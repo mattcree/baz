@@ -104,6 +104,25 @@
 //! bar underneath a hover — hovering is not an interaction, and pretending
 //! it pauses playback truth would be a lie.
 //!
+//! # The signal path
+//!
+//! [`Event::SignalPath`] reports what sits between the decoded file and the
+//! output — the source's rate and declared depth, the rate the output is
+//! running at, and whether the engine is converting between them (ADR-0009).
+//! It arrives when a session starts and only when something changes, so it is
+//! folded the same way as everything else: recorded on arrival, forgotten
+//! when the session that it described ends (stop, queue end, engine gone).
+//! There is no session, so there is no chain to report.
+//!
+//! [`PlayerState::signal_note`] is the render-ready reading, and it answers
+//! `Some` **only** for [`SignalChain::Converting`]. `Direct` — the ordinary
+//! case, and the one ADR-0009 exists to make ordinary — renders nothing at
+//! all. That asymmetry is deliberate: this is information, not a warning, and
+//! an indicator that lit up for every track would be exactly the nagging the
+//! ADR rules out. The note carries a short factual label and one plain
+//! sentence for a tooltip; no vocabulary of fault, and nothing for the view
+//! to interpret.
+//!
 //! Engine availability ([`Availability`]) is seeded from the spawn result at
 //! startup — that is a returned fact, not an assumption — and downgrades to
 //! [`Availability::Closed`] when the event bridge reports the engine gone or
@@ -116,7 +135,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use baz_core::protocol::Event;
+use baz_core::protocol::{ConversionReason, Event, SignalChain};
 
 use crate::vm::{self, AlbumVm};
 
@@ -350,6 +369,43 @@ pub struct SeekBar {
 /// never declared one. Same width as a real `m:ss` so the bar does not jump.
 const UNKNOWN_TOTAL: &str = "--:--";
 
+/// The chain the engine last reported, exactly as [`Event::SignalPath`]
+/// stated it: what the file is, what the output is running at, and what (if
+/// anything) sits between them.
+///
+/// Kept whole rather than reduced to a flag on arrival, because the reason a
+/// conversion is in the path is what the note can actually explain — "this
+/// device has no 48 kHz mode" and "the output is held at a fixed rate" are
+/// different facts (ADR-0009 §5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SignalPath {
+    /// Sample rate of the track playing, in Hz.
+    pub source_rate_hz: u32,
+    /// Bit depth its container declares, when it declares one.
+    pub source_bits: Option<u32>,
+    /// Rate the output stream is running at, in Hz.
+    pub output_rate_hz: u32,
+    /// What the engine is doing between the two.
+    pub chain: SignalChain,
+}
+
+/// The bottom bar's signal-path readout — present **only** while the engine
+/// is converting (see the module's signal-path note).
+///
+/// Two strings and nothing else: no severity, no icon choice, no color. The
+/// view has no decision left to make, which is what keeps the tone out of the
+/// view layer's hands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignalNote {
+    /// The visible label: `48 → 44.1 kHz`, the chain in the same kHz spelling
+    /// the side panel's encoding line uses. Short enough to read at a glance
+    /// and factual enough to need no adjective.
+    pub label: String,
+    /// The hover sentence, naming the rate being played and why: "Playing at
+    /// 44.1 kHz — this device has no 48 kHz mode".
+    pub detail: String,
+}
+
 /// The event-derived playback state behind every playback widget.
 ///
 /// `PartialEq` but not `Eq`: pointer geometry is measured in floating-point
@@ -379,6 +435,8 @@ pub struct PlayerState {
     /// Position a sent-but-unconfirmed [`Command::Seek`](baz_core::protocol::Command::Seek)
     /// asked for.
     seek_pending: Option<u64>,
+    /// The chain the engine last reported for the current session, if any.
+    signal: Option<SignalPath>,
 }
 
 impl PlayerState {
@@ -398,6 +456,7 @@ impl PlayerState {
             gesture: None,
             hover: None,
             seek_pending: None,
+            signal: None,
         }
     }
 
@@ -424,6 +483,8 @@ impl PlayerState {
                 self.phase = Phase::Stopped;
                 self.now_playing = None;
                 self.now_playing_path = None;
+                // The chain described a session; there is no session now.
+                self.signal = None;
                 self.reset_progress();
             }
             Event::TrackFailed { .. } => self.failed += 1,
@@ -433,6 +494,21 @@ impl PlayerState {
             } => {
                 self.elapsed_ms = *elapsed_ms;
                 self.track_ms = *track_ms;
+            }
+            // Reported when a session starts and whenever the chain changes,
+            // so each arrival simply replaces what was known (ADR-0009).
+            Event::SignalPath {
+                source_rate_hz,
+                source_bits,
+                output_rate_hz,
+                chain,
+            } => {
+                self.signal = Some(SignalPath {
+                    source_rate_hz: *source_rate_hz,
+                    source_bits: *source_bits,
+                    output_rate_hz: *output_rate_hz,
+                    chain: *chain,
+                });
             }
             // `Event` is #[non_exhaustive]: tolerate unknown messages.
             _ => {}
@@ -476,6 +552,7 @@ impl PlayerState {
         self.now_playing = None;
         self.now_playing_path = None;
         self.pending = false;
+        self.signal = None;
         self.reset_progress();
     }
 
@@ -711,6 +788,60 @@ impl PlayerState {
         }
     }
 
+    /// The chain the engine last reported, whatever it is — the whole
+    /// reading, for anything that wants the direct case too.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the bar renders only the converting case through signal_note(); the \
+                      full reading is kept because the state is the honest thing to hold \
+                      and a diagnostics readout is ADR-0009's next step"
+        )
+    )]
+    #[must_use]
+    pub fn signal_path(&self) -> Option<SignalPath> {
+        self.signal
+    }
+
+    /// The bottom bar's signal-path note — `Some` **only** when the chain the
+    /// engine reported is [`SignalChain::Converting`].
+    ///
+    /// Presence is decided by `chain` and by nothing else: not by comparing
+    /// the two rates (the engine, not the front end, knows whether it is
+    /// converting), not by phase, not by depth. `Direct` renders nothing, and
+    /// so does a session that has reported no chain at all.
+    ///
+    /// The words are deliberately flat. A rate is a fact about the chain in
+    /// the same way a codec name is a fact about a file, and ADR-0009 §5 puts
+    /// the tone in the decision itself: no "degraded", no "fallback", nothing
+    /// that reads as a fault. The listener who cares can find it; everyone
+    /// else can look straight past it.
+    #[must_use]
+    pub fn signal_note(&self) -> Option<SignalNote> {
+        let path = self.signal?;
+        let SignalChain::Converting { reason } = path.chain else {
+            return None;
+        };
+        let source = vm::format_sample_rate(path.source_rate_hz);
+        let output = vm::format_sample_rate(path.output_rate_hz);
+        let because = match reason {
+            ConversionReason::DeviceRateUnavailable => {
+                format!("this device has no {source} mode")
+            }
+            ConversionReason::FixedOutputRate => {
+                format!("the output is set to a fixed {output}")
+            }
+            // `ConversionReason` is #[non_exhaustive]: a cause this build has
+            // not heard of still gets the honest half of the sentence.
+            _ => format!("converted from {source}"),
+        };
+        Some(SignalNote {
+            label: format!("{} → {output}", strip_unit(&source)),
+            detail: format!("Playing at {output} — {because}"),
+        })
+    }
+
     /// Unobtrusive skip note: `N track(s) skipped` once any track in the
     /// current queue failed (the engine already continued past it).
     #[must_use]
@@ -756,6 +887,13 @@ fn fraction(position: u64, total: u64) -> f32 {
 /// Milliseconds as the shelf's `m:ss` / `h:mm:ss` timestamp.
 fn format_ms(ms: u64) -> String {
     vm::format_duration(Duration::from_millis(ms))
+}
+
+/// A formatted rate without its unit, so `48 kHz → 44.1 kHz` can be written
+/// `48 → 44.1 kHz` — one unit for the pair, which is how a chain reads aloud
+/// and how it stays short enough to ignore.
+fn strip_unit(rate: &str) -> &str {
+    rate.strip_suffix(" kHz").unwrap_or(rate)
 }
 
 /// Where to put the left edge of a `tip_width`-wide preview so that it is
@@ -1608,5 +1746,278 @@ mod tests {
         let bar = player.seek_bar().expect("bar");
         assert_eq!(bar.elapsed, "1:02:03");
         assert_eq!(bar.total, "2:00:00");
+    }
+
+    // -----------------------------------------------------------------
+    // The signal path
+    // -----------------------------------------------------------------
+
+    /// A `SignalPath` event for a `source` → `output` chain.
+    fn signal(source: u32, output: u32, chain: SignalChain) -> Event {
+        Event::SignalPath {
+            source_rate_hz: source,
+            source_bits: Some(24),
+            output_rate_hz: output,
+            chain,
+        }
+    }
+
+    /// The `Converting` chain ADR-0009 measures: a 48 kHz master on a device
+    /// that only offers 44.1 kHz.
+    fn converting() -> Event {
+        signal(
+            48_000,
+            44_100,
+            SignalChain::Converting {
+                reason: ConversionReason::DeviceRateUnavailable,
+            },
+        )
+    }
+
+    #[test]
+    fn a_player_that_has_heard_nothing_reports_no_chain() {
+        let albums = albums();
+        let mut player = ready_with_queue(2);
+        assert_eq!(player.signal_path(), None);
+        assert_eq!(player.signal_note(), None, "no event, no readout");
+
+        // A track starting is not itself a chain report: until the engine
+        // says what it is doing, the bar says nothing about it.
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        assert_eq!(player.signal_note(), None);
+    }
+
+    #[test]
+    fn a_direct_chain_is_recorded_and_shows_nothing() {
+        let albums = albums();
+        let mut player = ready_with_queue(2);
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        player.apply(&signal(48_000, 48_000, SignalChain::Direct), &albums);
+
+        let path = player.signal_path().expect("the chain was reported");
+        assert_eq!(path.chain, SignalChain::Direct);
+        assert_eq!(path.source_rate_hz, 48_000);
+        assert_eq!(path.output_rate_hz, 48_000);
+        assert_eq!(path.source_bits, Some(24));
+        assert_eq!(
+            player.signal_note(),
+            None,
+            "the ordinary case puts nothing on the bar"
+        );
+    }
+
+    #[test]
+    fn a_converting_chain_names_the_rate_and_the_reason() {
+        let albums = albums();
+        let mut player = ready_with_queue(2);
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        player.apply(&converting(), &albums);
+
+        let note = player.signal_note().expect("converting is reported");
+        assert_eq!(note.label, "48 → 44.1 kHz");
+        assert_eq!(
+            note.detail,
+            "Playing at 44.1 kHz — this device has no 48 kHz mode"
+        );
+
+        // A fixed output rate is a different fact and says so.
+        player.apply(
+            &signal(
+                96_000,
+                44_100,
+                SignalChain::Converting {
+                    reason: ConversionReason::FixedOutputRate,
+                },
+            ),
+            &albums,
+        );
+        let note = player.signal_note().expect("still converting");
+        assert_eq!(note.label, "96 → 44.1 kHz");
+        assert_eq!(
+            note.detail,
+            "Playing at 44.1 kHz — the output is set to a fixed 44.1 kHz"
+        );
+    }
+
+    #[test]
+    fn the_note_never_reads_as_a_fault() {
+        // The tone is part of the decision (ADR-0009 §5), so it is pinned
+        // here rather than left to a reviewer's eye: nothing in the words
+        // may suggest something has gone wrong.
+        let albums = albums();
+        let mut player = ready_with_queue(2);
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        for event in [
+            converting(),
+            signal(
+                96_000,
+                48_000,
+                SignalChain::Converting {
+                    reason: ConversionReason::FixedOutputRate,
+                },
+            ),
+        ] {
+            player.apply(&event, &albums);
+            let note = player.signal_note().expect("converting");
+            let words = format!("{} {}", note.label, note.detail).to_lowercase();
+            for alarm in [
+                "warning",
+                "degraded",
+                "error",
+                "fallback",
+                "unsupported",
+                "failed",
+                "!",
+            ] {
+                assert!(
+                    !words.contains(alarm),
+                    "{words:?} must not carry the word {alarm:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn presence_is_derived_from_the_chain_and_from_nothing_else() {
+        // The engine, not the front end, decides whether a conversion is in
+        // the path: a `Direct` chain shows nothing even when the two rates
+        // differ, and a `Converting` one shows the note even when they do
+        // not. Inferring from the numbers would put the front end in the
+        // business of second-guessing the engine.
+        let albums = albums();
+        let mut player = ready_with_queue(2);
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+
+        player.apply(&signal(48_000, 44_100, SignalChain::Direct), &albums);
+        assert_eq!(player.signal_note(), None, "Direct is Direct");
+
+        player.apply(
+            &signal(
+                44_100,
+                44_100,
+                SignalChain::Converting {
+                    reason: ConversionReason::FixedOutputRate,
+                },
+            ),
+            &albums,
+        );
+        assert!(
+            player.signal_note().is_some(),
+            "Converting is Converting, whatever the rates read"
+        );
+
+        // Nor does anything else about the player move it: phase, pending
+        // commands and pointer gestures leave the readout alone.
+        player.apply(&Event::Paused, &albums);
+        assert!(player.signal_note().is_some(), "pause is not a rate change");
+        player.note_transport_sent();
+        assert!(player.signal_note().is_some());
+        player.press(at(100.0));
+        player.drag_to(at(150.0));
+        assert!(player.signal_note().is_some());
+    }
+
+    #[test]
+    fn each_report_replaces_the_last_one_as_the_queue_moves() {
+        // An album whose rate the device can follow, then one it cannot,
+        // then back: the bar follows the engine's latest word every time.
+        let albums = albums();
+        let mut player = ready_with_queue(3);
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        player.apply(&signal(44_100, 44_100, SignalChain::Direct), &albums);
+        assert_eq!(player.signal_note(), None);
+
+        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+        player.apply(&converting(), &albums);
+        assert_eq!(
+            player.signal_note().map(|note| note.label),
+            Some("48 → 44.1 kHz".to_owned())
+        );
+
+        player.apply(&started("/m/strays/a.wav", 2), &albums);
+        player.apply(&signal(44_100, 44_100, SignalChain::Direct), &albums);
+        assert_eq!(
+            player.signal_note(),
+            None,
+            "back to a rate the device can follow"
+        );
+
+        // A track change on its own reports nothing new, and must not
+        // resurrect a chain the engine has moved past.
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        assert_eq!(player.signal_note(), None);
+    }
+
+    #[test]
+    fn the_chain_does_not_outlive_the_session_it_described() {
+        let albums = albums();
+        for ending in [Event::Stopped, Event::QueueEnded] {
+            let mut player = ready_with_queue(2);
+            player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+            player.apply(&converting(), &albums);
+            assert!(player.signal_note().is_some());
+
+            player.apply(&ending, &albums);
+            assert_eq!(player.signal_path(), None, "{ending:?} ends the session");
+            assert_eq!(player.signal_note(), None);
+        }
+
+        // And an engine that goes away takes its chain with it.
+        let mut player = ready_with_queue(2);
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        player.apply(&converting(), &albums);
+        player.engine_closed();
+        assert_eq!(player.signal_path(), None);
+        assert_eq!(player.signal_note(), None);
+    }
+
+    #[test]
+    fn a_failed_track_does_not_disturb_the_chain() {
+        // Decode-ahead finding a broken file says nothing about the rate the
+        // audible track is playing at.
+        let albums = albums();
+        let mut player = ready_with_queue(3);
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        player.apply(&converting(), &albums);
+        player.apply(
+            &Event::TrackFailed {
+                path: PathBuf::from("/m/boc/geogaddi/02.flac"),
+                reason: "decode error: oops".into(),
+            },
+            &albums,
+        );
+        assert_eq!(
+            player.signal_note().map(|note| note.label),
+            Some("48 → 44.1 kHz".to_owned())
+        );
+    }
+
+    #[test]
+    fn chain_labels_spell_rates_the_way_the_rest_of_the_interface_does() {
+        let albums = albums();
+        let mut player = ready_with_queue(1);
+        player.apply(&started("/m/strays/a.wav", 0), &albums);
+        for (source, output, label) in [
+            (48_000, 44_100, "48 → 44.1 kHz"),
+            (96_000, 48_000, "96 → 48 kHz"),
+            (192_000, 176_400, "192 → 176.4 kHz"),
+            (44_100, 48_000, "44.1 → 48 kHz"),
+        ] {
+            player.apply(
+                &signal(
+                    source,
+                    output,
+                    SignalChain::Converting {
+                        reason: ConversionReason::DeviceRateUnavailable,
+                    },
+                ),
+                &albums,
+            );
+            assert_eq!(
+                player.signal_note().expect("converting").label,
+                label,
+                "{source} -> {output}"
+            );
+        }
     }
 }

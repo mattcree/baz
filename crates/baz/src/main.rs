@@ -6,6 +6,11 @@
 //! through `baz-core`'s engine (see `playback.rs` and `player.rs`; without
 //! the feature the app builds everywhere with playback UI hidden).
 //!
+//! The modules follow ADR-0006's three layers: pure state and logic
+//! (`vm`, `player`, `shelf`, `config`, `scan`, `art` — no iced imports),
+//! design tokens (`theme`), and view composition (`views/`, one module per
+//! surface) with the application shell that drives it (`app`).
+//!
 //! Usage: `baz [DIR]` — `DIR` overrides (and updates) the remembered
 //! music folder in `~/.config/baz/config.toml`.
 
@@ -22,6 +27,7 @@ mod scan;
 mod seek;
 mod shelf;
 mod theme;
+mod views;
 mod vm;
 
 fn main() -> iced::Result {
