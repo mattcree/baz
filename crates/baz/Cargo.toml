@@ -9,6 +9,16 @@ authors.workspace = true
 
 [dependencies]
 baz-core = { workspace = true }
+dirs = { workspace = true }
+iced = { workspace = true }
+image = { workspace = true }
+lofty = { workspace = true }
+lru = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+hound = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

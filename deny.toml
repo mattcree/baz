@@ -1,6 +1,18 @@
 # cargo-deny policy (docs/ENGINEERING.md). Run: cargo deny check
 [graph]
 all-features = true
+# Audit the platforms baz ships on (the CI matrix: Linux, macOS, Windows).
+# Without this, deny also walks wasm-only branches (e.g. iced_futures →
+# wasm-timer → the unmaintained `instant`) that are never compiled into any
+# baz artifact. Extend this list if a wasm/mobile target ever becomes real.
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+  "aarch64-pc-windows-msvc",
+]
 
 [advisories]
 version = 2
@@ -10,7 +22,25 @@ ignore = [
   # has no vulnerability and no drop-in replacement upstream has adopted yet.
   # Revisit when lofty migrates (tracked upstream); remove this when it does.
   "RUSTSEC-2024-0436",
+  # `ttf-parser` is unmaintained (no vulnerability). It is load-bearing in
+  # iced 0.13's entire text stack (cosmic-text/rustybuzz) and in winit's
+  # decoration fallback (sctk-adwaita → ab_glyph); there is no upgrade we can
+  # make from this workspace — the fix is upstream's migration to the
+  # fontations/skrifa crates. Font parsing here only ever reads fonts we ship
+  # or the OS provides, not hostile input from the library. Remove when iced
+  # (or an iced upgrade we take) drops ttf-parser.
+  "RUSTSEC-2026-0192",
+  # `rustybuzz` (harfbuzz port) is unmaintained (no vulnerability) — the same
+  # upstream situation as ttf-parser above: it IS iced 0.13's text shaping via
+  # cosmic-text, shapes only shipped/OS fonts, and the fix is upstream's
+  # migration (harfrust/fontations). Remove together with RUSTSEC-2026-0192.
+  "RUSTSEC-2026-0206",
 ]
+# Note on RUSTSEC-2026-0002 (lru < 0.16.3 IterMut unsoundness): our own `lru`
+# is pinned >= 0.16.3 (fixed). iced_glyphon still carries a 0.12.x copy;
+# cargo-deny currently reports the advisory as satisfied for the graph, so no
+# ignore is present — if a future advisory-db/deny pairing flags the glyphon
+# copy, resolve it there rather than silencing it here blindly.
 
 [licenses]
 version = 2
@@ -26,6 +56,13 @@ allow = [
   "MPL-2.0",
   "Unicode-3.0",
   "Zlib",               # foldhash (transitive: rusqlite → hashlink → hashbrown)
+  # Boost Software License: permissive, GPL-compatible per the FSF license
+  # list. Transitive via iced → winit → window_clipboard → clipboard-win /
+  # error-code (Windows clipboard support).
+  "BSL-1.0",
+  # Creative Commons Zero: public-domain dedication, GPL-compatible per the
+  # FSF license list. Transitive via iced → wgpu → naga → hexf-parse.
+  "CC0-1.0",
 ]
 confidence-threshold = 0.9
 
