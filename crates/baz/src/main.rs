@@ -15,6 +15,7 @@ use std::time::Instant;
 mod app;
 mod art;
 mod config;
+mod icon;
 mod playback;
 mod player;
 mod scan;

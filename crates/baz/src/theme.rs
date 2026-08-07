@@ -150,6 +150,12 @@ pub const KNOB: f32 = 5.0;
 pub const KNOB_ACTIVE: f32 = 7.0;
 /// Minimum width the seek bar is given in the now-playing bar.
 pub const SEEK_W: f32 = 260.0;
+/// Width reserved for each of the seek bar's timestamps: enough for
+/// `h:mm:ss` at [`SIZE_META`] in [`MONO`]. Fixed, so the groove keeps its
+/// place when a track crosses the hour mark or a stamp gains a digit — the
+/// same reason an undeclared length renders as `--:--` rather than as
+/// nothing.
+pub const STAMP_W: f32 = 52.0;
 /// Height of the lane the hover preview floats in, directly above the
 /// groove. Reserved whether or not anything is hovering, so the bottom bar
 /// never changes height under the pointer.
@@ -158,6 +164,59 @@ pub const PREVIEW_H: f32 = 15.0;
 /// [`SIZE_CAPTION`] in [`MONO`] plus its padding, fixed so the tip can be
 /// centered on the pointer without measuring text.
 pub const PREVIEW_W: f32 = 58.0;
+
+// ---------------------------------------------------------------------------
+// The transport controls
+// ---------------------------------------------------------------------------
+
+/// Edge of a transport glyph (play/pause/next), in logical pixels. The
+/// sprite is drawn into a box exactly this size, so the glyph in it can
+/// never change the layout — see [`crate::icon`].
+pub const ICON_PX: f32 = 16.0;
+/// Edge of a transport button's square hit area. Comfortably above the
+/// glyph so the pointer aims at a target rather than at a shape, and fixed
+/// in both axes so play and pause occupy identically many pixels.
+pub const TRANSPORT_HIT: f32 = 32.0;
+/// The transport glyphs' ink at rest — the same paper white the labels they
+/// replaced were set in.
+pub const GLYPH: Color = PAPER;
+/// Opacity of a glyph on a live control.
+pub const GLYPH_OPACITY: f32 = 1.0;
+/// Opacity of a glyph while its command is in flight: the whole of the
+/// pending affordance. A control that dims a little and comes back changes
+/// no size, no shape, and no meaning — which is the difference between an
+/// affordance and the flash the bottom bar used to have (the argument, and
+/// the measured round trip, are in [`crate::player`]'s module docs).
+pub const GLYPH_OPACITY_PENDING: f32 = 0.55;
+/// Opacity of a glyph on a control that genuinely cannot act — no engine,
+/// or nothing queued. Lands on roughly [`PAPER_FAINT`] over [`CARD`], the
+/// weight the rest of the room gives inert text.
+pub const GLYPH_OPACITY_DISABLED: f32 = 0.45;
+
+/// Height of the bottom bar's seek row: the hover-preview lane plus the
+/// groove's hit band. Reserved whether or not there is anything to seek, so
+/// the bar keeps its height from launch through play to stop.
+pub const SEEK_ROW_H: f32 = PREVIEW_H + RAIL_HIT;
+/// Width of the bottom bar's centre column: a timestamp, the groove, a
+/// timestamp, and the gaps between them. The transport row centres itself
+/// over this, and the column is fixed so the whole block stays put.
+pub const SEEK_ROW_W: f32 = SEEK_W + 2.0 * (STAMP_W + GAP_SM);
+
+/// How strongly to ink a transport glyph.
+///
+/// Three states, one of which is not a state the *control* is in at all:
+/// `pending` means a command has been sent and not yet confirmed, and the
+/// only thing it is allowed to move is this number.
+#[must_use]
+pub fn glyph_opacity(enabled: bool, pending: bool) -> f32 {
+    if !enabled {
+        GLYPH_OPACITY_DISABLED
+    } else if pending {
+        GLYPH_OPACITY_PENDING
+    } else {
+        GLYPH_OPACITY
+    }
+}
 
 /// The cursor over a seekable bar. `Pointer` — the pointing hand every
 /// platform uses for "this responds to a click" — because clicking the bar
@@ -481,5 +540,73 @@ pub fn hairline(_theme: &Theme) -> rule::Style {
         width: 1,
         radius: 0.0.into(),
         fill_mode: FillMode::Full,
+    }
+}
+
+/// The name that floats over an icon-only control on hover — the same quiet
+/// card as the seek preview, for the same reason: it is a label, not a
+/// claim about playback.
+///
+/// iced 0.13 exposes no accessibility tree, so this tooltip *is* the
+/// control's accessible name as far as the toolkit allows.
+#[must_use]
+pub fn tooltip(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(CARD_HIGH)),
+        text_color: Some(PAPER_DIM),
+        border: Border {
+            color: HAIRLINE_STRONG,
+            width: 1.0,
+            radius: RADIUS_CHIP.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_pending_command_changes_the_glyph_ink_and_nothing_else() {
+        // The pending affordance, pinned to the one property it is allowed
+        // to touch: an opacity. There is no size, weight, or color token
+        // that varies with it, so no pending transition can move a pixel.
+        let live = glyph_opacity(true, false);
+        let pending = glyph_opacity(true, true);
+        assert!(pending < live, "pending must read as quieter, not louder");
+        assert!(
+            pending > glyph_opacity(false, false),
+            "a control that is merely waiting must not look as dead as one that cannot act"
+        );
+        // A control that cannot act says so regardless of what is in flight.
+        assert!((glyph_opacity(false, true) - glyph_opacity(false, false)).abs() < f32::EPSILON);
+        for opacity in [live, pending, glyph_opacity(false, false)] {
+            assert!((0.0..=1.0).contains(&opacity), "{opacity} is not an alpha");
+        }
+    }
+
+    #[test]
+    fn the_bottom_bar_reserves_the_seek_row_whether_or_not_it_has_one() {
+        // The bar must not change height when a track starts or ends, so the
+        // reserved strip has to be exactly what the real row occupies: the
+        // preview lane above the groove's hit band.
+        assert!((SEEK_ROW_H - (PREVIEW_H + RAIL_HIT)).abs() < f32::EPSILON);
+        // The lane is part of the row's height, not decoration on top of it.
+        const { assert!(SEEK_ROW_H > RAIL_HIT) }
+        // And its width is the groove plus a fixed stamp on each side, so
+        // the centre column never resizes as the digits tick.
+        assert!((SEEK_ROW_W - (SEEK_W + 2.0 * (STAMP_W + GAP_SM))).abs() < f32::EPSILON);
+        // A stamp must hold `h:mm:ss` — seven monospace figures, which are
+        // around half an em wide at this size — without clipping.
+        const { assert!(STAMP_W > SIZE_META * 7.0 * 0.5) }
+    }
+
+    #[test]
+    fn a_transport_button_is_a_square_target_around_its_glyph() {
+        // The hit area is larger than the mark it carries…
+        const { assert!(TRANSPORT_HIT > ICON_PX) }
+        // …and the pair of them fits inside the column they centre in.
+        const { assert!(2.0 * TRANSPORT_HIT + GAP_SM < SEEK_ROW_W) }
     }
 }

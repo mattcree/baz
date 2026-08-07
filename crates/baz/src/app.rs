@@ -35,16 +35,16 @@ use iced::keyboard::{self, key};
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
 use iced::widget::{
     Column, Space, button, column, container, horizontal_rule, image as iced_image, row,
-    scrollable, text, text_input, vertical_rule,
+    scrollable, text, text_input, tooltip, vertical_rule,
 };
 use iced::{Color, Element, Length, Size, Subscription, Task, alignment, window};
 use lru::LruCache;
 
 use crate::playback::{Playback, PlayerEvent};
-use crate::player::{Availability, Phase, PlayerState};
+use crate::player::{Availability, PlayerState};
 use crate::scan::ScanUpdate;
 use crate::shelf::{ART_PX, CELL_H, CELL_W, GRID_PADDING};
-use crate::{art, config, player, scan, seek, shelf, theme, vm};
+use crate::{art, config, icon, player, scan, seek, shelf, theme, vm};
 
 /// Side-panel width (logical px).
 const PANEL_W: f32 = 340.0;
@@ -209,11 +209,12 @@ impl App {
                 Task::none()
             }
             Message::PlayPause => {
-                // Choose the action from the *confirmed* phase (Play also
-                // resumes a paused engine, so a stale read is still safe).
-                let command = match self.player.phase() {
-                    Phase::Playing => Command::Pause,
-                    Phase::Paused | Phase::Stopped => Command::Play,
+                // The same reading the glyph is drawn from, so a press asks
+                // for exactly what the button was showing (Play also resumes
+                // a paused engine, so a stale read is still safe).
+                let command = match self.player.play_pause() {
+                    player::PlayPause::Pause => Command::Pause,
+                    player::PlayPause::Play => Command::Play,
                 };
                 self.send_transport(command);
                 Task::none()
@@ -1211,78 +1212,46 @@ fn track_row(track: &vm::TrackVm, show_artist: bool) -> Element<'_, Message> {
     .into()
 }
 
-/// The persistent now-playing bar: transport controls on the left, the
-/// current track as a title-over-artist stack (or the engine's
-/// plainly-stated absence as quiet status text), the seek bar and its
-/// timestamps in the middle, skip notes on the right. Every label,
-/// position, and enabled-state comes from [`PlayerState`] — event-derived,
-/// tested in `player.rs`.
+/// The persistent now-playing bar, in three zones: the current track on the
+/// left, the transport centred over its seek bar in the middle, quiet status
+/// on the right.
+///
+/// The transport sits *above* the groove rather than beside it because that
+/// is where a listener looks for it — the controls and the position they act
+/// on read as one block, and the block is the only thing in the bar that is
+/// centred. The two flanking zones are equal-weight fills, which is what
+/// keeps the centre column optically centred no matter how long a track
+/// title runs; both clip rather than push.
+///
+/// Nothing in here changes size as playback moves. The centre column is
+/// [`theme::SEEK_ROW_W`] wide with fixed-width timestamps, the seek row's
+/// height is reserved even when there is nothing to seek, and the transport
+/// glyphs live in fixed boxes — so starting a track, crossing the hour mark,
+/// or sending a command cannot reflow the bar. Every glyph, position, and
+/// enabled-state comes from [`PlayerState`] — event-derived, tested in
+/// `player.rs`.
 fn bottom_bar(player: &PlayerState) -> Element<'_, Message> {
-    let toggle = button(
-        container(
-            text(player.play_pause_label())
-                .size(theme::SIZE_BODY)
-                .font(theme::MEDIUM),
-        )
-        .width(Length::Fill)
-        .align_x(alignment::Horizontal::Center),
-    )
-    .width(Length::Fixed(84.0))
-    .padding(theme::pad(theme::GAP_SM, 0.0))
-    .style(theme::transport)
-    .on_press_maybe(player.play_pause_enabled().then_some(Message::PlayPause));
-    let next = button(
-        container(text("Next").size(theme::SIZE_BODY).font(theme::MEDIUM))
-            .width(Length::Fill)
-            .align_x(alignment::Horizontal::Center),
-    )
-    .width(Length::Fixed(64.0))
-    .padding(theme::pad(theme::GAP_SM, 0.0))
-    .style(theme::transport)
-    .on_press_maybe(player.next_enabled().then_some(Message::NextTrack));
-
-    let line: Element<'_, Message> = if let Some(note) = player.availability_note() {
-        text(note)
-            .size(theme::SIZE_META)
-            .color(theme::PAPER_FAINT)
-            .into()
-    } else if let Some(now) = player.now_playing() {
-        let mut stack = column![
-            text(now.title.as_str())
-                .size(theme::SIZE_BODY)
-                .font(theme::MEDIUM)
-        ]
-        .spacing(theme::GAP_XXS);
-        if let Some(artist) = &now.artist {
-            stack = stack.push(
-                text(artist.as_str())
-                    .size(theme::SIZE_META)
-                    .color(theme::PAPER_DIM),
-            );
-        }
-        stack.into()
-    } else {
-        text("Nothing playing")
-            .size(theme::SIZE_META)
-            .color(theme::PAPER_FAINT)
-            .into()
-    };
-
-    let mut bar = row![toggle, next, line, Space::with_width(Length::Fill)]
-        .spacing(theme::GAP_MD)
-        .align_y(iced::Alignment::Center);
-    if let Some(seek) = player.seek_bar() {
-        bar = bar.push(seek_bar(seek));
-        bar = bar.push(Space::with_width(Length::Fill));
-    }
+    let mut status = row![].spacing(theme::GAP_SM);
     if let Some(skipped) = player.skipped_note() {
-        bar = bar.push(
+        status = status.push(
             text(skipped)
                 .size(theme::SIZE_META)
                 .font(theme::MONO)
                 .color(theme::PAPER_FAINT),
         );
     }
+    let bar = row![
+        container(now_playing_line(player))
+            .width(Length::Fill)
+            .clip(true),
+        transport_stack(player),
+        container(status)
+            .width(Length::Fill)
+            .align_x(alignment::Horizontal::Right)
+            .clip(true),
+    ]
+    .spacing(theme::GAP_LG)
+    .align_y(iced::Alignment::Center);
     column![
         horizontal_rule(1).style(theme::hairline),
         container(bar)
@@ -1290,6 +1259,131 @@ fn bottom_bar(player: &PlayerState) -> Element<'_, Message> {
             .padding(theme::pad(theme::GAP_MD, theme::GAP_LG))
             .style(theme::bar),
     ]
+    .into()
+}
+
+/// The bar's left zone: the current track as a title-over-artist stack, or
+/// the engine's plainly-stated absence as quiet status text.
+///
+/// Neither line wraps. A bar that grew a second row under a long album title
+/// would shove the shelf up by a line, which is exactly the kind of movement
+/// this bar is built not to make; the enclosing zone clips instead.
+fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
+    if let Some(note) = player.availability_note() {
+        return text(note)
+            .size(theme::SIZE_META)
+            .color(theme::PAPER_FAINT)
+            .wrapping(text::Wrapping::None)
+            .into();
+    }
+    let Some(now) = player.now_playing() else {
+        return text("Nothing playing")
+            .size(theme::SIZE_META)
+            .color(theme::PAPER_FAINT)
+            .wrapping(text::Wrapping::None)
+            .into();
+    };
+    let mut stack = column![
+        text(now.title.as_str())
+            .size(theme::SIZE_BODY)
+            .font(theme::MEDIUM)
+            .wrapping(text::Wrapping::None)
+    ]
+    .spacing(theme::GAP_XXS);
+    if let Some(artist) = &now.artist {
+        stack = stack.push(
+            text(artist.as_str())
+                .size(theme::SIZE_META)
+                .color(theme::PAPER_DIM)
+                .wrapping(text::Wrapping::None),
+        );
+    }
+    stack.into()
+}
+
+/// The bar's centre: the transport row over the seek row, both centred in a
+/// fixed-width column.
+///
+/// When there is nothing to seek — no engine, or nothing playing — the seek
+/// row's space is *reserved* rather than dropped. The transport is the one
+/// thing in this bar that is always in the same place, and a bar that
+/// changed height the moment a track started would undo that.
+fn transport_stack(player: &PlayerState) -> Element<'_, Message> {
+    let pending = player.transport_pending();
+    let toggle = player.play_pause();
+    let transport = row![
+        transport_button(
+            toggle.into(),
+            toggle.label(),
+            player.play_pause_enabled(),
+            pending,
+            Message::PlayPause,
+        ),
+        transport_button(
+            icon::Glyph::Next,
+            "Next track",
+            player.next_enabled(),
+            pending,
+            Message::NextTrack,
+        ),
+    ]
+    .spacing(theme::GAP_SM);
+    let seek: Element<'_, Message> = match player.seek_bar() {
+        Some(state) => seek_bar(state),
+        None => Space::new(
+            Length::Fixed(theme::SEEK_ROW_W),
+            Length::Fixed(theme::SEEK_ROW_H),
+        )
+        .into(),
+    };
+    column![transport, seek]
+        .spacing(theme::GAP_SM)
+        .width(Length::Fixed(theme::SEEK_ROW_W))
+        .align_x(iced::Alignment::Center)
+        .into()
+}
+
+/// One transport control: a glyph in a fixed square, named by a tooltip.
+///
+/// The size is fixed in both axes and the glyph is drawn into a box of its
+/// own, so swapping play for pause moves nothing. `pending` reaches the ink
+/// and only the ink (see [`theme::glyph_opacity`]).
+///
+/// The tooltip is the control's accessible name. iced 0.13 publishes no
+/// accessibility tree and its buttons take no keyboard focus, so a hover
+/// label plus a target comfortably larger than the mark is the whole of what
+/// the toolkit can offer here — stated plainly rather than papered over.
+fn transport_button(
+    glyph: icon::Glyph,
+    label: &str,
+    enabled: bool,
+    pending: bool,
+    message: Message,
+) -> Element<'_, Message> {
+    let mark = container(
+        iced_image(icon::handle(glyph))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(theme::glyph_opacity(enabled, pending)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    let control = button(mark)
+        .width(Length::Fixed(theme::TRANSPORT_HIT))
+        .height(Length::Fixed(theme::TRANSPORT_HIT))
+        .padding(0)
+        .style(theme::transport)
+        .on_press_maybe(enabled.then_some(message));
+    tooltip(
+        control,
+        text(label).size(theme::SIZE_CAPTION),
+        tooltip::Position::Top,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(theme::tooltip)
     .into()
 }
 
@@ -1339,9 +1433,9 @@ fn seek_bar(state: player::SeekBar) -> Element<'static, Message> {
             .into()
     };
     row![
-        seek_stamp(state.elapsed, elapsed_color),
+        seek_stamp(state.elapsed, elapsed_color, alignment::Horizontal::Right),
         column![preview_lane(state.preview), groove],
-        seek_stamp(state.total, theme::PAPER_FAINT),
+        seek_stamp(state.total, theme::PAPER_FAINT, alignment::Horizontal::Left),
     ]
     .spacing(theme::GAP_SM)
     .into()
@@ -1350,7 +1444,17 @@ fn seek_bar(state: player::SeekBar) -> Element<'static, Message> {
 /// One of the seek bar's timestamps, carrying the same preview lane as the
 /// groove above it so that the digits line up with the rail rather than with
 /// the lane-plus-rail block.
-fn seek_stamp(value: String, color: Color) -> Element<'static, Message> {
+///
+/// The stamp is [`theme::STAMP_W`] wide whatever it says, hugging the groove
+/// it belongs to. Sizing it to its own digits would slide the groove
+/// sideways the moment a track crossed the hour — and, since the whole
+/// centre column is what the transport centres over, would drag the buttons
+/// with it.
+fn seek_stamp(
+    value: String,
+    color: Color,
+    align: alignment::Horizontal,
+) -> Element<'static, Message> {
     column![
         Space::with_height(Length::Fixed(theme::PREVIEW_H)),
         container(
@@ -1358,8 +1462,11 @@ fn seek_stamp(value: String, color: Color) -> Element<'static, Message> {
                 .size(theme::SIZE_META)
                 .font(theme::MONO)
                 .color(color)
+                .wrapping(text::Wrapping::None)
         )
+        .width(Length::Fixed(theme::STAMP_W))
         .height(Length::Fixed(theme::RAIL_HIT))
+        .align_x(align)
         .align_y(alignment::Vertical::Center),
     ]
     .into()

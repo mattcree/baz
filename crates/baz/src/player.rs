@@ -15,13 +15,41 @@
 //!   "did we ever hand the engine a queue" is what decides whether a Play
 //!   button can do anything at all.
 //! - **A pending transport command** ([`PlayerState::note_transport_sent`]):
-//!   the documented "brief pending affordance". While a Play/Pause/Next is
-//!   in flight the toggle shows `…` and both transport buttons disable —
-//!   which also debounces double-presses. Pending clears on the *next event
-//!   of any kind* (any event proves the engine processed past our command;
-//!   clearing on any rather than the matching one means a command that
-//!   raced into a no-op — pause just as the queue ended, say — cannot wedge
-//!   the button forever). It never sets a phase.
+//!   the documented "brief pending affordance". Pending clears on the *next
+//!   event of any kind* (any event proves the engine processed past our
+//!   command; clearing on any rather than the matching one means a command
+//!   that raced into a no-op — pause just as the queue ended, say — cannot
+//!   wedge the button forever). It never sets a phase.
+//!
+//! ## What pending is allowed to change on screen
+//!
+//! Nothing that occupies space, and nothing that carries meaning. It was
+//! once allowed both: the toggle swapped its label to `…` and both transport
+//! buttons disabled while a command was in flight. That is the bottom bar's
+//! reported "text flash" — three simultaneous changes to the two controls
+//! directly under the pointer (the toggle's glyph, the toggle's text color
+//! as it fell to the disabled style, and Next's alongside it), each of them
+//! reversed one to a few frames later. The window is short by construction —
+//! the engine answers a transport command between pump iterations, bounded
+//! by one `DeviceSink::write` (up to a device ring's worth of backpressure,
+//! ~46 ms worst case at the shipped 2048-frame chunk) plus one iced
+//! event-loop turn — which is exactly long enough to see as a blink and far
+//! too short to read as information.
+//!
+//! So pending is now a *style* fact, not a content one:
+//! [`PlayerState::play_pause`] answers from the confirmed phase alone, and
+//! [`PlayerState::play_pause_enabled`] / [`PlayerState::next_enabled`] no
+//! longer consult it. All that remains is
+//! [`PlayerState::transport_pending`], which the view spends on the glyph's
+//! opacity — a fixed-size control that dims a little and comes back. The
+//! debounce the disable used to provide is not missed: the engine documents
+//! redundant transport commands as no-ops that emit nothing, and a second
+//! press of Next inside the window is a second skip, which is what pressing
+//! it twice means everywhere else.
+//!
+//! The honesty rule is untouched by all of this. Phase still moves only in
+//! [`PlayerState::apply`]; the glyph still shows what the engine last
+//! *confirmed*, never what we just asked for.
 //!
 //! # The seek bar
 //!
@@ -127,6 +155,32 @@ pub enum Phase {
     Playing,
     /// Paused mid-session ([`Event::Paused`]).
     Paused,
+}
+
+/// What the play/pause toggle currently offers to do — the action a press
+/// would request, read off the *confirmed* phase.
+///
+/// Deliberately not a string: the view turns it into a glyph and a tooltip,
+/// and the point of the type is that exactly two answers exist. A command in
+/// flight is not a third one (see the module's pending note).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayPause {
+    /// A press asks the engine to start or resume.
+    Play,
+    /// A press asks the engine to pause.
+    Pause,
+}
+
+impl PlayPause {
+    /// The control's accessible name — its tooltip, and the closest thing
+    /// iced 0.13 has to a label for an icon-only button.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Play => "Play",
+            Self::Pause => "Pause",
+        }
+    }
 }
 
 /// The bottom bar's resolved current track.
@@ -585,6 +639,14 @@ impl PlayerState {
     }
 
     /// Confirmed transport phase.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the confirmed phase is this machine's central fact and the tests pin it \
+                      directly; the view reads it only through play_pause() and seek_bar()"
+        )
+    )]
     #[must_use]
     pub fn phase(&self) -> Phase {
         self.phase
@@ -602,34 +664,40 @@ impl PlayerState {
         self.now_playing.as_ref().and_then(|now| now.album_id)
     }
 
-    /// Play/pause toggle label: the action a press would request, from the
-    /// *confirmed* phase — or `…` while a command is pending confirmation.
+    /// What the play/pause toggle offers: the action a press would request,
+    /// from the *confirmed* phase and nothing else.
+    ///
+    /// A transport command in flight does not change the answer — see the
+    /// module's pending note for why swapping it mid-flight was the bottom
+    /// bar's flash.
     #[must_use]
-    pub fn play_pause_label(&self) -> &'static str {
-        if !self.engine_ready() {
-            return "Play";
-        }
-        if self.pending {
-            return "…";
-        }
+    pub fn play_pause(&self) -> PlayPause {
         match self.phase {
-            Phase::Playing => "Pause",
-            Phase::Paused | Phase::Stopped => "Play",
+            Phase::Playing => PlayPause::Pause,
+            Phase::Paused | Phase::Stopped => PlayPause::Play,
         }
     }
 
-    /// Whether the play/pause toggle does anything: engine running, nothing
-    /// pending, and a queue to (re)start when stopped.
+    /// Whether a transport command is awaiting its confirming event. The
+    /// view spends this on a glyph opacity and nothing else — it changes no
+    /// size, no label, and no enabled state (module docs).
+    #[must_use]
+    pub fn transport_pending(&self) -> bool {
+        self.pending
+    }
+
+    /// Whether the play/pause toggle does anything: engine running, and a
+    /// queue to (re)start when stopped.
     #[must_use]
     pub fn play_pause_enabled(&self) -> bool {
-        self.engine_ready() && !self.pending && (self.queued > 0 || self.phase != Phase::Stopped)
+        self.engine_ready() && (self.queued > 0 || self.phase != Phase::Stopped)
     }
 
     /// Whether Next does anything (it is a documented engine no-op while
     /// stopped).
     #[must_use]
     pub fn next_enabled(&self) -> bool {
-        self.engine_ready() && !self.pending && self.phase != Phase::Stopped
+        self.engine_ready() && self.phase != Phase::Stopped
     }
 
     /// The bar's replacement line when there is no engine to report on;
@@ -776,18 +844,24 @@ mod tests {
     }
 
     #[test]
-    fn started_paused_resumed_stopped_drives_phase_and_labels() {
+    fn started_paused_resumed_stopped_drives_phase_and_the_toggle() {
         let albums = albums();
         let mut player = ready_with_queue(2);
         player.note_transport_sent();
-        assert_eq!(player.play_pause_label(), "…");
-        assert!(!player.play_pause_enabled(), "pending disables the toggle");
-        assert!(!player.next_enabled());
+        assert_eq!(
+            player.play_pause(),
+            PlayPause::Play,
+            "a command in flight does not move the toggle off the confirmed phase"
+        );
 
         player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
         assert_eq!(player.phase(), Phase::Playing);
-        assert_eq!(player.play_pause_label(), "Pause");
-        assert!(player.play_pause_enabled(), "any event clears pending");
+        assert_eq!(player.play_pause(), PlayPause::Pause);
+        assert!(
+            !player.transport_pending(),
+            "any event clears the pending note"
+        );
+        assert!(player.play_pause_enabled());
         assert!(player.next_enabled());
         let now = player.now_playing().expect("resolved current track");
         assert_eq!(now.title, "Ready Lets Go");
@@ -796,7 +870,7 @@ mod tests {
 
         player.apply(&Event::Paused, &albums);
         assert_eq!(player.phase(), Phase::Paused);
-        assert_eq!(player.play_pause_label(), "Play");
+        assert_eq!(player.play_pause(), PlayPause::Play);
         assert!(player.next_enabled(), "Next skips-and-resumes while paused");
         assert!(
             player.now_playing().is_some(),
@@ -805,11 +879,11 @@ mod tests {
 
         player.apply(&Event::Resumed, &albums);
         assert_eq!(player.phase(), Phase::Playing);
-        assert_eq!(player.play_pause_label(), "Pause");
+        assert_eq!(player.play_pause(), PlayPause::Pause);
 
         player.apply(&Event::Stopped, &albums);
         assert_eq!(player.phase(), Phase::Stopped);
-        assert_eq!(player.play_pause_label(), "Play");
+        assert_eq!(player.play_pause(), PlayPause::Play);
         assert!(player.now_playing().is_none());
         assert_eq!(player.playing_album(), None);
         assert!(
@@ -864,12 +938,73 @@ mod tests {
         player.apply(&Event::QueueEnded, &albums);
         assert_eq!(player.phase(), Phase::Stopped);
         assert!(player.now_playing().is_none());
-        assert_eq!(player.play_pause_label(), "Play");
+        assert_eq!(player.play_pause(), PlayPause::Play);
         assert!(
             player.play_pause_enabled(),
             "the engine keeps the queue; Play restarts from the top"
         );
         assert!(!player.next_enabled());
+    }
+
+    #[test]
+    fn a_pending_transport_command_moves_nothing_the_layout_can_see() {
+        // The reported flash, pinned: pressing the toggle used to swap its
+        // label to `…` and disable both buttons for a frame or three, then
+        // put them back. Everything the view sizes or reads from must now be
+        // invariant across that window; the only thing left that pending can
+        // reach is the glyph's opacity, which changes no geometry.
+        let albums = albums();
+        let mut player = ready_with_queue(2);
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        let before = (
+            player.play_pause(),
+            player.play_pause().label(),
+            player.play_pause_enabled(),
+            player.next_enabled(),
+        );
+
+        player.note_transport_sent();
+        assert!(player.transport_pending(), "the request is still recorded");
+        assert_eq!(
+            (
+                player.play_pause(),
+                player.play_pause().label(),
+                player.play_pause_enabled(),
+                player.next_enabled(),
+            ),
+            before,
+            "a command in flight must not change the glyph, its label, or either button's state"
+        );
+
+        // And the glyph moves exactly once, when the engine confirms.
+        player.apply(&Event::Paused, &albums);
+        assert!(!player.transport_pending());
+        assert_eq!(player.play_pause(), PlayPause::Play);
+        assert_eq!(player.play_pause().label(), "Play");
+    }
+
+    #[test]
+    fn the_toggle_never_shows_an_action_the_engine_has_not_confirmed() {
+        // The honesty rule, restated for the toggle now that pending no
+        // longer touches it: sending Pause does not make the button say
+        // "Play" until Paused actually arrives.
+        let albums = albums();
+        let mut player = ready_with_queue(1);
+        player.apply(&started("/m/strays/a.wav", 0), &albums);
+        assert_eq!(player.play_pause(), PlayPause::Pause);
+        player.note_transport_sent();
+        assert_eq!(
+            player.play_pause(),
+            PlayPause::Pause,
+            "still playing until the engine says otherwise"
+        );
+        // A Progress report clears pending without confirming the pause —
+        // and must not move the toggle either.
+        player.apply(&progress(1_000, Some(200_000)), &albums);
+        assert!(!player.transport_pending());
+        assert_eq!(player.play_pause(), PlayPause::Pause);
+        player.apply(&Event::Paused, &albums);
+        assert_eq!(player.play_pause(), PlayPause::Play);
     }
 
     #[test]
