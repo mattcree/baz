@@ -104,6 +104,53 @@
 //! bar underneath a hover — hovering is not an interaction, and pretending
 //! it pauses playback truth would be a lie.
 //!
+//! # The volume
+//!
+//! The same honesty rule, and the ADR that governs it says so in as many
+//! words: *observe [`Event::VolumeChanged`] and follow it rather than your own
+//! optimistic value, so two front ends on one engine agree* (ADR-0011, "What a
+//! front end needs"). So [`PlayerState::apply`] is again the only place the
+//! position, the mute flag, and the [`VolumePath`] move. Sending
+//! `SetVolume` changes nothing by itself; a `VolumeChanged` carrying a
+//! position we never asked for — another front end, or the engine clamping
+//! ours — simply becomes the truth.
+//!
+//! Three things sit on top, all request-side and all modelled on the seek
+//! bar's:
+//!
+//! - **A gesture** ([`PlayerState::press_volume`],
+//!   [`PlayerState::drag_volume`]) with the same
+//!   [`DRAG_THRESHOLD_PX`] click-vs-drag rule, for the same reason: without
+//!   it, two pixels of tremor between button-down and button-up would move
+//!   the level away from the position the user aimed at — and near the top of
+//!   the travel, off unity. The one deliberate difference from the seek bar
+//!   is *when* the request goes out. A seek commits on release, because
+//!   seeking to every position the pointer passed through would be absurd; a
+//!   fader commits on press and on every scrub step, because a volume control
+//!   you cannot hear until you let go is not a volume control. Sub-threshold
+//!   travel still moves nothing, so a click is exactly where it was pressed.
+//! - **A pending position**, recorded by whichever of the methods above asked
+//!   for it, shown until the confirming event arrives and cleared on the next
+//!   event of any kind — the seek bar's affordance, wholesale, including its
+//!   anti-wedging rule.
+//! - **A hover** ([`PlayerState::hover_volume`]), previewing the level a click
+//!   would set.
+//!
+//! The unit of the preview is **decibels**, and that is a decision rather than
+//! a default. Percent-of-travel would be a number about the widget rather than
+//! about the sound; percent-of-amplitude would disagree with where the handle
+//! is, because the taper is a cube. dB is what
+//! [`Volume::decibels`](baz_core::volume::Volume::decibels) exists to provide,
+//! it is the unit the ADR labels the control in, and it is the only one in
+//! which the detent's meaning is legible on sight: at unity the readout is not
+//! "100 %" but the word `unity`, and one position below it is `-0.0 dB`.
+//!
+//! [`UNITY_SNAP_PX`] is the other half of making unity reachable: within a few
+//! pixels of the top of the travel the position resolves to
+//! [`MAX_POSITION`] exactly, so the
+//! bit-perfect position is a place the hand lands rather than a place it has
+//! to be threaded into.
+//!
 //! # The signal path
 //!
 //! [`Event::SignalPath`] reports what sits between the decoded file and the
@@ -114,14 +161,28 @@
 //! when the session that it described ends (stop, queue end, engine gone).
 //! There is no session, so there is no chain to report.
 //!
-//! [`PlayerState::signal_note`] is the render-ready reading, and it answers
-//! `Some` **only** for [`SignalChain::Converting`]. `Direct` — the ordinary
-//! case, and the one ADR-0009 exists to make ordinary — renders nothing at
-//! all. That asymmetry is deliberate: this is information, not a warning, and
-//! an indicator that lit up for every track would be exactly the nagging the
-//! ADR rules out. The note carries a short factual label and one plain
-//! sentence for a tooltip; no vocabulary of fault, and nothing for the view
-//! to interpret.
+//! [`PlayerState::signal_note`] is the render-ready reading, and ADR-0011
+//! amends what it answers. Bit-exactness used to be one fact and is now the
+//! conjunction of two — `SignalChain::Direct` **and**
+//! [`VolumePath::is_transparent`] — so the note has three states rather than
+//! two:
+//!
+//! - **Converting**: the chain, `48 → 44.1 kHz`, with the reason on hover.
+//!   Unchanged, down to the wording.
+//! - **Direct and transparent** ([`PlayerState::bit_exact`]): the word
+//!   `bit-perfect`. This is the affirmative reading ADR-0009's "What a front
+//!   end needs" leaves open — *nothing, or the same affordance in a resting
+//!   state* — and persona P4 asks for by name: a readout that proves the
+//!   chain rather than merely failing to complain about it.
+//! - **Anything else** — a direct chain with the volume scaling the samples,
+//!   or no session at all: nothing. Not because the fact is unimportant but
+//!   because it is already on screen, six pixels away: the fader is visibly
+//!   not at the top. A label that appeared every time somebody turned the
+//!   music down would be exactly the nagging both ADRs rule out.
+//!
+//! The words stay flat in all three. No severity, no icon, no colour: the note
+//! is two strings and the view has no decision left to make, which is what
+//! keeps the tone out of the view layer's hands.
 //!
 //! Engine availability ([`Availability`]) is seeded from the spawn result at
 //! startup — that is a returned fact, not an assumption — and downgrades to
@@ -135,7 +196,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use baz_core::protocol::{ConversionReason, Event, SignalChain};
+use baz_core::protocol::{ConversionReason, Event, SignalChain, VolumePath};
+use baz_core::volume::{MAX_POSITION, Volume};
 
 use crate::vm::{self, AlbumVm};
 
@@ -345,10 +407,16 @@ struct Gesture {
     scrubbing: bool,
 }
 
-/// The timestamp under a hovering pointer, ready to float over the bar.
+/// What a click under a hovering pointer would ask for, ready to float over
+/// the groove it was measured on.
+///
+/// One type for both grooves: the seek bar previews a timestamp and the
+/// volume fader a level, and neither the placement arithmetic
+/// ([`preview_offset`]) nor the lane that holds it cares which. The label is
+/// already formatted — the view renders text, it does not compute it.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SeekPreview {
-    /// The position the pointer is over, formatted like the elapsed stamp.
+pub struct Preview {
+    /// What a click here would ask for, formatted for display.
     pub label: String,
     /// Distance from the bar's left edge, clamped onto the bar (logical px).
     pub x: f32,
@@ -381,12 +449,89 @@ pub struct SeekBar {
     /// Where the pointer is resting and what a click there would seek to —
     /// `None` unless the pointer is on a seekable bar with no scrub in
     /// progress (see the module's precedence rules).
-    pub preview: Option<SeekPreview>,
+    pub preview: Option<Preview>,
 }
 
 /// The placeholder shown where a track length would be, when the container
 /// never declared one. Same width as a real `m:ss` so the bar does not jump.
 const UNKNOWN_TOTAL: &str = "--:--";
+
+/// How close to the top of the volume fader's travel counts as *at* the top,
+/// in logical pixels.
+///
+/// Unity is the one position on this control that carries a guarantee — the
+/// engine performs no arithmetic on the samples at all (ADR-0011 §5) — and on
+/// a [`theme::VOLUME_W`](crate::theme::VOLUME_W)-wide groove a single pixel is
+/// ~10 control positions, so "very nearly at the top" is an easy place to land
+/// and an invisible one to be in. Four pixels is the same figure
+/// [`DRAG_THRESHOLD_PX`] uses and for the same reason: it is the scale of the
+/// tremor a hand puts into a pointer, not the scale of an intention. Below the
+/// snap the control is continuous; there is no second detent to fall into.
+///
+/// It is a *snap*, not a dead zone: positions inside it resolve to
+/// [`MAX_POSITION`], which is the position the user was reaching for. The
+/// resolution given up is the top 0.9 dB of a 60 dB taper.
+pub const UNITY_SNAP_PX: f32 = 4.0;
+
+/// One press of the volume keys, in control positions.
+///
+/// Chosen against the taper rather than against the widget. The cube's slope
+/// is `d(dB)/d(position) = 60 / (position · ln 10)`, so at the top of the
+/// travel 40 positions is **1.04 dB** — the smallest change a listener
+/// reliably hears as one. Smaller and a press near unity would do nothing
+/// audible; much larger and there would be no fine control where people
+/// actually listen. It also means:
+///
+/// - 25 presses span the whole control, so Down-held reaches silence in about
+///   a second of key repeat and Up-held returns.
+/// - **40 divides 1000 exactly**, so stepping down and back up lands on
+///   [`MAX_POSITION`] itself rather than on 999. Combined with the clamp at
+///   the top, holding Up always ends at unity exactly — the keyboard can reach
+///   the bit-perfect position as reliably as the snap can.
+///
+/// Lower down the same 40 positions is a coarser dB step (2.1 dB at
+/// half-travel, 5.2 dB at a fifth); that is what a fader law *is*, and it is
+/// the same curve the pointer feels.
+pub const VOLUME_STEP: u16 = 40;
+
+/// The volume control's render-ready state — a fader position, a mute glyph,
+/// and a hover preview, with nothing about how to draw them.
+#[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "four independent facts about three different things — where the fader is, whether \
+              the output is muted, whether there is an engine, and whether a mute command is in \
+              flight. Folding them into a state machine would invent states the control does not \
+              have (muted-and-inert-and-pending is a real combination) and put the enumeration \
+              between this module and the view, which is the translation the type exists to avoid"
+)]
+pub struct VolumeBar {
+    /// Handle position as a fraction of the fader's travel, `0.0..=1.0`.
+    /// Linear in *travel*, not in amplitude: the taper lives in `baz-core`
+    /// and the control shows where the control is.
+    pub position: f32,
+    /// Whether output is muted — separate state from [`Self::position`],
+    /// exactly as the protocol keeps it (ADR-0011 §3).
+    pub muted: bool,
+    /// Whether the fader is sitting exactly on the unity detent.
+    pub unity: bool,
+    /// Whether the control can do anything: an engine to send to.
+    pub interactive: bool,
+    /// Whether a mute command is awaiting its confirming event. Spent on the
+    /// speaker's ink and nothing else — the same fixed-size dim-and-return
+    /// the transport buttons use, for the same reason.
+    ///
+    /// The *fader* needs no equivalent: a requested position is already
+    /// visible as the handle sitting where the hand put it, which is the
+    /// affordance the seek bar's amber timestamp stands in for.
+    pub mute_pending: bool,
+    /// The level a click under the pointer would set — `None` unless the
+    /// pointer is resting on a live fader with no drag in progress.
+    pub preview: Option<Preview>,
+    /// The mute affordance's accessible name, naming the action a press
+    /// would take rather than the state it is in.
+    pub mute_label: &'static str,
+}
 
 /// The chain the engine last reported, exactly as [`Event::SignalPath`]
 /// stated it: what the file is, what the output is running at, and what (if
@@ -461,6 +606,26 @@ pub struct PlayerState {
     seek_pending: Option<u64>,
     /// The chain the engine last reported for the current session, if any.
     signal: Option<SignalPath>,
+    /// The volume the engine last confirmed. Engine state, not session
+    /// state: nothing about starting, stopping or skipping a track touches
+    /// it (ADR-0011 §6), so it is deliberately absent from
+    /// [`Self::reset_progress`] and from [`Self::engine_closed`]'s clearing.
+    volume: Volume,
+    /// Mute as the engine last confirmed it, independent of [`Self::volume`].
+    muted: bool,
+    /// Where the engine last said the volume is being applied.
+    volume_path: VolumePath,
+    /// The pointer gesture on the fader, if one is in progress.
+    volume_gesture: Option<Gesture>,
+    /// Where the pointer is resting on the fader, if it is.
+    volume_hover: Option<Pointer>,
+    /// A position a sent-but-unconfirmed
+    /// [`Command::SetVolume`](baz_core::protocol::Command::SetVolume) asked
+    /// for.
+    volume_pending: Option<u16>,
+    /// A [`Command::SetMute`](baz_core::protocol::Command::SetMute) awaiting
+    /// its confirming event.
+    mute_pending: bool,
 }
 
 impl PlayerState {
@@ -482,7 +647,38 @@ impl PlayerState {
             hover: None,
             seek_pending: None,
             signal: None,
+            // A freshly spawned engine is at unity, unmuted, `Unity` — so
+            // these are the right values before anybody has been asked
+            // (ADR-0011, "The default is unaffected"). `seed_volume` replaces
+            // them with the engine's own reading at start-up all the same,
+            // because a second front end may have moved it already.
+            volume: Volume::UNITY,
+            muted: false,
+            volume_path: VolumePath::Unity,
+            volume_gesture: None,
+            volume_hover: None,
+            volume_pending: None,
+            mute_pending: false,
         }
+    }
+
+    /// Seed the volume from [`EngineHandle::volume`](baz_core::engine::EngineHandle::volume)
+    /// at start-up — the pull-side snapshot ADR-0011 provides for exactly
+    /// this moment, so the fader is right on the first frame instead of on
+    /// the first change.
+    ///
+    /// A returned fact, not an assumption, in the same way
+    /// [`Availability`] is seeded from the spawn result.
+    ///
+    /// Takes the three facts rather than the
+    /// [`VolumeState`](baz_core::volume::VolumeState) carrying them:
+    /// that type is `#[non_exhaustive]`, so a caller outside `baz-core` — a
+    /// unit test here included — cannot build one, and a seeding path no test
+    /// can exercise is a seeding path nobody has checked.
+    pub fn seed_volume(&mut self, volume: Volume, muted: bool, path: VolumePath) {
+        self.volume = volume;
+        self.muted = muted;
+        self.volume_path = path;
     }
 
     /// Fold one engine event into the state. `albums` is the current shelf
@@ -536,6 +732,19 @@ impl PlayerState {
                     chain: *chain,
                 });
             }
+            // The engine's own account of the volume, and the only thing
+            // that moves it. What we asked for does not appear here at all:
+            // a position we never sent (another front end, or a clamp) is
+            // simply the truth from now on.
+            Event::VolumeChanged {
+                position,
+                muted,
+                path,
+            } => {
+                self.volume = Volume::new(*position);
+                self.muted = *muted;
+                self.volume_path = *path;
+            }
             // `Event` is #[non_exhaustive]: tolerate unknown messages.
             _ => {}
         }
@@ -544,6 +753,8 @@ impl PlayerState {
         // pointer's business, not the engine's, so they survive.
         self.pending = false;
         self.seek_pending = None;
+        self.volume_pending = None;
+        self.mute_pending = false;
     }
 
     /// Forget where we were: a different track, or none at all.
@@ -580,6 +791,14 @@ impl PlayerState {
         self.pending = false;
         self.signal = None;
         self.reset_progress();
+        // The volume itself survives — it is engine state, and the last
+        // reading remains the honest answer to "where is the fader" — but a
+        // gone engine cannot confirm anything, so nothing may stay pending
+        // and the pointer has nothing left to hold.
+        self.volume_gesture = None;
+        self.volume_hover = None;
+        self.volume_pending = None;
+        self.mute_pending = false;
     }
 
     /// The pointer is resting on the bar at `pointer` with no button held:
@@ -696,6 +915,194 @@ impl PlayerState {
         Some(target)
     }
 
+    // -----------------------------------------------------------------
+    // The volume fader
+    // -----------------------------------------------------------------
+
+    /// The pointer is resting on the fader at `pointer`: record it so the
+    /// view can preview the level a click would set. Cleared when the
+    /// control is not live.
+    pub fn hover_volume(&mut self, pointer: Pointer) {
+        self.volume_hover = self.engine_ready().then_some(pointer);
+    }
+
+    /// The pointer left the fader; the preview goes with it.
+    pub fn volume_left(&mut self) {
+        self.volume_hover = None;
+    }
+
+    /// The fader was pressed at `pointer`. Returns the position to ask the
+    /// engine for — a fader answers at once, so the press *is* the request
+    /// (module docs) — or `None` when there is no engine to ask.
+    pub fn press_volume(&mut self, pointer: Pointer) -> Option<u16> {
+        if !self.engine_ready() {
+            return None;
+        }
+        self.volume_gesture = Some(Gesture {
+            anchor: pointer,
+            latest: pointer,
+            scrubbing: false,
+        });
+        let target = position_for(pointer);
+        self.volume_pending = Some(target);
+        Some(target)
+    }
+
+    /// The pointer moved to `pointer` with the fader held. Returns a
+    /// position to ask for once the gesture has travelled
+    /// [`DRAG_THRESHOLD_PX`] from the press, and `None` before that — so a
+    /// click cannot smear a few pixels into a level nobody aimed at, while a
+    /// real drag is heard as it happens.
+    pub fn drag_volume(&mut self, pointer: Pointer) -> Option<u16> {
+        let gesture = self.volume_gesture.as_mut()?;
+        gesture.latest = pointer;
+        if (pointer.x - gesture.anchor.x).abs() >= DRAG_THRESHOLD_PX {
+            gesture.scrubbing = true;
+        }
+        if !gesture.scrubbing {
+            return None;
+        }
+        let target = position_for(pointer);
+        self.volume_pending = Some(target);
+        Some(target)
+    }
+
+    /// The fader was released. Nothing new is requested — every position
+    /// this gesture asked for went out as it happened — so this only ends
+    /// the gesture and leaves the preview wherever the pointer actually is.
+    pub fn release_volume(&mut self) {
+        let Some(gesture) = self.volume_gesture.take() else {
+            return;
+        };
+        self.volume_hover = gesture.latest.is_over().then_some(gesture.latest);
+    }
+
+    /// Step the volume by `steps` × [`VOLUME_STEP`] positions — the
+    /// keyboard's Up and Down. Returns the position to ask for, clamped into
+    /// the control's travel, or `None` with no engine to ask.
+    ///
+    /// The base is the position a request is already in flight for when
+    /// there is one, so presses inside one round trip accumulate instead of
+    /// each landing on the same confirmed reading — the same rule, and the
+    /// same reason, as [`Self::seek_by`].
+    pub fn step_volume(&mut self, steps: i32) -> Option<u16> {
+        if !self.engine_ready() {
+            return None;
+        }
+        let base = i32::from(self.volume_pending.unwrap_or(self.volume.position()));
+        let delta = steps.saturating_mul(i32::from(VOLUME_STEP));
+        let target = base.saturating_add(delta).clamp(0, i32::from(MAX_POSITION));
+        let target = u16::try_from(target).unwrap_or(MAX_POSITION);
+        self.volume_pending = Some(target);
+        Some(target)
+    }
+
+    /// Set the volume to an absolute position (MPRIS `Volume`), clamped into
+    /// the control's travel. `None` with no engine to ask.
+    pub fn set_volume(&mut self, position: u16) -> Option<u16> {
+        if !self.engine_ready() {
+            return None;
+        }
+        let target = Volume::new(position).position();
+        self.volume_pending = Some(target);
+        Some(target)
+    }
+
+    /// What a press of the mute affordance should ask for: the opposite of
+    /// the *confirmed* mute state.
+    ///
+    /// The command is idempotent rather than a toggle (ADR-0011 §3), so this
+    /// resolves the toggle against what the engine last said — never against
+    /// a flag we flipped ourselves, which is how two front ends on one engine
+    /// come to disagree about which way "toggle" points.
+    pub fn toggle_mute(&mut self) -> Option<bool> {
+        self.set_muted(!self.muted)
+    }
+
+    /// Ask for an absolute mute state (MPRIS, and the toggle above). `None`
+    /// with no engine to ask.
+    pub fn set_muted(&mut self, muted: bool) -> Option<bool> {
+        if !self.engine_ready() {
+            return None;
+        }
+        self.mute_pending = true;
+        Some(muted)
+    }
+
+    /// The volume control's render-ready state.
+    ///
+    /// Always present, unlike [`Self::seek_bar`]: a fader has something to
+    /// say whether or not anything is playing, because the volume is engine
+    /// state and outlives every session. With no engine it renders inert
+    /// rather than vanishing, which is what keeps the bottom bar's right-hand
+    /// end the same width from launch onward.
+    #[must_use]
+    pub fn volume_bar(&self) -> VolumeBar {
+        let shown = self.volume_gesture_position().or(self.volume_pending);
+        let position = shown.unwrap_or(self.volume.position());
+        VolumeBar {
+            position: travel(position),
+            muted: self.muted,
+            unity: position == MAX_POSITION,
+            interactive: self.engine_ready(),
+            mute_pending: self.mute_pending,
+            preview: self.volume_preview(),
+            mute_label: if self.muted { "Unmute" } else { "Mute" },
+        }
+    }
+
+    /// The position under the pointer while a fader drag is engaged.
+    fn volume_gesture_position(&self) -> Option<u16> {
+        let gesture = self.volume_gesture.filter(|gesture| gesture.scrubbing)?;
+        Some(position_for(gesture.latest))
+    }
+
+    /// The hover preview: the level a click under the pointer would set.
+    /// Suppressed while dragging, for the seek bar's reason — one pointer,
+    /// one number.
+    fn volume_preview(&self) -> Option<Preview> {
+        if !self.engine_ready() || self.volume_gesture.is_some_and(|g| g.scrubbing) {
+            return None;
+        }
+        let hover = self.volume_hover?;
+        let width = hover.usable_width();
+        Some(Preview {
+            label: level_label(position_for(hover)),
+            // From the same clamped geometry the label came from, so the
+            // marker and the level can never disagree about where the
+            // pointer is — including past either end of the travel.
+            x: hover.fraction() * width,
+            width,
+        })
+    }
+
+    /// The volume as the engine last confirmed it.
+    #[must_use]
+    pub fn volume(&self) -> Volume {
+        self.volume
+    }
+
+    /// Whether output is muted, as the engine last confirmed it.
+    #[must_use]
+    pub fn muted(&self) -> bool {
+        self.muted
+    }
+
+    /// Whether baz is, right now, putting the decoder's samples on the wire
+    /// unaltered — ADR-0011's amendment to ADR-0009, spelled once.
+    ///
+    /// Both halves are required and neither is inferred: the chain must be
+    /// [`SignalChain::Direct`] (no rate conversion) **and** the volume path
+    /// must be [`VolumePath::is_transparent`] (no gain stage). A session that
+    /// has reported no chain answers `false` — the honest reading of "we have
+    /// not been told" is not "yes".
+    #[must_use]
+    pub fn bit_exact(&self) -> bool {
+        self.signal
+            .is_some_and(|path| path.chain == SignalChain::Direct)
+            && self.volume_path.is_transparent()
+    }
+
     /// The track length to scrub against, or `None` when scrubbing would be
     /// a lie: no engine, nothing playing, or a track of undeclared length.
     fn seekable_total(&self) -> Option<u64> {
@@ -741,14 +1148,14 @@ impl PlayerState {
     /// The hover preview: what a click under the pointer would seek to.
     /// Suppressed while scrubbing — the bar itself already shows that
     /// target, and two numbers chasing one pointer is noise.
-    fn preview(&self) -> Option<SeekPreview> {
+    fn preview(&self) -> Option<Preview> {
         if self.dragging() {
             return None;
         }
         let total = self.seekable_total()?;
         let hover = self.hover?;
         let width = hover.usable_width();
-        Some(SeekPreview {
+        Some(Preview {
             label: format_ms(scale(total, hover.fraction())),
             // Derived from the (clamped) fraction rather than from `x`, so
             // the marker and the timestamp can never disagree about where
@@ -902,24 +1309,38 @@ impl PlayerState {
         self.signal
     }
 
-    /// The bottom bar's signal-path note — `Some` **only** when the chain the
-    /// engine reported is [`SignalChain::Converting`].
+    /// The bottom bar's signal-path note — the chain when the engine is
+    /// converting, `bit-perfect` when the whole path is transparent, and
+    /// nothing otherwise (module docs give the three cases and why the third
+    /// stays quiet).
     ///
-    /// Presence is decided by `chain` and by nothing else: not by comparing
-    /// the two rates (the engine, not the front end, knows whether it is
-    /// converting), not by phase, not by depth. `Direct` renders nothing, and
-    /// so does a session that has reported no chain at all.
+    /// Presence is decided by what the engine reported and by nothing else:
+    /// not by comparing the two rates (the engine, not the front end, knows
+    /// whether it is converting), not by phase, not by depth, and not by
+    /// where the fader looks like it is sitting — [`Self::bit_exact`] asks
+    /// [`VolumePath::is_transparent`], which is the engine's own answer.
     ///
-    /// The words are deliberately flat. A rate is a fact about the chain in
-    /// the same way a codec name is a fact about a file, and ADR-0009 §5 puts
-    /// the tone in the decision itself: no "degraded", no "fallback", nothing
-    /// that reads as a fault. The listener who cares can find it; everyone
-    /// else can look straight past it.
+    /// The words are deliberately flat in every case. A rate is a fact about
+    /// the chain in the same way a codec name is a fact about a file, and
+    /// ADR-0009 §5 puts the tone in the decision itself: no "degraded", no
+    /// "fallback", nothing that reads as a fault — and, on the other side,
+    /// nothing that reads as a boast. The listener who cares can find it;
+    /// everyone else can look straight past it.
     #[must_use]
     pub fn signal_note(&self) -> Option<SignalNote> {
         let path = self.signal?;
         let SignalChain::Converting { reason } = path.chain else {
-            return None;
+            if !self.bit_exact() {
+                return None;
+            }
+            let source = vm::format_sample_rate(path.source_rate_hz);
+            return Some(SignalNote {
+                label: "bit-perfect".to_owned(),
+                detail: format!(
+                    "{source} reaching the output untouched — no rate conversion, \
+                     and the volume is not scaling the samples"
+                ),
+            });
         };
         let source = vm::format_sample_rate(path.source_rate_hz);
         let output = vm::format_sample_rate(path.output_rate_hz);
@@ -969,6 +1390,59 @@ fn scale(total: u64, fraction: f32) -> u64 {
     scaled.min(total)
 }
 
+/// The control position a pointer on the volume fader is asking for, with
+/// the unity snap applied.
+///
+/// Clamped at both ends — a held drag keeps reporting after the pointer
+/// leaves the widget, so out-of-bounds pixels are ordinary input — and
+/// snapped to [`MAX_POSITION`] within [`UNITY_SNAP_PX`] of the top of the
+/// travel. The snap is refused on a groove no wider than the snap itself,
+/// where "within four pixels of the top" would be true everywhere and the
+/// control would have exactly one reachable value.
+#[must_use]
+pub fn position_for(pointer: Pointer) -> u16 {
+    let width = pointer.usable_width();
+    if width > UNITY_SNAP_PX && pointer.x.is_finite() && pointer.x >= width - UNITY_SNAP_PX {
+        return MAX_POSITION;
+    }
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the fraction is clamped to 0..=1, so the product is 0..=MAX_POSITION"
+    )]
+    let position = (pointer.fraction() * f32::from(MAX_POSITION)).round() as u16;
+    position.min(MAX_POSITION)
+}
+
+/// Where `position` sits along the fader's travel, `0.0..=1.0`.
+fn travel(position: u16) -> f32 {
+    f32::from(position.min(MAX_POSITION)) / f32::from(MAX_POSITION)
+}
+
+/// A control position as the level it means, for the hover tip.
+///
+/// Three spellings, and the two special ones are the point:
+///
+/// - [`MAX_POSITION`] reads **`unity`**, not `0.0 dB`. It is the only
+///   position on the control that carries a guarantee, and naming it is what
+///   makes "I am at the top" and "I am nearly at the top" different things on
+///   sight — the position below it reads `-0.0 dB`, which is exactly and
+///   honestly what it is.
+/// - Position 0 reads `-∞ dB` rather than a very large negative number,
+///   because that is the true reading and
+///   [`Volume::decibels`](baz_core::volume::Volume::decibels) declines to
+///   invent one.
+fn level_label(position: u16) -> String {
+    let volume = Volume::new(position);
+    if volume.is_unity() {
+        return "unity".to_owned();
+    }
+    match volume.decibels() {
+        None => "-∞ dB".to_owned(),
+        Some(db) => format!("{db:.1} dB"),
+    }
+}
+
 /// The inverse of [`scale`]: where `position` sits in `0..=total`.
 fn fraction(position: u64, total: u64) -> f32 {
     if total == 0 {
@@ -1002,7 +1476,7 @@ fn strip_unit(rate: &str) -> &str {
 /// of its own: it asks for an offset and pushes a spacer that wide. A tip
 /// wider than the bar pins to the left edge rather than going negative.
 #[must_use]
-pub fn preview_offset(preview: &SeekPreview, tip_width: f32) -> f32 {
+pub fn preview_offset(preview: &Preview, tip_width: f32) -> f32 {
     let slack = (preview.width - tip_width).max(0.0);
     (preview.x - tip_width / 2.0).clamp(0.0, slack)
 }
@@ -1818,7 +2292,7 @@ mod tests {
     #[test]
     fn preview_offsets_center_the_tip_and_keep_it_on_the_bar() {
         let tip = 50.0;
-        let preview = |x: f32, width: f32| SeekPreview {
+        let preview = |x: f32, width: f32| Preview {
             label: String::new(),
             x,
             width,
@@ -1886,7 +2360,7 @@ mod tests {
     }
 
     #[test]
-    fn a_direct_chain_is_recorded_and_shows_nothing() {
+    fn a_direct_chain_at_unity_is_recorded_and_reads_bit_perfect() {
         let albums = albums();
         let mut player = ready_with_queue(2);
         player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
@@ -1897,10 +2371,15 @@ mod tests {
         assert_eq!(path.source_rate_hz, 48_000);
         assert_eq!(path.output_rate_hz, 48_000);
         assert_eq!(path.source_bits, Some(24));
+        // ADR-0011's amendment: a direct chain is only half of bit-exact,
+        // and the default volume supplies the other half.
+        assert!(player.bit_exact());
+        let note = player.signal_note().expect("the affirmative reading");
+        assert_eq!(note.label, "bit-perfect");
         assert_eq!(
-            player.signal_note(),
-            None,
-            "the ordinary case puts nothing on the bar"
+            note.detail,
+            "48 kHz reaching the output untouched — no rate conversion, \
+             and the volume is not scaling the samples"
         );
     }
 
@@ -1954,9 +2433,12 @@ mod tests {
                     reason: ConversionReason::FixedOutputRate,
                 },
             ),
+            // The affirmative reading is held to the same standard: a note
+            // that boasted would be as wrong as one that scolded.
+            signal(48_000, 48_000, SignalChain::Direct),
         ] {
             player.apply(&event, &albums);
-            let note = player.signal_note().expect("converting");
+            let note = player.signal_note().expect("a reading");
             let words = format!("{} {}", note.label, note.detail).to_lowercase();
             for alarm in [
                 "warning",
@@ -1987,7 +2469,11 @@ mod tests {
         player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
 
         player.apply(&signal(48_000, 44_100, SignalChain::Direct), &albums);
-        assert_eq!(player.signal_note(), None, "Direct is Direct");
+        assert_eq!(
+            player.signal_note().map(|note| note.label),
+            Some("bit-perfect".to_owned()),
+            "Direct is Direct, whatever the rates read"
+        );
 
         player.apply(
             &signal(
@@ -2023,7 +2509,10 @@ mod tests {
         let mut player = ready_with_queue(3);
         player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
         player.apply(&signal(44_100, 44_100, SignalChain::Direct), &albums);
-        assert_eq!(player.signal_note(), None);
+        assert_eq!(
+            player.signal_note().map(|note| note.label),
+            Some("bit-perfect".to_owned())
+        );
 
         player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
         player.apply(&converting(), &albums);
@@ -2035,15 +2524,18 @@ mod tests {
         player.apply(&started("/m/strays/a.wav", 2), &albums);
         player.apply(&signal(44_100, 44_100, SignalChain::Direct), &albums);
         assert_eq!(
-            player.signal_note(),
-            None,
+            player.signal_note().map(|note| note.label),
+            Some("bit-perfect".to_owned()),
             "back to a rate the device can follow"
         );
 
         // A track change on its own reports nothing new, and must not
         // resurrect a chain the engine has moved past.
         player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
-        assert_eq!(player.signal_note(), None);
+        assert_eq!(
+            player.signal_note().map(|note| note.label),
+            Some("bit-perfect".to_owned())
+        );
     }
 
     #[test]
@@ -2243,6 +2735,495 @@ mod tests {
 
         player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
         assert_eq!(player.track_seq(), first + 1);
+    }
+
+    // -----------------------------------------------------------------
+    // The volume fader
+    // -----------------------------------------------------------------
+
+    /// The fader these tests measure against: 100 logical px, so one pixel
+    /// is exactly ten control positions and every expectation below is
+    /// arithmetic anyone can check in their head.
+    const FADER: f32 = 100.0;
+
+    /// A pointer `x` px into [`FADER`].
+    fn fader_at(x: f32) -> Pointer {
+        Pointer::new(x, FADER)
+    }
+
+    fn volume_changed(position: u16, muted: bool, path: VolumePath) -> Event {
+        Event::VolumeChanged {
+            position,
+            muted,
+            path,
+        }
+    }
+
+    /// The engine's ordinary report for a position below unity.
+    fn turned_down(position: u16) -> Event {
+        volume_changed(position, false, VolumePath::SoftwareGain)
+    }
+
+    #[test]
+    fn a_fresh_player_is_at_unity_unmuted_and_transparent() {
+        // ADR-0011: "a freshly spawned engine is at unity, unmuted,
+        // VolumePath::Unity" — so a front end that has heard nothing must
+        // show that rather than an invented zero.
+        let player = ready_with_queue(0);
+        let bar = player.volume_bar();
+        assert!((bar.position - 1.0).abs() < 1e-6);
+        assert!(bar.unity);
+        assert!(!bar.muted);
+        assert_eq!(player.volume(), Volume::UNITY);
+        assert_eq!(bar.mute_label, "Mute");
+    }
+
+    #[test]
+    fn seeding_takes_the_engines_own_reading_at_startup() {
+        let mut player = ready_with_queue(0);
+        player.seed_volume(Volume::new(500), true, VolumePath::SoftwareGain);
+        let bar = player.volume_bar();
+        assert!((bar.position - 0.5).abs() < 1e-6);
+        assert!(bar.muted);
+        assert!(!bar.unity);
+        assert_eq!(bar.mute_label, "Unmute", "the affordance names the action");
+        assert!(!player.bit_exact());
+    }
+
+    /// The honesty rule for the volume, stated as a test: what we *send*
+    /// never becomes the reading, and an event we did not ask for does.
+    #[test]
+    fn the_fader_follows_events_and_never_its_own_sends() {
+        let albums = albums();
+        let mut player = ready_with_queue(1);
+
+        // Ask for half. The confirmed volume has not moved.
+        assert_eq!(player.set_volume(500), Some(500));
+        assert_eq!(
+            player.volume(),
+            Volume::UNITY,
+            "sending a command is not hearing one"
+        );
+
+        // The engine answers with something else entirely — another front
+        // end moved it, or ours was clamped. That is the truth now.
+        player.apply(&turned_down(750), &albums);
+        assert_eq!(player.volume(), Volume::new(750));
+        let bar = player.volume_bar();
+        assert!((bar.position - 0.75).abs() < 1e-6);
+        assert!(!bar.unity);
+
+        // And a bare `Progress` clears the pending display without pretending
+        // to confirm anything about the volume.
+        assert_eq!(player.set_volume(200), Some(200));
+        player.apply(&progress(1_000, Some(200_000)), &albums);
+        assert_eq!(
+            player.volume(),
+            Volume::new(750),
+            "an unrelated event clears pending but confirms no volume"
+        );
+    }
+
+    #[test]
+    fn mute_is_separate_state_and_leaves_the_fader_where_it_was() {
+        let albums = albums();
+        let mut player = ready_with_queue(1);
+        player.apply(&turned_down(600), &albums);
+
+        assert_eq!(player.toggle_mute(), Some(true));
+        assert!(!player.muted(), "still unmuted until the engine says so");
+        assert!(
+            player.volume_bar().mute_pending,
+            "the request is recorded for the glyph's ink"
+        );
+
+        player.apply(
+            &volume_changed(600, true, VolumePath::SoftwareGain),
+            &albums,
+        );
+        let bar = player.volume_bar();
+        assert!(bar.muted);
+        assert!(!bar.mute_pending);
+        assert!(
+            (bar.position - 0.6).abs() < 1e-6,
+            "mute does not move the fader — it is the position mute restores"
+        );
+
+        // The toggle resolves against the confirmed state, so it now asks to
+        // unmute rather than repeating itself.
+        assert_eq!(player.toggle_mute(), Some(false));
+        player.apply(&turned_down(600), &albums);
+        assert!(!player.volume_bar().muted);
+        assert!((player.volume_bar().position - 0.6).abs() < 1e-6);
+    }
+
+    /// The volume is engine state, not session state (ADR-0011 §6): nothing
+    /// about starting, stopping or skipping a track may touch it.
+    #[test]
+    fn the_volume_outlives_every_session() {
+        let albums = albums();
+        for ending in [Event::Stopped, Event::QueueEnded] {
+            let mut player = ready_with_queue(2);
+            player.apply(&turned_down(300), &albums);
+            player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+            assert_eq!(player.volume(), Volume::new(300));
+            player.apply(&ending, &albums);
+            assert_eq!(
+                player.volume(),
+                Volume::new(300),
+                "{ending:?} is not a volume change"
+            );
+        }
+
+        // A track boundary is not one either.
+        let mut player = ready_with_queue(2);
+        player.apply(
+            &volume_changed(300, true, VolumePath::SoftwareGain),
+            &albums,
+        );
+        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+        assert_eq!(player.volume(), Volume::new(300));
+        assert!(player.muted());
+
+        // And an engine that goes away leaves the last honest reading on
+        // screen, inert.
+        player.engine_closed();
+        let bar = player.volume_bar();
+        assert!(!bar.interactive);
+        assert!((bar.position - 0.3).abs() < 1e-6);
+        assert!(bar.muted);
+        assert_eq!(player.press_volume(fader_at(50.0)), None);
+        assert_eq!(player.step_volume(1), None);
+        assert_eq!(player.toggle_mute(), None);
+        assert_eq!(player.volume_bar().preview, None);
+    }
+
+    // -----------------------------------------------------------------
+    // Pixels to positions, and the unity detent
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn pointer_positions_map_linearly_along_the_travel_and_clamp() {
+        assert_eq!(position_for(fader_at(0.0)), 0);
+        assert_eq!(position_for(fader_at(25.0)), 250);
+        assert_eq!(position_for(fader_at(50.0)), 500);
+        assert_eq!(position_for(fader_at(93.0)), 930);
+        // Past either end is the end: a held drag keeps reporting after the
+        // pointer leaves the widget.
+        assert_eq!(position_for(fader_at(-40.0)), 0);
+        assert_eq!(position_for(fader_at(400.0)), MAX_POSITION);
+        // Degenerate geometry reads silence rather than dividing by nothing.
+        assert_eq!(position_for(Pointer::new(12.0, 0.0)), 0);
+        assert_eq!(position_for(Pointer::new(f32::NAN, FADER)), 0);
+        assert_eq!(position_for(Pointer::new(50.0, f32::NAN)), 0);
+        // A groove no wider than the snap stays *linear* rather than
+        // snapping: "within four pixels of the top" would otherwise be true
+        // everywhere on it, leaving one reachable value.
+        assert_eq!(position_for(Pointer::new(1.0, 2.0)), 500);
+        assert_eq!(position_for(Pointer::new(2.0, 2.0)), MAX_POSITION);
+    }
+
+    /// The whole point of the detent: the bit-perfect position is where the
+    /// hand lands, not where it has to be threaded.
+    #[test]
+    fn the_top_of_the_travel_snaps_to_unity() {
+        assert!((UNITY_SNAP_PX - 4.0).abs() < f32::EPSILON);
+        for x in [FADER, FADER - 0.5, FADER - UNITY_SNAP_PX, FADER + 20.0] {
+            assert_eq!(
+                position_for(fader_at(x)),
+                MAX_POSITION,
+                "{x} px is within the snap and must be unity exactly"
+            );
+        }
+        // Just outside it the control is continuous again — no dead band,
+        // and no second position that pretends to be unity.
+        let just_below = position_for(fader_at(FADER - UNITY_SNAP_PX - 0.1));
+        assert!(
+            just_below < MAX_POSITION,
+            "outside the snap the fader keeps its resolution: {just_below}"
+        );
+        assert_eq!(just_below, 959);
+        assert!(!Volume::new(just_below).is_unity());
+    }
+
+    /// A click is exactly where it was pressed, and a hand's tremor between
+    /// button-down and button-up cannot drag it off unity.
+    #[test]
+    fn a_press_commits_at_once_and_sub_threshold_travel_asks_for_nothing() {
+        let mut player = ready_with_queue(1);
+        assert_eq!(
+            player.press_volume(fader_at(40.0)),
+            Some(400),
+            "a fader answers on press — there is nothing to wait for"
+        );
+        // Three pixels of wobble: under the threshold, so nothing more is
+        // asked for and the bar keeps showing the pressed position.
+        assert_eq!(player.drag_volume(fader_at(41.0)), None);
+        assert_eq!(player.drag_volume(fader_at(43.0)), None);
+        assert!((player.volume_bar().position - 0.4).abs() < 1e-6);
+        player.release_volume();
+        assert!((player.volume_bar().position - 0.4).abs() < 1e-6);
+
+        // The same wobble at the top of the travel cannot cost unity.
+        let mut player = ready_with_queue(1);
+        assert_eq!(player.press_volume(fader_at(FADER)), Some(MAX_POSITION));
+        assert_eq!(player.drag_volume(fader_at(FADER - 3.0)), None);
+        assert!(player.volume_bar().unity);
+    }
+
+    #[test]
+    fn a_drag_past_the_threshold_asks_for_every_step_it_passes_through() {
+        let mut player = ready_with_queue(1);
+        assert_eq!(player.press_volume(fader_at(80.0)), Some(800));
+        assert_eq!(
+            player.drag_volume(fader_at(80.0 - DRAG_THRESHOLD_PX)),
+            Some(760),
+            "at the threshold the drag engages and is heard as it happens"
+        );
+        assert_eq!(player.drag_volume(fader_at(20.0)), Some(200));
+        assert!((player.volume_bar().position - 0.2).abs() < 1e-6);
+        // A drag that wanders back past the press point is still a drag.
+        assert_eq!(player.drag_volume(fader_at(80.0)), Some(800));
+        player.release_volume();
+        // Dragged off the end of the bar and released there: clamped, and no
+        // preview because the pointer is not on the control.
+        assert_eq!(player.press_volume(fader_at(50.0)), Some(500));
+        assert_eq!(player.drag_volume(Pointer::new(-70.0, FADER)), Some(0));
+        player.release_volume();
+        assert_eq!(player.volume_bar().preview, None);
+    }
+
+    // -----------------------------------------------------------------
+    // The level preview
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn hovering_previews_the_level_a_click_would_set() {
+        let mut player = ready_with_queue(1);
+        player.hover_volume(fader_at(50.0));
+        let preview = player
+            .volume_bar()
+            .preview
+            .expect("a hovered live fader previews");
+        assert_eq!(preview.label, "-18.1 dB", "half travel on a cubic taper");
+        assert!((preview.x - 50.0).abs() < 1e-6);
+        assert!((preview.width - FADER).abs() < 1e-6);
+
+        // The top of the travel names the guarantee rather than a number,
+        // and one position below it is visibly a different thing.
+        player.hover_volume(fader_at(FADER));
+        assert_eq!(player.volume_bar().preview.expect("preview").label, "unity");
+        player.hover_volume(fader_at(FADER - UNITY_SNAP_PX - 0.1));
+        assert_eq!(
+            player.volume_bar().preview.expect("preview").label,
+            "-1.1 dB"
+        );
+
+        // Silence is -∞, not a very large negative number.
+        player.hover_volume(fader_at(0.0));
+        assert_eq!(player.volume_bar().preview.expect("preview").label, "-∞ dB");
+
+        // The pointer leaving takes the preview with it.
+        player.volume_left();
+        assert_eq!(player.volume_bar().preview, None);
+    }
+
+    #[test]
+    fn a_drag_suppresses_the_preview_and_the_ends_clamp() {
+        let mut player = ready_with_queue(1);
+        player.hover_volume(fader_at(30.0));
+        assert!(player.volume_bar().preview.is_some());
+        player.press_volume(fader_at(30.0));
+        assert!(
+            player.volume_bar().preview.is_some(),
+            "a press that has not become a drag is still just a pointer"
+        );
+        player.drag_volume(fader_at(70.0));
+        assert_eq!(
+            player.volume_bar().preview,
+            None,
+            "one pointer, one number: the drag suppresses the preview"
+        );
+        player.release_volume();
+        assert_eq!(
+            player.volume_bar().preview.expect("preview").label,
+            "-9.3 dB",
+            "the release leaves the preview where the pointer actually is"
+        );
+
+        // Off either end the marker clamps onto the control, exactly as the
+        // seek bar's does.
+        player.hover_volume(Pointer::new(-40.0, FADER));
+        let preview = player.volume_bar().preview.expect("preview");
+        assert_eq!(preview.label, "-∞ dB");
+        assert!((preview.x - 0.0).abs() < 1e-6);
+        player.hover_volume(Pointer::new(FADER + 40.0, FADER));
+        let preview = player.volume_bar().preview.expect("preview");
+        assert_eq!(preview.label, "unity");
+        assert!((preview.x - FADER).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_level_label_names_unity_and_silence_and_reads_in_decibels() {
+        assert_eq!(level_label(MAX_POSITION), "unity");
+        assert_eq!(level_label(0), "-∞ dB");
+        assert_eq!(level_label(500), "-18.1 dB");
+        assert_eq!(level_label(100), "-60.0 dB");
+        // Just below unity is `-0.0 dB`, which is exactly and honestly what
+        // it is — and unmistakably not the word above it.
+        assert_eq!(level_label(MAX_POSITION - 1), "-0.0 dB");
+    }
+
+    // -----------------------------------------------------------------
+    // The keyboard step
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn the_volume_step_is_the_documented_constant() {
+        assert_eq!(VOLUME_STEP, 40);
+        // The property the step size is chosen for: it divides the travel
+        // exactly, so a stepped grid always contains unity itself.
+        assert_eq!(MAX_POSITION % VOLUME_STEP, 0);
+        // And one press at the top is the ~1 dB a listener hears as a
+        // change — the reason the number is 40 and not 25.
+        let one_press = Volume::new(MAX_POSITION - VOLUME_STEP)
+            .decibels()
+            .expect("not silent");
+        assert!(
+            (-1.2..-0.9).contains(&one_press),
+            "one press from unity should be about 1 dB: {one_press}"
+        );
+    }
+
+    #[test]
+    fn stepping_accumulates_before_confirmation_and_clamps_at_both_ends() {
+        let albums = albums();
+        let mut player = ready_with_queue(1);
+        player.apply(&turned_down(500), &albums);
+
+        assert_eq!(player.step_volume(-1), Some(460));
+        assert_eq!(
+            player.step_volume(-1),
+            Some(420),
+            "presses inside one round trip accumulate rather than restacking"
+        );
+        assert_eq!(player.step_volume(3), Some(540));
+
+        // The engine's confirming report resets the base to truth.
+        player.apply(&turned_down(420), &albums);
+        assert_eq!(player.step_volume(1), Some(460));
+
+        // Down clamps at silence…
+        player.apply(&turned_down(20), &albums);
+        assert_eq!(player.step_volume(-1), Some(0));
+        assert_eq!(player.step_volume(-100), Some(0));
+        // …and up clamps at unity, exactly, from anywhere.
+        player.apply(&turned_down(993), &albums);
+        assert_eq!(player.step_volume(1), Some(MAX_POSITION));
+        assert_eq!(player.step_volume(i32::MAX), Some(MAX_POSITION));
+    }
+
+    /// Stepping down and back up returns to unity itself, not to a position
+    /// that merely looks like it — the reason [`VOLUME_STEP`] divides
+    /// [`MAX_POSITION`].
+    #[test]
+    fn stepping_down_and_back_up_lands_on_unity_exactly() {
+        let albums = albums();
+        let mut player = ready_with_queue(1);
+        let mut position = MAX_POSITION;
+        for _ in 0..6 {
+            position = player.step_volume(-1).expect("engine ready");
+            player.apply(&turned_down(position), &albums);
+        }
+        assert_eq!(position, MAX_POSITION - 6 * VOLUME_STEP);
+        for _ in 0..6 {
+            position = player.step_volume(1).expect("engine ready");
+            player.apply(&turned_down(position), &albums);
+        }
+        assert_eq!(position, MAX_POSITION);
+        assert!(Volume::new(position).is_unity());
+        assert!(player.volume_bar().unity);
+    }
+
+    #[test]
+    fn absolute_sets_clamp_into_the_travel() {
+        let mut player = ready_with_queue(1);
+        assert_eq!(player.set_volume(0), Some(0));
+        assert_eq!(player.set_volume(618), Some(618));
+        assert_eq!(player.set_volume(MAX_POSITION), Some(MAX_POSITION));
+        assert_eq!(player.set_volume(u16::MAX), Some(MAX_POSITION));
+        assert_eq!(player.set_muted(true), Some(true));
+        assert_eq!(player.set_muted(false), Some(false));
+    }
+
+    // -----------------------------------------------------------------
+    // Bit-exactness: the conjunction ADR-0011 introduced
+    // -----------------------------------------------------------------
+
+    /// Both halves are required, and neither is inferred from the other.
+    #[test]
+    fn bit_exactness_is_the_chain_and_the_volume_path_together() {
+        let albums = albums();
+        let direct = signal(48_000, 48_000, SignalChain::Direct);
+
+        // Nothing reported at all is not a yes.
+        let silent = ready_with_queue(1);
+        assert!(!silent.bit_exact());
+        assert_eq!(silent.signal_note(), None);
+
+        // Direct + transparent — both spellings of transparent.
+        for path in [VolumePath::Unity, VolumePath::DeviceAttenuator] {
+            let mut player = ready_with_queue(1);
+            player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+            player.apply(&direct, &albums);
+            player.apply(&volume_changed(MAX_POSITION, false, path), &albums);
+            assert!(player.bit_exact(), "{path:?} leaves the samples untouched");
+            assert_eq!(
+                player.signal_note().map(|note| note.label),
+                Some("bit-perfect".to_owned())
+            );
+        }
+
+        // Direct, but the volume is scaling: not bit-exact, and — the tone
+        // rule — nothing at all on the bar rather than a complaint.
+        let mut player = ready_with_queue(1);
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        player.apply(&direct, &albums);
+        player.apply(&turned_down(750), &albums);
+        assert!(!player.bit_exact());
+        assert_eq!(
+            player.signal_note(),
+            None,
+            "a volume below unity is stated by the fader, not by a label"
+        );
+
+        // Mute is a software gain of zero, and reads the same way.
+        player.apply(
+            &volume_changed(750, true, VolumePath::SoftwareGain),
+            &albums,
+        );
+        assert!(!player.bit_exact());
+
+        // Transparent, but the chain is converting: the chain wins the slot,
+        // because it is the more specific fact about what is happening.
+        player.apply(
+            &volume_changed(MAX_POSITION, false, VolumePath::Unity),
+            &albums,
+        );
+        player.apply(&converting(), &albums);
+        assert!(!player.bit_exact());
+        assert_eq!(
+            player.signal_note().map(|note| note.label),
+            Some("48 → 44.1 kHz".to_owned())
+        );
+
+        // A session ending takes the claim with it: there is no chain, so
+        // there is nothing to be bit-exact about.
+        player.apply(&direct, &albums);
+        assert!(player.bit_exact());
+        player.apply(&Event::Stopped, &albums);
+        assert!(!player.bit_exact());
+        assert_eq!(player.signal_note(), None);
     }
 
     /// The catalogue facts MPRIS metadata needs come from the same lookup the

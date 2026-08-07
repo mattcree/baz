@@ -175,6 +175,31 @@ pub(crate) enum Message {
     /// Bottom bar: the seek bar was released — the moment the request
     /// actually goes to the engine.
     SeekReleased,
+    /// Bottom bar: the pointer went down on the volume fader. Unlike the
+    /// seek bar this *is* the request — a fader answers at once (see
+    /// `player.rs`).
+    VolumePressed(player::Pointer),
+    /// Bottom bar: the pointer moved with the fader held. Past
+    /// [`player::DRAG_THRESHOLD_PX`] every step is a fresh request.
+    VolumeDragged(player::Pointer),
+    /// Bottom bar: the pointer moved over the fader with nothing held — the
+    /// level preview follows it.
+    VolumeHovered(player::Pointer),
+    /// Bottom bar: the pointer left the fader; the preview goes with it.
+    VolumeLeft,
+    /// Bottom bar: the fader was released, ending the gesture.
+    VolumeReleased,
+    /// Up/Down: step the volume by this many
+    /// [`player::VOLUME_STEP`]s; negative goes down.
+    VolumeStep(i32),
+    /// Bottom bar's speaker, or `M`: mute if unmuted and back again,
+    /// resolved against the confirmed state.
+    ToggleMute,
+    /// MPRIS `Volume`: set the fader to an absolute control position,
+    /// already mapped through `baz-core`'s taper.
+    SetVolume(u16),
+    /// MPRIS: mute or unmute outright, never a toggle.
+    SetMute(bool),
     /// An engine event arrived over the bridge subscription.
     Playback(PlayerEvent),
     /// An off-thread thumbnail decode finished (`None` = no usable art).
@@ -221,7 +246,13 @@ impl App {
         // Engine first: open failure must not kill the app — it becomes
         // Availability::NoDevice state that the bottom bar reports.
         let playback = Playback::start();
-        let player = PlayerState::new(playback.availability());
+        let mut player = PlayerState::new(playback.availability());
+        // The one pull in an event-driven machine, and ADR-0011 provides it
+        // for this moment: the fader shows the engine's real volume on the
+        // first frame instead of assuming a default until something changes.
+        if let Some(state) = playback.volume() {
+            player.seed_volume(state.volume, state.muted, state.path);
+        }
         // Desktop integration is an enhancement: this spawns a thread and
         // returns, and an absent session bus costs one stdout line (see
         // crate::mpris).
@@ -235,21 +266,31 @@ impl App {
                 Err(error) => (Screen::Setup(Setup::fresh(Some(error))), Task::none()),
             },
         };
-        (
-            Self {
-                started,
-                first_frame_logged: false,
-                screen,
-                playback,
-                player,
-                mpris,
-                mpris_art: (0, None),
-            },
-            task,
-        )
+        let mut app = Self {
+            started,
+            first_frame_logged: false,
+            screen,
+            playback,
+            player,
+            mpris,
+            mpris_art: (0, None),
+        };
+        // One publish before the first frame, so a desktop widget that asks
+        // straight away gets the seeded volume and the real `Can*` flags
+        // rather than the server's own defaults. The MPRIS thread may not
+        // have reached its bus yet; the update simply waits in its channel.
+        app.publish_mpris(false);
+        (app, task)
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        // The volume is its own small machine and every one of its messages
+        // resolves to "tell the state machine, maybe tell the engine", so it
+        // is answered first and separately rather than as nine more arms
+        // below.
+        if self.update_volume(&message) {
+            return Task::none();
+        }
         match message {
             Message::FirstFrame => {
                 if !self.first_frame_logged {
@@ -470,6 +511,69 @@ impl App {
     fn send_seek(&mut self, target: Option<u64>) {
         if let Some(position_ms) = target
             && !self.playback.send(Command::Seek { position_ms })
+        {
+            self.player.engine_closed();
+        }
+    }
+
+    /// Answer a volume message, reporting whether it was one.
+    ///
+    /// Every arm follows the same shape as the seek bar's: the state machine
+    /// decides what — if anything — to ask for from event-derived state, and
+    /// the answer goes to the engine. Nothing here writes the volume the
+    /// interface displays; only `Event::VolumeChanged` does (see `player.rs`).
+    fn update_volume(&mut self, message: &Message) -> bool {
+        match *message {
+            Message::VolumePressed(pointer) => {
+                let target = self.player.press_volume(pointer);
+                self.send_volume(target);
+            }
+            Message::VolumeDragged(pointer) => {
+                let target = self.player.drag_volume(pointer);
+                self.send_volume(target);
+            }
+            Message::VolumeHovered(pointer) => self.player.hover_volume(pointer),
+            Message::VolumeLeft => self.player.volume_left(),
+            Message::VolumeReleased => self.player.release_volume(),
+            Message::VolumeStep(steps) => {
+                let target = self.player.step_volume(steps);
+                self.send_volume(target);
+            }
+            Message::SetVolume(position) => {
+                let target = self.player.set_volume(position);
+                self.send_volume(target);
+            }
+            Message::ToggleMute => {
+                let muted = self.player.toggle_mute();
+                self.send_mute(muted);
+            }
+            Message::SetMute(muted) => {
+                let requested = self.player.set_muted(muted);
+                self.send_mute(requested);
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Send an accepted volume position to the engine. `None` means there was
+    /// no engine to ask and nothing was requested. Nothing about the fader's
+    /// reading moves here: the state machine recorded the request as pending
+    /// for the view's benefit, and the position itself changes only when
+    /// `Event::VolumeChanged` says so (see `player.rs`).
+    fn send_volume(&mut self, target: Option<u16>) {
+        if let Some(position) = target
+            && !self.playback.send(Command::SetVolume { position })
+        {
+            self.player.engine_closed();
+        }
+    }
+
+    /// Send an accepted mute state to the engine. Idempotent by protocol —
+    /// `SetMute { muted }`, never a toggle (ADR-0011 §3).
+    fn send_mute(&mut self, target: Option<bool>) {
+        if let Some(muted) = target
+            && !self.playback.send(Command::SetMute { muted })
         {
             self.player.engine_closed();
         }
@@ -950,6 +1054,8 @@ fn message_for(request: mpris::Request) -> Message {
         mpris::Request::Next => Message::NextTrack,
         mpris::Request::SeekBy(delta_ms) => Message::SeekBy(delta_ms),
         mpris::Request::SeekTo(position_ms) => Message::SeekTo(position_ms),
+        mpris::Request::SetVolume(position) => Message::SetVolume(position),
+        mpris::Request::SetMute(muted) => Message::SetMute(muted),
         mpris::Request::Raise => Message::Raise,
         mpris::Request::Quit => Message::Quit,
     }

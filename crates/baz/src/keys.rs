@@ -54,6 +54,30 @@
 //! Nothing here invents a position: the target is computed by
 //! [`PlayerState::seek_by`](crate::player::PlayerState::seek_by) from
 //! event-derived state and clamped to the track the engine confirmed.
+//!
+//! # Volume
+//!
+//! Up and Down move the fader by one
+//! [`VOLUME_STEP`](crate::player::VOLUME_STEP) — 40 of the control's 1000
+//! positions, which is 1.04 dB at the top of the cubic taper and therefore
+//! the smallest press that does something a listener reliably hears. That
+//! module carries the full derivation and the two properties that follow
+//! from the number dividing 1000 exactly.
+//!
+//! `M` mutes and unmutes. It is the letter every player uses for it, it
+//! needs no modifier, and — like the transport keys — it resolves against
+//! the *confirmed* state rather than a flag we keep, so the command that
+//! goes out is the idempotent `SetMute { muted }` the protocol asks for
+//! rather than a toggle two front ends could disagree about.
+//!
+//! **The `XF86AudioRaiseVolume` family is deliberately not bound.** The
+//! transport media keys are bound (below) because `MediaPlayPause` means one
+//! thing everywhere; the volume keys do not. On every desktop they mean *the
+//! system's* volume, and on most they never reach an application at all — so
+//! binding them would make one key change either baz's fader or the whole
+//! machine's, depending on which daemon happened to grab it first. baz's
+//! volume is baz's alone (ADR-0011: it is the per-application control), and a
+//! key that means two different things is worse than a key that means one.
 
 use iced::keyboard::{Key, Modifiers, key};
 
@@ -115,6 +139,12 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Named(key::Named::ArrowRight) if shift => Some(Message::SeekBy(SEEK_STEP_LARGE_MS)),
         Key::Named(key::Named::ArrowLeft) if bare => Some(Message::SeekBy(-SEEK_STEP_MS)),
         Key::Named(key::Named::ArrowLeft) if shift => Some(Message::SeekBy(-SEEK_STEP_LARGE_MS)),
+
+        // Volume. The vertical arrows are the axis a fader moves on, and
+        // `M` is mute everywhere. Neither takes a modifier (module docs).
+        Key::Named(key::Named::ArrowUp) if bare => Some(Message::VolumeStep(1)),
+        Key::Named(key::Named::ArrowDown) if bare => Some(Message::VolumeStep(-1)),
+        Key::Character("m" | "M") if bare || shift => Some(Message::ToggleMute),
 
         // Search. `/` is the reflex from every pager and browser; Ctrl+F
         // (Cmd+F) is the reflex from every document. Shift is tolerated on
@@ -199,7 +229,10 @@ mod tests {
             (named(key::Named::ArrowLeft), Modifiers::SHIFT),
             (named(key::Named::ArrowRight), Modifiers::SHIFT),
             (named(key::Named::ArrowRight), Modifiers::COMMAND),
+            (named(key::Named::ArrowUp), none()),
+            (named(key::Named::ArrowDown), none()),
             (ch("n"), none()),
+            (ch("m"), none()),
             (ch("/"), none()),
             (ch("f"), Modifiers::COMMAND),
             (named(key::Named::Escape), none()),
@@ -244,6 +277,43 @@ mod tests {
     fn the_two_steps_are_the_documented_constants() {
         assert_eq!(SEEK_STEP_MS, 5_000);
         assert_eq!(SEEK_STEP_LARGE_MS, 30_000);
+    }
+
+    #[test]
+    fn the_vertical_arrows_step_the_volume() {
+        assert_eq!(
+            bind(&named(key::Named::ArrowUp), none()).as_deref(),
+            Some("VolumeStep(1)")
+        );
+        assert_eq!(
+            bind(&named(key::Named::ArrowDown), none()).as_deref(),
+            Some("VolumeStep(-1)")
+        );
+    }
+
+    #[test]
+    fn m_mutes_in_either_case() {
+        assert_eq!(bind(&ch("m"), none()).as_deref(), Some("ToggleMute"));
+        // Shift+M is still M, whatever the layout calls it — the same
+        // tolerance `N` and `/` already get.
+        assert_eq!(
+            bind(&ch("M"), Modifiers::SHIFT).as_deref(),
+            Some("ToggleMute")
+        );
+    }
+
+    /// The volume keys are not media keys. `XF86AudioRaiseVolume` and friends
+    /// mean *the system's* volume on every desktop, and baz's fader is baz's
+    /// alone (module docs) — so they stay unbound, deliberately and testably.
+    #[test]
+    fn the_systems_volume_keys_are_left_to_the_system() {
+        for key in [
+            named(key::Named::AudioVolumeUp),
+            named(key::Named::AudioVolumeDown),
+            named(key::Named::AudioVolumeMute),
+        ] {
+            assert_eq!(bind(&key, none()), None, "{key:?} belongs to the desktop");
+        }
     }
 
     #[test]
@@ -340,8 +410,13 @@ mod tests {
                 named(key::Named::ArrowRight),
                 Modifiers::COMMAND | Modifiers::SHIFT,
             ),
+            (named(key::Named::ArrowUp), Modifiers::SHIFT),
+            (named(key::Named::ArrowUp), Modifiers::COMMAND),
+            (named(key::Named::ArrowDown), Modifiers::ALT),
             (ch("n"), Modifiers::COMMAND),
             (ch("n"), Modifiers::ALT),
+            (ch("m"), Modifiers::COMMAND),
+            (ch("m"), Modifiers::ALT),
             (ch("/"), Modifiers::COMMAND),
             (ch("f"), Modifiers::ALT),
             (named(key::Named::Escape), Modifiers::COMMAND),
@@ -361,8 +436,6 @@ mod tests {
         let unbound = [
             named(key::Named::Enter),
             named(key::Named::Tab),
-            named(key::Named::ArrowUp),
-            named(key::Named::ArrowDown),
             named(key::Named::Backspace),
             named(key::Named::Delete),
             named(key::Named::Home),

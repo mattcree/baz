@@ -150,6 +150,11 @@ fn serve(updates: &Receiver<Update>, requests: UnboundedSender<Request>) {
         let changed = Changed {
             status: previous.status != current.status,
             metadata: previous.track != current.track,
+            // Compared on the position and the mute flag rather than on the
+            // reported f64: the same two facts the property is computed from,
+            // and comparable exactly.
+            volume: (previous.volume_position, previous.muted)
+                != (current.volume_position, current.muted),
             can_go_next: previous.can_go_next != current.can_go_next,
             can_play: previous.can_play != current.can_play,
             can_pause: previous.can_pause != current.can_pause,
@@ -173,6 +178,7 @@ fn serve(updates: &Receiver<Update>, requests: UnboundedSender<Request>) {
 struct Changed {
     status: bool,
     metadata: bool,
+    volume: bool,
     can_go_next: bool,
     can_play: bool,
     can_pause: bool,
@@ -188,6 +194,9 @@ fn emit(player: &Player, context: &SignalContext<'static>, changed: &Changed) {
     }
     if changed.metadata {
         let _ = zbus::block_on(player.metadata_changed(context));
+    }
+    if changed.volume {
+        let _ = zbus::block_on(player.volume_changed(context));
     }
     if changed.can_go_next {
         let _ = zbus::block_on(player.can_go_next_changed(context));
@@ -399,10 +408,37 @@ impl Player {
         1.0
     }
 
-    /// baz has no volume control; read-only rather than writable-and-ignored.
-    #[zbus(property(emits_changed_signal = "const"))]
+    /// The fader's level as a linear amplitude, `0.0..=1.0` — mapped through
+    /// `baz-core`'s taper, and `0.0` while muted (see [`crate::mpris`]).
+    #[zbus(property)]
     fn volume(&self) -> f64 {
-        1.0
+        self.snapshot.volume()
+    }
+
+    /// Set the level. Refused when `CanControl` is false, as the spec asks;
+    /// otherwise mapped back through the same taper and, when it asks for
+    /// sound while muted, accompanied by an unmute.
+    ///
+    /// Nothing about the reported state moves here. The requests go to the
+    /// engine and the property changes when `Event::VolumeChanged` comes
+    /// back — the honesty rule, unchanged by the direction of travel.
+    #[zbus(property)]
+    fn set_volume(&self, volume: f64) -> zbus::Result<()> {
+        if !self.snapshot.can_control {
+            // `#[interface]` property setters return `zbus::Result`, so the
+            // fdo error is wrapped rather than returned directly; the wire
+            // name a client sees is still `org.freedesktop.DBus.Error.NotSupported`.
+            return Err(fdo::Error::NotSupported(
+                "baz has no engine to set a volume on".to_owned(),
+            )
+            .into());
+        }
+        let position = state::position_for_amplitude(volume);
+        if position > 0 && self.snapshot.muted {
+            self.ask(Request::SetMute(false));
+        }
+        self.ask(Request::SetVolume(position));
+        Ok(())
     }
 
     #[zbus(property)]

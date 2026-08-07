@@ -85,8 +85,6 @@ next commit.
   exactly unity the samples reach the sink with no copy and no arithmetic, so
   bit-exactness at full volume is a property of the control flow rather than of
   floating-point luck. Reported honestly through `VolumePath` (ADR-0011).
-  There is no volume slider in the window yet: the engine and the protocol
-  carry it, the interface does not.
 - Command/event protocol between the engine and any front end, with the wire
   format pinned by test.
 
@@ -97,11 +95,22 @@ next commit.
   selector, and a bottom bar with transport, seek groove and now-playing.
 - A visual design pass — the "listening room" theme — and a seek groove with a
   click-versus-drag threshold, hover preview and an honest cursor.
-- A signal-path readout that appears **only** when the chain is converting, in
-  the same faint ink as the rest of the secondary text, with no fault
-  vocabulary anywhere in it (ADR-0009).
+- A **volume control** in the bottom bar: a mute affordance and a fader on the
+  same custom groove widget as the seek bar, so it inherits that bar's cursor,
+  its hover preview (in dB) and its click-versus-drag threshold. Unity — the
+  position at which baz touches not one sample — is reachable by a four-pixel
+  snap at the top of the travel and marked by a detent that lights when the
+  handle is on it. Drawn in paper ink rather than the accent, because a volume
+  is a setting and the lamp means playback truth.
+- A signal-path readout in a fixed-width slot beside the fader: the chain
+  (`48 → 44.1 kHz`) when the engine is converting, `bit-perfect` when the path
+  is literally untouched — a direct chain *and* a transparent volume, which is
+  the conjunction ADR-0011 made of ADR-0009's guarantee — and nothing at all in
+  between. Same faint ink as the rest of the secondary text, no icon, no fault
+  vocabulary, and no layout shift when it appears (ADR-0009 §5).
 - **Keyboard control**: space to play/pause, arrows to seek (shifted for 30 s),
-  `N` or Ctrl+Right for next, `/` or Ctrl+F for search, Escape to back out.
+  up/down for volume and `M` for mute, `N` or Ctrl+Right for next, `/` or
+  Ctrl+F for search, Escape to back out.
   While the search field has focus no binding is live — baz asks the toolkit
   whether the widget consumed the key and never second-guesses the answer.
 - Presentation split into a `views/` module tree, verified pixel-identical
@@ -111,9 +120,11 @@ next commit.
 
 - **MPRIS2**: both interfaces on the session bus, so GNOME's and KDE's media
   controls, the lock screen, `playerctl` and hardware media keys drive baz and
-  show title, artist, album and cover art. Position and playback status come
-  from engine events only. With no session bus baz prints one line and runs
-  exactly as before.
+  show title, artist, album and cover art. `Volume` is readable and writable,
+  mapped through `baz-core`'s taper in both directions so a lock-screen slider
+  and the fader in the window mean the same sound. Position, playback status
+  and volume come from engine events only. With no session bus baz prints one
+  line and runs exactly as before.
 - A desktop entry, and the window's Wayland `app_id` / X11 `WM_CLASS`, so a
   launcher can associate the running window with the entry that started it.
 

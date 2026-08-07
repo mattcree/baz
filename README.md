@@ -37,12 +37,15 @@ The full vision, competitive analysis, and staged scope live in
 | <kbd>←</kbd> <kbd>→</kbd> | seek 5 s back / forward |
 | <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> | seek 30 s back / forward |
 | <kbd>N</kbd>, or <kbd>Ctrl</kbd>+<kbd>→</kbd> | next track |
+| <kbd>↑</kbd> <kbd>↓</kbd> | volume up / down, one step (~1 dB at the top of the fader) |
+| <kbd>M</kbd> | mute / unmute |
 | <kbd>/</kbd>, or <kbd>Ctrl</kbd>+<kbd>F</kbd> | focus the search field |
 | <kbd>Esc</kbd> | clear the search, else close the album panel |
 
 Media keys (play/pause, next, stop) work too — on Linux they usually arrive
 over MPRIS rather than as key presses, which is the same thing by a different
-road.
+road. The *volume* media keys are deliberately left alone: on every desktop
+they mean the system's volume, and baz's fader is baz's own.
 
 **While the search field has focus, every key belongs to the field**: Space
 types a space, the arrows move the caret, `N` types an `N`. That is deliberate
@@ -54,9 +57,11 @@ startup, so the first <kbd>Esc</kbd> hands the keyboard back to the transport.
 
 baz implements [MPRIS2], so GNOME's and KDE's media controls, the lock screen,
 `playerctl`, and hardware media keys all drive it, showing the current track's
-title, artist, album and cover. What they show comes only from what the
-playback engine confirmed — the position is baz's real knowledge, not a clock
-run alongside it.
+title, artist, album and cover. Volume is readable and settable from there
+too, mapped through the same fader curve the on-screen control uses so the
+two cannot disagree. What they show comes only from what the playback engine
+confirmed — the position is baz's real knowledge, not a clock run alongside
+it.
 
 It is an enhancement and never a requirement: with no D-Bus session bus, baz
 prints one line and runs exactly as before. Packagers should install

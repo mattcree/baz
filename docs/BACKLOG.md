@@ -14,12 +14,22 @@
 - **Per-album edition preference should persist** once the library DB is the
   right home for it (deferred in ADR-0007: persisting today would mean taking a
   TOML-parser dependency for a preference that belongs in a database column).
-- ~~**A volume slider**~~ — **the engine half shipped (ADR-0011)**; the GUI
-  control is a separate unit. `Command::SetVolume`/`SetMute`, a cubic taper
-  defined once in `baz_core::volume`, software gain on the pump path with a
-  20 ms slew, and a structural unity short-circuit that keeps ADR-0009's
-  bit-exactness reachable and pinned by test. The *device/hardware volume* half
-  was investigated and deliberately not built — see below.
+- ~~**A volume slider**~~ — **shipped, both halves (ADR-0011)**.
+  `Command::SetVolume`/`SetMute`, a cubic taper defined once in
+  `baz_core::volume`, software gain on the pump path with a 20 ms slew, and a
+  structural unity short-circuit that keeps ADR-0009's bit-exactness reachable
+  and pinned by test. The GUI control landed after it: a mute affordance and a
+  fader in the bottom bar's right-hand end, driven by the same custom groove
+  widget as the seek bar; unity is reachable by a 4 px snap at the top of the
+  travel and shown by a detent mark that lights when the handle is on it;
+  <kbd>↑</kbd>/<kbd>↓</kbd>/<kbd>M</kbd> on the keyboard; MPRIS `Volume`
+  readable and writable through the same taper. The *device/hardware volume*
+  half was investigated and deliberately not built — see below.
+  The bit-exactness readout is now the conjunction ADR-0011 defines: the
+  bottom bar says `bit-perfect` when the chain is `Direct` **and** the volume
+  path is transparent, and says nothing (rather than something apologetic)
+  when a volume below unity is scaling the samples — that fact is already on
+  screen in the fader beside it.
 
 ## Known gaps in shipped features
 
