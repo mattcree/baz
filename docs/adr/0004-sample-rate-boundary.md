@@ -1,6 +1,26 @@
 # ADR-0004: Sample-rate changes at track boundaries — resample by default, reopen in bit-perfect mode
 
-**Status**: accepted (2026-08-07) · based on Spike B measurements (`git show dc13d7e` — spikes/audio-gapless/RESULTS.md)
+**Status**: accepted (2026-08-07) · **amended by [ADR-0009](0009-follow-the-source-rate.md) (2026-08-07): the default is inverted** · based on Spike B measurements (`git show dc13d7e` — spikes/audio-gapless/RESULTS.md)
+
+> **Amendment (ADR-0009).** Decision 1 below — *resample by default* — is no longer
+> the default. ADR-0009 makes **follow-the-source-rate** the default: the output is
+> opened at the rate of the session's first playable track, a track at a different
+> rate ends the session and reopens the output at its rate, and nothing is resampled
+> unless the device cannot run at the source rate (in which case it is resampled to
+> the nearest rate the device offers *and reported* through
+> `Event::SignalPath`). Decision 2's resample mode survives as an explicit opt-in,
+> `BoundaryPolicy::ResampleToStreamRate`, and remains the fallback path; decision 3's
+> "negotiation is left to `baz-core`" is the sentence ADR-0009 finally answers.
+>
+> The engineering note in *Consequences* below — rubato's `output_delay()` must NOT
+> be compensated for; use anti-reflective padding — is unaffected and still governs
+> `playback::resample`.
+>
+> Why the reversal: negotiation was specified here and never implemented, so the
+> "negotiated stream rate" was in practice a hardcoded 44 100 Hz, and *every* 48 kHz
+> album was converted on hardware that could have played it directly — costing
+> 2 224 ms before first audio on the maintainer's own 24/48 album, against 0.4 ms
+> at the same rate. ADR-0009 carries the full measurements.
 
 ## Context
 

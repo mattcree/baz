@@ -84,11 +84,41 @@
 //! documented in [`crate::engine`]. Trading measured underrun margin for that
 //! is not a good trade.
 //!
-//! Exclusive-mode backends (ALSA `hw:`, WASAPI exclusive, `CoreAudio` hog) are
-//! a later phase and the prerequisite for
-//! [`BoundaryPolicy::BitPerfectReopen`](super::BoundaryPolicy::BitPerfectReopen).
+//! # Following the source rate (ADR-0009)
+//!
+//! The stream is opened at whatever rate the engine asks for and **reopened**
+//! when it asks for a different one, which is how baz plays a 48 kHz album at
+//! 48 kHz and a 44.1 kHz album at 44.1 kHz with no conversion of its own.
+//! [`Sink::negotiate_rate`] is that request; it consults
+//! `supported_output_configs` rather than guessing, and when the device cannot
+//! do the asked-for rate it answers with the nearest rate it *can* do, so the
+//! engine knows to report the chain as not bit-perfect instead of quietly
+//! converting.
+//!
+//! Reopening tears the old stream down, so the engine drains it first
+//! ([`Sink::drain_buffered`]) at a rate boundary and discards it outright when
+//! a transport command abandoned the audio anyway. A reopen therefore subsumes
+//! [`Sink::discard_buffered`]: nothing survives it.
+//!
+//! **Sample format.** Every stream is opened as f32. f32's 24-bit
+//! mantissa holds every 24-bit integer PCM value exactly, so a 24-bit master
+//! reaches the device untruncated and undithered; the format is a lossless
+//! carrier for the depths this decoder produces, not a compromise.
+//!
+//! **What "no conversion" does and does not claim.** This is shared-mode
+//! output. The guarantee here is that *baz* performs no sample-rate
+//! conversion: the samples handed to the host are the decoder's, at the file's
+//! rate, in a lossless format. What the system mixer then does with them —
+//! `PipeWire` or `CoreAudio` may still resample to a graph rate it is holding for
+//! another client — is outside this backend's control and is not claimed.
+//! Removing that last hop is what exclusive-mode backends (ALSA `hw:`, WASAPI
+//! exclusive, `CoreAudio` hog) are for, and they remain a later phase; ADR-0009
+//! states the boundary of the claim in the same terms.
 //!
 //! [`EngineConfig::consumer_pace`]: super::EngineConfig
+//! [`Sink::negotiate_rate`]: super::Sink::negotiate_rate
+//! [`Sink::drain_buffered`]: super::Sink::drain_buffered
+//! [`Sink::discard_buffered`]: super::Sink::discard_buffered
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -100,6 +130,65 @@ use rtrb::{Producer, RingBuffer};
 
 use super::sink::Sink;
 use super::{CHANNELS, PlaybackError};
+
+/// How long [`Sink::drain_buffered`] will wait for the callback to empty the
+/// ring before giving up. Generously past the ~186 ms the app's ring holds, so
+/// a healthy device always finishes; short enough that a stalled one cannot
+/// wedge the engine (the module docs' rule for anything that waits on a
+/// callback).
+const DRAIN_BUDGET: Duration = Duration::from_millis(2_000);
+/// Poll interval while draining. One millisecond is a twentieth of a callback
+/// period on this host: fine-grained relative to what is being waited for, and
+/// ~200 wake-ups for a full ring.
+const DRAIN_POLL: Duration = Duration::from_millis(1);
+
+/// The one sample format the engine emits, and the format every stream is
+/// opened with.
+///
+/// f32 is not a compromise for high-resolution sources: its 24-bit mantissa
+/// represents every value of a 24-bit integer PCM sample exactly, so a
+/// 24-bit master reaches the device without truncation or dither. (16- and
+/// 20-bit sources are exact for the same reason.) Requesting it explicitly —
+/// rather than accepting whatever the device lists first — is what keeps
+/// [`negotiated_rate`] from selecting a rate that is only available in a
+/// narrower integer format.
+const SAMPLE_FORMAT: cpal::SampleFormat = cpal::SampleFormat::F32;
+
+/// The rate the default output device will actually run at if asked for
+/// `desired` Hz, according to its own advertised capabilities.
+///
+/// Returns `desired` when the device supports it (the bit-perfect case), the
+/// **nearest** supported rate when it does not, and `None` when the device
+/// advertises nothing usable — in which case the caller should simply try
+/// `desired` and let the open succeed or fail, because a device that will not
+/// describe itself is still allowed to work.
+///
+/// Only stereo f32 configurations are considered: those are the only ones the
+/// engine can feed (see [`SAMPLE_FORMAT`] and [`CHANNELS`]), so a rate offered
+/// solely in some other format is not a rate we can actually use.
+fn negotiated_rate(device: &cpal::Device, desired: u32) -> Option<u32> {
+    let channels = u16::try_from(CHANNELS).ok()?;
+    let configs = device.supported_output_configs().ok()?;
+    let mut best: Option<u32> = None;
+    for range in configs {
+        if range.channels() != channels || range.sample_format() != SAMPLE_FORMAT {
+            continue;
+        }
+        let min = range.min_sample_rate().0;
+        let max = range.max_sample_rate().0;
+        // The rate this range can get closest to. Ranges are inclusive
+        // intervals, so clamping is the whole search.
+        let candidate = desired.clamp(min, max);
+        if candidate == desired {
+            return Some(desired);
+        }
+        let better = best.is_none_or(|b| desired.abs_diff(candidate) < desired.abs_diff(b));
+        if better {
+            best = Some(candidate);
+        }
+    }
+    best
+}
 
 /// A [`Sink`] that plays samples on the default output device.
 ///
@@ -126,6 +215,11 @@ pub struct DeviceSink {
     written: u64,
     /// Ring capacity in interleaved samples.
     capacity: usize,
+    /// The rate this stream is open at — what [`Sink::negotiate_rate`]
+    /// compares a request against, and what a reopen has to rebuild from.
+    sample_rate: u32,
+    /// Ring size in frames, kept so a reopen reproduces the same buffering.
+    ring_frames: usize,
 }
 
 impl DeviceSink {
@@ -215,7 +309,20 @@ impl DeviceSink {
             underruns,
             written: 0,
             capacity,
+            sample_rate,
+            ring_frames,
         })
+    }
+
+    /// The rate this stream is currently open at.
+    ///
+    /// Under the ADR-0009 default this tracks the source: it is the sample
+    /// rate of the material being played whenever the device supports it, and
+    /// the honest report of what the audio was converted *to* when it does
+    /// not.
+    #[must_use]
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
     }
 
     /// Whether the stream reported an error since it was opened.
@@ -300,5 +407,58 @@ impl Sink for DeviceSink {
     /// when the callback never runs again.
     fn discard_buffered(&mut self) {
         self.discard_before.store(self.written, Ordering::Release);
+    }
+
+    /// Reopen the stream so the device runs at `desired` Hz, returning the
+    /// rate it ended up at (see the module docs' "Following the source rate").
+    ///
+    /// Same rate as now: nothing happens at all, and the stream — including
+    /// everything buffered in it — is untouched. That is the common case (an
+    /// album is one rate) and it is why following the source costs nothing
+    /// track to track.
+    fn negotiate_rate(&mut self, desired: u32) -> Option<u32> {
+        if desired == self.sample_rate {
+            return Some(self.sample_rate);
+        }
+        let host = cpal::default_host();
+        // A device that has vanished since we opened is not something a rate
+        // request can fix; keep the stream we have and let `write` report.
+        let Some(device) = host.default_output_device() else {
+            return Some(self.sample_rate);
+        };
+        // Ask the device what it can do rather than guessing. `None` means it
+        // would not say, so the only honest test left is to try.
+        let target = negotiated_rate(&device, desired).unwrap_or(desired);
+        if target == self.sample_rate {
+            return Some(self.sample_rate);
+        }
+        match Self::open(target, self.ring_frames) {
+            // Build first, swap second: assigning drops the old stream, so a
+            // failed open leaves the working one in place rather than a
+            // silent device. Shared mode permits the moment both exist.
+            Ok(fresh) => {
+                *self = fresh;
+                Some(target)
+            }
+            Err(_) => Some(self.sample_rate),
+        }
+    }
+
+    /// Wait for the callback to play out everything already handed over, so a
+    /// following [`Sink::negotiate_rate`] cannot truncate it.
+    ///
+    /// Bounded (two seconds — ten times the app's ring) and abandoned
+    /// immediately if the stream has
+    /// faulted: the module's standing rule is that nothing waits indefinitely
+    /// on a callback that may never run again. Giving up early costs at most
+    /// the tail that was stuck anyway.
+    fn drain_buffered(&mut self) {
+        let deadline = std::time::Instant::now() + DRAIN_BUDGET;
+        while self.buffered_samples() > 0 {
+            if self.failed.load(Ordering::Acquire) || std::time::Instant::now() >= deadline {
+                return;
+            }
+            thread::sleep(DRAIN_POLL);
+        }
     }
 }

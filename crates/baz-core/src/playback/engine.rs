@@ -7,7 +7,9 @@
 //! - **Prefetch thread** decodes track N+1 fully into memory while track N
 //!   is still streaming/draining. It never touches the ring, so the
 //!   consumer's guarantees are structurally unaffected by decode-ahead. Any
-//!   boundary resampling (ADR-0004 default policy) happens here too.
+//!   boundary resampling happens here too — which, since ADR-0009 made
+//!   following the source the default, means only when a fixed output rate
+//!   was explicitly selected.
 //! - **Consumer** (the stand-in for the audio callback) pulls from the ring
 //!   in bounded chunks on the caller's thread. Its pull path is wait-free by
 //!   construction: `rtrb::Consumer::read_chunk` plus a preallocated
@@ -33,25 +35,45 @@ use super::sink::Sink;
 use super::source::{AudioSource, DecodedAudio};
 use super::{CHANNELS, PlaybackError};
 
-/// What to do when the next track's sample rate differs from the stream
-/// rate. The two-mode contract is ADR-0004; the default is resampling.
+/// What to do when a track's sample rate differs from the rate the output
+/// stream is running at.
+///
+/// The two-mode contract is ADR-0004's; **which mode is the default was
+/// inverted by ADR-0009**. baz never converts sample rates unless it is asked
+/// to, or unless the hardware leaves it no choice — and in the latter case it
+/// says so ([`Event::SignalPath`](crate::protocol::Event::SignalPath)) rather
+/// than converting quietly.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BoundaryPolicy {
-    /// Resample the incoming track to the negotiated stream rate on the
+    /// Resample the incoming track to the session's stream rate on the
     /// prefetch thread (rubato windowed sinc, splice-exact alignment). The
-    /// stream never closes between tracks: gapless always. Zero cost on
-    /// same-rate boundaries — the common case.
-    #[default]
-    ResampleToStreamRate,
-    /// Never resample; reopen the device at the new rate and accept the gap
-    /// (bit-perfect/exclusive mode, an explicit user setting per ADR-0004).
+    /// stream never closes between tracks: gapless across a rate change, at
+    /// the cost of sample-rate conversion. Zero cost on same-rate boundaries.
     ///
-    /// **Not yet implemented**: reopen belongs to the exclusive-mode output
-    /// backends, which are a later phase. Selecting this policy is accepted
-    /// by the API but [`run_playlist`] returns
-    /// [`PlaybackError::BitPerfectReopenUnimplemented`] rather than
-    /// approximating the mode.
+    /// ADR-0004's default; ADR-0009 demoted it to an explicit opt-in, because
+    /// converting a master the device could have played untouched is a
+    /// fidelity loss taken for a convenience the listener did not ask for.
+    ResampleToStreamRate,
+    /// **The default.** Never resample: follow the source. The output stream
+    /// is opened at the rate of the track that starts a session, and a track
+    /// at a different rate ends that session and begins a new one, reopening
+    /// the device at *its* rate ([`Sink::negotiate_rate`]).
+    ///
+    /// Gapless is preserved within a run of same-rate tracks — an album is one
+    /// rate, so this is the ordinary case — and a boundary between *different*
+    /// rates carries a short gap while the device is reconfigured. ADR-0009
+    /// records the measured length of that gap and accepts it.
+    ///
+    /// The one thing this mode cannot promise is what a device it cannot
+    /// negotiate with will do: if the hardware offers no mode at the source
+    /// rate, the engine plays at the nearest rate it does offer, resamples,
+    /// and reports the chain as
+    /// [`Converting`](crate::protocol::SignalChain::Converting) with reason
+    /// [`DeviceRateUnavailable`](crate::protocol::ConversionReason::DeviceRateUnavailable).
+    /// Playing the music is the right answer there; doing it silently is the
+    /// outcome this mode exists to prevent.
+    #[default]
     BitPerfectReopen,
 }
 
@@ -65,7 +87,8 @@ pub struct EngineConfig {
     /// Sleep between consumer pulls (emulates device drain cadence; zero
     /// means drain as fast as the producer fills).
     pub consumer_pace: Duration,
-    /// Boundary policy on sample-rate change (ADR-0004).
+    /// What to do when a track's sample rate differs from the output's
+    /// (ADR-0004's two modes, ADR-0009's default).
     pub boundary: BoundaryPolicy,
 }
 
@@ -106,8 +129,9 @@ pub struct PrefetchEvidence {
 /// Result of one playlist run.
 #[derive(Clone, Debug)]
 pub struct PlayReport {
-    /// The stream rate (rate of the first track — the current negotiation
-    /// policy; ADR-0004 leaves negotiation to this crate).
+    /// The stream rate: the rate of the first track, which is the negotiation
+    /// policy ADR-0009 settled on everywhere (see [`crate::engine`] for why
+    /// the anchor, and not the queue's most-common or highest rate).
     pub stream_rate: u32,
     /// Output frame index where each track begins.
     pub track_start_frames: Vec<usize>,
@@ -139,6 +163,14 @@ struct ProducerOutcome {
     resample_ms: Option<f64>,
 }
 
+/// The rate this render runs at and what to do about a track that disagrees —
+/// the two facts the producer needs at every boundary, and the only two.
+#[derive(Clone, Copy)]
+struct StreamSpec {
+    rate: u32,
+    boundary: BoundaryPolicy,
+}
+
 fn ns_to_ms(ns: u64) -> f64 {
     if ns == NS_UNSET {
         f64::NAN
@@ -160,21 +192,30 @@ fn elapsed_ns(since: Instant) -> u64 {
 /// The consumer loop runs on the calling thread; decode and prefetch run on
 /// scoped worker threads. Returns instrumentation for tests and diagnostics.
 ///
+/// # One render, one rate
+///
+/// This is the offline one-shot: it fills a single `sink` with a single
+/// continuous stream, so it has nowhere to put a sample-rate change. Under the
+/// default [`BoundaryPolicy::BitPerfectReopen`] it therefore *refuses* a queue
+/// whose rates differ, with
+/// [`PlaybackError::SampleRateChangeRequiresReopen`], rather than converting
+/// audio the caller asked it not to convert. Reopening the output at the new
+/// rate is a thing only a live output can do, and the interactive service
+/// ([`crate::engine`]) is where that lives. Callers who genuinely want one
+/// buffer at one rate ask for [`BoundaryPolicy::ResampleToStreamRate`] and get
+/// exactly the old behaviour.
+///
 /// # Errors
 ///
 /// [`PlaybackError::EmptyPlaylist`] for an empty `paths`;
-/// [`PlaybackError::BitPerfectReopenUnimplemented`] when
-/// [`BoundaryPolicy::BitPerfectReopen`] is selected (see that variant's
-/// docs); otherwise any decode, resample, or worker failure from the
-/// pipeline.
+/// [`PlaybackError::SampleRateChangeRequiresReopen`] for a mixed-rate queue
+/// under the bit-perfect default (see above); otherwise any decode, resample,
+/// or worker failure from the pipeline.
 pub fn run_playlist(
     paths: &[PathBuf],
     cfg: EngineConfig,
     sink: &mut dyn Sink,
 ) -> Result<PlayReport, PlaybackError> {
-    if cfg.boundary == BoundaryPolicy::BitPerfectReopen {
-        return Err(PlaybackError::BitPerfectReopenUnimplemented);
-    }
     let first_path = paths.first().ok_or(PlaybackError::EmptyPlaylist)?;
     let first = AudioSource::open(first_path)?;
     let stream_rate = first.sample_rate();
@@ -188,7 +229,11 @@ pub fn run_playlist(
     let outcome = thread::scope(|s| -> Result<ProducerOutcome, PlaybackError> {
         let sh = Arc::clone(&shared);
         let handle = s.spawn(move || {
-            let res = produce(s, paths, first, producer, stream_rate, &sh, start);
+            let stream = StreamSpec {
+                rate: stream_rate,
+                boundary: cfg.boundary,
+            };
+            let res = produce(s, paths, first, producer, stream, &sh, start);
             // Always release the consumer, even on error.
             sh.producer_done.store(true, Ordering::Release);
             res
@@ -225,7 +270,7 @@ fn produce<'scope, 'env: 'scope>(
     paths: &'env [PathBuf],
     first: AudioSource,
     mut producer: Producer<f32>,
-    stream_rate: u32,
+    stream: StreamSpec,
     shared: &Arc<SharedState>,
     start: Instant,
 ) -> Result<ProducerOutcome, PlaybackError> {
@@ -271,13 +316,21 @@ fn produce<'scope, 'env: 'scope>(
             .get(i + 1)
             .map(|p| scope.spawn(move || AudioSource::decode_all(p)));
 
-        // ADR-0004 default boundary policy: resample to the stream rate on
-        // this (non-realtime) side. Same-rate boundaries cost nothing.
-        let samples = if decoded.sample_rate == stream_rate {
+        // Same-rate boundaries — every boundary inside an album — cost
+        // nothing and take this branch. A rate *change* is where the two
+        // policies part company, and the default refuses rather than converts
+        // (see `run_playlist`'s "One render, one rate").
+        let samples = if decoded.sample_rate == stream.rate {
             decoded.samples
+        } else if stream.boundary == BoundaryPolicy::BitPerfectReopen {
+            return Err(PlaybackError::SampleRateChangeRequiresReopen {
+                index: i,
+                from: stream.rate,
+                to: decoded.sample_rate,
+            });
         } else {
             let t0 = Instant::now();
-            let out = resample_interleaved(&decoded.samples, decoded.sample_rate, stream_rate)?;
+            let out = resample_interleaved(&decoded.samples, decoded.sample_rate, stream.rate)?;
             resample_ms = Some(t0.elapsed().as_secs_f64() * 1.0e3);
             out
         };
@@ -322,6 +375,7 @@ fn prefetch_decode(
     Ok(DecodedAudio {
         samples,
         sample_rate: src.sample_rate(),
+        bits_per_sample: src.bits_per_sample(),
     })
 }
 

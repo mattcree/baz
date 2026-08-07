@@ -45,6 +45,59 @@ pub trait Sink {
     /// implementation must also not *block* waiting for a real audio callback
     /// to confirm the discard — the callback may never run again.
     fn discard_buffered(&mut self) {}
+
+    /// Reconfigure the output to run at `desired` Hz, returning the rate it
+    /// will **actually** run at.
+    ///
+    /// This is the ADR-0009 negotiation point: the engine asks for the rate of
+    /// the audio it is about to play, and the sink answers with the rate it
+    /// can deliver. When the two agree, samples reach the destination
+    /// unconverted — the bit-perfect default. When they differ, the engine
+    /// resamples and reports the chain as *not* bit-perfect
+    /// ([`Event::SignalPath`](crate::protocol::Event::SignalPath)); it never
+    /// converts silently.
+    ///
+    /// # Default: no rate of my own
+    ///
+    /// The default returns `None`, meaning "this sink has no fixed output rate
+    /// — play at whatever rate you like". [`OfflineSink`] is exactly that: a
+    /// record of delivered samples, which carries no clock. The engine reads
+    /// `None` as "granted", so an offline session always runs at its source's
+    /// native rate and never resamples. Only a sink bound to real hardware —
+    /// `DeviceSink`, behind the `device-output` feature — has a rate to
+    /// negotiate.
+    ///
+    /// # Contract
+    ///
+    /// Called on the engine's control/pump thread **between** pump iterations,
+    /// at session start only, and never from a realtime callback. It may
+    /// therefore block for as long as opening a device takes; it must not be
+    /// called from [`Self::write`]'s caller mid-block. Reconfiguring discards
+    /// whatever the sink had buffered, so the engine drains or discards first
+    /// (see [`Self::drain_buffered`]).
+    fn negotiate_rate(&mut self, _desired: u32) -> Option<u32> {
+        None
+    }
+
+    /// Wait for audio this sink has already accepted to become audible, so
+    /// that reconfiguring the output cannot cut it off.
+    ///
+    /// The mirror image of [`Self::discard_buffered`], and the engine calls it
+    /// in exactly one place the discard is wrong: the boundary between two
+    /// tracks of *different* sample rates, where the output stream is about to
+    /// be reopened. The previous track's tail is audio the listener is still
+    /// owed; throwing it away would turn a rate change into a truncation.
+    ///
+    /// # Contract
+    ///
+    /// Blocking is the point, so this is called only between pump iterations
+    /// on the control thread, never from a realtime callback. An
+    /// implementation **must** bound its wait: a stalled device that will
+    /// never drain must not wedge the engine.
+    ///
+    /// The default is a no-op, correct for every sink whose `write` is its own
+    /// destination.
+    fn drain_buffered(&mut self) {}
 }
 
 /// Offline sink that collects every sample into preallocated storage — the
@@ -58,10 +111,18 @@ pub trait Sink {
 /// path performed no allocation — see the sacred-thread test in
 /// `tests/playback.rs`.
 ///
-/// It keeps the default [`Sink::discard_buffered`]: an offline sink holds no
-/// pending audio, only the finished record of what was delivered, and that
-/// record is what the bit-exactness tests measure. See the trait method's
-/// docs for the full argument.
+/// It keeps every default the trait provides, and for the same reason in each
+/// case — an offline sink is a record, not a queue in front of a clock:
+///
+/// - [`Sink::discard_buffered`]: it holds no pending audio, only the finished
+///   record of what was delivered, and that record is what the bit-exactness
+///   tests measure. Discarding could only mean deleting history.
+/// - [`Sink::drain_buffered`]: nothing is in flight, so there is nothing to
+///   wait for.
+/// - [`Sink::negotiate_rate`]: a `Vec<f32>` has no sample rate, so every rate
+///   is granted. An offline session therefore always runs at its source's
+///   native rate and never resamples — which is what makes the headless suite
+///   a test of the bit-perfect default rather than of a fallback.
 #[derive(Debug)]
 pub struct OfflineSink {
     samples: Vec<f32>,

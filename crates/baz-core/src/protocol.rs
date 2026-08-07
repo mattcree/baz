@@ -153,6 +153,91 @@ pub enum Event {
         /// front end must render that case rather than invent a duration.
         track_ms: Option<u64>,
     },
+    /// The signal chain for the audio now playing: what the file is, what the
+    /// output is running at, and whether anything sits between them.
+    ///
+    /// This is the readout ADR-0004 promised and ADR-0009 made load-bearing.
+    /// It is emitted when a session starts and whenever any part of it
+    /// changes — never once per track for an album that does not change, so a
+    /// front end can treat every arrival as news.
+    ///
+    /// # Reading it
+    ///
+    /// [`SignalChain::Direct`] is the ordinary state: baz is playing the file
+    /// at its own rate, converting nothing. [`SignalChain::Converting`] means
+    /// a sample-rate conversion is in the path, and `reason` says which of the
+    /// two ordinary causes it is.
+    ///
+    /// **This is information, not a warning.** Converting is a normal thing
+    /// for a player to do when hardware or a setting requires it, and the only
+    /// unacceptable version of it is the *silent* one. A front end should
+    /// render this the way it renders a codec name — available to a listener
+    /// who wants it, ignorable by one who does not. Nothing here is a fault
+    /// condition and nothing here should be styled as one.
+    ///
+    /// # What `Direct` does not claim
+    ///
+    /// It says *baz* converted nothing: the decoder's samples reached the
+    /// output at the file's own rate, in a format that carries them exactly.
+    /// It does not claim the operating system's mixer left them alone
+    /// downstream — only exclusive-mode output could claim that, and it is a
+    /// later phase.
+    SignalPath {
+        /// Sample rate of the track now playing, in Hz.
+        source_rate_hz: u32,
+        /// Bit depth the track's container declares, when it declares one.
+        /// `None` for sources that carry no integer depth (float PCM) or do
+        /// not say. The engine's own output format is f32, whose 24-bit
+        /// mantissa carries 24-bit and narrower sources exactly, so this
+        /// number is never truncated on baz's side of the chain.
+        source_bits: Option<u32>,
+        /// Rate the output stream is running at, in Hz.
+        output_rate_hz: u32,
+        /// What the engine is doing between the two.
+        chain: SignalChain,
+    },
+}
+
+/// What sits between the decoded file and the output, in
+/// [`Event::SignalPath`].
+///
+/// Modelled as a state rather than a flag on purpose: "converting, because the
+/// device has no 48 kHz mode" and "converting, because you asked for a fixed
+/// output rate" are different facts about the system, and a front end that
+/// wants to explain itself needs to tell them apart.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SignalChain {
+    /// The output is running at the source's own sample rate and the
+    /// decoder's samples reach it unconverted. The default, and the case for
+    /// every album whose rate the output device can run at.
+    Direct,
+    /// The output is running at a different rate, so the engine converts the
+    /// source to it (rubato windowed sinc — see
+    /// [`crate::playback`]). Ordinary and expected in the situations
+    /// [`ConversionReason`] enumerates; the point of reporting it is that a
+    /// listener who cares can see it, not that anything has gone wrong.
+    Converting {
+        /// Why the conversion is in the path.
+        reason: ConversionReason,
+    },
+}
+
+/// Why a [`SignalChain::Converting`] chain is converting.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConversionReason {
+    /// The output device does not offer the source's sample rate, so baz
+    /// plays it at the nearest rate the device does offer. Playing the music
+    /// is the right answer here; saying so is the other half of it.
+    DeviceRateUnavailable,
+    /// A fixed output rate was selected
+    /// ([`BoundaryPolicy::ResampleToStreamRate`](crate::playback::BoundaryPolicy::ResampleToStreamRate)),
+    /// so every track is brought to it regardless of what the device could
+    /// have played directly.
+    FixedOutputRate,
 }
 
 #[cfg(test)]
@@ -200,6 +285,28 @@ mod tests {
                 elapsed_ms: 93_500,
                 track_ms: Some(214_000),
             },
+            Event::SignalPath {
+                source_rate_hz: 48_000,
+                source_bits: Some(24),
+                output_rate_hz: 48_000,
+                chain: SignalChain::Direct,
+            },
+            Event::SignalPath {
+                source_rate_hz: 48_000,
+                source_bits: None,
+                output_rate_hz: 44_100,
+                chain: SignalChain::Converting {
+                    reason: ConversionReason::DeviceRateUnavailable,
+                },
+            },
+            Event::SignalPath {
+                source_rate_hz: 96_000,
+                source_bits: Some(24),
+                output_rate_hz: 44_100,
+                chain: SignalChain::Converting {
+                    reason: ConversionReason::FixedOutputRate,
+                },
+            },
         ]
     }
 
@@ -221,11 +328,11 @@ mod tests {
         }
     }
 
+    /// Every [`Command`] variant's bytes, pinned. The wire format is a public
+    /// contract; a change here is a protocol break and must be a deliberate,
+    /// versioned decision.
     #[test]
-    fn wire_format_is_stable() {
-        // The wire format is a public contract; a change here is a protocol
-        // break and must be a deliberate, versioned decision. Every variant
-        // of both enums is pinned.
+    fn command_wire_format_is_stable() {
         let cases: Vec<(String, &str)> = vec![
             (
                 serde_json::to_string(&Command::SetQueue {
@@ -263,6 +370,16 @@ mod tests {
                 serde_json::to_string(&Command::Seek { position_ms: 0 }).expect("serialize"),
                 r#"{"cmd":"seek","position_ms":0}"#,
             ),
+        ];
+        for (got, want) in cases {
+            assert_eq!(got, want);
+        }
+    }
+
+    /// Every [`Event`] variant's bytes, pinned — same contract, same rule.
+    #[test]
+    fn event_wire_format_is_stable() {
+        let cases: Vec<(String, &str)> = vec![
             (
                 serde_json::to_string(&Event::TrackStarted {
                     path: PathBuf::from("/music/a.flac"),
@@ -313,6 +430,43 @@ mod tests {
                 })
                 .expect("serialize"),
                 r#"{"event":"progress","elapsed_ms":0,"track_ms":null}"#,
+            ),
+            (
+                // The ordinary state: a 24/48 master played at 48 kHz.
+                serde_json::to_string(&Event::SignalPath {
+                    source_rate_hz: 48_000,
+                    source_bits: Some(24),
+                    output_rate_hz: 48_000,
+                    chain: SignalChain::Direct,
+                })
+                .expect("serialize"),
+                r#"{"event":"signal_path","source_rate_hz":48000,"source_bits":24,"output_rate_hz":48000,"chain":{"state":"direct"}}"#,
+            ),
+            (
+                // The case the readout exists for: conversion is happening,
+                // and the wire says so — with the reason, not a bare flag.
+                serde_json::to_string(&Event::SignalPath {
+                    source_rate_hz: 48_000,
+                    source_bits: None,
+                    output_rate_hz: 44_100,
+                    chain: SignalChain::Converting {
+                        reason: ConversionReason::DeviceRateUnavailable,
+                    },
+                })
+                .expect("serialize"),
+                r#"{"event":"signal_path","source_rate_hz":48000,"source_bits":null,"output_rate_hz":44100,"chain":{"state":"converting","reason":"device_rate_unavailable"}}"#,
+            ),
+            (
+                serde_json::to_string(&Event::SignalPath {
+                    source_rate_hz: 96_000,
+                    source_bits: Some(24),
+                    output_rate_hz: 44_100,
+                    chain: SignalChain::Converting {
+                        reason: ConversionReason::FixedOutputRate,
+                    },
+                })
+                .expect("serialize"),
+                r#"{"event":"signal_path","source_rate_hz":96000,"source_bits":24,"output_rate_hz":44100,"chain":{"state":"converting","reason":"fixed_output_rate"}}"#,
             ),
         ];
         for (got, want) in cases {

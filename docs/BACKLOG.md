@@ -31,8 +31,16 @@
   rather than silently wrong output. 5.1 downmix is unwritten.
 - **Skip and seek are drain-and-restart**, not sample-accurate splices (tens of
   ms of latency, documented in the engine module docs).
-- **Bit-perfect reopen mode** exists in the API and refuses to run: it lands
-  with exclusive-mode output backends (ADR-0004).
+- **Bit-perfect is shared-mode only.** Following the source rate and reopening
+  on a change is implemented and is now the default (ADR-0009): baz converts
+  nothing. What is still outstanding is the last hop — the system mixer may
+  resample downstream of us, and only exclusive-mode backends (ALSA `hw:`,
+  WASAPI exclusive, `CoreAudio` hog) can close that. `Event::SignalPath` will
+  grow a field for it when they land.
+- **A converted anchor is decoded whole before first audio.** Reached only when
+  the device offers no mode at the source rate; measured at ~2.6 s on a
+  5:24 24/48 FLAC (ADR-0009). Streaming the fallback resampler would fix it and
+  is deliberately unbuilt — the case is rare and the machinery is not free.
 - **The event channel is single-consumer** (`std::sync::mpsc`); a broadcast
   channel is needed before a second front end or a remote transport.
 - **FLAC-in-MP4 is labelled ALAC** — lofty exposes no MP4 codec discriminator,

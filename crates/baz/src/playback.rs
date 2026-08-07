@@ -17,10 +17,17 @@
 //!
 //! # Spawn defaults
 //!
-//! - **Sample rate 44 100 Hz**: the CD rate virtually every consumer output
-//!   path accepts in shared mode; tracks at other rates are resampled by
-//!   the engine per ADR-0004 (`spawn_device`'s contract). Output-rate
-//!   negotiation from device caps is future work.
+//! - **Initial sample rate 44 100 Hz**: a *starting* rate, not a policy. The
+//!   engine must hold an open output from the moment it spawns, before any
+//!   queue exists, and 44.1 kHz is the CD rate virtually every consumer output
+//!   path accepts in shared mode. Per ADR-0009 each session then renegotiates
+//!   the stream to the rate of the music it is about to play, so a 48 kHz
+//!   album ends up playing at 48 kHz with no conversion — this constant only
+//!   decides what the device idles at before the first click.
+//! - **Nothing is resampled** by default. When a device cannot run at a
+//!   source's rate the engine converts to the nearest rate it can and reports
+//!   that through [`Event::SignalPath`];
+//!   see "Signal path" below for what a front end does with it.
 //! - **Device ring 8192 frames** (~0.19 s at 44.1 kHz): the size the engine
 //!   docs describe as ordinary output latency and the size `baz-core`'s
 //!   device smoke test uses. It is not merely inherited — `baz-core`'s
@@ -31,6 +38,23 @@
 //!   [`EngineConfig::default`](baz_core::playback::EngineConfig) —
 //!   `DeviceSink::write` provides real backpressure, so the default pump
 //!   pacing is correct for device output too.
+//!
+//! # Signal path
+//!
+//! [`Event::SignalPath`] arrives on the
+//! same bridge as every other engine event and carries what the chain is doing:
+//! the source rate and declared bit depth, the rate the output is running at,
+//! and a [`SignalChain`](baz_core::protocol::SignalChain) that is either
+//! `Direct` or `Converting { reason }`. It is emitted when a session starts
+//! and only when something about it changes, so every arrival is news.
+//!
+//! It is **information, not a warning**: `Converting` means the music is
+//! playing through a sample-rate conversion because the hardware or a setting
+//! requires it, which is a normal thing for a player to do. The unacceptable
+//! version is the silent one, which is why the event exists. A front end that
+//! surfaces it should do so the way it surfaces a codec name — legible to a
+//! listener who cares, invisible to one who does not, and never styled as a
+//! fault.
 //!
 //! # The event bridge
 //!
@@ -82,8 +106,9 @@ mod imp {
     use super::PlayerEvent;
     use crate::player::Availability;
 
-    /// Engine stream rate (see the module docs for the rationale).
-    const SAMPLE_RATE: u32 = 44_100;
+    /// Rate the output device is opened at before any music is queued; every
+    /// session renegotiates from there (module docs, ADR-0009).
+    const INITIAL_SAMPLE_RATE: u32 = 44_100;
     /// Device ring capacity in frames (~0.19 s at 44.1 kHz; module docs).
     const DEVICE_RING_FRAMES: usize = 8192;
 
@@ -101,7 +126,7 @@ mod imp {
         pub fn start() -> Self {
             let spawned = baz_core::engine::spawn_device(
                 EngineConfig::default(),
-                SAMPLE_RATE,
+                INITIAL_SAMPLE_RATE,
                 DEVICE_RING_FRAMES,
             );
             let (handle, events) = match spawned {
@@ -126,7 +151,8 @@ mod imp {
             match bridge {
                 Ok(_detached) => {
                     println!(
-                        "[playback] engine ready ({SAMPLE_RATE} Hz, device ring {DEVICE_RING_FRAMES} frames)"
+                        "[playback] engine ready (device opened at {INITIAL_SAMPLE_RATE} Hz, \
+                         follows the source from there; device ring {DEVICE_RING_FRAMES} frames)"
                     );
                     Self {
                         handle: Some(handle),

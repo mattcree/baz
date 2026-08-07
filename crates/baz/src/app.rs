@@ -30,7 +30,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 use baz_core::index::Library;
-use baz_core::protocol::{Command, Event};
+use baz_core::protocol::{Command, Event, SignalChain};
 use iced::keyboard::{self, key};
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
 use iced::widget::{
@@ -304,6 +304,29 @@ impl App {
                         println!("[playback] track skipped: {} ({reason})", path.display());
                     }
                     Event::QueueEnded => println!("[playback] queue ended"),
+                    // The signal-path readout, logged as plain information —
+                    // it says what the chain is doing, not that anything is
+                    // wrong (see crate::playback's "Signal path").
+                    Event::SignalPath {
+                        source_rate_hz,
+                        source_bits,
+                        output_rate_hz,
+                        chain,
+                    } => {
+                        let depth =
+                            source_bits.map_or_else(String::new, |bits| format!("/{bits}-bit"));
+                        let doing = match chain {
+                            SignalChain::Direct => "direct".to_string(),
+                            SignalChain::Converting { reason } => {
+                                format!("converting ({reason:?})")
+                            }
+                            other => format!("{other:?}"),
+                        };
+                        println!(
+                            "[playback] signal path: {source_rate_hz} Hz{depth} source -> \
+                             {output_rate_hz} Hz output, {doing}"
+                        );
+                    }
                     _ => {}
                 }
                 let albums: &[vm::AlbumVm] = match &self.screen {

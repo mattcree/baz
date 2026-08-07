@@ -487,12 +487,16 @@ fn fixtures() -> &'static FixtureSet {
     })
 }
 
+/// Tuning only: the boundary policy stays at its shipped default (follow the
+/// source, convert nothing — ADR-0009), so every test below that does not say
+/// otherwise is exercising what baz actually does. The two tests that are
+/// *about* conversion opt into `ResampleToStreamRate` explicitly.
 fn test_config() -> EngineConfig {
     EngineConfig {
         ring_frames: 8192,
         consumer_chunk_frames: 2048,
         consumer_pace: Duration::from_micros(500),
-        boundary: BoundaryPolicy::ResampleToStreamRate,
+        ..EngineConfig::default()
     }
 }
 
@@ -1305,23 +1309,29 @@ fn decode_ahead_overlaps_playback() {
     assert!(p.next_decode_done_ms_from_start < p.prev_drain_ms_from_start);
 }
 
-/// Resample boundary (ADR-0004 default policy): a 48 kHz track after a
-/// 44.1 kHz track is resampled to the stream rate on the prefetch side and
-/// spliced seamlessly. The sine must continue through the boundary at
-/// −45 dB error or better (Spike B measured −45.5 dB), and the output
-/// duration must be exact.
+/// Resample boundary, under the explicit fixed-rate opt-in
+/// ([`BoundaryPolicy::ResampleToStreamRate`] — ADR-0004's default, demoted by
+/// ADR-0009): a 48 kHz track after a 44.1 kHz track is resampled to the stream
+/// rate on the prefetch side and spliced seamlessly. The sine must continue
+/// through the boundary at −45 dB error or better (Spike B measured −45.5 dB),
+/// and the output duration must be exact.
+///
+/// Demoting the policy did not weaken this guarantee: the mode is still
+/// reachable, is what a device that cannot do the source rate falls back to,
+/// and must still splice cleanly when it does. Only the config line below
+/// changed.
 #[test]
 fn resample_boundary_is_continuous() {
     let f = fixtures();
+    let cfg = EngineConfig {
+        boundary: BoundaryPolicy::ResampleToStreamRate,
+        ..test_config()
+    };
     // The 48 kHz half resamples to exactly 220_500 frames at 44.1 kHz.
     let expected_frames = RATE_PAIR_FRAMES_44K + RATE_PAIR_FRAMES_44K;
     let mut sink = OfflineSink::with_capacity(expected_frames * CHANNELS);
-    let report = run_playlist(
-        &[f.rate_44k.clone(), f.rate_48k.clone()],
-        test_config(),
-        &mut sink,
-    )
-    .expect("run playlist");
+    let report = run_playlist(&[f.rate_44k.clone(), f.rate_48k.clone()], cfg, &mut sink)
+        .expect("run playlist");
 
     assert_eq!(report.stream_rate, RATE);
     let out = sink.samples();
@@ -1378,24 +1388,64 @@ fn resample_boundary_is_continuous() {
     );
 }
 
-/// The bit-perfect reopen mode is part of the API contract (ADR-0004) but
-/// its implementation arrives with the exclusive-mode backends: selecting it
-/// must return the documented error, not an approximation.
+/// Under the bit-perfect default (ADR-0009) `run_playlist` refuses a queue
+/// that changes sample rate rather than converting it: a single-buffer
+/// one-shot render has nowhere to put a reopen, and converting behind the
+/// caller's back is exactly what the default exists to prevent.
+///
+/// The refusal must name the position and both rates — a caller who hits this
+/// has to be able to see *which* track diverged and to what.
 #[test]
-fn bit_perfect_reopen_reports_unimplemented() {
+fn a_rate_change_is_refused_by_the_bit_perfect_default() {
+    let f = fixtures();
+    let mut sink = OfflineSink::with_capacity(16);
+    let err = run_playlist(
+        &[f.rate_44k.clone(), f.rate_48k.clone()],
+        test_config(),
+        &mut sink,
+    )
+    .expect_err("a rate change must not be silently converted");
+    assert!(
+        matches!(
+            err,
+            PlaybackError::SampleRateChangeRequiresReopen {
+                index: 1,
+                from: RATE,
+                to: 48_000,
+            }
+        ),
+        "wrong refusal: {err}"
+    );
+    let text = err.to_string();
+    for expected in ["track 1", "44100", "48000"] {
+        assert!(
+            text.contains(expected),
+            "the error must state {expected}: {text}"
+        );
+    }
+}
+
+/// The same queue under the explicit fixed-rate opt-in converts and plays —
+/// the mode is still there, it just is not what an unconfigured baz does.
+/// (`resample_boundary_is_continuous` measures the quality of that path; this
+/// only pins that selecting it is what turns refusal into conversion.)
+#[test]
+fn the_fixed_rate_opt_in_converts_the_same_queue() {
     let f = fixtures();
     let cfg = EngineConfig {
-        boundary: BoundaryPolicy::BitPerfectReopen,
+        boundary: BoundaryPolicy::ResampleToStreamRate,
         ..test_config()
     };
-    let mut sink = OfflineSink::with_capacity(16);
-    let err = run_playlist(std::slice::from_ref(&f.part1_f32), cfg, &mut sink)
-        .expect_err("reopen mode must refuse");
-    assert!(matches!(err, PlaybackError::BitPerfectReopenUnimplemented));
+    let expected_frames = RATE_PAIR_FRAMES_44K * 2;
+    let mut sink = OfflineSink::with_capacity(expected_frames * CHANNELS);
+    let report = run_playlist(&[f.rate_44k.clone(), f.rate_48k.clone()], cfg, &mut sink)
+        .expect("the fixed-rate mode must convert rather than refuse");
+    assert_eq!(report.stream_rate, RATE);
     assert!(
-        err.to_string().contains("not yet implemented"),
-        "error must say so plainly: {err}"
+        report.resample_ms.is_some(),
+        "the fixed-rate mode must actually have resampled"
     );
+    assert_eq!(sink.samples().len(), expected_frames * CHANNELS);
 }
 
 /// Mono sources are upmixed to stereo by duplication.
@@ -1629,6 +1679,111 @@ fn device_sink_opens_or_reports_cleanly() {
         }
         Err(other) => panic!("unexpected error opening device: {other}"),
     }
+}
+
+/// **Device output (feature `device-output`): a 48 kHz stream really opens and
+/// plays on this machine's hardware.**
+///
+/// ADR-0009's whole premise is that the owner's 24-bit/48 kHz album can be
+/// played at 48 kHz instead of converted to 44.1 kHz. That premise is a claim
+/// about hardware, so it is tested against hardware: open at 48 kHz, play a
+/// tone, and check the stream neither refused nor faulted. A device with no
+/// 48 kHz mode is a documented outcome, not a failure — it is exactly the
+/// fallback case — so it skips with a notice.
+#[cfg(feature = "device-output")]
+#[test]
+fn device_sink_opens_at_48k_and_plays() {
+    use baz_core::playback::device::DeviceSink;
+    const HI_RATE: u32 = 48_000;
+    match DeviceSink::open(HI_RATE, 8192) {
+        Ok(mut sink) => {
+            assert_eq!(sink.sample_rate(), HI_RATE);
+            // 50 ms of tone generated at the stream's own rate.
+            let samples = sine_stereo(HI_RATE, HI_RATE as usize / 20, 0.0);
+            baz_core::playback::Sink::write(&mut sink, &samples);
+            assert!(!sink.failed(), "stream reported an error during smoke run");
+            println!("[device] opened the default output device at {HI_RATE} Hz and wrote 50 ms");
+        }
+        Err(PlaybackError::Device(msg)) => {
+            eprintln!("SKIP: no usable 48 kHz output ({msg})");
+        }
+        Err(other) => panic!("unexpected error opening device: {other}"),
+    }
+}
+
+/// **Device output (feature `device-output`): reopening at a new rate works,
+/// and this is where the rate-change gap is measured.**
+///
+/// A rate change costs a device reconfiguration, which ADR-0009 accepts and
+/// therefore has to quantify. `negotiate_rate` is that reconfiguration —
+/// tearing down one cpal stream and building another — so timing it *is* the
+/// measurement, and it is taken on real hardware rather than estimated.
+///
+/// The assertions are the correctness half (the stream really is at the new
+/// rate, and really is alive afterwards); the number is printed for the ADR.
+/// The bound is deliberately loose — this measures a device, not our code, and
+/// a slow host must not turn into a red build — but it is tight enough that a
+/// reopen which silently fell back or hung would fail.
+#[cfg(feature = "device-output")]
+#[test]
+fn device_sink_reopens_at_the_requested_rate() {
+    use std::time::Instant;
+
+    use baz_core::playback::Sink as _;
+    use baz_core::playback::device::DeviceSink;
+    const HI_RATE: u32 = 48_000;
+    /// Loose: a device reconfiguration on a busy host still has to beat this.
+    const REOPEN_BUDGET: Duration = Duration::from_millis(1_000);
+
+    let mut sink = match DeviceSink::open(RATE, 8192) {
+        Ok(sink) => sink,
+        Err(PlaybackError::Device(msg)) => {
+            eprintln!("SKIP: no usable output device ({msg})");
+            return;
+        }
+        Err(other) => panic!("unexpected error opening device: {other}"),
+    };
+    assert_eq!(sink.sample_rate(), RATE);
+
+    let t0 = Instant::now();
+    let granted = sink.negotiate_rate(HI_RATE).expect("a device has a rate");
+    let reopen = t0.elapsed();
+
+    if granted != HI_RATE {
+        eprintln!("SKIP: this device offers no {HI_RATE} Hz mode (it answered {granted} Hz)");
+        return;
+    }
+    assert_eq!(
+        sink.sample_rate(),
+        HI_RATE,
+        "the sink must report the rate it actually reopened at"
+    );
+    assert!(
+        reopen < REOPEN_BUDGET,
+        "reopening at {HI_RATE} Hz took {reopen:?}"
+    );
+
+    // The new stream is alive and takes audio at the new rate.
+    let samples = sine_stereo(HI_RATE, HI_RATE as usize / 20, 0.0);
+    sink.write(&samples);
+    assert!(!sink.failed(), "the reopened stream reported an error");
+
+    // Asking for the rate it is already at must cost nothing at all — that is
+    // what makes following the source free within an album.
+    let t1 = Instant::now();
+    assert_eq!(sink.negotiate_rate(HI_RATE), Some(HI_RATE));
+    let noop = t1.elapsed();
+    assert!(
+        noop < Duration::from_millis(10),
+        "re-requesting the open rate must not reopen anything, took {noop:?}"
+    );
+
+    println!(
+        "[device] rate change {RATE} Hz -> {HI_RATE} Hz reopened in {:.1} ms; \
+         re-requesting the same rate took {:.3} ms",
+        reopen.as_secs_f64() * 1e3,
+        noop.as_secs_f64() * 1e3,
+    );
 }
 
 /// Device output (feature `device-output`): `Sink::discard_buffered` really

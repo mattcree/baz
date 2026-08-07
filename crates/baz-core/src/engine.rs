@@ -40,6 +40,82 @@
 //! All cross-thread control flags (`stop`, `producer_done`) are atomics; the
 //! pause gate is plain single-threaded state on the engine thread.
 //!
+//! # Sample rate: the output follows the source
+//!
+//! ADR-0009 is the governing decision and it is short: **baz does not resample
+//! unless it has to.** The output stream is opened at the rate of the music
+//! rather than the music being converted to the rate of the output.
+//!
+//! ## Negotiation, per session
+//!
+//! A session's rate is settled once, at its start, by a two-atomic handshake
+//! between the producer and the engine thread:
+//!
+//! 1. The producer opens the session's first playable track — the **anchor** —
+//!    and publishes that track's own rate as a *proposal*.
+//! 2. The engine thread, which is the only thread allowed to touch the sink,
+//!    passes the proposal to [`Sink::negotiate_rate`] and publishes whatever
+//!    comes back as the session's stream rate. Nothing has been pushed yet, so
+//!    reopening a device here interrupts nothing.
+//! 3. The producer, parked on that value, wakes and decodes against it.
+//!
+//! **Which rate a queue negotiates is therefore the anchor's** — the first
+//! track that actually plays, counting from wherever the session started. That
+//! is one header probe, so it adds nothing measurable to the time before first
+//! audio; it is the rate of the album the listener just clicked, which is the
+//! one they asked to hear; and it is the same rule
+//! [`run_playlist`](crate::playback::run_playlist) already used, so offline and
+//! device paths agree. The alternatives were considered and rejected: *most
+//! common in the queue* would have to probe every file before a single sample
+//! could play, and would convert the very track the user chose; *highest in
+//! the queue* would upsample most of a mixed queue, which is DSP nobody asked
+//! for.
+//!
+//! An [`OfflineSink`] has no rate and grants every proposal, so a headless
+//! session simply runs at its source's rate.
+//!
+//! ## Rate changes inside a queue
+//!
+//! A track stored at a different rate from the running stream **ends the
+//! session at that track**. The producer discovers this from the next track's
+//! header during decode-ahead — no decode is wasted — and publishes the queue
+//! index instead of pushing audio. The engine plays the ring out, drains the
+//! sink so the previous track's tail is actually heard
+//! ([`Sink::drain_buffered`] — the one place a session boundary drains instead
+//! of discarding), and starts a fresh session at that index, which negotiates
+//! and so reopens the output.
+//!
+//! Consequences, stated rather than hidden:
+//!
+//! - **Gapless is unaffected within a rate**, which is the ordinary case: an
+//!   album is one rate, and every boundary inside it is the same
+//!   sample-accurate splice it always was.
+//! - **A boundary between two different rates carries a short gap** while the
+//!   device is reconfigured. ADR-0009 measures it and accepts it.
+//! - A front end sees exactly one [`Event::QueueEnded`], at the true end. The
+//!   split is an internal handover; `TrackStarted` fires for every track in
+//!   order as usual.
+//! - **Pause is untouched.** Reopening happens only when a session *starts*,
+//!   and pause never starts one — it gates the pump and keeps the sink's
+//!   buffer, exactly as described below, so resume stays bit-identical.
+//!
+//! ## When the device will not follow
+//!
+//! If [`Sink::negotiate_rate`] answers with a rate other than the one asked
+//! for — a device with no mode for this material — the engine converts to what
+//! it was given and **says so**: [`Event::SignalPath`] carries
+//! `Converting { reason: DeviceRateUnavailable }`. Playing the music is the
+//! right answer; doing it silently is not. That readout, and the
+//! [`Conversions`] counters behind [`EngineHandle::conversions`], are the whole
+//! visible surface of the fallback.
+//!
+//! The one thing to know about this path's *cost*: a converted anchor is
+//! decoded whole before its first sample is pushed, because the whole-buffer
+//! resampler needs the whole buffer. On a five-minute 48 kHz FLAC that is a
+//! measurable wait. It is the price of a case that no longer happens on
+//! hardware that can play the file, and ADR-0009 records the number rather
+//! than leaving it to be rediscovered.
+//!
 //! # Command semantics
 //!
 //! | Command | While stopped | While playing | While paused |
@@ -131,8 +207,9 @@
 //! frames at the session's stream rate** — not in the source file's frames.
 //!
 //! That distinction is the whole correctness argument, and it matters
-//! exactly when the two rates differ. A 48 kHz track played into a 44.1 kHz
-//! stream is resampled by the ADR-0004 boundary policy before it reaches the
+//! exactly when the two rates differ — which, since ADR-0009, means a fixed
+//! output rate was chosen or the device would not follow the source. A 48 kHz
+//! track played into a 44.1 kHz stream is resampled before it reaches the
 //! ring, so one second of that track occupies 44 100 delivered frames, not
 //! 48 000. Dividing delivered frames by the *file's* rate would report a
 //! 60-second track as running 55.1 seconds — wrong by 8 %, and wrong in a way
@@ -177,10 +254,10 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rtrb::RingBuffer;
 
@@ -193,7 +270,7 @@ use crate::playback::{
     AudioSource, BoundaryPolicy, CHANNELS, DecodedAudio, EngineConfig, OfflineSink, PlaybackError,
     Sink,
 };
-use crate::protocol::{Command, Event};
+use crate::protocol::{Command, ConversionReason, Event, SignalChain};
 
 /// Sleep per engine-loop iteration while paused: long enough to idle
 /// cheaply, short enough that resume feels instant.
@@ -201,6 +278,14 @@ const PAUSED_POLL: Duration = Duration::from_millis(2);
 /// Sleep when the ring is empty but the producer is still working
 /// (mirrors `playback::engine::consume`).
 const STARVED_POLL: Duration = Duration::from_micros(50);
+/// Producer-side poll while it waits for the engine thread to grant a stream
+/// rate (see "Rate negotiation"). The engine answers on its very next loop
+/// iteration, so this is a handful of wake-ups at worst.
+const NEGOTIATE_POLL: Duration = Duration::from_micros(100);
+/// [`SessionShared::rate_change_at`] sentinel for "the session ran to the end
+/// of the queue"; any other value is the queue index where the sample rate
+/// changed and a fresh session must take over.
+const NO_RATE_CHANGE: usize = usize::MAX;
 /// [`Event::Progress`] cadence divisor: one report per `1/PROGRESS_HZ` of
 /// *delivered audio*. Deriving the cadence from the sample counter rather
 /// than a clock keeps it exactly 4 Hz of playing time (never faster when the
@@ -224,6 +309,60 @@ pub struct EngineHandle {
     commands: Option<Sender<Command>>,
     thread: Option<JoinHandle<()>>,
     delivered: Arc<AtomicUsize>,
+    instruments: Arc<Instruments>,
+}
+
+/// A running count of the conversions the engine has performed, readable from
+/// an [`EngineHandle`] at any time.
+///
+/// Under the ADR-0009 default every field here stays at zero for as long as
+/// the output device can run at the rates the music is stored at, which is the
+/// ordinary case; the counters exist so that "no resampler was constructed" is
+/// an assertable fact rather than an inference from a stopwatch. The
+/// per-track, user-facing version of the same story is
+/// [`Event::SignalPath`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
+pub struct Conversions {
+    /// Tracks the engine has sample-rate converted since it spawned.
+    pub resampled_tracks: usize,
+    /// Wall time spent inside the resampler, in milliseconds. Exactly `0.0`
+    /// when `resampled_tracks` is 0 — no resampler was ever constructed.
+    pub resample_ms: f64,
+    /// Times the output stream has been reconfigured to a different rate:
+    /// once per rate change the queue asked for and the device granted.
+    pub output_reconfigurations: usize,
+}
+
+/// The atomics behind [`Conversions`]. Written by producer threads (resample)
+/// and the engine thread (reconfiguration), read by the handle from any
+/// thread; relaxed ordering throughout because these are counters nothing
+/// synchronizes on.
+#[derive(Debug, Default)]
+struct Instruments {
+    resampled_tracks: AtomicUsize,
+    resample_ns: AtomicU64,
+    reconfigurations: AtomicUsize,
+}
+
+impl Instruments {
+    fn record_resample(&self, elapsed: Duration) {
+        self.resampled_tracks.fetch_add(1, Ordering::Relaxed);
+        let ns = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
+        self.resample_ns.fetch_add(ns, Ordering::Relaxed);
+    }
+
+    fn snapshot(&self) -> Conversions {
+        // Nanosecond totals are far below f64's exact-integer range for any
+        // plausible session.
+        #[allow(clippy::cast_precision_loss)]
+        let resample_ms = self.resample_ns.load(Ordering::Relaxed) as f64 / 1.0e6;
+        Conversions {
+            resampled_tracks: self.resampled_tracks.load(Ordering::Relaxed),
+            resample_ms,
+            output_reconfigurations: self.reconfigurations.load(Ordering::Relaxed),
+        }
+    }
 }
 
 impl EngineHandle {
@@ -247,6 +386,15 @@ impl EngineHandle {
     #[must_use]
     pub fn samples_delivered(&self) -> usize {
         self.delivered.load(Ordering::Acquire)
+    }
+
+    /// What the engine has converted since it spawned — see [`Conversions`].
+    ///
+    /// All zeroes is the expected reading for a device that can run at the
+    /// music's own rates.
+    #[must_use]
+    pub fn conversions(&self) -> Conversions {
+        self.instruments.snapshot()
     }
 
     /// Shut the engine down and wait for its threads to finish. Equivalent
@@ -297,22 +445,25 @@ impl OfflineOutput {
 /// the module docs), and the [`OfflineOutput`] that yields the delivered
 /// samples after shutdown.
 ///
+/// An offline sink has no rate of its own ([`Sink::negotiate_rate`]), so every
+/// session runs at its own first track's native rate and nothing is ever
+/// resampled — the headless configuration exercises the bit-perfect default,
+/// not a fallback.
+///
 /// # Errors
 ///
-/// [`PlaybackError::BitPerfectReopenUnimplemented`] if `cfg` selects
-/// [`BoundaryPolicy::BitPerfectReopen`] (not yet implemented — same contract
-/// as [`run_playlist`](crate::playback::run_playlist)); [`PlaybackError::Io`] if the engine thread cannot
-/// be spawned.
+/// [`PlaybackError::Io`] if the engine thread cannot be spawned.
 pub fn spawn_offline(
     cfg: EngineConfig,
     capacity_samples: usize,
 ) -> Result<(EngineHandle, Receiver<Event>, OfflineOutput), PlaybackError> {
-    ensure_supported(cfg)?;
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let (event_tx, event_rx) = mpsc::channel();
     let (out_tx, out_rx) = mpsc::channel();
     let delivered = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&delivered);
+    let instruments = Arc::new(Instruments::default());
+    let probes = Arc::clone(&instruments);
     let thread = thread::Builder::new()
         .name("baz-engine".into())
         .spawn(move || {
@@ -320,8 +471,9 @@ pub fn spawn_offline(
                 cmd_rx,
                 event_tx,
                 cfg,
-                None,
+                0,
                 counter,
+                probes,
                 OfflineSink::with_capacity(capacity_samples),
             );
             let sink = control.run();
@@ -332,49 +484,65 @@ pub fn spawn_offline(
             commands: Some(cmd_tx),
             thread: Some(thread),
             delivered,
+            instruments,
         },
         event_rx,
         OfflineOutput { output: out_rx },
     ))
 }
 
-/// Spawn an engine playing through the default audio device (shared mode)
-/// at `sample_rate`, with a device ring of `device_ring_frames` frames.
+/// Spawn an engine playing through the default audio device (shared mode),
+/// with a device ring of `device_ring_frames` frames.
 ///
-/// The device stream is opened once and stays open for the life of the
-/// engine — pause does not tear it down. Every session is delivered at
-/// `sample_rate`: tracks at other rates are resampled on the prefetch side
-/// (ADR-0004 default policy), including the first track of a session.
+/// `initial_sample_rate` is the rate the device is opened at *before any queue
+/// exists* — the engine has to hold an open sink from the moment it spawns, and
+/// nothing is known about the music yet. It is a starting point, not a policy:
+/// under the ADR-0009 default every session renegotiates the stream to the rate
+/// of the track that starts it, so a 48 kHz album ends up playing at 48 kHz
+/// whatever this argument said. Pick a rate every device accepts (44 100 Hz)
+/// and let negotiation do the rest.
+///
+/// The stream stays open across pause, seek, skip and stop; the only thing
+/// that reopens it is a session starting at a rate the currently open stream
+/// is not running at.
 ///
 /// # Errors
 ///
-/// [`PlaybackError::Device`] if no output device is usable;
-/// [`PlaybackError::BitPerfectReopenUnimplemented`] if `cfg` selects
-/// [`BoundaryPolicy::BitPerfectReopen`]; [`PlaybackError::Io`] if the
-/// engine thread cannot be spawned.
+/// [`PlaybackError::Device`] if no output device is usable at
+/// `initial_sample_rate`; [`PlaybackError::Io`] if the engine thread cannot be
+/// spawned.
 #[cfg(feature = "device-output")]
 pub fn spawn_device(
     cfg: EngineConfig,
-    sample_rate: u32,
+    initial_sample_rate: u32,
     device_ring_frames: usize,
 ) -> Result<(EngineHandle, Receiver<Event>), PlaybackError> {
-    ensure_supported(cfg)?;
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let (event_tx, event_rx) = mpsc::channel();
     let (ack_tx, ack_rx) = mpsc::channel();
     let delivered = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&delivered);
+    let instruments = Arc::new(Instruments::default());
+    let probes = Arc::clone(&instruments);
     let thread = thread::Builder::new()
         .name("baz-engine".into())
         .spawn(move || {
             // cpal streams are not Send, so the sink must be created (and
             // dropped) on the engine thread; the open result is reported
-            // back through a one-shot channel.
-            match DeviceSink::open(sample_rate, device_ring_frames) {
+            // back through a one-shot channel. Reopening for a rate change
+            // happens on this same thread for the same reason.
+            match DeviceSink::open(initial_sample_rate, device_ring_frames) {
                 Ok(sink) => {
                     let _ = ack_tx.send(Ok(()));
-                    let control =
-                        Control::new(cmd_rx, event_tx, cfg, Some(sample_rate), counter, sink);
+                    let control = Control::new(
+                        cmd_rx,
+                        event_tx,
+                        cfg,
+                        initial_sample_rate,
+                        counter,
+                        probes,
+                        sink,
+                    );
                     drop(control.run()); // closes the device stream
                 }
                 Err(e) => {
@@ -386,6 +554,7 @@ pub fn spawn_device(
         commands: Some(cmd_tx),
         thread: Some(thread),
         delivered,
+        instruments,
     };
     match ack_rx.recv() {
         Ok(Ok(())) => Ok((handle, event_rx)),
@@ -396,15 +565,6 @@ pub fn spawn_device(
     }
 }
 
-/// The engine service implements [`BoundaryPolicy::ResampleToStreamRate`]
-/// only, matching [`run_playlist`](crate::playback::run_playlist)'s contract for the reopen mode.
-fn ensure_supported(cfg: EngineConfig) -> Result<(), PlaybackError> {
-    if cfg.boundary == BoundaryPolicy::BitPerfectReopen {
-        return Err(PlaybackError::BitPerfectReopenUnimplemented);
-    }
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
 // Engine (control + pump) thread
 // ---------------------------------------------------------------------------
@@ -413,11 +573,13 @@ struct Control<S: Sink> {
     commands: Receiver<Command>,
     events: Sender<Event>,
     cfg: EngineConfig,
-    /// Force every session to this stream rate (device output); `None`
-    /// negotiates per session from the first playable track, like
-    /// [`run_playlist`](crate::playback::run_playlist).
-    forced_rate: Option<u32>,
+    /// The rate the sink is currently running at, as it last reported through
+    /// [`Sink::negotiate_rate`]. Zero for a sink with no rate of its own
+    /// (offline), which is also why a zero here never counts as a
+    /// reconfiguration.
+    open_rate: u32,
     delivered: Arc<AtomicUsize>,
+    instruments: Arc<Instruments>,
     queue: Vec<PathBuf>,
     /// Queue index where the next idle-state `Play` starts.
     position: usize,
@@ -431,16 +593,18 @@ impl<S: Sink> Control<S> {
         commands: Receiver<Command>,
         events: Sender<Event>,
         cfg: EngineConfig,
-        forced_rate: Option<u32>,
+        open_rate: u32,
         delivered: Arc<AtomicUsize>,
+        instruments: Arc<Instruments>,
         sink: S,
     ) -> Self {
         Self {
             commands,
             events,
             cfg,
-            forced_rate,
+            open_rate,
             delivered,
+            instruments,
             queue: Vec::new(),
             position: 0,
             paused: false,
@@ -481,6 +645,10 @@ impl<S: Sink> Control<S> {
 
     /// One pump-and-report iteration of an active session.
     fn tick(&mut self) {
+        // Ahead of the pause gate on purpose: a session created by a
+        // seek-while-paused is still waiting to be told its stream rate, and
+        // gating that would leave its producer parked until the user hit play.
+        self.settle_rate();
         if self.paused {
             // The gate: no pulls, so the sink sees nothing until resume and
             // the ring (plus producer backpressure) preserves every sample.
@@ -495,7 +663,12 @@ impl<S: Sink> Control<S> {
         session.report(&self.events, false);
         if session.complete() {
             session.report(&self.events, true);
+            let resume_at = session.rate_change_at();
             self.session = None; // joins the (already finished) producer
+            if let Some(next) = resume_at {
+                self.continue_at_new_rate(next);
+                return;
+            }
             let _ = self.events.send(Event::QueueEnded);
             self.position = 0;
             return;
@@ -594,6 +767,66 @@ impl<S: Sink> Control<S> {
         }
     }
 
+    /// Answer a session's rate proposal: ask the sink to run at the rate the
+    /// music is stored at, and publish whatever it grants.
+    ///
+    /// The engine thread owns the sink, so it is the only thread that may
+    /// reopen a device — hence the handshake rather than the producer simply
+    /// deciding. It runs once per session, before a single sample has been
+    /// pushed, so a reopen here interrupts nothing.
+    ///
+    /// Nothing is negotiated for a sink that has no rate ([`OfflineSink`]):
+    /// `None` grants the proposal outright, which is what makes an offline
+    /// session play at its source's native rate.
+    fn settle_rate(&mut self) {
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        if session.rate_settled {
+            return;
+        }
+        let proposed = session.shared.proposed_rate.load(Ordering::Acquire);
+        if proposed == 0 {
+            return; // the producer has not opened the first track yet
+        }
+        let shared = Arc::clone(&session.shared);
+        let granted = match self.sink.negotiate_rate(proposed) {
+            Some(rate) => {
+                if self.open_rate != 0 && rate != self.open_rate {
+                    self.instruments
+                        .reconfigurations
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+                self.open_rate = rate;
+                rate
+            }
+            None => proposed,
+        };
+        // Release-store the granted rate: the producer's Acquire load of it is
+        // what unparks it, so everything the negotiation did happens-before
+        // the first sample is decoded against that rate.
+        shared.stream_rate.store(granted, Ordering::Release);
+        if let Some(session) = self.session.as_mut() {
+            session.rate_settled = true;
+        }
+    }
+
+    /// Hand the rest of the queue to a fresh session because the track at
+    /// `next` is stored at a different sample rate (ADR-0009's reopen).
+    ///
+    /// The previous session has already played out — `complete()` means its
+    /// producer finished *and* its ring drained — but the sink may still be
+    /// holding a bufferful of the last track. That audio is owed to the
+    /// listener, so this is the one place the engine **drains** instead of
+    /// discarding: cutting it off would turn a rate change into a truncated
+    /// ending. The new session then negotiates, which reopens the output at
+    /// the new rate; the reconfiguration is what the listener hears as a short
+    /// gap, and ADR-0009 measures and accepts it.
+    fn continue_at_new_rate(&mut self, next: usize) {
+        self.sink.drain_buffered();
+        self.start_session(next, 0, None);
+    }
+
     /// Send one [`Event::Progress`] now and re-arm the cadence, so an
     /// immediate report never doubles up with a scheduled one.
     fn emit_progress(&mut self) {
@@ -638,7 +871,7 @@ impl<S: Sink> Control<S> {
             start,
             seek_ms,
             track_ms,
-            self.forced_rate,
+            Arc::clone(&self.instruments),
             self.cfg,
         ));
     }
@@ -650,18 +883,43 @@ impl<S: Sink> Control<S> {
 
 /// Flags shared between the engine thread and a session's producer side.
 /// Atomics only — both sides stay lock-free.
-#[derive(Default)]
 struct SessionShared {
     /// Engine → producer: abandon the run (stop, skip, shutdown).
     stop: AtomicBool,
     /// Producer → engine: every track has been pushed or failed.
     producer_done: AtomicBool,
-    /// Producer → engine: the rate this session's audio is delivered at,
-    /// published once the first playable track has been opened (0 until
-    /// then). Every elapsed-time calculation divides by this and nothing
-    /// else — see "Elapsed time" in the module docs for why the source
-    /// file's own rate would be the wrong denominator.
+    /// Producer → engine: the rate the session's first playable track is
+    /// stored at, published as soon as that track is open (0 until then).
+    /// This is the *request* half of rate negotiation.
+    proposed_rate: AtomicU32,
+    /// Engine → producer: the rate this session's audio will be delivered at,
+    /// published once the sink has answered the proposal above (0 until
+    /// then). The producer parks on it, because nothing can be decoded to a
+    /// rate that has not been settled.
+    ///
+    /// Every elapsed-time calculation divides by this and nothing else — see
+    /// "Elapsed time" in the module docs for why the source file's own rate
+    /// would be the wrong denominator.
     stream_rate: AtomicU32,
+    /// Producer → engine: the queue index whose sample rate differs from
+    /// [`Self::stream_rate`], i.e. where this session deliberately stopped
+    /// short so the output can be reopened. [`NO_RATE_CHANGE`] when the
+    /// session simply ran out of queue.
+    rate_change_at: AtomicUsize,
+}
+
+impl Default for SessionShared {
+    fn default() -> Self {
+        Self {
+            stop: AtomicBool::new(false),
+            producer_done: AtomicBool::new(false),
+            proposed_rate: AtomicU32::new(0),
+            stream_rate: AtomicU32::new(0),
+            // Zero is a real queue index, so "no rate change" needs its own
+            // value rather than the numeric default.
+            rate_change_at: AtomicUsize::new(NO_RATE_CHANGE),
+        }
+    }
 }
 
 /// A track's position and length within a session, as the producer reports
@@ -678,6 +936,12 @@ struct TrackBound {
     /// is the same number for a well-formed file and strictly more truthful
     /// for one whose header lies or is missing.
     duration_ms: Option<u64>,
+    /// The rate the track is stored at, for the signal-path readout. Equal to
+    /// the session's stream rate for every track the output can run at, which
+    /// under the default is every track in the session.
+    source_rate: u32,
+    /// The depth the track's container declares, when it declares one.
+    source_bits: Option<u32>,
 }
 
 /// One run through the queue from a starting position. Owned by the engine
@@ -696,6 +960,15 @@ struct Session {
     boundaries: Vec<Option<usize>>,
     /// Declared length of each queue index's track, once known.
     durations: Vec<Option<u64>>,
+    /// Stored rate and depth of each queue index's track, once known — the
+    /// source half of [`Event::SignalPath`].
+    formats: Vec<Option<(u32, Option<u32>)>>,
+    /// The last [`Event::SignalPath`] this session emitted, so an unchanged
+    /// chain is stated once rather than once per track.
+    last_signal: Option<Event>,
+    /// Which policy this session runs under, needed only to say *why* a
+    /// conversion is happening when one is.
+    boundary: BoundaryPolicy,
     /// Failure reason per queue index, once known (taken when reported).
     failures: Vec<Option<String>>,
     /// Reporting cursor: per-track events are emitted strictly in queue
@@ -717,6 +990,10 @@ struct Session {
     seek_index: usize,
     /// `pulled` value at which the next cadence [`Event::Progress`] is due.
     next_progress: usize,
+    /// Whether the engine thread has answered this session's rate proposal.
+    /// Engine-thread state only — the producer learns the answer from
+    /// [`SessionShared::stream_rate`].
+    rate_settled: bool,
 }
 
 impl Session {
@@ -725,7 +1002,7 @@ impl Session {
         start: usize,
         seek_ms: u64,
         track_ms: Option<u64>,
-        forced_rate: Option<u32>,
+        instruments: Arc<Instruments>,
         cfg: EngineConfig,
     ) -> Self {
         let (ring_tx, ring_rx) = RingBuffer::new(cfg.ring_frames * CHANNELS);
@@ -737,7 +1014,8 @@ impl Session {
             queue: Arc::clone(&queue),
             start,
             seek_ms,
-            forced_rate,
+            boundary: cfg.boundary,
+            instruments,
             ring: ring_tx,
             bounds: bounds_tx,
             fails: fails_tx,
@@ -755,6 +1033,9 @@ impl Session {
             pulled: 0,
             boundaries: vec![None; len],
             durations: vec![None; len],
+            formats: vec![None; len],
+            last_signal: None,
+            boundary: cfg.boundary,
             failures: vec![None; len],
             next_report: start,
             current: start,
@@ -767,7 +1048,40 @@ impl Session {
             // Nothing to report until a track actually starts (or a seek or
             // resume asks for a reading), so the cadence starts disarmed.
             next_progress: usize::MAX,
+            rate_settled: false,
         }
+    }
+
+    /// The queue index this session stopped short at because the sample rate
+    /// changed there, if it did (see [`SessionShared::rate_change_at`]).
+    fn rate_change_at(&self) -> Option<usize> {
+        let at = self.shared.rate_change_at.load(Ordering::Acquire);
+        (at != NO_RATE_CHANGE).then_some(at)
+    }
+
+    /// The signal-path statement for the track at `index`, or `None` when
+    /// nothing about it is known yet.
+    fn signal_path(&self, index: usize) -> Option<Event> {
+        let (source_rate_hz, source_bits) = (*self.formats.get(index)?)?;
+        let output_rate_hz = self.shared.stream_rate.load(Ordering::Acquire);
+        let chain = if source_rate_hz == output_rate_hz {
+            SignalChain::Direct
+        } else {
+            SignalChain::Converting {
+                reason: match self.boundary {
+                    // Following the source is the policy, so a mismatch here
+                    // means the output could not be made to follow.
+                    BoundaryPolicy::BitPerfectReopen => ConversionReason::DeviceRateUnavailable,
+                    _ => ConversionReason::FixedOutputRate,
+                },
+            }
+        };
+        Some(Event::SignalPath {
+            source_rate_hz,
+            source_bits,
+            output_rate_hz,
+            chain,
+        })
     }
 
     /// The current position reading, or `None` when audio has been delivered
@@ -861,6 +1175,9 @@ impl Session {
             if let Some(slot) = self.durations.get_mut(bound.index) {
                 *slot = bound.duration_ms;
             }
+            if let Some(slot) = self.formats.get_mut(bound.index) {
+                *slot = Some((bound.source_rate, bound.source_bits));
+            }
         }
         while let Ok((i, reason)) = self.fails.pop() {
             if let Some(slot) = self.failures.get_mut(i) {
@@ -878,6 +1195,16 @@ impl Session {
                     self.current = i;
                     self.track_origin = start_sample;
                     self.track_ms = self.durations[i];
+                    // The chain follows the track it describes, and is stated
+                    // only when it is news: identical for every track of an
+                    // album, so an album says it once.
+                    let signal = self.signal_path(i);
+                    if signal.is_some() && signal != self.last_signal {
+                        if let Some(event) = signal.clone() {
+                            let _ = events.send(event);
+                        }
+                        self.last_signal = signal;
+                    }
                     // A new track means a new position: make the cadence due
                     // now so `Progress` follows `TrackStarted` immediately
                     // (protocol docs) instead of up to 250 ms later.
@@ -941,14 +1268,27 @@ struct ProducerTask {
     /// Milliseconds into the session's first playable track to begin at
     /// ([`Command::Seek`]'s target); 0 for an ordinary start.
     seek_ms: u64,
-    forced_rate: Option<u32>,
+    boundary: BoundaryPolicy,
+    instruments: Arc<Instruments>,
     ring: rtrb::Producer<f32>,
     bounds: rtrb::Producer<TrackBound>,
     fails: rtrb::Producer<(usize, String)>,
     shared: Arc<SessionShared>,
 }
 
-type Prefetch = (usize, JoinHandle<Result<DecodedAudio, PlaybackError>>);
+/// What decode-ahead found at a queue position.
+enum Prefetched {
+    /// The track, decoded at its native rate and ready to splice.
+    Audio(DecodedAudio),
+    /// The track is stored at a *different* sample rate from the session's.
+    /// Under the bit-perfect default the session ends at this position so the
+    /// output can be reopened; nothing was decoded, so discovering it cost a
+    /// header probe rather than a track. The rate itself is not carried — the
+    /// session that takes over opens the file and negotiates from it.
+    RateChange,
+}
+
+type Prefetch = (usize, JoinHandle<Result<Prefetched, PlaybackError>>);
 
 impl ProducerTask {
     fn run(mut self) {
@@ -961,86 +1301,59 @@ impl ProducerTask {
     /// one ahead on a prefetch thread and spliced through the ring —
     /// gapless exactly as in [`run_playlist`](crate::playback::run_playlist). A track that fails to open
     /// or decode is recorded and skipped; the queue survives it.
+    ///
+    /// Under the ADR-0009 default the run also **ends** at the first track
+    /// stored at a different sample rate, handing that index back to the
+    /// engine so a new session can reopen the output at it.
     fn produce(&mut self) {
         let stop = Arc::clone(&self.shared);
         let stop = &stop.stop;
 
-        let Some((idx, mut src)) = self.find_anchor(stop) else {
+        let Some((idx, src)) = self.find_anchor(stop) else {
             return; // nothing playable (or stopping)
         };
-        let stream_rate = self.forced_rate.unwrap_or_else(|| src.sample_rate());
-        // Publish the rate before any bound: the engine thread's Acquire on
-        // the bounds ring synchronizes with this Release, so a bound is
-        // never visible without the rate that gives it meaning.
+        let source_rate = src.sample_rate();
+        // Rate negotiation, producer half: propose the rate this music is
+        // stored at and wait for the engine thread — the only thread that may
+        // touch the sink — to say what the output will actually run at. The
+        // answer arrives on its next loop iteration.
         self.shared
-            .stream_rate
-            .store(stream_rate, Ordering::Release);
-        // The track's own length, unaffected by any resampling below.
-        let anchor_ms = src.duration_ms();
-        let mut pushed = 0usize;
-        let mut pending: Option<Prefetch> = self.spawn_prefetch(idx + 1);
-
-        // The anchor track. Same-rate: stream block-by-block for fast
-        // start. Different rate (forced-rate/device mode): decode fully and
-        // resample first — the ADR-0004 policy applied to track one. A seek
-        // has already positioned the source either way; on the resampling
-        // path the remaining tail must still be longer than the resampler's
-        // alignment padding (a few milliseconds), or it is reported as a
-        // track failure like any other decode problem.
-        if src.sample_rate() == stream_rate {
-            let _ = self.bounds.push(TrackBound {
-                index: idx,
-                start_sample: pushed,
-                duration_ms: anchor_ms,
-            });
-            loop {
-                if stop.load(Ordering::Acquire) {
-                    break;
-                }
-                match src.next_block() {
-                    Ok(Some(block)) => {
-                        if !push_with_backpressure(&mut self.ring, block, stop) {
-                            break;
-                        }
-                        pushed += block.len();
-                    }
-                    Ok(None) => break,
-                    Err(e) => {
-                        let _ = self.fails.push((idx, e.to_string()));
-                        break;
-                    }
-                }
-            }
-        } else {
-            match decode_open(src, stop).and_then(|d| at_rate(d, stream_rate)) {
-                Ok(samples) => {
-                    if !stop.load(Ordering::Acquire) {
-                        let _ = self.bounds.push(TrackBound {
-                            index: idx,
-                            start_sample: pushed,
-                            duration_ms: anchor_ms,
-                        });
-                        if push_with_backpressure(&mut self.ring, &samples, stop) {
-                            pushed += samples.len();
-                        }
-                    }
-                }
-                Err(e) => {
-                    let _ = self.fails.push((idx, e.to_string()));
-                }
-            }
-        }
+            .proposed_rate
+            .store(source_rate, Ordering::Release);
+        let Some(stream_rate) = self.await_stream_rate(stop) else {
+            return; // stopping before the rate was ever settled
+        };
+        // Follow-the-source only cares about the *next* track's rate when it
+        // is going to refuse to convert it; a fixed-rate session converts
+        // everything and so needs no comparison.
+        let follow = (self.boundary == BoundaryPolicy::BitPerfectReopen).then_some(stream_rate);
+        let mut pending: Option<Prefetch> = self.spawn_prefetch(idx + 1, follow);
+        let mut pushed = self.push_anchor(idx, src, stream_rate, stop);
 
         // Subsequent tracks, one decode ahead.
         let mut i = idx + 1;
         while i < self.queue.len() && !stop.load(Ordering::Acquire) {
-            let decoded = match pending.take() {
+            let found = match pending.take() {
                 Some((_, handle)) => handle
                     .join()
                     .unwrap_or(Err(PlaybackError::WorkerPanicked("prefetch"))),
-                None => decode_all(&self.queue[i], stop),
+                None => prefetch(&self.queue[i], stop, follow),
             };
-            pending = self.spawn_prefetch(i + 1);
+            let decoded = match found {
+                Ok(Prefetched::RateChange) => {
+                    // The session stops one track short of its queue on
+                    // purpose. Publishing the index is the whole handover: the
+                    // engine drains the output, reopens it at this track's
+                    // rate, and starts a fresh session here.
+                    self.shared.rate_change_at.store(i, Ordering::Release);
+                    break;
+                }
+                Ok(Prefetched::Audio(decoded)) => Ok(decoded),
+                Err(e) => Err(e),
+            };
+            // Only now start decode-ahead of the following track: past a rate
+            // change there is nothing this session would do with it.
+            pending = self.spawn_prefetch(i + 1, follow);
             if stop.load(Ordering::Acquire) {
                 break;
             }
@@ -1050,13 +1363,17 @@ impl ProducerTask {
                 // the stream rate, which changes their count but not the
                 // seconds they represent.
                 let duration_ms = Some(frames_to_ms(d.frames() as u64, d.sample_rate));
-                at_rate(d, stream_rate).map(|samples| (samples, duration_ms))
+                let format = (d.sample_rate, d.bits_per_sample);
+                at_rate(d, stream_rate, &self.instruments)
+                    .map(|samples| (samples, duration_ms, format))
             }) {
-                Ok((samples, duration_ms)) => {
+                Ok((samples, duration_ms, (source_rate, source_bits))) => {
                     let _ = self.bounds.push(TrackBound {
                         index: i,
                         start_sample: pushed,
                         duration_ms,
+                        source_rate,
+                        source_bits,
                     });
                     if !push_with_backpressure(&mut self.ring, &samples, stop) {
                         break;
@@ -1108,22 +1425,129 @@ impl ProducerTask {
         None
     }
 
-    fn spawn_prefetch(&self, index: usize) -> Option<Prefetch> {
+    /// Push the anchor — the session's first playable track — into the ring,
+    /// returning how many interleaved samples reached it.
+    ///
+    /// At the stream rate, which under the default is every track the output
+    /// device can run at, it **streams block-by-block** so the first sample is
+    /// audible in under a millisecond. When the rates differ (the device
+    /// offered no mode at the source rate, or a fixed output rate was chosen)
+    /// it is decoded whole and resampled whole first, because the whole-buffer
+    /// resampler needs the whole buffer — the wait ADR-0009 measures and
+    /// accepts for a case that no longer happens on hardware that can play the
+    /// file.
+    ///
+    /// A seek has already positioned the source either way; on the resampling
+    /// path the remaining tail must still be longer than the resampler's
+    /// alignment padding (a few milliseconds), or it is reported as a track
+    /// failure like any other decode problem.
+    fn push_anchor(
+        &mut self,
+        idx: usize,
+        mut src: AudioSource,
+        stream_rate: u32,
+        stop: &AtomicBool,
+    ) -> usize {
+        let bound = TrackBound {
+            index: idx,
+            // The anchor's audio always begins at the session's sample 0.
+            start_sample: 0,
+            // The track's own length, unaffected by any resampling below.
+            duration_ms: src.duration_ms(),
+            source_rate: src.sample_rate(),
+            source_bits: src.bits_per_sample(),
+        };
+        let mut pushed = 0usize;
+        if src.sample_rate() == stream_rate {
+            let _ = self.bounds.push(bound);
+            loop {
+                if stop.load(Ordering::Acquire) {
+                    break;
+                }
+                match src.next_block() {
+                    Ok(Some(block)) => {
+                        if !push_with_backpressure(&mut self.ring, block, stop) {
+                            break;
+                        }
+                        pushed += block.len();
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        let _ = self.fails.push((idx, e.to_string()));
+                        break;
+                    }
+                }
+            }
+            return pushed;
+        }
+        match decode_open(src, stop).and_then(|d| at_rate(d, stream_rate, &self.instruments)) {
+            Ok(samples) => {
+                if !stop.load(Ordering::Acquire) {
+                    let _ = self.bounds.push(bound);
+                    if push_with_backpressure(&mut self.ring, &samples, stop) {
+                        pushed += samples.len();
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = self.fails.push((idx, e.to_string()));
+            }
+        }
+        pushed
+    }
+
+    /// Park until the engine thread has answered this session's rate proposal
+    /// (see [`Control::settle_rate`]). `None` means the session is being
+    /// abandoned and the producer should simply leave.
+    ///
+    /// The wait is genuinely short — the engine answers on its next loop
+    /// iteration, which for a starting session is microseconds away — but it
+    /// is a wait, so it checks `stop` as diligently as every other loop here.
+    fn await_stream_rate(&self, stop: &AtomicBool) -> Option<u32> {
+        loop {
+            let granted = self.shared.stream_rate.load(Ordering::Acquire);
+            if granted != 0 {
+                return Some(granted);
+            }
+            if stop.load(Ordering::Acquire) {
+                return None;
+            }
+            thread::sleep(NEGOTIATE_POLL);
+        }
+    }
+
+    fn spawn_prefetch(&self, index: usize, follow: Option<u32>) -> Option<Prefetch> {
         let path = self.queue.get(index)?.clone();
         let shared = Arc::clone(&self.shared);
-        let handle = thread::spawn(move || decode_all(&path, &shared.stop));
+        let handle = thread::spawn(move || prefetch(&path, &shared.stop, follow));
         Some((index, handle))
     }
 }
 
-/// Decode a whole file, checking `stop` between blocks so an aborting
-/// session never waits for a full-track decode. On stop the partial result
-/// is returned; callers observe the flag and discard it.
-fn decode_all(path: &Path, stop: &AtomicBool) -> Result<DecodedAudio, PlaybackError> {
-    decode_open(AudioSource::open(path)?, stop)
+/// Decode-ahead of one queue position.
+///
+/// `follow` carries the session's stream rate when the policy is to follow the
+/// source: the file is opened, its declared rate compared, and a track at a
+/// different rate reported as [`Prefetched::RateChange`] **without decoding
+/// it** — the rate is in the header, so refusing costs a probe rather than a
+/// whole track. `None` (fixed output rate) always decodes.
+fn prefetch(
+    path: &Path,
+    stop: &AtomicBool,
+    follow: Option<u32>,
+) -> Result<Prefetched, PlaybackError> {
+    let src = AudioSource::open(path)?;
+    if let Some(stream_rate) = follow
+        && src.sample_rate() != stream_rate
+    {
+        return Ok(Prefetched::RateChange);
+    }
+    decode_open(src, stop).map(Prefetched::Audio)
 }
 
-/// [`decode_all`] from an already-open source.
+/// Decode a whole open source, checking `stop` between blocks so an aborting
+/// session never waits for a full-track decode. On stop the partial result
+/// is returned; callers observe the flag and discard it.
 fn decode_open(mut src: AudioSource, stop: &AtomicBool) -> Result<DecodedAudio, PlaybackError> {
     let mut samples = Vec::new();
     while let Some(block) = src.next_block()? {
@@ -1135,54 +1559,78 @@ fn decode_open(mut src: AudioSource, stop: &AtomicBool) -> Result<DecodedAudio, 
     Ok(DecodedAudio {
         samples,
         sample_rate: src.sample_rate(),
+        bits_per_sample: src.bits_per_sample(),
     })
 }
 
-/// Bring decoded audio to the session stream rate (ADR-0004 default
-/// policy; no-op at equal rates).
-fn at_rate(decoded: DecodedAudio, stream_rate: u32) -> Result<Vec<f32>, PlaybackError> {
+/// Bring decoded audio to the session's stream rate.
+///
+/// The equal-rate branch is the one the bit-perfect default takes for every
+/// track: it moves the samples and touches nothing. The other branch is
+/// reached only when the output could not be made to run at the source rate,
+/// or a fixed output rate was chosen — and it is counted, so "nothing was
+/// resampled" is a fact the tests can read rather than infer.
+fn at_rate(
+    decoded: DecodedAudio,
+    stream_rate: u32,
+    instruments: &Instruments,
+) -> Result<Vec<f32>, PlaybackError> {
     if decoded.sample_rate == stream_rate {
-        Ok(decoded.samples)
-    } else {
-        resample_interleaved(&decoded.samples, decoded.sample_rate, stream_rate)
+        return Ok(decoded.samples);
     }
+    let t0 = Instant::now();
+    let out = resample_interleaved(&decoded.samples, decoded.sample_rate, stream_rate)?;
+    instruments.record_resample(t0.elapsed());
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
-    //! Where the engine must drop the sink's buffered audio.
+    //! What the engine asks of a sink that has a rate and a buffer — i.e. of
+    //! real hardware.
     //!
     //! # Why these tests live here and not in `tests/engine.rs`
     //!
     //! The integration suite drives the engine through [`spawn_offline`],
-    //! whose sink is an [`OfflineSink`] — and an offline sink has no
-    //! downstream buffer to discard from. It is the record of delivered
-    //! audio, not a queue standing in front of a device, so the bug these
-    //! tests guard (*pre-seek audio still queued in the device ring keeps
-    //! playing after the seek*) is structurally unobservable through that
-    //! path. Saying so plainly and testing the two halves where each is real
+    //! whose sink is an [`OfflineSink`] — and an offline sink has neither a
+    //! downstream buffer to discard from nor a rate to negotiate. It is the
+    //! record of delivered audio, not a queue standing in front of a clock, so
+    //! two whole classes of behaviour are structurally unobservable through
+    //! that path: *pre-seek audio still queued in the device ring keeps
+    //! playing after the seek*, and *the output must be reopened at the rate
+    //! of the music*. Saying so plainly and testing each half where it is real
     //! beats inventing an offline assertion that would pass either way:
     //!
-    //! - **Does the engine ask for the discard, at exactly the right
-    //!   moments?** That is a property of [`Control`], and it is what these
-    //!   tests assert, by running the real control loop against a sink that
-    //!   records the operations it receives. The recording sink is a test
-    //!   double, but it does not stand in for the behaviour under test — the
-    //!   behaviour under test is the engine's *call*, observed directly.
-    //! - **Does the discard actually empty the device ring?** That is a
-    //!   property of `DeviceSink`, asserted against a real audio device in
+    //! - **Does the engine ask for the discard, and for the rate, at exactly
+    //!   the right moments?** That is a property of [`Control`], and it is
+    //!   what these tests assert, by running the real control loop against a
+    //!   sink that records the operations it receives. The test doubles do not
+    //!   stand in for the behaviour under test — the behaviour under test is
+    //!   the engine's *call*, observed directly. In particular
+    //!   [`DeviceDouble`] answers rate requests exactly as `DeviceSink` does
+    //!   (grant the rate if it has it, nearest one it has otherwise), which is
+    //!   how the "device refuses the source rate" fallback becomes testable at
+    //!   all: no real machine can be made to lack a 48 kHz mode on demand.
+    //! - **Does the discard actually empty the device ring, and does a reopen
+    //!   really produce a stream at the new rate?** Those are properties of
+    //!   `DeviceSink`, asserted against a real audio device in
     //!   `tests/playback.rs` (`discard_buffered_empties_the_device_ring`,
-    //!   feature `device-output`).
+    //!   `device_sink_reopens_at_the_requested_rate`, feature
+    //!   `device-output`).
 
     use std::sync::Mutex;
     use std::time::Instant;
 
     use super::{
-        Arc, AtomicUsize, BoundaryPolicy, Command, Control, Duration, EngineConfig, Event, Path,
-        PathBuf, Sink, mpsc, thread,
+        Arc, AtomicUsize, BoundaryPolicy, Command, Control, Conversions, Duration, EngineConfig,
+        Event, Instruments, Path, PathBuf, Sink, mpsc, thread,
     };
+    use crate::protocol::{ConversionReason, SignalChain};
 
     const RATE: u32 = 44_100;
+    /// The rate the owner's album is stored at, and the case ADR-0009 exists
+    /// for.
+    const HI_RATE: u32 = 48_000;
     /// Long enough that every command below lands mid-track.
     const TRACK_SECS: usize = 5;
     const TIMEOUT: Duration = Duration::from_secs(20);
@@ -1192,6 +1640,10 @@ mod tests {
     enum Op {
         Write,
         Discard,
+        /// Wait for buffered audio to play out (a rate change).
+        Drain,
+        /// Reopen at a new rate.
+        Negotiate,
     }
 
     /// A sink that records the operations the engine performs on it.
@@ -1220,19 +1672,19 @@ mod tests {
         }
     }
 
-    /// A five-second 440 Hz stereo WAV.
-    fn fixture(dir: &Path, name: &str) -> PathBuf {
+    /// A 440 Hz stereo WAV of `frames` frames at `rate`.
+    fn fixture_at(dir: &Path, name: &str, rate: u32, frames: usize) -> PathBuf {
         let path = dir.join(name);
         let spec = hound::WavSpec {
             channels: 2,
-            sample_rate: RATE,
+            sample_rate: rate,
             bits_per_sample: 32,
             sample_format: hound::SampleFormat::Float,
         };
         let mut writer = hound::WavWriter::create(&path, spec).expect("create fixture wav");
-        for n in 0..TRACK_SECS * RATE as usize {
+        for n in 0..frames {
             #[allow(clippy::cast_precision_loss)] // frame indices are far below 2^52
-            let t = n as f64 / f64::from(RATE);
+            let t = n as f64 / f64::from(rate);
             #[allow(clippy::cast_possible_truncation)] // f64 sine -> f32 sample
             let s = (0.5 * (2.0 * std::f64::consts::PI * 440.0 * t).sin()) as f32;
             writer.write_sample(s).expect("write sample");
@@ -1242,6 +1694,11 @@ mod tests {
         path
     }
 
+    /// A five-second 440 Hz stereo WAV at [`RATE`].
+    fn fixture(dir: &Path, name: &str) -> PathBuf {
+        fixture_at(dir, name, RATE, TRACK_SECS * RATE as usize)
+    }
+
     /// Paced so a 5 s track takes a few hundred ms to drain: every command
     /// below then lands mid-track, with audio genuinely in flight.
     fn config() -> EngineConfig {
@@ -1249,7 +1706,7 @@ mod tests {
             ring_frames: 8192,
             consumer_chunk_frames: 2048,
             consumer_pace: Duration::from_millis(4),
-            boundary: BoundaryPolicy::ResampleToStreamRate,
+            ..EngineConfig::default()
         }
     }
 
@@ -1279,8 +1736,9 @@ mod tests {
                     cmd_rx,
                     event_tx,
                     config(),
-                    None,
+                    0,
                     Arc::new(AtomicUsize::new(0)),
+                    Arc::default(),
                     sink,
                 );
                 drop(control.run());
@@ -1468,5 +1926,360 @@ mod tests {
              sample-continuous"
         );
         harness.shutdown();
+    }
+
+    // -----------------------------------------------------------------------
+    // Rate negotiation (ADR-0009)
+    // -----------------------------------------------------------------------
+
+    /// Rates a [`DeviceDouble`] was reopened at, in order.
+    type Opened = Arc<Mutex<Vec<u32>>>;
+
+    /// A sink standing in for real hardware: it has a rate, a fixed set of
+    /// rates it can be opened at, and it answers a rate request the way
+    /// `DeviceSink` does — grant the asked-for rate when it has it, otherwise
+    /// the nearest one it does have.
+    ///
+    /// It exists because the interesting branch cannot be reached any other
+    /// way: no real machine can be persuaded to lack a 48 kHz mode for the
+    /// duration of one test, and the fallback it triggers is precisely the
+    /// behaviour ADR-0009 has to get right.
+    struct DeviceDouble {
+        rate: u32,
+        supported: Vec<u32>,
+        opened: Opened,
+    }
+
+    impl DeviceDouble {
+        fn new(rate: u32, supported: &[u32], opened: &Opened) -> Self {
+            Self {
+                rate,
+                supported: supported.to_vec(),
+                opened: Arc::clone(opened),
+            }
+        }
+    }
+
+    impl Sink for DeviceDouble {
+        fn write(&mut self, _samples: &[f32]) {}
+
+        fn negotiate_rate(&mut self, desired: u32) -> Option<u32> {
+            let granted = self
+                .supported
+                .iter()
+                .copied()
+                .min_by_key(|r| r.abs_diff(desired))
+                .unwrap_or(self.rate);
+            if granted != self.rate {
+                self.rate = granted;
+                if let Ok(mut log) = self.opened.lock() {
+                    log.push(granted);
+                }
+            }
+            Some(granted)
+        }
+    }
+
+    /// Play `queue` to its end through a real [`Control`] over `sink`, and
+    /// return every event it emitted plus its conversion counters.
+    fn run_queue<S: Sink + Send + 'static>(
+        queue: Vec<PathBuf>,
+        cfg: EngineConfig,
+        sink: S,
+        open_rate: u32,
+    ) -> (Vec<Event>, Conversions) {
+        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
+        let instruments: Arc<Instruments> = Arc::default();
+        let probes = Arc::clone(&instruments);
+        let engine = thread::spawn(move || {
+            let control = Control::new(
+                cmd_rx,
+                event_tx,
+                cfg,
+                open_rate,
+                Arc::new(AtomicUsize::new(0)),
+                probes,
+                sink,
+            );
+            drop(control.run());
+        });
+        cmd_tx
+            .send(Command::SetQueue { paths: queue })
+            .expect("engine accepts commands");
+        cmd_tx.send(Command::Play).expect("engine accepts commands");
+
+        let mut events = Vec::new();
+        let deadline = Instant::now() + TIMEOUT;
+        while Instant::now() < deadline {
+            match event_rx.recv_timeout(Duration::from_millis(50)) {
+                Ok(Event::QueueEnded) => {
+                    events.push(Event::QueueEnded);
+                    break;
+                }
+                Ok(event) => events.push(event),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        drop(cmd_tx);
+        engine.join().expect("engine thread");
+        (events, instruments.snapshot())
+    }
+
+    /// Every `SignalPath` in `events`, as the tuple a front end would render.
+    fn chains(events: &[Event]) -> Vec<(u32, u32, SignalChain)> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                Event::SignalPath {
+                    source_rate_hz,
+                    output_rate_hz,
+                    chain,
+                    ..
+                } => Some((*source_rate_hz, *output_rate_hz, *chain)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Half a second: real audio, but a queue of three still plays out inside
+    /// a test.
+    const SHORT_FRAMES: usize = 22_050;
+
+    /// **A 48 kHz queue negotiates a 48 kHz output.** The device starts at
+    /// 44.1 kHz — what the app opens before it knows what will be played — and
+    /// the session moves it, because this device has a 48 kHz mode.
+    ///
+    /// Asserted three ways so it cannot pass by accident: the sink was
+    /// reopened at 48 kHz, the readout says the chain is direct, and no
+    /// resampler was constructed.
+    #[test]
+    fn a_48k_queue_negotiates_a_48k_output() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let track = fixture_at(dir.path(), "hi.wav", HI_RATE, SHORT_FRAMES);
+        let opened: Opened = Arc::default();
+        let sink = DeviceDouble::new(RATE, &[RATE, HI_RATE], &opened);
+        let (events, conversions) = run_queue(vec![track], EngineConfig::default(), sink, RATE);
+
+        assert_eq!(
+            *opened.lock().expect("opened lock"),
+            vec![HI_RATE],
+            "the output must be reopened at the rate the music is stored at"
+        );
+        assert_eq!(
+            chains(&events),
+            vec![(HI_RATE, HI_RATE, SignalChain::Direct)]
+        );
+        assert_eq!(
+            conversions,
+            Conversions {
+                resampled_tracks: 0,
+                resample_ms: 0.0,
+                output_reconfigurations: 1,
+            },
+            "one reconfiguration, no conversion"
+        );
+    }
+
+    /// **A device with no 48 kHz mode plays it anyway, and says what it did.**
+    ///
+    /// Refusing to play a file because the DAC is fussy would be the wrong
+    /// answer, so the engine converts to the nearest rate the device has. What
+    /// makes that acceptable is that the chain reports itself as converting,
+    /// attributed to the device rather than to a setting.
+    #[test]
+    fn a_device_without_the_rate_converts_and_reports_it() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let track = fixture_at(dir.path(), "hi.wav", HI_RATE, SHORT_FRAMES);
+        let opened: Opened = Arc::default();
+        // 44.1 kHz only: the nearest thing this device has to 48 kHz.
+        let sink = DeviceDouble::new(RATE, &[RATE], &opened);
+        let (events, conversions) = run_queue(vec![track], EngineConfig::default(), sink, RATE);
+
+        assert!(
+            opened.lock().expect("opened lock").is_empty(),
+            "a device with nowhere to move must not be reopened"
+        );
+        assert_eq!(
+            chains(&events),
+            vec![(
+                HI_RATE,
+                RATE,
+                SignalChain::Converting {
+                    reason: ConversionReason::DeviceRateUnavailable,
+                },
+            )],
+            "the conversion must be visible, and attributed to the device"
+        );
+        assert_eq!(
+            conversions.resampled_tracks, 1,
+            "the track must actually have been converted — it did play"
+        );
+        assert!(
+            conversions.resample_ms > 0.0,
+            "a resampler ran, so time was spent in one: {conversions:?}"
+        );
+    }
+
+    /// **A mixed-rate queue follows every rate and converts nothing.**
+    ///
+    /// 44.1 → 48 → 44.1 on a device that has both: three sessions, two
+    /// reconfigurations, three direct chains, and exactly one `QueueEnded` —
+    /// the splits are an internal handover and a front end must never see one
+    /// as the end of the queue.
+    #[test]
+    fn a_mixed_rate_queue_follows_every_rate() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let queue = vec![
+            fixture_at(dir.path(), "a_44k.wav", RATE, SHORT_FRAMES),
+            fixture_at(dir.path(), "b_48k.wav", HI_RATE, SHORT_FRAMES),
+            fixture_at(dir.path(), "c_44k.wav", RATE, SHORT_FRAMES),
+        ];
+        let opened: Opened = Arc::default();
+        let sink = DeviceDouble::new(RATE, &[RATE, HI_RATE], &opened);
+        let (events, conversions) = run_queue(queue, EngineConfig::default(), sink, RATE);
+
+        assert_eq!(
+            *opened.lock().expect("opened lock"),
+            vec![HI_RATE, RATE],
+            "the output follows the music: up to 48 kHz and back down"
+        );
+        assert_eq!(
+            chains(&events),
+            vec![
+                (RATE, RATE, SignalChain::Direct),
+                (HI_RATE, HI_RATE, SignalChain::Direct),
+                (RATE, RATE, SignalChain::Direct),
+            ],
+        );
+        assert_eq!(conversions.resampled_tracks, 0, "nothing may be converted");
+        assert_eq!(conversions.output_reconfigurations, 2);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e, Event::TrackStarted { .. }))
+                .count(),
+            3,
+            "every track must still play"
+        );
+        assert_eq!(
+            events.iter().filter(|e| **e == Event::QueueEnded).count(),
+            1,
+            "a rate change is a handover, not the end of the queue"
+        );
+    }
+
+    /// The same queue under the explicit fixed-rate opt-in: one stream, no
+    /// reopens, and the one track that differs converted — attributed to the
+    /// setting, not to the device.
+    #[test]
+    fn a_fixed_output_rate_never_reopens() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let queue = vec![
+            fixture_at(dir.path(), "a_44k.wav", RATE, SHORT_FRAMES),
+            fixture_at(dir.path(), "b_48k.wav", HI_RATE, SHORT_FRAMES),
+        ];
+        let opened: Opened = Arc::default();
+        let sink = DeviceDouble::new(RATE, &[RATE, HI_RATE], &opened);
+        let cfg = EngineConfig {
+            boundary: BoundaryPolicy::ResampleToStreamRate,
+            ..EngineConfig::default()
+        };
+        let (events, conversions) = run_queue(queue, cfg, sink, RATE);
+
+        assert!(
+            opened.lock().expect("opened lock").is_empty(),
+            "a fixed output rate is fixed: nothing may reopen it"
+        );
+        assert_eq!(
+            chains(&events),
+            vec![
+                (RATE, RATE, SignalChain::Direct),
+                (
+                    HI_RATE,
+                    RATE,
+                    SignalChain::Converting {
+                        reason: ConversionReason::FixedOutputRate,
+                    },
+                ),
+            ],
+        );
+        assert_eq!(conversions.resampled_tracks, 1);
+    }
+
+    /// A rate change is the one boundary where the engine **drains** the sink
+    /// instead of discarding it: the previous track's tail is audio the
+    /// listener is owed, and cutting it off would turn a rate change into a
+    /// truncated ending.
+    ///
+    /// Asserted on the operation log, in order — drain before the reopen, and
+    /// no discard anywhere near it.
+    #[test]
+    fn a_rate_change_drains_rather_than_discards() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let queue = vec![
+            fixture_at(dir.path(), "a_44k.wav", RATE, SHORT_FRAMES),
+            fixture_at(dir.path(), "b_48k.wav", HI_RATE, SHORT_FRAMES),
+        ];
+        let ops: Arc<Mutex<Vec<Op>>> = Arc::default();
+        let sink = DrainingDouble {
+            rate: RATE,
+            ops: Arc::clone(&ops),
+        };
+        let (events, _) = run_queue(queue, EngineConfig::default(), sink, RATE);
+        assert_eq!(
+            events.iter().filter(|e| **e == Event::QueueEnded).count(),
+            1
+        );
+
+        let log = ops.lock().expect("ops lock").clone();
+        let drain = log
+            .iter()
+            .position(|op| *op == Op::Drain)
+            .expect("a rate change must drain the sink before reopening it");
+        assert!(
+            log[drain..].contains(&Op::Negotiate),
+            "the drain must come before the reopen, not after: {log:?}"
+        );
+        assert!(
+            !log.contains(&Op::Discard),
+            "nothing about a rate change abandons audio: {log:?}"
+        );
+    }
+
+    /// A sink that records drain/negotiate/discard ordering. Always grants the
+    /// requested rate, so the only thing under test is *when* the engine asks.
+    struct DrainingDouble {
+        rate: u32,
+        ops: Arc<Mutex<Vec<Op>>>,
+    }
+
+    impl DrainingDouble {
+        fn record(&self, op: Op) {
+            if let Ok(mut ops) = self.ops.lock() {
+                ops.push(op);
+            }
+        }
+    }
+
+    impl Sink for DrainingDouble {
+        fn write(&mut self, _samples: &[f32]) {}
+
+        fn discard_buffered(&mut self) {
+            self.record(Op::Discard);
+        }
+
+        fn drain_buffered(&mut self) {
+            self.record(Op::Drain);
+        }
+
+        fn negotiate_rate(&mut self, desired: u32) -> Option<u32> {
+            if desired != self.rate {
+                self.rate = desired;
+                self.record(Op::Negotiate);
+            }
+            Some(desired)
+        }
     }
 }
