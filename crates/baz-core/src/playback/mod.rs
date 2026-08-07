@@ -32,7 +32,7 @@
 //! lossy work is codec enablement plus verification, not new plumbing.
 
 pub mod engine;
-mod resample;
+pub(crate) mod resample;
 pub mod sink;
 pub mod source;
 

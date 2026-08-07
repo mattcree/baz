@@ -241,10 +241,14 @@ fn produce<'scope, 'env: 'scope>(
     let mut resample_ms = None;
     let mut pushed_samples = 0usize;
 
+    // `run_playlist` is the uncontrolled one-shot: nothing ever sets this,
+    // so pushes never abort (the interactive service uses its own flag).
+    let never_stop = AtomicBool::new(false);
+
     // Stream track 0 block-by-block through the ring.
     let mut src = first;
     while let Some(block) = src.next_block()? {
-        push_with_backpressure(&mut producer, block);
+        push_with_backpressure(&mut producer, block, &never_stop);
         pushed_samples += block.len();
     }
     shared
@@ -279,7 +283,7 @@ fn produce<'scope, 'env: 'scope>(
         };
 
         track_start_frames.push(pushed_samples / CHANNELS);
-        push_with_backpressure(&mut producer, &samples);
+        push_with_backpressure(&mut producer, &samples, &never_stop);
         pushed_samples += samples.len();
     }
 
@@ -323,9 +327,22 @@ fn prefetch_decode(
 
 /// Push a block into the ring, sleeping briefly whenever it is full.
 /// Producer-side only — the consumer never blocks.
-fn push_with_backpressure(producer: &mut Producer<f32>, data: &[f32]) {
+///
+/// `stop` aborts the push (returning `false`) so a controlling thread can
+/// release a producer that would otherwise sleep forever against a consumer
+/// that has stopped pulling. [`run_playlist`] passes a flag that is never
+/// set; the interactive engine service ([`crate::engine`]) sets it on stop,
+/// skip, and shutdown.
+pub(crate) fn push_with_backpressure(
+    producer: &mut Producer<f32>,
+    data: &[f32],
+    stop: &AtomicBool,
+) -> bool {
     let mut offset = 0;
     while offset < data.len() {
+        if stop.load(Ordering::Acquire) {
+            return false;
+        }
         let free = producer.slots();
         if free == 0 {
             thread::sleep(Duration::from_micros(100));
@@ -341,6 +358,7 @@ fn push_with_backpressure(producer: &mut Producer<f32>, data: &[f32]) {
             offset += n;
         }
     }
+    true
 }
 
 /// Tracks when the consumer drains track 0's last sample. Lives on the
