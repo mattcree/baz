@@ -23,13 +23,25 @@
 //!
 //! # Gapless status by format
 //!
-//! WAV and FLAC carry exact sample counts, so gapless is exact concatenation
-//! (verified bit-for-bit in the integration tests). MP3/AAC require encoder
-//! delay/padding trim; those codecs are deliberately not enabled in the
-//! Symphonia feature set until that trim work lands with its own
-//! synthesized-signal tests. [`AudioSource`] already honors the
-//! delay/padding/frame-count metadata Symphonia exposes, so the remaining
-//! lossy work is codec enablement plus verification, not new plumbing.
+//! - **WAV, FLAC**: exact sample counts in the container; gapless is exact
+//!   concatenation, verified bit-for-bit in the integration tests.
+//! - **MP3**: enabled, with Symphonia's gapless trim active
+//!   (`FormatOptions::enable_gapless`). Files with a Xing/Info + LAME header
+//!   (LAME, and ffmpeg's `libmp3lame`) decode to *exactly* the encoded
+//!   sample count — encoder delay and padding are trimmed — so consecutive
+//!   tracks concatenate without a gap and with continuous phase. The joint
+//!   is lossy-accurate, not bit-exact: independently encoded files have an
+//!   MDCT edge artifact at the splice (measured on a 320 kbps pure-tone
+//!   fixture: peak ≈ −25 dB re. full amplitude at the joint, decaying to
+//!   steady-state ≈ −70 dB within ~3 ms). Files without a LAME header carry
+//!   no trim metadata and play with their delay/padding intact. Exact
+//!   numbers and methodology: `tests/playback.rs` and the [`source`] module
+//!   docs.
+//! - **AAC**: deliberately not enabled. Symphonia 0.5 supports no gapless
+//!   trim for AAC in any container we would use (upstream: AAC-LC codec and
+//!   ISO/MP4 demuxer are both "gapless: No"; ADTS has no delay/padding
+//!   signaling at all), so AAC could not meet the verified-gapless standard
+//!   the other formats are held to. It stays off until it can.
 
 pub mod engine;
 pub(crate) mod resample;

@@ -3,6 +3,14 @@
 //! Sibling of `protocol_deserialize.rs` per docs/ENGINEERING.md: every
 //! parser that touches external file bytes gets a fuzz target — media
 //! parsers process hostile input.
+//!
+//! Coverage tracks whatever codecs baz-core enables: the probe here
+//! registers every format/decoder in baz-core's symphonia feature set, so
+//! enabling MP3 there put the whole MPEG-audio demux/decode path (including
+//! the Xing/LAME gapless-trim parsing) under this target. That MP3 bytes
+//! probe successfully with no extension hint — i.e. that this entry point
+//! really reaches the MP3 path — is asserted by
+//! `mp3_decoded_length_is_exact` in crates/baz-core/tests/playback.rs.
 #![no_main]
 
 use baz_core::playback::AudioSource;

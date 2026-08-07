@@ -7,6 +7,9 @@
 //! implementation). FLAC fixtures are encoded with an external encoder
 //! (`ffmpeg` or the `flac` CLI, whichever is present) so the FLAC test is an
 //! external-reference test; it skips with a notice when neither exists.
+//! MP3 fixtures are encoded with ffmpeg's `libmp3lame` (LAME via ffmpeg),
+//! which writes the Xing/Info + LAME header the gapless trim relies on; the
+//! MP3 tests skip with a notice when that encoder is unavailable.
 
 use std::f64::consts::PI;
 use std::path::{Path, PathBuf};
@@ -159,6 +162,13 @@ struct FlacFixtures {
     encoder: &'static str,
 }
 
+struct Mp3Fixtures {
+    full: PathBuf,
+    part1: PathBuf,
+    part2: PathBuf,
+    encoder: &'static str,
+}
+
 struct FixtureSet {
     /// 10 s continuous reference, f32 WAV.
     ref_f32: PathBuf,
@@ -178,6 +188,8 @@ struct FixtureSet {
     quad: PathBuf,
     /// FLAC encodings, if an encoder CLI was found.
     flac: Option<FlacFixtures>,
+    /// MP3 encodings (LAME via ffmpeg), if the encoder was found.
+    mp3: Option<Mp3Fixtures>,
 }
 
 fn have(cmd: &str, arg: &str) -> bool {
@@ -239,6 +251,43 @@ fn encode_flac(dir: &Path, full: &Path, part1: &Path, part2: &Path) -> Option<Fl
     })
 }
 
+/// Encode the i16 reference WAVs to MP3 with ffmpeg's `libmp3lame` (LAME).
+/// 320 kbps CBR: the highest-fidelity MP3 a user's library can contain, so
+/// the measured tolerances below describe the *best* case honestly labelled
+/// as such. ffmpeg writes the Xing/Info header with the LAME extension
+/// (encoder delay + padding) by default, which is exactly the metadata the
+/// gapless trim consumes.
+fn encode_mp3(dir: &Path, full: &Path, part1: &Path, part2: &Path) -> Option<Mp3Fixtures> {
+    let have_lame = Command::new("ffmpeg")
+        .args(["-hide_banner", "-h", "encoder=libmp3lame"])
+        .output()
+        .map(|o| {
+            o.status.success() && String::from_utf8_lossy(&o.stdout).contains("Encoder libmp3lame")
+        })
+        .unwrap_or(false);
+    if !have_lame {
+        return None;
+    }
+    let mp3_full = dir.join("ref_10s.mp3");
+    let mp3_part1 = dir.join("part1.mp3");
+    let mp3_part2 = dir.join("part2.mp3");
+    for (wav, mp3) in [(full, &mp3_full), (part1, &mp3_part1), (part2, &mp3_part2)] {
+        run_encoder(
+            Command::new("ffmpeg")
+                .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                .arg(wav)
+                .args(["-c:a", "libmp3lame", "-b:a", "320k"])
+                .arg(mp3),
+        );
+    }
+    Some(Mp3Fixtures {
+        full: mp3_full,
+        part1: mp3_part1,
+        part2: mp3_part2,
+        encoder: "ffmpeg libmp3lame 320 kbps CBR",
+    })
+}
+
 fn fixtures() -> &'static FixtureSet {
     static FIXTURES: OnceLock<FixtureSet> = OnceLock::new();
     FIXTURES.get_or_init(|| {
@@ -288,6 +337,7 @@ fn fixtures() -> &'static FixtureSet {
         write_wav_multi(&quad, RATE, 4, &mono[..4410]);
 
         let flac = encode_flac(&dir, &pcm_ref, &pcm_part1, &pcm_part2);
+        let mp3 = encode_mp3(&dir, &pcm_ref, &pcm_part1, &pcm_part2);
 
         FixtureSet {
             ref_f32,
@@ -299,6 +349,7 @@ fn fixtures() -> &'static FixtureSet {
             part1_mono,
             quad,
             flac,
+            mp3,
         }
     })
 }
@@ -429,6 +480,203 @@ fn gapless_flac_bit_exact() {
         flac.encoder,
         sink.samples().len(),
         max_delta
+    );
+}
+
+// ---------------------------------------------------------------------------
+// MP3 (lossy) — length exactness, content sanity, gapless boundary
+// ---------------------------------------------------------------------------
+
+/// One MPEG-1 Layer III frame at 44.1 kHz (samples per frame). Used to
+/// exclude codec edge regions from steady-state comparisons.
+const MP3_FRAME: usize = 1152;
+
+/// Steady-state accuracy bound for the 320 kbps CBR fixture, as max |error|
+/// vs the ideal sine (amplitude 0.8), file edges excluded. Derivation:
+/// measured 2.64e-4 (−69.6 dB re. amplitude) with ffmpeg 8.1 libmp3lame;
+/// pinned at 8e-4 (−60 dB, ~3x) so a real decode regression fails while
+/// encoder-version noise does not. This is a *fixture* bound (pure tone,
+/// top bitrate), not a general MP3 quality claim.
+const MP3_STEADY_TOL: f32 = 8.0e-4;
+
+/// Half-width (in frames) of the splice *edge region* where independently
+/// encoded MP3s show MDCT edge artifacts even after exact trim. Measured
+/// decay profile (same fixture): error peaks at the very first/last trimmed
+/// sample and falls to steady-state level within ~128 samples (2.9 ms at
+/// 44.1 kHz) on both sides.
+const MP3_EDGE_FRAMES: usize = 128;
+
+/// Peak accuracy bound inside the splice edge region. Derivation: measured
+/// peak 4.3e-2 (−25.4 dB re. amplitude) at the first sample of the second
+/// file, 2.8e-2 at the last sample of the first; pinned at ~2x. This is the
+/// honest cost of splicing *independently encoded* MP3s — a sub-3 ms, about
+/// −25 dB blip at the joint, vs literally 0 for FLAC/WAV. (Album rips
+/// encoded track-by-track exhibit exactly this; encoders that carry MDCT
+/// state across tracks, e.g. LAME `--nogap`, would not.)
+const MP3_EDGE_TOL: f32 = 8.0e-2;
+
+/// Accuracy bound just outside the edge region (the rest of ±[`MP3_FRAME`]
+/// around the splice). Derivation: measured 5.7e-4 max beyond 128 samples
+/// from the joint; pinned at 2x [`MP3_STEADY_TOL`].
+const MP3_SETTLED_TOL: f32 = 1.6e-3;
+
+/// Length exactness: with the LAME header present, decoding yields exactly
+/// the source sample count — encoder delay and padding are trimmed, not
+/// merely "small". Also proves the hint-less `open_bytes` path (the fuzz
+/// entry point) probes MP3 by content.
+#[test]
+fn mp3_decoded_length_is_exact() {
+    let f = fixtures();
+    let Some(mp3) = &f.mp3 else {
+        eprintln!("SKIP: ffmpeg with libmp3lame not available; MP3 fixtures not generated");
+        return;
+    };
+    let full = AudioSource::decode_all(&mp3.full).expect("decode mp3 reference");
+    assert_eq!(full.sample_rate, RATE);
+    assert_eq!(
+        full.frames(),
+        TOTAL_FRAMES,
+        "LAME-tagged MP3 must decode to exactly the source frame count \
+         (delay/padding trimmed)"
+    );
+    let p1 = AudioSource::decode_all(&mp3.part1).expect("decode mp3 part1");
+    let p2 = AudioSource::decode_all(&mp3.part2).expect("decode mp3 part2");
+    assert_eq!(p1.frames(), SPLIT_FRAME, "part1 trimmed length");
+    assert_eq!(
+        p2.frames(),
+        TOTAL_FRAMES - SPLIT_FRAME,
+        "part2 trimmed length"
+    );
+
+    // Same file through the hint-less in-memory path the fuzz target drives:
+    // MP3 must probe by content, and the trim must be identical.
+    let bytes = std::fs::read(&mp3.full).expect("read mp3 bytes");
+    let mut src = AudioSource::open_bytes(bytes).expect("mp3 must probe with no extension hint");
+    assert_eq!(src.sample_rate(), RATE);
+    let mut frames = 0usize;
+    while let Some(block) = src.next_block().expect("decode block") {
+        frames += block.len() / CHANNELS;
+    }
+    assert_eq!(
+        frames, TOTAL_FRAMES,
+        "open_bytes path must trim identically"
+    );
+    println!(
+        "[mp3-length] encoder={}: {} frames decoded from all three fixtures, \
+         exact to the sample",
+        mp3.encoder,
+        full.frames()
+    );
+}
+
+/// Content sanity: the decoded MP3 is the source sine within lossy
+/// tolerance over the steady state (first/last MPEG frame excluded — codec
+/// edges are covered by the boundary test's own bound).
+#[test]
+fn mp3_content_matches_source_sine() {
+    let f = fixtures();
+    let Some(mp3) = &f.mp3 else {
+        eprintln!("SKIP: ffmpeg with libmp3lame not available; MP3 fixtures not generated");
+        return;
+    };
+    let decoded = AudioSource::decode_all(&mp3.full).expect("decode mp3 reference");
+    let ch0 = channel(&decoded.samples, 0);
+    let err = max_error_vs_sine(&ch0, RATE, MP3_FRAME..TOTAL_FRAMES - MP3_FRAME);
+    let err_db = 20.0 * f64::from(err / 0.8_f32).log10();
+    println!(
+        "[mp3-content] steady-state max |error| vs ideal sine: {err:.2e} \
+         ({err_db:.1} dB re. amplitude); bound {MP3_STEADY_TOL:.2e}"
+    );
+    assert!(
+        err <= MP3_STEADY_TOL,
+        "decoded MP3 deviates from the source sine by {err} (bound {MP3_STEADY_TOL})"
+    );
+}
+
+/// Gapless boundary: two independently encoded MP3s of a split sine, played
+/// through the engine. "No gap" is exact — output length equals the sum of
+/// the trimmed lengths, i.e. the source length to the sample, and the
+/// signal phase is continuous through the joint (a trim error of even one
+/// granule would be a phase slip orders of magnitude past these bounds).
+/// Continuity is honest lossy continuity: a sub-3 ms edge artifact bounded
+/// by [`MP3_EDGE_TOL`], settling to [`MP3_SETTLED_TOL`] beyond
+/// [`MP3_EDGE_FRAMES`] — not the literal 0 of FLAC/WAV (which
+/// [`gapless_flac_bit_exact`] pins). That is what users splicing
+/// independently encoded MP3s actually get.
+#[test]
+fn gapless_mp3_no_gap_bounded_boundary() {
+    let f = fixtures();
+    let Some(mp3) = &f.mp3 else {
+        eprintln!("SKIP: ffmpeg with libmp3lame not available; MP3 fixtures not generated");
+        return;
+    };
+    let mut sink = OfflineSink::with_capacity(TOTAL_FRAMES * CHANNELS);
+    let report = run_playlist(
+        &[mp3.part1.clone(), mp3.part2.clone()],
+        test_config(),
+        &mut sink,
+    )
+    .expect("run playlist");
+    assert_eq!(report.stream_rate, RATE);
+    assert_eq!(report.track_start_frames, vec![0, SPLIT_FRAME]);
+    // No gap, no overlap: trimmed lengths sum to the source length exactly.
+    assert_eq!(
+        sink.samples().len(),
+        TOTAL_FRAMES * CHANNELS,
+        "engine output must be exactly the source length: any leftover \
+         delay/padding would show up here as extra or missing samples"
+    );
+
+    let ch0 = channel(sink.samples(), 0);
+    // Accuracy across the splice, against the one continuous sine both
+    // files were cut from — split into the measured edge region and the
+    // settled remainder of ±one MPEG frame.
+    let err_edge = max_error_vs_sine(
+        &ch0,
+        RATE,
+        SPLIT_FRAME - MP3_EDGE_FRAMES..SPLIT_FRAME + MP3_EDGE_FRAMES,
+    );
+    let err_settled_before = max_error_vs_sine(
+        &ch0,
+        RATE,
+        SPLIT_FRAME - MP3_FRAME..SPLIT_FRAME - MP3_EDGE_FRAMES,
+    );
+    let err_settled_after = max_error_vs_sine(
+        &ch0,
+        RATE,
+        SPLIT_FRAME + MP3_EDGE_FRAMES..SPLIT_FRAME + MP3_FRAME,
+    );
+    let err_settled = err_settled_before.max(err_settled_after);
+    // Click check over the edge region: adjacent-sample deltas may exceed a
+    // continuous sine's bound by at most twice the edge error (the error
+    // rides on the sine's own slope).
+    let lo = SPLIT_FRAME - MP3_EDGE_FRAMES;
+    let hi = (SPLIT_FRAME + MP3_EDGE_FRAMES).min(ch0.len());
+    let max_delta = max_adjacent_delta(&ch0[lo..hi]);
+    let delta_bound = sine_adjacent_bound(RATE) + 2.0 * MP3_EDGE_TOL;
+    let edge_db = 20.0 * f64::from(err_edge / 0.8_f32).log10();
+    println!(
+        "[gapless-mp3] encoder={}: output={} samples (exact, no gap); splice edge \
+         (±{MP3_EDGE_FRAMES} frames) max |error| {err_edge:.2e} ({edge_db:.1} dB re. amplitude, \
+         bound {MP3_EDGE_TOL:.2e}); settled (rest of ±{MP3_FRAME}) {err_settled:.2e} \
+         (bound {MP3_SETTLED_TOL:.2e}); max adjacent delta {max_delta:.6} \
+         (bound {delta_bound:.6}; continuous-sine bound {:.6}; FLAC/WAV excess: 0)",
+        mp3.encoder,
+        sink.samples().len(),
+        sine_adjacent_bound(RATE)
+    );
+    assert!(
+        err_edge <= MP3_EDGE_TOL,
+        "splice edge error {err_edge} exceeds bound {MP3_EDGE_TOL}"
+    );
+    assert!(
+        err_settled <= MP3_SETTLED_TOL,
+        "signal has not settled beyond the edge region: {err_settled} \
+         exceeds bound {MP3_SETTLED_TOL} (trim misalignment?)"
+    );
+    assert!(
+        max_delta <= delta_bound,
+        "click at the splice: adjacent delta {max_delta} exceeds bound {delta_bound}"
     );
 }
 

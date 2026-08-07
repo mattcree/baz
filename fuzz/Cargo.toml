@@ -4,6 +4,12 @@ version = "0.0.0"
 publish = false
 edition = "2024"
 
+# Explicitly its own workspace root (the main workspace `exclude`s this
+# crate). Without this, cargo keeps walking up past the exclusion and can
+# latch onto an unrelated ancestor manifest in nested checkouts (e.g. git
+# worktrees created inside the repository directory).
+[workspace]
+
 [package.metadata]
 cargo-fuzz = true
 

@@ -9,13 +9,33 @@
 //!
 //! # Gapless trim
 //!
-//! The decoder honors the trim metadata Symphonia exposes on the codec
-//! parameters: `delay` frames are skipped at the start and emission stops
-//! after `n_frames` frames, which removes container/codec padding. For WAV
-//! and FLAC these counts are exact and the result is verified bit-for-bit in
-//! the integration tests. MP3/AAC encoder delay/padding handling is future
-//! work and those codecs are not yet enabled (see the module docs in
-//! [`crate::playback`]).
+//! Every source is probed with `FormatOptions::enable_gapless`, which makes
+//! Symphonia's gapless-capable format readers do the encoder delay/padding
+//! trim themselves: the reader shifts packet timestamps by the encoder
+//! delay, stamps per-packet trim counts, and the codec applies those counts
+//! to its decoded buffer before we ever see it. Concretely, per format:
+//!
+//! - **WAV/FLAC**: the container carries an exact sample count and no
+//!   delay/padding exists; `n_frames` is the exact stream length and decode
+//!   is bit-exact (verified bit-for-bit in the integration tests).
+//! - **MP3**: when a Xing/Info header with a LAME extension is present
+//!   (written by LAME, and by ffmpeg's `libmp3lame`), Symphonia reads the
+//!   encoder delay and padding from it, adds the fixed 529-frame decoder
+//!   delay, and trims both ends; `codec_params.n_frames` is then the
+//!   **post-trim** count. The result is sample-count-exact: decoding an
+//!   encode of an N-frame WAV yields exactly N frames (verified against
+//!   synthesized ground truth in `tests/playback.rs`). An MP3 *without* a
+//!   LAME tag carries no trim metadata anywhere in the bitstream; it decodes
+//!   with its delay and padding intact — there is nothing to honestly trim
+//!   by, so no heuristic trim is attempted.
+//! - **AAC**: not enabled — see [`crate::playback`] module docs.
+//!
+//! Because the reader/decoder pair already applies the trim when gapless is
+//! enabled, this module must **not** apply `codec_params.delay` again (MP3
+//! sets it even though its packets arrive pre-trimmed; re-applying it would
+//! double-trim). The only trim-related job left here is capping emission at
+//! `n_frames`, which is a no-op for well-formed files and stops overrun on
+//! streams that decode to more frames than their header declared.
 
 use std::fs::File;
 use std::io::Cursor;
@@ -62,12 +82,13 @@ pub struct AudioSource {
     sample_buf: Option<SampleBuffer<f32>>,
     /// Reusable stereo output block returned by [`Self::next_block`].
     block: Vec<f32>,
-    /// Frames decoded so far, before trimming.
+    /// Frames received from the decoder so far (post Symphonia's own gapless
+    /// trim — see the module docs).
     frames_seen: u64,
-    /// First frame to emit (codec `delay` trim).
-    trim_start: u64,
-    /// One past the last frame to emit (`delay + n_frames`), if known.
-    trim_end: Option<u64>,
+    /// Emission cap: `codec_params.n_frames` if the header declares it. With
+    /// gapless enabled this is the post-trim count for MP3 and the exact
+    /// stream length for WAV/FLAC; either way, exact.
+    emit_cap: Option<u64>,
 }
 
 impl AudioSource {
@@ -103,10 +124,18 @@ impl AudioSource {
 
     fn from_media_source(source: Box<dyn MediaSource>, hint: &Hint) -> Result<Self, PlaybackError> {
         let mss = MediaSourceStream::new(source, MediaSourceStreamOptions::default());
+        // `enable_gapless` makes gapless-capable readers (MP3) shift packet
+        // timestamps and stamp per-packet trim counts, which the decoder
+        // applies to its output buffer; `n_frames` becomes the post-trim
+        // count. WAV/FLAC ignore the flag (they have nothing to trim).
+        let format_opts = FormatOptions {
+            enable_gapless: true,
+            ..FormatOptions::default()
+        };
         let probed = symphonia::default::get_probe().format(
             hint,
             mss,
-            &FormatOptions::default(),
+            &format_opts,
             &MetadataOptions::default(),
         )?;
         let format = probed.format;
@@ -125,11 +154,12 @@ impl AudioSource {
                 channels: source_channels,
             });
         }
-        // Gapless trim window: skip `delay` frames, stop after `n_frames`.
-        // Exact for WAV/FLAC (verified in tests); lossy codecs are not yet
-        // enabled (module docs).
-        let trim_start = u64::from(params.delay.unwrap_or(0));
-        let trim_end = params.n_frames.map(|n| trim_start + n);
+        // Emission cap only. Deliberately NOT `params.delay`: with gapless
+        // enabled the reader/decoder pair has already trimmed delay and
+        // padding out of the buffers we receive (and MP3 still reports
+        // `delay` in its params, so applying it here would double-trim).
+        // See the module docs.
+        let emit_cap = params.n_frames;
         let decoder = symphonia::default::get_codecs().make(params, &DecoderOptions::default())?;
         Ok(Self {
             format,
@@ -140,8 +170,7 @@ impl AudioSource {
             sample_buf: None,
             block: Vec::new(),
             frames_seen: 0,
-            trim_start,
-            trim_end,
+            emit_cap,
         })
     }
 
@@ -152,7 +181,7 @@ impl AudioSource {
     }
 
     /// Decode the next block; `Ok(None)` at end of stream (or once the
-    /// gapless trim window is exhausted). The returned slice is interleaved
+    /// declared frame count is exhausted). The returned slice is interleaved
     /// stereo f32 and valid until the next call.
     ///
     /// # Errors
@@ -161,8 +190,8 @@ impl AudioSource {
     /// other than a clean end of stream.
     pub fn next_block(&mut self) -> Result<Option<&[f32]>, PlaybackError> {
         loop {
-            if let Some(end) = self.trim_end
-                && self.frames_seen >= end
+            if let Some(cap) = self.emit_cap
+                && self.frames_seen >= cap
             {
                 return Ok(None);
             }
@@ -178,26 +207,21 @@ impl AudioSource {
             if packet.track_id() != self.track_id {
                 continue;
             }
+            // `decoded` is post-trim when the format did gapless trimming
+            // (module docs): a fully-trimmed packet yields zero frames.
             let decoded = self.decoder.decode(&packet)?;
             let frames = decoded.frames() as u64;
             if frames == 0 {
                 continue;
             }
 
-            // Intersect this packet's frame span with the trim window.
-            let span_start = self.frames_seen;
+            // Cap emission at the declared frame count (no-op for
+            // well-formed files; stops overrun past a lying header).
+            let remaining = self.emit_cap.map_or(u64::MAX, |cap| cap - self.frames_seen);
             self.frames_seen += frames;
-            let keep_from = self.trim_start.max(span_start);
-            let keep_to = self.trim_end.unwrap_or(u64::MAX).min(self.frames_seen);
-            if keep_from >= keep_to {
-                continue; // entirely delay or padding
-            }
-            // In-packet frame offsets; a packet is far smaller than usize.
+            // A packet is far smaller than usize.
             #[allow(clippy::cast_possible_truncation)] // packet-local counts fit usize
-            let (skip, take) = (
-                (keep_from - span_start) as usize,
-                (keep_to - keep_from) as usize,
-            );
+            let take = frames.min(remaining) as usize;
 
             // Copy out of the decoder into native interleaved f32, reusing
             // the buffer (steady-state allocation-free on the decode thread).
@@ -210,19 +234,18 @@ impl AudioSource {
             sample_buf.copy_interleaved_ref(decoded);
             let native = sample_buf.samples();
 
-            // Trim and normalize to stereo into the reusable output block.
+            // Normalize to stereo into the reusable output block.
             self.block.clear();
             self.block.reserve(take * CHANNELS);
             match self.source_channels {
                 1 => {
-                    for &s in &native[skip..skip + take] {
+                    for &s in &native[..take] {
                         self.block.push(s);
                         self.block.push(s);
                     }
                 }
                 _ => {
-                    self.block
-                        .extend_from_slice(&native[skip * CHANNELS..(skip + take) * CHANNELS]);
+                    self.block.extend_from_slice(&native[..take * CHANNELS]);
                 }
             }
             return Ok(Some(&self.block));
