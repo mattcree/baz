@@ -941,7 +941,10 @@ impl Shelf {
         };
         let sleeve = container(art).style(move |_theme| theme::sleeve(playing));
         let title = album.title.as_deref().unwrap_or("Unknown Album");
-        let artist = album.artist.as_deref().unwrap_or("Unknown Artist");
+        // The *album* artist: one tile per album, captioned by whoever the
+        // album is filed under, not by whichever composer happened to be
+        // first (see `vm::AlbumArtistVm`).
+        let artist = album.artist.label();
         let caption = match album.year {
             Some(year) => format!("{artist} · {year}"),
             None => artist.to_owned(),
@@ -1004,8 +1007,17 @@ impl Shelf {
         let sleeve = container(art).style(move |_theme| theme::sleeve(playing));
         let chosen = self.edition_choice.get(&album.id).copied();
         let edition = vm::selected_edition(album, chosen);
+        // A soundtrack grouped under one album artist keeps its per-cue
+        // composer credits; an ordinary album gains no extra line.
+        let per_track_artists = album.track_artists_vary;
         let rows: Vec<Element<'_, Message>> = edition
-            .map(|edition| edition.tracks.iter().map(track_row).collect())
+            .map(|edition| {
+                edition
+                    .tracks
+                    .iter()
+                    .map(|track| track_row(track, per_track_artists))
+                    .collect()
+            })
             .unwrap_or_default();
 
         let mut content = column![sleeve, album_header(album, edition)].spacing(theme::GAP_MD);
@@ -1071,7 +1083,7 @@ fn album_header<'a>(
     edition: Option<&'a vm::EditionVm>,
 ) -> Element<'a, Message> {
     let title = album.title.as_deref().unwrap_or("Unknown Album");
-    let artist = album.artist.as_deref().unwrap_or("Unknown Artist");
+    let artist = album.artist.label();
     let tracks = edition.map_or(0, |edition| edition.tracks.len());
     let mut meta: Vec<String> = Vec::new();
     if let Some(year) = album.year {
@@ -1153,9 +1165,29 @@ fn edition_selector<'a>(
 /// One track-list row: right-aligned number, title, monospace duration.
 /// Rows are not interactive in v0.1, so they carry no hover affordance —
 /// no false signals.
-fn track_row(track: &vm::TrackVm) -> Element<'_, Message> {
+///
+/// With `show_artist`, the track's own artist sits under its title in the
+/// quiet meta style — the same title-over-artist stack the now-playing bar
+/// uses. It is passed in rather than decided here because the answer is a
+/// property of the whole album ([`vm::AlbumVm::track_artists_vary`]): every
+/// row of a soundtrack shows its composer, or none does.
+fn track_row(track: &vm::TrackVm, show_artist: bool) -> Element<'_, Message> {
     let number = track.number.map(|n| n.to_string()).unwrap_or_default();
     let duration = track.duration.map(vm::format_duration).unwrap_or_default();
+    let mut title = column![
+        text(track.title.as_str())
+            .size(theme::SIZE_BODY)
+            .wrapping(text::Wrapping::None)
+    ]
+    .spacing(theme::GAP_XXS);
+    if let Some(artist) = track.artist.as_deref().filter(|_| show_artist) {
+        title = title.push(
+            text(artist)
+                .size(theme::SIZE_META)
+                .color(theme::PAPER_DIM)
+                .wrapping(text::Wrapping::None),
+        );
+    }
     container(
         row![
             container(
@@ -1166,10 +1198,7 @@ fn track_row(track: &vm::TrackVm) -> Element<'_, Message> {
             )
             .width(Length::Fixed(TRACK_NO_W))
             .align_x(alignment::Horizontal::Right),
-            text(track.title.as_str())
-                .size(theme::SIZE_BODY)
-                .width(Length::Fill)
-                .wrapping(text::Wrapping::None),
+            container(title).width(Length::Fill),
             text(duration)
                 .size(theme::SIZE_META)
                 .font(theme::MONO)

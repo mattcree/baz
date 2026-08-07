@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use baz_core::index::{IndexError, Library};
+use baz_core::index::{AlbumArtist, IndexError, Library};
 use baz_core::library::{AudioFormat, TrackMeta};
 
 /// A fully-`None` track except for its path — the shape a tagless file with
@@ -14,6 +14,8 @@ fn bare(path: &str) -> TrackMeta {
     TrackMeta {
         path: PathBuf::from(path),
         artist: None,
+        album_artist: None,
+        compilation: None,
         album: None,
         title: None,
         track: None,
@@ -227,7 +229,7 @@ fn albums_order_tracks_by_disc_then_number_then_title() {
     let albums = library.albums();
     assert_eq!(albums.len(), 1);
     let album = &albums[0];
-    assert_eq!(album.artist, Some("The Band"));
+    assert_eq!(album.artist, AlbumArtist::Named("The Band"));
     assert_eq!(album.title, Some("Live Set"));
     // One format in, one edition out — and no selector in the UI.
     assert_eq!(album.editions.len(), 1);
@@ -257,8 +259,8 @@ fn same_album_title_by_different_artists_stays_separate() {
     let albums = library.albums();
     assert_eq!(albums.len(), 2);
     // Sorted by artist; identical titles do not merge across artists.
-    assert_eq!(albums[0].artist, Some("Alpha"));
-    assert_eq!(albums[1].artist, Some("Beta"));
+    assert_eq!(albums[0].artist, AlbumArtist::Named("Alpha"));
+    assert_eq!(albums[1].artist, AlbumArtist::Named("Beta"));
     assert!(albums.iter().all(|a| a.title == Some("Greatest Hits")));
 }
 
@@ -276,11 +278,11 @@ fn unknown_artist_and_album_tracks_group_together_first() {
     let albums = library.albums();
     assert_eq!(albums.len(), 2);
     // Documented behavior: unknowns share one shelf entry and sort first.
-    assert_eq!(albums[0].artist, None);
+    assert_eq!(albums[0].artist, AlbumArtist::Unknown);
     assert_eq!(albums[0].title, None);
     assert_eq!(albums[0].editions.len(), 1);
     assert_eq!(albums[0].editions[0].tracks.len(), 2);
-    assert_eq!(albums[1].artist, Some("Zeta"));
+    assert_eq!(albums[1].artist, AlbumArtist::Named("Zeta"));
 }
 
 #[test]
@@ -570,6 +572,272 @@ fn an_edition_declines_to_summarize_properties_its_tracks_disagree_on() {
 }
 
 // ---------------------------------------------------------------------------
+// Album-artist grouping (docs/adr/0008-album-artist-grouping.md)
+// ---------------------------------------------------------------------------
+
+/// The owner's real soundtrack, as `library.db` holds it: nine files whose
+/// `ARTIST` tags name four different combinations of composers, and whose
+/// `ALBUMARTIST` tags all read `RODIK`. Before album artists, this shattered
+/// into one shelf entry per distinct artist string.
+fn cookies_bustle_gamerip() -> Vec<TrackMeta> {
+    let composers = [
+        "Kouhei Okamura",
+        "Kouhei Okamura, Masashi Matsumoto",
+        "Katsuhiko Nakamichi",
+        "Miki Nagamatsu, Kouhei Okamura, Masashi Matsumoto, Katsuhiko Nakamichi",
+    ];
+    let cues = [
+        "Main Menu",
+        "Bus Level",
+        "Southern Territory",
+        "Temple",
+        "Top Down Level",
+        "Good Ending",
+    ];
+    cues.iter()
+        .enumerate()
+        .map(|(index, cue)| {
+            let number = u32::try_from(index).expect("small") + 1;
+            TrackMeta {
+                album_artist: Some("RODIK".to_owned()),
+                ..encoded(
+                    &format!("/m/[GST] Cookie's Bustle/{number}. {cue}.flac"),
+                    "Cookie's Bustle OST (gamerip)",
+                    cue,
+                    number,
+                    AudioFormat::Flac,
+                    900,
+                )
+            }
+        })
+        .enumerate()
+        .map(|(index, mut meta)| {
+            meta.artist = Some(composers[index % composers.len()].to_owned());
+            meta
+        })
+        .collect()
+}
+
+#[test]
+fn a_soundtrack_with_a_composer_per_track_is_one_album() {
+    let tracks = cookies_bustle_gamerip();
+    let distinct_artists: std::collections::BTreeSet<&str> =
+        tracks.iter().filter_map(|t| t.artist.as_deref()).collect();
+    assert_eq!(
+        distinct_artists.len(),
+        4,
+        "the fixture must actually be the shattering case"
+    );
+
+    let mut library = Library::open_in_memory().expect("open");
+    library.add_tracks(tracks).expect("add");
+
+    let albums = library.albums();
+    assert_eq!(albums.len(), 1, "one album, not one per composer");
+    let album = &albums[0];
+    assert_eq!(album.artist, AlbumArtist::Named("RODIK"));
+    assert_eq!(album.title, Some("Cookie's Bustle OST (gamerip)"));
+    assert_eq!(album.editions.len(), 1);
+    assert_eq!(album.editions[0].tracks.len(), 6, "every cue is present");
+
+    // And the per-track credits survive the merge — they are the thing a
+    // collector-curator keeps a soundtrack for.
+    let credits: Vec<&str> = album.editions[0]
+        .tracks
+        .iter()
+        .filter_map(|t| t.artist.as_deref())
+        .collect();
+    assert_eq!(credits.len(), 6);
+    assert!(credits.contains(&"Katsuhiko Nakamichi"));
+}
+
+#[test]
+fn an_album_with_no_album_artist_but_one_artist_groups_as_before() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks(vec![
+            track(
+                "/m/1.flac",
+                "Miki Nagamatsu",
+                "Cookie's Bustle OST",
+                "RIVER",
+                6,
+            ),
+            track(
+                "/m/2.flac",
+                "Miki Nagamatsu",
+                "Cookie's Bustle OST",
+                "Alien Arena",
+                2,
+            ),
+        ])
+        .expect("add");
+
+    let albums = library.albums();
+    assert_eq!(albums.len(), 1);
+    assert_eq!(
+        albums[0].artist,
+        AlbumArtist::Named("Miki Nagamatsu"),
+        "with no album-artist tag the chain falls through to the artist, \
+         which is exactly the pre-v3 behaviour"
+    );
+}
+
+#[test]
+fn differing_artists_without_a_compilation_flag_stay_separate() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks(vec![
+            track("/m/a.flac", "Alpha", "Greatest Hits", "A-Side", 1),
+            track("/m/b.flac", "Beta", "Greatest Hits", "B-Side", 1),
+        ])
+        .expect("add");
+
+    // Nothing in either file says these belong together, and two artists
+    // who each released a "Greatest Hits" is far commoner than a compilation
+    // nobody tagged. Merging on title alone would be a guess; baz declines.
+    assert_eq!(library.albums().len(), 2);
+}
+
+#[test]
+fn a_flagged_compilation_with_differing_artists_becomes_one_various_album() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks(vec![
+            TrackMeta {
+                compilation: Some(true),
+                ..track(
+                    "/m/now/1.flac",
+                    "Alpha",
+                    "Now That's What I Call 42",
+                    "A",
+                    1,
+                )
+            },
+            TrackMeta {
+                compilation: Some(true),
+                ..track("/m/now/2.flac", "Beta", "Now That's What I Call 42", "B", 2)
+            },
+            TrackMeta {
+                compilation: Some(true),
+                ..track(
+                    "/m/now/3.flac",
+                    "Gamma",
+                    "Now That's What I Call 42",
+                    "C",
+                    3,
+                )
+            },
+        ])
+        .expect("add");
+
+    let albums = library.albums();
+    assert_eq!(albums.len(), 1, "the files said they belong together");
+    assert_eq!(
+        albums[0].artist,
+        AlbumArtist::Various,
+        "no name was given, so none is invented"
+    );
+    assert_eq!(albums[0].artist.name(), None);
+    assert_eq!(albums[0].editions[0].tracks.len(), 3);
+}
+
+#[test]
+fn a_compilation_names_itself_when_the_tagger_named_it() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks(vec![
+            TrackMeta {
+                album_artist: Some("Various Artists".to_owned()),
+                compilation: Some(true),
+                ..track("/m/cb/1.mp3", "Miki Nagamatsu", "Cookie's Bustle", "A", 1)
+            },
+            TrackMeta {
+                album_artist: Some("Various Artists".to_owned()),
+                compilation: Some(true),
+                ..track("/m/cb/2.mp3", "Kouhei Okamura", "Cookie's Bustle", "B", 2)
+            },
+        ])
+        .expect("add");
+
+    let albums = library.albums();
+    assert_eq!(albums.len(), 1);
+    // The owner's real files carry this exact tag. It is a *name*, not baz's
+    // compilation bucket, and the two must remain distinguishable.
+    assert_eq!(albums[0].artist, AlbumArtist::Named("Various Artists"));
+    assert_ne!(albums[0].artist, AlbumArtist::Various);
+}
+
+#[test]
+fn a_grouped_soundtrack_still_splits_into_editions_by_codec() {
+    // The two axes are independent: album artist decides what one album is,
+    // codec decides how many editions it has (ADR-0007).
+    let mut tracks = cookies_bustle_gamerip();
+    tracks.extend(cookies_bustle_gamerip().into_iter().map(|meta| TrackMeta {
+        path: PathBuf::from(meta.path.to_string_lossy().replace(".flac", ".m4a")),
+        format: Some(AudioFormat::Aac),
+        bit_depth: None,
+        bitrate: Some(256),
+        ..meta
+    }));
+
+    let mut library = Library::open_in_memory().expect("open");
+    library.add_tracks(tracks).expect("add");
+
+    let albums = library.albums();
+    assert_eq!(albums.len(), 1, "still one album");
+    assert_eq!(albums[0].artist, AlbumArtist::Named("RODIK"));
+    assert_eq!(albums[0].editions.len(), 2, "still two editions");
+    assert_eq!(
+        albums[0].default_edition().and_then(|e| e.format),
+        Some(AudioFormat::Flac),
+        "lossless still wins the default"
+    );
+    for edition in &albums[0].editions {
+        assert_eq!(edition.tracks.len(), 6);
+    }
+}
+
+#[test]
+fn shelf_order_puts_unknowns_first_and_unnamed_compilations_last() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks(vec![
+            track("/m/m.flac", "Middle", "Album", "One", 1),
+            TrackMeta {
+                compilation: Some(true),
+                ..track("/m/c.flac", "Someone", "Mixtape", "Two", 1)
+            },
+            bare("/m/stray.mp3"),
+        ])
+        .expect("add");
+
+    let albums = library.albums();
+    let artists: Vec<AlbumArtist<'_>> = albums.iter().map(|a| a.artist).collect();
+    assert_eq!(
+        artists,
+        [
+            AlbumArtist::Unknown,
+            AlbumArtist::Named("Middle"),
+            AlbumArtist::Various,
+        ]
+    );
+}
+
+#[test]
+fn a_distinct_album_artist_is_searchable() {
+    let mut library = Library::open_in_memory().expect("open");
+    library.add_tracks(cookies_bustle_gamerip()).expect("add");
+
+    // The name on the shelf tile must be a name search can find, or the
+    // filtered shelf contradicts the unfiltered one.
+    assert_eq!(library.search("rodik", 20).len(), 6);
+    assert_eq!(library.search("RODIK", 20).len(), 6);
+    // And the track artists are still searchable in their own right.
+    assert!(!library.search("Katsuhiko", 20).is_empty());
+}
+
+// ---------------------------------------------------------------------------
 // Schema migration
 // ---------------------------------------------------------------------------
 
@@ -682,12 +950,13 @@ fn a_v1_database_migrates_in_place_without_losing_anything() {
     let library = Library::open(&db).expect("a v1 database must open");
     assert_eq!(library.len(), 4, "every v1 row survives the upgrade");
 
-    // The schema really did move.
+    // The schema really did move — and all the way, v1 → v2 → v3, because
+    // migrations chain rather than jumping.
     let conn = rusqlite::Connection::open(&db).expect("raw open");
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
 
     let by_path = |needle: &str| {
         library
@@ -738,6 +1007,258 @@ fn a_v1_database_migrates_in_place_without_losing_anything() {
         passage.default_edition().and_then(|e| e.format),
         Some(AudioFormat::Flac)
     );
+}
+
+/// One row as the v2 schema stored it, for [`write_v2_database`].
+struct V2Row {
+    path: &'static str,
+    artist: &'static str,
+    album: &'static str,
+    title: &'static str,
+    track: u32,
+    year: u32,
+    duration_ns: i64,
+    format: &'static str,
+    bit_depth: Option<u32>,
+    sample_rate: u32,
+    bitrate: u32,
+}
+
+/// Build a genuine v2 database with the v2 schema and v2 statements only —
+/// no baz code involved. This is the shape of the `library.db` sitting on
+/// the owner's disk right now, contents included: the double rip that
+/// motivated editions, and the soundtrack that motivated album artists.
+fn write_v2_database(db: &std::path::Path) {
+    let conn = rusqlite::Connection::open(db).expect("create v2 db");
+    conn.execute_batch(
+        "
+        BEGIN;
+        CREATE TABLE tracks (
+            id          INTEGER PRIMARY KEY,
+            path        BLOB NOT NULL UNIQUE,
+            artist      TEXT,
+            album       TEXT,
+            title       TEXT,
+            track       INTEGER,
+            disc        INTEGER,
+            year        INTEGER,
+            duration_ns INTEGER,
+            format      TEXT,
+            bit_depth   INTEGER,
+            sample_rate INTEGER,
+            bitrate     INTEGER
+        ) STRICT;
+        PRAGMA user_version = 2;
+        COMMIT;
+        ",
+    )
+    .expect("v2 schema");
+
+    for row in v2_rows() {
+        conn.execute(
+            "INSERT INTO tracks
+                 (path, artist, album, title, track, disc, year, duration_ns,
+                  format, bit_depth, sample_rate, bitrate)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![
+                row.path.as_bytes(),
+                row.artist,
+                row.album,
+                row.title,
+                row.track,
+                row.year,
+                row.duration_ns,
+                row.format,
+                row.bit_depth,
+                row.sample_rate,
+                row.bitrate,
+            ],
+        )
+        .expect("insert v2 row");
+    }
+}
+
+/// The rows [`write_v2_database`] seeds: the owner's own library, minus the
+/// paths that only exist on his disk.
+fn v2_rows() -> [V2Row; 5] {
+    [
+        V2Row {
+            path: "/m/FLAC/Stan Rogers/Northwest Passage/01 - Northwest Passage.flac",
+            artist: "Stan Rogers",
+            album: "Northwest Passage",
+            title: "Northwest Passage",
+            track: 1,
+            year: 1981,
+            duration_ns: 261_000_000_000,
+            format: "flac",
+            bit_depth: Some(16),
+            sample_rate: 44_100,
+            bitrate: 900,
+        },
+        V2Row {
+            path: "/m/MP3/Stan Rogers/Northwest Passage/01 - Northwest Passage.mp3",
+            artist: "Stan Rogers",
+            album: "Northwest Passage",
+            title: "Northwest Passage",
+            track: 1,
+            year: 1981,
+            duration_ns: 261_000_000_000,
+            format: "mp3",
+            bit_depth: None,
+            sample_rate: 44_100,
+            bitrate: 320,
+        },
+        // The shattered soundtrack, exactly as the owner's v2 database holds
+        // it: same album, two different `ARTIST` strings, no album artist
+        // anywhere because v2 had nowhere to put one.
+        V2Row {
+            path: "/m/[GST] Cookie's Bustle/1. Main Menu.flac",
+            artist: "Kouhei Okamura, Masashi Matsumoto, Katsuhiko Nakamichi",
+            album: "Cookie's Bustle OST (gamerip)",
+            title: "Main Menu",
+            track: 1,
+            year: 1998,
+            duration_ns: 95_000_000_000,
+            format: "flac",
+            bit_depth: Some(16),
+            sample_rate: 44_100,
+            bitrate: 700,
+        },
+        V2Row {
+            path: "/m/[GST] Cookie's Bustle/As For Dreams.m4a",
+            artist: "Miki Nagamatsu, Kouhei Okamura, Masashi Matsumoto, Katsuhiko Nakamichi",
+            album: "Cookie's Bustle OST (gamerip)",
+            title: "As For Dreams (low quality)",
+            track: 2,
+            year: 1998,
+            duration_ns: 130_000_000_000,
+            format: "aac",
+            bit_depth: None,
+            sample_rate: 44_100,
+            bitrate: 256,
+        },
+        // Unicode everywhere, to prove the upgrade is not re-encoding text.
+        V2Row {
+            path: "/m/misc/Größenwahn/Debüt/03 Ærø — 序曲.wav",
+            artist: "Größenwahn",
+            album: "Debüt",
+            title: "Ærø — 序曲",
+            track: 3,
+            year: 1999,
+            duration_ns: 215_123_456_789,
+            format: "wav",
+            bit_depth: Some(24),
+            sample_rate: 96_000,
+            bitrate: 4_608,
+        },
+    ]
+}
+
+#[test]
+fn a_v2_database_migrates_in_place_without_losing_anything() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    write_v2_database(&db);
+
+    let library = Library::open(&db).expect("a v2 database must open");
+    assert_eq!(library.len(), 5, "every v2 row survives the upgrade");
+
+    let conn = rusqlite::Connection::open(&db).expect("raw open");
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("user_version");
+    assert_eq!(version, 3);
+
+    let by_path = |needle: &str| {
+        library
+            .tracks()
+            .find(|t| t.path.to_string_lossy().contains(needle))
+            .cloned()
+            .unwrap_or_else(|| panic!("{needle} must survive"))
+    };
+
+    // Every v2 column is intact, Unicode and encoding properties included.
+    let unicode = by_path("Größenwahn");
+    assert_eq!(unicode.artist.as_deref(), Some("Größenwahn"));
+    assert_eq!(unicode.album.as_deref(), Some("Debüt"));
+    assert_eq!(unicode.title.as_deref(), Some("Ærø — 序曲"));
+    assert_eq!(unicode.track, Some(3));
+    assert_eq!(unicode.disc, Some(1));
+    assert_eq!(unicode.year, Some(1999));
+    assert_eq!(unicode.duration, Some(Duration::new(215, 123_456_789)));
+    assert_eq!(unicode.format, Some(AudioFormat::Wav));
+    assert_eq!(unicode.bit_depth, Some(24));
+    assert_eq!(unicode.sample_rate, Some(96_000));
+    assert_eq!(unicode.bitrate, Some(4_608));
+
+    // The new columns are NULL, because nothing in a v2 database could
+    // honestly fill them — see `migrate_v2_to_v3`.
+    for track in library.tracks() {
+        assert_eq!(track.album_artist, None);
+        assert_eq!(track.compilation, None);
+    }
+
+    // Until the rescan, grouping is *exactly* the pre-v3 behaviour: the
+    // double rip is still one album with two editions, and the soundtrack is
+    // still shattered. The upgrade fixes nothing by itself and breaks
+    // nothing either.
+    let albums = library.albums();
+    let passage = albums
+        .iter()
+        .find(|a| a.title == Some("Northwest Passage"))
+        .expect("the double rip");
+    assert_eq!(passage.artist, AlbumArtist::Named("Stan Rogers"));
+    assert_eq!(passage.editions.len(), 2);
+    assert_eq!(
+        albums
+            .iter()
+            .filter(|a| a.title == Some("Cookie's Bustle OST (gamerip)"))
+            .count(),
+        2,
+        "two artist strings, two entries — the bug, faithfully preserved"
+    );
+}
+
+#[test]
+fn the_rescan_after_a_v2_upgrade_collapses_the_shattered_soundtrack() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    write_v2_database(&db);
+
+    let mut library = Library::open(&db).expect("open migrates to v3");
+    // What baz does on every launch: rescan the music folder and upsert. The
+    // files carry `ALBUMARTIST=RODIK`; v3 finally has somewhere to put it.
+    let rescanned: Vec<TrackMeta> = library
+        .tracks()
+        .filter(|t| t.album.as_deref() == Some("Cookie's Bustle OST (gamerip)"))
+        .cloned()
+        .map(|meta| TrackMeta {
+            album_artist: Some("RODIK".to_owned()),
+            ..meta
+        })
+        .collect();
+    assert_eq!(rescanned.len(), 2);
+    library.add_tracks(rescanned).expect("rescan batch");
+    assert_eq!(library.len(), 5, "an upsert, not a duplicate");
+
+    let albums = library.albums();
+    let gamerip: Vec<_> = albums
+        .iter()
+        .filter(|a| a.title == Some("Cookie's Bustle OST (gamerip)"))
+        .collect();
+    assert_eq!(gamerip.len(), 1, "two shelf entries became one");
+    assert_eq!(gamerip[0].artist, AlbumArtist::Named("RODIK"));
+    // One album, two codecs: the edition split is untouched by the merge.
+    assert_eq!(gamerip[0].editions.len(), 2);
+
+    // And it is durable.
+    drop(library);
+    let reopened = Library::open(&db).expect("reopen");
+    let stored = reopened
+        .tracks()
+        .find(|t| t.path.to_string_lossy().ends_with("1. Main Menu.flac"))
+        .expect("the track");
+    assert_eq!(stored.album_artist.as_deref(), Some("RODIK"));
 }
 
 #[test]

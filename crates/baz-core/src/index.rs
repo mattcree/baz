@@ -30,10 +30,13 @@
 //! # Search semantics
 //!
 //! [`Library::search`] is a literal, Unicode-aware case-insensitive
-//! substring match over each track's artist + album + title (folded with
-//! [`str::to_lowercase`]; full case folding such as `ß`/`SS` equivalence is
-//! out of scope for now). Results come back in library order — artist, album,
-//! disc, track, title, path — so repeated queries are deterministic. An
+//! substring match over each track's artist + album artist + album + title,
+//! folded with [`str::to_lowercase`] (full case folding such as `ß`/`SS`
+//! equivalence is out of scope for now). The album artist is included only
+//! when it differs from the artist, so the ordinary album adds nothing to
+//! the corpus a keystroke scans while the name on a soundtrack's tile stays
+//! findable. Results come back in library order — album artist, album, disc,
+//! track, title, path — so repeated queries are deterministic. An
 //! **empty query returns nothing**: every haystack contains the empty
 //! string, so the only honest answer would be the entire library truncated
 //! at `limit`, which would misrepresent a 100k-track library as `limit`
@@ -49,9 +52,10 @@
 //! walks the same chain from 0, so "created fresh" and "upgraded" can never
 //! drift into two different shapes.
 //!
-//! # Editions
+//! # Albums and editions
 //!
-//! [`Library::albums`] groups tracks into albums by artist + title, then
+//! [`Library::albums`] groups tracks into albums by **album artist** +
+//! title ([`AlbumArtist`], `docs/adr/0008-album-artist-grouping.md`), then
 //! splits each album by [`AudioFormat`] into [`Edition`]s: one shelf tile,
 //! one track list per format the collector actually owns. The ranking that
 //! decides which edition is the default is documented on
@@ -69,7 +73,7 @@ use rusqlite::{Connection, params};
 use crate::library::{AudioFormat, TrackMeta};
 
 /// The schema version this build reads and writes (`PRAGMA user_version`).
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// Rows per write transaction in [`Library::add_tracks`]. A scan yields tens
 /// of thousands of tracks; committing in batches keeps any single
@@ -110,13 +114,24 @@ const SCHEMA_V2_COLUMNS: &str = "
     ALTER TABLE tracks ADD COLUMN bitrate     INTEGER; -- kbit/s, VBR-averaged
 ";
 
+/// Version 3: the album-artist grouping key
+/// (`docs/adr/0008-album-artist-grouping.md`). Two more nullable columns,
+/// added rather than rebuilt, exactly as v2 was.
+///
+/// The transaction and the `user_version` bump are applied by
+/// [`migrate_v2_to_v3`].
+const SCHEMA_V3_COLUMNS: &str = "
+    ALTER TABLE tracks ADD COLUMN album_artist TEXT;    -- ALBUMARTIST/TPE2/aART
+    ALTER TABLE tracks ADD COLUMN compilation  INTEGER; -- 0/1 flag; NULL = unsaid
+";
+
 /// Insert-or-replace by path: a rescan of the same file updates its metadata
 /// instead of failing the batch or duplicating the track.
 const UPSERT_TRACK: &str = "
     INSERT INTO tracks
         (path, artist, album, title, track, disc, year, duration_ns,
-         format, bit_depth, sample_rate, bitrate)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+         format, bit_depth, sample_rate, bitrate, album_artist, compilation)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
     ON CONFLICT(path) DO UPDATE SET
         artist = excluded.artist,
         album = excluded.album,
@@ -128,12 +143,14 @@ const UPSERT_TRACK: &str = "
         format = excluded.format,
         bit_depth = excluded.bit_depth,
         sample_rate = excluded.sample_rate,
-        bitrate = excluded.bitrate
+        bitrate = excluded.bitrate,
+        album_artist = excluded.album_artist,
+        compilation = excluded.compilation
 ";
 
 const SELECT_ALL_TRACKS: &str = "
     SELECT path, artist, album, title, track, disc, year, duration_ns,
-           format, bit_depth, sample_rate, bitrate
+           format, bit_depth, sample_rate, bitrate, album_artist, compilation
     FROM tracks
 ";
 
@@ -280,6 +297,8 @@ impl Library {
                         meta.bit_depth,
                         meta.sample_rate,
                         meta.bitrate,
+                        meta.album_artist,
+                        meta.compilation,
                     ])?;
                 }
             }
@@ -295,8 +314,9 @@ impl Library {
     }
 
     /// Search the library: literal, case-insensitive substring match over
-    /// artist + album + title, capped at `limit` results, in library order
-    /// (artist, album, disc, track, title — see the [module docs](self)).
+    /// artist + album artist + album + title, capped at `limit` results, in
+    /// library order (album artist, album, disc, track, title — see the
+    /// [module docs](self)).
     ///
     /// An empty `query` returns no results, deliberately (module docs), and
     /// so does a query containing `\n` — that is the field/record separator
@@ -349,17 +369,20 @@ impl Library {
         self.index.tracks.is_empty()
     }
 
-    /// The shelf view: tracks grouped into albums, sorted by artist then
-    /// album title (case-insensitively), tracks within each album ordered by
-    /// disc, then track number, then title.
+    /// The shelf view: tracks grouped into albums, sorted by album artist
+    /// then album title (case-insensitively), tracks within each album
+    /// ordered by disc, then track number, then title.
     ///
-    /// The grouping key is artist + album (an album-artist tag can refine
-    /// this later), compared case-insensitively, so the same album title
-    /// under different artists stays separate. Tracks with an unknown artist
-    /// or album group under that unknown (`None`) key — all artist-less,
+    /// The grouping key is **album artist + album**, compared
+    /// case-insensitively, so the same album title under different artists
+    /// stays separate while a soundtrack whose every track names a different
+    /// composer stays *together*. The album artist of a track is resolved by
+    /// the fallback chain on [`AlbumArtist`]. Tracks with an unknown album
+    /// artist or album group under that unknown key — all artist-less,
     /// album-less strays share one shelf entry — and unknowns sort before
     /// known values, so they surface at the front rather than hiding at the
-    /// end of a long shelf.
+    /// end of a long shelf; compilations without a named album artist sort
+    /// after every named one, the other end of the same shelf.
     ///
     /// Each album is then split by codec into [`Album::editions`]: the same
     /// album ripped to FLAC *and* to MP3 is **one** entry with two editions,
@@ -367,15 +390,15 @@ impl Library {
     #[must_use]
     pub fn albums(&self) -> Vec<Album<'_>> {
         let mut albums: Vec<Album<'_>> = Vec::new();
-        let mut current_key: Option<(&Option<String>, &Option<String>)> = None;
-        // Library order sorts by folded (artist, album, ...) first, so each
-        // album is one consecutive run, already in in-album track order.
+        let mut current_key: Option<(&ArtistKey, &Option<String>)> = None;
+        // Library order sorts by folded (album artist, album, ...) first, so
+        // each album is one consecutive run, already in in-album track order.
         for track in self.index.in_order() {
             let key = (&track.key.artist, &track.key.album);
             if current_key != Some(key) {
                 current_key = Some(key);
                 albums.push(Album {
-                    artist: track.meta.artist.as_deref(),
+                    artist: AlbumArtist::of(&track.meta),
                     title: track.meta.album.as_deref(),
                     year: None,
                     editions: Vec::new(),
@@ -395,13 +418,88 @@ impl Library {
     }
 }
 
+/// Who an album is filed under — the grouping key's artist half, and the
+/// name the shelf tile and side-panel header show.
+///
+/// This is deliberately **not** an `Option<String>` carrying a
+/// `"Various Artists"` sentinel. The owner's own library contains a file
+/// whose `TPE2` frame literally reads `Various Artists`, so a magic string
+/// could not tell "the tagger named this album's artist" from "baz gave up
+/// and called it a compilation" — a distinction that decides whether the
+/// name on screen came from the user's own curation or from us. The enum
+/// makes the two unconfusable by construction.
+///
+/// # The fallback chain
+///
+/// [`AlbumArtist::of`] resolves one track, in this order
+/// (`docs/adr/0008-album-artist-grouping.md`):
+///
+/// 1. **The album-artist tag** ([`TrackMeta::album_artist`]) →
+///    [`AlbumArtist::Named`]. This is the tag that exists for exactly this
+///    problem, and every serious library manager writes it.
+/// 2. **The compilation flag** ([`TrackMeta::compilation`]) →
+///    [`AlbumArtist::Various`]. A file that says "I am a compilation"
+///    without naming an album artist has told us that its track artist is
+///    *not* the album's artist; grouping by the track artist would be
+///    following a value the file itself disclaimed.
+/// 3. **The track artist** → [`AlbumArtist::Named`]. An album whose tracks
+///    share one artist — the overwhelming majority — groups exactly as it
+///    did before album artists existed.
+/// 4. **Nothing** → [`AlbumArtist::Unknown`].
+///
+/// The chain is per *track* rather than per album on purpose: it is the
+/// grouping key, so it has to be computable before the album exists. Step 3
+/// is what makes "if the album's tracks share one artist, that artist" fall
+/// out for free — tracks that share an artist share a key, and tracks that
+/// do not are only merged when step 1 or 2 gave a reason to merge them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AlbumArtist<'a> {
+    /// A named album artist: the album-artist tag, or the track artist when
+    /// the file declares no album artist.
+    Named(&'a str),
+    /// A compilation with no named album artist — tracks by different
+    /// artists that the files themselves flag as belonging to one release.
+    Various,
+    /// Nothing is known: no album artist, no compilation flag, no artist.
+    Unknown,
+}
+
+impl<'a> AlbumArtist<'a> {
+    /// Resolve one track's album artist by the fallback chain documented on
+    /// [`AlbumArtist`].
+    #[must_use]
+    pub fn of(meta: &'a TrackMeta) -> Self {
+        if let Some(name) = meta.album_artist.as_deref() {
+            return Self::Named(name);
+        }
+        if meta.compilation == Some(true) {
+            return Self::Various;
+        }
+        match meta.artist.as_deref() {
+            Some(name) => Self::Named(name),
+            None => Self::Unknown,
+        }
+    }
+
+    /// The name, when there is one. `None` for a compilation or an unknown
+    /// — neither has a name, and inventing one is the caller's decision to
+    /// make in the language of its own presentation layer.
+    #[must_use]
+    pub fn name(self) -> Option<&'a str> {
+        match self {
+            Self::Named(name) => Some(name),
+            Self::Various | Self::Unknown => None,
+        }
+    }
+}
+
 /// One album on the shelf, as grouped by [`Library::albums`]. Borrows from
 /// the library; a snapshot to render, not a place to mutate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Album<'a> {
-    /// Artist name as first seen on the album's tracks; `None` for the
-    /// unknown-artist group.
-    pub artist: Option<&'a str>,
+    /// Who the album is filed under, resolved by [`AlbumArtist::of`] from
+    /// the album's first track (every track in the album shares this key).
+    pub artist: AlbumArtist<'a>,
     /// Album title as first seen; `None` for the unknown-album group.
     pub title: Option<&'a str>,
     /// Release year: the first year any track on the album declares.
@@ -599,11 +697,11 @@ impl SearchIndex {
         }
     }
 
-    /// Re-sort storage into library order — folded artist, album, disc,
-    /// track, title, with the (unique) path as the final tiebreak so the
-    /// order is total and deterministic — and re-map paths to their new
-    /// positions. `None` sorts before `Some`, so unknown fields group at
-    /// the front.
+    /// Re-sort storage into library order — folded album artist, album,
+    /// disc, track, title, with the (unique) path as the final tiebreak so
+    /// the order is total and deterministic — and re-map paths to their new
+    /// positions. Unknowns sort before known values, so they group at the
+    /// front.
     fn rebuild_order(&mut self) {
         self.tracks.sort_unstable_by(|a, b| {
             a.key
@@ -640,8 +738,12 @@ impl SearchIndex {
 /// keystroke costs a substring scan and nothing else.
 struct IndexedTrack {
     meta: TrackMeta,
-    /// Case-folded `artist\nalbum\ntitle` (the separator keeps a query from
-    /// matching across field boundaries).
+    /// Case-folded `artist\nalbum artist\nalbum\ntitle` (the separator keeps
+    /// a query from matching across field boundaries). The album-artist
+    /// slot is left empty when it would only repeat the artist, which is the
+    /// overwhelming majority of tracks — so the corpus a search scans grows
+    /// only for the albums that actually have a distinct album artist, and
+    /// searching "RODIK" finds the album whose tile says RODIK.
     haystack: String,
     key: SortKey,
 }
@@ -649,17 +751,22 @@ struct IndexedTrack {
 impl IndexedTrack {
     fn new(meta: TrackMeta) -> Self {
         let artist = meta.artist.as_deref().map(str::to_lowercase);
+        let album_artist = meta
+            .album_artist
+            .as_deref()
+            .map(str::to_lowercase)
+            .filter(|name| Some(name) != artist.as_ref());
         let album = meta.album.as_deref().map(str::to_lowercase);
         let title = meta.title.as_deref().map(str::to_lowercase);
         let mut haystack = String::new();
-        for part in [&artist, &album, &title] {
+        for part in [&artist, &album_artist, &album, &title] {
             if let Some(text) = part {
                 haystack.push_str(text);
             }
             haystack.push('\n');
         }
         let key = SortKey {
-            artist,
+            artist: ArtistKey::of(&meta),
             album,
             disc: meta.disc,
             track: meta.track,
@@ -673,15 +780,43 @@ impl IndexedTrack {
     }
 }
 
-/// Library-order sort key: case-folded strings, `None` first (see
+/// Library-order sort key: case-folded strings, unknowns first (see
 /// [`SearchIndex::rebuild_order`]). Field order *is* the sort order.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct SortKey {
-    artist: Option<String>,
+    artist: ArtistKey,
     album: Option<String>,
     disc: Option<u32>,
     track: Option<u32>,
     title: Option<String>,
+}
+
+/// The sortable, case-folded form of [`AlbumArtist`] — the album grouping
+/// key's artist half.
+///
+/// Variant order *is* shelf order: unknowns first (a stray with no metadata
+/// should be visible at the front, not buried), then named artists
+/// alphabetically, then unnamed compilations. Both anonymous buckets sit at
+/// an end of the shelf rather than somewhere in the middle of the alphabet
+/// where their names would have landed by accident.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum ArtistKey {
+    /// Nothing known — [`AlbumArtist::Unknown`].
+    Unknown,
+    /// A case-folded name — [`AlbumArtist::Named`].
+    Named(String),
+    /// A compilation with no named album artist — [`AlbumArtist::Various`].
+    Various,
+}
+
+impl ArtistKey {
+    fn of(meta: &TrackMeta) -> Self {
+        match AlbumArtist::of(meta) {
+            AlbumArtist::Named(name) => Self::Named(name.to_lowercase()),
+            AlbumArtist::Various => Self::Various,
+            AlbumArtist::Unknown => Self::Unknown,
+        }
+    }
 }
 
 /// Run pending schema migrations, stepwise, up to [`SCHEMA_VERSION`].
@@ -690,8 +825,8 @@ struct SortKey {
 /// `user_version`, so versions chain automatically: a v3 adds a `2 => ...`
 /// arm and bumps [`SCHEMA_VERSION`], nothing else.
 ///
-/// A brand-new database walks the *whole* chain (0 → v1 → v2) rather than
-/// being stamped with the current schema directly. That costs a few
+/// A brand-new database walks the *whole* chain (0 → v1 → v2 → v3) rather
+/// than being stamped with the current schema directly. That costs a few
 /// statements once, and buys the guarantee that a freshly created database
 /// and an upgraded one are byte-identical in shape — no class of "works on a
 /// new install, breaks on an old library" bug can hide between the two
@@ -702,6 +837,7 @@ fn migrate(conn: &Connection) -> Result<(), IndexError> {
         match version {
             0 => conn.execute_batch(SCHEMA_V1)?,
             1 => migrate_v1_to_v2(conn)?,
+            2 => migrate_v2_to_v3(conn)?,
             SCHEMA_VERSION => return Ok(()),
             found => return Err(IndexError::SchemaTooNew { found }),
         }
@@ -720,6 +856,34 @@ fn migrate_v1_to_v2(conn: &Connection) -> Result<(), IndexError> {
     tx.execute_batch(SCHEMA_V2_COLUMNS)?;
     backfill_formats(&tx)?;
     tx.pragma_update(None, "user_version", 2)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// v2 → v3: add the album-artist grouping columns.
+///
+/// Both columns are left `NULL` for existing rows, and deliberately so.
+/// Neither can be derived from anything already in the database — an album
+/// artist lives in the file's tags and nowhere else, and inventing one from
+/// the stored track artist would be indistinguishable, forever after, from
+/// a value the user's tagger actually wrote. The v2 backfill could read a
+/// file *extension*; there is no equivalent here, and an upgrade must not
+/// turn into a full library re-read at startup.
+///
+/// `NULL` is self-healing rather than permanent, exactly as v2's was: baz
+/// rescans its music folder on every start and [`Library::add_tracks`]
+/// upserts, so the first scan after the upgrade fills in every surviving
+/// file's real album artist. Until then, [`AlbumArtist::of`] falls through
+/// to the track artist and grouping is precisely the pre-v3 behavior — the
+/// upgrade cannot make the shelf worse, only later.
+///
+/// The `ALTER TABLE`s and the `user_version` bump are one transaction
+/// (SQLite's DDL is transactional), so an interrupted upgrade leaves a v2
+/// database that the next open migrates again.
+fn migrate_v2_to_v3(conn: &Connection) -> Result<(), IndexError> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(SCHEMA_V3_COLUMNS)?;
+    tx.pragma_update(None, "user_version", 3)?;
     tx.commit()?;
     Ok(())
 }
@@ -797,6 +961,8 @@ fn row_to_meta(row: &rusqlite::Row<'_>) -> Result<TrackMeta, IndexError> {
         bit_depth: row.get(9)?,
         sample_rate: row.get(10)?,
         bitrate: row.get(11)?,
+        album_artist: row.get(12)?,
+        compilation: row.get(13)?,
     })
 }
 
@@ -880,12 +1046,14 @@ mod tests {
         assert_eq!(back, path);
     }
 
-    #[test]
-    fn haystack_separates_fields_and_folds_case() {
-        let track = IndexedTrack::new(TrackMeta {
+    /// A track with nothing but a path, for building fixtures from.
+    fn bare_meta() -> TrackMeta {
+        TrackMeta {
             path: PathBuf::from("/m/a.flac"),
-            artist: Some("Größenwahn".to_owned()),
-            album: Some("LIVE".to_owned()),
+            artist: None,
+            album_artist: None,
+            compilation: None,
+            album: None,
             title: None,
             track: None,
             disc: None,
@@ -895,10 +1063,108 @@ mod tests {
             bit_depth: None,
             sample_rate: None,
             bitrate: None,
+        }
+    }
+
+    #[test]
+    fn haystack_separates_fields_and_folds_case() {
+        let track = IndexedTrack::new(TrackMeta {
+            artist: Some("Größenwahn".to_owned()),
+            album: Some("LIVE".to_owned()),
+            ..bare_meta()
         });
-        assert_eq!(track.haystack, "größenwahn\nlive\n\n");
+        assert_eq!(track.haystack, "größenwahn\n\nlive\n\n");
         // The separator keeps queries from matching across field boundaries.
         assert!(!track.haystack.contains("wahnlive"));
+    }
+
+    #[test]
+    fn haystack_carries_a_distinct_album_artist_but_never_repeats_the_artist() {
+        // A soundtrack: the album is filed under a name no track artist has.
+        let soundtrack = IndexedTrack::new(TrackMeta {
+            artist: Some("Kouhei Okamura".to_owned()),
+            album_artist: Some("RODIK".to_owned()),
+            album: Some("Cookie's Bustle OST (gamerip)".to_owned()),
+            ..bare_meta()
+        });
+        assert!(
+            soundtrack.haystack.contains("rodik"),
+            "searching the name on the tile must find the album"
+        );
+
+        // The ordinary album: album artist == artist, so the slot stays
+        // empty rather than doubling every record in the corpus.
+        let ordinary = IndexedTrack::new(TrackMeta {
+            artist: Some("Stan Rogers".to_owned()),
+            album_artist: Some("STAN ROGERS".to_owned()),
+            album: Some("Northwest Passage".to_owned()),
+            ..bare_meta()
+        });
+        assert_eq!(ordinary.haystack, "stan rogers\n\nnorthwest passage\n\n");
+    }
+
+    #[test]
+    fn album_artist_resolution_follows_the_documented_chain() {
+        let tagged = TrackMeta {
+            artist: Some("Kouhei Okamura".to_owned()),
+            album_artist: Some("RODIK".to_owned()),
+            compilation: Some(true),
+            ..bare_meta()
+        };
+        assert_eq!(
+            AlbumArtist::of(&tagged),
+            AlbumArtist::Named("RODIK"),
+            "a named album artist outranks every other signal"
+        );
+
+        let flagged = TrackMeta {
+            artist: Some("Kouhei Okamura".to_owned()),
+            compilation: Some(true),
+            ..bare_meta()
+        };
+        assert_eq!(AlbumArtist::of(&flagged), AlbumArtist::Various);
+        assert_eq!(AlbumArtist::of(&flagged).name(), None);
+
+        let ordinary = TrackMeta {
+            artist: Some("Stan Rogers".to_owned()),
+            compilation: Some(false),
+            ..bare_meta()
+        };
+        assert_eq!(
+            AlbumArtist::of(&ordinary),
+            AlbumArtist::Named("Stan Rogers")
+        );
+
+        assert_eq!(AlbumArtist::of(&bare_meta()), AlbumArtist::Unknown);
+        assert_eq!(AlbumArtist::of(&bare_meta()).name(), None);
+
+        // A tag that literally reads "Various Artists" is a *name* the user's
+        // tagger wrote, not baz's compilation bucket. The owner's library has
+        // one; the two must stay distinguishable.
+        let literal = TrackMeta {
+            album_artist: Some("Various Artists".to_owned()),
+            ..bare_meta()
+        };
+        assert_eq!(
+            AlbumArtist::of(&literal),
+            AlbumArtist::Named("Various Artists")
+        );
+        assert_ne!(AlbumArtist::of(&literal), AlbumArtist::Various);
+    }
+
+    #[test]
+    fn artist_keys_put_both_anonymous_buckets_at_the_ends_of_the_shelf() {
+        let mut keys = [
+            ArtistKey::Various,
+            ArtistKey::Named("zeta".to_owned()),
+            ArtistKey::Unknown,
+            ArtistKey::Named("alpha".to_owned()),
+        ];
+        keys.sort();
+        assert!(matches!(keys[0], ArtistKey::Unknown));
+        assert!(matches!(&keys[1], ArtistKey::Named(n) if n == "alpha"));
+        assert!(matches!(&keys[2], ArtistKey::Named(n) if n == "zeta"));
+        assert!(matches!(keys[3], ArtistKey::Various));
     }
 
     #[test]
@@ -914,18 +1180,8 @@ mod tests {
     #[test]
     fn duration_nanos_conversion_is_exact() {
         let meta = TrackMeta {
-            path: PathBuf::from("/m/a.flac"),
-            artist: None,
-            album: None,
-            title: None,
-            track: None,
-            disc: None,
-            year: None,
             duration: Some(Duration::new(215, 123_456_789)),
-            format: None,
-            bit_depth: None,
-            sample_rate: None,
-            bitrate: None,
+            ..bare_meta()
         };
         let nanos = duration_to_nanos(&meta).expect("convert").expect("some");
         assert_eq!(nanos, 215_123_456_789);

@@ -31,6 +31,7 @@ use std::time::Duration;
 
 use lofty::file::{FileType, TaggedFile};
 use lofty::prelude::*;
+use lofty::tag::{ItemKey, Tag};
 
 pub mod inference;
 
@@ -154,6 +155,36 @@ pub struct TrackMeta {
     pub path: PathBuf,
     /// Track artist, from tags or else the grandparent directory.
     pub artist: Option<String>,
+    /// Album artist — who the *album* is filed under, as distinct from who
+    /// performs an individual track. This is the tag that keeps a
+    /// soundtrack or a compilation from shattering into one shelf entry per
+    /// composer (`docs/adr/0008-album-artist-grouping.md`), read from
+    /// whichever spelling the container uses: Vorbis `ALBUMARTIST` (and the
+    /// non-standard `ALBUM ARTIST`), `ID3v2` `TPE2`, MP4 `aART`, APE
+    /// `Album Artist`.
+    ///
+    /// `None` means the file did not say. It is **not** a claim that the
+    /// album artist equals the track artist — that fallback is a grouping
+    /// decision ([`crate::index::AlbumArtist`]), made where the album's
+    /// whole track list is visible, not guessed at here.
+    ///
+    /// Folder inference fills this exactly when it fills
+    /// [`TrackMeta::artist`] — from the grandparent directory of an
+    /// `Artist/Album/track` layout — so a folder-organised library with no
+    /// tags at all still groups correctly.
+    pub album_artist: Option<String>,
+    /// The file's compilation flag: `ID3v2` `TCMP`, MP4 `cpil`, Vorbis
+    /// `COMPILATION`, APE `Compilation`.
+    ///
+    /// It earns its place by making one grouping case decidable that
+    /// nothing else can decide: tracks by *different* artists that belong
+    /// to one album and carry no album-artist tag. Without a signal, two
+    /// artists who each released a "Greatest Hits" would merge into one
+    /// shelf entry; with it, a flagged compilation groups under
+    /// [`crate::index::AlbumArtist::Various`] instead.
+    ///
+    /// `None` is "the file said nothing", distinct from `Some(false)`.
+    pub compilation: Option<bool>,
     /// Album title, from tags or else the parent directory.
     pub album: Option<String>,
     /// Track title, from tags or else the filename.
@@ -310,23 +341,42 @@ fn build_meta(root: &Path, path: PathBuf, file: &TaggedFile) -> TrackMeta {
     let inferred = inference::infer_from_relative_path(relative);
 
     let tag = file.primary_tag().or_else(|| file.first_tag());
-    let (artist, album, title, track, disc, year) = match tag {
+    let (artist, album_artist, compilation, album, title, track, disc, year) = match tag {
         Some(tag) => (
-            clean_text(tag.artist()),
-            clean_text(tag.album()),
-            clean_text(tag.title()),
+            tag.artist().as_deref().and_then(clean_str),
+            album_artist(tag),
+            compilation_flag(tag),
+            tag.album().as_deref().and_then(clean_str),
+            tag.title().as_deref().and_then(clean_str),
             nonzero(tag.track()),
             nonzero(tag.disk()),
             nonzero(tag.year()),
         ),
-        None => (None, None, None, None, None, None),
+        None => (None, None, None, None, None, None, None, None),
     };
 
     let properties = file.properties();
     let duration = properties.duration();
 
+    // Inference fills the album artist on exactly the terms it fills the
+    // track artist: only when the tags left *both* blank. A file that names
+    // its artist but not its album artist is trusted over its folder — the
+    // "Beatles/" directory must not overrule an `ARTIST=The Beatles` tag —
+    // and the album-artist fallback chain (`crate::index::AlbumArtist`)
+    // reaches that tag anyway.
+    let inferred_artist = inferred.artist;
+    let album_artist = album_artist.or_else(|| {
+        if artist.is_none() {
+            inferred_artist.clone()
+        } else {
+            None
+        }
+    });
+
     TrackMeta {
-        artist: artist.or(inferred.artist),
+        artist: artist.or(inferred_artist),
+        album_artist,
+        compilation,
         album: album.or(inferred.album),
         title: title.or(inferred.title),
         track: track.or(inferred.track),
@@ -375,13 +425,59 @@ fn detect_format(file: &TaggedFile) -> Option<AudioFormat> {
     }
 }
 
+/// The album-artist tag, whatever the container calls it.
+///
+/// lofty's [`ItemKey::AlbumArtist`] already covers the mappings that matter
+/// — Vorbis `ALBUMARTIST`, `ID3v2` `TPE2`, MP4 `aART`, APE `Album Artist` —
+/// so the common case is one lookup. The second pass exists for the one
+/// spelling real files use that no standard blesses and lofty therefore
+/// leaves as an unmapped key: Vorbis comments written `ALBUM ARTIST` (or
+/// `Album_Artist`) by older taggers. Punctuation-insensitive matching is
+/// confined to that fallback, so a mapped tag is never second-guessed.
+fn album_artist(tag: &Tag) -> Option<String> {
+    if let Some(name) = tag.get_string(&ItemKey::AlbumArtist).and_then(clean_str) {
+        return Some(name);
+    }
+    tag.items()
+        .filter(|item| matches!(item.key(), ItemKey::Unknown(key) if is_album_artist_key(key)))
+        .find_map(|item| item.value().text().and_then(clean_str))
+}
+
+/// Whether an unmapped tag key is a spelling of "album artist" — spaces and
+/// underscores ignored, ASCII case ignored.
+fn is_album_artist_key(key: &str) -> bool {
+    let squashed: String = key.chars().filter(|c| !matches!(c, ' ' | '_')).collect();
+    squashed.eq_ignore_ascii_case("albumartist")
+}
+
+/// The compilation flag, if the file sets one. See
+/// [`TrackMeta::compilation`] for why it is read at all.
+fn compilation_flag(tag: &Tag) -> Option<bool> {
+    tag.get_string(&ItemKey::FlagCompilation)
+        .and_then(parse_flag)
+}
+
+/// Parse a boolean tag value. Containers disagree on the spelling — MP4
+/// stores a real boolean that lofty surfaces as `"1"`/`"0"`, `ID3v2` `TCMP`
+/// and Vorbis `COMPILATION` are free text — so the spellings actually found
+/// in the wild are accepted and anything else is `None` rather than
+/// silently false.
+fn parse_flag(value: &str) -> Option<bool> {
+    let value = value.trim();
+    if value == "1" || value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("yes") {
+        return Some(true);
+    }
+    if value == "0" || value.eq_ignore_ascii_case("false") || value.eq_ignore_ascii_case("no") {
+        return Some(false);
+    }
+    None
+}
+
 /// Messy-library hygiene: a tag field that is present but blank (or
 /// whitespace) counts as absent, so inference can fill it.
-fn clean_text(value: Option<std::borrow::Cow<'_, str>>) -> Option<String> {
-    value.and_then(|s| {
-        let trimmed = s.trim();
-        (!trimmed.is_empty()).then(|| trimmed.to_owned())
-    })
+fn clean_str(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
 /// Numeric tag hygiene: `0` conventionally means "unset" for track/disc/year.
@@ -445,10 +541,44 @@ mod tests {
 
     #[test]
     fn blank_and_zero_tag_values_count_as_absent() {
-        assert_eq!(clean_text(Some("  ".into())), None);
-        assert_eq!(clean_text(Some(" x ".into())), Some("x".to_owned()));
-        assert_eq!(clean_text(None), None);
+        assert_eq!(clean_str("  "), None);
+        assert_eq!(clean_str(" x "), Some("x".to_owned()));
+        assert_eq!(clean_str(""), None);
         assert_eq!(nonzero(Some(0)), None);
         assert_eq!(nonzero(Some(7)), Some(7));
+    }
+
+    #[test]
+    fn non_standard_album_artist_spellings_are_recognized() {
+        for spelling in [
+            "ALBUM ARTIST",
+            "Album Artist",
+            "album artist",
+            "ALBUM_ARTIST",
+            "AlbumArtist",
+        ] {
+            assert!(
+                is_album_artist_key(spelling),
+                "{spelling} is an album-artist key in the wild"
+            );
+        }
+        // Neighbouring keys must not be swallowed.
+        for other in ["ALBUMARTISTSORT", "ALBUM ARTISTS", "ARTIST", "ALBUM", ""] {
+            assert!(!is_album_artist_key(other), "{other} is a different tag");
+        }
+    }
+
+    #[test]
+    fn compilation_flag_spellings() {
+        assert_eq!(parse_flag("1"), Some(true));
+        assert_eq!(parse_flag(" true "), Some(true));
+        assert_eq!(parse_flag("Yes"), Some(true));
+        assert_eq!(parse_flag("0"), Some(false));
+        assert_eq!(parse_flag("FALSE"), Some(false));
+        assert_eq!(parse_flag("no"), Some(false));
+        // Anything else is "the file did not say", never a silent false.
+        assert_eq!(parse_flag(""), None);
+        assert_eq!(parse_flag("2"), None);
+        assert_eq!(parse_flag("maybe"), None);
     }
 }
