@@ -14,6 +14,16 @@
 - **Per-album edition preference should persist** once the library DB is the
   right home for it (deferred in ADR-0007: persisting today would mean taking a
   TOML-parser dependency for a preference that belongs in a database column).
+- **A volume slider** *(owner, 2026-08-07)* — wanted, but it collides with
+  ADR-0009's bit-perfect default and must not be built naively. Scaling samples
+  in software is by definition no longer bit-perfect (and at 16-bit it costs
+  real resolution unless dithered). The resolution to design, not assume:
+  prefer **device/hardware volume** where the backend exposes it, so the stream
+  stays untouched; fall back to software gain only when it doesn't, and say so
+  through the existing `Event::SignalPath` mechanism — the same quiet,
+  non-alarming channel the rate-conversion note uses. A "unity / bit-perfect"
+  position on the control should be reachable and obvious. Worth an ADR when it
+  lands, since it amends ADR-0009's guarantee.
 
 ## Known gaps in shipped features
 
