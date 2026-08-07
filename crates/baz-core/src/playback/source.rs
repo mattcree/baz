@@ -28,7 +28,15 @@
 //!   LAME tag carries no trim metadata anywhere in the bitstream; it decodes
 //!   with its delay and padding intact — there is nothing to honestly trim
 //!   by, so no heuristic trim is attempted.
-//! - **AAC**: not enabled — see [`crate::playback`] module docs.
+//! - **ALAC in MP4**: nothing to trim. `n_frames` (the `mdhd` media
+//!   duration) is the exact stream length and the codec is lossless, so
+//!   decode is bit-exact and the cap below is a no-op.
+//! - **AAC in MP4**: Symphonia's ISO-MP4 reader is *not* gapless-capable and
+//!   ignores `enable_gapless`. It applies neither the edit list nor
+//!   `iTunSMPB`, so the encoder's priming frames arrive as ordinary audio;
+//!   `n_frames` counts them. Measured excess over the source: 1024 frames
+//!   (23.2 ms at 44.1 kHz) with ffmpeg's native AAC encoder. See
+//!   [`crate::playback`] for the full statement and the tests that pin it.
 //!
 //! Because the reader/decoder pair already applies the trim when gapless is
 //! enabled, this module must **not** apply `codec_params.delay` again (MP3
@@ -37,12 +45,39 @@
 //! `n_frames`, which is a no-op for well-formed files and stops overrun on
 //! streams that decode to more frames than their header declared.
 //!
+//! # What MP4 does not declare
+//!
+//! WAV, FLAC and MP3 describe their audio fully in the container header. MP4
+//! does not, and two gaps have to be closed before the first block is
+//! emitted:
+//!
+//! - **Channel layout** is absent for AAC and ALAC — it lives in the codec's
+//!   own setup data (the `AudioSpecificConfig`, the ALAC magic cookie), which
+//!   only the decoder parses.
+//! - **Sample rate** is present but can be wrong for our purposes: an HE-AAC
+//!   sample entry advertises the SBR *output* rate, while Symphonia 0.5
+//!   implements no SBR and hands back the AAC-LC core at half of it.
+//!
+//! Both are settled at open time by `AudioSource::probe_first_packet`, which
+//! decodes the first packet that yields audio and reads the answers off the
+//! decoder's own buffer. The probed frames are kept, not discarded, so the
+//! probe costs no audio and needs no rewind. When the decoder's rate
+//! disagrees with the container's, the decoder wins and the emission cap is
+//! rescaled through the same ratio — the cap arrives as a count in the
+//! container's timeline, and time is what the two timelines agree on.
+//!
+//! One more MP4 wrinkle is settled next to it: an MP4 lists *every* track, so
+//! `default_track` (the container's first) is the video track in a `.mp4`.
+//! [`AudioSource::open`] falls back to the first track that declares a sample
+//! rate, because `AUDIO_EXTENSIONS` accepts `.mp4` and a file the shelf lists
+//! has to play.
+//!
 //! # Seeking
 //!
 //! [`AudioSource::seek`] is sample-accurate and shares the trim timeline
 //! above. `FormatReader::seek` in [`SeekMode::Accurate`] positions the reader
 //! at a *packet boundary at or before* the requested frame and reports both
-//! numbers (`required_ts`, `actual_ts`); all three enabled formats agree on
+//! numbers (`required_ts`, `actual_ts`); every enabled format agrees on
 //! that contract, and for MP3 both are already delay-shifted so the seek
 //! timeline is the same post-trim timeline `next_block` emits. The residue —
 //! `required_ts - actual_ts` frames of the first packet(s), which for MP3
@@ -86,6 +121,16 @@ impl DecodedAudio {
     }
 }
 
+/// What a decoded packet says about the stream — the answers a container may
+/// have withheld (see [`AudioSource::probe_first_packet`]).
+#[derive(Debug, Clone, Copy)]
+struct ProbedSpec {
+    /// Channels in the decoder's output buffer.
+    channels: usize,
+    /// Sample rate of the decoder's output buffer, in Hz.
+    rate: u32,
+}
+
 /// Streaming decoder for one audio file, yielding interleaved stereo f32.
 pub struct AudioSource {
     format: Box<dyn FormatReader>,
@@ -96,6 +141,10 @@ pub struct AudioSource {
     source_channels: usize,
     /// Reusable native-interleaved decode buffer.
     sample_buf: Option<SampleBuffer<f32>>,
+    /// Frames sitting in [`Self::sample_buf`] that have been decoded but not
+    /// yet emitted. Non-zero only between the open-time channel probe (see
+    /// [`Self::from_media_source`]) and the first [`Self::next_block`].
+    pending_frames: u64,
     /// Reusable stereo output block returned by [`Self::next_block`].
     block: Vec<f32>,
     /// Frames received from the decoder so far (post Symphonia's own gapless
@@ -103,7 +152,10 @@ pub struct AudioSource {
     frames_seen: u64,
     /// Emission cap: `codec_params.n_frames` if the header declares it. With
     /// gapless enabled this is the post-trim count for MP3 and the exact
-    /// stream length for WAV/FLAC; either way, exact.
+    /// stream length for WAV/FLAC/ALAC; for AAC in MP4 it is the container's
+    /// media duration, which counts the untrimmed encoder delay (module
+    /// docs). In every case it is the count this source will actually emit,
+    /// which is what makes it usable as a duration.
     emit_cap: Option<u64>,
     /// Frames still to be discarded from the front of the decoder's output
     /// after a [`Self::seek`] (module docs). Zero on the un-seeked path, so
@@ -112,7 +164,14 @@ pub struct AudioSource {
 }
 
 impl AudioSource {
-    /// Open and probe a file, ready to decode its default track.
+    /// Open and probe a file, ready to decode its audio track.
+    ///
+    /// Normally that is the container's default track; in a multi-track
+    /// container (a `.mp4`, where the video track comes first) it is the
+    /// first track that declares a sample rate. For MP4 this also decodes the
+    /// first audio packet, to learn the channel layout and true sample rate
+    /// the container leaves out — see the module docs. No audio is lost to
+    /// that probe.
     ///
     /// # Errors
     ///
@@ -159,21 +218,34 @@ impl AudioSource {
             &MetadataOptions::default(),
         )?;
         let format = probed.format;
-        let track = format
-            .default_track()
-            .ok_or(PlaybackError::NoDefaultTrack)?;
+        // Pick the track to play. Symphonia's `default_track` is the
+        // container's first, which is right for every single-stream audio
+        // file — but an MP4 lists *all* its tracks and a `.mp4` puts the
+        // video track first. The library scans `.mp4`/`.m4a` by extension, so
+        // "the first track declares no sample rate" cannot be the end of the
+        // story: fall back to the first track that does declare one, i.e. the
+        // audio. A container with tracks but no audio among them is
+        // `UnknownSampleRate`; one with no tracks at all, `NoDefaultTrack`.
+        let track = match format.default_track() {
+            Some(t) if t.codec_params.sample_rate.is_some() => t,
+            Some(_) => format
+                .tracks()
+                .iter()
+                .find(|t| t.codec_params.sample_rate.is_some())
+                .ok_or(PlaybackError::UnknownSampleRate)?,
+            None => return Err(PlaybackError::NoDefaultTrack),
+        };
         let track_id = track.id;
         let params = &track.codec_params;
         let sample_rate = params.sample_rate.ok_or(PlaybackError::UnknownSampleRate)?;
-        let source_channels = params
-            .channels
-            .ok_or(PlaybackError::UnknownChannelLayout)?
-            .count();
-        if source_channels == 0 || source_channels > CHANNELS {
-            return Err(PlaybackError::UnsupportedChannelCount {
-                channels: source_channels,
-            });
-        }
+        // WAV/FLAC/MP3 declare the layout in the container header. MP4 does
+        // not for AAC or ALAC: the layout lives in the codec's own setup data
+        // (the AudioSpecificConfig / ALAC magic cookie), which only the
+        // decoder parses — so `channels` is `None` here and the probe below
+        // asks the decoder instead. `None` from a format that *should* have
+        // told us is not distinguishable at this point, so the probe is the
+        // single answer for both cases.
+        let declared_channels = params.channels.map(symphonia::core::audio::Channels::count);
         // Emission cap only. Deliberately NOT `params.delay`: with gapless
         // enabled the reader/decoder pair has already trimmed delay and
         // padding out of the buffers we receive (and MP3 still reports
@@ -181,18 +253,83 @@ impl AudioSource {
         // See the module docs.
         let emit_cap = params.n_frames;
         let decoder = symphonia::default::get_codecs().make(params, &DecoderOptions::default())?;
-        Ok(Self {
+        let mut source = Self {
             format,
             decoder,
             track_id,
             sample_rate,
-            source_channels,
+            // Provisional: overwritten by the probe below when the container
+            // declared nothing. Never read before then.
+            source_channels: declared_channels.unwrap_or(CHANNELS),
             sample_buf: None,
+            pending_frames: 0,
             block: Vec::new(),
             frames_seen: 0,
             emit_cap,
             skip_frames: 0,
-        })
+        };
+        let channels = if let Some(n) = declared_channels {
+            n
+        } else {
+            let probe = source.probe_first_packet()?;
+            source.adopt_decoder_rate(probe.rate, sample_rate);
+            probe.channels
+        };
+        if channels == 0 || channels > CHANNELS {
+            return Err(PlaybackError::UnsupportedChannelCount { channels });
+        }
+        source.source_channels = channels;
+        Ok(source)
+    }
+
+    /// Decode the first packet that yields audio, to learn what the container
+    /// did not say (MP4).
+    ///
+    /// The decoded frames are *kept* — [`Self::decode_into_buf`] leaves them
+    /// in [`Self::sample_buf`] and [`Self::pending_frames`] hands them to the
+    /// first [`Self::next_block`] — so probing costs no audio and needs no
+    /// rewind (which a non-seekable media source could not offer anyway).
+    fn probe_first_packet(&mut self) -> Result<ProbedSpec, PlaybackError> {
+        loop {
+            match self.decode_into_buf()? {
+                // A stream that ends before yielding a single frame has no
+                // observable layout; report the container's omission rather
+                // than guess one.
+                None => return Err(PlaybackError::UnknownChannelLayout),
+                // A packet the format's own trim consumed entirely: keep
+                // looking.
+                Some((0, _)) => {}
+                Some((frames, spec)) => {
+                    self.pending_frames = frames;
+                    return Ok(spec);
+                }
+            }
+        }
+    }
+
+    /// Reconcile the rate the decoder actually produces with the one the
+    /// container advertised, when they disagree.
+    ///
+    /// They disagree for **HE-AAC** (SBR): the MP4 sample entry advertises
+    /// the SBR *output* rate, Symphonia 0.5's AAC decoder implements no SBR
+    /// and returns the AAC-LC core at half that rate. Believing the container
+    /// would play the core band at twice its proper speed — an octave up. The
+    /// decoder is the authority on the samples it hands us, so we take its
+    /// rate and rescale the emission cap through the same ratio: the cap
+    /// arrives as a count in the container's timeline (`mdhd` duration in the
+    /// track timescale), and *time* is what the two timelines agree on.
+    fn adopt_decoder_rate(&mut self, decoder_rate: u32, container_rate: u32) {
+        if decoder_rate == 0 || decoder_rate == container_rate {
+            return;
+        }
+        self.sample_rate = decoder_rate;
+        self.emit_cap = self.emit_cap.map(|cap| {
+            // u128 so the intermediate product cannot overflow for any
+            // plausible length x rate.
+            let scaled =
+                u128::from(cap) * u128::from(decoder_rate) / u128::from(container_rate.max(1));
+            u64::try_from(scaled).unwrap_or(u64::MAX)
+        });
     }
 
     /// Native sample rate of the stream in Hz.
@@ -204,7 +341,9 @@ impl AudioSource {
     /// Total frames the container declares for this stream, post gapless
     /// trim; `None` when the header declares no length (an MP3 without a
     /// Xing/Info header). This is the same number that caps emission, so it
-    /// is exactly the length [`Self::next_block`] will yield.
+    /// is exactly the length [`Self::next_block`] will yield — including for
+    /// AAC in MP4, where "what the file plays" is a little longer than "what
+    /// was encoded" because the delay is not trimmed (module docs).
     #[must_use]
     pub fn total_frames(&self) -> Option<u64> {
         self.emit_cap
@@ -265,11 +404,58 @@ impl AudioSource {
             Err(e) => return Err(e.into()),
         };
         // The decoder's state (and, for MP3, its bit reservoir) belongs to
-        // the old position.
+        // the old position, and so does anything the open-time channel probe
+        // left buffered.
         self.decoder.reset();
+        self.pending_frames = 0;
         self.frames_seen = seeked.actual_ts;
         self.skip_frames = seeked.required_ts.saturating_sub(seeked.actual_ts);
         Ok(())
+    }
+
+    /// Demux and decode the next packet of our track into [`Self::sample_buf`]
+    /// as native-interleaved f32, returning `(frames, spec)`; `Ok(None)` at
+    /// end of stream.
+    ///
+    /// `frames` may be 0 for a packet the format's gapless trim consumed
+    /// entirely — the caller loops. The buffer is reused across calls, so
+    /// steady-state decoding stays allocation-free on the decode thread.
+    fn decode_into_buf(&mut self) -> Result<Option<(u64, ProbedSpec)>, PlaybackError> {
+        loop {
+            let packet = match self.format.next_packet() {
+                Ok(p) => p,
+                Err(SymphoniaError::IoError(e))
+                    if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
+                    return Ok(None);
+                }
+                Err(e) => return Err(e.into()),
+            };
+            if packet.track_id() != self.track_id {
+                continue;
+            }
+            // `decoded` is post-trim when the format did gapless trimming
+            // (module docs): a fully-trimmed packet yields zero frames.
+            let decoded = self.decoder.decode(&packet)?;
+            let frames = decoded.frames() as u64;
+            let spec = *decoded.spec();
+            let probed = ProbedSpec {
+                channels: spec.channels.count(),
+                rate: spec.rate,
+            };
+            if frames == 0 {
+                return Ok(Some((0, probed)));
+            }
+            // Copy out of the decoder into native interleaved f32, reusing
+            // the buffer.
+            let capacity = decoded.capacity() as u64;
+            let sample_buf = match &mut self.sample_buf {
+                Some(b) if b.capacity() >= decoded.capacity() * probed.channels => b,
+                slot => slot.insert(SampleBuffer::new(capacity, spec)),
+            };
+            sample_buf.copy_interleaved_ref(decoded);
+            return Ok(Some((frames, probed)));
+        }
     }
 
     /// Decode the next block; `Ok(None)` at end of stream (or once the
@@ -287,22 +473,17 @@ impl AudioSource {
             {
                 return Ok(None);
             }
-            let packet = match self.format.next_packet() {
-                Ok(p) => p,
-                Err(SymphoniaError::IoError(e))
-                    if e.kind() == std::io::ErrorKind::UnexpectedEof =>
-                {
-                    return Ok(None);
+            // Frames left over from the open-time channel probe come first;
+            // after that (and always, for containers that declare a layout)
+            // we pull a fresh packet.
+            let frames = if self.pending_frames > 0 {
+                std::mem::take(&mut self.pending_frames)
+            } else {
+                match self.decode_into_buf()? {
+                    None => return Ok(None),
+                    Some((frames, _)) => frames,
                 }
-                Err(e) => return Err(e.into()),
             };
-            if packet.track_id() != self.track_id {
-                continue;
-            }
-            // `decoded` is post-trim when the format did gapless trimming
-            // (module docs): a fully-trimmed packet yields zero frames.
-            let decoded = self.decoder.decode(&packet)?;
-            let frames = decoded.frames() as u64;
             if frames == 0 {
                 continue;
             }
@@ -330,16 +511,14 @@ impl AudioSource {
                 continue; // wholly-skipped packet
             }
 
-            // Copy out of the decoder into native interleaved f32, reusing
-            // the buffer (steady-state allocation-free on the decode thread).
-            let spec = *decoded.spec();
-            let capacity = decoded.capacity() as u64;
-            let sample_buf = match &mut self.sample_buf {
-                Some(b) if b.capacity() >= decoded.capacity() * self.source_channels => b,
-                slot => slot.insert(SampleBuffer::new(capacity, spec)),
+            // The decoded packet is already in `sample_buf` as native
+            // interleaved f32 (`decode_into_buf`).
+            let native = match &self.sample_buf {
+                Some(b) => b.samples(),
+                // Unreachable: a non-zero frame count means the buffer was
+                // filled. Yielding nothing beats an unwrap on the decode path.
+                None => return Ok(None),
             };
-            sample_buf.copy_interleaved_ref(decoded);
-            let native = sample_buf.samples();
 
             // Normalize to stereo into the reusable output block.
             self.block.clear();
