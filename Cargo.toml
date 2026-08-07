@@ -16,8 +16,12 @@ baz-core = { path = "crates/baz-core", version = "0.0.0" }
 dirs = "6"          # XDG config/data dir lookup for config + library DB (MIT OR Apache-2.0)
 # GUI toolkit (ADR-0005, chosen by the Spike A head-to-head). Pure Rust, zero
 # system deps on Linux. `image` for album-art widgets; `tokio` supplies the
-# executor that drives subscriptions and the blocking-decode pool. (MIT)
-iced = { version = "0.13", features = ["image", "tokio"] }
+# executor that drives subscriptions and the blocking-decode pool;
+# `advanced` exposes the `Widget` trait, which the seek groove implements
+# because neither `slider` nor `mouse_area` can express its pointer
+# affordances (evidence in crates/baz/src/seek.rs). All three are feature
+# flags on a dependency already here — no new crates. (MIT)
+iced = { version = "0.13", features = ["advanced", "image", "tokio"] }
 # Thumbnail decode + downscale; jpeg/png only — the two formats cover art
 # ships in practice (see crates/baz/src/art.rs). (MIT OR Apache-2.0)
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

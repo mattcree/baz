@@ -18,6 +18,7 @@ mod config;
 mod playback;
 mod player;
 mod scan;
+mod seek;
 mod shelf;
 mod theme;
 mod vm;

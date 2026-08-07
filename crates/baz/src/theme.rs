@@ -25,7 +25,7 @@ use iced::font::Weight;
 use iced::widget::rule::FillMode;
 use iced::widget::slider::{Handle, HandleShape, Rail};
 use iced::widget::{button, container, rule, slider, text_input};
-use iced::{Background, Border, Color, Font, Padding, Shadow, Theme, Vector};
+use iced::{Background, Border, Color, Font, Padding, Shadow, Theme, Vector, mouse};
 
 // ---------------------------------------------------------------------------
 // Palette
@@ -128,14 +128,21 @@ pub const RADIUS_SEGMENT: f32 = 4.0;
 pub const SEGMENT_INSET: f32 = 2.0;
 /// Corner radius for the tile's hover/selection card.
 pub const RADIUS_TILE: f32 = 10.0;
+/// Corner radius for small floating chips (the seek preview tip).
+pub const RADIUS_CHIP: f32 = 4.0;
 /// Edge of the playing-album lamp dot (a [`RADIUS_CTRL`]-free circle).
 pub const DOT: f32 = 6.0;
 
 /// Thickness of the seek bar's rail — a groove, not a gauge.
 pub const RAIL: f32 = 4.0;
-/// Hit height of the seek bar. Far taller than [`RAIL`] so the thin groove
-/// is still easy to grab; the widget draws the rail centered in it.
-pub const RAIL_HIT: f32 = 16.0;
+/// Vertical slop above *and* below the [`RAIL`] that still counts as the
+/// seek bar. A 4 px groove is a 4 px target, which is a miss waiting to
+/// happen (Fitts); the pointer gets a band an order of magnitude taller to
+/// aim at, and the cursor changes across the whole of it.
+pub const HIT_SLOP: f32 = 9.0;
+/// Hit height of the seek bar: the groove plus [`HIT_SLOP`] on each side.
+/// The widget draws the rail centered in it.
+pub const RAIL_HIT: f32 = RAIL + 2.0 * HIT_SLOP;
 /// Radius of the seek handle at rest.
 pub const KNOB: f32 = 5.0;
 /// Radius of the seek handle while hovered or held — the control grows
@@ -143,6 +150,27 @@ pub const KNOB: f32 = 5.0;
 pub const KNOB_ACTIVE: f32 = 7.0;
 /// Minimum width the seek bar is given in the now-playing bar.
 pub const SEEK_W: f32 = 260.0;
+/// Height of the lane the hover preview floats in, directly above the
+/// groove. Reserved whether or not anything is hovering, so the bottom bar
+/// never changes height under the pointer.
+pub const PREVIEW_H: f32 = 15.0;
+/// Width of the hover-preview tip: enough for `h:mm:ss` at
+/// [`SIZE_CAPTION`] in [`MONO`] plus its padding, fixed so the tip can be
+/// centered on the pointer without measuring text.
+pub const PREVIEW_W: f32 = 58.0;
+
+/// The cursor over a seekable bar. `Pointer` — the pointing hand every
+/// platform uses for "this responds to a click" — because clicking the bar
+/// is the primary gesture here and dragging is the refinement, not the
+/// other way round. (`Grab`, iced's slider default, promises a handle that
+/// must be picked up first, which is not how this bar behaves.)
+pub const SEEK_CURSOR: mouse::Interaction = mouse::Interaction::Pointer;
+/// The cursor while the bar is held: the closed hand, so the difference
+/// between "you may" and "you are" is visible without looking at the bar.
+pub const SEEK_CURSOR_HELD: mouse::Interaction = mouse::Interaction::Grabbing;
+/// The cursor over a bar that cannot be scrubbed (a track of undeclared
+/// length): the plain arrow, promising nothing.
+pub const SEEK_CURSOR_INERT: mouse::Interaction = mouse::Interaction::None;
 
 /// Symmetric padding: `vertical` on top/bottom, `horizontal` on left/right.
 #[must_use]
@@ -368,6 +396,26 @@ pub fn segmented(_theme: &Theme) -> container::Style {
             color: HAIRLINE,
             width: 1.0,
             radius: RADIUS_CTRL.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
+/// The seek bar's hover preview: a small card floating over the groove with
+/// the timestamp the pointer is pointing at.
+///
+/// Deliberately *not* amber. The lamp is reserved for playback truth and for
+/// positions actually asked for; a preview is neither — it is the room's
+/// quietest card with a hairline edge, readable and forgettable.
+#[must_use]
+pub fn preview_tip(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(CARD_HIGH)),
+        text_color: Some(PAPER_DIM),
+        border: Border {
+            color: HAIRLINE_STRONG,
+            width: 1.0,
+            radius: RADIUS_CHIP.into(),
         },
         ..container::Style::default()
     }

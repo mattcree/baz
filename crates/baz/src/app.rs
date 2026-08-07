@@ -35,7 +35,7 @@ use iced::keyboard::{self, key};
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
 use iced::widget::{
     Column, Space, button, column, container, horizontal_rule, image as iced_image, row,
-    scrollable, slider, text, text_input, vertical_rule,
+    scrollable, text, text_input, vertical_rule,
 };
 use iced::{Color, Element, Length, Size, Subscription, Task, alignment, window};
 use lru::LruCache;
@@ -44,7 +44,7 @@ use crate::playback::{Playback, PlayerEvent};
 use crate::player::{Availability, Phase, PlayerState};
 use crate::scan::ScanUpdate;
 use crate::shelf::{ART_PX, CELL_H, CELL_W, GRID_PADDING};
-use crate::{art, config, scan, shelf, theme, vm};
+use crate::{art, config, player, scan, seek, shelf, theme, vm};
 
 /// Side-panel width (logical px).
 const PANEL_W: f32 = 340.0;
@@ -113,12 +113,19 @@ enum Message {
     PlayPause,
     /// Bottom bar: skip to the next queued track.
     NextTrack,
-    /// Bottom bar: the seek handle moved to this fraction of the track.
-    /// Fires on press and on every drag step (iced's slider has no separate
-    /// press event), which is exactly when the bar should follow the
-    /// pointer.
-    SeekDragged(f32),
-    /// Bottom bar: the seek handle was released — the moment the request
+    /// Bottom bar: the pointer went down on the seek bar, this far along it.
+    /// Nothing is requested and nothing moves yet — the gesture is a click
+    /// until it travels [`player::DRAG_THRESHOLD_PX`].
+    SeekPressed(player::Pointer),
+    /// Bottom bar: the pointer moved with the seek bar held. Past the
+    /// threshold this is the scrub, and the bar follows the pointer.
+    SeekDragged(player::Pointer),
+    /// Bottom bar: the pointer moved over the seek bar with nothing held —
+    /// the hover preview follows it.
+    SeekHovered(player::Pointer),
+    /// Bottom bar: the pointer left the seek bar; the preview goes with it.
+    SeekLeft,
+    /// Bottom bar: the seek bar was released — the moment the request
     /// actually goes to the engine.
     SeekReleased,
     /// An engine event arrived over the bridge subscription.
@@ -215,8 +222,20 @@ impl App {
                 self.send_transport(Command::Next);
                 Task::none()
             }
-            Message::SeekDragged(fraction) => {
-                self.player.drag_to(fraction);
+            Message::SeekPressed(pointer) => {
+                self.player.press(pointer);
+                Task::none()
+            }
+            Message::SeekDragged(pointer) => {
+                self.player.drag_to(pointer);
+                Task::none()
+            }
+            Message::SeekHovered(pointer) => {
+                self.player.hover_to(pointer);
+                Task::none()
+            }
+            Message::SeekLeft => {
+                self.player.hover_left();
                 Task::none()
             }
             Message::SeekReleased => {
@@ -1246,20 +1265,21 @@ fn bottom_bar(player: &PlayerState) -> Element<'_, Message> {
 }
 
 /// The seek bar: elapsed timestamp, groove, total timestamp — a row that
-/// reads left to right the way the track plays. Timestamps are monospace so
-/// the digits do not shuffle the groove sideways as they tick.
+/// reads left to right the way the track plays, with a lane above the groove
+/// where the hover preview floats. Timestamps are monospace so the digits do
+/// not shuffle the groove sideways as they tick.
+///
+/// The groove is [`seek::Groove`] rather than iced's `slider`: it reports
+/// pointer *geometry*, which is what the click-vs-scrub threshold, the hover
+/// preview, and the cursor affordance are all built from (that module's docs
+/// carry the evidence for why the built-ins cannot).
 ///
 /// A track whose length was never declared gets the inert groove: the
 /// elapsed time still counts up (that much is known), but there is nothing
-/// to scrub against and the widget says so by refusing the drag rather than
-/// by looking identical and doing nothing.
-fn seek_bar(state: crate::player::SeekBar) -> Element<'static, Message> {
-    let stamp = |value: String, color| {
-        text(value)
-            .size(theme::SIZE_META)
-            .font(theme::MONO)
-            .color(color)
-    };
+/// to scrub against and the widget says so by refusing the pointer — and by
+/// leaving the cursor alone — rather than by looking identical and doing
+/// nothing.
+fn seek_bar(state: player::SeekBar) -> Element<'static, Message> {
     // While a position is being asked for rather than reported, the elapsed
     // timestamp warms to lamp amber — the same accent the rest of the room
     // reserves for playback truth, here saying "this is where you are asking
@@ -1270,23 +1290,81 @@ fn seek_bar(state: crate::player::SeekBar) -> Element<'static, Message> {
     } else {
         theme::PAPER_FAINT
     };
-    let groove = slider(0.0..=1.0, state.position, Message::SeekDragged)
-        .step(0.001)
-        .height(theme::RAIL_HIT)
-        .width(Length::Fixed(theme::SEEK_W));
-    let groove = if state.interactive {
-        groove.on_release(Message::SeekReleased).style(theme::seek)
+    let groove = seek::Groove::new(state.position, theme::seek)
+        .width(Length::Fixed(theme::SEEK_W))
+        .height(theme::RAIL_HIT);
+    let groove: Element<'static, Message> = if state.interactive {
+        groove
+            .on_pointer(
+                Message::SeekPressed,
+                Message::SeekDragged,
+                Message::SeekHovered,
+                Message::SeekReleased,
+                Message::SeekLeft,
+            )
+            .into()
     } else {
-        groove.style(theme::seek_inert)
+        seek::Groove::new(state.position, theme::seek_inert)
+            .width(Length::Fixed(theme::SEEK_W))
+            .height(theme::RAIL_HIT)
+            .into()
     };
     row![
-        stamp(state.elapsed, elapsed_color),
-        groove,
-        stamp(state.total, theme::PAPER_FAINT),
+        seek_stamp(state.elapsed, elapsed_color),
+        column![preview_lane(state.preview), groove],
+        seek_stamp(state.total, theme::PAPER_FAINT),
     ]
     .spacing(theme::GAP_SM)
-    .align_y(iced::Alignment::Center)
     .into()
+}
+
+/// One of the seek bar's timestamps, carrying the same preview lane as the
+/// groove above it so that the digits line up with the rail rather than with
+/// the lane-plus-rail block.
+fn seek_stamp(value: String, color: Color) -> Element<'static, Message> {
+    column![
+        Space::with_height(Length::Fixed(theme::PREVIEW_H)),
+        container(
+            text(value)
+                .size(theme::SIZE_META)
+                .font(theme::MONO)
+                .color(color)
+        )
+        .height(Length::Fixed(theme::RAIL_HIT))
+        .align_y(alignment::Vertical::Center),
+    ]
+    .into()
+}
+
+/// The lane above the groove where the hover preview floats: a fixed-height
+/// strip, empty until the pointer rests on the bar, then carrying a small
+/// tip centered on the pointer with the timestamp a click would seek to.
+///
+/// The strip is reserved whether or not anything is hovering, so the bottom
+/// bar never changes height under the pointer; the horizontal placement is
+/// [`player::preview_offset`], which keeps the tip whole and on the bar at
+/// both ends (pure, and tested there).
+fn preview_lane(preview: Option<player::SeekPreview>) -> Element<'static, Message> {
+    let mut lane = row![];
+    if let Some(preview) = preview {
+        let offset = player::preview_offset(&preview, theme::PREVIEW_W);
+        lane = lane.push(Space::with_width(Length::Fixed(offset))).push(
+            container(
+                text(preview.label)
+                    .size(theme::SIZE_CAPTION)
+                    .font(theme::MONO),
+            )
+            .width(Length::Fixed(theme::PREVIEW_W))
+            .height(Length::Fill)
+            .align_x(alignment::Horizontal::Center)
+            .align_y(alignment::Vertical::Center)
+            .style(theme::preview_tip),
+        );
+    }
+    container(lane)
+        .width(Length::Fixed(theme::SEEK_W))
+        .height(Length::Fixed(theme::PREVIEW_H))
+        .into()
 }
 
 /// The playing album's lamp dot: a small amber circle, the amplifier's
