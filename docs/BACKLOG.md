@@ -1,0 +1,61 @@
+# baz — Backlog
+
+> Deliberate deferrals, in one place. Everything here was consciously *not* done,
+> with the reason. Roadmap-level scope lives in `VISION.md`; this is the list of
+> known gaps and promises. Updated 2026-08-07.
+
+## Product decisions to honour later
+
+- **Shuffle and auto-queueing must prefer the highest-quality edition.** When a
+  track exists in several formats (ADR-0007), any automatic selection — library
+  shuffle, mood-steered radio, "play something" — picks the best available
+  edition, never a random one. The fidelity ranking in ADR-0007 is a
+  library-wide policy, not merely the side panel's default. *(Owner, 2026-08-07.)*
+- **Per-album edition preference should persist** once the library DB is the
+  right home for it (deferred in ADR-0007: persisting today would mean taking a
+  TOML-parser dependency for a preference that belongs in a database column).
+
+## Known gaps in shipped features
+
+- **Deleted files linger in the index** — `add_tracks` is upsert-only; removal
+  support has not been written, so a file deleted on disk stays on the shelf.
+- **A full rescan runs on every launch** — cheap on small libraries, wasteful on
+  large ones; incremental scanning by mtime is the fix.
+- **Multichannel (>2ch) files are rejected**, not downmixed — a typed error
+  rather than silently wrong output. 5.1 downmix is unwritten.
+- **Skip and seek are drain-and-restart**, not sample-accurate splices (tens of
+  ms of latency, documented in the engine module docs).
+- **Bit-perfect reopen mode** exists in the API and refuses to run: it lands
+  with exclusive-mode output backends (ADR-0004).
+- **The event channel is single-consumer** (`std::sync::mpsc`); a broadcast
+  channel is needed before a second front end or a remote transport.
+- **FLAC-in-MP4 is labelled ALAC** — lofty exposes no MP4 codec discriminator,
+  so bit depth is the proxy. Wrong name, right fidelity tier, vanishingly rare.
+- **AAC has no gapless trim** (symphonia limitation) — documented per format in
+  `playback/mod.rs` rather than papered over.
+- **`config.rs` is a hand-rolled single-key TOML writer** — adopt the `toml`
+  crate when configuration grows beyond a couple of keys.
+
+## Interface
+
+- **A serious UX pass with expert guidance** — the current look is deliberate
+  but scaffolding-grade (ADR-0006 exists to make replacing it cheap). Vetted
+  community design skills to be shortlisted and owner-approved first.
+- **Light theme variant** — the palette is dark-first; tokens are in place, the
+  light values are not.
+- **Panel hiding / layout flexibility** — the v0.1 sketch promised a fixed
+  layout *with hideable panels*; hiding is unwritten.
+- **Keyboard control beyond Escape** — no transport keybindings yet, which also
+  makes GUI automation impossible for testing.
+
+## Platform integration
+
+- **MPRIS + media keys** (Linux) — in the v0.1 scope sketch, deferred.
+- **Windows/macOS media-key and now-playing integration** — untouched.
+
+## Bigger chapters (see `VISION.md` staging)
+
+ReplayGain scanning, cue sheets, watch folders, batch tag editing, exclusive
+outputs, bliss-rs analysis and mood-steered shuffle, the opt-in enrichment pane,
+scrobbling, OpenSubsonic client mode, and the paid-parity hit-list in
+`research/06-paid-product-teardown.md`.
