@@ -50,6 +50,21 @@
 //!
 //! Front ends that want seconds divide by 1000 at the presentation edge,
 //! which is where rounding belongs.
+//!
+//! # Volume on the wire: an integer control position
+//!
+//! [`Command::SetVolume`] carries a `u16` **control position** in
+//! `0..=`[`MAX_POSITION`](crate::volume::MAX_POSITION), not a linear
+//! amplitude and not decibels. The integer choice is the one argued above,
+//! for the same two reasons: one canonical encoding for the byte-pinned
+//! stability test, and [`Command`] keeps its `Eq`.
+//!
+//! *Which* number the integer is, is a separate decision and it belongs to
+//! [`crate::volume`], which owns the taper that turns a position into a gain
+//! and explains why the taper is defined in `baz-core` rather than in each
+//! front end. The short version: a linear-amplitude control feels wrong to a
+//! human, so the correction has to happen somewhere, and if it happened in the
+//! front ends they would disagree with each other.
 
 use std::path::PathBuf;
 
@@ -96,6 +111,47 @@ pub enum Command {
         /// Target position from the start of the current track, in
         /// milliseconds (module docs explain the unit).
         position_ms: u64,
+    },
+    /// Set the playback volume to a position on the control's travel.
+    ///
+    /// Takes effect within one pump iteration and survives everything the
+    /// transport does — pause, resume, seek, skip, track and rate changes,
+    /// queue replacement — because it is engine state, not session state.
+    ///
+    /// # The unit
+    ///
+    /// `position` is `0..=`[`MAX_POSITION`](crate::volume::MAX_POSITION)
+    /// (1000), *not* a linear amplitude: it is where the fader sits, and
+    /// [`Volume::amplitude`](crate::volume::Volume::amplitude) is the taper
+    /// that turns it into gain. Values above the maximum clamp to it (a
+    /// pointer at the end of a slider lands one past the last pixel often
+    /// enough that rejecting would be the wrong answer). There is no gain
+    /// above unity: baz attenuates, it does not amplify, so the loudest baz
+    /// plays a file is exactly as loud as the file is.
+    ///
+    /// # Unity is a real position
+    ///
+    /// [`MAX_POSITION`](crate::volume::MAX_POSITION) is exactly unity gain,
+    /// and at unity the engine applies no arithmetic to the sample stream at
+    /// all — it is the position at which ADR-0009's bit-perfect claim is
+    /// unqualified. A front end should make it reachable and obvious.
+    SetVolume {
+        /// Position on the control's travel,
+        /// `0..=`[`MAX_POSITION`](crate::volume::MAX_POSITION).
+        position: u16,
+    },
+    /// Mute or unmute, independently of [`Command::SetVolume`].
+    ///
+    /// Deliberately *not* the same thing as position 0, and deliberately
+    /// idempotent (`SetMute { muted }` rather than a toggle), which is the
+    /// same choice [`Command::Seek`] makes for the same reason: an absolute
+    /// command cannot desynchronize from a front end that missed an event.
+    /// [`crate::volume`] gives the full argument for keeping mute separate —
+    /// in short, mute has to remember the position it will restore, and if the
+    /// engine did not remember it every front end would have to.
+    SetMute {
+        /// Whether output is silenced.
+        muted: bool,
     },
 }
 
@@ -182,6 +238,18 @@ pub enum Event {
     /// It does not claim the operating system's mixer left them alone
     /// downstream — only exclusive-mode output could claim that, and it is a
     /// later phase.
+    ///
+    /// Since ADR-0010 it also does not claim, on its own, that the samples
+    /// were unaltered: **a volume below unity is a second, independent gain
+    /// stage**, reported by [`Event::VolumeChanged`]'s [`VolumePath`]. A path
+    /// is literally bit-exact when `chain` is [`SignalChain::Direct`] *and*
+    /// that `path` is [`VolumePath::Unity`]; neither fact alone is the whole
+    /// statement, and [`VolumePath::is_transparent`] exists so a front end
+    /// does not have to remember which is which. The volume fact is a
+    /// separate event rather than a field here because the two change on
+    /// completely different cadences — this one per session, that one per
+    /// pointer drag — and folding them would mean restating a track's whole
+    /// format every time someone nudged a slider.
     SignalPath {
         /// Sample rate of the track now playing, in Hz.
         source_rate_hz: u32,
@@ -195,6 +263,36 @@ pub enum Event {
         output_rate_hz: u32,
         /// What the engine is doing between the two.
         chain: SignalChain,
+    },
+    /// The volume, the mute state, and where the volume is being applied.
+    ///
+    /// Emitted whenever any of the three changes — including the changes the
+    /// engine makes on its own behalf, such as re-establishing the volume
+    /// after the output is reopened at a new sample rate. Redundant commands
+    /// (setting the volume it already has) emit nothing, like every other
+    /// command in this protocol.
+    ///
+    /// # Reading it
+    ///
+    /// `position` and `muted` are what the front end sent, echoed back as the
+    /// engine's confirmed state — a slider should follow this rather than its
+    /// own optimistic value, so that two front ends attached to one engine
+    /// agree. `path` is the engine's own report of *where* the volume is being
+    /// applied, which is the fidelity half of the story and is described on
+    /// [`VolumePath`].
+    ///
+    /// **This is information, not a warning**, on exactly the terms
+    /// [`Event::SignalPath`] sets out. Software gain is the ordinary way a
+    /// player implements a volume control; the only unacceptable version is
+    /// the one that claims the stream is untouched while scaling it.
+    VolumeChanged {
+        /// Position on the control's travel,
+        /// `0..=`[`MAX_POSITION`](crate::volume::MAX_POSITION).
+        position: u16,
+        /// Whether output is muted, independently of `position`.
+        muted: bool,
+        /// Where the volume is being applied.
+        path: VolumePath,
     },
 }
 
@@ -240,6 +338,66 @@ pub enum ConversionReason {
     FixedOutputRate,
 }
 
+/// Where the volume is being applied, in [`Event::VolumeChanged`] — and
+/// therefore whether the sample stream is still literally untouched.
+///
+/// This is the ADR-0010 half of the fidelity readout, and it exists for one
+/// reason: **software gain is not bit-exact, and saying otherwise would be the
+/// silent conversion ADR-0009 exists to rule out.** baz decodes to f32, so
+/// scaling costs ~1 ULP of a 24-bit mantissa — around −140 dBFS, inaudible by
+/// any measure a listener could apply — but "inaudible" and "identical" are
+/// different claims and only one of them is true.
+///
+/// # Tone
+///
+/// The same rule as [`SignalChain`]: this is information, not a warning.
+/// [`Self::SoftwareGain`] is what every ordinary player does with a volume
+/// control and describes a perfectly good listening experience. A front end
+/// should render it the way it renders a sample rate — available to the
+/// listener who wants it, ignorable by the one who does not — and nothing here
+/// should be styled as a fault.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VolumePath {
+    /// No gain stage at all: the volume is at unity and unmuted, so the engine
+    /// performs no arithmetic on the samples — not even a multiply by one (see
+    /// [`crate::volume`] for why the difference is structural and not
+    /// pedantry). This is the state in which ADR-0009's bit-perfect claim is
+    /// unqualified.
+    Unity,
+    /// baz scales every sample by an f32 multiply on its way to the output.
+    /// The ordinary state for any volume other than unity, and for mute.
+    SoftwareGain,
+    /// The output device is carrying the volume in its own attenuator and the
+    /// sample stream reaches it unscaled — bit-exact, with the volume applied
+    /// downstream of everything baz does.
+    ///
+    /// Reachable through [`Sink::set_device_volume`](crate::playback::Sink::set_device_volume),
+    /// which **no backend baz ships implements**: shared-mode output has no
+    /// per-application hardware volume to reach for, and the card-wide
+    /// controls that do exist belong to the whole system rather than to this
+    /// player. ADR-0010 records the measurements behind that and what would
+    /// change it (exclusive-mode output, where baz owns the card and may
+    /// legitimately drive its attenuator).
+    DeviceAttenuator,
+}
+
+impl VolumePath {
+    /// Whether the volume stage leaves the sample stream untouched — true for
+    /// [`Self::Unity`] and [`Self::DeviceAttenuator`], false for
+    /// [`Self::SoftwareGain`].
+    ///
+    /// Combine with [`SignalChain::Direct`] for the whole bit-exactness
+    /// question; the method exists so a front end asks about the property it
+    /// cares about rather than enumerating the variants that happen to have it
+    /// today.
+    #[must_use]
+    pub fn is_transparent(self) -> bool {
+        matches!(self, Self::Unity | Self::DeviceAttenuator)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,6 +418,11 @@ mod tests {
             Command::Seek {
                 position_ms: 93_500,
             },
+            Command::SetVolume { position: 0 },
+            Command::SetVolume { position: 618 },
+            Command::SetVolume { position: 1000 },
+            Command::SetMute { muted: true },
+            Command::SetMute { muted: false },
         ]
     }
 
@@ -306,6 +469,26 @@ mod tests {
                 chain: SignalChain::Converting {
                     reason: ConversionReason::FixedOutputRate,
                 },
+            },
+            Event::VolumeChanged {
+                position: 1000,
+                muted: false,
+                path: VolumePath::Unity,
+            },
+            Event::VolumeChanged {
+                position: 618,
+                muted: false,
+                path: VolumePath::SoftwareGain,
+            },
+            Event::VolumeChanged {
+                position: 0,
+                muted: true,
+                path: VolumePath::SoftwareGain,
+            },
+            Event::VolumeChanged {
+                position: 750,
+                muted: false,
+                path: VolumePath::DeviceAttenuator,
             },
         ]
     }
@@ -369,6 +552,29 @@ mod tests {
                 // choice is exactly what makes this assertable (module docs).
                 serde_json::to_string(&Command::Seek { position_ms: 0 }).expect("serialize"),
                 r#"{"cmd":"seek","position_ms":0}"#,
+            ),
+            (
+                // The top of the travel, which is unity gain. Integer for the
+                // same reason `position_ms` is (module docs): `1000` has one
+                // JSON rendering and `1.0` has several.
+                serde_json::to_string(&Command::SetVolume { position: 1000 }).expect("serialize"),
+                r#"{"cmd":"set_volume","position":1000}"#,
+            ),
+            (
+                serde_json::to_string(&Command::SetVolume { position: 618 }).expect("serialize"),
+                r#"{"cmd":"set_volume","position":618}"#,
+            ),
+            (
+                serde_json::to_string(&Command::SetVolume { position: 0 }).expect("serialize"),
+                r#"{"cmd":"set_volume","position":0}"#,
+            ),
+            (
+                serde_json::to_string(&Command::SetMute { muted: true }).expect("serialize"),
+                r#"{"cmd":"set_mute","muted":true}"#,
+            ),
+            (
+                serde_json::to_string(&Command::SetMute { muted: false }).expect("serialize"),
+                r#"{"cmd":"set_mute","muted":false}"#,
             ),
         ];
         for (got, want) in cases {
@@ -472,6 +678,69 @@ mod tests {
         for (got, want) in cases {
             assert_eq!(got, want);
         }
+    }
+
+    /// [`Event::VolumeChanged`]'s bytes, pinned — split from its sibling above
+    /// only because one test listing every variant of a growing enum outgrows
+    /// what is readable, not because the contract is any weaker.
+    #[test]
+    fn volume_event_wire_format_is_stable() {
+        let cases: Vec<(String, &str)> = vec![
+            (
+                // Unity: the position at which nothing is applied to the
+                // samples at all, and the one a front end must make obvious.
+                serde_json::to_string(&Event::VolumeChanged {
+                    position: 1000,
+                    muted: false,
+                    path: VolumePath::Unity,
+                })
+                .expect("serialize"),
+                r#"{"event":"volume_changed","position":1000,"muted":false,"path":"unity"}"#,
+            ),
+            (
+                // The case the readout exists for: the stream is being scaled,
+                // and the wire says so rather than implying otherwise.
+                serde_json::to_string(&Event::VolumeChanged {
+                    position: 618,
+                    muted: false,
+                    path: VolumePath::SoftwareGain,
+                })
+                .expect("serialize"),
+                r#"{"event":"volume_changed","position":618,"muted":false,"path":"software_gain"}"#,
+            ),
+            (
+                // Mute travels beside the position, never as a position: the
+                // 618 survives the round trip (see `Command::SetMute`).
+                serde_json::to_string(&Event::VolumeChanged {
+                    position: 618,
+                    muted: true,
+                    path: VolumePath::SoftwareGain,
+                })
+                .expect("serialize"),
+                r#"{"event":"volume_changed","position":618,"muted":true,"path":"software_gain"}"#,
+            ),
+            (
+                serde_json::to_string(&Event::VolumeChanged {
+                    position: 750,
+                    muted: false,
+                    path: VolumePath::DeviceAttenuator,
+                })
+                .expect("serialize"),
+                r#"{"event":"volume_changed","position":750,"muted":false,"path":"device_attenuator"}"#,
+            ),
+        ];
+        for (got, want) in cases {
+            assert_eq!(got, want);
+        }
+    }
+
+    /// The fidelity question a front end actually asks, answered by the type
+    /// rather than by enumerating variants at the call site.
+    #[test]
+    fn only_software_gain_touches_the_samples() {
+        assert!(VolumePath::Unity.is_transparent());
+        assert!(VolumePath::DeviceAttenuator.is_transparent());
+        assert!(!VolumePath::SoftwareGain.is_transparent());
     }
 
     #[test]

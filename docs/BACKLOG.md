@@ -14,16 +14,12 @@
 - **Per-album edition preference should persist** once the library DB is the
   right home for it (deferred in ADR-0007: persisting today would mean taking a
   TOML-parser dependency for a preference that belongs in a database column).
-- **A volume slider** *(owner, 2026-08-07)* — wanted, but it collides with
-  ADR-0009's bit-perfect default and must not be built naively. Scaling samples
-  in software is by definition no longer bit-perfect (and at 16-bit it costs
-  real resolution unless dithered). The resolution to design, not assume:
-  prefer **device/hardware volume** where the backend exposes it, so the stream
-  stays untouched; fall back to software gain only when it doesn't, and say so
-  through the existing `Event::SignalPath` mechanism — the same quiet,
-  non-alarming channel the rate-conversion note uses. A "unity / bit-perfect"
-  position on the control should be reachable and obvious. Worth an ADR when it
-  lands, since it amends ADR-0009's guarantee.
+- ~~**A volume slider**~~ — **the engine half shipped (ADR-0010)**; the GUI
+  control is a separate unit. `Command::SetVolume`/`SetMute`, a cubic taper
+  defined once in `baz_core::volume`, software gain on the pump path with a
+  20 ms slew, and a structural unity short-circuit that keeps ADR-0009's
+  bit-exactness reachable and pinned by test. The *device/hardware volume* half
+  was investigated and deliberately not built — see below.
 
 ## Known gaps in shipped features
 
@@ -115,6 +111,24 @@
   resample downstream of us, and only exclusive-mode backends (ALSA `hw:`,
   WASAPI exclusive, `CoreAudio` hog) can close that. `Event::SignalPath` will
   grow a field for it when they land.
+
+- **Hardware volume needs exclusive mode, and waits for it** (ADR-0010, which
+  measured this rather than assuming it). In *shared* mode there is no
+  bit-exact per-application volume on any platform: the per-app controls
+  (PipeWire sink-input, WASAPI `ISimpleAudioVolume`) are a float multiply
+  inside the sound server, which buys nothing over doing it ourselves and costs
+  a libpipewire/libpulse or `windows-sys` dependency; the *hardware* controls
+  (the owner's iFi DAC has a real −127 dB attenuator, `amixer -c 3 numid=4`,
+  and `IAudioEndpointVolume`/`kAudioDevicePropertyVolumeScalar` are the same
+  shape) are card-wide, so driving one from a player's own slider would move
+  every other application's volume — and baz cannot even identify the card,
+  since cpal reports the device only as `"default"`. When baz owns the card,
+  all three objections vanish at once. The seam is already in place and tested:
+  `Sink::set_device_volume` returns `None` from every shipped backend, and a
+  backend that returns `Some` gets `VolumePath::DeviceAttenuator` reported and
+  the sample stream left untouched, with no other engine change.
+  (`alsa` 0.9.1 is already an indirect dependency via cpal on Linux, so that
+  platform's cost is a dependency *line*, not a new build requirement.)
 - **A converted anchor is decoded whole before first audio.** Reached only when
   the device offers no mode at the source rate; measured at ~2.6 s on a
   5:24 24/48 FLAC (ADR-0009). Streaming the fallback resampler would fix it and

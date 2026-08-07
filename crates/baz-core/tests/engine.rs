@@ -19,7 +19,8 @@ use baz_core::playback::{AudioSource, BoundaryPolicy, CHANNELS, EngineConfig};
 // real failure; the headless build never constructs one.
 #[cfg(feature = "device-output")]
 use baz_core::playback::PlaybackError;
-use baz_core::protocol::{Command, ConversionReason, Event, SignalChain};
+use baz_core::protocol::{Command, ConversionReason, Event, SignalChain, VolumePath};
+use baz_core::volume::{MAX_POSITION, RAMP_MS, Volume, VolumeState};
 
 /// Test tone parameters (arbitrary; equality checks are exact either way).
 const FREQ: f64 = 440.0;
@@ -54,6 +55,17 @@ const TAIL_48K_FRAMES: usize = TAIL_48K_SECS * TAIL_48K_RATE as usize;
 /// CI; the engine emits within milliseconds).
 const EVENT_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Constant-amplitude fixture for the volume tests: 3 s of exactly [`DC`] in
+/// both channels.
+///
+/// A steady tone would make the gain unmeasurable near its zero crossings —
+/// `out / ref` is meaningless where `ref` is ~0 — but a constant makes the
+/// delivered stream *literally the gain trajectory*, scaled by a number chosen
+/// to divide exactly. That turns "did the ramp click?" into arithmetic instead
+/// of an eyeball.
+const DC: f32 = 0.5;
+const DC_FRAMES: usize = 3 * RATE as usize;
+
 struct Fixtures {
     a: PathBuf,
     b: PathBuf,
@@ -61,12 +73,14 @@ struct Fixtures {
     chirp: PathBuf,
     head_44k: PathBuf,
     tail_48k: PathBuf,
+    dc: PathBuf,
     /// Reference decodes (interleaved stereo f32).
     a_ref: Vec<f32>,
     b_ref: Vec<f32>,
     chirp_ref: Vec<f32>,
     head_44k_ref: Vec<f32>,
     tail_48k_ref: Vec<f32>,
+    dc_ref: Vec<f32>,
 }
 
 fn wav_spec(rate: u32) -> hound::WavSpec {
@@ -120,6 +134,16 @@ fn write_chirp_wav(path: &Path) {
     w.finalize().expect("finalize wav");
 }
 
+/// A constant-[`DC`] stereo WAV — see [`DC`] for why the volume tests want one.
+fn write_dc_wav(path: &Path) {
+    let mut w = hound::WavWriter::create(path, wav_spec(RATE)).expect("create wav");
+    for _ in 0..DC_FRAMES {
+        w.write_sample(DC).expect("write sample");
+        w.write_sample(DC).expect("write sample");
+    }
+    w.finalize().expect("finalize wav");
+}
+
 fn fixtures() -> &'static Fixtures {
     static FIXTURES: OnceLock<Fixtures> = OnceLock::new();
     FIXTURES.get_or_init(|| {
@@ -131,6 +155,8 @@ fn fixtures() -> &'static Fixtures {
         let chirp = dir.join("chirp_6s.wav");
         let head_44k = dir.join("head_1s_44k.wav");
         let tail_48k = dir.join("tail_4s_48k.wav");
+        let dc = dir.join("dc_3s.wav");
+        write_dc_wav(&dc);
         write_sine_wav(&a, A_FRAMES, 0.0);
         write_sine_wav(&b, B_FRAMES, 0.0);
         write_chirp_wav(&chirp);
@@ -153,6 +179,13 @@ fn fixtures() -> &'static Fixtures {
             .samples;
         assert_eq!(head_44k_ref.len(), HEAD_44K_FRAMES * CHANNELS);
         assert_eq!(tail_48k_ref.len(), TAIL_48K_FRAMES * CHANNELS);
+        let dc_ref = AudioSource::decode_all(&dc).expect("decode dc").samples;
+        assert_eq!(dc_ref.len(), DC_FRAMES * CHANNELS);
+        assert!(
+            dc_ref.iter().all(|s| *s == DC),
+            "the constant fixture must decode to exactly its constant, or the \
+             gain trajectory it is used to measure would not be one"
+        );
         Fixtures {
             a,
             b,
@@ -160,11 +193,13 @@ fn fixtures() -> &'static Fixtures {
             chirp,
             head_44k,
             tail_48k,
+            dc,
             a_ref,
             b_ref,
             chirp_ref,
             head_44k_ref,
             tail_48k_ref,
+            dc_ref,
         }
     })
 }
@@ -209,18 +244,18 @@ fn next_event(events: &Receiver<Event>) -> Event {
         .expect("timed out waiting for an engine event")
 }
 
-/// The next event that is not a readout — [`Event::Progress`] or
-/// [`Event::SignalPath`].
+/// The next event that is not a readout — [`Event::Progress`],
+/// [`Event::SignalPath`] or [`Event::VolumeChanged`].
 ///
-/// Both are continuous or incidental *descriptions* of playback rather than
-/// transport transitions, and both interleave with everything by design; the
-/// tests that assert the *transport* vocabulary's ordering therefore step over
-/// them. Each has its own contract and its own tests below — neither is going
+/// All three are continuous or incidental *descriptions* of playback rather
+/// than transport transitions, and all interleave with everything by design;
+/// the tests that assert the *transport* vocabulary's ordering therefore step
+/// over them. Each has its own contract and its own tests below — none is going
 /// unasserted.
 fn next_transport_event(events: &Receiver<Event>) -> Event {
     loop {
         match next_event(events) {
-            Event::Progress { .. } | Event::SignalPath { .. } => {}
+            Event::Progress { .. } | Event::SignalPath { .. } | Event::VolumeChanged { .. } => {}
             other => return other,
         }
     }
@@ -1444,5 +1479,469 @@ fn device_engine_follows_the_source_rate() {
         }
         other => panic!("unexpected chain state: {other:?}"),
     }
+    engine.shutdown();
+}
+
+// ---------------------------------------------------------------------------
+// Volume (ADR-0010)
+// ---------------------------------------------------------------------------
+
+/// Play `queue` to completion with `before_play` sent first, and return the
+/// delivered samples.
+///
+/// Commands sent before `Play` land while the engine is idle, which is where
+/// the fader jumps rather than slews (there is no audible discontinuity in
+/// silence) — so this is the harness for the *exact-arithmetic* volume tests.
+/// The one that measures the slew drives the engine by hand instead.
+fn play_with_volume(queue: &[PathBuf], capacity: usize, before_play: &[Command]) -> Vec<f32> {
+    let (engine, events, output) = spawn_offline(fast_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: queue.to_vec(),
+        })
+        .expect("send");
+    for command in before_play {
+        engine.send(command.clone()).expect("send");
+    }
+    engine.send(Command::Play).expect("send");
+    loop {
+        match next_transport_event(&events) {
+            Event::QueueEnded => break,
+            Event::TrackStarted { .. } => {}
+            other => panic!("unexpected event while playing out: {other:?}"),
+        }
+    }
+    engine.shutdown();
+    collect(output)
+}
+
+/// **Unity is bit-exact.** The whole ADR-0010 guarantee, asserted where it
+/// matters: a gapless two-track queue played with the volume control explicitly
+/// engaged at unity is sample-for-sample the same stream as the reference
+/// decode of both files concatenated.
+///
+/// This is the engine-level twin of `gapless_wav_bit_exact` in
+/// `tests/playback.rs`, and it is deliberately run with `SetVolume` and
+/// `SetMute` *sent* rather than left at their defaults: "we never touched the
+/// volume so of course it is exact" would be a much weaker claim than "the
+/// volume was set, to the top, and it is still exact".
+#[test]
+fn unity_volume_delivers_a_bit_identical_stream() {
+    let f = fixtures();
+    let mut want = f.a_ref.clone();
+    want.extend_from_slice(&f.b_ref);
+    let out = play_with_volume(
+        &[f.a.clone(), f.b.clone()],
+        want.len(),
+        &[
+            Command::SetVolume {
+                position: MAX_POSITION,
+            },
+            Command::SetMute { muted: false },
+        ],
+    );
+    assert_samples_eq(&out, &want, "unity-volume gapless output");
+}
+
+/// The same claim from the other side: the stream delivered at unity is
+/// identical to the stream delivered with no volume command sent at all.
+///
+/// Compared against the *reference decode* above and against the *no-volume
+/// run* here, because the two catch different mistakes — the first catches a
+/// gain that is applied, the second catches a code path that is taken.
+#[test]
+fn unity_volume_is_indistinguishable_from_no_volume_control() {
+    let f = fixtures();
+    let capacity = f.a_ref.len();
+    let untouched = play_with_volume(std::slice::from_ref(&f.a), capacity, &[]);
+    let at_unity = play_with_volume(
+        std::slice::from_ref(&f.a),
+        capacity,
+        &[Command::SetVolume {
+            position: MAX_POSITION,
+        }],
+    );
+    assert_samples_eq(&at_unity, &untouched, "unity vs. no volume command");
+}
+
+/// **Half travel is exactly one eighth of the amplitude**, and every sample
+/// says so exactly — f32 multiplication is deterministic, so this is asserted
+/// with `==` and no tolerance.
+///
+/// Position 500 is chosen because the taper makes its gain `0.5³ = 0.125`, a
+/// power of two: scaling by it is exactly representable for every finite
+/// sample, so a single wrong bit anywhere in the path fails the test.
+#[test]
+#[allow(clippy::float_cmp)] // exactness is the assertion (baz_core::volume)
+fn half_travel_scales_by_exactly_one_eighth() {
+    let f = fixtures();
+    let gain = Volume::new(500).amplitude();
+    assert_eq!(gain, 0.125, "the taper's own arithmetic");
+    let out = play_with_volume(
+        std::slice::from_ref(&f.a),
+        f.a_ref.len(),
+        &[Command::SetVolume { position: 500 }],
+    );
+    let want: Vec<f32> = f.a_ref.iter().map(|s| s * gain).collect();
+    assert_samples_eq(&out, &want, "half-travel output");
+    assert_eq!(out.len(), f.a_ref.len(), "scaling must not drop a sample");
+}
+
+/// Silence at the bottom of the travel is *exactly* silence, not a very small
+/// number — the taper reaches zero rather than approaching it.
+#[test]
+fn the_bottom_of_the_travel_is_exact_silence() {
+    let f = fixtures();
+    let out = play_with_volume(
+        std::slice::from_ref(&f.b),
+        f.b_ref.len(),
+        &[Command::SetVolume { position: 0 }],
+    );
+    assert_eq!(out.len(), f.b_ref.len(), "silence is still delivered audio");
+    assert!(
+        out.iter().all(|s| *s == 0.0),
+        "position 0 must be exactly zero, not merely quiet"
+    );
+}
+
+/// A gain applied by the engine, as read straight out of the delivered stream.
+///
+/// The fixture is a constant, so dividing by it recovers the gain exactly (see
+/// [`DC`]). One value per frame — both channels must agree, which is itself
+/// part of what is being checked.
+#[allow(clippy::float_cmp)] // the channels must agree exactly, not approximately
+fn gain_trajectory(out: &[f32]) -> Vec<f32> {
+    out.chunks_exact(CHANNELS)
+        .map(|frame| {
+            assert_eq!(
+                frame[0], frame[1],
+                "a volume change must move both channels together"
+            );
+            frame[0] / DC
+        })
+        .collect()
+}
+
+/// **A mid-playback volume change is a monotonic ramp that drops no samples.**
+///
+/// Everything a "does it click?" question actually asks, made arithmetic by
+/// the constant fixture: the delivered stream *is* the gain trajectory.
+///
+/// - Nothing is dropped: the delivered length is the reference length.
+/// - Before the change the samples are untouched — exactly unity, because the
+///   transparent path does not multiply at all.
+/// - The change is a ramp, not a step: monotonic, no adjacent gain step larger
+///   than the documented slew rate, landing exactly on the target.
+/// - It completes inside [`RAMP_MS`], which is what "full travel per
+///   [`RAMP_MS`]" commits to for a change of less than full travel.
+///
+/// The exact float comparisons are deliberate throughout — see
+/// `baz_core::volume`'s note on `float_cmp`. The fixture is a constant and the
+/// gains are exact, so "untouched" and "landed" are exact questions; the *only*
+/// place a tolerance appears is the slew-rate bound, and it is one f32 epsilon
+/// wide with its reason stated at the assertion.
+#[test]
+#[allow(clippy::float_cmp)]
+fn a_mid_playback_volume_change_ramps_monotonically_and_drops_nothing() {
+    let f = fixtures();
+    let target = Volume::new(500).amplitude();
+    let cfg = EngineConfig {
+        consumer_pace: Duration::from_millis(2),
+        ..paced_config()
+    };
+    let (engine, events, output) = spawn_offline(cfg, f.dc_ref.len()).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.dc.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.dc, 0));
+    // Let real audio flow at unity first, so the ramp has a "before" to be
+    // measured against.
+    thread::sleep(Duration::from_millis(30));
+    assert!(
+        engine.samples_delivered() > 0,
+        "no audio flowed before the volume change"
+    );
+    engine
+        .send(Command::SetVolume { position: 500 })
+        .expect("send");
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    engine.shutdown();
+
+    let out = collect(output);
+    assert_eq!(
+        out.len(),
+        f.dc_ref.len(),
+        "a volume change must not drop, duplicate, or truncate audio"
+    );
+    let gains = gain_trajectory(&out);
+
+    // The untouched head, then the first frame that is not unity.
+    let start = gains
+        .iter()
+        .position(|g| *g != 1.0)
+        .expect("the volume change must reach the stream");
+    assert!(
+        gains[..start].iter().all(|g| *g == 1.0),
+        "audio before the change must be exactly untouched"
+    );
+    let landed = gains[start..]
+        .iter()
+        .position(|g| *g == target)
+        .expect("the ramp must land exactly on the target gain")
+        + start;
+    assert!(
+        gains[landed..].iter().all(|g| *g == target),
+        "the gain must stay put once it arrives"
+    );
+
+    // Monotonic, and never faster than the documented slew rate.
+    //
+    // The bound carries one f32 epsilon of slack, and only one: the fader
+    // accumulates its position in f32, so each step is the ideal slew plus at
+    // most one rounding. Asserting tighter than that would be asserting
+    // against the arithmetic's precision rather than against the property —
+    // and the slack is ~1e-7 against a total change of 0.875, so a genuine
+    // step discontinuity is still caught by six orders of magnitude.
+    let slew = 1.0 / (f64::from(RATE) * f64::from(RAMP_MS) / 1000.0);
+    let bound = slew + f64::from(f32::EPSILON);
+    for (i, pair) in gains[start - 1..=landed].windows(2).enumerate() {
+        assert!(
+            pair[1] <= pair[0],
+            "the ramp reversed at frame {i}: {} then {}",
+            pair[0],
+            pair[1]
+        );
+        assert!(
+            pair[1] >= target,
+            "the ramp overshot the target at frame {i}: {}",
+            pair[1]
+        );
+        let step = f64::from(pair[0] - pair[1]);
+        assert!(
+            step <= bound,
+            "a gain step of {step} exceeds the {slew} slew rate at frame {i} — \
+             that is the discontinuity a ramp exists to prevent"
+        );
+    }
+
+    // And it completes inside the documented time.
+    let ramp_frames = landed - start + 1;
+    let budget = ms_to_frames(u64::from(RAMP_MS), RATE);
+    assert!(
+        ramp_frames <= budget,
+        "the ramp took {ramp_frames} frames; RAMP_MS allows at most {budget}"
+    );
+    assert!(ramp_frames > 1, "a single-frame 'ramp' is a step");
+}
+
+/// The volume is engine state, not session state, so every transport command
+/// leaves it exactly where it was. Asserted on the *audio*, not just on the
+/// readout: the tail delivered after a pause, a resume, a seek and a track
+/// change is still scaled by the gain that was set before any of them.
+#[test]
+fn volume_survives_pause_resume_seek_and_track_boundaries() {
+    let f = fixtures();
+    let gain = Volume::new(500).amplitude();
+    let capacity = f.a_ref.len() + f.b_ref.len();
+    let (engine, events, output) = spawn_offline(fast_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    engine
+        .send(Command::SetVolume { position: 500 })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+
+    engine.send(Command::Pause).expect("send");
+    assert_eq!(next_transport_event(&events), Event::Paused);
+    assert_eq!(engine.volume().volume, Volume::new(500), "pause lost it");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), Event::Resumed);
+
+    engine
+        .send(Command::Seek { position_ms: 2_000 })
+        .expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    assert_eq!(engine.volume().volume, Volume::new(500), "seek lost it");
+
+    engine.send(Command::Next).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.b, 1));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    let state = engine.volume();
+    assert_eq!(state.volume, Volume::new(500), "the track boundary lost it");
+    assert!(!state.muted);
+    assert_eq!(state.path, VolumePath::SoftwareGain);
+
+    engine.shutdown();
+    let out = collect(output);
+    // Track B ran to completion after every one of those commands, so the
+    // tail of the delivered stream must be exactly B, scaled.
+    let want: Vec<f32> = f.b_ref.iter().map(|s| s * gain).collect();
+    assert!(out.len() >= want.len(), "output too short");
+    assert_samples_eq(
+        &out[out.len() - want.len()..],
+        &want,
+        "post-transport track B output",
+    );
+}
+
+/// Mute silences without forgetting, and unmute restores the position it was
+/// never told. That is the whole reason mute is separate state rather than
+/// gain zero (`baz_core::volume`), and this is the round trip that proves it.
+#[test]
+fn mute_and_unmute_round_trip_without_losing_the_position() {
+    let f = fixtures();
+    let gain = Volume::new(500).amplitude();
+
+    let muted = play_with_volume(
+        std::slice::from_ref(&f.b),
+        f.b_ref.len(),
+        &[
+            Command::SetVolume { position: 500 },
+            Command::SetMute { muted: true },
+        ],
+    );
+    assert_eq!(muted.len(), f.b_ref.len(), "mute must not stop delivery");
+    assert!(
+        muted.iter().all(|s| *s == 0.0),
+        "mute must be exactly silent"
+    );
+
+    let unmuted = play_with_volume(
+        std::slice::from_ref(&f.b),
+        f.b_ref.len(),
+        &[
+            Command::SetVolume { position: 500 },
+            Command::SetMute { muted: true },
+            Command::SetMute { muted: false },
+        ],
+    );
+    let want: Vec<f32> = f.b_ref.iter().map(|s| s * gain).collect();
+    assert_samples_eq(&unmuted, &want, "unmuted output");
+}
+
+/// Muting at unity and unmuting again returns the path to `Unity` — so the
+/// bit-exact state is genuinely recoverable, not merely reachable once.
+#[test]
+fn unmuting_at_unity_returns_to_a_bit_exact_path() {
+    let f = fixtures();
+    let out = play_with_volume(
+        std::slice::from_ref(&f.b),
+        f.b_ref.len(),
+        &[
+            Command::SetMute { muted: true },
+            Command::SetMute { muted: false },
+        ],
+    );
+    assert_samples_eq(&out, &f.b_ref, "output after a mute round trip at unity");
+}
+
+/// A front end coming up mid-session needs the state without waiting for
+/// someone to change it, so the handle answers directly — and its answer is
+/// unity, the state ADR-0009 describes.
+#[test]
+fn a_fresh_engine_reports_unity_and_an_untouched_path() {
+    let (engine, _events, _output) = spawn_offline(fast_config(), 16).expect("spawn engine");
+    let state: VolumeState = engine.volume();
+    assert_eq!(state.volume, Volume::UNITY);
+    assert!(!state.muted);
+    assert_eq!(state.path, VolumePath::Unity);
+    assert!(
+        state.path.is_transparent(),
+        "a player nobody has touched must not be scaling anything"
+    );
+    engine.shutdown();
+}
+
+/// The engine confirms every accepted change on the event channel, so two front
+/// ends attached to one engine agree about where the control is — a slider must
+/// follow this rather than its own optimistic value.
+#[test]
+fn every_accepted_change_is_confirmed_on_the_event_channel() {
+    let (engine, events, _output) = spawn_offline(fast_config(), 16).expect("spawn engine");
+    engine
+        .send(Command::SetVolume { position: 250 })
+        .expect("send");
+    assert_eq!(
+        next_event(&events),
+        Event::VolumeChanged {
+            position: 250,
+            muted: false,
+            path: VolumePath::SoftwareGain,
+        }
+    );
+    engine.send(Command::SetMute { muted: true }).expect("send");
+    assert_eq!(
+        next_event(&events),
+        Event::VolumeChanged {
+            position: 250,
+            muted: true,
+            path: VolumePath::SoftwareGain,
+        },
+        "mute travels beside the position, never as one"
+    );
+    engine
+        .send(Command::SetVolume {
+            position: MAX_POSITION,
+        })
+        .expect("send");
+    assert_eq!(
+        next_event(&events),
+        Event::VolumeChanged {
+            position: MAX_POSITION,
+            muted: true,
+            // Still muted, so the samples are still being zeroed: unity on the
+            // control is not unity in the path while mute is on.
+            path: VolumePath::SoftwareGain,
+        }
+    );
+    engine
+        .send(Command::SetMute { muted: false })
+        .expect("send");
+    assert_eq!(
+        next_event(&events),
+        Event::VolumeChanged {
+            position: MAX_POSITION,
+            muted: false,
+            path: VolumePath::Unity,
+        }
+    );
+    // Redundant commands say nothing (the rule the whole protocol follows).
+    engine
+        .send(Command::SetVolume {
+            position: MAX_POSITION,
+        })
+        .expect("send");
+    assert_no_event_within(&events, Duration::from_millis(50));
+    engine.shutdown();
+}
+
+/// A position past the top of the travel clamps to unity rather than being
+/// rejected or wrapping — and the confirmation reports the clamped value, so a
+/// front end that sent a bad number learns what actually happened.
+#[test]
+fn an_out_of_range_position_clamps_to_unity() {
+    let (engine, events, _output) = spawn_offline(fast_config(), 16).expect("spawn engine");
+    engine
+        .send(Command::SetVolume { position: 250 })
+        .expect("send");
+    assert!(matches!(next_event(&events), Event::VolumeChanged { .. }));
+    engine
+        .send(Command::SetVolume { position: u16::MAX })
+        .expect("send");
+    assert_eq!(
+        next_event(&events),
+        Event::VolumeChanged {
+            position: MAX_POSITION,
+            muted: false,
+            path: VolumePath::Unity,
+        }
+    );
     engine.shutdown();
 }

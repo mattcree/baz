@@ -98,6 +98,46 @@ pub trait Sink {
     /// The default is a no-op, correct for every sink whose `write` is its own
     /// destination.
     fn drain_buffered(&mut self) {}
+
+    /// Ask the output to carry a linear `gain` in **its own** attenuator, so
+    /// that baz does not have to scale the samples.
+    ///
+    /// This is ADR-0010's device-volume slot, and it is deliberately shaped
+    /// like [`Self::negotiate_rate`]: the engine asks, the sink answers, and
+    /// the engine reports honestly whichever answer it got. `Some(())` means
+    /// the sink took the gain and the sample stream may be passed through
+    /// untouched — the path is
+    /// [`VolumePath::DeviceAttenuator`](crate::protocol::VolumePath::DeviceAttenuator)
+    /// and remains bit-exact. `None` means the sink has no volume of its own,
+    /// and the engine applies software gain and says so
+    /// ([`VolumePath::SoftwareGain`](crate::protocol::VolumePath::SoftwareGain)).
+    ///
+    /// # Default: no volume of my own — and that is every sink baz ships
+    ///
+    /// The default returns `None`, which is the honest answer for
+    /// [`OfflineSink`] (a `Vec<f32>` has no attenuator) **and** for
+    /// `DeviceSink`. cpal exposes no volume API at all, so a hardware volume
+    /// would mean platform-specific code — and ADR-0010's measurements found
+    /// that in shared mode there is nothing correct for it to reach: the
+    /// mixer behind a shared output belongs to the whole system, not to this
+    /// player, and moving it would move every other application's volume with
+    /// it. The trait method exists anyway, because the case where the answer
+    /// changes is a known one (exclusive-mode output, where baz owns the card)
+    /// and because a slot that a test double can fill is how the engine's half
+    /// of the arrangement gets tested before the backend exists.
+    ///
+    /// # Contract
+    ///
+    /// Called on the engine's control thread **between** pump iterations,
+    /// never from a realtime callback, so it may block for as long as talking
+    /// to a mixer takes. It does not affect audio already buffered in the sink
+    /// unless the underlying control does; and because
+    /// [`Self::negotiate_rate`] may rebuild the output from scratch, the
+    /// engine re-asks after every successful reconfiguration rather than
+    /// assuming a gain survived it.
+    fn set_device_volume(&mut self, _gain: f32) -> Option<()> {
+        None
+    }
 }
 
 /// Offline sink that collects every sample into preallocated storage — the
@@ -123,6 +163,11 @@ pub trait Sink {
 ///   is granted. An offline session therefore always runs at its source's
 ///   native rate and never resamples — which is what makes the headless suite
 ///   a test of the bit-perfect default rather than of a fallback.
+/// - [`Sink::set_device_volume`]: a `Vec<f32>` has no attenuator either, so
+///   volume is always applied in software above it. That is exactly what makes
+///   the headless suite able to measure the gain: the delivered record *is*
+///   the scaled stream, so "unity is bit-exact" and "half travel is exactly
+///   0.125" are assertions about samples rather than about a setting.
 #[derive(Debug)]
 pub struct OfflineSink {
     samples: Vec<f32>,
