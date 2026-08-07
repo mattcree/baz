@@ -18,3 +18,10 @@ path = "fuzz_targets/protocol_deserialize.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "scanner_inference"
+path = "fuzz_targets/scanner_inference.rs"
+test = false
+doc = false
+bench = false
