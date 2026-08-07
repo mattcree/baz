@@ -57,10 +57,6 @@
   community design skills to be shortlisted and owner-approved first.
 - **Light theme variant** — the palette is dark-first; tokens are in place, the
   light values are not.
-- **Split `app.rs` into a `views/` module tree** — ADR-0006 mandates this at the
-  next substantial UI change; deliberately deferred during the transport-icon
-  work so a behaviour-sensitive diff wasn't buried in file moves. `app.rs` is
-  ~1490 lines. Book it as its own commit.
 - **Transport buttons take no keyboard focus and publish no accessibility tree**
   — iced 0.13 offers neither (no AccessKit). Tooltips and 32 px hit targets are
   the whole of what the toolkit currently allows.

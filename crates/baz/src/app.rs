@@ -22,6 +22,14 @@
 //!   subscription and are the *only* source of playback UI state — see
 //!   `player.rs` for the honesty rule. The persistent bottom bar and the
 //!   side panel's Play button render that state.
+//!
+//! # What is *not* here
+//!
+//! Drawing. This module is the application shell — state, [`Message`], the
+//! update loop, subscriptions, and the top-level composition that says which
+//! surfaces are on screen — while every surface's iced composition lives in
+//! [`crate::views`], one module per surface (ADR-0006's mandated split). A
+//! layout or visual redesign touches `views/` and nothing in here.
 
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
@@ -33,46 +41,33 @@ use baz_core::index::Library;
 use baz_core::protocol::{Command, Event, SignalChain};
 use iced::keyboard::{self, key};
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
-use iced::widget::{
-    Column, Space, button, column, container, horizontal_rule, image as iced_image, row,
-    scrollable, text, text_input, tooltip, vertical_rule,
-};
-use iced::{Color, Element, Length, Size, Subscription, Task, alignment, window};
+use iced::widget::{column, image as iced_image, row, scrollable, text_input, vertical_rule};
+use iced::{Element, Size, Subscription, Task, window};
 use lru::LruCache;
 
 use crate::playback::{Playback, PlayerEvent};
 use crate::player::{Availability, PlayerState};
 use crate::scan::ScanUpdate;
-use crate::shelf::{ART_PX, CELL_H, CELL_W, GRID_PADDING};
-use crate::{art, config, icon, player, scan, seek, shelf, theme, vm};
+use crate::views::side_panel::PANEL_W;
+use crate::{art, config, player, scan, shelf, theme, views, vm};
 
-/// Side-panel width (logical px).
-const PANEL_W: f32 = 340.0;
-/// Side-panel inner padding (logical px).
-const PANEL_PAD: f32 = theme::GAP_XL;
 /// Approximate top-bar height, used only for the pre-first-scroll estimate
 /// of the grid viewport (real bounds arrive with every scroll event).
 const TOP_BAR_H: f32 = 56.0;
 /// Initial window size.
 const WINDOW: Size = Size::new(1280.0, 860.0);
-/// Horizontal tile padding: centers [`ART_PX`] artwork inside [`CELL_W`].
-const TILE_PAD_H: f32 = (CELL_W - ART_PX) / 2.0;
-/// Vertical tile padding.
-const TILE_PAD_V: f32 = theme::GAP_MD;
-/// The search field's width in the top bar (logical px).
-const SEARCH_W: f32 = 360.0;
-/// The first-run screen's folder input width (logical px).
-const SETUP_INPUT_W: f32 = 460.0;
-/// Width of the track-number column in the side panel (logical px).
-const TRACK_NO_W: f32 = 24.0;
 /// Two clicks on the same tile within this window play the album.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
-fn scroll_id() -> scrollable::Id {
+/// The shelf scrollable's id — the update loop scrolls it back to the top
+/// when the query changes, and [`crate::views::shelf`] attaches it.
+pub(crate) fn scroll_id() -> scrollable::Id {
     scrollable::Id::new("baz-shelf")
 }
 
-fn search_id() -> text_input::Id {
+/// The search field's id — the update loop focuses it, and
+/// [`crate::views::top_bar`] attaches it.
+pub(crate) fn search_id() -> text_input::Id {
     text_input::Id::new("baz-search")
 }
 
@@ -87,8 +82,11 @@ pub fn run(started: Instant, cli_dir: Option<PathBuf>) -> iced::Result {
 }
 
 /// Top-level messages; one enum across both screens keeps the seams simple.
+///
+/// Crate-visible because [`crate::views`] emits them: a view function's whole
+/// output is an [`Element`] parameterised by this type.
 #[derive(Debug, Clone)]
-enum Message {
+pub(crate) enum Message {
     /// Setup screen: the folder text input changed.
     SetupInput(String),
     /// Setup screen: folder submitted (Enter).
@@ -155,9 +153,11 @@ enum Screen {
 }
 
 /// The minimal first-run screen: "Where's your music?".
-struct Setup {
-    input: String,
-    error: Option<String>,
+pub(crate) struct Setup {
+    /// What has been typed into the folder field.
+    pub(crate) input: String,
+    /// Why the last submission did not open a shelf, if it did not.
+    pub(crate) error: Option<String>,
 }
 
 impl App {
@@ -375,9 +375,12 @@ impl App {
         }
     }
 
+    /// The whole window: the current screen, with the persistent bottom bar
+    /// under it. Composition only — every surface is drawn by
+    /// [`crate::views`].
     fn view(&self) -> Element<'_, Message> {
         let screen: Element<'_, Message> = match &self.screen {
-            Screen::Setup(setup) => return setup.view(),
+            Screen::Setup(setup) => return views::setup::view(setup),
             Screen::Shelf(state) => state.view(&self.player),
         };
         // The persistent bottom bar lives under the shelf — unless this
@@ -386,7 +389,7 @@ impl App {
         if *self.player.availability() == Availability::NotBuilt {
             return screen;
         }
-        column![screen, bottom_bar(&self.player)].into()
+        column![screen, views::bottom_bar::view(&self.player)].into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -422,59 +425,24 @@ impl Setup {
             .unwrap_or_default();
         Self { input, error }
     }
-
-    fn view(&self) -> Element<'_, Message> {
-        let heading = column![
-            text("baz")
-                .size(theme::SIZE_EMPHASIS)
-                .font(theme::MONO)
-                .color(theme::LAMP),
-            text("Where's your music?")
-                .size(theme::SIZE_HERO)
-                .font(theme::SEMIBOLD),
-            text("Point baz at a folder — the shelf fills as it scans.")
-                .size(theme::SIZE_EMPHASIS)
-                .color(theme::PAPER_DIM),
-        ]
-        .spacing(theme::GAP_SM)
-        .align_x(iced::Alignment::Center);
-        let mut content = column![
-            heading,
-            text_input("/path/to/your/music", &self.input)
-                .on_input(Message::SetupInput)
-                .on_submit(Message::SetupSubmit)
-                .padding(theme::pad(theme::GAP_SM + 2.0, theme::GAP_MD))
-                .size(theme::SIZE_EMPHASIS)
-                .width(Length::Fixed(SETUP_INPUT_W))
-                .style(theme::input),
-        ]
-        .spacing(theme::GAP_XL)
-        .align_x(iced::Alignment::Center);
-        if let Some(error) = &self.error {
-            content = content.push(
-                text(error.as_str())
-                    .size(theme::SIZE_META)
-                    .color(theme::ALERT),
-            );
-        }
-        content = content.push(
-            text("Enter confirms · next time, `baz` remembers (or run `baz DIR`)")
-                .size(theme::SIZE_CAPTION)
-                .color(theme::PAPER_FAINT),
-        );
-        container(content).center(Length::Fill).into()
-    }
 }
 
 /// The shelf screen: library, scan state, and grid/panel view state.
-struct Shelf {
-    library: Library,
+///
+/// Fields the view layer reads are `pub(crate)`; the ones the update loop
+/// owns alone (in-flight decodes, the scan channel, click timing) stay
+/// private — [`crate::views`] draws this state, it never steers it.
+pub(crate) struct Shelf {
+    /// The open library: the search index the counts and the query run over.
+    pub(crate) library: Library,
     /// Owned view model of every album, in `Library::albums` order.
-    albums: Vec<vm::AlbumVm>,
+    pub(crate) albums: Vec<vm::AlbumVm>,
     /// Indices into `albums` that survive the current query.
-    visible: Vec<usize>,
-    query: String,
-    selected: Option<u64>,
+    pub(crate) visible: Vec<usize>,
+    /// The live search text.
+    pub(crate) query: String,
+    /// The album whose side panel is open, if any.
+    pub(crate) selected: Option<u64>,
     /// Which format of an album the user picked, for albums where they
     /// picked one. Absent = the ranked-best edition (see
     /// [`vm::selected_edition`]).
@@ -484,9 +452,9 @@ struct Shelf {
     /// would mean adopting a real TOML parser for a preference whose proper
     /// home is a column in the library database anyway. Deferred in
     /// ADR-0007 rather than bolted on here.
-    edition_choice: HashMap<u64, vm::EditionKey>,
+    pub(crate) edition_choice: HashMap<u64, vm::EditionKey>,
     /// Decoded-thumbnail LRU; capacity/budget documented in [`art`].
-    thumbs: LruCache<u64, iced_image::Handle>,
+    pub(crate) thumbs: LruCache<u64, iced_image::Handle>,
     /// Albums with a decode in flight (dedupes requests while scrolling).
     pending: HashSet<u64>,
     /// Albums known to have no (decodable) art — render the gradient and
@@ -494,13 +462,17 @@ struct Shelf {
     /// or cover files may have arrived for early albums.
     no_art: HashSet<u64>,
     scan_rx: Option<Receiver<ScanUpdate>>,
-    scanning: bool,
-    files_skipped: usize,
+    /// Whether the scan worker is still running.
+    pub(crate) scanning: bool,
+    /// Files the scan could not read.
+    pub(crate) files_skipped: usize,
     /// A fatal-ish problem worth a status-line mention (scan could not
     /// start, or a library write failed). Never a modal.
-    problem: Option<String>,
-    scroll_offset: f32,
-    grid_size: Size,
+    pub(crate) problem: Option<String>,
+    /// Where the shelf is scrolled to (logical px from the top).
+    pub(crate) scroll_offset: f32,
+    /// The grid viewport's size, for the virtualization math.
+    pub(crate) grid_size: Size,
     last_scan_log: Instant,
     /// Last tile click, for double-click-to-play detection.
     last_click: Option<(u64, Instant)>,
@@ -785,773 +757,26 @@ impl Shelf {
         Task::batch(tasks)
     }
 
+    /// The shelf screen: the top bar over the grid, with the side panel
+    /// beside it when an album is selected. Composition only — the surfaces
+    /// themselves are [`crate::views`].
     fn view<'a>(&'a self, player: &'a PlayerState) -> Element<'a, Message> {
         let body: Element<'_, Message> = match self.selected_album() {
             Some(album) => row![
-                self.grid(player),
+                views::shelf::view(self, player),
                 vertical_rule(1).style(theme::hairline),
-                self.side_panel(album, player)
+                views::side_panel::view(self, album, player)
             ]
             .into(),
-            None => self.grid(player),
+            None => views::shelf::view(self, player),
         };
-        column![self.top_bar(), body].into()
+        column![views::top_bar::view(self), body].into()
     }
 
     fn selected_album(&self) -> Option<&vm::AlbumVm> {
         let id = self.selected?;
         self.albums.iter().find(|album| album.id == id)
     }
-
-    /// The slim top bar: the search well on the left, quiet status on the
-    /// right, a hairline rule below.
-    fn top_bar(&self) -> Element<'_, Message> {
-        let search = text_input("Search artists, albums, tracks…", &self.query)
-            .id(search_id())
-            .on_input(Message::SearchChanged)
-            .padding(theme::pad(theme::GAP_SM, theme::GAP_MD))
-            .size(theme::SIZE_BODY)
-            .width(Length::Fixed(SEARCH_W))
-            .style(theme::input);
-        let mut status = row![
-            text(self.counts_line())
-                .size(theme::SIZE_META)
-                .font(theme::MONO)
-                .color(theme::PAPER_FAINT)
-        ]
-        .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Center);
-        if self.scanning {
-            status = status.push(
-                text("scanning…")
-                    .size(theme::SIZE_META)
-                    .font(theme::MONO)
-                    .color(theme::LAMP),
-            );
-        }
-        if self.files_skipped > 0 {
-            status = status.push(
-                text(format!("{} files skipped", self.files_skipped))
-                    .size(theme::SIZE_META)
-                    .font(theme::MONO)
-                    .color(theme::PAPER_FAINT),
-            );
-        }
-        if let Some(problem) = &self.problem {
-            status = status.push(
-                text(problem.as_str())
-                    .size(theme::SIZE_META)
-                    .color(theme::ALERT),
-            );
-        }
-        column![
-            container(
-                row![search, Space::with_width(Length::Fill), status]
-                    .spacing(theme::GAP_LG)
-                    .align_y(iced::Alignment::Center),
-            )
-            .padding(theme::pad(theme::GAP_SM + 2.0, theme::GAP_LG)),
-            horizontal_rule(1).style(theme::hairline),
-        ]
-        .into()
-    }
-
-    /// The unobtrusive count text: album/track counts, or the filtered
-    /// count while a query narrows the shelf. Status, not modal — by
-    /// design; scan/skip/problem notes render as separate colored segments.
-    fn counts_line(&self) -> String {
-        if self.query.trim().is_empty() {
-            format!(
-                "{} albums · {} tracks",
-                self.albums.len(),
-                self.library.len()
-            )
-        } else {
-            format!("{} / {} albums", self.visible.len(), self.albums.len())
-        }
-    }
-
-    /// The virtualized grid: spacer, visible rows, spacer (see [`shelf`]).
-    /// The grid block is centered in the viewport; spacers are
-    /// width-shrunk so the column keeps the rows' width and partial last
-    /// rows stay left-aligned within the shelf.
-    fn grid<'a>(&'a self, player: &'a PlayerState) -> Element<'a, Message> {
-        if self.visible.is_empty() {
-            return self.empty_state();
-        }
-        let cols = shelf::columns(self.grid_size.width);
-        let total_rows = shelf::total_rows(self.visible.len(), cols);
-        let (first_row, end_row) =
-            shelf::visible_rows(self.scroll_offset, self.grid_size.height, total_rows);
-
-        let mut grid = column![].padding(GRID_PADDING);
-        grid = grid.push(Space::with_height(Length::Fixed(shelf::spacer_height(
-            first_row,
-        ))));
-        for r in first_row..end_row {
-            let mut cells = row![];
-            for c in 0..cols {
-                let Some(&album_index) = self.visible.get(r * cols + c) else {
-                    break;
-                };
-                if let Some(album) = self.albums.get(album_index) {
-                    cells = cells.push(self.tile(album, player.playing_album() == Some(album.id)));
-                }
-            }
-            grid = grid.push(container(cells).height(Length::Fixed(CELL_H)));
-        }
-        grid = grid.push(Space::with_height(Length::Fixed(shelf::spacer_height(
-            total_rows - end_row,
-        ))));
-
-        scrollable(
-            container(grid)
-                .width(Length::Fill)
-                .align_x(alignment::Horizontal::Center),
-        )
-        .id(scroll_id())
-        .on_scroll(Message::Scrolled)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
-    }
-
-    /// The shelf with nothing to show: a zero-result search, the first
-    /// moments of a scan, or a genuinely empty folder. Quiet text, no modal.
-    fn empty_state(&self) -> Element<'_, Message> {
-        let query = self.query.trim();
-        let (line, hint) = if query.is_empty() {
-            if self.scanning {
-                (
-                    "The shelf fills as the scan finds your music…".to_owned(),
-                    None,
-                )
-            } else {
-                (
-                    "No albums here yet".to_owned(),
-                    Some("baz rescans this folder each time it starts"),
-                )
-            }
-        } else {
-            (
-                format!("Nothing matches “{query}”"),
-                Some("Esc clears the search"),
-            )
-        };
-        let mut content = column![
-            text(line)
-                .size(theme::SIZE_EMPHASIS)
-                .color(theme::PAPER_DIM)
-        ]
-        .spacing(theme::GAP_SM)
-        .align_x(iced::Alignment::Center);
-        if let Some(hint) = hint {
-            content = content.push(text(hint).size(theme::SIZE_META).color(theme::PAPER_FAINT));
-        }
-        container(content).center(Length::Fill).into()
-    }
-
-    /// One album tile: the sleeve (thumbnail or gradient placeholder, with
-    /// a soft shelf shadow) over a quiet two-line caption. The playing
-    /// album swaps the shadow for a lamp-amber halo and gains a lamp dot by
-    /// its title; selection and hover raise the tile's card.
-    fn tile<'a>(&'a self, album: &'a vm::AlbumVm, playing: bool) -> Element<'a, Message> {
-        let art: Element<'_, Message> = match self.thumbs.peek(&album.id) {
-            Some(handle) => iced_image(handle.clone())
-                .width(Length::Fixed(ART_PX))
-                .height(Length::Fixed(ART_PX))
-                .into(),
-            None => gradient_block(album.id, ART_PX),
-        };
-        let sleeve = container(art).style(move |_theme| theme::sleeve(playing));
-        let title = album.title.as_deref().unwrap_or("Unknown Album");
-        // The *album* artist: one tile per album, captioned by whoever the
-        // album is filed under, not by whichever composer happened to be
-        // first (see `vm::AlbumArtistVm`).
-        let artist = album.artist.label();
-        let caption = match album.year {
-            Some(year) => format!("{artist} · {year}"),
-            None => artist.to_owned(),
-        };
-        let mut title_row = row![]
-            .spacing(theme::GAP_XS)
-            .align_y(iced::Alignment::Center);
-        if playing {
-            title_row = title_row.push(lamp_dot());
-        }
-        title_row = title_row.push(
-            text(title)
-                .size(theme::SIZE_BODY)
-                .font(theme::MEDIUM)
-                .wrapping(text::Wrapping::None),
-        );
-        let selected = self.selected == Some(album.id);
-        button(
-            column![
-                sleeve,
-                column![
-                    title_row,
-                    text(caption)
-                        .size(theme::SIZE_META)
-                        .color(theme::PAPER_DIM)
-                        .wrapping(text::Wrapping::None),
-                ]
-                .spacing(theme::GAP_XXS),
-            ]
-            .spacing(theme::GAP_SM)
-            .width(Length::Fixed(ART_PX)),
-        )
-        .width(Length::Fixed(CELL_W))
-        .height(Length::Fixed(CELL_H))
-        .padding(theme::pad(TILE_PAD_V, TILE_PAD_H))
-        .style(move |_theme, status| theme::tile(status, selected))
-        .on_press(Message::AlbumClicked(album.id))
-        .into()
-    }
-
-    /// The album side panel: large art, a title/artist/meta header, the
-    /// edition selector when the album is owned in more than one format, the
-    /// primary Play action, and the selected edition's numbered track list
-    /// (durations in monospace, right-hugged). In a build without audio
-    /// output the button is hidden; with an unusable or closed engine it
-    /// renders disabled.
-    fn side_panel<'a>(
-        &'a self,
-        album: &'a vm::AlbumVm,
-        player: &'a PlayerState,
-    ) -> Element<'a, Message> {
-        let playing = player.playing_album() == Some(album.id);
-        let art_edge = PANEL_W - 2.0 * PANEL_PAD;
-        let art: Element<'_, Message> = match self.thumbs.peek(&album.id) {
-            Some(handle) => iced_image(handle.clone())
-                .width(Length::Fixed(art_edge))
-                .into(),
-            None => gradient_block(album.id, art_edge),
-        };
-        let sleeve = container(art).style(move |_theme| theme::sleeve(playing));
-        let chosen = self.edition_choice.get(&album.id).copied();
-        let edition = vm::selected_edition(album, chosen);
-        // A soundtrack grouped under one album artist keeps its per-cue
-        // composer credits; an ordinary album gains no extra line.
-        let per_track_artists = album.track_artists_vary;
-        let rows: Vec<Element<'_, Message>> = edition
-            .map(|edition| {
-                edition
-                    .tracks
-                    .iter()
-                    .map(|track| track_row(track, per_track_artists))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let mut content = column![sleeve, album_header(album, edition)].spacing(theme::GAP_MD);
-        // Only a genuinely multi-format album gets a control; a single-format
-        // album must look exactly as it always did.
-        if album.editions.len() > 1 {
-            content = content.push(edition_selector(album, edition));
-        }
-        if *player.availability() != Availability::NotBuilt {
-            content = content.push(
-                button(
-                    container(
-                        text("Play album")
-                            .size(theme::SIZE_BODY)
-                            .font(theme::MEDIUM),
-                    )
-                    .width(Length::Fill)
-                    .align_x(alignment::Horizontal::Center),
-                )
-                .width(Length::Fill)
-                .padding(theme::pad(theme::GAP_SM, 0.0))
-                .style(theme::primary)
-                .on_press_maybe(
-                    player
-                        .engine_ready()
-                        .then_some(Message::PlayAlbum(album.id)),
-                ),
-            );
-        }
-        let hint = if *player.availability() == Availability::NotBuilt {
-            "Esc closes · built without audio output"
-        } else {
-            "Esc closes · double-click a tile to play"
-        };
-        content = content
-            .push(
-                scrollable(Column::with_children(rows).spacing(theme::GAP_XXS))
-                    .height(Length::Fill),
-            )
-            .push(
-                text(hint)
-                    .size(theme::SIZE_CAPTION)
-                    .color(theme::PAPER_FAINT),
-            );
-
-        container(content)
-            .width(Length::Fixed(PANEL_W))
-            .height(Length::Fill)
-            .padding(PANEL_PAD)
-            .style(theme::panel)
-            .into()
-    }
-}
-
-/// The side panel's header: album title over artist over a quiet
-/// year · tracks · total-time meta line, and — when the scan read one — the
-/// selected edition's encoding fingerprint under it.
-///
-/// The counts describe `edition`, not the album: with two rips on disk, "24
-/// tracks" would be a number nothing on screen adds up to.
-fn album_header<'a>(
-    album: &'a vm::AlbumVm,
-    edition: Option<&'a vm::EditionVm>,
-) -> Element<'a, Message> {
-    let title = album.title.as_deref().unwrap_or("Unknown Album");
-    let artist = album.artist.label();
-    let tracks = edition.map_or(0, |edition| edition.tracks.len());
-    let mut meta: Vec<String> = Vec::new();
-    if let Some(year) = album.year {
-        meta.push(year.to_string());
-    }
-    meta.push(match tracks {
-        1 => "1 track".to_owned(),
-        n => format!("{n} tracks"),
-    });
-    let total: Duration = edition
-        .into_iter()
-        .flat_map(|edition| edition.tracks.iter())
-        .filter_map(|t| t.duration)
-        .sum();
-    if total > Duration::ZERO {
-        meta.push(vm::format_duration(total));
-    }
-    let mut header = column![
-        text(title).size(theme::SIZE_TITLE).font(theme::SEMIBOLD),
-        text(artist)
-            .size(theme::SIZE_EMPHASIS)
-            .color(theme::PAPER_DIM),
-        text(meta.join(" · "))
-            .size(theme::SIZE_META)
-            .font(theme::MONO)
-            .color(theme::PAPER_FAINT),
-    ]
-    .spacing(theme::GAP_XS);
-    if let Some(line) = edition.and_then(vm::EditionVm::encoding_line) {
-        header = header.push(
-            text(line)
-                .size(theme::SIZE_META)
-                .font(theme::MONO)
-                .color(theme::PAPER_FAINT),
-        );
-    }
-    header.into()
-}
-
-/// The edition selector: a quiet segmented control, one segment per format
-/// the album is owned in, in the library's best-first order.
-///
-/// Shown only when there is a choice to make — a single-format album carries
-/// no control at all, so the ordinary case gains no chrome. The choice
-/// changes what the panel lists and what Play queues, and nothing else; it
-/// never interrupts what is already playing.
-fn edition_selector<'a>(
-    album: &'a vm::AlbumVm,
-    selected: Option<&'a vm::EditionVm>,
-) -> Element<'a, Message> {
-    let selected_key = selected.map(|edition| edition.key);
-    let mut segments = row![].spacing(theme::GAP_XXS);
-    for edition in &album.editions {
-        let is_selected = selected_key == Some(edition.key);
-        segments = segments.push(
-            button(
-                container(
-                    text(edition.key.label())
-                        .size(theme::SIZE_META)
-                        .font(theme::MEDIUM)
-                        .wrapping(text::Wrapping::None),
-                )
-                .width(Length::Fill)
-                .align_x(alignment::Horizontal::Center),
-            )
-            .width(Length::Fill)
-            .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-            .style(move |_theme, status| theme::segment(status, is_selected))
-            .on_press(Message::EditionSelected(album.id, edition.key)),
-        );
-    }
-    container(segments)
-        .width(Length::Fill)
-        .padding(theme::SEGMENT_INSET)
-        .style(theme::segmented)
-        .into()
-}
-
-/// One track-list row: right-aligned number, title, monospace duration.
-/// Rows are not interactive in v0.1, so they carry no hover affordance —
-/// no false signals.
-///
-/// With `show_artist`, the track's own artist sits under its title in the
-/// quiet meta style — the same title-over-artist stack the now-playing bar
-/// uses. It is passed in rather than decided here because the answer is a
-/// property of the whole album ([`vm::AlbumVm::track_artists_vary`]): every
-/// row of a soundtrack shows its composer, or none does.
-fn track_row(track: &vm::TrackVm, show_artist: bool) -> Element<'_, Message> {
-    let number = track.number.map(|n| n.to_string()).unwrap_or_default();
-    let duration = track.duration.map(vm::format_duration).unwrap_or_default();
-    let mut title = column![
-        text(track.title.as_str())
-            .size(theme::SIZE_BODY)
-            .wrapping(text::Wrapping::None)
-    ]
-    .spacing(theme::GAP_XXS);
-    if let Some(artist) = track.artist.as_deref().filter(|_| show_artist) {
-        title = title.push(
-            text(artist)
-                .size(theme::SIZE_META)
-                .color(theme::PAPER_DIM)
-                .wrapping(text::Wrapping::None),
-        );
-    }
-    container(
-        row![
-            container(
-                text(number)
-                    .size(theme::SIZE_META)
-                    .font(theme::MONO)
-                    .color(theme::PAPER_FAINT)
-            )
-            .width(Length::Fixed(TRACK_NO_W))
-            .align_x(alignment::Horizontal::Right),
-            container(title).width(Length::Fill),
-            text(duration)
-                .size(theme::SIZE_META)
-                .font(theme::MONO)
-                .color(theme::PAPER_FAINT),
-        ]
-        .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Center),
-    )
-    .padding(theme::pad(theme::GAP_XS, theme::GAP_XS))
-    .into()
-}
-
-/// The persistent now-playing bar, in three zones: the current track on the
-/// left, the transport centred over its seek bar in the middle, quiet status
-/// on the right.
-///
-/// The transport sits *above* the groove rather than beside it because that
-/// is where a listener looks for it — the controls and the position they act
-/// on read as one block, and the block is the only thing in the bar that is
-/// centred. The two flanking zones are equal-weight fills, which is what
-/// keeps the centre column optically centred no matter how long a track
-/// title runs; both clip rather than push.
-///
-/// Nothing in here changes size as playback moves. The centre column is
-/// [`theme::SEEK_ROW_W`] wide with fixed-width timestamps, the seek row's
-/// height is reserved even when there is nothing to seek, and the transport
-/// glyphs live in fixed boxes — so starting a track, crossing the hour mark,
-/// or sending a command cannot reflow the bar. Every glyph, position, and
-/// enabled-state comes from [`PlayerState`] — event-derived, tested in
-/// `player.rs`.
-fn bottom_bar(player: &PlayerState) -> Element<'_, Message> {
-    let mut status = row![].spacing(theme::GAP_SM);
-    if let Some(skipped) = player.skipped_note() {
-        status = status.push(
-            text(skipped)
-                .size(theme::SIZE_META)
-                .font(theme::MONO)
-                .color(theme::PAPER_FAINT),
-        );
-    }
-    let bar = row![
-        container(now_playing_line(player))
-            .width(Length::Fill)
-            .clip(true),
-        transport_stack(player),
-        container(status)
-            .width(Length::Fill)
-            .align_x(alignment::Horizontal::Right)
-            .clip(true),
-    ]
-    .spacing(theme::GAP_LG)
-    .align_y(iced::Alignment::Center);
-    column![
-        horizontal_rule(1).style(theme::hairline),
-        container(bar)
-            .width(Length::Fill)
-            .padding(theme::pad(theme::GAP_MD, theme::GAP_LG))
-            .style(theme::bar),
-    ]
-    .into()
-}
-
-/// The bar's left zone: the current track as a title-over-artist stack, or
-/// the engine's plainly-stated absence as quiet status text.
-///
-/// Neither line wraps. A bar that grew a second row under a long album title
-/// would shove the shelf up by a line, which is exactly the kind of movement
-/// this bar is built not to make; the enclosing zone clips instead.
-fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
-    if let Some(note) = player.availability_note() {
-        return text(note)
-            .size(theme::SIZE_META)
-            .color(theme::PAPER_FAINT)
-            .wrapping(text::Wrapping::None)
-            .into();
-    }
-    let Some(now) = player.now_playing() else {
-        return text("Nothing playing")
-            .size(theme::SIZE_META)
-            .color(theme::PAPER_FAINT)
-            .wrapping(text::Wrapping::None)
-            .into();
-    };
-    let mut stack = column![
-        text(now.title.as_str())
-            .size(theme::SIZE_BODY)
-            .font(theme::MEDIUM)
-            .wrapping(text::Wrapping::None)
-    ]
-    .spacing(theme::GAP_XXS);
-    if let Some(artist) = &now.artist {
-        stack = stack.push(
-            text(artist.as_str())
-                .size(theme::SIZE_META)
-                .color(theme::PAPER_DIM)
-                .wrapping(text::Wrapping::None),
-        );
-    }
-    stack.into()
-}
-
-/// The bar's centre: the transport row over the seek row, both centred in a
-/// fixed-width column.
-///
-/// When there is nothing to seek — no engine, or nothing playing — the seek
-/// row's space is *reserved* rather than dropped. The transport is the one
-/// thing in this bar that is always in the same place, and a bar that
-/// changed height the moment a track started would undo that.
-fn transport_stack(player: &PlayerState) -> Element<'_, Message> {
-    let pending = player.transport_pending();
-    let toggle = player.play_pause();
-    let transport = row![
-        transport_button(
-            toggle.into(),
-            toggle.label(),
-            player.play_pause_enabled(),
-            pending,
-            Message::PlayPause,
-        ),
-        transport_button(
-            icon::Glyph::Next,
-            "Next track",
-            player.next_enabled(),
-            pending,
-            Message::NextTrack,
-        ),
-    ]
-    .spacing(theme::GAP_SM);
-    let seek: Element<'_, Message> = match player.seek_bar() {
-        Some(state) => seek_bar(state),
-        None => Space::new(
-            Length::Fixed(theme::SEEK_ROW_W),
-            Length::Fixed(theme::SEEK_ROW_H),
-        )
-        .into(),
-    };
-    column![transport, seek]
-        .spacing(theme::GAP_SM)
-        .width(Length::Fixed(theme::SEEK_ROW_W))
-        .align_x(iced::Alignment::Center)
-        .into()
-}
-
-/// One transport control: a glyph in a fixed square, named by a tooltip.
-///
-/// The size is fixed in both axes and the glyph is drawn into a box of its
-/// own, so swapping play for pause moves nothing. `pending` reaches the ink
-/// and only the ink (see [`theme::glyph_opacity`]).
-///
-/// The tooltip is the control's accessible name. iced 0.13 publishes no
-/// accessibility tree and its buttons take no keyboard focus, so a hover
-/// label plus a target comfortably larger than the mark is the whole of what
-/// the toolkit can offer here — stated plainly rather than papered over.
-fn transport_button(
-    glyph: icon::Glyph,
-    label: &str,
-    enabled: bool,
-    pending: bool,
-    message: Message,
-) -> Element<'_, Message> {
-    let mark = container(
-        iced_image(icon::handle(glyph))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::glyph_opacity(enabled, pending)),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(alignment::Horizontal::Center)
-    .align_y(alignment::Vertical::Center);
-    let control = button(mark)
-        .width(Length::Fixed(theme::TRANSPORT_HIT))
-        .height(Length::Fixed(theme::TRANSPORT_HIT))
-        .padding(0)
-        .style(theme::transport)
-        .on_press_maybe(enabled.then_some(message));
-    tooltip(
-        control,
-        text(label).size(theme::SIZE_CAPTION),
-        tooltip::Position::Top,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(theme::tooltip)
-    .into()
-}
-
-/// The seek bar: elapsed timestamp, groove, total timestamp — a row that
-/// reads left to right the way the track plays, with a lane above the groove
-/// where the hover preview floats. Timestamps are monospace so the digits do
-/// not shuffle the groove sideways as they tick.
-///
-/// The groove is [`seek::Groove`] rather than iced's `slider`: it reports
-/// pointer *geometry*, which is what the click-vs-scrub threshold, the hover
-/// preview, and the cursor affordance are all built from (that module's docs
-/// carry the evidence for why the built-ins cannot).
-///
-/// A track whose length was never declared gets the inert groove: the
-/// elapsed time still counts up (that much is known), but there is nothing
-/// to scrub against and the widget says so by refusing the pointer — and by
-/// leaving the cursor alone — rather than by looking identical and doing
-/// nothing.
-fn seek_bar(state: player::SeekBar) -> Element<'static, Message> {
-    // While a position is being asked for rather than reported, the elapsed
-    // timestamp warms to lamp amber — the same accent the rest of the room
-    // reserves for playback truth, here saying "this is where you are asking
-    // to be". It cools back to the quiet default the moment the engine
-    // confirms.
-    let elapsed_color = if state.pending {
-        theme::LAMP
-    } else {
-        theme::PAPER_FAINT
-    };
-    let groove = seek::Groove::new(state.position, theme::seek)
-        .width(Length::Fixed(theme::SEEK_W))
-        .height(theme::RAIL_HIT);
-    let groove: Element<'static, Message> = if state.interactive {
-        groove
-            .on_pointer(
-                Message::SeekPressed,
-                Message::SeekDragged,
-                Message::SeekHovered,
-                Message::SeekReleased,
-                Message::SeekLeft,
-            )
-            .into()
-    } else {
-        seek::Groove::new(state.position, theme::seek_inert)
-            .width(Length::Fixed(theme::SEEK_W))
-            .height(theme::RAIL_HIT)
-            .into()
-    };
-    row![
-        seek_stamp(state.elapsed, elapsed_color, alignment::Horizontal::Right),
-        column![preview_lane(state.preview), groove],
-        seek_stamp(state.total, theme::PAPER_FAINT, alignment::Horizontal::Left),
-    ]
-    .spacing(theme::GAP_SM)
-    .into()
-}
-
-/// One of the seek bar's timestamps, carrying the same preview lane as the
-/// groove above it so that the digits line up with the rail rather than with
-/// the lane-plus-rail block.
-///
-/// The stamp is [`theme::STAMP_W`] wide whatever it says, hugging the groove
-/// it belongs to. Sizing it to its own digits would slide the groove
-/// sideways the moment a track crossed the hour — and, since the whole
-/// centre column is what the transport centres over, would drag the buttons
-/// with it.
-fn seek_stamp(
-    value: String,
-    color: Color,
-    align: alignment::Horizontal,
-) -> Element<'static, Message> {
-    column![
-        Space::with_height(Length::Fixed(theme::PREVIEW_H)),
-        container(
-            text(value)
-                .size(theme::SIZE_META)
-                .font(theme::MONO)
-                .color(color)
-                .wrapping(text::Wrapping::None)
-        )
-        .width(Length::Fixed(theme::STAMP_W))
-        .height(Length::Fixed(theme::RAIL_HIT))
-        .align_x(align)
-        .align_y(alignment::Vertical::Center),
-    ]
-    .into()
-}
-
-/// The lane above the groove where the hover preview floats: a fixed-height
-/// strip, empty until the pointer rests on the bar, then carrying a small
-/// tip centered on the pointer with the timestamp a click would seek to.
-///
-/// The strip is reserved whether or not anything is hovering, so the bottom
-/// bar never changes height under the pointer; the horizontal placement is
-/// [`player::preview_offset`], which keeps the tip whole and on the bar at
-/// both ends (pure, and tested there).
-fn preview_lane(preview: Option<player::SeekPreview>) -> Element<'static, Message> {
-    let mut lane = row![];
-    if let Some(preview) = preview {
-        let offset = player::preview_offset(&preview, theme::PREVIEW_W);
-        lane = lane.push(Space::with_width(Length::Fixed(offset))).push(
-            container(
-                text(preview.label)
-                    .size(theme::SIZE_CAPTION)
-                    .font(theme::MONO),
-            )
-            .width(Length::Fixed(theme::PREVIEW_W))
-            .height(Length::Fill)
-            .align_x(alignment::Horizontal::Center)
-            .align_y(alignment::Vertical::Center)
-            .style(theme::preview_tip),
-        );
-    }
-    container(lane)
-        .width(Length::Fixed(theme::SEEK_W))
-        .height(Length::Fixed(theme::PREVIEW_H))
-        .into()
-}
-
-/// The playing album's lamp dot: a small amber circle, the amplifier's
-/// power light.
-fn lamp_dot() -> Element<'static, Message> {
-    container(Space::new(
-        Length::Fixed(theme::DOT),
-        Length::Fixed(theme::DOT),
-    ))
-    .style(theme::lamp_dot)
-    .into()
-}
-
-/// A `size`×`size` block filled with the album's deterministic two-color
-/// gradient (hash → HSL, see [`vm::gradient_colors`]) — a stand-in sleeve,
-/// square-cornered like the artwork it substitutes.
-fn gradient_block(album_id: u64, size: f32) -> Element<'static, Message> {
-    let (c1, c2) = vm::gradient_colors(album_id);
-    let to_color = |c: [u8; 3]| Color::from_rgb8(c[0], c[1], c[2]);
-    let gradient = iced::gradient::Linear::new(iced::Radians(2.4))
-        .add_stop(0.0, to_color(c1))
-        .add_stop(1.0, to_color(c2));
-    container(Space::new(Length::Fixed(size), Length::Fixed(size)))
-        .style(move |_theme| container::Style {
-            background: Some(iced::Background::Gradient(gradient.into())),
-            ..container::Style::default()
-        })
-        .into()
 }
 
 /// Persist the chosen music dir (config module); best-effort with a log,
