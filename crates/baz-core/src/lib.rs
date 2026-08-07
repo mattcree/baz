@@ -6,10 +6,11 @@
 //! thin clients by design (see ADR-0003): if a capability isn't reachable
 //! through the protocol, it doesn't exist.
 //!
-//! This crate is currently a skeleton: the workspace and its quality gates
-//! (see `docs/ENGINEERING.md`) were established before feature code, and the
-//! engine grows behind them.
+//! The workspace and its quality gates (see `docs/ENGINEERING.md`) were
+//! established before feature code; the engine grows behind them. First
+//! feature in: the [`library`] scanner.
 
 #![forbid(unsafe_code)]
 
+pub mod library;
 pub mod protocol;

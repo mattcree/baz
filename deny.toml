@@ -5,6 +5,12 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+  # `paste` (proc-macro, transitive via lofty) is archived by its author but
+  # has no vulnerability and no drop-in replacement upstream has adopted yet.
+  # Revisit when lofty migrates (tracked upstream); remove this when it does.
+  "RUSTSEC-2024-0436",
+]
 
 [licenses]
 version = 2
