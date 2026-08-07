@@ -34,29 +34,37 @@ use baz_core::protocol::{Command, Event};
 use iced::keyboard::{self, key};
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
 use iced::widget::{
-    Column, Space, button, column, container, image as iced_image, mouse_area, row, scrollable,
-    text, text_input,
+    Column, Space, button, column, container, horizontal_rule, image as iced_image, row,
+    scrollable, text, text_input, vertical_rule,
 };
-use iced::{Color, Element, Length, Size, Subscription, Task, Theme, window};
+use iced::{Color, Element, Length, Size, Subscription, Task, alignment, window};
 use lru::LruCache;
 
 use crate::playback::{Playback, PlayerEvent};
 use crate::player::{Availability, Phase, PlayerState};
 use crate::scan::ScanUpdate;
 use crate::shelf::{ART_PX, CELL_H, CELL_W, GRID_PADDING};
-use crate::{art, config, scan, shelf, vm};
+use crate::{art, config, scan, shelf, theme, vm};
 
 /// Side-panel width (logical px).
-const PANEL_W: f32 = 320.0;
+const PANEL_W: f32 = 340.0;
+/// Side-panel inner padding (logical px).
+const PANEL_PAD: f32 = theme::GAP_XL;
 /// Approximate top-bar height, used only for the pre-first-scroll estimate
 /// of the grid viewport (real bounds arrive with every scroll event).
 const TOP_BAR_H: f32 = 56.0;
 /// Initial window size.
 const WINDOW: Size = Size::new(1280.0, 860.0);
-/// Muted foreground for secondary text.
-const DIM: Color = Color::from_rgb(0.55, 0.55, 0.60);
-/// Accent for the playing-album highlight on the shelf.
-const ACCENT: Color = Color::from_rgb(0.35, 0.62, 0.95);
+/// Horizontal tile padding: centers [`ART_PX`] artwork inside [`CELL_W`].
+const TILE_PAD_H: f32 = (CELL_W - ART_PX) / 2.0;
+/// Vertical tile padding.
+const TILE_PAD_V: f32 = theme::GAP_MD;
+/// The search field's width in the top bar (logical px).
+const SEARCH_W: f32 = 360.0;
+/// The first-run screen's folder input width (logical px).
+const SETUP_INPUT_W: f32 = 460.0;
+/// Width of the track-number column in the side panel (logical px).
+const TRACK_NO_W: f32 = 24.0;
 /// Two clicks on the same tile within this window play the album.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
@@ -73,7 +81,7 @@ fn search_id() -> text_input::Id {
 pub fn run(started: Instant, cli_dir: Option<PathBuf>) -> iced::Result {
     iced::application("baz", App::update, App::view)
         .subscription(App::subscription)
-        .theme(|_| Theme::Dark)
+        .theme(|_| theme::theme())
         .window_size(WINDOW)
         .run_with(move || App::new(started, cli_dir))
 }
@@ -348,27 +356,43 @@ impl Setup {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let mut content = column![
-            text("Where's your music?").size(30),
+        let heading = column![
+            text("baz")
+                .size(theme::SIZE_EMPHASIS)
+                .font(theme::MONO)
+                .color(theme::LAMP),
+            text("Where's your music?")
+                .size(theme::SIZE_HERO)
+                .font(theme::SEMIBOLD),
             text("Point baz at a folder — the shelf fills as it scans.")
-                .size(14)
-                .color(DIM),
+                .size(theme::SIZE_EMPHASIS)
+                .color(theme::PAPER_DIM),
+        ]
+        .spacing(theme::GAP_SM)
+        .align_x(iced::Alignment::Center);
+        let mut content = column![
+            heading,
             text_input("/path/to/your/music", &self.input)
                 .on_input(Message::SetupInput)
                 .on_submit(Message::SetupSubmit)
-                .padding(10)
-                .size(16)
-                .width(Length::Fixed(480.0)),
+                .padding(theme::pad(theme::GAP_SM + 2.0, theme::GAP_MD))
+                .size(theme::SIZE_EMPHASIS)
+                .width(Length::Fixed(SETUP_INPUT_W))
+                .style(theme::input),
         ]
-        .spacing(16)
+        .spacing(theme::GAP_XL)
         .align_x(iced::Alignment::Center);
         if let Some(error) = &self.error {
-            content = content.push(text(error).size(13).color(Color::from_rgb(0.9, 0.4, 0.4)));
+            content = content.push(
+                text(error.as_str())
+                    .size(theme::SIZE_META)
+                    .color(theme::ALERT),
+            );
         }
         content = content.push(
             text("Enter confirms · next time, `baz` remembers (or run `baz DIR`)")
-                .size(12)
-                .color(DIM),
+                .size(theme::SIZE_CAPTION)
+                .color(theme::PAPER_FAINT),
         );
         container(content).center(Length::Fill).into()
     }
@@ -678,7 +702,12 @@ impl Shelf {
 
     fn view<'a>(&'a self, player: &'a PlayerState) -> Element<'a, Message> {
         let body: Element<'_, Message> = match self.selected_album() {
-            Some(album) => row![self.grid(player), self.side_panel(album, player)].into(),
+            Some(album) => row![
+                self.grid(player),
+                vertical_rule(1).style(theme::hairline),
+                self.side_panel(album, player)
+            ]
+            .into(),
             None => self.grid(player),
         };
         column![self.top_bar(), body].into()
@@ -689,26 +718,64 @@ impl Shelf {
         self.albums.iter().find(|album| album.id == id)
     }
 
+    /// The slim top bar: the search well on the left, quiet status on the
+    /// right, a hairline rule below.
     fn top_bar(&self) -> Element<'_, Message> {
-        row![
-            text_input("Search artists, albums, tracks…", &self.query)
-                .id(search_id())
-                .on_input(Message::SearchChanged)
-                .padding(10)
-                .size(15),
-            container(text(self.status_line()).size(13).color(DIM)).padding(10),
+        let search = text_input("Search artists, albums, tracks…", &self.query)
+            .id(search_id())
+            .on_input(Message::SearchChanged)
+            .padding(theme::pad(theme::GAP_SM, theme::GAP_MD))
+            .size(theme::SIZE_BODY)
+            .width(Length::Fixed(SEARCH_W))
+            .style(theme::input);
+        let mut status = row![
+            text(self.counts_line())
+                .size(theme::SIZE_META)
+                .font(theme::MONO)
+                .color(theme::PAPER_FAINT)
         ]
-        .spacing(8)
-        .padding(8)
-        .align_y(iced::Alignment::Center)
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center);
+        if self.scanning {
+            status = status.push(
+                text("scanning…")
+                    .size(theme::SIZE_META)
+                    .font(theme::MONO)
+                    .color(theme::LAMP),
+            );
+        }
+        if self.files_skipped > 0 {
+            status = status.push(
+                text(format!("{} files skipped", self.files_skipped))
+                    .size(theme::SIZE_META)
+                    .font(theme::MONO)
+                    .color(theme::PAPER_FAINT),
+            );
+        }
+        if let Some(problem) = &self.problem {
+            status = status.push(
+                text(problem.as_str())
+                    .size(theme::SIZE_META)
+                    .color(theme::ALERT),
+            );
+        }
+        column![
+            container(
+                row![search, Space::with_width(Length::Fill), status]
+                    .spacing(theme::GAP_LG)
+                    .align_y(iced::Alignment::Center),
+            )
+            .padding(theme::pad(theme::GAP_SM + 2.0, theme::GAP_LG)),
+            horizontal_rule(1).style(theme::hairline),
+        ]
         .into()
     }
 
-    /// The unobtrusive status text: album/track counts, live scan progress,
-    /// skipped-file count, any problem. Count, not modal — by design.
-    fn status_line(&self) -> String {
-        use std::fmt::Write as _;
-        let mut status = if self.query.trim().is_empty() {
+    /// The unobtrusive count text: album/track counts, or the filtered
+    /// count while a query narrows the shelf. Status, not modal — by
+    /// design; scan/skip/problem notes render as separate colored segments.
+    fn counts_line(&self) -> String {
+        if self.query.trim().is_empty() {
             format!(
                 "{} albums · {} tracks",
                 self.albums.len(),
@@ -716,32 +783,26 @@ impl Shelf {
             )
         } else {
             format!("{} / {} albums", self.visible.len(), self.albums.len())
-        };
-        if self.scanning {
-            status.push_str(" · scanning…");
         }
-        if self.files_skipped > 0 {
-            let _ = write!(status, " · {} files skipped", self.files_skipped);
-        }
-        if let Some(problem) = &self.problem {
-            status.push_str(" · ");
-            status.push_str(problem);
-        }
-        status
     }
 
     /// The virtualized grid: spacer, visible rows, spacer (see [`shelf`]).
+    /// The grid block is centered in the viewport; spacers are
+    /// width-shrunk so the column keeps the rows' width and partial last
+    /// rows stay left-aligned within the shelf.
     fn grid<'a>(&'a self, player: &'a PlayerState) -> Element<'a, Message> {
+        if self.visible.is_empty() {
+            return self.empty_state();
+        }
         let cols = shelf::columns(self.grid_size.width);
         let total_rows = shelf::total_rows(self.visible.len(), cols);
         let (first_row, end_row) =
             shelf::visible_rows(self.scroll_offset, self.grid_size.height, total_rows);
 
         let mut grid = column![].padding(GRID_PADDING);
-        grid = grid.push(Space::new(
-            Length::Fill,
-            Length::Fixed(shelf::spacer_height(first_row)),
-        ));
+        grid = grid.push(Space::with_height(Length::Fixed(shelf::spacer_height(
+            first_row,
+        ))));
         for r in first_row..end_row {
             let mut cells = row![];
             for c in 0..cols {
@@ -754,21 +815,61 @@ impl Shelf {
             }
             grid = grid.push(container(cells).height(Length::Fixed(CELL_H)));
         }
-        grid = grid.push(Space::new(
-            Length::Fill,
-            Length::Fixed(shelf::spacer_height(total_rows - end_row)),
-        ));
+        grid = grid.push(Space::with_height(Length::Fixed(shelf::spacer_height(
+            total_rows - end_row,
+        ))));
 
-        scrollable(grid)
-            .id(scroll_id())
-            .on_scroll(Message::Scrolled)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        scrollable(
+            container(grid)
+                .width(Length::Fill)
+                .align_x(alignment::Horizontal::Center),
+        )
+        .id(scroll_id())
+        .on_scroll(Message::Scrolled)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
     }
 
-    /// One album tile: art (thumbnail or gradient placeholder) + caption.
-    /// The currently playing album carries an accent border.
+    /// The shelf with nothing to show: a zero-result search, the first
+    /// moments of a scan, or a genuinely empty folder. Quiet text, no modal.
+    fn empty_state(&self) -> Element<'_, Message> {
+        let query = self.query.trim();
+        let (line, hint) = if query.is_empty() {
+            if self.scanning {
+                (
+                    "The shelf fills as the scan finds your music…".to_owned(),
+                    None,
+                )
+            } else {
+                (
+                    "No albums here yet".to_owned(),
+                    Some("baz rescans this folder each time it starts"),
+                )
+            }
+        } else {
+            (
+                format!("Nothing matches “{query}”"),
+                Some("Esc clears the search"),
+            )
+        };
+        let mut content = column![
+            text(line)
+                .size(theme::SIZE_EMPHASIS)
+                .color(theme::PAPER_DIM)
+        ]
+        .spacing(theme::GAP_SM)
+        .align_x(iced::Alignment::Center);
+        if let Some(hint) = hint {
+            content = content.push(text(hint).size(theme::SIZE_META).color(theme::PAPER_FAINT));
+        }
+        container(content).center(Length::Fill).into()
+    }
+
+    /// One album tile: the sleeve (thumbnail or gradient placeholder, with
+    /// a soft shelf shadow) over a quiet two-line caption. The playing
+    /// album swaps the shadow for a lamp-amber halo and gains a lamp dot by
+    /// its title; selection and hover raise the tile's card.
     fn tile<'a>(&'a self, album: &'a vm::AlbumVm, playing: bool) -> Element<'a, Message> {
         let art: Element<'_, Message> = match self.thumbs.peek(&album.id) {
             Some(handle) => iced_image(handle.clone())
@@ -777,88 +878,85 @@ impl Shelf {
                 .into(),
             None => gradient_block(album.id, ART_PX),
         };
+        let sleeve = container(art).style(move |_theme| theme::sleeve(playing));
         let title = album.title.as_deref().unwrap_or("Unknown Album");
         let artist = album.artist.as_deref().unwrap_or("Unknown Artist");
         let caption = match album.year {
             Some(year) => format!("{artist} · {year}"),
             None => artist.to_owned(),
         };
+        let mut title_row = row![]
+            .spacing(theme::GAP_XS)
+            .align_y(iced::Alignment::Center);
+        if playing {
+            title_row = title_row.push(lamp_dot());
+        }
+        title_row = title_row.push(
+            text(title)
+                .size(theme::SIZE_BODY)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None),
+        );
         let selected = self.selected == Some(album.id);
-        let cell = container(
-            column![art, text(title).size(13), text(caption).size(12).color(DIM),]
-                .spacing(3)
-                .width(Length::Fixed(ART_PX)),
+        button(
+            column![
+                sleeve,
+                column![
+                    title_row,
+                    text(caption)
+                        .size(theme::SIZE_META)
+                        .color(theme::PAPER_DIM)
+                        .wrapping(text::Wrapping::None),
+                ]
+                .spacing(theme::GAP_XXS),
+            ]
+            .spacing(theme::GAP_SM)
+            .width(Length::Fixed(ART_PX)),
         )
         .width(Length::Fixed(CELL_W))
         .height(Length::Fixed(CELL_H))
-        .padding(6)
-        .style(move |_theme| {
-            let mut style = container::Style::default();
-            if selected {
-                style.background = Some(Color::from_rgb(0.18, 0.18, 0.24).into());
-                style.border = iced::border::rounded(8);
-            }
-            if playing {
-                style.border = iced::Border {
-                    color: ACCENT,
-                    width: 2.0,
-                    radius: 8.into(),
-                };
-            }
-            style
-        });
-        mouse_area(cell)
-            .on_press(Message::AlbumClicked(album.id))
-            .into()
+        .padding(theme::pad(TILE_PAD_V, TILE_PAD_H))
+        .style(move |_theme, status| theme::tile(status, selected))
+        .on_press(Message::AlbumClicked(album.id))
+        .into()
     }
 
-    /// The album side panel: art, header, Play button (queues the album),
-    /// track list. In a build without audio output the button is hidden;
-    /// with an unusable or closed engine it renders disabled.
+    /// The album side panel: large art, a title/artist/meta header, the
+    /// primary Play action, and the numbered track list (durations in
+    /// monospace, right-hugged). In a build without audio output the button
+    /// is hidden; with an unusable or closed engine it renders disabled.
     fn side_panel<'a>(
         &'a self,
         album: &'a vm::AlbumVm,
         player: &'a PlayerState,
     ) -> Element<'a, Message> {
+        let playing = player.playing_album() == Some(album.id);
+        let art_edge = PANEL_W - 2.0 * PANEL_PAD;
         let art: Element<'_, Message> = match self.thumbs.peek(&album.id) {
             Some(handle) => iced_image(handle.clone())
-                .width(Length::Fixed(PANEL_W - 28.0))
+                .width(Length::Fixed(art_edge))
                 .into(),
-            None => gradient_block(album.id, PANEL_W - 28.0),
+            None => gradient_block(album.id, art_edge),
         };
-        let title = album.title.as_deref().unwrap_or("Unknown Album");
-        let artist = album.artist.as_deref().unwrap_or("Unknown Artist");
-        let mut subtitle = format!("{artist} · {} tracks", album.tracks.len());
-        if let Some(year) = album.year {
-            use std::fmt::Write as _;
-            let _ = write!(subtitle, " · {year}");
-        }
+        let sleeve = container(art).style(move |_theme| theme::sleeve(playing));
+        let rows: Vec<Element<'_, Message>> = album.tracks.iter().map(track_row).collect();
 
-        let rows: Vec<Element<'_, Message>> = album
-            .tracks
-            .iter()
-            .map(|track| {
-                let number = track.number.map(|n| n.to_string()).unwrap_or_default();
-                let duration = track.duration.map(vm::format_duration).unwrap_or_default();
-                row![
-                    container(text(number).size(12).color(DIM)).width(Length::Fixed(26.0)),
-                    text(track.title.as_str()).size(13).width(Length::Fill),
-                    text(duration).size(12).color(DIM),
-                ]
-                .spacing(6)
-                .into()
-            })
-            .collect();
-
-        let mut content = column![
-            art,
-            text(title).size(18),
-            text(subtitle).size(13).color(DIM),
-        ]
-        .spacing(10);
+        let mut content = column![sleeve, album_header(album)].spacing(theme::GAP_MD);
         if *player.availability() != Availability::NotBuilt {
             content = content.push(
-                button(text("Play").size(14)).on_press_maybe(
+                button(
+                    container(
+                        text("Play album")
+                            .size(theme::SIZE_BODY)
+                            .font(theme::MEDIUM),
+                    )
+                    .width(Length::Fill)
+                    .align_x(alignment::Horizontal::Center),
+                )
+                .width(Length::Fill)
+                .padding(theme::pad(theme::GAP_SM, 0.0))
+                .style(theme::primary)
+                .on_press_maybe(
                     player
                         .engine_ready()
                         .then_some(Message::PlayAlbum(album.id)),
@@ -871,59 +969,181 @@ impl Shelf {
             "Esc closes · double-click a tile to play"
         };
         content = content
-            .push(scrollable(Column::with_children(rows).spacing(4)).height(Length::Fill))
-            .push(text(hint).size(11).color(DIM));
+            .push(
+                scrollable(Column::with_children(rows).spacing(theme::GAP_XXS))
+                    .height(Length::Fill),
+            )
+            .push(
+                text(hint)
+                    .size(theme::SIZE_CAPTION)
+                    .color(theme::PAPER_FAINT),
+            );
 
         container(content)
             .width(Length::Fixed(PANEL_W))
             .height(Length::Fill)
-            .padding(14)
-            .style(|_theme| container::Style {
-                background: Some(Color::from_rgb(0.10, 0.10, 0.13).into()),
-                ..container::Style::default()
-            })
+            .padding(PANEL_PAD)
+            .style(theme::panel)
             .into()
     }
 }
 
-/// The persistent bottom bar: play/pause toggle, Next, and the current
-/// track (or the engine's plainly-stated absence). Every label and
-/// enabled-state comes from [`PlayerState`] — event-derived, tested in
-/// `player.rs`. No seek bar: the engine has no seek yet, and we do not fake
-/// affordances.
-fn bottom_bar(player: &PlayerState) -> Element<'_, Message> {
-    let toggle = button(text(player.play_pause_label()).size(14))
-        .width(Length::Fixed(64.0))
-        .on_press_maybe(player.play_pause_enabled().then_some(Message::PlayPause));
-    let next = button(text("Next").size(14))
-        .on_press_maybe(player.next_enabled().then_some(Message::NextTrack));
-    let line = player.availability_note().unwrap_or_else(|| {
-        player.now_playing().map_or_else(
-            || "Nothing playing".to_owned(),
-            |now| match &now.artist {
-                Some(artist) => format!("{} — {artist}", now.title),
-                None => now.title.clone(),
-            },
-        )
+/// The side panel's header: album title over artist over a quiet
+/// year · tracks · total-time meta line (the total is the sum of the known
+/// track durations).
+fn album_header(album: &vm::AlbumVm) -> Element<'_, Message> {
+    let title = album.title.as_deref().unwrap_or("Unknown Album");
+    let artist = album.artist.as_deref().unwrap_or("Unknown Artist");
+    let mut meta: Vec<String> = Vec::new();
+    if let Some(year) = album.year {
+        meta.push(year.to_string());
+    }
+    meta.push(match album.tracks.len() {
+        1 => "1 track".to_owned(),
+        n => format!("{n} tracks"),
     });
-    let mut bar = row![toggle, next, text(line).size(14)]
-        .spacing(10)
+    let total: Duration = album.tracks.iter().filter_map(|t| t.duration).sum();
+    if total > Duration::ZERO {
+        meta.push(vm::format_duration(total));
+    }
+    column![
+        text(title).size(theme::SIZE_TITLE).font(theme::SEMIBOLD),
+        text(artist)
+            .size(theme::SIZE_EMPHASIS)
+            .color(theme::PAPER_DIM),
+        text(meta.join(" · "))
+            .size(theme::SIZE_META)
+            .font(theme::MONO)
+            .color(theme::PAPER_FAINT),
+    ]
+    .spacing(theme::GAP_XS)
+    .into()
+}
+
+/// One track-list row: right-aligned number, title, monospace duration.
+/// Rows are not interactive in v0.1, so they carry no hover affordance —
+/// no false signals.
+fn track_row(track: &vm::TrackVm) -> Element<'_, Message> {
+    let number = track.number.map(|n| n.to_string()).unwrap_or_default();
+    let duration = track.duration.map(vm::format_duration).unwrap_or_default();
+    container(
+        row![
+            container(
+                text(number)
+                    .size(theme::SIZE_META)
+                    .font(theme::MONO)
+                    .color(theme::PAPER_FAINT)
+            )
+            .width(Length::Fixed(TRACK_NO_W))
+            .align_x(alignment::Horizontal::Right),
+            text(track.title.as_str())
+                .size(theme::SIZE_BODY)
+                .width(Length::Fill)
+                .wrapping(text::Wrapping::None),
+            text(duration)
+                .size(theme::SIZE_META)
+                .font(theme::MONO)
+                .color(theme::PAPER_FAINT),
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center),
+    )
+    .padding(theme::pad(theme::GAP_XS, theme::GAP_XS))
+    .into()
+}
+
+/// The persistent now-playing bar: transport controls on the left, the
+/// current track as a title-over-artist stack (or the engine's
+/// plainly-stated absence as quiet status text), skip notes on the right.
+/// Every label and enabled-state comes from [`PlayerState`] —
+/// event-derived, tested in `player.rs`. No seek bar: the engine has no
+/// seek yet, and we do not fake affordances.
+fn bottom_bar(player: &PlayerState) -> Element<'_, Message> {
+    let toggle = button(
+        container(
+            text(player.play_pause_label())
+                .size(theme::SIZE_BODY)
+                .font(theme::MEDIUM),
+        )
+        .width(Length::Fill)
+        .align_x(alignment::Horizontal::Center),
+    )
+    .width(Length::Fixed(84.0))
+    .padding(theme::pad(theme::GAP_SM, 0.0))
+    .style(theme::transport)
+    .on_press_maybe(player.play_pause_enabled().then_some(Message::PlayPause));
+    let next = button(
+        container(text("Next").size(theme::SIZE_BODY).font(theme::MEDIUM))
+            .width(Length::Fill)
+            .align_x(alignment::Horizontal::Center),
+    )
+    .width(Length::Fixed(64.0))
+    .padding(theme::pad(theme::GAP_SM, 0.0))
+    .style(theme::transport)
+    .on_press_maybe(player.next_enabled().then_some(Message::NextTrack));
+
+    let line: Element<'_, Message> = if let Some(note) = player.availability_note() {
+        text(note)
+            .size(theme::SIZE_META)
+            .color(theme::PAPER_FAINT)
+            .into()
+    } else if let Some(now) = player.now_playing() {
+        let mut stack = column![
+            text(now.title.as_str())
+                .size(theme::SIZE_BODY)
+                .font(theme::MEDIUM)
+        ]
+        .spacing(theme::GAP_XXS);
+        if let Some(artist) = &now.artist {
+            stack = stack.push(
+                text(artist.as_str())
+                    .size(theme::SIZE_META)
+                    .color(theme::PAPER_DIM),
+            );
+        }
+        stack.into()
+    } else {
+        text("Nothing playing")
+            .size(theme::SIZE_META)
+            .color(theme::PAPER_FAINT)
+            .into()
+    };
+
+    let mut bar = row![toggle, next, line, Space::with_width(Length::Fill)]
+        .spacing(theme::GAP_MD)
         .align_y(iced::Alignment::Center);
     if let Some(skipped) = player.skipped_note() {
-        bar = bar.push(text(skipped).size(12).color(DIM));
+        bar = bar.push(
+            text(skipped)
+                .size(theme::SIZE_META)
+                .font(theme::MONO)
+                .color(theme::PAPER_FAINT),
+        );
     }
-    container(bar)
-        .width(Length::Fill)
-        .padding(10)
-        .style(|_theme| container::Style {
-            background: Some(Color::from_rgb(0.08, 0.08, 0.10).into()),
-            ..container::Style::default()
-        })
-        .into()
+    column![
+        horizontal_rule(1).style(theme::hairline),
+        container(bar)
+            .width(Length::Fill)
+            .padding(theme::pad(theme::GAP_MD, theme::GAP_LG))
+            .style(theme::bar),
+    ]
+    .into()
+}
+
+/// The playing album's lamp dot: a small amber circle, the amplifier's
+/// power light.
+fn lamp_dot() -> Element<'static, Message> {
+    container(Space::new(
+        Length::Fixed(theme::DOT),
+        Length::Fixed(theme::DOT),
+    ))
+    .style(theme::lamp_dot)
+    .into()
 }
 
 /// A `size`×`size` block filled with the album's deterministic two-color
-/// gradient (hash → HSL, see [`vm::gradient_colors`]).
+/// gradient (hash → HSL, see [`vm::gradient_colors`]) — a stand-in sleeve,
+/// square-cornered like the artwork it substitutes.
 fn gradient_block(album_id: u64, size: f32) -> Element<'static, Message> {
     let (c1, c2) = vm::gradient_colors(album_id);
     let to_color = |c: [u8; 3]| Color::from_rgb8(c[0], c[1], c[2]);
@@ -933,7 +1153,6 @@ fn gradient_block(album_id: u64, size: f32) -> Element<'static, Message> {
     container(Space::new(Length::Fixed(size), Length::Fixed(size)))
         .style(move |_theme| container::Style {
             background: Some(iced::Background::Gradient(gradient.into())),
-            border: iced::border::rounded(4),
             ..container::Style::default()
         })
         .into()

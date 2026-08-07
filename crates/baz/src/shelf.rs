@@ -6,14 +6,16 @@
 //! (`git show dc13d7e:spikes/shelf-iced/src/main.rs`). A 10k-album shelf
 //! therefore costs ~40 live widgets per frame, not 10 000.
 
-/// Tile width including inter-tile padding (logical px).
-pub const CELL_W: f32 = 178.0;
+/// Tile width including inter-tile padding (logical px). Art leads: the
+/// tile is mostly artwork ([`ART_PX`]) with a 32 px art-to-art gutter.
+pub const CELL_W: f32 = 240.0;
 /// Tile height including caption (logical px).
-pub const CELL_H: f32 = 232.0;
-/// Artwork edge inside a tile (logical px).
-pub const ART_PX: f32 = 160.0;
+pub const CELL_H: f32 = 284.0;
+/// Artwork edge inside a tile (logical px). Generous by design — the shelf
+/// pillar says art *is* the interface (docs/VISION.md pillar 5).
+pub const ART_PX: f32 = 208.0;
 /// Outer padding around the whole grid (logical px).
-pub const GRID_PADDING: f32 = 12.0;
+pub const GRID_PADDING: f32 = 24.0;
 /// Extra rows rendered beyond each edge of the viewport so fast flings meet
 /// already-built rows instead of blank space.
 pub const OVERSCAN_ROWS: usize = 2;
@@ -70,8 +72,8 @@ mod tests {
     fn columns_never_zero_and_scale_with_width() {
         assert_eq!(columns(0.0), 1);
         assert_eq!(columns(100.0), 1);
-        // 1280 wide: (1280 - 24) / 178 = 7.05… → 7 columns.
-        assert_eq!(columns(1280.0), 7);
+        // 1280 wide: (1280 - 48) / 240 = 5.13… → 5 columns.
+        assert_eq!(columns(1280.0), 5);
         assert!(columns(2560.0) > columns(1280.0));
     }
 
@@ -89,8 +91,8 @@ mod tests {
         let total = 1000;
         let (first, end) = visible_rows(0.0, 800.0, total);
         assert_eq!(first, 0, "top of shelf starts at row 0");
-        // 800 / 232 = 3.45 → ceil 4 (+1 partial) + 2×2 overscan = 9.
-        assert_eq!(end, 9);
+        // 800 / 284 = 2.82 → ceil 3 (+1 partial) + 2×2 overscan = 8.
+        assert_eq!(end, 8);
 
         // One viewport down: overscan reaches back above the fold.
         let (first, end) = visible_rows(CELL_H * 10.0, 800.0, total);

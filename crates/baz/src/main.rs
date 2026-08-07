@@ -19,6 +19,7 @@ mod playback;
 mod player;
 mod scan;
 mod shelf;
+mod theme;
 mod vm;
 
 fn main() -> iced::Result {
