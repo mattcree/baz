@@ -202,6 +202,20 @@ pub const SEEK_ROW_H: f32 = PREVIEW_H + RAIL_HIT;
 /// over this, and the column is fixed so the whole block stays put.
 pub const SEEK_ROW_W: f32 = SEEK_W + 2.0 * (STAMP_W + GAP_SM);
 
+/// Width reserved at the end of the bottom bar for the signal-path readout
+/// (`48 → 44.1 kHz`, [`crate::player::PlayerState::signal_note`]).
+///
+/// *Reserved*, not sized to content: the readout appears only when the engine
+/// is converting, and a bar that shuffled its status line sideways the moment
+/// a 48 kHz album met a 44.1 kHz-only device would be announcing the thing
+/// this indicator is specifically not supposed to announce. The slot is
+/// always there and usually empty.
+///
+/// Wide enough for the longest chain a consumer device produces —
+/// `192 → 176.4 kHz`, fifteen monospace figures at [`SIZE_META`] — with room
+/// to spare.
+pub const SIGNAL_W: f32 = 120.0;
+
 /// How strongly to ink a transport glyph.
 ///
 /// Three states, one of which is not a state the *control* is in at all:
@@ -600,6 +614,11 @@ mod tests {
         // A stamp must hold `h:mm:ss` — seven monospace figures, which are
         // around half an em wide at this size — without clipping.
         const { assert!(STAMP_W > SIZE_META * 7.0 * 0.5) }
+        // The signal-path slot is reserved on the same principle, and must
+        // hold the longest chain a consumer device produces —
+        // `192 → 176.4 kHz`, fifteen monospace figures — so that a note
+        // appearing there moves nothing beside it.
+        const { assert!(SIGNAL_W > SIZE_META * 15.0 * 0.5) }
     }
 
     #[test]

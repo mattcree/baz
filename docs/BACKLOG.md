@@ -57,6 +57,11 @@
   community design skills to be shortlisted and owner-approved first.
 - **Light theme variant** — the palette is dark-first; tokens are in place, the
   light values are not.
+- **No readout for the *direct* signal path** — the bottom bar shows the chain
+  only when the engine is converting (ADR-0009 §5, deliberately). The listener
+  who wants to *confirm* 24/96 is reaching the device untouched has only the
+  `[playback] signal path:` stdout line; the proper home for that, with
+  `EngineHandle::conversions()` alongside it, is a diagnostics view.
 - **Transport buttons take no keyboard focus and publish no accessibility tree**
   — iced 0.13 offers neither (no AccessKit). Tooltips and 32 px hit targets are
   the whole of what the toolkit currently allows.

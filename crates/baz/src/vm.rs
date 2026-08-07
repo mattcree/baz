@@ -311,7 +311,13 @@ fn edition_detail(edition: &Edition<'_>) -> Option<String> {
 
 /// A sample rate in kHz, to one decimal and no trailing `.0`: `44.1 kHz`,
 /// `48 kHz`, `96 kHz`.
-fn format_sample_rate(hz: u32) -> String {
+///
+/// Shared so that every rate in the interface is spelled the same way — the
+/// side panel's encoding line and the bottom bar's signal-path readout
+/// ([`crate::player::PlayerState::signal_note`]) name the same 44 100 Hz
+/// identically.
+#[must_use]
+pub fn format_sample_rate(hz: u32) -> String {
     let tenths = hz.saturating_add(50) / 100; // hz/100 kHz, rounded half-up
     let (whole, fraction) = (tenths / 10, tenths % 10);
     if fraction == 0 {

@@ -22,11 +22,12 @@ use crate::{icon, player, seek, theme};
 ///
 /// Nothing in here changes size as playback moves. The centre column is
 /// [`theme::SEEK_ROW_W`] wide with fixed-width timestamps, the seek row's
-/// height is reserved even when there is nothing to seek, and the transport
-/// glyphs live in fixed boxes — so starting a track, crossing the hour mark,
-/// or sending a command cannot reflow the bar. Every glyph, position, and
-/// enabled-state comes from [`PlayerState`] — event-derived, tested in
-/// `player.rs`.
+/// height is reserved even when there is nothing to seek, the signal-path
+/// slot is [`theme::SIGNAL_W`] wide whether or not it says anything, and the
+/// transport glyphs live in fixed boxes — so starting a track, crossing the
+/// hour mark, sending a command, or meeting a device that cannot follow the
+/// music cannot reflow the bar. Every glyph, position, and enabled-state
+/// comes from [`PlayerState`] — event-derived, tested in `player.rs`.
 pub(crate) fn view(player: &PlayerState) -> Element<'_, Message> {
     let mut status = row![].spacing(theme::GAP_SM);
     if let Some(skipped) = player.skipped_note() {
@@ -37,6 +38,7 @@ pub(crate) fn view(player: &PlayerState) -> Element<'_, Message> {
                 .color(theme::PAPER_FAINT),
         );
     }
+    status = status.push(signal_path(player));
     let bar = row![
         container(now_playing_line(player))
             .width(Length::Fill)
@@ -96,6 +98,45 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
         );
     }
     stack.into()
+}
+
+/// The signal path, in the quietest terms the room has: a short monospace
+/// `48 → 44.1 kHz` in the same faint ink as the track durations and the
+/// counts, with one plain sentence on hover.
+///
+/// Drawn **only** when [`PlayerState::signal_note`] answers — that is, only
+/// while the engine is converting (ADR-0009 §5). The direct case, which is
+/// the ordinary one, puts nothing here at all.
+///
+/// Everything about the treatment is chosen to be ignorable. No lamp amber:
+/// the accent means playback truth, and a rate the device happens to be
+/// running at is not a claim about the music. No icon, no rule, no
+/// background — the label is the same weight as the "3 tracks skipped" note
+/// it sits beside. And the slot is [`theme::SIGNAL_W`] wide either way, so
+/// the note *appearing* moves nothing: a listener who is not looking for it
+/// will never see it arrive.
+fn signal_path(player: &PlayerState) -> Element<'_, Message> {
+    let Some(note) = player.signal_note() else {
+        return Space::with_width(Length::Fixed(theme::SIGNAL_W)).into();
+    };
+    let label = container(
+        text(note.label)
+            .size(theme::SIZE_META)
+            .font(theme::MONO)
+            .color(theme::PAPER_FAINT)
+            .wrapping(text::Wrapping::None),
+    )
+    .width(Length::Fixed(theme::SIGNAL_W))
+    .align_x(alignment::Horizontal::Right);
+    tooltip(
+        label,
+        text(note.detail).size(theme::SIZE_CAPTION),
+        tooltip::Position::Top,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(theme::tooltip)
+    .into()
 }
 
 /// The bar's centre: the transport row over the seek row, both centred in a
