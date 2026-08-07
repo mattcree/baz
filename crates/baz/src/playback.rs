@@ -23,7 +23,11 @@
 //!   negotiation from device caps is future work.
 //! - **Device ring 8192 frames** (~0.19 s at 44.1 kHz): the size the engine
 //!   docs describe as ordinary output latency and the size `baz-core`'s
-//!   device smoke test uses. Engine-side config is
+//!   device smoke test uses. It is not merely inherited — `baz-core`'s
+//!   `playback::device` module docs carry the underrun measurements that
+//!   justify it against the smaller candidates, and the reason shrinking it
+//!   no longer buys transport responsiveness now that abandoning a session
+//!   discards the device ring outright. Engine-side config is
 //!   [`EngineConfig::default`](baz_core::playback::EngineConfig) —
 //!   `DeviceSink::write` provides real backpressure, so the default pump
 //!   pacing is correct for device output too.

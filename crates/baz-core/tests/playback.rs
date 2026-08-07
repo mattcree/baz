@@ -1044,3 +1044,109 @@ fn device_sink_opens_or_reports_cleanly() {
         Err(other) => panic!("unexpected error opening device: {other}"),
     }
 }
+
+/// Device output (feature `device-output`): `Sink::discard_buffered` really
+/// empties the device ring, and does it far faster than the buffered audio
+/// would have taken to play.
+///
+/// This is the test that pins the seek-latency fix at the place the bug
+/// lived. The engine has always dropped its *own* undelivered audio when a
+/// session is abandoned; what it could not drop was the copy already handed
+/// to the device, which kept playing the old position for up to a full ring.
+///
+/// The ring here is deliberately sized at one full second so the two possible
+/// explanations are impossible to confuse: if the audio merely played out
+/// normally the ring could not be empty for ~1000 ms, so emptying inside
+/// [`DISCARD_SETTLE_BUDGET`] proves it was *discarded*. The follow-up write
+/// then shows the ring holds the new audio and nothing else — no stale
+/// residue behind it.
+#[cfg(feature = "device-output")]
+#[test]
+fn discard_buffered_empties_the_device_ring() {
+    use std::time::Instant;
+
+    use baz_core::playback::Sink as _;
+    use baz_core::playback::device::DeviceSink;
+
+    /// One second of ring, so "discarded" and "played out" differ by 20x.
+    const RING_FRAMES: usize = RATE as usize;
+    /// Generous next-callback allowance: this host's cpal callback period is
+    /// ~43 ms (one 100 ms priming call at stream start), and the discard is
+    /// honoured on the first callback that observes it.
+    const DISCARD_SETTLE_BUDGET: Duration = Duration::from_millis(400);
+
+    /// Playing time of `samples` interleaved samples at [`RATE`], in ms.
+    #[allow(clippy::cast_precision_loss)] // sample counts are far below 2^52
+    fn audio_ms(samples: usize) -> f64 {
+        1000.0 * (samples / CHANNELS) as f64 / f64::from(RATE)
+    }
+
+    let mut sink = match DeviceSink::open(RATE, RING_FRAMES) {
+        Ok(sink) => sink,
+        Err(PlaybackError::Device(msg)) => {
+            eprintln!("SKIP: no usable output device ({msg})");
+            return;
+        }
+        Err(other) => panic!("unexpected error opening device: {other}"),
+    };
+
+    // Fill the ring with a full second of audio.
+    let stale = sine_stereo(RATE, RING_FRAMES, 0.0);
+    sink.write(&stale);
+    let buffered = sink.buffered_samples();
+    assert!(
+        buffered > RING_FRAMES,
+        "the ring must actually be holding audio for the discard to mean anything \
+         (only {buffered} of {} samples buffered)",
+        RING_FRAMES * CHANNELS
+    );
+    assert!(!sink.discard_pending(), "no discard has been requested yet");
+
+    // The whole producer side of the mechanism: one atomic store, no wait.
+    let t0 = Instant::now();
+    sink.discard_buffered();
+    assert!(
+        sink.discard_pending() || sink.buffered_samples() == 0,
+        "a discard is either still pending or already honoured"
+    );
+    while sink.discard_pending() && t0.elapsed() < DISCARD_SETTLE_BUDGET {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let settled = t0.elapsed();
+
+    assert!(
+        !sink.discard_pending(),
+        "the callback did not honour the discard within {DISCARD_SETTLE_BUDGET:?}"
+    );
+    assert_eq!(
+        sink.buffered_samples(),
+        0,
+        "the device ring must be empty after a discard"
+    );
+    assert!(
+        settled < Duration::from_millis(1000),
+        "{buffered} samples ({:.0} ms of audio) took {settled:?} to clear — that is \
+         long enough to have simply played out, which is the bug, not the fix",
+        audio_ms(buffered)
+    );
+
+    // Nothing stale is lurking behind the new audio: the ring now holds
+    // exactly what was written after the discard.
+    let fresh = sine_stereo(RATE, 1024, 0.0);
+    sink.write(&fresh);
+    let after = sink.buffered_samples();
+    assert!(
+        after <= fresh.len(),
+        "the ring holds {after} samples after writing {} fresh ones — stale audio \
+         survived the discard",
+        fresh.len()
+    );
+    assert!(
+        !sink.failed(),
+        "stream reported an error during the discard"
+    );
+    println!(
+        "[device] discarded {buffered} buffered samples ({:.0} ms of audio) in {settled:?}",
+        audio_ms(buffered)
+    );
+}

@@ -82,25 +82,37 @@
 //! gapless-instant and the delivered sample stream is bit-identical to an
 //! unpaused run. (Device output has up to one device-ring's worth of already
 //! -pumped audio that keeps draining after `Paused` — ordinary output
-//! latency, ~0.2 s at the default ring size.)
+//! latency, ~0.2 s at the size the app uses.) Pause is therefore the one
+//! transport command that does *not* call [`Sink::discard_buffered`]:
+//! throwing that audio away is exactly what would cost resume its
+//! bit-identical continuation, so the short trailing drain is the price and
+//! it is knowingly paid.
 //!
 //! **Stop** and **Next** abort the session: an atomic stop flag releases the
 //! producer, its threads are joined, and undelivered ring audio is
-//! discarded. **Next is drain-and-restart**: a fresh session starts at the
-//! next queue position, meaning a new decode of that track (first audio
-//! within milliseconds for local files) rather than a sample-accurate splice
-//! out of the running stream. That trade is deliberate for v0.1; the gapless
-//! path stays reserved for its one guarantee — *adjacent* tracks playing to
+//! discarded. They also call [`Sink::discard_buffered`], which drops the
+//! audio the sink itself had queued but not yet made audible — for device
+//! output, the contents of the device ring. Abandoning the session without
+//! that leaves up to a full device ring of the *abandoned* position playing
+//! on afterwards, which is precisely how a transport command comes to feel
+//! late. **Next is drain-and-restart**: a fresh session starts at the next
+//! queue position, meaning a new decode of that track (first audio within
+//! milliseconds for local files) rather than a sample-accurate splice out of
+//! the running stream. That trade is deliberate for v0.1; the gapless path
+//! stays reserved for its one guarantee — *adjacent* tracks playing to
 //! completion.
 //!
 //! **Seek is the same drain-and-restart**, aimed at the *current* queue
 //! position instead of the next one, with the new session's first track
 //! opened and [`AudioSource::seek`]ed to the target before its first block is
 //! pushed. The cost is identical and identically documented: the running
-//! session's undelivered ring audio is discarded and the target track is
-//! decoded afresh, so first audio at the new position arrives within tens of
-//! milliseconds rather than instantly. Two consequences worth stating
-//! plainly:
+//! session's undelivered ring audio *and* the sink's buffered audio are
+//! discarded and the target track is decoded afresh, so first audio at the
+//! new position arrives within tens of milliseconds rather than instantly.
+//! What the listener does **not** hear in between is the old position: the
+//! discard is what keeps the gap a short silence rather than a fifth of a
+//! second of audio the user already asked to leave. Two further consequences
+//! worth stating plainly:
 //!
 //! - **Seeking while paused** moves the position and stays paused: the new
 //!   session is created in the paused state, so not one sample reaches the
@@ -138,8 +150,12 @@
 //! Two honest caveats:
 //!
 //! - Position is measured at the **sink**, so with device output it leads
-//!   what is audible by up to one device ring (~0.19 s at the default size),
-//!   the same ordinary output latency the pause docs above describe.
+//!   what is audible by up to one device ring (~0.19 s at the size the app
+//!   uses), the same ordinary output latency the pause docs above describe.
+//!   The lead is a steady-state property of continuous playback only: every
+//!   command that abandons a session empties the sink's buffer as part of
+//!   abandoning it, so a seek's own [`Event::Progress`] is never reporting
+//!   across a bufferful of stale audio.
 //! - `track_ms` is `None` for a stream that declares no length. Progress is
 //!   still reported; there is simply no total to render against.
 //!
@@ -533,6 +549,9 @@ impl<S: Sink> Control<S> {
                 if let Some(session) = self.session.take() {
                     let next = session.current + 1;
                     drop(session); // abort: stop flag + join
+                    // The skipped track's audio is gone from the session ring;
+                    // drop the copy already sitting in the sink too.
+                    self.sink.discard_buffered();
                     self.paused = false;
                     self.start_session(next, 0, None);
                 }
@@ -552,6 +571,11 @@ impl<S: Sink> Control<S> {
         let track_ms = session.track_ms;
         let was_paused = self.paused;
         drop(session); // abort: stop flag + join, exactly as Next does
+        // Aborting the session discards the audio the engine still held, but
+        // the sink may hold a further bufferful of the position being left
+        // behind. Dropping the session without dropping that is precisely the
+        // "seek feels late" bug: see `Sink::discard_buffered`.
+        self.sink.discard_buffered();
         if track_ms.is_some_and(|total| position_ms >= total) {
             // At or past the end is Next, per Command::Seek's contract.
             self.paused = false;
@@ -583,9 +607,15 @@ impl<S: Sink> Control<S> {
     }
 
     /// Abort any active session and emit [`Event::Stopped`] if one existed.
+    ///
+    /// Stopping means stopping: the sink's buffered audio goes with the
+    /// session, so silence follows the command rather than trailing it by a
+    /// bufferful. (Pause takes a different path for exactly that reason —
+    /// it keeps its buffer on purpose.)
     fn stop_session(&mut self) {
         if let Some(session) = self.session.take() {
             drop(session);
+            self.sink.discard_buffered();
             let _ = self.events.send(Event::Stopped);
         }
         self.paused = false;
@@ -1115,5 +1145,328 @@ fn at_rate(decoded: DecodedAudio, stream_rate: u32) -> Result<Vec<f32>, Playback
         Ok(decoded.samples)
     } else {
         resample_interleaved(&decoded.samples, decoded.sample_rate, stream_rate)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Where the engine must drop the sink's buffered audio.
+    //!
+    //! # Why these tests live here and not in `tests/engine.rs`
+    //!
+    //! The integration suite drives the engine through [`spawn_offline`],
+    //! whose sink is an [`OfflineSink`] — and an offline sink has no
+    //! downstream buffer to discard from. It is the record of delivered
+    //! audio, not a queue standing in front of a device, so the bug these
+    //! tests guard (*pre-seek audio still queued in the device ring keeps
+    //! playing after the seek*) is structurally unobservable through that
+    //! path. Saying so plainly and testing the two halves where each is real
+    //! beats inventing an offline assertion that would pass either way:
+    //!
+    //! - **Does the engine ask for the discard, at exactly the right
+    //!   moments?** That is a property of [`Control`], and it is what these
+    //!   tests assert, by running the real control loop against a sink that
+    //!   records the operations it receives. The recording sink is a test
+    //!   double, but it does not stand in for the behaviour under test — the
+    //!   behaviour under test is the engine's *call*, observed directly.
+    //! - **Does the discard actually empty the device ring?** That is a
+    //!   property of `DeviceSink`, asserted against a real audio device in
+    //!   `tests/playback.rs` (`discard_buffered_empties_the_device_ring`,
+    //!   feature `device-output`).
+
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    use super::{
+        Arc, AtomicUsize, BoundaryPolicy, Command, Control, Duration, EngineConfig, Event, Path,
+        PathBuf, Sink, mpsc, thread,
+    };
+
+    const RATE: u32 = 44_100;
+    /// Long enough that every command below lands mid-track.
+    const TRACK_SECS: usize = 5;
+    const TIMEOUT: Duration = Duration::from_secs(20);
+
+    /// What a sink was asked to do, in order.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Op {
+        Write,
+        Discard,
+    }
+
+    /// A sink that records the operations the engine performs on it.
+    struct RecordingSink {
+        ops: Arc<Mutex<Vec<Op>>>,
+    }
+
+    impl Sink for RecordingSink {
+        fn write(&mut self, samples: &[f32]) {
+            if samples.is_empty() {
+                return;
+            }
+            if let Ok(mut ops) = self.ops.lock() {
+                // Collapse runs of writes: the pump writes constantly, and
+                // only their ordering against `Discard` is under test.
+                if ops.last() != Some(&Op::Write) {
+                    ops.push(Op::Write);
+                }
+            }
+        }
+
+        fn discard_buffered(&mut self) {
+            if let Ok(mut ops) = self.ops.lock() {
+                ops.push(Op::Discard);
+            }
+        }
+    }
+
+    /// A five-second 440 Hz stereo WAV.
+    fn fixture(dir: &Path, name: &str) -> PathBuf {
+        let path = dir.join(name);
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: RATE,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).expect("create fixture wav");
+        for n in 0..TRACK_SECS * RATE as usize {
+            #[allow(clippy::cast_precision_loss)] // frame indices are far below 2^52
+            let t = n as f64 / f64::from(RATE);
+            #[allow(clippy::cast_possible_truncation)] // f64 sine -> f32 sample
+            let s = (0.5 * (2.0 * std::f64::consts::PI * 440.0 * t).sin()) as f32;
+            writer.write_sample(s).expect("write sample");
+            writer.write_sample(s).expect("write sample");
+        }
+        writer.finalize().expect("finalize fixture wav");
+        path
+    }
+
+    /// Paced so a 5 s track takes a few hundred ms to drain: every command
+    /// below then lands mid-track, with audio genuinely in flight.
+    fn config() -> EngineConfig {
+        EngineConfig {
+            ring_frames: 8192,
+            consumer_chunk_frames: 2048,
+            consumer_pace: Duration::from_millis(4),
+            boundary: BoundaryPolicy::ResampleToStreamRate,
+        }
+    }
+
+    /// A running [`Control`] on its own thread, plus what is needed to drive
+    /// and observe it.
+    struct Harness {
+        commands: Option<mpsc::Sender<Command>>,
+        events: mpsc::Receiver<Event>,
+        ops: Arc<Mutex<Vec<Op>>>,
+        thread: Option<thread::JoinHandle<()>>,
+        _dir: tempfile::TempDir,
+        track: PathBuf,
+    }
+
+    impl Harness {
+        fn start() -> Self {
+            let dir = tempfile::tempdir().expect("temp dir");
+            let track = fixture(dir.path(), "tone_5s.wav");
+            let (cmd_tx, cmd_rx) = mpsc::channel();
+            let (event_tx, event_rx) = mpsc::channel();
+            let ops: Arc<Mutex<Vec<Op>>> = Arc::default();
+            let sink = RecordingSink {
+                ops: Arc::clone(&ops),
+            };
+            let thread = thread::spawn(move || {
+                let control = Control::new(
+                    cmd_rx,
+                    event_tx,
+                    config(),
+                    None,
+                    Arc::new(AtomicUsize::new(0)),
+                    sink,
+                );
+                drop(control.run());
+            });
+            Self {
+                commands: Some(cmd_tx),
+                events: event_rx,
+                ops,
+                thread: Some(thread),
+                _dir: dir,
+                track,
+            }
+        }
+
+        fn send(&self, command: Command) {
+            self.commands
+                .as_ref()
+                .expect("engine running")
+                .send(command)
+                .expect("engine accepts commands");
+        }
+
+        /// Start playback and block until audio is genuinely flowing into the
+        /// sink, so a later command has something buffered to invalidate.
+        fn play_until_audio_flows(&self) {
+            self.send(Command::SetQueue {
+                paths: vec![self.track.clone()],
+            });
+            self.send(Command::Play);
+            loop {
+                match self.events.recv_timeout(TIMEOUT) {
+                    Ok(Event::TrackStarted { .. }) => break,
+                    Ok(_) => {}
+                    Err(e) => panic!("no TrackStarted: {e}"),
+                }
+            }
+            let deadline = Instant::now() + TIMEOUT;
+            while Instant::now() < deadline {
+                if self.ops_since(0).contains(&Op::Write) {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+            panic!("the engine never wrote audio to the sink");
+        }
+
+        fn ops_since(&self, mark: usize) -> Vec<Op> {
+            self.ops.lock().expect("ops lock")[mark..].to_vec()
+        }
+
+        /// Where the ops log stands now, so a command's effects are read
+        /// separately from the previous one's.
+        fn mark(&self) -> usize {
+            self.ops.lock().expect("ops lock").len()
+        }
+
+        fn shutdown(mut self) {
+            self.commands = None;
+            if let Some(handle) = self.thread.take() {
+                handle.join().expect("engine thread");
+            }
+        }
+    }
+
+    impl Drop for Harness {
+        fn drop(&mut self) {
+            self.commands = None;
+            if let Some(handle) = self.thread.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+
+    /// Poll the ops log until `done` accepts it (or time runs out) and return
+    /// what it ended up as, so the assertion can be made on the caller's
+    /// terms rather than on the timeout's.
+    fn wait_until(harness: &Harness, mark: usize, done: impl Fn(&[Op]) -> bool) -> Vec<Op> {
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            let ops = harness.ops_since(mark);
+            if done(&ops) || Instant::now() >= deadline {
+                return ops;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn discarded(ops: &[Op]) -> bool {
+        ops.contains(&Op::Discard)
+    }
+
+    /// The bug: a seek abandoned the session but left the audio already
+    /// handed to the sink queued in front of the new position. The engine
+    /// must tell the sink to drop it, between the last pre-seek write and the
+    /// first post-seek one.
+    #[test]
+    fn seek_discards_the_sinks_buffered_audio() {
+        let harness = Harness::start();
+        harness.play_until_audio_flows();
+        let mark = harness.mark();
+        harness.send(Command::Seek { position_ms: 3_000 });
+        let ops = wait_until(&harness, mark, |ops| {
+            ops.iter()
+                .position(|op| *op == Op::Discard)
+                .is_some_and(|i| ops[i + 1..].contains(&Op::Write))
+        });
+        let discard = ops
+            .iter()
+            .position(|op| *op == Op::Discard)
+            .expect("Seek must discard the sink's buffered audio");
+        assert!(
+            ops[discard + 1..].contains(&Op::Write),
+            "post-seek audio must reach the sink only after the discard: {ops:?}"
+        );
+        harness.shutdown();
+    }
+
+    /// Skipping a track abandons its audio the same way a seek does.
+    #[test]
+    fn next_discards_the_sinks_buffered_audio() {
+        let harness = Harness::start();
+        harness.play_until_audio_flows();
+        let mark = harness.mark();
+        harness.send(Command::Next);
+        assert!(
+            discarded(&wait_until(&harness, mark, discarded)),
+            "Next must discard the sink's buffered audio"
+        );
+        harness.shutdown();
+    }
+
+    /// Stop means stop: silence follows the command instead of trailing it by
+    /// a bufferful.
+    #[test]
+    fn stop_discards_the_sinks_buffered_audio() {
+        let harness = Harness::start();
+        harness.play_until_audio_flows();
+        let mark = harness.mark();
+        harness.send(Command::Stop);
+        assert!(
+            discarded(&wait_until(&harness, mark, discarded)),
+            "Stop must discard the sink's buffered audio"
+        );
+        harness.shutdown();
+    }
+
+    /// Replacing the queue while playing stops playback (module docs), and so
+    /// abandons the buffered audio with it.
+    #[test]
+    fn queue_replacement_discards_the_sinks_buffered_audio() {
+        let harness = Harness::start();
+        harness.play_until_audio_flows();
+        let mark = harness.mark();
+        harness.send(Command::SetQueue { paths: Vec::new() });
+        assert!(
+            discarded(&wait_until(&harness, mark, discarded)),
+            "SetQueue while playing must discard the sink's buffered audio"
+        );
+        harness.shutdown();
+    }
+
+    /// Pause is the deliberate exception: it keeps its buffered audio, which
+    /// is what makes resume gapless-instant and the delivered stream
+    /// bit-identical to an unpaused run. Discarding here would break a
+    /// documented guarantee, not improve one.
+    #[test]
+    fn pause_keeps_the_sinks_buffered_audio() {
+        let harness = Harness::start();
+        harness.play_until_audio_flows();
+        let mark = harness.mark();
+        harness.send(Command::Pause);
+        loop {
+            match harness.events.recv_timeout(TIMEOUT) {
+                Ok(Event::Paused) => break,
+                Ok(_) => {}
+                Err(e) => panic!("no Paused event: {e}"),
+            }
+        }
+        // Give the engine every chance to misbehave before concluding it did
+        // not: many pump iterations' worth of idle time.
+        thread::sleep(Duration::from_millis(50));
+        assert!(
+            !discarded(&harness.ops_since(mark)),
+            "Pause must not discard buffered audio — resume would no longer be \
+             sample-continuous"
+        );
+        harness.shutdown();
     }
 }

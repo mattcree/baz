@@ -991,3 +991,81 @@ fn device_engine_spawns_or_reports_cleanly() {
     engine.shutdown();
     println!("[device] seek into a resampled track reported {elapsed} ms of {total:?}");
 }
+
+/// Device output (feature `device-output`): the whole transport vocabulary,
+/// over real hardware, in **the configuration the app actually ships** —
+/// [`EngineConfig::default`], 44.1 kHz, an 8192-frame device ring.
+///
+/// Every command here is one that abandons a session and therefore discards
+/// the device ring's contents (`Sink::discard_buffered`): seek, skip, stop,
+/// queue replacement, and then a restart to prove the stream survived them
+/// all. What it asserts is that the discard path is exercised against a live
+/// cpal callback without the stream faulting, stalling, or dropping the
+/// engine's event ordering — the failure modes a lock-free producer/callback
+/// handshake would produce if it were wrong. That the ring is genuinely
+/// *emptied* is measured in `tests/playback.rs`; this is the integration-level
+/// companion to it.
+#[cfg(feature = "device-output")]
+#[test]
+fn device_engine_transport_survives_repeated_session_abandonment() {
+    let f = fixtures();
+    // Exactly what crates/baz/src/playback.rs spawns.
+    let spawned = baz_core::engine::spawn_device(EngineConfig::default(), RATE, 8192);
+    let (engine, events) = match spawned {
+        Ok(pair) => pair,
+        Err(PlaybackError::Device(msg)) => {
+            eprintln!("SKIP: no usable output device ({msg})");
+            return;
+        }
+        Err(other) => panic!("unexpected error spawning device engine: {other}"),
+    };
+
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.chirp.clone(), f.a.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.chirp, 0));
+
+    // Seek repeatedly, including backwards: each one abandons a session whose
+    // audio is already sitting in the device ring.
+    // Targets stay well clear of the 6 s track end so a slow machine cannot
+    // let the track run out from under the next command.
+    for target in [1_000u64, 3_000, 500, 2_000] {
+        engine
+            .send(Command::Seek {
+                position_ms: target,
+            })
+            .expect("send");
+        assert_eq!(
+            next_transport_event(&events),
+            started(&f.chirp, 0),
+            "a seek restarts the current track"
+        );
+        // The position the engine reports must be the one asked for, not the
+        // one still queued in the ring.
+        let landed = loop {
+            let (elapsed, total) = next_progress(&events);
+            assert_eq!(total, Some(CHIRP_MS));
+            if elapsed >= target {
+                break elapsed;
+            }
+        };
+        assert!(
+            landed < target + 500,
+            "seek to {target} ms reported {landed} ms"
+        );
+    }
+
+    engine.send(Command::Next).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 1));
+    engine.send(Command::Stop).expect("send");
+    assert_eq!(next_transport_event(&events), Event::Stopped);
+
+    // The stream is still alive after all of that: replay from the top.
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.chirp, 0));
+    engine.shutdown();
+    println!("[device] transport survived 4 seeks, a skip, a stop, and a restart");
+}
