@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream MetaInfo for baz. Flathub reads this to build the store listing;
+  GNOME Software and KDE Discover read the installed copy.
+
+  Installed as /app/share/metainfo/io.github.mattcree.baz.metainfo.xml. The
+  component id, the desktop entry basename and the Flatpak application id are
+  one string by requirement — see packaging/README.md.
+
+  Validate after any edit with `appstreamcli validate` in offline mode
+  (the "no net" flag). CI runs exactly that on every PR: see the `packaging`
+  job in .github/workflows/ci.yml.
+-->
+<component type="desktop-application">
+  <id>io.github.mattcree.baz</id>
+
+  <name>baz</name>
+  <summary>Music player for local collections</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <developer id="io.github.mattcree">
+    <name>baz contributors</name>
+  </developer>
+
+  <description>
+    <p>
+      baz is a music player for people who own their music. Point it at a
+      folder and your albums are the home screen: click one and it plays
+      front to back, gapless. There is no account, no subscription and no
+      network service between you and your files.
+    </p>
+    <p>
+      It is built around claims that can be checked rather than advertised.
+      Gapless continuity is asserted sample-for-sample in the test suite; the
+      output device follows the sample rate of the music instead of resampling
+      it silently, and says so on screen when a device leaves it no choice.
+    </p>
+    <p>Currently supported:</p>
+    <ul>
+      <li>FLAC, WAV, MP3, M4A/MP4 (AAC and ALAC) and Ogg Vorbis</li>
+      <li>Gapless album playback, with the per-format trim measured and tested</li>
+      <li>Albums grouped by album artist, with lossless and lossy copies kept as separate editions of one album</li>
+      <li>Incremental library scanning that re-reads only what changed on disk</li>
+      <li>Search across the whole library as you type</li>
+      <li>MPRIS2, so desktop media controls, the lock screen, playerctl and hardware media keys all drive it</li>
+    </ul>
+    <p>
+      baz is pre-alpha software under active development. It reads your files
+      and never writes to them, but it is not yet a finished player.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.mattcree.baz.desktop</launchable>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Player</category>
+  </categories>
+
+  <keywords>
+    <keyword>music</keyword>
+    <keyword>audio</keyword>
+    <keyword>player</keyword>
+    <keyword>library</keyword>
+    <keyword>flac</keyword>
+    <keyword>gapless</keyword>
+  </keywords>
+
+  <url type="homepage">https://github.com/mattcree/baz</url>
+  <url type="bugtracker">https://github.com/mattcree/baz/issues</url>
+  <url type="vcs-browser">https://github.com/mattcree/baz</url>
+  <url type="contribute">https://github.com/mattcree/baz/blob/main/CONTRIBUTING.md</url>
+
+  <provides>
+    <binary>baz</binary>
+  </provides>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+
+  <!--
+    PLACEHOLDER. Flathub requires at least one screenshot and rejects a
+    submission whose image URL does not resolve. Nothing is published at this
+    URL yet: the file must be committed and the caption checked in the same
+    change that first submits to Flathub. The offline validate that CI runs
+    does not fetch it; a networked validate will report it.
+  -->
+  <screenshots>
+    <screenshot type="default">
+      <image type="source">https://raw.githubusercontent.com/mattcree/baz/main/docs/screenshots/shelf.png</image>
+      <caption>The album shelf, with an album open</caption>
+    </screenshot>
+  </screenshots>
+
+  <content_rating type="oars-1.1"/>
+
+  <!--
+    The release list is machinery, not history: baz has never been tagged.
+    Cutting a release means adding the entry here with its real date, in the
+    same commit as the CHANGELOG section and the Cargo.toml version bump —
+    docs/RELEASING.md is the checklist, and the release workflow refuses a tag
+    whose version does not match Cargo.toml.
+  -->
+  <releases>
+    <release version="0.1.0" date="2026-01-01" type="development">
+      <description>
+        <p>First tagged pre-alpha. Not yet released — placeholder entry.</p>
+      </description>
+    </release>
+  </releases>
+</component>

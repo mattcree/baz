@@ -3,27 +3,40 @@
 Files a distribution or an installer needs, kept in the repository so they are
 reviewed like code rather than invented per-packager.
 
-## `baz.desktop`
+## `flatpak/`
+
+The Flatpak manifest and the AppStream metadata, plus the submission path to
+Flathub. See [`flatpak/README.md`](flatpak/README.md).
+
+## `io.github.mattcree.baz.desktop`
 
 The freedesktop [desktop entry] for the application. Install it as:
 
 ```
-/usr/share/applications/baz.desktop          # system-wide
-~/.local/share/applications/baz.desktop      # per-user
+/usr/share/applications/io.github.mattcree.baz.desktop        # system-wide
+~/.local/share/applications/io.github.mattcree.baz.desktop    # per-user
 ```
 
-The basename **must** stay `baz.desktop`. Three things agree on it and a
-desktop matches them against each other:
+The basename **must** stay `io.github.mattcree.baz.desktop`. Five things agree
+on that one string and a desktop matches them against each other:
 
 | Where | What it is |
 |---|---|
-| `packaging/baz.desktop` | the file name |
-| `DesktopEntry` on `org.mpris.MediaPlayer2` | `"baz"` (`crates/baz/src/mpris/`) |
-| the window's Wayland `app_id` / X11 `WM_CLASS` | `"baz"` (`app::window_settings`) |
+| `packaging/io.github.mattcree.baz.desktop` | the file name |
+| `DesktopEntry` on `org.mpris.MediaPlayer2` | `DESKTOP_ENTRY` (`crates/baz/src/mpris/mod.rs`) |
+| the window's Wayland `app_id` / X11 `WM_CLASS` | the same constant (`app::window_settings`) |
+| `<id>` in the AppStream metainfo | `packaging/flatpak/` |
+| `id:` in the Flatpak manifest | `packaging/flatpak/` |
 
 That is how GNOME's and KDE's media widgets find the player's name and icon
 from an MPRIS connection, and how a launcher knows the running window belongs
-to the entry it launched. Change one and all three change together.
+to the entry it launched. Change one and all five change together — CI's
+`packaging` job fails the build if they disagree.
+
+It is reverse-DNS rather than the bare `baz` it once was because Flatpak
+requires that of an application id, and there is no version of this that works
+with two different names. The MPRIS **bus** name is unaffected: it is the
+spec's, and remains `org.mpris.MediaPlayer2.baz`.
 
 `Exec=baz` assumes the binary is on `PATH`; a packager installing elsewhere
 should write the absolute path. The optional `baz [MUSIC_DIR]` argument is
@@ -43,6 +56,10 @@ the folder itself.
   `SupportedUriSchemes`/`SupportedMimeTypes` MPRIS properties; see
   `crates/baz/src/mpris/mod.rs`.
 
-Validate with `desktop-file-validate packaging/baz.desktop` after any edit.
+Note also that the Flatpak has no `Icon=` to give it either, so its store
+listing will show a placeholder until the artwork exists.
+
+Validate with `desktop-file-validate packaging/io.github.mattcree.baz.desktop`
+after any edit; CI does the same on every pull request.
 
 [desktop entry]: https://specifications.freedesktop.org/desktop-entry-spec/latest/

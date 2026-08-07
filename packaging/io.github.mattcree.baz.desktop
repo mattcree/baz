@@ -9,4 +9,4 @@ Terminal=false
 Categories=AudioVideo;Audio;Player;
 Keywords=music;audio;player;library;flac;
 StartupNotify=true
-StartupWMClass=baz
+StartupWMClass=io.github.mattcree.baz

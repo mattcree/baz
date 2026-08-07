@@ -5,9 +5,13 @@ foo, bar… baz — a spiritual successor to foobar2000: instant, correct, no
 commercial agenda; with the beauty and convenience of the paid players (Roon,
 Plexamp, Audirvana) and none of their clouds, accounts, or subscriptions.
 
-> **Status: pre-alpha.** The groundwork — research, architecture decisions, and
-> the quality pipeline — is in place; the player itself is being built behind
-> it. Nothing is usable yet. Follow `docs/NEXT-STEPS.md` for where things stand.
+> **Status: pre-alpha, and nothing has been released.** It scans a music
+> folder, shows your albums and plays them gaplessly; it is not a finished
+> player, and there is nothing to download yet — build it from source
+> ([`docs/INSTALL.md`](docs/INSTALL.md)). What has actually landed is in
+> [`CHANGELOG.md`](CHANGELOG.md); what is deliberately deferred is in
+> [`docs/BACKLOG.md`](docs/BACKLOG.md); where things stand is in
+> `docs/NEXT-STEPS.md`.
 
 ## What baz will be
 
@@ -56,7 +60,7 @@ run alongside it.
 
 It is an enhancement and never a requirement: with no D-Bus session bus, baz
 prints one line and runs exactly as before. Packagers should install
-[`packaging/baz.desktop`](packaging/README.md).
+[`packaging/io.github.mattcree.baz.desktop`](packaging/README.md).
 
 [MPRIS2]: https://specifications.freedesktop.org/mpris-spec/latest/
 
@@ -67,14 +71,36 @@ the GUI — [iced](https://iced.rs), chosen by measured spike, ADR-0005 — is a
 thin client over its command/event protocol. Decisions are recorded in
 [`docs/adr/`](docs/adr/).
 
-## Building
+## Installing
+
+**There is no released version yet** — nothing has been tagged, so the releases
+page is empty. Building from source is the only way to run baz today, and it is
+one command plus (on Linux) one system package:
 
 ```sh
-cargo build --release   # workspace has no Linux system deps by design
+cargo build --release --locked -p baz --features device-output
+./target/release/baz [MUSIC_DIR]
 ```
 
+`device-output` is what makes sound come out; it is off by default because
+building it needs the platform's audio headers (`libasound2-dev` /
+`alsa-lib-devel` on Linux, nothing on macOS or Windows). Without it baz builds
+and runs everywhere and hides the playback controls.
+
+When releases do exist there will be three ways in — **Flatpak** (the intended
+one on Linux), **signed-by-nobody release binaries** for Linux, Windows and
+macOS, and source. All three, the checksum step, where baz keeps its config and
+library, and the honest state of each platform:
+[`docs/INSTALL.md`](docs/INSTALL.md).
+
+The short version of "honest state": baz is pre-alpha, Linux is the platform it
+is developed and used on, and the Windows and macOS binaries are built and
+tested by CI on every change but have never been used by a human.
+
 Dev environment details (including the one-command Fedora toolbox):
-[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
+[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). How a release is cut, and what
+"reproducible" does and does not mean here:
+[`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## Development model — a note on AI
 

@@ -87,9 +87,9 @@ pub fn run(started: Instant, cli_dir: Option<PathBuf>) -> iced::Result {
 /// iced 0.13 leaves the Wayland `app_id` / X11 `WM_CLASS` empty by default,
 /// which is what makes a launcher show a running window as an unrelated
 /// "unknown" entry beside its own icon. Setting it to the basename of
-/// `packaging/baz.desktop` is the whole of the association — the same string
-/// MPRIS advertises as `DesktopEntry`, which is why [`mpris::DESKTOP_ENTRY`]
-/// is the single place it is spelled.
+/// `packaging/io.github.mattcree.baz.desktop` is the whole of the association
+/// — the same string MPRIS advertises as `DesktopEntry`, which is why
+/// [`mpris::DESKTOP_ENTRY`] is the single place it is spelled.
 fn window_settings() -> window::Settings {
     #[cfg_attr(
         not(target_os = "linux"),

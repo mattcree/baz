@@ -145,15 +145,22 @@ mod server;
 
 pub(crate) use state::Snapshot;
 
-/// The basename of `packaging/baz.desktop`.
+/// The basename of `packaging/io.github.mattcree.baz.desktop`.
 ///
 /// One constant with two customers, deliberately: it is MPRIS's
 /// `DesktopEntry` property *and* the window's Wayland `app_id` / X11
 /// `WM_CLASS` (set in [`crate::app`]). A desktop associates a running window
 /// with a launcher entry by matching exactly these two against the file name,
 /// so they cannot be allowed to drift apart.
+///
+/// The value is the reverse-DNS Flatpak application id (ADR-0002), not the
+/// bare `baz` this once was: Flatpak requires the desktop entry, the AppStream
+/// component id and the manifest to share one id, and a portal-facing
+/// `app_id` that disagrees with it is what makes a sandboxed window lose its
+/// icon. The MPRIS *bus* name stays `org.mpris.MediaPlayer2.baz` — that one is
+/// the spec's, not the desktop's.
 #[cfg(target_os = "linux")]
-pub(crate) const DESKTOP_ENTRY: &str = "baz";
+pub(crate) const DESKTOP_ENTRY: &str = "io.github.mattcree.baz";
 
 /// A D-Bus method call, in baz's vocabulary rather than MPRIS's.
 ///

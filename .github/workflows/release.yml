@@ -1,0 +1,321 @@
+name: Release
+
+# Builds the binaries a person downloads, and nothing else decides whether
+# they are fit to download: the `gate` job below *calls* the CI workflow, so a
+# tag cannot produce an artifact that `cargo test`, `clippy`, `cargo-deny` or
+# the packaging checks would have rejected. It is a `needs:` edge, not an
+# ordering convention — there is no path from a tag to an upload that skips it.
+#
+# docs/RELEASING.md is the checklist for cutting one; docs/INSTALL.md is what
+# the artifacts are for.
+
+on:
+  push:
+    # v-prefixed semver, including pre-releases (v0.1.0-rc.1).
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  # Dry run: builds and checksums everything, publishes nothing.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # Reproducibility, as far as it is cheap (see "What is pinned" in
+  # docs/RELEASING.md): no incremental artifacts in a release build, and the
+  # runner's absolute build path kept out of the binary.
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/build/baz
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Fails in seconds if the tag and the workspace disagree about what
+  # version this is, before anything spends a runner-hour on a build.
+  # ---------------------------------------------------------------------
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      publish: ${{ steps.resolve.outputs.publish }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve and cross-check the version
+        id: resolve
+        run: |
+          set -euo pipefail
+          # [workspace.package] version — the only line-initial `version = `
+          # in the manifest (the dependency entries are inline tables).
+          manifest="$(grep -m1 '^version = ' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          echo "workspace version: $manifest"
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [ "$tag" != "$manifest" ]; then
+              echo "::error::tag v$tag does not match the workspace version $manifest." \
+                   "Bump Cargo.toml (and Cargo.lock) in the release commit, then tag it." >&2
+              exit 1
+            fi
+            version="$tag"
+            publish=true
+          else
+            # A dry run is never mistaken for the real thing: the artifacts
+            # carry the commit they came from.
+            version="$manifest+dry.$(git rev-parse --short HEAD)"
+            publish=false
+          fi
+
+          # 0.x is a pre-release by semver's own reading of it, and so is
+          # anything carrying a -suffix.
+          case "$version" in
+            0.*|*-*) prerelease=true ;;
+            *)       prerelease=false ;;
+          esac
+
+          {
+            echo "version=$version"
+            echo "publish=$publish"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------
+  # The whole PR gate, run again against the tagged tree. Reusing the
+  # workflow rather than copying its jobs is the point: there is one
+  # definition of "green", and it cannot drift from what PRs are held to.
+  #
+  # Note: under `workflow_call` the called workflow sees the *caller's*
+  # event, so CI's scheduled fuzz job runs on a dry run (workflow_dispatch)
+  # and is skipped on a tag push (push). That is CI's own condition; this
+  # workflow does not override it.
+  # ---------------------------------------------------------------------
+  gate:
+    name: CI gate
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  build:
+    name: build (${{ matrix.artifact }})
+    needs: [version, gate]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact: linux-x86_64
+            os: ubuntu-latest
+            targets: x86_64-unknown-linux-gnu
+          - artifact: windows-x86_64
+            os: windows-latest
+            targets: x86_64-pc-windows-msvc
+          # One download rather than two, because an ordinary person should
+          # not have to know which Mac they own. Apple's own `lipo` combines
+          # the two slices, and cross-building x86_64 from the arm64 runner
+          # needs no extra linker — the Xcode toolchain targets both.
+          - artifact: macos-universal
+            os: macos-latest
+            targets: aarch64-apple-darwin x86_64-apple-darwin
+            universal: true
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same reason and same package as CI's test job: --features
+      # device-output pulls cpal, which needs ALSA headers on Linux.
+      - name: Install ALSA headers (cpal via device-output)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      # rust-toolchain.toml pins the compiler (1.92.0); rustup honours it, so
+      # the targets are added to that toolchain and not to a floating stable.
+      - name: Add targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --version --verbose
+          for target in ${{ matrix.targets }}; do
+            rustup target add "$target"
+          done
+
+      # No build cache here, unlike CI. A release binary is built from cold
+      # every time: a cache is a second input to the build that nobody
+      # inspects, and ten minutes of runner time per tag is not worth it.
+      #
+      # --locked: the committed Cargo.lock, byte for byte, or fail. A release
+      # must be built from the dependency set CI proved, not from whatever
+      # resolved on the day.
+      #
+      # --features device-output: THE shipped feature set. It is non-default
+      # only because building cpal needs platform audio headers that the
+      # primary dev host lacks; a released music player obviously needs audio
+      # output. `baz` has exactly one feature, so this is the whole of it.
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in ${{ matrix.targets }}; do
+            cargo build --release --locked --target "$target" \
+                        -p baz --features device-output
+          done
+
+      - name: Stage the archive contents
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          stage="staging/baz-${VERSION}-${{ matrix.artifact }}"
+          mkdir -p "$stage"
+
+          if [ "${{ matrix.universal || 'false' }}" = "true" ]; then
+            slices=""
+            for target in ${{ matrix.targets }}; do
+              slices="$slices target/$target/release/baz"
+            done
+            # shellcheck disable=SC2086
+            lipo -create -output "$stage/baz" $slices
+            lipo -info "$stage/baz"
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${{ matrix.targets }}/release/baz.exe" "$stage/baz.exe"
+          else
+            cp "target/${{ matrix.targets }}/release/baz" "$stage/baz"
+          fi
+
+          # The licence travels with the binary — GPL-3.0-or-later requires
+          # it to, and ADR-0001 is why. The changelog and readme are there so
+          # an unpacked archive can answer "what is this and what changed".
+          cp LICENSE README.md CHANGELOG.md "$stage/"
+
+          # Desktop integration files, for anyone installing the tarball by
+          # hand rather than through Flatpak (docs/INSTALL.md says where).
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            cp packaging/io.github.mattcree.baz.desktop "$stage/"
+            cp packaging/flatpak/io.github.mattcree.baz.metainfo.xml "$stage/"
+          fi
+
+          ls -l "$stage"
+
+      - name: Archive (tar.gz)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          name="baz-${VERSION}-${{ matrix.artifact }}"
+          tar -czf "dist/${name}.tar.gz" -C staging "$name"
+
+      - name: Archive (zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          # ${env:VERSION}, braced: PowerShell allows hyphens in variable
+          # names, so $env:VERSION-windows would read as one name.
+          $name = "baz-${env:VERSION}-${{ matrix.artifact }}"
+          Compress-Archive -Path "staging/$name" -DestinationPath "dist/$name.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: baz-${{ matrix.artifact }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------
+  # Checksums in one place, over the artifacts as they were actually
+  # uploaded — one sha256sum implementation instead of three per-runner
+  # ones that could disagree.
+  # ---------------------------------------------------------------------
+  publish:
+    name: checksums and release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      # Only this job writes anything, and only on a tag.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: incoming
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: incoming
+        run: |
+          set -euo pipefail
+          ls -l
+          sha256sum -- * | tee SHA256SUMS
+          # Prove the file we are about to publish describes the files we are
+          # about to publish, rather than trusting that it was written right.
+          grep -v ' SHA256SUMS$' SHA256SUMS | sha256sum --check --strict
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: incoming/SHA256SUMS
+          if-no-files-found: error
+
+      - name: Release notes preamble
+        if: needs.version.outputs.publish == 'true'
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<EOF
+          **baz $VERSION** — pre-alpha. Linux is the platform baz is developed and
+          used on; the Windows and macOS binaries are built and tested by CI but
+          have not been exercised by a human. See
+          [\`docs/INSTALL.md\`](https://github.com/mattcree/baz/blob/v$VERSION/docs/INSTALL.md)
+          for installation, and
+          [\`CHANGELOG.md\`](https://github.com/mattcree/baz/blob/v$VERSION/CHANGELOG.md)
+          for what changed.
+
+          Verify a download against \`SHA256SUMS\`:
+
+          \`\`\`sh
+          sha256sum --check --ignore-missing SHA256SUMS
+          \`\`\`
+
+          Built from this tag by GitHub Actions with the toolchain pinned in
+          \`rust-toolchain.toml\` and \`--locked\` against the committed
+          \`Cargo.lock\`, with the \`device-output\` feature enabled. No artifact
+          here was built on a developer machine.
+          EOF
+
+      # A draft, deliberately: the maintainer publishes after looking at what
+      # the machinery produced. ENGINEERING.md's "a human owns the trunk"
+      # applies at least as much to the thing strangers download.
+      - name: Draft the GitHub Release
+        if: needs.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          args=(--draft --verify-tag --generate-notes --notes-file notes.md --title "baz $TAG")
+          if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
+          gh release create "$TAG" "${args[@]}" incoming/*
+
+      - name: Dry run summary
+        if: needs.version.outputs.publish != 'true'
+        run: |
+          {
+            echo "### Dry run — nothing published"
+            echo
+            echo "Version: \`${{ needs.version.outputs.version }}\`"
+            echo
+            echo '```'
+            cat incoming/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

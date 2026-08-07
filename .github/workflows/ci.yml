@@ -7,6 +7,10 @@ on:
   schedule:
     - cron: "17 4 * * 1" # weekly: fuzz + fresh advisory sweep
   workflow_dispatch:
+  # Callable so the release workflow can make this whole suite a hard
+  # dependency of shipping a binary (.github/workflows/release.yml). The
+  # release gate is *this* definition of green, not a copy of it.
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always
@@ -98,6 +102,51 @@ jobs:
         with:
           name: coverage-html
           path: coverage-html
+
+  packaging:
+    name: packaging metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # desktop-file-utils -> desktop-file-validate; appstream -> appstreamcli;
+      # python3-yaml so the manifest parse below does not depend on whatever
+      # the runner image happens to preinstall.
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y desktop-file-utils appstream python3-yaml
+      - name: Desktop entry
+        run: desktop-file-validate packaging/io.github.mattcree.baz.desktop
+      # Offline: the screenshot URL is a placeholder until the first Flathub
+      # submission, and a validator that fetched it would fail on that alone.
+      - name: AppStream metainfo
+        run: |
+          appstreamcli validate --no-net \
+            packaging/flatpak/io.github.mattcree.baz.metainfo.xml
+      # The Flatpak manifest is YAML that flatpak-builder parses; catching a
+      # syntax error here costs a second and catching it at submission costs a
+      # round trip. (A full `flatpak-builder --show-deps` would need the
+      # flatpak toolchain on the runner for no extra signal.)
+      - name: Flatpak manifest parses
+        run: |
+          python3 -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))" \
+            packaging/flatpak/io.github.mattcree.baz.yml
+      # A Flathub build is offline, so every crate is listed by URL and hash.
+      # This is where that list is caught drifting from Cargo.lock.
+      - name: Vendored crate list matches Cargo.lock
+        run: python3 packaging/flatpak/check-cargo-sources.py
+      # The three names that must never drift apart: the desktop entry's
+      # basename, the AppStream component id, and the MPRIS DesktopEntry
+      # constant the binary advertises (crates/baz/src/mpris/mod.rs).
+      - name: Application id is one string everywhere
+        run: |
+          set -euo pipefail
+          id=io.github.mattcree.baz
+          test -f "packaging/$id.desktop"
+          grep -qx "  <id>$id</id>" "packaging/flatpak/$id.metainfo.xml"
+          grep -qx "id: $id" "packaging/flatpak/$id.yml"
+          grep -qx "pub(crate) const DESKTOP_ENTRY: &str = \"$id\";" \
+            crates/baz/src/mpris/mod.rs
+          echo "application id consistent: $id"
 
   fuzz:
     name: fuzz (scheduled)
