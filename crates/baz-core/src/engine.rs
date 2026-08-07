@@ -126,6 +126,49 @@
 //! | [`Command::Stop`] | no-op | stops ([`Event::Stopped`]); a later `Play` starts from the queue top | same |
 //! | [`Command::Next`] | no-op | skips to the next queue position (see below) | skips and *resumes playing* |
 //! | [`Command::Seek`] | no-op | jumps within the current track, keeps playing | jumps within the current track, **stays paused** |
+//! | [`Command::SetVolume`] / [`Command::SetMute`] | applies, silently | applies within one pump iteration, slewed | applies, silently |
+//!
+//! # Volume
+//!
+//! ADR-0010 is the governing decision; [`crate::volume`] holds the unit, the
+//! taper, and the fader. What belongs *here* is where the gain is applied and
+//! what it survives.
+//!
+//! **Where.** In the session's pump, between the ring read and the sink write,
+//! and nowhere else. That is the only place every sample passes through
+//! exactly once regardless of how it got there — streamed anchor, prefetched
+//! track, resampled fallback — so a volume applied there cannot be bypassed by
+//! a code path someone adds later. Doing it in the producer instead would have
+//! baked the gain into decoded audio that outlives the setting by a ring's
+//! worth of buffering, which is precisely how a volume control comes to feel
+//! late.
+//!
+//! **Realtime discipline.** Per pump *block* the volume costs **one acquire
+//! load** of the effective gain (f32 bits in an `AtomicU32`) and **one
+//! branch** — plus, on the scaling branch only, a second load of the session's
+//! stream rate to size the slew step. Per *sample* it costs one multiply, into
+//! a buffer preallocated when the engine thread starts. Nothing allocates,
+//! nothing locks, nothing can panic. At unity the branch skips the multiply
+//! *and* the copy: the
+//! ring's slices go to the sink exactly as they did before volume control
+//! existed, which is what makes bit-exactness at unity structural rather than
+//! arithmetic (see [`crate::volume`]).
+//!
+//! **What it survives.** The volume is engine-thread state, not *session*
+//! state, so pause, resume, seek, skip, queue replacement, a track boundary
+//! and a sample-rate reopen all leave it exactly where it was — by
+//! construction, not by remembering to copy it. The one thing the engine does
+//! on its own initiative is **re-establish the volume after the output is
+//! reopened** at a new rate, because a reopened device is a fresh device and
+//! any attenuator it was carrying went with the old one.
+//!
+//! **Reporting.** [`Event::VolumeChanged`] carries the position, the mute
+//! state, and the [`VolumePath`] — which of the two places the volume is
+//! actually being applied. Under every backend baz ships it is
+//! [`VolumePath::SoftwareGain`] below unity and [`VolumePath::Unity`] at it;
+//! [`VolumePath::DeviceAttenuator`] is what [`Sink::set_device_volume`]
+//! reports when a sink takes the gain itself. ADR-0010 records why no shipped
+//! backend does.
 //!
 //! # Event semantics
 //!
@@ -270,7 +313,8 @@ use crate::playback::{
     AudioSource, BoundaryPolicy, CHANNELS, DecodedAudio, EngineConfig, OfflineSink, PlaybackError,
     Sink,
 };
-use crate::protocol::{Command, ConversionReason, Event, SignalChain};
+use crate::protocol::{Command, ConversionReason, Event, SignalChain, VolumePath};
+use crate::volume::{Fader, SharedVolume, Volume, VolumeState};
 
 /// Sleep per engine-loop iteration while paused: long enough to idle
 /// cheaply, short enough that resume feels instant.
@@ -310,6 +354,7 @@ pub struct EngineHandle {
     thread: Option<JoinHandle<()>>,
     delivered: Arc<AtomicUsize>,
     instruments: Arc<Instruments>,
+    volume: Arc<SharedVolume>,
 }
 
 /// A running count of the conversions the engine has performed, readable from
@@ -397,6 +442,19 @@ impl EngineHandle {
         self.instruments.snapshot()
     }
 
+    /// The volume, the mute state, and where the volume is being applied —
+    /// the pull-side twin of [`Event::VolumeChanged`].
+    ///
+    /// A front end coming up mid-session reads this once to draw its control
+    /// in the right place, then follows the event stream. `VolumeState`'s docs
+    /// note the one caveat: the three fields are loaded independently, so a
+    /// read racing a change may mix old and new. The events are the ordered
+    /// account; this is the snapshot.
+    #[must_use]
+    pub fn volume(&self) -> VolumeState {
+        self.volume.snapshot()
+    }
+
     /// Shut the engine down and wait for its threads to finish. Equivalent
     /// to dropping the handle; provided so intent reads explicitly.
     pub fn shutdown(self) {
@@ -464,6 +522,8 @@ pub fn spawn_offline(
     let counter = Arc::clone(&delivered);
     let instruments = Arc::new(Instruments::default());
     let probes = Arc::clone(&instruments);
+    let volume = Arc::new(SharedVolume::default());
+    let gain = Arc::clone(&volume);
     let thread = thread::Builder::new()
         .name("baz-engine".into())
         .spawn(move || {
@@ -472,8 +532,11 @@ pub fn spawn_offline(
                 event_tx,
                 cfg,
                 0,
-                counter,
-                probes,
+                Observable {
+                    delivered: counter,
+                    instruments: probes,
+                    volume: gain,
+                },
                 OfflineSink::with_capacity(capacity_samples),
             );
             let sink = control.run();
@@ -485,6 +548,7 @@ pub fn spawn_offline(
             thread: Some(thread),
             delivered,
             instruments,
+            volume,
         },
         event_rx,
         OfflineOutput { output: out_rx },
@@ -524,6 +588,8 @@ pub fn spawn_device(
     let counter = Arc::clone(&delivered);
     let instruments = Arc::new(Instruments::default());
     let probes = Arc::clone(&instruments);
+    let volume = Arc::new(SharedVolume::default());
+    let gain = Arc::clone(&volume);
     let thread = thread::Builder::new()
         .name("baz-engine".into())
         .spawn(move || {
@@ -539,8 +605,11 @@ pub fn spawn_device(
                         event_tx,
                         cfg,
                         initial_sample_rate,
-                        counter,
-                        probes,
+                        Observable {
+                            delivered: counter,
+                            instruments: probes,
+                            volume: gain,
+                        },
                         sink,
                     );
                     drop(control.run()); // closes the device stream
@@ -555,6 +624,7 @@ pub fn spawn_device(
         thread: Some(thread),
         delivered,
         instruments,
+        volume,
     };
     match ack_rx.recv() {
         Ok(Ok(())) => Ok((handle, event_rx)),
@@ -585,7 +655,37 @@ struct Control<S: Sink> {
     position: usize,
     paused: bool,
     session: Option<Session>,
+    /// Volume state shared with [`EngineHandle`] and read by the pump path
+    /// (from [`Observable::volume`]). This thread is its only writer.
+    volume: Arc<SharedVolume>,
+    /// The gain applicator. Engine-thread state; see [`crate::volume`].
+    fader: Fader,
+    /// Where the volume is currently being applied, as last reported.
+    volume_path: VolumePath,
+    /// Scratch for the scaled block: one pump chunk, allocated when the engine
+    /// thread starts and never grown.
+    ///
+    /// A `Box<[f32]>` rather than a `Vec<f32>` on purpose — a boxed slice has
+    /// no `push`, `extend` or `resize`, so "the pump path never allocates" is
+    /// something the type forbids rather than something a comment asks for
+    /// (`docs/ENGINEERING.md`: enforced by construction, with types that do not
+    /// implement the tempting shortcuts).
+    scratch: Box<[f32]>,
     sink: S,
+}
+
+/// The state an [`EngineHandle`] can read while the engine runs: the delivered
+/// -sample counter, the conversion counters, and the volume.
+///
+/// Grouped because they travel together — one `Arc` each, created by the
+/// spawner, cloned into the engine thread, and read from any thread — and
+/// because passing three of them alongside five other arguments is how a
+/// constructor stops being readable.
+#[derive(Debug, Default)]
+struct Observable {
+    delivered: Arc<AtomicUsize>,
+    instruments: Arc<Instruments>,
+    volume: Arc<SharedVolume>,
 }
 
 impl<S: Sink> Control<S> {
@@ -594,10 +694,14 @@ impl<S: Sink> Control<S> {
         events: Sender<Event>,
         cfg: EngineConfig,
         open_rate: u32,
-        delivered: Arc<AtomicUsize>,
-        instruments: Arc<Instruments>,
+        observable: Observable,
         sink: S,
     ) -> Self {
+        let Observable {
+            delivered,
+            instruments,
+            volume,
+        } = observable;
         Self {
             commands,
             events,
@@ -609,6 +713,13 @@ impl<S: Sink> Control<S> {
             position: 0,
             paused: false,
             session: None,
+            volume,
+            fader: Fader::default(),
+            volume_path: VolumePath::Unity,
+            // One pump chunk is the most `pump` can ever hand to the fader in
+            // one call (the ring read is `min`'d against it), so this is
+            // exactly enough and is allocated before any audio flows.
+            scratch: vec![0.0; cfg.consumer_chunk_frames * CHANNELS].into_boxed_slice(),
             sink,
         }
     }
@@ -655,11 +766,22 @@ impl<S: Sink> Control<S> {
             thread::sleep(PAUSED_POLL);
             return;
         }
+        // The pump path's one volume read: a single acquire load of the
+        // effective gain, taken once per block and never per sample. This is
+        // where a volume change becomes audible, which is what bounds "takes
+        // effect promptly" at one pump iteration.
+        self.fader.aim(self.volume.gain());
         let Some(session) = self.session.as_mut() else {
             return;
         };
         let chunk_samples = self.cfg.consumer_chunk_frames * CHANNELS;
-        let pumped = session.pump(&mut self.sink, chunk_samples, &self.delivered);
+        let pumped = session.pump(
+            &mut self.sink,
+            chunk_samples,
+            &self.delivered,
+            &mut self.fader,
+            &mut self.scratch,
+        );
         session.report(&self.events, false);
         if session.complete() {
             session.report(&self.events, true);
@@ -730,6 +852,106 @@ impl<S: Sink> Control<S> {
                 }
             }
             Command::Seek { position_ms } => self.seek(position_ms),
+            Command::SetVolume { position } => {
+                let volume = Volume::new(position);
+                if volume != self.volume.volume() {
+                    self.volume.set_volume(volume);
+                    self.apply_volume();
+                }
+            }
+            Command::SetMute { muted } => {
+                if muted != self.volume.muted() {
+                    self.volume.set_muted(muted);
+                    self.apply_volume();
+                }
+            }
+        }
+    }
+
+    /// The gain the sample stream should end up carrying: the taper's
+    /// amplitude, or silence while muted.
+    ///
+    /// Mute is folded in here rather than kept as a second thing the pump has
+    /// to consult, so the realtime path reads one number and multiplies by it
+    /// (see [`crate::volume`] for why mute is nevertheless separate *state*).
+    fn effective_gain(&self) -> f32 {
+        if self.volume.muted() {
+            0.0
+        } else {
+            self.volume.volume().amplitude()
+        }
+    }
+
+    /// Put the current volume into effect and say where it landed.
+    ///
+    /// The device is offered the gain first ([`Sink::set_device_volume`]):
+    /// when a sink takes it, the fader stays at unity and the sample stream is
+    /// passed through untouched, which is the whole reason the offer is made
+    /// before the fallback rather than after. No backend baz ships takes it
+    /// today (ADR-0010), so in practice this settles on software gain — and
+    /// reports exactly that.
+    ///
+    /// The slew is skipped whenever nothing is audible (stopped, or paused):
+    /// there is no discontinuity to hide in silence, and jumping is what lets
+    /// a front end set a volume *before* pressing play and get it from the
+    /// first sample.
+    fn apply_volume(&mut self) {
+        self.settle_volume(true);
+    }
+
+    /// Offer the gain to the device again after the output was rebuilt.
+    ///
+    /// [`Sink::negotiate_rate`] may replace the stream wholesale (the device
+    /// backend does exactly that), and a fresh stream carries none of the old
+    /// one's settings — so the arrangement has to be re-made rather than
+    /// assumed to have survived. Announced only if the *path* changed, so an
+    /// ordinary mixed-rate queue does not narrate its volume at every
+    /// boundary.
+    fn reestablish_volume(&mut self) {
+        self.settle_volume(false);
+    }
+
+    /// The body of both: offer the gain to the sink, fall back to the fader,
+    /// publish, and report.
+    ///
+    /// The exact `== 1.0` below is the point rather than an oversight — see
+    /// [`crate::volume`]'s note on `float_cmp`. An epsilon-wide band around
+    /// unity would be a band in which baz scaled the samples while reporting
+    /// [`VolumePath::Unity`], which is the one outcome this whole design rules
+    /// out. The taper makes the top of the travel exactly `1.0`, so the
+    /// comparison is exact by construction.
+    #[allow(clippy::float_cmp)]
+    fn settle_volume(&mut self, announce: bool) {
+        let gain = self.effective_gain();
+        // What the *pump* must apply, which is not the same number when the
+        // device took the volume: applying it in both places would apply it
+        // twice. The atomic's contract is "the gain baz itself scales by".
+        let (applied, path) = if self.sink.set_device_volume(gain).is_some() {
+            self.fader.jump(1.0);
+            (1.0, VolumePath::DeviceAttenuator)
+        } else {
+            // Nothing is audible while stopped or paused, so there is no
+            // discontinuity for a slew to hide and jumping is the honest move.
+            if self.session.is_none() || self.paused {
+                self.fader.jump(gain);
+            }
+            let path = if gain == 1.0 {
+                VolumePath::Unity
+            } else {
+                VolumePath::SoftwareGain
+            };
+            (gain, path)
+        };
+        self.volume.set_gain(applied);
+        let news = announce || path != self.volume_path;
+        self.volume_path = path;
+        self.volume.set_path(path);
+        if news {
+            let _ = self.events.send(Event::VolumeChanged {
+                position: self.volume.volume().position(),
+                muted: self.volume.muted(),
+                path,
+            });
         }
     }
 
@@ -790,18 +1012,25 @@ impl<S: Sink> Control<S> {
             return; // the producer has not opened the first track yet
         }
         let shared = Arc::clone(&session.shared);
+        let mut reopened = false;
         let granted = match self.sink.negotiate_rate(proposed) {
             Some(rate) => {
                 if self.open_rate != 0 && rate != self.open_rate {
                     self.instruments
                         .reconfigurations
                         .fetch_add(1, Ordering::Relaxed);
+                    reopened = true;
                 }
                 self.open_rate = rate;
                 rate
             }
             None => proposed,
         };
+        if reopened {
+            // A reopened output is a new one; whatever volume arrangement the
+            // old stream carried went with it.
+            self.reestablish_volume();
+        }
         // Release-store the granted rate: the producer's Acquire load of it is
         // what unparks it, so everything the negotiation did happens-before
         // the first sample is decoded against that rate.
@@ -861,6 +1090,11 @@ impl<S: Sink> Control<S> {
     /// [`Event::QueueEnded`].
     fn start_session(&mut self, start: usize, seek_ms: u64, track_ms: Option<u64>) {
         self.paused = false;
+        // Nothing has been delivered yet, so a slew would only mean the first
+        // 20 ms of the new position playing at the *old* gain. Land on the
+        // current setting instead — which is also what makes "set the volume,
+        // then press play" exact from the first sample.
+        self.fader.jump(self.volume.gain());
         if start >= self.queue.len() {
             self.position = 0;
             let _ = self.events.send(Event::QueueEnded);
@@ -1061,6 +1295,13 @@ impl Session {
 
     /// The signal-path statement for the track at `index`, or `None` when
     /// nothing about it is known yet.
+    ///
+    /// Deliberately says nothing about the volume: that travels on
+    /// [`Event::VolumeChanged`], and the two events are separate because they
+    /// change on incomparable cadences — this one per session, that one per
+    /// pointer drag. `protocol`'s docs for both carry the full argument and
+    /// the rule for combining them (`Direct` **and** `Unity` is what
+    /// bit-exactness means since ADR-0010).
     fn signal_path(&self, index: usize) -> Option<Event> {
         let (source_rate_hz, source_bits) = (*self.formats.get(index)?)?;
         let output_rate_hz = self.shared.stream_rate.load(Ordering::Acquire);
@@ -1140,22 +1381,66 @@ impl Session {
         self.next_progress = self.pulled + step.max(1);
     }
 
-    /// Pull up to `chunk_samples` from the ring into the sink. This is the
-    /// pump path: wait-free ring read, preallocated-sink write, atomic
-    /// counter — no locks, no allocation (see module docs).
-    fn pump(&mut self, sink: &mut dyn Sink, chunk_samples: usize, delivered: &AtomicUsize) -> bool {
+    /// Pull up to `chunk_samples` from the ring into the sink, applying the
+    /// volume on the way. This is the pump path: wait-free ring read,
+    /// preallocated-sink write, atomic counter — no locks, no allocation (see
+    /// module docs).
+    ///
+    /// # The two branches
+    ///
+    /// **Transparent** (the fader is at rest at exactly unity) is the branch
+    /// that existed before volume control did, unchanged: the ring's slices go
+    /// to the sink directly, with no copy and no arithmetic. That is what
+    /// makes bit-exactness at unity structural — there is nothing here for a
+    /// rounding argument to be about.
+    ///
+    /// **Scaling** rejoins the ring's two slices into `scratch` — sized to
+    /// `chunk_samples` by [`Control::new`] and never grown — and scales the
+    /// block there. Rejoining first is not incidental: the ring can wrap at
+    /// any sample offset, and scaling the halves separately would step the
+    /// slew half a frame out of phase across the join. The read length is
+    /// `min`'d against the scratch, so every index below is in range by
+    /// construction and nothing here can panic. One branch per block, one
+    /// multiply per sample; [`Fader::apply`] states its own realtime contract.
+    fn pump(
+        &mut self,
+        sink: &mut dyn Sink,
+        chunk_samples: usize,
+        delivered: &AtomicUsize,
+        fader: &mut Fader,
+        scratch: &mut [f32],
+    ) -> bool {
         let available = self.audio.slots();
         if available == 0 {
             return false;
         }
-        let n = available.min(chunk_samples);
+        let transparent = fader.is_transparent();
+        // While scaling, never read more than the scratch can hold; the two
+        // are equal by construction, and the `min` is what makes that a fact
+        // rather than a comment.
+        let n = if transparent {
+            available.min(chunk_samples)
+        } else {
+            available.min(chunk_samples).min(scratch.len())
+        };
         let Ok(chunk) = self.audio.read_chunk(n) else {
             return false;
         };
         let (a, b) = chunk.as_slices();
-        sink.write(a);
-        if !b.is_empty() {
-            sink.write(b);
+        if transparent {
+            sink.write(a);
+            if !b.is_empty() {
+                sink.write(b);
+            }
+        } else {
+            // One load of the session's rate, used only to size the slew step.
+            let rate = self.shared.stream_rate.load(Ordering::Acquire);
+            let split = a.len();
+            scratch[..split].copy_from_slice(a);
+            scratch[split..n].copy_from_slice(b);
+            let block = &mut scratch[..n];
+            fader.apply(block, rate);
+            sink.write(block);
         }
         chunk.commit_all();
         self.pulled += n;
@@ -1622,8 +1907,8 @@ mod tests {
     use std::time::Instant;
 
     use super::{
-        Arc, AtomicUsize, BoundaryPolicy, Command, Control, Conversions, Duration, EngineConfig,
-        Event, Instruments, Path, PathBuf, Sink, mpsc, thread,
+        Arc, BoundaryPolicy, Command, Control, Conversions, Duration, EngineConfig, Event,
+        Instruments, Observable, Path, PathBuf, Sink, mpsc, thread,
     };
     use crate::protocol::{ConversionReason, SignalChain};
 
@@ -1732,15 +2017,8 @@ mod tests {
                 ops: Arc::clone(&ops),
             };
             let thread = thread::spawn(move || {
-                let control = Control::new(
-                    cmd_rx,
-                    event_tx,
-                    config(),
-                    0,
-                    Arc::new(AtomicUsize::new(0)),
-                    Arc::default(),
-                    sink,
-                );
+                let control =
+                    Control::new(cmd_rx, event_tx, config(), 0, Observable::default(), sink);
                 drop(control.run());
             });
             Self {
@@ -1998,8 +2276,10 @@ mod tests {
                 event_tx,
                 cfg,
                 open_rate,
-                Arc::new(AtomicUsize::new(0)),
-                probes,
+                Observable {
+                    instruments: probes,
+                    ..Observable::default()
+                },
                 sink,
             );
             drop(control.run());
@@ -2281,5 +2561,295 @@ mod tests {
             }
             Some(desired)
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Volume (ADR-0010)
+    // -----------------------------------------------------------------------
+
+    use crate::protocol::VolumePath;
+    use crate::volume::{MAX_POSITION, SharedVolume, Volume};
+
+    /// A sink with an attenuator of its own — the backend ADR-0010 says baz
+    /// does not currently ship, standing in for the one it may.
+    ///
+    /// It exists for the same reason [`DeviceDouble`] does: the interesting
+    /// branch is unreachable on real hardware (no shipped backend accepts a
+    /// device volume) and it is precisely the branch that must be right when
+    /// one does. What is under test is the *engine's* half of the arrangement —
+    /// that it offers the gain to the sink before falling back, that it does
+    /// not then also scale the samples, that it reports
+    /// [`VolumePath::DeviceAttenuator`], and that it re-offers after a reopen.
+    struct AttenuatingDouble {
+        rate: u32,
+        /// Every gain the engine handed to the device, in order.
+        accepted: Arc<Mutex<Vec<f32>>>,
+        /// Everything written, so the test can prove the stream was *not*
+        /// scaled as well.
+        written: Arc<Mutex<Vec<f32>>>,
+    }
+
+    impl Sink for AttenuatingDouble {
+        fn write(&mut self, samples: &[f32]) {
+            if let Ok(mut out) = self.written.lock() {
+                out.extend_from_slice(samples);
+            }
+        }
+
+        fn negotiate_rate(&mut self, desired: u32) -> Option<u32> {
+            self.rate = desired;
+            Some(desired)
+        }
+
+        fn set_device_volume(&mut self, gain: f32) -> Option<()> {
+            if let Ok(mut log) = self.accepted.lock() {
+                log.push(gain);
+            }
+            Some(())
+        }
+    }
+
+    /// Run `queue` to its end, sending `before_play` first, and report the
+    /// events plus the engine's final volume snapshot.
+    fn run_with_volume<S: Sink + Send + 'static>(
+        queue: Vec<PathBuf>,
+        sink: S,
+        before_play: &[Command],
+    ) -> (Vec<Event>, crate::volume::VolumeState) {
+        let (cmd_tx, cmd_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
+        let volume: Arc<SharedVolume> = Arc::default();
+        let shared = Arc::clone(&volume);
+        let engine = thread::spawn(move || {
+            let control = Control::new(
+                cmd_rx,
+                event_tx,
+                EngineConfig::default(),
+                RATE,
+                Observable {
+                    volume: shared,
+                    ..Observable::default()
+                },
+                sink,
+            );
+            drop(control.run());
+        });
+        cmd_tx
+            .send(Command::SetQueue { paths: queue })
+            .expect("engine accepts commands");
+        for command in before_play {
+            cmd_tx
+                .send(command.clone())
+                .expect("engine accepts commands");
+        }
+        cmd_tx.send(Command::Play).expect("engine accepts commands");
+
+        let mut events = Vec::new();
+        let deadline = Instant::now() + TIMEOUT;
+        while Instant::now() < deadline {
+            match event_rx.recv_timeout(Duration::from_millis(50)) {
+                Ok(Event::QueueEnded) => {
+                    events.push(Event::QueueEnded);
+                    break;
+                }
+                Ok(event) => events.push(event),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        drop(cmd_tx);
+        engine.join().expect("engine thread");
+        let state = volume.snapshot();
+        (events, state)
+    }
+
+    /// **A sink with its own attenuator gets the volume, and the samples do
+    /// not.**
+    ///
+    /// This is the whole point of the ADR-0010 abstraction: when the output can
+    /// carry the volume, the stream stays bit-exact and the readout says
+    /// `DeviceAttenuator` rather than `SoftwareGain`. Asserted three ways — the
+    /// device was handed the gain, the delivered samples are unscaled, and the
+    /// reported path is the device's.
+    #[test]
+    fn a_sink_with_an_attenuator_carries_the_volume_and_the_stream_is_untouched() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let track = fixture_at(dir.path(), "tone.wav", RATE, SHORT_FRAMES);
+        let accepted: Arc<Mutex<Vec<f32>>> = Arc::default();
+        let written: Arc<Mutex<Vec<f32>>> = Arc::default();
+        let sink = AttenuatingDouble {
+            rate: RATE,
+            accepted: Arc::clone(&accepted),
+            written: Arc::clone(&written),
+        };
+        let (events, state) = run_with_volume(
+            vec![track.clone()],
+            sink,
+            &[Command::SetVolume { position: 500 }],
+        );
+
+        let handed = accepted.lock().expect("accepted lock").clone();
+        assert_eq!(
+            handed.first().copied(),
+            Some(Volume::new(500).amplitude()),
+            "the device must be offered the taper's gain, not the raw position"
+        );
+        assert_eq!(
+            state.path,
+            VolumePath::DeviceAttenuator,
+            "a sink that took the volume must be reported as carrying it"
+        );
+        assert!(state.path.is_transparent());
+
+        let reference = crate::playback::AudioSource::decode_all(&track)
+            .expect("decode reference")
+            .samples;
+        let delivered = written.lock().expect("written lock").clone();
+        assert_eq!(
+            delivered, reference,
+            "the device carried the volume, so baz must not have scaled anything"
+        );
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::VolumeChanged {
+                    path: VolumePath::DeviceAttenuator,
+                    ..
+                }
+            )),
+            "the path must be reported, not merely taken: {events:?}"
+        );
+    }
+
+    /// A reopened output is a new output: whatever attenuation the old stream
+    /// was carrying went with it, so the engine must re-offer the gain rather
+    /// than assume it survived. Without this, following the source rate would
+    /// silently reset the volume to unity mid-album.
+    #[test]
+    #[allow(clippy::float_cmp)] // the gain must be re-offered exactly, not nearly
+    fn a_rate_change_re_establishes_the_device_volume() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let queue = vec![
+            fixture_at(dir.path(), "a_44k.wav", RATE, SHORT_FRAMES),
+            fixture_at(dir.path(), "b_48k.wav", HI_RATE, SHORT_FRAMES),
+        ];
+        let accepted: Arc<Mutex<Vec<f32>>> = Arc::default();
+        let sink = AttenuatingDouble {
+            rate: RATE,
+            accepted: Arc::clone(&accepted),
+            written: Arc::default(),
+        };
+        let (_events, state) =
+            run_with_volume(queue, sink, &[Command::SetVolume { position: 250 }]);
+
+        let gain = Volume::new(250).amplitude();
+        let handed = accepted.lock().expect("accepted lock").clone();
+        assert!(
+            handed.len() >= 2,
+            "the gain must be re-offered after the output is reopened: {handed:?}"
+        );
+        assert!(
+            handed.iter().all(|g| *g == gain),
+            "every offer must be the same gain the listener set: {handed:?}"
+        );
+        assert_eq!(state.volume, Volume::new(250));
+        assert_eq!(state.path, VolumePath::DeviceAttenuator);
+    }
+
+    /// A sink with no attenuator — every backend baz actually ships — falls
+    /// back to software gain and says so.
+    #[test]
+    fn a_sink_without_an_attenuator_falls_back_to_software_gain() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let track = fixture_at(dir.path(), "tone.wav", RATE, SHORT_FRAMES);
+        let opened: Opened = Arc::default();
+        let sink = DeviceDouble::new(RATE, &[RATE], &opened);
+        let (events, state) =
+            run_with_volume(vec![track], sink, &[Command::SetVolume { position: 500 }]);
+
+        assert_eq!(state.path, VolumePath::SoftwareGain);
+        assert!(
+            !state.path.is_transparent(),
+            "software gain must not claim the stream is untouched"
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter_map(|e| match e {
+                    Event::VolumeChanged {
+                        position,
+                        muted,
+                        path,
+                    } => Some((*position, *muted, *path)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            vec![(500, false, VolumePath::SoftwareGain)],
+            "exactly one change, reported once"
+        );
+    }
+
+    /// Unity is not merely a gain of one — it is reported as its own state, so
+    /// a front end can say "nothing is being applied" without inferring it from
+    /// a float comparison of its own.
+    #[test]
+    fn returning_to_unity_is_reported_as_unity() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let track = fixture_at(dir.path(), "tone.wav", RATE, SHORT_FRAMES);
+        let opened: Opened = Arc::default();
+        let sink = DeviceDouble::new(RATE, &[RATE], &opened);
+        let (events, state) = run_with_volume(
+            vec![track],
+            sink,
+            &[
+                Command::SetVolume { position: 500 },
+                Command::SetVolume {
+                    position: MAX_POSITION,
+                },
+            ],
+        );
+
+        assert_eq!(state.volume, Volume::UNITY);
+        assert_eq!(state.path, VolumePath::Unity);
+        let paths: Vec<VolumePath> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::VolumeChanged { path, .. } => Some(*path),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            paths,
+            vec![VolumePath::SoftwareGain, VolumePath::Unity],
+            "down from unity and back must be two statements, in that order"
+        );
+    }
+
+    /// Redundant commands emit nothing — the rule the whole protocol follows
+    /// (module docs), and the one that keeps a slider dragged across the same
+    /// pixel from flooding the event channel.
+    #[test]
+    fn a_redundant_volume_command_says_nothing() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let track = fixture_at(dir.path(), "tone.wav", RATE, SHORT_FRAMES);
+        let opened: Opened = Arc::default();
+        let sink = DeviceDouble::new(RATE, &[RATE], &opened);
+        let (events, _) = run_with_volume(
+            vec![track],
+            sink,
+            &[
+                // Already unity, already unmuted: neither is news.
+                Command::SetVolume {
+                    position: MAX_POSITION,
+                },
+                Command::SetMute { muted: false },
+            ],
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::VolumeChanged { .. })),
+            "nothing changed, so nothing may be announced: {events:?}"
+        );
     }
 }
