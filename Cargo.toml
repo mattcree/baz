@@ -13,7 +13,18 @@ authors = ["baz contributors"]
 
 [workspace.dependencies]
 baz-core = { path = "crates/baz-core", version = "0.0.0" }
+dirs = "6"          # XDG config/data dir lookup for config + library DB (MIT OR Apache-2.0)
+# GUI toolkit (ADR-0005, chosen by the Spike A head-to-head). Pure Rust, zero
+# system deps on Linux. `image` for album-art widgets; `tokio` supplies the
+# executor that drives subscriptions and the blocking-decode pool. (MIT)
+iced = { version = "0.13", features = ["image", "tokio"] }
+# Thumbnail decode + downscale; jpeg/png only — the two formats cover art
+# ships in practice (see crates/baz/src/art.rs). (MIT OR Apache-2.0)
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 lofty = "0.22"      # tag reading (MIT OR Apache-2.0)
+# Bounded album-art thumbnail cache (MIT). >= 0.16.3 for the RUSTSEC-2026-0002
+# IterMut soundness fix; iced_glyphon still pins a 0.12 copy (see deny.toml).
+lru = "0.16.3"
 memchr = "2"        # SIMD substring scan for the search hot path (Unlicense OR MIT)
 # Durable library store (MIT; libsqlite3-sys MIT, SQLite itself public
 # domain). `bundled` compiles SQLite from source so no system library or
@@ -27,6 +38,7 @@ walkdir = "2"       # directory traversal (Unlicense OR MIT)
 # lossy codecs (mp3/aac) stay off until encoder delay/padding gapless trim
 # lands — see baz_core::playback docs.
 symphonia = { version = "0.5", default-features = false, features = ["wav", "pcm", "flac"] }  # demux/decode (MPL-2.0 — allowlisted in deny.toml)
+tokio = { version = "1", features = ["rt"] }  # async runtime for the iced shell only (MIT)
 rtrb = "0.3"        # lock-free SPSC ring buffer, no hand-rolled unsafe here (MIT OR Apache-2.0)
 rubato = "0.16"     # windowed-sinc sample-rate conversion (MIT)
 cpal = "0.16"       # shared-mode device output, optional feature `device-output` (Apache-2.0)
