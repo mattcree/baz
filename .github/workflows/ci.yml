@@ -25,6 +25,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # --all-features pulls cpal (feature device-output), which needs ALSA
+      # headers on Linux; macOS/Windows audio backends need nothing extra.
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --all-features
 
@@ -37,6 +40,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install ALSA headers (cpal via --all-features)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-features
 
@@ -47,6 +53,7 @@ jobs:
       RUSTDOCFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --workspace --no-deps --all-features
 
@@ -68,6 +75,7 @@ jobs:
         id: msrv
         run: echo "msrv=$(grep -m1 'rust-version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
       - run: rustup toolchain install ${{ steps.msrv.outputs.msrv }} --profile minimal && rustup override set ${{ steps.msrv.outputs.msrv }}
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --all-features
 
@@ -76,6 +84,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
       - run: cargo llvm-cov --workspace --all-features --summary-only --fail-under-lines 80

@@ -7,10 +7,11 @@
 //! through the protocol, it doesn't exist.
 //!
 //! The workspace and its quality gates (see `docs/ENGINEERING.md`) were
-//! established before feature code; the engine grows behind them. First
-//! feature in: the [`library`] scanner.
+//! established before feature code; the engine grows behind them. In so far:
+//! the [`library`] scanner and the gapless [`playback`] engine.
 
 #![forbid(unsafe_code)]
 
 pub mod library;
+pub mod playback;
 pub mod protocol;
