@@ -17,6 +17,12 @@
 
 ## Known gaps in shipped features
 
+- **`.ogg` and `.opus` are scanned but unplayable** — the same
+  advertises-what-it-can't-play bug that m4a had. Vorbis is a one-feature fix
+  (`ogg` + `vorbis`); **Opus has no decoder in symphonia 0.5 at all**, so it
+  needs a real decision (an external decoder crate, or dropping the extension
+  until one exists). Until fixed, these files appear on the shelf and skip.
+
 - **Deleted files linger in the index** — `add_tracks` is upsert-only; removal
   support has not been written, so a file deleted on disk stays on the shelf.
 - **A full rescan runs on every launch** — cheap on small libraries, wasteful on
