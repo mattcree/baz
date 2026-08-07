@@ -25,6 +25,7 @@ allow = [
   "ISC",
   "MPL-2.0",
   "Unicode-3.0",
+  "Zlib",               # foldhash (transitive: rusqlite → hashlink → hashbrown)
 ]
 confidence-threshold = 0.9
 

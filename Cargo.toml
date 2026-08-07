@@ -14,12 +14,18 @@ authors = ["baz contributors"]
 [workspace.dependencies]
 baz-core = { path = "crates/baz-core", version = "0.0.0" }
 lofty = "0.22"      # tag reading (MIT OR Apache-2.0)
+memchr = "2"        # SIMD substring scan for the search hot path (Unlicense OR MIT)
+# Durable library store (MIT; libsqlite3-sys MIT, SQLite itself public
+# domain). `bundled` compiles SQLite from source so no system library or
+# -dev package is needed on any platform.
+rusqlite = { version = "0.39", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"     # library error types (MIT OR Apache-2.0)
 walkdir = "2"       # directory traversal (Unlicense OR MIT)
 
 # dev-dependencies
+criterion = "0.8"   # benchmarks per docs/ENGINEERING.md (MIT OR Apache-2.0)
 hound = "3.5"       # WAV fixture generation in tests (Apache-2.0)
 tempfile = "3"      # scratch dirs for scanner tests (MIT OR Apache-2.0)
 
