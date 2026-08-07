@@ -1483,7 +1483,7 @@ fn device_engine_follows_the_source_rate() {
 }
 
 // ---------------------------------------------------------------------------
-// Volume (ADR-0010)
+// Volume (ADR-0011)
 // ---------------------------------------------------------------------------
 
 /// Play `queue` to completion with `before_play` sent first, and return the
@@ -1515,7 +1515,7 @@ fn play_with_volume(queue: &[PathBuf], capacity: usize, before_play: &[Command])
     collect(output)
 }
 
-/// **Unity is bit-exact.** The whole ADR-0010 guarantee, asserted where it
+/// **Unity is bit-exact.** The whole ADR-0011 guarantee, asserted where it
 /// matters: a gapless two-track queue played with the volume control explicitly
 /// engaged at unity is sample-for-sample the same stream as the reference
 /// decode of both files concatenated.

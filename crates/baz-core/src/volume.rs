@@ -1,7 +1,7 @@
 //! Volume: the control unit, the taper that maps it to gain, and the fader
 //! that applies it on the pump path.
 //!
-//! The design decision this module encodes is ADR-0010, and its two halves are
+//! The design decision this module encodes is ADR-0011, and its two halves are
 //! worth stating up front because both are easy to get quietly wrong.
 //!
 //! # The unit on the wire is a control position, not an amplitude

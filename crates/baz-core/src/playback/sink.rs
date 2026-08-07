@@ -102,7 +102,7 @@ pub trait Sink {
     /// Ask the output to carry a linear `gain` in **its own** attenuator, so
     /// that baz does not have to scale the samples.
     ///
-    /// This is ADR-0010's device-volume slot, and it is deliberately shaped
+    /// This is ADR-0011's device-volume slot, and it is deliberately shaped
     /// like [`Self::negotiate_rate`]: the engine asks, the sink answers, and
     /// the engine reports honestly whichever answer it got. `Some(())` means
     /// the sink took the gain and the sample stream may be passed through
@@ -117,7 +117,7 @@ pub trait Sink {
     /// The default returns `None`, which is the honest answer for
     /// [`OfflineSink`] (a `Vec<f32>` has no attenuator) **and** for
     /// `DeviceSink`. cpal exposes no volume API at all, so a hardware volume
-    /// would mean platform-specific code — and ADR-0010's measurements found
+    /// would mean platform-specific code — and ADR-0011's measurements found
     /// that in shared mode there is nothing correct for it to reach: the
     /// mixer behind a shared output belongs to the whole system, not to this
     /// player, and moving it would move every other application's volume with

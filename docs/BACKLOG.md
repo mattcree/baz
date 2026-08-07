@@ -14,7 +14,7 @@
 - **Per-album edition preference should persist** once the library DB is the
   right home for it (deferred in ADR-0007: persisting today would mean taking a
   TOML-parser dependency for a preference that belongs in a database column).
-- ~~**A volume slider**~~ — **the engine half shipped (ADR-0010)**; the GUI
+- ~~**A volume slider**~~ — **the engine half shipped (ADR-0011)**; the GUI
   control is a separate unit. `Command::SetVolume`/`SetMute`, a cubic taper
   defined once in `baz_core::volume`, software gain on the pump path with a
   20 ms slew, and a structural unity short-circuit that keeps ADR-0009's
@@ -98,7 +98,7 @@
   we need — rather than for its own sake.
 
 - **A deleted *directory*'s tracks still linger in the index.** Removal
-  landed with ADR-0010 and deleting a *file* now clears its row on the next
+  landed with ADR-0011 and deleting a *file* now clears its row on the next
   scan — but only under positive confirmation, and one of the four gates is
   "the file's parent directory is present". So `rm -rf ~/Music/Artist/Album`
   leaves eight rows behind, deliberately: from the filesystem's side a
@@ -132,7 +132,7 @@
   WASAPI exclusive, `CoreAudio` hog) can close that. `Event::SignalPath` will
   grow a field for it when they land.
 
-- **Hardware volume needs exclusive mode, and waits for it** (ADR-0010, which
+- **Hardware volume needs exclusive mode, and waits for it** (ADR-0011, which
   measured this rather than assuming it). In *shared* mode there is no
   bit-exact per-application volume on any platform: the per-app controls
   (PipeWire sink-input, WASAPI `ISimpleAudioVolume`) are a float multiply

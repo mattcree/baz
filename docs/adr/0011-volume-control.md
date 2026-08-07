@@ -1,4 +1,4 @@
-# ADR-0010: Volume — a cubic control position, software gain, and an honest readout
+# ADR-0011: Volume — a cubic control position, software gain, and an honest readout
 
 **Status**: accepted (2026-08-07) · **amends the guarantee stated in [ADR-0009](0009-follow-the-source-rate.md)** (that ADR's decisions all stand; what changes is that "bit-exact" is now the conjunction of two facts instead of one) · resolves the volume entry in `docs/BACKLOG.md` · measurements taken on the maintainer's own machine (Fedora/PipeWire 1.6.7, iFi HD USB DAC)
 

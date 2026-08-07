@@ -239,7 +239,7 @@ pub enum Event {
     /// downstream — only exclusive-mode output could claim that, and it is a
     /// later phase.
     ///
-    /// Since ADR-0010 it also does not claim, on its own, that the samples
+    /// Since ADR-0011 it also does not claim, on its own, that the samples
     /// were unaltered: **a volume below unity is a second, independent gain
     /// stage**, reported by [`Event::VolumeChanged`]'s [`VolumePath`]. A path
     /// is literally bit-exact when `chain` is [`SignalChain::Direct`] *and*
@@ -341,7 +341,7 @@ pub enum ConversionReason {
 /// Where the volume is being applied, in [`Event::VolumeChanged`] — and
 /// therefore whether the sample stream is still literally untouched.
 ///
-/// This is the ADR-0010 half of the fidelity readout, and it exists for one
+/// This is the ADR-0011 half of the fidelity readout, and it exists for one
 /// reason: **software gain is not bit-exact, and saying otherwise would be the
 /// silent conversion ADR-0009 exists to rule out.** baz decodes to f32, so
 /// scaling costs ~1 ULP of a 24-bit mantissa — around −140 dBFS, inaudible by
@@ -377,7 +377,7 @@ pub enum VolumePath {
     /// which **no backend baz ships implements**: shared-mode output has no
     /// per-application hardware volume to reach for, and the card-wide
     /// controls that do exist belong to the whole system rather than to this
-    /// player. ADR-0010 records the measurements behind that and what would
+    /// player. ADR-0011 records the measurements behind that and what would
     /// change it (exclusive-mode output, where baz owns the card and may
     /// legitimately drive its attenuator).
     DeviceAttenuator,

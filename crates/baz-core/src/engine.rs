@@ -130,7 +130,7 @@
 //!
 //! # Volume
 //!
-//! ADR-0010 is the governing decision; [`crate::volume`] holds the unit, the
+//! ADR-0011 is the governing decision; [`crate::volume`] holds the unit, the
 //! taper, and the fader. What belongs *here* is where the gain is applied and
 //! what it survives.
 //!
@@ -167,7 +167,7 @@
 //! actually being applied. Under every backend baz ships it is
 //! [`VolumePath::SoftwareGain`] below unity and [`VolumePath::Unity`] at it;
 //! [`VolumePath::DeviceAttenuator`] is what [`Sink::set_device_volume`]
-//! reports when a sink takes the gain itself. ADR-0010 records why no shipped
+//! reports when a sink takes the gain itself. ADR-0011 records why no shipped
 //! backend does.
 //!
 //! # Event semantics
@@ -888,7 +888,7 @@ impl<S: Sink> Control<S> {
     /// when a sink takes it, the fader stays at unity and the sample stream is
     /// passed through untouched, which is the whole reason the offer is made
     /// before the fallback rather than after. No backend baz ships takes it
-    /// today (ADR-0010), so in practice this settles on software gain — and
+    /// today (ADR-0011), so in practice this settles on software gain — and
     /// reports exactly that.
     ///
     /// The slew is skipped whenever nothing is audible (stopped, or paused):
@@ -1301,7 +1301,7 @@ impl Session {
     /// change on incomparable cadences — this one per session, that one per
     /// pointer drag. `protocol`'s docs for both carry the full argument and
     /// the rule for combining them (`Direct` **and** `Unity` is what
-    /// bit-exactness means since ADR-0010).
+    /// bit-exactness means since ADR-0011).
     fn signal_path(&self, index: usize) -> Option<Event> {
         let (source_rate_hz, source_bits) = (*self.formats.get(index)?)?;
         let output_rate_hz = self.shared.stream_rate.load(Ordering::Acquire);
@@ -2564,13 +2564,13 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Volume (ADR-0010)
+    // Volume (ADR-0011)
     // -----------------------------------------------------------------------
 
     use crate::protocol::VolumePath;
     use crate::volume::{MAX_POSITION, SharedVolume, Volume};
 
-    /// A sink with an attenuator of its own — the backend ADR-0010 says baz
+    /// A sink with an attenuator of its own — the backend ADR-0011 says baz
     /// does not currently ship, standing in for the one it may.
     ///
     /// It exists for the same reason [`DeviceDouble`] does: the interesting
@@ -2666,7 +2666,7 @@ mod tests {
     /// **A sink with its own attenuator gets the volume, and the samples do
     /// not.**
     ///
-    /// This is the whole point of the ADR-0010 abstraction: when the output can
+    /// This is the whole point of the ADR-0011 abstraction: when the output can
     /// carry the volume, the stream stays bit-exact and the readout says
     /// `DeviceAttenuator` rather than `SoftwareGain`. Asserted three ways — the
     /// device was handed the gain, the delivered samples are unscaled, and the
