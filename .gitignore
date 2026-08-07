@@ -8,3 +8,4 @@ fixtures/
 fuzz/corpus/
 fuzz/artifacts/
 coverage-html/
+.claude/

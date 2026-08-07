@@ -8,10 +8,12 @@
 //!
 //! The workspace and its quality gates (see `docs/ENGINEERING.md`) were
 //! established before feature code; the engine grows behind them. Features
-//! so far: the [`library`] scanner and the [`index`] it feeds.
+//! so far: the [`library`] scanner, the [`index`] it feeds, and the gapless
+//! [`playback`] engine.
 
 #![forbid(unsafe_code)]
 
 pub mod index;
 pub mod library;
+pub mod playback;
 pub mod protocol;

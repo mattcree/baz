@@ -8,12 +8,23 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+cpal = { workspace = true, optional = true }
 lofty = { workspace = true }
 memchr = { workspace = true }
+rtrb = { workspace = true }
+rubato = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
+symphonia = { workspace = true }
 thiserror = { workspace = true }
 walkdir = { workspace = true }
+
+[features]
+# Real audio-device output via cpal. Non-default: building cpal requires
+# platform audio headers (alsa-lib-devel on Linux), which the primary dev
+# machine lacks outside the baz-dev toolbox. Everything else — including the
+# whole playback test suite — runs headless against `OfflineSink`.
+device-output = ["dep:cpal"]
 
 [dev-dependencies]
 criterion = { workspace = true }

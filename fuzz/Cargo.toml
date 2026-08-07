@@ -25,3 +25,10 @@ path = "fuzz_targets/scanner_inference.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "playback_decode"
+path = "fuzz_targets/playback_decode.rs"
+test = false
+doc = false
+bench = false
