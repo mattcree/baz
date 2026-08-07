@@ -170,6 +170,12 @@ next commit.
   above).
 - The device ring buffer is discarded when a playback session is abandoned,
   instead of leaking the previous session's audio into the next.
+- The seek bar and the volume fader no longer stay stuck to the pointer after
+  a drag that ends outside the window. If the pointer leaves the window, or
+  the window loses focus, mid-drag, the gesture now ends there and commits at
+  the last position it saw — the release that would normally end it is being
+  delivered to somebody else, and neither iced 0.13 nor `winit` offers a
+  pointer grab a widget could hold instead.
 
 ### Known limitations
 

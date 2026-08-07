@@ -2994,6 +2994,127 @@ mod tests {
     }
 
     // -----------------------------------------------------------------
+    // Losing the pointer mid-gesture
+    //
+    // A button that comes up over another window is a release baz never
+    // sees, so [`crate::groove`] ends the gesture itself and publishes the
+    // *ordinary* release-and-exit pair (its "Losing the pointer" docs carry
+    // the argument, and its own tests pin the event handling). What follows
+    // pins the other half — what that pair does to this state machine, on
+    // both bars: the gesture **commits** at the last position it saw, and
+    // nothing is left mid-drag to ignore the engine forever.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn a_seek_scrub_that_loses_the_pointer_commits_at_the_last_position() {
+        let (albums, mut player) = playing_with_progress();
+        player.hover_to(at(100.0));
+        player.press(at(100.0));
+        player.drag_to(at(160.0));
+        assert!(player.dragging());
+
+        // The pointer crosses the window edge. The bar has been showing
+        // 2:40 for the whole scrub, so 2:40 is what gets asked for —
+        // snapping back to the engine's 0:30 would be a jump nobody asked
+        // for and would read as baz dropping the input.
+        assert_eq!(player.release_drag(), Some(160_000));
+        player.hover_left();
+        assert!(!player.dragging(), "no gesture survives the loss");
+        let bar = player.seek_bar().expect("bar");
+        assert_eq!(bar.elapsed, "2:40");
+        assert!(bar.pending, "a request awaiting the engine's word");
+        assert_eq!(bar.preview, None, "the preview left with the pointer");
+
+        // Movement after the loss is not part of the dead gesture: it can
+        // no longer move the bar. This is the reported bug — the groove
+        // followed the pointer around the screen — stated as an assertion.
+        player.drag_to(at(20.0));
+        assert!(!player.dragging());
+        assert_eq!(player.seek_bar().expect("bar").elapsed, "2:40");
+
+        // And pending is not wedged: the engine's confirmation lands.
+        player.apply(&progress(160_000, Some(200_000)), &albums);
+        assert!(!player.seek_pending());
+        let bar = player.seek_bar().expect("bar");
+        assert_eq!(bar.elapsed, "2:40");
+        assert!(!bar.pending);
+    }
+
+    #[test]
+    fn a_seek_click_that_loses_the_pointer_commits_where_it_went_down() {
+        // Sub-threshold travel is a click wherever the pointer ends up, and
+        // losing the pointer does not change what the hand aimed at.
+        let (_albums, mut player) = playing_with_progress();
+        player.press(at(60.0));
+        player.drag_to(at(62.0));
+        assert!(!player.dragging());
+        assert_eq!(player.release_drag(), Some(60_000));
+        player.hover_left();
+        assert_eq!(
+            player.release_drag(),
+            None,
+            "the gesture is spent — a second loss asks for nothing"
+        );
+    }
+
+    #[test]
+    fn a_volume_drag_that_loses_the_pointer_keeps_the_level_it_was_left_at() {
+        let mut player = ready_with_queue(1);
+        player.hover_volume(fader_at(80.0));
+        assert_eq!(player.press_volume(fader_at(80.0)), Some(800));
+        assert_eq!(
+            player.drag_volume(fader_at(30.0)),
+            Some(300),
+            "a fader is heard as it moves"
+        );
+
+        // The pointer leaves the window. Nothing new is asked for and
+        // nothing is undone: 300 is the level the listener has been
+        // hearing, so 300 is the level they keep. Rolling back would be an
+        // audible change caused by nothing they did.
+        player.release_volume();
+        player.volume_left();
+        assert!((player.volume_bar().position - 0.3).abs() < 1e-6);
+        assert_eq!(player.volume_bar().preview, None);
+
+        // The fader no longer follows the pointer — the worse half of the
+        // reported bug, since every step of it committed.
+        assert_eq!(
+            player.drag_volume(fader_at(95.0)),
+            None,
+            "no gesture, no request"
+        );
+        assert!((player.volume_bar().position - 0.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_fresh_press_after_a_lost_pointer_is_an_ordinary_gesture() {
+        // Re-entering and clicking again must start clean on both bars —
+        // the loss ended a gesture, it did not disable the control.
+        let (_albums, mut player) = playing_with_progress();
+        player.press(at(100.0));
+        player.drag_to(at(160.0));
+        player.release_drag();
+        player.hover_left();
+
+        player.hover_to(at(40.0));
+        player.press(at(40.0));
+        player.drag_to(at(80.0));
+        assert!(player.dragging(), "a new press scrubs like any other");
+        assert_eq!(player.release_drag(), Some(80_000));
+
+        let mut player = ready_with_queue(1);
+        player.press_volume(fader_at(80.0));
+        player.drag_volume(fader_at(30.0));
+        player.release_volume();
+        player.volume_left();
+        assert_eq!(player.press_volume(fader_at(70.0)), Some(700));
+        assert_eq!(player.drag_volume(fader_at(20.0)), Some(200));
+        player.release_volume();
+        assert!((player.volume_bar().position - 0.2).abs() < 1e-6);
+    }
+
+    // -----------------------------------------------------------------
     // The level preview
     // -----------------------------------------------------------------
 
