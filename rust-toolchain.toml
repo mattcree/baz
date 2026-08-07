@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned stable (docs/ENGINEERING.md). Bump deliberately; MSRV in Cargo.toml
+# trails or matches this and is CI-checked.
+channel = "1.92.0"
+components = ["rustfmt", "clippy"]

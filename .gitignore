@@ -5,3 +5,6 @@ spikes/*/dataset/
 *.flac
 *.wav
 fixtures/
+fuzz/corpus/
+fuzz/artifacts/
+coverage-html/

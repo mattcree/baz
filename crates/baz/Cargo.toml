@@ -1,0 +1,14 @@
+[package]
+name = "baz"
+description = "baz — a fast, open-source music player for people who own their music"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+baz-core = { workspace = true }
+
+[lints]
+workspace = true

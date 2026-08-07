@@ -1,0 +1,35 @@
+[workspace]
+resolver = "3"
+members = ["crates/baz-core", "crates/baz"]
+exclude = ["fuzz"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.92"
+license = "GPL-3.0-or-later"
+# repository = set when the GitHub home is created (ADR-0002 leaves it open)
+authors = ["baz contributors"]
+
+[workspace.dependencies]
+baz-core = { path = "crates/baz-core", version = "0.0.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Lint policy (see docs/ENGINEERING.md): clippy::all + selectively-audited
+# pedantic lints. CI runs with -D warnings, so "warn" here is enforced there.
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "deny"          # exclusive-mode audio backends will opt out explicitly
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Audited exceptions to pedantic (rationale required to extend this list):
+module_name_repetitions = "allow"   # baz_core::protocol::Command is fine
+must_use_candidate = "allow"        # too noisy; #[must_use] applied deliberately
+missing_errors_doc = "warn"
+unwrap_used = "warn"                # library code must not unwrap (tests may)
+
+[profile.release]
+lto = "thin"

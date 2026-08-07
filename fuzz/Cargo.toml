@@ -1,0 +1,20 @@
+[package]
+name = "baz-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+baz-core = { path = "../crates/baz-core" }
+
+[[bin]]
+name = "protocol_deserialize"
+path = "fuzz_targets/protocol_deserialize.rs"
+test = false
+doc = false
+bench = false
