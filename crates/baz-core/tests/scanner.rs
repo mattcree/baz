@@ -113,6 +113,155 @@ fn write_mp3(root: &Path, relative: &str) -> PathBuf {
     path
 }
 
+/// Ogg's page checksum: CRC-32 with polynomial `0x04c1_1db7`, no input or
+/// output reflection, zero initial value and no final XOR (RFC 3533 §6).
+/// Deliberately not any of the CRC crates — a five-line loop beats a
+/// dependency for one test fixture.
+fn ogg_crc(data: &[u8]) -> u32 {
+    let mut crc: u32 = 0;
+    for &byte in data {
+        crc ^= u32::from(byte) << 24;
+        for _ in 0..8 {
+            crc = if crc & 0x8000_0000 == 0 {
+                crc << 1
+            } else {
+                (crc << 1) ^ 0x04c1_1db7
+            };
+        }
+    }
+    crc
+}
+
+/// One Ogg page carrying whole packets (RFC 3533 §6). `header_type` is the
+/// bitfield: 0x02 begins the logical stream, 0x04 ends it.
+fn ogg_page(header_type: u8, granule: u64, seq: u32, packets: &[&[u8]]) -> Vec<u8> {
+    // Segment table: each packet becomes ⌊len/255⌋ lacing values of 255
+    // followed by len % 255, which is how a reader knows where it ended.
+    let mut segments = Vec::new();
+    for packet in packets {
+        let mut remaining = packet.len();
+        while remaining >= 255 {
+            segments.push(255_u8);
+            remaining -= 255;
+        }
+        segments.push(u8::try_from(remaining).expect("< 255 by construction"));
+    }
+    assert!(segments.len() <= 255, "fixture pages hold one packet each");
+
+    let mut page = Vec::new();
+    page.extend_from_slice(b"OggS");
+    page.push(0); // stream structure version
+    page.push(header_type);
+    page.extend_from_slice(&granule.to_le_bytes());
+    page.extend_from_slice(&0xBA25_F00D_u32.to_le_bytes()); // bitstream serial
+    page.extend_from_slice(&seq.to_le_bytes());
+    let crc_at = page.len();
+    page.extend_from_slice(&0_u32.to_le_bytes()); // CRC placeholder
+    page.push(u8::try_from(segments.len()).expect("checked above"));
+    page.extend_from_slice(&segments);
+    for packet in packets {
+        page.extend_from_slice(packet);
+    }
+    let crc = ogg_crc(&page);
+    page[crc_at..crc_at + 4].copy_from_slice(&crc.to_le_bytes());
+    page
+}
+
+/// A comment header body in the Vorbis-comment format: a vendor string and an
+/// empty user-comment list. Shared by Ogg Opus (`OpusTags`) and Ogg Vorbis.
+fn vorbis_comment_body() -> Vec<u8> {
+    const VENDOR: &[u8] = b"baz test fixture";
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&u32::try_from(VENDOR.len()).expect("short").to_le_bytes());
+    bytes.extend_from_slice(VENDOR);
+    bytes.extend_from_slice(&0_u32.to_le_bytes()); // no user comments
+    bytes
+}
+
+/// A structurally valid **Ogg Opus** stream: an `OpusHead` identification
+/// packet, an `OpusTags` comment packet, and one audio page whose granule
+/// position gives the stream a duration (RFC 7845 §5).
+///
+/// It carries no decodable audio because nothing decodes it — that is the
+/// whole point. What it has to be is *identifiable*: the scanner's job is to
+/// recognise Opus and decline to list it, and a fixture that lofty could not
+/// identify would prove nothing.
+fn write_ogg_opus(root: &Path, relative: &str) -> PathBuf {
+    const PRE_SKIP: u16 = 312;
+    const RATE: u32 = 48_000;
+    let path = root.join(relative);
+    make_dirs(&path);
+
+    let mut head = Vec::new();
+    head.extend_from_slice(b"OpusHead");
+    head.push(1); // encapsulation version
+    head.push(1); // channel count
+    head.extend_from_slice(&PRE_SKIP.to_le_bytes());
+    head.extend_from_slice(&RATE.to_le_bytes()); // original input rate
+    head.extend_from_slice(&0_i16.to_le_bytes()); // output gain
+    head.push(0); // channel mapping family 0 (mono/stereo)
+
+    let mut tags = Vec::new();
+    tags.extend_from_slice(b"OpusTags");
+    tags.extend_from_slice(&vorbis_comment_body());
+
+    // One 20 ms SILK-NB frame's worth of TOC byte plus filler. The granule
+    // position is in 48 kHz samples and includes the pre-skip.
+    let audio = [0x08_u8, 0x00, 0x00, 0x00];
+    let granule = u64::from(PRE_SKIP) + u64::from(RATE); // one second of audio
+
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&ogg_page(0x02, 0, 0, &[&head]));
+    bytes.extend_from_slice(&ogg_page(0x00, 0, 1, &[&tags]));
+    bytes.extend_from_slice(&ogg_page(0x04, granule, 2, &[&audio]));
+    fs::write(&path, bytes).expect("write ogg opus fixture");
+    path
+}
+
+/// A structurally valid **Ogg Vorbis** stream: the three Vorbis headers
+/// (identification, comment, setup) followed by an audio page whose granule
+/// position gives the stream a duration.
+///
+/// The control for [`write_ogg_opus`]: `.ogg` is a container, not a codec, and
+/// dropping Opus must not drop Vorbis with it.
+fn write_ogg_vorbis(root: &Path, relative: &str) -> PathBuf {
+    const RATE: u32 = 44_100;
+    let path = root.join(relative);
+    make_dirs(&path);
+
+    // Identification header (Vorbis I §4.2.2).
+    let mut ident = vec![1_u8];
+    ident.extend_from_slice(b"vorbis");
+    ident.extend_from_slice(&0_u32.to_le_bytes()); // version
+    ident.push(2); // channels
+    ident.extend_from_slice(&RATE.to_le_bytes());
+    ident.extend_from_slice(&0_i32.to_le_bytes()); // bitrate maximum
+    ident.extend_from_slice(&192_000_i32.to_le_bytes()); // bitrate nominal
+    ident.extend_from_slice(&0_i32.to_le_bytes()); // bitrate minimum
+    ident.push(0xB8); // blocksize_0 = 2^8, blocksize_1 = 2^11
+    ident.push(0x01); // framing bit
+
+    let mut comment = vec![3_u8];
+    comment.extend_from_slice(b"vorbis");
+    comment.extend_from_slice(&vorbis_comment_body());
+    comment.push(0x01); // framing bit
+
+    // Setup header: never parsed by a tag reader (only by a decoder), so its
+    // body is filler. It must exist, because the header packet count is what
+    // tells a reader where the audio starts.
+    let mut setup = vec![5_u8];
+    setup.extend_from_slice(b"vorbis");
+    setup.extend_from_slice(&[0; 64]);
+
+    let audio = [0_u8; 16];
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&ogg_page(0x02, 0, 0, &[&ident]));
+    bytes.extend_from_slice(&ogg_page(0x00, 0, 1, &[&comment, &setup]));
+    bytes.extend_from_slice(&ogg_page(0x04, u64::from(RATE), 2, &[&audio]));
+    fs::write(&path, bytes).expect("write ogg vorbis fixture");
+    path
+}
+
 /// One MP4 atom: a big-endian length covering the header, the four-character
 /// identifier, and the payload.
 fn atom(fourcc: [u8; 4], payload: &[u8]) -> Vec<u8> {
@@ -394,6 +543,122 @@ fn non_audio_files_and_empty_dirs_are_ignored() {
     let tracks = scan_tracks(dir.path());
     assert_eq!(tracks.len(), 1, "only the wav is a track");
     assert_eq!(tracks[0].title.as_deref(), Some("Keeper"));
+}
+
+/// **The shelf never advertises what the engine cannot play — extension half.**
+///
+/// `.opus` is not in `AUDIO_EXTENSIONS` (Symphonia ships no Opus decoder in
+/// any released version — see `AudioFormat::is_decodable`), so an `.opus`
+/// file is not audio as far as a scan is concerned: not a track, and not a
+/// [`ScanEntry::Failed`] either. The bytes are deliberately garbage, because
+/// the point is that nothing ever opens them.
+#[test]
+fn opus_files_are_not_scanned_at_all() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_wav(dir.path(), "Artist/Album/01 - Keeper.wav");
+    fs::write(
+        dir.path().join("Artist/Album/02 - Unplayable.opus"),
+        b"never opened",
+    )
+    .expect("opus file");
+
+    let entries: Vec<ScanEntry> = scan(dir.path()).expect("scan starts").collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        ".opus must not produce an entry of any kind, got: {entries:?}"
+    );
+    match &entries[0] {
+        ScanEntry::Track(meta) => assert_eq!(meta.title.as_deref(), Some("Keeper")),
+        other @ ScanEntry::Failed { .. } => panic!("expected only the wav track, got {other:?}"),
+    }
+}
+
+/// **The shelf never advertises what the engine cannot play — codec half.**
+///
+/// Extension is not enough: `.ogg` is a container and it can hold Opus. Such
+/// a file is dropped on the codec lofty read out of it, not listed and then
+/// skipped at playback time. The Vorbis file beside it — same extension, same
+/// container, decodable codec — must still be listed, or the fix would have
+/// cured the disease by killing the patient.
+#[test]
+fn ogg_opus_is_dropped_but_ogg_vorbis_is_kept() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_ogg_vorbis(dir.path(), "Artist/Album/01 - Vorbis.ogg");
+    write_ogg_opus(dir.path(), "Artist/Album/02 - Opus.ogg");
+
+    let entries: Vec<ScanEntry> = scan(dir.path()).expect("scan starts").collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        "the Opus file must be dropped silently — not listed, and not reported \
+         as a failure. Entries: {entries:?}"
+    );
+    match &entries[0] {
+        ScanEntry::Track(meta) => {
+            assert_eq!(meta.title.as_deref(), Some("Vorbis"));
+            assert_eq!(
+                meta.format,
+                Some(AudioFormat::Vorbis),
+                "the surviving .ogg must be the Vorbis one"
+            );
+        }
+        other @ ScanEntry::Failed { .. } => panic!("expected the Vorbis track, got {other:?}"),
+    }
+}
+
+/// The decoder set and the advertised extension list agree on Opus, from the
+/// library side. (`every_advertised_extension_decodes` in `tests/playback.rs`
+/// is the other half: every extension that *is* advertised really decodes.)
+#[test]
+fn opus_is_the_only_undecodable_format() {
+    let undecodable: Vec<AudioFormat> = [
+        AudioFormat::Flac,
+        AudioFormat::Alac,
+        AudioFormat::Wav,
+        AudioFormat::Mp3,
+        AudioFormat::Aac,
+        AudioFormat::Vorbis,
+        AudioFormat::Opus,
+    ]
+    .into_iter()
+    .filter(|f| !f.is_decodable())
+    .collect();
+    assert_eq!(
+        undecodable,
+        vec![AudioFormat::Opus],
+        "if this changed, AUDIO_EXTENSIONS and docs/BACKLOG.md's Opus entry \
+         need to change with it"
+    );
+}
+
+/// A file is identified by its **content**, not its extension.
+///
+/// `lofty::read_from_path` picks a parser from the extension alone, which is
+/// how an Ogg Opus file named `.ogg` used to arrive as "Vorbis: File missing
+/// magic signature". The scanner sniffs instead, and the side benefit is
+/// tested here: a FLAC that someone named `.mp3` — real libraries have
+/// these — is read as the FLAC it is, rather than failing to parse.
+#[test]
+fn a_mislabelled_file_is_read_by_its_content() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_flac(dir.path(), "Artist/Album/01 - Actually FLAC.mp3");
+
+    let entries: Vec<ScanEntry> = scan(dir.path()).expect("scan starts").collect();
+    assert_eq!(entries.len(), 1);
+    match &entries[0] {
+        ScanEntry::Track(meta) => {
+            assert_eq!(meta.title.as_deref(), Some("Actually FLAC"));
+            assert_eq!(
+                meta.format,
+                Some(AudioFormat::Flac),
+                "the codec must come from the bytes, not from `.mp3`"
+            );
+        }
+        other @ ScanEntry::Failed { .. } => {
+            panic!("a mislabelled file must still be read, got {other:?}")
+        }
+    }
 }
 
 #[test]

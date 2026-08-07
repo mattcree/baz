@@ -38,9 +38,15 @@
 //! |---|---|---|
 //! | WAV, FLAC | exact | none (bit-exact) |
 //! | ALAC in MP4 (`.m4a`) | exact | none (bit-exact) |
+//! | Vorbis in Ogg (`.ogg`) | exact | no edge artifact: the joint measures 1.07x the file's own steady-state error |
 //! | MP3 with LAME header | exact | ~3 ms MDCT edge artifact, ≈ −25 dB peak |
 //! | MP3 without LAME header | none available | untrimmed delay + padding |
 //! | AAC in MP4 (`.m4a`, `.mp4`) | **not trimmed** | ~23 ms of encoder priming |
+//!
+//! Opus is not in the table because it is not in the library: Symphonia has
+//! no Opus decoder in any released version, so `.opus` is deliberately absent
+//! from [`crate::library::AUDIO_EXTENSIONS`] rather than listed and skipped
+//! (`docs/BACKLOG.md`).
 //!
 //! - **WAV, FLAC**: exact sample counts in the container; gapless is exact
 //!   concatenation, verified bit-for-bit in the integration tests.
@@ -52,6 +58,46 @@
 //!   concatenate to the original sample-for-sample. Seeking is sample-exact
 //!   too. (Symphonia's ISO-MP4 reader is not gapless-capable — see AAC below
 //!   — but for ALAC that is a distinction without a difference.)
+//! - **Vorbis** (lossy, in Ogg): **exact**, and the best-behaved lossy format
+//!   here. Ogg carries an absolute granule position on every page, which is a
+//!   sample count, not an estimate; with `FormatOptions::enable_gapless` the
+//!   Ogg reader derives the stream's start delay (the lapped block the first
+//!   page cannot yet render) and its end trim from those numbers and trims
+//!   the packets itself. **Measured** on the test fixture (ffmpeg
+//!   `libvorbis -q:a 6`): decoding a 441 000-frame source yields exactly
+//!   441 000 frames, and the two halves of the split reference decode to
+//!   exactly 220 513 and 220 487 — the source lengths to the sample. Because
+//!   the trim is exact, the splice between two independently encoded Vorbis
+//!   files shows **no MDCT edge artifact at all**: peak error at the joint is
+//!   1.37e-2 (−35.3 dB re. full amplitude) against 1.28e-2 (−35.9 dB) in the
+//!   steady state elsewhere in the same file — a ratio of **1.07**, where the
+//!   same ratio for MP3 is **75** — and the largest adjacent-sample step
+//!   across the joint is 5.11e-2 against the continuous-sine bound of
+//!   5.01e-2, i.e. 2% over it, which is the lossy noise riding on the sine's
+//!   own slope and not a click. (MP3 needs that bound widened by twice its
+//!   edge tolerance before it passes the same check.)
+//!   The comparison that matters is the ratio, not the absolute figure: this
+//!   fixture is a steady 440 Hz sine, which libvorbis handles far less
+//!   accurately than LAME does (as ffmpeg's native AAC encoder also does), so
+//!   −36 dB describes the tone, not the codec on music. What it does show is
+//!   that the joint is not a special place, which is the difference an
+//!   exactly-trimmed lapped transform makes.
+//!
+//!   One thing Vorbis does **not** do exactly is *seek*. Symphonia's Vorbis
+//!   decoder needs two packets before it can overlap-add, so the first packet
+//!   after a mid-stream reset returns an empty buffer and its audio is lost:
+//!   playback resumes exactly one lapped block late. **Measured**: 1024
+//!   frames — **23.2 ms** at 44.1 kHz — of content offset, and the same 1024
+//!   frames missing from the remaining length, at every seek target tried.
+//!   (The size is the encoder's long block ÷ 2; 1024 is libvorbis's default.)
+//!   Seeking is exact for WAV, FLAC and ALAC and time-accurate for MP3;
+//!   Vorbis is the one format where it costs audio, and
+//!   `seek_into_vorbis_ogg_costs_one_lapped_block` pins the number.
+//! - **FLAC in Ogg** (`.ogg` carrying FLAC rather than Vorbis): plays, with
+//!   FLAC's own exact frame count and lossless decode. It arrives free with
+//!   the Ogg demuxer and is tested by the extension/decoder invariant test,
+//!   not separately — it is the same FLAC decoder behind a different
+//!   container.
 //! - **MP3**: Symphonia's gapless trim is active
 //!   (`FormatOptions::enable_gapless`). Files with a Xing/Info + LAME header
 //!   (LAME, and ffmpeg's `libmp3lame`) decode to *exactly* the encoded

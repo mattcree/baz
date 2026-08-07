@@ -17,11 +17,79 @@
 
 ## Known gaps in shipped features
 
-- **`.ogg` and `.opus` are scanned but unplayable** — the same
-  advertises-what-it-can't-play bug that m4a had. Vorbis is a one-feature fix
-  (`ogg` + `vorbis`); **Opus has no decoder in symphonia 0.5 at all**, so it
-  needs a real decision (an external decoder crate, or dropping the extension
-  until one exists). Until fixed, these files appear on the shelf and skip.
+- **Opus is not played, and therefore not listed.** *(Decided 2026-08-07;
+  `.ogg`/Vorbis shipped in the same commit and plays.)* `.opus` is out of
+  `AUDIO_EXTENSIONS` and `AudioFormat::is_decodable` returns `false` for it,
+  so Opus files — including Opus arriving inside a `.ogg` — do not reach the
+  shelf at all. Nothing is silently skipped; there is simply nothing listed.
+
+  **Why not just add a decoder.** Every route costs more than the format is
+  worth *today*, and the options were checked rather than assumed:
+
+  - **Symphonia itself has none, in any released version.** 0.5's
+    `symphonia-codec-opus` is a 1-byte placeholder and was never published to
+    crates.io; **0.6.0 (2026-05-15) still ships no Opus feature**, its README
+    codec table lists Opus as `-`, and [issue #8][opus-issue] has been open
+    since 2020 with two unmerged WIP PRs. So *upgrading buys nothing for
+    Opus* — and 0.6 is a large, unrelated migration in its own right:
+    `SampleBuffer` is removed, `AudioBufferRef` becomes
+    `GenericAudioBufferRef`, `CodecParameters` splits and loses `n_frames`,
+    `delay`, `padding` and `start_ts` to `Track`, and — the one that matters
+    most here — **`FormatOptions::enable_gapless` is gone**, replaced by
+    negative PTS signalling. Every measured number in `baz_core::playback`
+    would have to be re-derived. That is its own ADR and its own commit, not
+    a side effect of adding a format.
+  - **libopus bindings** (`symphonia-adapter-libopus` → `opusic-sys`, or the
+    older `opus`/`audiopus_sys`) work today and are the only *proven* path —
+    the adapter is what rodio wires up. The cost is a **C library and a
+    `cmake` build dependency on every platform**, which neither this machine
+    nor the `baz-dev` toolbox currently has, so it would mean editing
+    `scripts/toolbox-setup.sh`, the devcontainer and all three CI runners.
+    baz's decode path is pure Rust with **zero system dependencies** today
+    (even SQLite is `bundled`); spending that property on one lossy format is
+    not a trade worth making unprompted. (`audiopus_sys` additionally links
+    libopus *dynamically* on glibc Linux and was last released in 2021.)
+  - **Pure-Rust decoders exist but are too young.** `opus-rs` 0.1.26
+    (BSD-3-Clause, first released 2026-02) and `opus-decoder` 0.1.1
+    (MIT/Apache-2.0, `#![forbid(unsafe_code)]`, claims all 12 RFC 8251
+    vectors) would cost no build dependency at all. Both are months old with
+    tens of GitHub stars and no maintenance record, and this is a parser
+    sitting in front of hostile input from the user's own filesystem —
+    exactly where `ENGINEERING.md`'s "prefer proven crates" and the fuzzing
+    policy point the other way.
+
+  **What would change the decision**, in preference order: (1) Symphonia
+  merges an Opus decoder — then it is a one-line feature flag with no new
+  dependency and no build cost, and the container work is *already done*
+  (Symphonia's Ogg demuxer parses `OpusHead`, honours the pre-skip and
+  derives packet durations from the TOC byte, so gapless Opus would arrive
+  working; `opus_bytes_probe_as_ogg_opus_and_never_as_aac` prints the
+  pre-skip it already reads); (2) a pure-Rust Opus crate earns a real track
+  record — a year of releases, adoption, and the RFC 8251 vectors run in
+  *our* CI and fuzzed; (3) the owner decides a bundled-C + `cmake` build
+  dependency is acceptable, in which case `symphonia-adapter-libopus` is the
+  route. The reversal is small and the tests say so: `AUDIO_EXTENSIONS`
+  regains `"opus"`, `AudioFormat::is_decodable` stops excluding it, and the
+  probe test's `Ok(_)` arm — which currently fails the build with those
+  instructions — goes away.
+
+  [opus-issue]: https://github.com/pdeljanov/Symphonia/issues/8
+
+- **Seeking into a Vorbis stream loses one lapped block** — measured at 1024
+  frames (23.2 ms at 44.1 kHz), because Symphonia's Vorbis decoder returns an
+  empty buffer for the first packet after a reset and that audio is gone.
+  Every other format seeks exactly (WAV/FLAC/ALAC) or time-accurately (MP3).
+  The fix is to seek earlier than asked and re-derive the skip from packet
+  timestamps, which touches the seek path five working formats share, so it
+  is deliberately not bundled with adding the format. Documented per format
+  in `playback/mod.rs` and pinned by
+  `seek_into_vorbis_ogg_costs_one_lapped_block`.
+
+- **Symphonia 0.6 is available and not taken.** Released 2026-05-15; a large
+  breaking migration (see the Opus entry above for the specific API changes)
+  that buys baz nothing it currently needs. Worth an ADR when there is a
+  reason — video/subtitle support, a codec only 0.6 has, or an upstream fix
+  we need — rather than for its own sake.
 
 - **Deleted files linger in the index** — `add_tracks` is upsert-only; removal
   support has not been written, so a file deleted on disk stays on the shelf.
@@ -46,7 +114,8 @@
 - **FLAC-in-MP4 is labelled ALAC** — lofty exposes no MP4 codec discriminator,
   so bit depth is the proxy. Wrong name, right fidelity tier, vanishingly rare.
 - **AAC has no gapless trim** (symphonia limitation) — documented per format in
-  `playback/mod.rs` rather than papered over.
+  `playback/mod.rs` rather than papered over. (Vorbis, added later, *is*
+  exactly trimmed: Ogg granule positions are sample counts.)
 - **`config.rs` is a hand-rolled single-key TOML writer** — adopt the `toml`
   crate when configuration grows beyond a couple of keys.
 

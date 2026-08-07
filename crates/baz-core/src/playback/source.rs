@@ -28,6 +28,16 @@
 //!   LAME tag carries no trim metadata anywhere in the bitstream; it decodes
 //!   with its delay and padding intact — there is nothing to honestly trim
 //!   by, so no heuristic trim is attempted.
+//! - **Vorbis in Ogg**: Symphonia's Ogg reader *is* gapless-capable, and it
+//!   has exact numbers to work from — every Ogg page carries an absolute
+//!   granule position, which for Vorbis is a PCM sample count. It compares
+//!   the first page's granule position against the duration of the packets on
+//!   that page; the shortfall is the start delay (the lapped block that
+//!   cannot be rendered yet). The last page's granule position gives the end
+//!   trim the same way. Both are applied to the packets before we see them,
+//!   and `n_frames` is the exact post-trim length. Verified against
+//!   synthesized ground truth in `tests/playback.rs`: an encode of an
+//!   N-frame WAV decodes to exactly N frames.
 //! - **ALAC in MP4**: nothing to trim. `n_frames` (the `mdhd` media
 //!   duration) is the exact stream length and the codec is lossless, so
 //!   decode is bit-exact and the cap below is a no-op.
@@ -40,10 +50,11 @@
 //!
 //! Because the reader/decoder pair already applies the trim when gapless is
 //! enabled, this module must **not** apply `codec_params.delay` again (MP3
-//! sets it even though its packets arrive pre-trimmed; re-applying it would
-//! double-trim). The only trim-related job left here is capping emission at
-//! `n_frames`, which is a no-op for well-formed files and stops overrun on
-//! streams that decode to more frames than their header declared.
+//! and Ogg both set it even though their packets arrive pre-trimmed;
+//! re-applying it would double-trim). The only trim-related job left here is
+//! capping emission at `n_frames`, which is a no-op for well-formed files and
+//! stops overrun on streams that decode to more frames than their header
+//! declared.
 //!
 //! # What MP4 does not declare
 //!
@@ -74,7 +85,8 @@
 //!
 //! # Seeking
 //!
-//! [`AudioSource::seek`] is sample-accurate and shares the trim timeline
+//! [`AudioSource::seek`] is sample-accurate for every format but Vorbis (see
+//! the note at the end of this section) and shares the trim timeline
 //! above. `FormatReader::seek` in [`SeekMode::Accurate`] positions the reader
 //! at a *packet boundary at or before* the requested frame and reports both
 //! numbers (`required_ts`, `actual_ts`); every enabled format agrees on
@@ -86,6 +98,21 @@
 //! way out. Those discarded frames still count toward the `n_frames`
 //! emission cap, which keeps the cap an absolute position in the stream
 //! rather than a per-seek allowance.
+//!
+//! **Vorbis is the exception, and it is the decoder's, not the reader's.**
+//! Symphonia's Vorbis decoder cannot render a block until it has the next
+//! one to overlap-add with, so the first packet after [`Decoder::reset`]
+//! returns an empty buffer — and that packet's audio is simply gone. The
+//! reader's `required_ts`/`actual_ts` are unaffected and the residue skip
+//! above still runs, so the net effect is a constant one-lapped-block
+//! offset: measured at **1024 frames (23.2 ms at 44.1 kHz)** of content
+//! delay, with the same 1024 frames missing from the remaining length, at
+//! every seek target tested. It is not corrected here because the frames are
+//! not recoverable at this point — the only fix is to seek earlier than
+//! asked and re-derive the skip from the packet timestamps, which changes
+//! the seek path all five other formats currently get right. Left as a
+//! measured, tested and backlogged limitation rather than a silent one; see
+//! `seek_into_vorbis_ogg_costs_one_lapped_block`.
 
 use std::fs::File;
 use std::io::Cursor;
@@ -385,7 +412,10 @@ impl AudioSource {
     }
 
     /// Seek so that the next block decoded starts at `position_ms` from the
-    /// beginning of the stream, sample-accurately (module docs).
+    /// beginning of the stream, sample-accurately — with one measured
+    /// exception, Vorbis, which resumes one lapped block (1024 frames,
+    /// 23.2 ms at 44.1 kHz) late because its decoder discards the first
+    /// packet after a reset. Both are covered in the module docs.
     ///
     /// Positions are in the same post-gapless-trim timeline the source
     /// emits, so `seek(0)` returns to the first emitted frame, not to the

@@ -24,6 +24,9 @@
 //! are *data*, reported as [`ScanEntry::Failed`] so the UI can show them,
 //! while the iterator keeps going. Only failure to start at all — a missing
 //! or non-directory root — is a [`ScanError`].
+//!
+//! A file carrying a codec baz cannot decode is neither: it is dropped, and
+//! [`Scan`] says why.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -37,7 +40,20 @@ pub mod inference;
 
 /// File extensions (ASCII case-insensitive, without the dot) the scanner
 /// treats as audio. This is *the* place to extend format support.
-pub const AUDIO_EXTENSIONS: &[&str] = &["flac", "mp3", "ogg", "opus", "m4a", "mp4", "wav"];
+///
+/// **The list is a promise.** Every extension here is one the playback engine
+/// can decode, because a shelf that lists a track and then skips it is worse
+/// than one that never listed it. `.opus` is absent for exactly that reason:
+/// Symphonia has no Opus decoder (see [`AudioFormat::is_decodable`]).
+/// `every_advertised_extension_decodes` in
+/// `crates/baz-core/tests/playback.rs` enforces the promise against real
+/// encoded fixtures, so adding an extension without a decoder fails the build.
+///
+/// Extension is a necessary but not sufficient filter — a container can hold
+/// a codec we cannot play (`.ogg` carries Vorbis, FLAC *or* Opus). The second
+/// half of the promise is kept in [`Scan`], which drops files whose actual
+/// codec is not decodable.
+pub const AUDIO_EXTENSIONS: &[&str] = &["flac", "mp3", "ogg", "m4a", "mp4", "wav"];
 
 /// The codec a track's samples are stored in.
 ///
@@ -67,6 +83,12 @@ pub enum AudioFormat {
     /// Ogg Vorbis — `.ogg`.
     Vorbis,
     /// Opus — `.opus`, or Opus in an Ogg container.
+    ///
+    /// Recognized but **not decodable** (see [`AudioFormat::is_decodable`]),
+    /// so no scan produces it today. The variant stays because it is
+    /// persisted on-disk data ([`AudioFormat::code`]) that older index rows
+    /// may still hold, and because it is what a future Opus decoder would
+    /// switch back on.
     Opus,
 }
 
@@ -81,6 +103,28 @@ impl AudioFormat {
     #[must_use]
     pub fn is_lossless(self) -> bool {
         matches!(self, Self::Flac | Self::Alac | Self::Wav)
+    }
+
+    /// Whether [`crate::playback`] can decode this codec — i.e. whether a
+    /// track in it may be put on the shelf at all.
+    ///
+    /// This is the codec-level half of the promise
+    /// [`AUDIO_EXTENSIONS`] makes at the extension level, and it exists
+    /// because the two are not the same question: an `.ogg` may hold Vorbis,
+    /// FLAC *or* Opus, and only the file's own bytes say which.
+    ///
+    /// **Opus is the one `false`.** Symphonia demuxes Ogg Opus correctly —
+    /// it parses `OpusHead`, honours the pre-skip and derives packet
+    /// durations from the TOC byte — but ships no Opus *decoder* in any
+    /// released version (0.5's `symphonia-codec-opus` is an empty
+    /// placeholder that was never published; 0.6.0 still has none). The
+    /// alternatives all cost either a bundled C library or an unproven
+    /// crate on the decode path, so baz declines to list what it cannot
+    /// play. `docs/BACKLOG.md` records the decision and what would reverse
+    /// it.
+    #[must_use]
+    pub fn is_decodable(self) -> bool {
+        !matches!(self, Self::Opus)
     }
 
     /// The stable lowercase code used to persist this format in the index
@@ -273,6 +317,24 @@ pub fn scan(root: impl AsRef<Path>) -> Result<Scan, ScanError> {
 }
 
 /// A running scan; see [`scan`].
+///
+/// # What a scan leaves out
+///
+/// Two filters, in this order, and both are about the promise
+/// [`AUDIO_EXTENSIONS`] makes:
+///
+/// 1. **Extension** — anything not in [`AUDIO_EXTENSIONS`] is not audio as
+///    far as baz is concerned, and never touched.
+/// 2. **Codec** — a file whose extension passed but whose *bytes* turn out to
+///    carry a codec the engine cannot decode
+///    ([`AudioFormat::is_decodable`]) is dropped rather than listed. Today
+///    that is exactly Ogg Opus arriving as `.ogg` — the one case where an
+///    accepted container can hold an unplayable codec. It is not a
+///    [`ScanEntry::Failed`]: nothing failed, and a listener with a folder of
+///    Opus files does not want a wall of red.
+///
+/// The codec filter costs no extra I/O — the codec comes from the same lofty
+/// read that produced the tags.
 #[derive(Debug)]
 pub struct Scan {
     root: PathBuf,
@@ -305,7 +367,12 @@ impl Iterator for Scan {
             if !has_audio_extension(&path) {
                 continue;
             }
-            return Some(read_track(&self.root, path));
+            // `None` is a playable-container-with-unplayable-codec (Ogg
+            // Opus in a `.ogg`): not an entry, not a failure. See the type
+            // docs.
+            if let Some(entry) = read_track(&self.root, path) {
+                return Some(entry);
+            }
         }
     }
 }
@@ -322,14 +389,52 @@ fn has_audio_extension(path: &Path) -> bool {
 }
 
 /// Read one audio file: tags via lofty, holes filled by path inference.
-fn read_track(root: &Path, path: PathBuf) -> ScanEntry {
-    match lofty::read_from_path(&path) {
-        Ok(file) => ScanEntry::Track(build_meta(root, path, &file)),
-        Err(err) => ScanEntry::Failed {
-            path,
-            reason: err.to_string(),
-        },
+///
+/// `None` means "this file is not for us": the container was one we scan but
+/// the codec inside is one the engine cannot decode
+/// ([`AudioFormat::is_decodable`]). The caller drops it silently — see the
+/// [`Scan`] docs for why that is not a [`ScanEntry::Failed`]. A file whose
+/// format lofty could not identify at all is *kept*: an honest "unknown
+/// format" row for something we can very likely still play beats dropping a
+/// track on a guess.
+fn read_track(root: &Path, path: PathBuf) -> Option<ScanEntry> {
+    match read_tagged_file(&path) {
+        Ok(file) => {
+            let meta = build_meta(root, path, &file);
+            match meta.format {
+                Some(format) if !format.is_decodable() => None,
+                _ => Some(ScanEntry::Track(meta)),
+            }
+        }
+        Err(err) => Some(ScanEntry::Failed { path, reason: err }),
     }
+}
+
+/// Read one file's tags and audio properties, identifying it **by content**.
+///
+/// Deliberately not `lofty::read_from_path`, which — as its own documentation
+/// says — picks a parser from the file *extension* alone. That is wrong twice
+/// over for a music library:
+///
+/// - `.ogg` is a container, not a codec. lofty maps the extension to Vorbis,
+///   so an Ogg Opus file named `.ogg` (which encoders do emit) came back as
+///   "Vorbis: File missing magic signature" — a scan failure blaming the file
+///   for baz's mis-guess, and, worse, one that hid the fact the file is Opus
+///   and therefore unplayable.
+/// - A mislabelled file — a FLAC named `.mp3`, which real libraries contain —
+///   failed to parse at all instead of simply being read.
+///
+/// `guess_file_type` inspects the first 36 bytes and overrides the extension
+/// when the content is conclusive; when it is not, the extension guess stands,
+/// so nothing that used to work stops working. The cost is 36 bytes of a read
+/// that was going to happen anyway.
+fn read_tagged_file(path: &Path) -> Result<TaggedFile, String> {
+    lofty::probe::Probe::open(path)
+        .map_err(|e| e.to_string())?
+        .guess_file_type()
+        .map_err(|e| e.to_string())?
+        .read()
+        .map_err(|e| e.to_string())
 }
 
 /// Merge tag data with folder-structure inference. Tags win field by field;
@@ -391,7 +496,9 @@ fn build_meta(root: &Path, path: PathBuf, file: &TaggedFile) -> TrackMeta {
     }
 }
 
-/// Which codec a file carries, from what lofty already parsed.
+/// Which codec a file carries, from what lofty already parsed — which is a
+/// fact about the file's *bytes*, because [`read_tagged_file`] identifies it
+/// by content rather than by extension.
 ///
 /// Most containers answer this outright. MP4 is the one ambiguous case:
 /// `.m4a`/`.mp4` may hold ALAC or AAC, and the format-agnostic
@@ -407,7 +514,9 @@ fn build_meta(root: &Path, path: PathBuf, file: &TaggedFile) -> TrackMeta {
 /// Anything else — AIFF, APE, `WavPack`, Musepack, Speex, a codec lofty grows
 /// later — is reported as `None`. The scanner only walks
 /// [`AUDIO_EXTENSIONS`], so those arrive only from a mislabeled file, and an
-/// honest "unknown" beats a guess.
+/// honest "unknown" beats a guess. `None` is also what keeps such a file *on*
+/// the shelf: only a positively-identified undecodable codec is dropped
+/// ([`AudioFormat::is_decodable`]).
 fn detect_format(file: &TaggedFile) -> Option<AudioFormat> {
     match file.file_type() {
         FileType::Flac => Some(AudioFormat::Flac),

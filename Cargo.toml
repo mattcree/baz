@@ -39,13 +39,27 @@ serde_json = "1"
 thiserror = "2"     # library error types (MIT OR Apache-2.0)
 walkdir = "2"       # directory traversal (Unlicense OR MIT)
 # Playback engine (ADR-0003/ADR-0004; architecture proven in Spike B).
-# Every sub-crate is MPL-2.0, same as symphonia itself. `mp3` enables
-# symphonia-bundle-mp3; `isomp4` + `aac` + `alac` cover the .m4a/.mp4 files
-# the library scanner already accepts (AUDIO_EXTENSIONS) — the shelf must
-# never advertise a track the engine cannot play. Per-format gapless status,
-# including what MP4 does and does not trim, is documented (and tested) in
+# Every sub-crate is MPL-2.0, same as symphonia itself. No feature here pulls
+# a C library or a system dependency: the whole decode path is pure Rust, and
+# staying that way is a build-system property worth keeping (see the Opus note
+# in docs/BACKLOG.md).
+#
+# The feature set is chosen to match `AUDIO_EXTENSIONS` exactly — the shelf
+# must never advertise a track the engine cannot play, and
+# `every_advertised_extension_decodes` in tests/playback.rs asserts the
+# correspondence rather than trusting this comment:
+#   wav + pcm         -> .wav
+#   flac              -> .flac (and FLAC-in-Ogg, via `ogg`)
+#   mp3               -> .mp3
+#   isomp4 + aac+alac -> .m4a / .mp4
+#   ogg + vorbis      -> .ogg
+# Symphonia 0.5 has no Opus decoder at all (its `symphonia-codec-opus` crate
+# is an empty placeholder and is unpublished; 0.6.0 still ships none), so
+# `.opus` is deliberately absent from AUDIO_EXTENSIONS instead of being
+# listed and then skipped. Per-format gapless status — including what MP4
+# does not trim and what a Vorbis seek costs — is documented, and tested, in
 # baz_core::playback.
-symphonia = { version = "0.5", default-features = false, features = ["wav", "pcm", "flac", "mp3", "isomp4", "aac", "alac"] }  # demux/decode (MPL-2.0 — allowlisted in deny.toml)
+symphonia = { version = "0.5", default-features = false, features = ["wav", "pcm", "flac", "mp3", "isomp4", "aac", "alac", "ogg", "vorbis"] }  # demux/decode (MPL-2.0 — allowlisted in deny.toml)
 tokio = { version = "1", features = ["rt"] }  # async runtime for the iced shell only (MIT)
 rtrb = "0.3"        # lock-free SPSC ring buffer, no hand-rolled unsafe here (MIT OR Apache-2.0)
 rubato = "0.16"     # windowed-sinc sample-rate conversion (MIT)

@@ -13,6 +13,9 @@
 //! (ISO-MP4) fixtures — ALAC, AAC-LC, HE-AAC and a video-first `.mp4` — are
 //! encoded the same way and skip the same way; the HE-AAC one additionally
 //! needs `libfdk_aac`, since ffmpeg's native AAC encoder cannot produce SBR.
+//! The Ogg fixtures — Vorbis via `libvorbis`, FLAC-in-Ogg, and one real Ogg
+//! Opus file for the probe test — follow the same pattern, with the Opus one
+//! additionally requiring `libopus`.
 //!
 //! No test here reads the developer's own music library: every fixture is
 //! generated from the synthesized reference at run time, so the suite is
@@ -25,9 +28,19 @@ use std::process::Command;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use baz_core::library::AUDIO_EXTENSIONS;
 use baz_core::playback::{
     AudioSource, BoundaryPolicy, CHANNELS, EngineConfig, OfflineSink, PlaybackError, run_playlist,
 };
+// Symphonia is a regular dependency of `baz-core`, so an integration test can
+// reach it. The Opus probe test needs it: the claim being asserted is about
+// what the *probe* decides the bytes are, which no baz-level API exposes (and
+// should not — nothing in baz needs to ask).
+use symphonia::core::codecs::CODEC_TYPE_OPUS;
+use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions};
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::probe::Hint;
 
 // ---------------------------------------------------------------------------
 // Signal synthesis and analysis (ground truth by construction)
@@ -177,6 +190,22 @@ struct Mp3Fixtures {
     encoder: &'static str,
 }
 
+/// Vorbis-in-Ogg encodings of the reference set, plus the one Ogg *Opus*
+/// file the probe test needs. Opus lives here because it is the same
+/// container: the point of the fixture is that the container is identified
+/// correctly and the codec inside it is named honestly.
+struct OggFixtures {
+    full: PathBuf,
+    part1: PathBuf,
+    part2: PathBuf,
+    /// FLAC in an Ogg container — the other codec `.ogg` can carry, and one
+    /// the shelf therefore has to play.
+    flac_in_ogg: PathBuf,
+    /// A real Ogg Opus file, present only if ffmpeg carries `libopus`.
+    opus: Option<PathBuf>,
+    encoder: &'static str,
+}
+
 /// One codec's worth of `.m4a` (ISO-MP4) encodings of the reference set.
 struct M4aCodecFixtures {
     full: PathBuf,
@@ -220,6 +249,8 @@ struct FixtureSet {
     flac: Option<FlacFixtures>,
     /// MP3 encodings (LAME via ffmpeg), if the encoder was found.
     mp3: Option<Mp3Fixtures>,
+    /// Ogg encodings (Vorbis, FLAC-in-Ogg, and Opus), if ffmpeg was found.
+    ogg: Option<OggFixtures>,
     /// ALAC and AAC in MP4 (`.m4a`), if ffmpeg with both encoders was found.
     m4a: Option<M4aFixtures>,
 }
@@ -317,6 +348,75 @@ fn encode_mp3(dir: &Path, full: &Path, part1: &Path, part2: &Path) -> Option<Mp3
         part1: mp3_part1,
         part2: mp3_part2,
         encoder: "ffmpeg libmp3lame 320 kbps CBR",
+    })
+}
+
+/// Encode the i16 reference WAVs to Vorbis in Ogg with ffmpeg's `libvorbis`
+/// (the reference Vorbis encoder), plus a FLAC-in-Ogg copy of the reference
+/// and — if ffmpeg carries `libopus` — one real Ogg Opus file.
+///
+/// `-q:a 6` is a high-quality VBR setting (~192 kbps on real music). Unlike
+/// the MP3 and AAC fixtures, the setting barely matters here: **measured**,
+/// `-q:a 10` (libvorbis's maximum) moves the whole-file accuracy from 1.30e-2
+/// to 1.23e-2, half a decibel, because what bounds it is libvorbis's
+/// noise-normalisation on a *steady pure tone* — a pathological input for it,
+/// the same way ffmpeg's native AAC encoder is (cf. [`AAC_STEADY_TOL`]) and
+/// unlike LAME, which is three decades better on this signal. So [`VORBIS_TOL`]
+/// is a statement about a 440 Hz sine, not about Vorbis on music.
+///
+/// Nothing about the *gapless* claim depends on any of that: the trim comes
+/// from Ogg granule positions, which are exact at every bitrate, and the
+/// splice assertion is against the file's own steady-state error rather than
+/// an absolute number.
+fn encode_ogg(dir: &Path, full: &Path, part1: &Path, part2: &Path) -> Option<OggFixtures> {
+    if !have_ffmpeg_encoder("libvorbis") {
+        return None;
+    }
+    let ogg_full = dir.join("ref_10s.ogg");
+    let ogg_part1 = dir.join("part1.ogg");
+    let ogg_part2 = dir.join("part2.ogg");
+    for (wav, ogg) in [(full, &ogg_full), (part1, &ogg_part1), (part2, &ogg_part2)] {
+        run_encoder(
+            Command::new("ffmpeg")
+                .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                .arg(wav)
+                .args(["-c:a", "libvorbis", "-q:a", "6"])
+                .arg(ogg),
+        );
+    }
+
+    // FLAC in an Ogg container: `.ogg` is not synonymous with Vorbis, and the
+    // shelf lists `.ogg` by extension.
+    let flac_in_ogg = dir.join("flac_in_ogg.ogg");
+    run_encoder(
+        Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+            .arg(full)
+            .args(["-c:a", "flac", "-f", "ogg"])
+            .arg(&flac_in_ogg),
+    );
+
+    // Real Ogg Opus bytes for the probe test. Not playable — that is the
+    // point of the test that consumes it.
+    let opus = have_ffmpeg_encoder("libopus").then(|| {
+        let out = dir.join("ref_10s.opus");
+        run_encoder(
+            Command::new("ffmpeg")
+                .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                .arg(full)
+                .args(["-c:a", "libopus", "-b:a", "128k"])
+                .arg(&out),
+        );
+        out
+    });
+
+    Some(OggFixtures {
+        full: ogg_full,
+        part1: ogg_part1,
+        part2: ogg_part2,
+        flac_in_ogg,
+        opus,
+        encoder: "ffmpeg libvorbis -q:a 6",
     })
 }
 
@@ -469,6 +569,7 @@ fn fixtures() -> &'static FixtureSet {
 
         let flac = encode_flac(&dir, &pcm_ref, &pcm_part1, &pcm_part2);
         let mp3 = encode_mp3(&dir, &pcm_ref, &pcm_part1, &pcm_part2);
+        let ogg = encode_ogg(&dir, &pcm_ref, &pcm_part1, &pcm_part2);
         let m4a = encode_m4a(&dir, &pcm_ref, &pcm_part1, &pcm_part2);
 
         FixtureSet {
@@ -482,6 +583,7 @@ fn fixtures() -> &'static FixtureSet {
             quad,
             flac,
             mp3,
+            ogg,
             m4a,
         }
     })
@@ -815,6 +917,487 @@ fn gapless_mp3_no_gap_bounded_boundary() {
         max_delta <= delta_bound,
         "click at the splice: adjacent delta {max_delta} exceeds bound {delta_bound}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Ogg — Vorbis, FLAC-in-Ogg, and the Opus that is deliberately not playable
+// ---------------------------------------------------------------------------
+
+/// The Ogg fixture set, or `None` with a skip notice where ffmpeg is absent
+/// (the toolbox) — the same contract the MP3 and MP4 tests keep.
+fn ogg_or_skip() -> Option<&'static OggFixtures> {
+    let f = fixtures();
+    if f.ogg.is_none() {
+        eprintln!("SKIP: ffmpeg with libvorbis is not available; Ogg fixtures not generated");
+    }
+    f.ogg.as_ref()
+}
+
+/// Accuracy bound for the Vorbis fixture, as max |error| vs the ideal sine
+/// (amplitude 0.8).
+///
+/// Measured 1.23e-2 (−36.3 dB re. amplitude) whole-file with ffmpeg 8.1's
+/// `libvorbis -q:a 6`; pinned at ~3x so an encoder-version wobble does not go
+/// red while a decode or trim regression does. That is far looser than
+/// [`MP3_STEADY_TOL`] and looser even than [`AAC_STEADY_TOL`], and it is a
+/// property of the *fixture*, not of Vorbis: a steady 440 Hz sine is a
+/// pathological input for libvorbis's noise normalisation, and raising the
+/// quality to its maximum improves it by half a decibel (see [`encode_ogg`]).
+/// A **fixture** bound, not a general Vorbis quality claim.
+///
+/// One bound serves the steady state and the splice alike, deliberately: for
+/// Vorbis they are the same measurement. The sharp claim — that the splice
+/// is no worse than the steady state — is asserted as a *ratio* in
+/// [`gapless_vorbis_ogg_no_gap_and_no_edge_artifact`], which needs no
+/// tolerance at all and is what makes this loose absolute bound acceptable.
+/// MP3, whose trim is equally exact but whose codec state is not, fails that
+/// ratio test by 75x ([`MP3_EDGE_TOL`] vs [`MP3_SETTLED_TOL`]).
+const VORBIS_TOL: f32 = 3.5e-2;
+
+/// How much larger the error at a Vorbis splice may be than the same file's
+/// steady-state error before the "no edge artifact" claim is considered
+/// broken.
+///
+/// **Measured 1.07** at `-q:a 6` and **0.90** at `-q:a 10` — i.e. the joint is
+/// indistinguishable from the rest of the file, and on the higher setting is
+/// marginally cleaner. 2x leaves room for encoder noise while failing
+/// unmissably on anything resembling MP3's behaviour, where the same ratio is
+/// **75**. Being a ratio, it survives encoder and quality changes that would
+/// invalidate any absolute number.
+const VORBIS_EDGE_RATIO: f32 = 2.0;
+
+/// Frames of a Vorbis long block ÷ 2 — the audio Symphonia's Vorbis decoder
+/// drops after a mid-stream reset, because it cannot overlap-add until it has
+/// a second packet.
+///
+/// Not a tolerance and not a choice of ours: it is the *measured* consequence
+/// of `VorbisDecoder::decode` returning an empty buffer for the first packet
+/// after `reset()`. 1024 is libvorbis's default 2048-sample long block ÷ 2;
+/// a stream encoded with different block sizes would lose a different number.
+/// That a seek costs one lapped block is not encoder-specific.
+const VORBIS_SEEK_LOST_FRAMES: usize = 1024;
+
+/// Half-width of the splice region examined for an edge artifact, in frames
+/// (2.9 ms at 44.1 kHz). Same window [`gapless_mp3_no_gap_bounded_boundary`]
+/// uses, so the two formats' numbers are directly comparable — which is the
+/// whole point of quoting them side by side.
+const VORBIS_EDGE_FRAMES: usize = 128;
+
+/// Guard band excluded from the "steady state" measurement either side of the
+/// splice, in frames (26 ms at 44.1 kHz). Generous on purpose: the steady-state
+/// figure has to be a clean baseline for the splice figure to be compared
+/// against.
+const VORBIS_GUARD_FRAMES: usize = 1152;
+
+/// Length exactness: Ogg pages carry an absolute granule position, so
+/// Symphonia's Ogg reader knows the stream's start delay and end trim to the
+/// sample and applies both. Decoding an encode of an N-frame WAV must yield
+/// exactly N frames — for the whole reference and for each half of the split,
+/// whose lengths are deliberately not multiples of anything.
+///
+/// Also drives the hint-less `open_bytes` path (the fuzz target's entry
+/// point), proving Ogg probes by content and not merely by file extension.
+#[test]
+fn vorbis_ogg_decoded_length_is_exact() {
+    let Some(ogg) = ogg_or_skip() else { return };
+    let full = AudioSource::decode_all(&ogg.full).expect("decode ogg reference");
+    assert_eq!(full.sample_rate, RATE);
+    assert_eq!(
+        full.frames(),
+        TOTAL_FRAMES,
+        "Vorbis in Ogg must decode to exactly the source frame count \
+         (granule positions give an exact start delay and end trim)"
+    );
+    let p1 = AudioSource::decode_all(&ogg.part1).expect("decode ogg part1");
+    let p2 = AudioSource::decode_all(&ogg.part2).expect("decode ogg part2");
+    assert_eq!(p1.frames(), SPLIT_FRAME, "part1 trimmed length");
+    assert_eq!(
+        p2.frames(),
+        TOTAL_FRAMES - SPLIT_FRAME,
+        "part2 trimmed length"
+    );
+
+    // Declared length must agree with what is actually emitted, or seek bars
+    // and track times lie.
+    let src = AudioSource::open(&ogg.full).expect("open ogg reference");
+    assert_eq!(
+        src.total_frames(),
+        Some(TOTAL_FRAMES as u64),
+        "declared length must be the emitted length"
+    );
+
+    // Same file through the hint-less in-memory path the fuzz target drives.
+    let bytes = std::fs::read(&ogg.full).expect("read ogg bytes");
+    let mut src = AudioSource::open_bytes(bytes).expect("ogg must probe with no extension hint");
+    assert_eq!(src.sample_rate(), RATE);
+    let mut frames = 0usize;
+    while let Some(block) = src.next_block().expect("decode block") {
+        frames += block.len() / CHANNELS;
+    }
+    assert_eq!(
+        frames, TOTAL_FRAMES,
+        "open_bytes path must trim identically"
+    );
+    println!(
+        "[vorbis-length] encoder={}: {}/{}/{} frames from the reference and its two \
+         halves, exact to the sample",
+        ogg.encoder,
+        full.frames(),
+        p1.frames(),
+        p2.frames()
+    );
+}
+
+/// Content sanity: the decoded Vorbis is the source sine within lossy
+/// tolerance across the whole file — including the first and last frames,
+/// which for a correctly trimmed Ogg stream are ordinary audio rather than
+/// codec edges. (The MP3 equivalent has to exclude one MPEG frame at each
+/// end; Vorbis does not need the exemption, so it is not given one.)
+#[test]
+fn vorbis_ogg_content_matches_source_sine() {
+    let Some(ogg) = ogg_or_skip() else { return };
+    let decoded = AudioSource::decode_all(&ogg.full).expect("decode ogg reference");
+    let ch0 = channel(&decoded.samples, 0);
+    let err = max_error_vs_sine(&ch0, RATE, 0..TOTAL_FRAMES);
+    let err_db = 20.0 * f64::from(err / 0.8_f32).log10();
+    println!(
+        "[vorbis-content] whole-file max |error| vs ideal sine: {err:.2e} \
+         ({err_db:.1} dB re. amplitude); bound {VORBIS_TOL:.2e}"
+    );
+    assert!(
+        err <= VORBIS_TOL,
+        "decoded Vorbis deviates from the source sine by {err} (bound {VORBIS_TOL})"
+    );
+}
+
+/// FLAC in an Ogg container plays, losslessly. `.ogg` is a container, not a
+/// codec, and the shelf lists it by extension — so the FLAC case has to work
+/// too, and it must still be bit-exact against the WAV it was encoded from.
+#[test]
+fn flac_in_ogg_is_lossless() {
+    let Some(ogg) = ogg_or_skip() else { return };
+    let f = fixtures();
+    let decoded = AudioSource::decode_all(&ogg.flac_in_ogg).expect("decode FLAC-in-Ogg");
+    let reference = AudioSource::decode_all(&f.ref_i16).expect("decode i16 reference");
+    assert_eq!(decoded.sample_rate, RATE);
+    assert_samples_eq(
+        &decoded.samples,
+        &reference.samples,
+        "FLAC-in-Ogg vs i16 WAV reference",
+    );
+}
+
+/// Gapless boundary (Vorbis): two independently encoded `.ogg` files of a
+/// split sine, played through the engine as a two-track queue.
+///
+/// "No gap" is exact — output length equals the source length to the sample —
+/// and, unlike MP3, so is the *signal* at the joint: the splice error is
+/// within the same [`VORBIS_TOL`] the rest of the file sits at, with no edge
+/// region needing its own looser bound. That is the strong claim this test
+/// exists to defend, so it is asserted at three places at once: length,
+/// error against the one continuous sine both halves were cut from, and the
+/// adjacent-sample step across the joint against the analytic
+/// continuous-sine bound.
+///
+/// The splice window ([`VORBIS_EDGE_FRAMES`]) is the same one
+/// [`gapless_mp3_no_gap_bounded_boundary`] measures in, so the printed
+/// numbers can be read against each other directly.
+#[test]
+fn gapless_vorbis_ogg_no_gap_and_no_edge_artifact() {
+    let Some(ogg) = ogg_or_skip() else { return };
+    let mut sink = OfflineSink::with_capacity(TOTAL_FRAMES * CHANNELS);
+    let report = run_playlist(
+        &[ogg.part1.clone(), ogg.part2.clone()],
+        test_config(),
+        &mut sink,
+    )
+    .expect("run playlist");
+    assert_eq!(report.stream_rate, RATE);
+    assert_eq!(report.track_start_frames, vec![0, SPLIT_FRAME]);
+    assert_eq!(
+        sink.samples().len(),
+        TOTAL_FRAMES * CHANNELS,
+        "engine output must be exactly the source length: any untrimmed \
+         lapped block or padding would show up here"
+    );
+
+    let ch0 = channel(sink.samples(), 0);
+    // Error right at the joint, and error far from it, measured the same way
+    // so the two numbers are comparable.
+    let err_edge = max_error_vs_sine(
+        &ch0,
+        RATE,
+        SPLIT_FRAME - VORBIS_EDGE_FRAMES..SPLIT_FRAME + VORBIS_EDGE_FRAMES,
+    );
+    let err_steady = max_error_vs_sine(&ch0, RATE, 0..SPLIT_FRAME - VORBIS_GUARD_FRAMES).max(
+        max_error_vs_sine(&ch0, RATE, SPLIT_FRAME + VORBIS_GUARD_FRAMES..TOTAL_FRAMES),
+    );
+    let max_delta = assert_boundary_continuous(sink.samples(), SPLIT_FRAME, "gapless vorbis");
+    let edge_db = 20.0 * f64::from(err_edge / 0.8_f32).log10();
+    let steady_db = 20.0 * f64::from(err_steady / 0.8_f32).log10();
+    println!(
+        "[gapless-vorbis] encoder={}: output={} samples (exact, no gap); splice \
+         (±{VORBIS_EDGE_FRAMES} frames) max |error| {err_edge:.2e} ({edge_db:.1} dB re. amplitude) \
+         vs steady state {err_steady:.2e} ({steady_db:.1} dB) — same bound {VORBIS_TOL:.2e} \
+         serves both; max adjacent delta {max_delta:.6} (continuous-sine bound {:.6})",
+        ogg.encoder,
+        sink.samples().len(),
+        sine_adjacent_bound(RATE)
+    );
+    assert!(
+        err_steady <= VORBIS_TOL,
+        "steady-state error {err_steady} exceeds bound {VORBIS_TOL}"
+    );
+    assert!(
+        err_edge <= VORBIS_TOL,
+        "splice error {err_edge} exceeds bound {VORBIS_TOL}"
+    );
+    // The claim, stated without a tolerance: the joint is not a special place.
+    assert!(
+        err_edge <= VORBIS_EDGE_RATIO * err_steady,
+        "the splice is {:.1}x the file's own steady-state error ({err_edge} vs \
+         {err_steady}, limit {VORBIS_EDGE_RATIO}x): Vorbis has grown the MDCT edge \
+         artifact it did not have",
+        err_edge / err_steady
+    );
+}
+
+/// Seeking into a Vorbis stream costs exactly one lapped block, and the cost
+/// is stated rather than hidden.
+///
+/// Symphonia's Vorbis decoder returns an empty buffer for the first packet
+/// after a reset — it has nothing to overlap-add with — so that packet's
+/// audio is lost and playback resumes [`VORBIS_SEEK_LOST_FRAMES`] frames
+/// late. This test pins both halves of the statement: the *length* shortfall
+/// against the un-seeked decode, and the *content* offset — the audio that
+/// comes back is the source at `target + 1024`, matching there and not at
+/// `target`, which is what makes the shortfall a leading offset rather than a
+/// stray tail.
+///
+/// FLAC is measured alongside as the control: the same seek on the same
+/// timeline is exact, so this is a Vorbis-decoder property and not something
+/// [`AudioSource::seek`] does to everyone.
+#[test]
+fn seek_into_vorbis_ogg_costs_one_lapped_block() {
+    /// Seek target. 3 s is inside the stream and not on any packet boundary.
+    const TARGET_MS: usize = 3000;
+    let Some(ogg) = ogg_or_skip() else { return };
+    let target = TARGET_MS * RATE as usize / 1000;
+
+    let tail = decode_from(&ogg.full, u64::try_from(TARGET_MS).expect("fits"));
+    let frames = tail.len() / CHANNELS;
+    assert_eq!(
+        frames,
+        TOTAL_FRAMES - target - VORBIS_SEEK_LOST_FRAMES,
+        "a Vorbis seek must be short by exactly one lapped block \
+         ({VORBIS_SEEK_LOST_FRAMES} frames) — no more, and no less"
+    );
+
+    // Content: matches the source at target + 1024, and does not match at
+    // target. The mismatch check is what makes the first assertion mean
+    // "shifted", not merely "shorter".
+    let ch0 = channel(&tail, 0);
+    let n = 4000.min(ch0.len());
+    let err_at_shift = (0..n)
+        .map(|i| (ch0[i] - ideal_sample_at(RATE, target + VORBIS_SEEK_LOST_FRAMES + i, 0.0)).abs())
+        .fold(0.0, f32::max);
+    let err_at_target = (0..n)
+        .map(|i| (ch0[i] - ideal_sample_at(RATE, target + i, 0.0)).abs())
+        .fold(0.0, f32::max);
+    println!(
+        "[vorbis-seek] seek({TARGET_MS} ms): {frames} frames returned, \
+         {VORBIS_SEEK_LOST_FRAMES} short ({:.1} ms at {RATE} Hz); max |error| vs the source \
+         at target+{VORBIS_SEEK_LOST_FRAMES} = {err_at_shift:.2e} (bound {VORBIS_TOL:.2e}), \
+         vs the source at target = {err_at_target:.2e}",
+        frames_ms(VORBIS_SEEK_LOST_FRAMES, RATE)
+    );
+    assert!(
+        err_at_shift <= VORBIS_TOL,
+        "seeked Vorbis audio does not line up at target+{VORBIS_SEEK_LOST_FRAMES}: \
+         error {err_at_shift} exceeds {VORBIS_TOL}"
+    );
+    assert!(
+        err_at_target > 10.0 * VORBIS_TOL,
+        "seeked Vorbis audio unexpectedly lines up at the target too \
+         ({err_at_target}) — the measurement below cannot distinguish an offset \
+         from a match, so the claim is no longer pinned"
+    );
+
+    // Control: FLAC on the same timeline loses nothing.
+    let f = fixtures();
+    if let Some(flac) = &f.flac {
+        let flac_tail = decode_from(&flac.full, u64::try_from(TARGET_MS).expect("fits"));
+        assert_eq!(
+            flac_tail.len() / CHANNELS,
+            TOTAL_FRAMES - target,
+            "control: a FLAC seek on the same timeline must be exact"
+        );
+    }
+}
+
+/// **Ogg Opus bytes must be identified as Ogg Opus.**
+///
+/// The regression this guards is real and was shipped: before the `ogg`
+/// demuxer was enabled, Symphonia's probe had no reader that claimed the
+/// bytes, the AAC/ADTS prober took them instead, and a `.opus` file failed
+/// with `unsupported feature: adts: only 1 aac frame per adts packet is
+/// supported` — a wrong answer about what the file *is*, not merely about
+/// what we can play. Probing must be content-correct even for formats baz
+/// has no decoder for, because the error a user sees is the difference
+/// between "baz cannot play Opus" and "this file is corrupt".
+///
+/// So this asserts the container-level truth directly — the probe finds a
+/// track whose codec is `CODEC_TYPE_OPUS`, with no extension hint at all —
+/// and then that [`AudioSource`] turns that into an honest "unsupported
+/// codec" rather than an ADTS complaint.
+#[test]
+fn opus_bytes_probe_as_ogg_opus_and_never_as_aac() {
+    let Some(ogg) = ogg_or_skip() else { return };
+    let Some(opus) = &ogg.opus else {
+        eprintln!("SKIP: ffmpeg has no libopus; Ogg Opus fixture not generated");
+        return;
+    };
+    let bytes = std::fs::read(opus).expect("read opus bytes");
+
+    // Container level: no hint, so this is purely a claim about the bytes.
+    let mss = MediaSourceStream::new(
+        Box::new(std::io::Cursor::new(bytes.clone())),
+        MediaSourceStreamOptions::default(),
+    );
+    let probed = symphonia::default::get_probe()
+        .format(
+            &Hint::new(),
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .expect("Ogg Opus bytes must probe as a known container with no extension hint");
+    let track = probed
+        .format
+        .default_track()
+        .expect("the Ogg stream must expose a track");
+    assert_eq!(
+        track.codec_params.codec, CODEC_TYPE_OPUS,
+        "Ogg Opus bytes must be identified as Opus, not as {:?} — a probe that \
+         hands them to the AAC/ADTS reader is the bug this test exists for",
+        track.codec_params.codec
+    );
+    // The Ogg mapper reads OpusHead, so the pre-skip is known even though we
+    // cannot decode: whoever adds a decoder inherits working gapless.
+    println!(
+        "[opus-probe] identified as CODEC_TYPE_OPUS; pre-skip (delay) = {:?} frames, \
+         rate = {:?} Hz",
+        track.codec_params.delay, track.codec_params.sample_rate
+    );
+
+    // Source level: the failure a caller sees names the codec, not ADTS.
+    for (what, result) in [
+        ("open_bytes", AudioSource::open_bytes(bytes)),
+        ("open", AudioSource::open(opus)),
+    ] {
+        match result {
+            Err(PlaybackError::Decode(err)) => {
+                let msg = err.to_string().to_ascii_lowercase();
+                assert!(
+                    !msg.contains("adts") && !msg.contains("aac"),
+                    "{what}: Opus bytes were claimed by the AAC prober again: {msg}"
+                );
+                assert!(
+                    msg.contains("codec"),
+                    "{what}: the failure must name the missing codec, got: {msg}"
+                );
+            }
+            Err(other) => panic!("{what}: expected a decode error for Opus, got {other}"),
+            Ok(_) => panic!(
+                "{what}: Opus now decodes. That is good news, and it means \
+                 AUDIO_EXTENSIONS should regain \"opus\", AudioFormat::is_decodable \
+                 should stop excluding it, and docs/BACKLOG.md's Opus entry should be \
+                 closed — see the reasoning recorded there"
+            ),
+        }
+    }
+}
+
+/// **The invariant: every extension the shelf advertises really decodes.**
+///
+/// `AUDIO_EXTENSIONS` is a promise to the listener — a track that appears on
+/// the shelf plays when clicked. The `.m4a` bug and then the `.ogg`/`.opus`
+/// bug were both the same failure of that promise: an extension was added to
+/// the scanner and no decoder was ever wired up behind it. Nothing in the
+/// type system connects the two lists, so this test connects them, against
+/// real encoded audio rather than a hard-coded table.
+///
+/// Every entry in `AUDIO_EXTENSIONS` must have a fixture here (an unmapped
+/// extension fails the test rather than being quietly skipped, which is how a
+/// future format gets caught), and every fixture must open, report a sane
+/// rate and length, and decode to audio.
+#[test]
+fn every_advertised_extension_decodes() {
+    let f = fixtures();
+    let Some(ogg) = &f.ogg else {
+        eprintln!("SKIP: ffmpeg is not available; per-extension fixtures not generated");
+        return;
+    };
+    let (Some(flac), Some(mp3), Some(m4a)) = (&f.flac, &f.mp3, &f.m4a) else {
+        eprintln!("SKIP: ffmpeg lacks one of libmp3lame/flac/alac/aac; fixtures not generated");
+        return;
+    };
+
+    for ext in AUDIO_EXTENSIONS {
+        // One representative file per advertised extension. Where an
+        // extension covers several codecs, the entry here is the one that
+        // was *not* already covered by a dedicated test above, so this stays
+        // a breadth check rather than a duplicate of the depth ones.
+        let fixture: &Path = match *ext {
+            "wav" => &f.ref_f32,
+            "flac" => &flac.full,
+            "mp3" => &mp3.full,
+            "ogg" => &ogg.full,
+            "m4a" => &m4a.alac.full,
+            "mp4" => &m4a.video_first,
+            other => panic!(
+                "AUDIO_EXTENSIONS advertises `.{other}` and this test has no fixture for it. \
+                 Add one — an extension with no proven decoder is exactly the bug this \
+                 test exists to prevent."
+            ),
+        };
+        assert_eq!(
+            fixture.extension().and_then(|e| e.to_str()),
+            Some(*ext),
+            "fixture for `.{ext}` must actually be a .{ext} file"
+        );
+
+        let mut src = AudioSource::open(fixture)
+            .unwrap_or_else(|e| panic!("`.{ext}` is advertised but will not open: {e}"));
+        assert_eq!(
+            src.sample_rate(),
+            RATE,
+            "`.{ext}`: decoder must report the source rate"
+        );
+        assert!(
+            src.total_frames().is_some_and(|n| n > 0),
+            "`.{ext}`: no declared length, so the shelf could not show a duration"
+        );
+        let mut frames = 0usize;
+        let mut peak = 0.0_f32;
+        while let Some(block) = src
+            .next_block()
+            .unwrap_or_else(|e| panic!("`.{ext}` is advertised but will not decode: {e}"))
+        {
+            frames += block.len() / CHANNELS;
+            peak = block.iter().fold(peak, |m, &s| m.max(s.abs()));
+        }
+        assert!(
+            frames > RATE as usize,
+            "`.{ext}`: decoded only {frames} frames — that is not a playable track"
+        );
+        assert!(
+            peak > 0.5,
+            "`.{ext}`: decoded {frames} frames of near-silence (peak {peak}); \
+             the file opened but the audio did not survive"
+        );
+        println!("[extension-invariant] .{ext}: {frames} frames, peak {peak:.3} — plays");
+    }
 }
 
 // ---------------------------------------------------------------------------
