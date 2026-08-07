@@ -29,6 +29,20 @@ Rust itself is **not** installed in the container — it comes from your rustup 
 - **Dev container**: `.devcontainer/` carries the same environment as a Containerfile for VS Code / Claude Code / cloud agents. Keep its package list in sync with `scripts/toolbox-setup.sh` (single source of truth: the script).
 - **Debian/Ubuntu contributors**: equivalents are `libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev libssl-dev librsvg2-dev libasound2-dev` — to be verified when CI lands (CI runs on Ubuntu runners and is the reference for that list).
 
+## Running baz with audio output
+
+Device playback is behind the non-default `device-output` feature (building
+cpal needs `alsa-lib-devel`, which the toolbox provides):
+
+```sh
+toolbox run -c baz-dev cargo run --release -p baz --features device-output [-- MUSIC_DIR]
+```
+
+A plain host `cargo run -p baz` builds everywhere and runs the full shelf,
+but prints `built without audio output — see docs/DEVELOPMENT.md` and hides
+the playback UI. With the feature but no usable output device, the app still
+runs and the bottom bar reports "no audio device".
+
 ## Running the Phase 1 spikes
 
 All spikes are throwaway (see `NEXT-STEPS.md`) but runnable:
