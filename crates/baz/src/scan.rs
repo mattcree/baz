@@ -187,6 +187,10 @@ mod tests {
             disc: None,
             year: None,
             duration: None,
+            format: Some(baz_core::library::AudioFormat::Flac),
+            bit_depth: Some(16),
+            sample_rate: Some(44_100),
+            bitrate: Some(900),
         })
     }
 

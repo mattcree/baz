@@ -91,6 +91,10 @@ fn synthetic_tracks() -> Vec<TrackMeta> {
                     disc: Some(1),
                     year: Some(1960 + (artist_n + album_n) % 65),
                     duration: Some(Duration::from_secs(180 + u64::from(track_n))),
+                    format: Some(baz_core::library::AudioFormat::Flac),
+                    bit_depth: Some(16),
+                    sample_rate: Some(44_100),
+                    bitrate: Some(900),
                 });
             }
         }

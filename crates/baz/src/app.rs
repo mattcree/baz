@@ -23,7 +23,7 @@
 //!   `player.rs` for the honesty rule. The persistent bottom bar and the
 //!   side panel's Play button render that state.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -107,6 +107,8 @@ enum Message {
     /// Queue the album's tracks and play (side-panel Play, tile
     /// double-click).
     PlayAlbum(u64),
+    /// Side panel: a different format of the selected album was picked.
+    EditionSelected(u64, vm::EditionKey),
     /// Bottom bar: play/pause toggle.
     PlayPause,
     /// Bottom bar: skip to the next queued track.
@@ -297,9 +299,9 @@ impl App {
         }
     }
 
-    /// Queue an album (tracks in the view model's disc/track order) and
-    /// play it. State stays untouched until events confirm — only the
-    /// request-side notes are recorded (see `player.rs`).
+    /// Queue an album (the selected edition's tracks, in the view model's
+    /// disc/track order) and play it. State stays untouched until events
+    /// confirm — only the request-side notes are recorded (see `player.rs`).
     fn play_album(&mut self, id: u64) {
         let Screen::Shelf(state) = &self.screen else {
             return;
@@ -307,7 +309,7 @@ impl App {
         let Some(album) = state.albums.iter().find(|album| album.id == id) else {
             return;
         };
-        let paths = vm::album_queue(album);
+        let paths = vm::album_queue(album, state.edition_choice.get(&id).copied());
         if paths.is_empty() {
             return;
         }
@@ -430,6 +432,16 @@ struct Shelf {
     visible: Vec<usize>,
     query: String,
     selected: Option<u64>,
+    /// Which format of an album the user picked, for albums where they
+    /// picked one. Absent = the ranked-best edition (see
+    /// [`vm::selected_edition`]).
+    ///
+    /// Session-scoped by choice: the persistent config is a hand-rolled
+    /// single-key TOML file (see `config.rs`), so persisting a per-album map
+    /// would mean adopting a real TOML parser for a preference whose proper
+    /// home is a column in the library database anyway. Deferred in
+    /// ADR-0007 rather than bolted on here.
+    edition_choice: HashMap<u64, vm::EditionKey>,
     /// Decoded-thumbnail LRU; capacity/budget documented in [`art`].
     thumbs: LruCache<u64, iced_image::Handle>,
     /// Albums with a decode in flight (dedupes requests while scrolling).
@@ -482,6 +494,7 @@ impl Shelf {
             albums,
             query: String::new(),
             selected: None,
+            edition_choice: HashMap::new(),
             thumbs: LruCache::new(
                 NonZeroUsize::new(art::THUMB_CACHE_ENTRIES).unwrap_or(NonZeroUsize::MIN),
             ),
@@ -581,6 +594,12 @@ impl Shelf {
                     self.selected = Some(id);
                 }
                 self.request_visible_thumbs()
+            }
+            Message::EditionSelected(id, key) => {
+                // Pure view state: the track list and the *next* queue follow
+                // it, but nothing already playing is disturbed.
+                self.edition_choice.insert(id, key);
+                Task::none()
             }
             Message::ThumbLoaded(id, handle) => {
                 self.pending.remove(&id);
@@ -945,9 +964,11 @@ impl Shelf {
     }
 
     /// The album side panel: large art, a title/artist/meta header, the
-    /// primary Play action, and the numbered track list (durations in
-    /// monospace, right-hugged). In a build without audio output the button
-    /// is hidden; with an unusable or closed engine it renders disabled.
+    /// edition selector when the album is owned in more than one format, the
+    /// primary Play action, and the selected edition's numbered track list
+    /// (durations in monospace, right-hugged). In a build without audio
+    /// output the button is hidden; with an unusable or closed engine it
+    /// renders disabled.
     fn side_panel<'a>(
         &'a self,
         album: &'a vm::AlbumVm,
@@ -962,9 +983,18 @@ impl Shelf {
             None => gradient_block(album.id, art_edge),
         };
         let sleeve = container(art).style(move |_theme| theme::sleeve(playing));
-        let rows: Vec<Element<'_, Message>> = album.tracks.iter().map(track_row).collect();
+        let chosen = self.edition_choice.get(&album.id).copied();
+        let edition = vm::selected_edition(album, chosen);
+        let rows: Vec<Element<'_, Message>> = edition
+            .map(|edition| edition.tracks.iter().map(track_row).collect())
+            .unwrap_or_default();
 
-        let mut content = column![sleeve, album_header(album)].spacing(theme::GAP_MD);
+        let mut content = column![sleeve, album_header(album, edition)].spacing(theme::GAP_MD);
+        // Only a genuinely multi-format album gets a control; a single-format
+        // album must look exactly as it always did.
+        if album.editions.len() > 1 {
+            content = content.push(edition_selector(album, edition));
+        }
         if *player.availability() != Availability::NotBuilt {
             content = content.push(
                 button(
@@ -1012,24 +1042,35 @@ impl Shelf {
 }
 
 /// The side panel's header: album title over artist over a quiet
-/// year · tracks · total-time meta line (the total is the sum of the known
-/// track durations).
-fn album_header(album: &vm::AlbumVm) -> Element<'_, Message> {
+/// year · tracks · total-time meta line, and — when the scan read one — the
+/// selected edition's encoding fingerprint under it.
+///
+/// The counts describe `edition`, not the album: with two rips on disk, "24
+/// tracks" would be a number nothing on screen adds up to.
+fn album_header<'a>(
+    album: &'a vm::AlbumVm,
+    edition: Option<&'a vm::EditionVm>,
+) -> Element<'a, Message> {
     let title = album.title.as_deref().unwrap_or("Unknown Album");
     let artist = album.artist.as_deref().unwrap_or("Unknown Artist");
+    let tracks = edition.map_or(0, |edition| edition.tracks.len());
     let mut meta: Vec<String> = Vec::new();
     if let Some(year) = album.year {
         meta.push(year.to_string());
     }
-    meta.push(match album.tracks.len() {
+    meta.push(match tracks {
         1 => "1 track".to_owned(),
         n => format!("{n} tracks"),
     });
-    let total: Duration = album.tracks.iter().filter_map(|t| t.duration).sum();
+    let total: Duration = edition
+        .into_iter()
+        .flat_map(|edition| edition.tracks.iter())
+        .filter_map(|t| t.duration)
+        .sum();
     if total > Duration::ZERO {
         meta.push(vm::format_duration(total));
     }
-    column![
+    let mut header = column![
         text(title).size(theme::SIZE_TITLE).font(theme::SEMIBOLD),
         text(artist)
             .size(theme::SIZE_EMPHASIS)
@@ -1039,8 +1080,55 @@ fn album_header(album: &vm::AlbumVm) -> Element<'_, Message> {
             .font(theme::MONO)
             .color(theme::PAPER_FAINT),
     ]
-    .spacing(theme::GAP_XS)
-    .into()
+    .spacing(theme::GAP_XS);
+    if let Some(line) = edition.and_then(vm::EditionVm::encoding_line) {
+        header = header.push(
+            text(line)
+                .size(theme::SIZE_META)
+                .font(theme::MONO)
+                .color(theme::PAPER_FAINT),
+        );
+    }
+    header.into()
+}
+
+/// The edition selector: a quiet segmented control, one segment per format
+/// the album is owned in, in the library's best-first order.
+///
+/// Shown only when there is a choice to make — a single-format album carries
+/// no control at all, so the ordinary case gains no chrome. The choice
+/// changes what the panel lists and what Play queues, and nothing else; it
+/// never interrupts what is already playing.
+fn edition_selector<'a>(
+    album: &'a vm::AlbumVm,
+    selected: Option<&'a vm::EditionVm>,
+) -> Element<'a, Message> {
+    let selected_key = selected.map(|edition| edition.key);
+    let mut segments = row![].spacing(theme::GAP_XXS);
+    for edition in &album.editions {
+        let is_selected = selected_key == Some(edition.key);
+        segments = segments.push(
+            button(
+                container(
+                    text(edition.key.label())
+                        .size(theme::SIZE_META)
+                        .font(theme::MEDIUM)
+                        .wrapping(text::Wrapping::None),
+                )
+                .width(Length::Fill)
+                .align_x(alignment::Horizontal::Center),
+            )
+            .width(Length::Fill)
+            .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+            .style(move |_theme, status| theme::segment(status, is_selected))
+            .on_press(Message::EditionSelected(album.id, edition.key)),
+        );
+    }
+    container(segments)
+        .width(Length::Fill)
+        .padding(theme::SEGMENT_INSET)
+        .style(theme::segmented)
+        .into()
 }
 
 /// One track-list row: right-aligned number, title, monospace duration.

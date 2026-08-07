@@ -114,10 +114,14 @@ pub struct NowPlaying {
 /// answers with title/artist/album. A path the library does not know (a
 /// file deleted mid-queue, say) falls back to its file name with no album
 /// highlight — playback truth outranks library staleness.
+///
+/// Every edition of every album is searched ([`AlbumVm::all_tracks`]): what
+/// is playing keeps its name even after the user switches the panel to a
+/// different format of the same album.
 #[must_use]
 pub fn resolve_now_playing(albums: &[AlbumVm], path: &Path) -> NowPlaying {
     for album in albums {
-        for track in &album.tracks {
+        for track in album.all_tracks() {
             if track.path == path {
                 return NowPlaying {
                     album_id: Some(album.id),
@@ -475,17 +479,31 @@ fn format_ms(ms: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::vm::TrackVm;
+    use baz_core::library::AudioFormat;
+
+    use crate::vm::{EditionKey, EditionVm, TrackVm};
 
     use super::*;
 
-    fn albums() -> Vec<AlbumVm> {
-        let track = |path: &str, title: &str, number| TrackVm {
+    fn track(path: &str, title: &str, number: u32) -> TrackVm {
+        TrackVm {
             number: Some(number),
             title: title.to_owned(),
             duration: Some(Duration::from_secs(200)),
             path: PathBuf::from(path),
-        };
+        }
+    }
+
+    /// One edition holding `tracks`, in `format`.
+    fn edition(format: Option<AudioFormat>, tracks: Vec<TrackVm>) -> EditionVm {
+        EditionVm {
+            key: EditionKey(format),
+            detail: None,
+            tracks,
+        }
+    }
+
+    fn albums() -> Vec<AlbumVm> {
         vec![
             AlbumVm {
                 id: 11,
@@ -493,10 +511,13 @@ mod tests {
                 artist: Some("Boards of Canada".into()),
                 year: Some(2002),
                 first_track: PathBuf::from("/m/boc/geogaddi/01.flac"),
-                tracks: vec![
-                    track("/m/boc/geogaddi/01.flac", "Ready Lets Go", 1),
-                    track("/m/boc/geogaddi/02.flac", "Music Is Math", 2),
-                ],
+                editions: vec![edition(
+                    Some(AudioFormat::Flac),
+                    vec![
+                        track("/m/boc/geogaddi/01.flac", "Ready Lets Go", 1),
+                        track("/m/boc/geogaddi/02.flac", "Music Is Math", 2),
+                    ],
+                )],
             },
             AlbumVm {
                 id: 22,
@@ -504,7 +525,10 @@ mod tests {
                 artist: None,
                 year: None,
                 first_track: PathBuf::from("/m/strays/a.wav"),
-                tracks: vec![track("/m/strays/a.wav", "a.wav", 1)],
+                editions: vec![edition(
+                    Some(AudioFormat::Wav),
+                    vec![track("/m/strays/a.wav", "a.wav", 1)],
+                )],
             },
         ]
     }
@@ -674,6 +698,36 @@ mod tests {
         assert_eq!(now.title, "a.wav");
         assert_eq!(now.album_id, Some(22));
         assert_eq!(now.artist, None);
+    }
+
+    #[test]
+    fn a_track_from_any_edition_resolves_to_its_album() {
+        // The same album owned twice. Whichever edition was queued, the
+        // playing file must still name its album on the bar — including
+        // after the panel has been switched to the other format.
+        let albums = vec![AlbumVm {
+            id: 33,
+            title: Some("Northwest Passage".into()),
+            artist: Some("Stan Rogers".into()),
+            year: Some(1981),
+            first_track: PathBuf::from("/m/flac/01.flac"),
+            editions: vec![
+                edition(
+                    Some(AudioFormat::Flac),
+                    vec![track("/m/flac/01.flac", "Northwest Passage", 1)],
+                ),
+                edition(
+                    Some(AudioFormat::Mp3),
+                    vec![track("/m/mp3/01.mp3", "Northwest Passage", 1)],
+                ),
+            ],
+        }];
+        for path in ["/m/flac/01.flac", "/m/mp3/01.mp3"] {
+            let now = resolve_now_playing(&albums, Path::new(path));
+            assert_eq!(now.album_id, Some(33), "{path} must resolve");
+            assert_eq!(now.artist.as_deref(), Some("Stan Rogers"));
+            assert_eq!(now.title, "Northwest Passage");
+        }
     }
 
     // -----------------------------------------------------------------

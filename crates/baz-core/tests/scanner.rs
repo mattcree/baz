@@ -10,7 +10,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use baz_core::library::{ScanEntry, ScanError, TrackMeta, scan};
+use baz_core::library::{AudioFormat, ScanEntry, ScanError, TrackMeta, scan};
 use lofty::config::WriteOptions;
 use lofty::prelude::*;
 use lofty::tag::{Tag, TagType};
@@ -116,6 +116,35 @@ fn fully_tagged_file_tags_win_over_path() {
         (900..=1100).contains(&duration.as_millis()),
         "duration was {duration:?}"
     );
+}
+
+#[test]
+fn encoding_properties_come_from_the_file_not_the_folder_name() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    // A folder named for a *different* format: only the file may be believed.
+    let path = write_wav(dir.path(), "MP3/Big Star/Radio City/01 - track.wav");
+    write_tags(
+        &path,
+        &Tags {
+            artist: Some("Big Star"),
+            album: Some("Radio City"),
+            ..Tags::default()
+        },
+    );
+
+    let tracks = scan_tracks(dir.path());
+    assert_eq!(tracks.len(), 1);
+    let t = &tracks[0];
+    assert_eq!(
+        t.format,
+        Some(AudioFormat::Wav),
+        "the codec is read from the file, never inferred from the path"
+    );
+    assert!(t.format.is_some_and(AudioFormat::is_lossless));
+    // The fixture is 16-bit mono at 8 kHz (see `write_wav`).
+    assert_eq!(t.bit_depth, Some(16));
+    assert_eq!(t.sample_rate, Some(8_000));
+    assert_eq!(t.bitrate, Some(128), "8000 Hz * 16 bit = 128 kbit/s");
 }
 
 #[test]

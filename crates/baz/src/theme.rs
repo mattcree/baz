@@ -120,6 +120,12 @@ pub const GAP_XL: f32 = 24.0;
 
 /// Corner radius for controls (buttons, inputs).
 pub const RADIUS_CTRL: f32 = 6.0;
+/// Corner radius of a segment inside the segmented control — one step
+/// tighter than its enclosing well, so the raised segment nests rather than
+/// straining against the edge.
+pub const RADIUS_SEGMENT: f32 = 4.0;
+/// Inset of the segmented control's well around its segments.
+pub const SEGMENT_INSET: f32 = 2.0;
 /// Corner radius for the tile's hover/selection card.
 pub const RADIUS_TILE: f32 = 10.0;
 /// Edge of the playing-album lamp dot (a [`RADIUS_CTRL`]-free circle).
@@ -348,6 +354,55 @@ pub fn seek_inert(_theme: &Theme, _status: slider::Status) -> slider::Style {
             border_width: 0.0,
             border_color: Color::TRANSPARENT,
         },
+    }
+}
+
+/// The well holding the album's edition selector: the same inset treatment
+/// as a text input, so a segmented control reads as a place you *choose*
+/// something rather than a row of buttons that each do something.
+#[must_use]
+pub fn segmented(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(RECESS)),
+        border: Border {
+            color: HAIRLINE,
+            width: 1.0,
+            radius: RADIUS_CTRL.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
+/// One segment of that control: the chosen format is a raised card in full
+/// paper white; the others are label-only until the pointer finds them.
+///
+/// Deliberately *not* lamp amber. The accent means playback truth (see the
+/// palette rationale) and a format choice is a view, not a claim about what
+/// is playing — a second amber control in the panel would dilute the one
+/// signal the room reserves.
+#[must_use]
+pub fn segment(status: button::Status, selected: bool) -> button::Style {
+    let (background, text_color) = if selected {
+        (Some(CARD_HIGH), PAPER)
+    } else {
+        match status {
+            button::Status::Hovered | button::Status::Pressed => (Some(CARD), PAPER),
+            button::Status::Active | button::Status::Disabled => (None, PAPER_DIM),
+        }
+    };
+    button::Style {
+        background: background.map(Background::Color),
+        text_color,
+        border: Border {
+            color: if selected {
+                HAIRLINE_STRONG
+            } else {
+                Color::TRANSPARENT
+            },
+            width: 1.0,
+            radius: RADIUS_SEGMENT.into(),
+        },
+        shadow: Shadow::default(),
     }
 }
 

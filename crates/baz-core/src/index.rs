@@ -43,10 +43,21 @@
 //! # Schema versioning
 //!
 //! The schema version lives in SQLite's `PRAGMA user_version` and migrations
-//! run stepwise at open (see `migrate`), so a v0.2 schema change is one new
+//! run stepwise at open (see `migrate`), so a schema change is one new
 //! match arm, not a format break. A database from a *newer* baz is refused
-//! rather than guessed at.
+//! rather than guessed at. Every database — including a brand-new one —
+//! walks the same chain from 0, so "created fresh" and "upgraded" can never
+//! drift into two different shapes.
+//!
+//! # Editions
+//!
+//! [`Library::albums`] groups tracks into albums by artist + title, then
+//! splits each album by [`AudioFormat`] into [`Edition`]s: one shelf tile,
+//! one track list per format the collector actually owns. The ranking that
+//! decides which edition is the default is documented on
+//! [`Album::editions`] and in `docs/adr/0007-album-editions.md`.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::iter::Peekable;
@@ -55,10 +66,10 @@ use std::time::Duration;
 
 use rusqlite::{Connection, params};
 
-use crate::library::TrackMeta;
+use crate::library::{AudioFormat, TrackMeta};
 
 /// The schema version this build reads and writes (`PRAGMA user_version`).
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// Rows per write transaction in [`Library::add_tracks`]. A scan yields tens
 /// of thousands of tracks; committing in batches keeps any single
@@ -86,11 +97,26 @@ const SCHEMA_V1: &str = "
     COMMIT;
 ";
 
+/// Version 2: the per-track encoding columns that album editions are built
+/// from (`docs/adr/0007-album-editions.md`). Added rather than rebuilt, so
+/// an existing library keeps its rows, its `id`s, and its `path` index.
+///
+/// The transaction and the `user_version` bump are applied by
+/// [`migrate_v1_to_v2`], which has Rust work to do in between.
+const SCHEMA_V2_COLUMNS: &str = "
+    ALTER TABLE tracks ADD COLUMN format      TEXT;    -- AudioFormat::code()
+    ALTER TABLE tracks ADD COLUMN bit_depth   INTEGER; -- bits per sample
+    ALTER TABLE tracks ADD COLUMN sample_rate INTEGER; -- Hz
+    ALTER TABLE tracks ADD COLUMN bitrate     INTEGER; -- kbit/s, VBR-averaged
+";
+
 /// Insert-or-replace by path: a rescan of the same file updates its metadata
 /// instead of failing the batch or duplicating the track.
 const UPSERT_TRACK: &str = "
-    INSERT INTO tracks (path, artist, album, title, track, disc, year, duration_ns)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+    INSERT INTO tracks
+        (path, artist, album, title, track, disc, year, duration_ns,
+         format, bit_depth, sample_rate, bitrate)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
     ON CONFLICT(path) DO UPDATE SET
         artist = excluded.artist,
         album = excluded.album,
@@ -98,11 +124,18 @@ const UPSERT_TRACK: &str = "
         track = excluded.track,
         disc = excluded.disc,
         year = excluded.year,
-        duration_ns = excluded.duration_ns
+        duration_ns = excluded.duration_ns,
+        format = excluded.format,
+        bit_depth = excluded.bit_depth,
+        sample_rate = excluded.sample_rate,
+        bitrate = excluded.bitrate
 ";
 
-const SELECT_ALL_TRACKS: &str =
-    "SELECT path, artist, album, title, track, disc, year, duration_ns FROM tracks";
+const SELECT_ALL_TRACKS: &str = "
+    SELECT path, artist, album, title, track, disc, year, duration_ns,
+           format, bit_depth, sample_rate, bitrate
+    FROM tracks
+";
 
 /// The library index could not be opened or updated.
 #[derive(Debug, thiserror::Error)]
@@ -243,6 +276,10 @@ impl Library {
                         meta.disc,
                         meta.year,
                         duration_to_nanos(meta)?,
+                        meta.format.map(AudioFormat::code),
+                        meta.bit_depth,
+                        meta.sample_rate,
+                        meta.bitrate,
                     ])?;
                 }
             }
@@ -323,6 +360,10 @@ impl Library {
     /// album-less strays share one shelf entry — and unknowns sort before
     /// known values, so they surface at the front rather than hiding at the
     /// end of a long shelf.
+    ///
+    /// Each album is then split by codec into [`Album::editions`]: the same
+    /// album ripped to FLAC *and* to MP3 is **one** entry with two editions,
+    /// not two entries and not one entry with every track listed twice.
     #[must_use]
     pub fn albums(&self) -> Vec<Album<'_>> {
         let mut albums: Vec<Album<'_>> = Vec::new();
@@ -337,15 +378,18 @@ impl Library {
                     artist: track.meta.artist.as_deref(),
                     title: track.meta.album.as_deref(),
                     year: None,
-                    tracks: Vec::new(),
+                    editions: Vec::new(),
                 });
             }
             if let Some(album) = albums.last_mut() {
                 if album.year.is_none() {
                     album.year = track.meta.year;
                 }
-                album.tracks.push(&track.meta);
+                album.push_track(&track.meta);
             }
+        }
+        for album in &mut albums {
+            album.editions.sort_by(rank_editions);
         }
         albums
     }
@@ -362,9 +406,150 @@ pub struct Album<'a> {
     pub title: Option<&'a str>,
     /// Release year: the first year any track on the album declares.
     pub year: Option<u32>,
-    /// The album's tracks in disc/track-number/title order; paths and
-    /// per-track detail live on each [`TrackMeta`].
+    /// The formats this album is owned in, **best first** — never empty (an
+    /// album exists because it has tracks, and every track lands in exactly
+    /// one edition).
+    ///
+    /// The ordering is total and deterministic, applied in this sequence:
+    ///
+    /// 1. **Lossless before lossy, unknown-codec last.** Fidelity is the
+    ///    point of keeping a second copy; see [`AudioFormat::is_lossless`].
+    /// 2. **More tracks first.** Within a tier this prefers the complete rip
+    ///    over a partial one — playing 3 of 12 tracks by default would be
+    ///    the worse failure.
+    /// 3. **Higher mean bitrate first.** A 24/96 FLAC over a 16/44 one, a
+    ///    320 kbit/s MP3 over a 128. Across *different* lossy codecs this is
+    ///    a preference, not a fidelity claim (128 kbit/s Opus is not worse
+    ///    than 192 kbit/s MP3) — it only ever breaks a tie, and some answer
+    ///    must be given.
+    /// 4. **Codec code, ascending.** Nothing but determinism rides on this.
+    ///
+    /// The user can always override the default in the UI; this decides only
+    /// what is offered first. See `docs/adr/0007-album-editions.md`.
+    pub editions: Vec<Edition<'a>>,
+}
+
+impl<'a> Album<'a> {
+    /// The edition to show and play unless the user says otherwise: the
+    /// best-ranked one (see [`Album::editions`]).
+    #[must_use]
+    pub fn default_edition(&self) -> Option<&Edition<'a>> {
+        self.editions.first()
+    }
+
+    /// The edition in `format`, if this album has one.
+    #[must_use]
+    pub fn edition(&self, format: Option<AudioFormat>) -> Option<&Edition<'a>> {
+        self.editions.iter().find(|e| e.format == format)
+    }
+
+    /// File this track under its codec's edition, creating that edition on
+    /// first sight. Tracks arrive in library order, so appending preserves
+    /// each edition's disc/track/title order without a second sort.
+    fn push_track(&mut self, meta: &'a TrackMeta) {
+        let format = meta.format;
+        if let Some(edition) = self.editions.iter_mut().find(|e| e.format == format) {
+            edition.tracks.push(meta);
+        } else {
+            self.editions.push(Edition {
+                format,
+                tracks: vec![meta],
+            });
+        }
+    }
+}
+
+/// One album as owned in one codec: the FLAC rip, or the MP3 copy.
+///
+/// An album with a single edition is the ordinary case and behaves exactly
+/// as an album did before editions existed — the UI shows no selector for
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Edition<'a> {
+    /// The codec every track in this edition is encoded with. `None` is the
+    /// edition of tracks whose codec is not known (see
+    /// [`TrackMeta::format`]) — an honest bucket, not a format.
+    pub format: Option<AudioFormat>,
+    /// This edition's tracks in disc/track-number/title order.
     pub tracks: Vec<&'a TrackMeta>,
+}
+
+impl Edition<'_> {
+    /// Whether this edition's codec reconstructs its source bit-exactly. An
+    /// unknown codec is not assumed lossless.
+    #[must_use]
+    pub fn is_lossless(&self) -> bool {
+        self.format.is_some_and(AudioFormat::is_lossless)
+    }
+
+    /// The bit depth the whole edition shares, or `None` if its tracks
+    /// disagree (or never declared one).
+    ///
+    /// Uniform-or-nothing rather than an average: "16-bit" is a claim about
+    /// every track, and an edition with one 24-bit outlier should decline to
+    /// make it rather than round the outlier away.
+    #[must_use]
+    pub fn bit_depth(&self) -> Option<u8> {
+        uniform(self.tracks.iter().map(|t| t.bit_depth))
+    }
+
+    /// The sample rate the whole edition shares, or `None` if its tracks
+    /// disagree (or never declared one). Uniform-or-nothing, as
+    /// [`Edition::bit_depth`].
+    #[must_use]
+    pub fn sample_rate(&self) -> Option<u32> {
+        uniform(self.tracks.iter().map(|t| t.sample_rate))
+    }
+
+    /// Mean bitrate (kbit/s) over the tracks that declare one, rounded down;
+    /// `None` when no track does. An average is the honest summary here —
+    /// unlike depth and rate, bitrate legitimately varies track to track,
+    /// and VBR means it varies within a track too.
+    #[must_use]
+    pub fn bitrate(&self) -> Option<u32> {
+        let mut sum: u64 = 0;
+        let mut count: u64 = 0;
+        for rate in self.tracks.iter().filter_map(|t| t.bitrate) {
+            sum += u64::from(rate);
+            count += 1;
+        }
+        if count == 0 {
+            return None;
+        }
+        u32::try_from(sum / count).ok()
+    }
+
+    /// Fidelity tier for the default-edition ranking: lossless, lossy,
+    /// unknown. Lower is better.
+    fn tier(&self) -> u8 {
+        match self.format {
+            Some(format) if format.is_lossless() => 0,
+            Some(_) => 1,
+            None => 2,
+        }
+    }
+}
+
+/// The best-first edition ordering documented on [`Album::editions`].
+fn rank_editions(a: &Edition<'_>, b: &Edition<'_>) -> Ordering {
+    a.tier()
+        .cmp(&b.tier())
+        .then_with(|| b.tracks.len().cmp(&a.tracks.len()))
+        .then_with(|| b.bitrate().unwrap_or(0).cmp(&a.bitrate().unwrap_or(0)))
+        // Formats are unique per album (they are the grouping key), so this
+        // makes the order total.
+        .then_with(|| {
+            a.format
+                .map(AudioFormat::code)
+                .cmp(&b.format.map(AudioFormat::code))
+        })
+}
+
+/// The single value every item declares, or `None` if any is missing or they
+/// disagree. An empty sequence yields `None`.
+fn uniform<T: Copy + PartialEq>(mut values: impl Iterator<Item = Option<T>>) -> Option<T> {
+    let first = values.next()??;
+    values.all(|value| value == Some(first)).then_some(first)
 }
 
 /// The in-RAM half of [`Library`]: every track with a precomputed
@@ -502,17 +687,88 @@ struct SortKey {
 /// Run pending schema migrations, stepwise, up to [`SCHEMA_VERSION`].
 ///
 /// Each arm migrates exactly one version and the loop re-reads
-/// `user_version`, so future versions chain automatically: v0.2 adds a
-/// `1 => ...` arm and bumps [`SCHEMA_VERSION`], nothing else.
+/// `user_version`, so versions chain automatically: a v3 adds a `2 => ...`
+/// arm and bumps [`SCHEMA_VERSION`], nothing else.
+///
+/// A brand-new database walks the *whole* chain (0 → v1 → v2) rather than
+/// being stamped with the current schema directly. That costs a few
+/// statements once, and buys the guarantee that a freshly created database
+/// and an upgraded one are byte-identical in shape — no class of "works on a
+/// new install, breaks on an old library" bug can hide between the two
+/// paths, and every release exercises its own migration code.
 fn migrate(conn: &Connection) -> Result<(), IndexError> {
     loop {
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         match version {
-            // A fresh database: create the current schema directly.
             0 => conn.execute_batch(SCHEMA_V1)?,
+            1 => migrate_v1_to_v2(conn)?,
             SCHEMA_VERSION => return Ok(()),
             found => return Err(IndexError::SchemaTooNew { found }),
         }
+    }
+}
+
+/// v1 → v2: add the encoding columns and backfill what can be known without
+/// touching the music files.
+///
+/// The columns, the backfill, and the `user_version` bump are one
+/// transaction: an interrupted upgrade leaves a v1 database, which the next
+/// open migrates again. SQLite's DDL is transactional, so this holds for the
+/// `ALTER TABLE`s too.
+fn migrate_v1_to_v2(conn: &Connection) -> Result<(), IndexError> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(SCHEMA_V2_COLUMNS)?;
+    backfill_formats(&tx)?;
+    tx.pragma_update(None, "user_version", 2)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Fill `format` for existing rows from the file extension, where the
+/// extension settles the question by itself.
+///
+/// This is the honest half of a v1 upgrade. `bit_depth`, `sample_rate` and
+/// `bitrate` stay NULL, and ambiguous *containers* keep a NULL `format`:
+/// `.m4a`/`.mp4` may hold ALAC or AAC and `.ogg` may hold Vorbis, Opus or
+/// FLAC, and only reading the file answers that. Nothing here reads a file —
+/// an upgrade must not turn into a full library re-read at startup.
+///
+/// NULL is self-healing rather than permanent: baz rescans its music folder
+/// on every start, and [`Library::add_tracks`] upserts, so each surviving
+/// file gets its true codec and properties within the first scan after the
+/// upgrade. Until then an unbackfilled album simply shows one unnamed
+/// edition — exactly the pre-editions behavior.
+fn backfill_formats(conn: &Connection) -> Result<(), IndexError> {
+    let mut updates: Vec<(i64, &'static str)> = Vec::new();
+    {
+        let mut stmt = conn.prepare("SELECT id, path FROM tracks")?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let id: i64 = row.get(0)?;
+            let blob: Vec<u8> = row.get(1)?;
+            if let Some(format) = format_from_extension(&path_from_blob(blob)?) {
+                updates.push((id, format.code()));
+            }
+        }
+    }
+    let mut stmt = conn.prepare("UPDATE tracks SET format = ?2 WHERE id = ?1")?;
+    for (id, code) in updates {
+        stmt.execute(params![id, code])?;
+    }
+    Ok(())
+}
+
+/// The codec a file *extension* pins down on its own, for the v1 → v2
+/// backfill only. Container extensions that can hold several codecs are
+/// deliberately absent — see [`backfill_formats`].
+fn format_from_extension(path: &Path) -> Option<AudioFormat> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    match extension.as_str() {
+        "flac" => Some(AudioFormat::Flac),
+        "mp3" => Some(AudioFormat::Mp3),
+        "wav" => Some(AudioFormat::Wav),
+        "opus" => Some(AudioFormat::Opus),
+        _ => None,
     }
 }
 
@@ -525,6 +781,7 @@ fn row_to_meta(row: &rusqlite::Row<'_>) -> Result<TrackMeta, IndexError> {
         .map(|nanos| u64::try_from(nanos).map(Duration::from_nanos))
         .transpose()
         .map_err(|_| IndexError::CorruptStoredDuration)?;
+    let format: Option<String> = row.get(8)?;
     Ok(TrackMeta {
         path: path_from_blob(path_blob)?,
         artist: row.get(1)?,
@@ -534,6 +791,12 @@ fn row_to_meta(row: &rusqlite::Row<'_>) -> Result<TrackMeta, IndexError> {
         disc: row.get(5)?,
         year: row.get(6)?,
         duration,
+        // An unreadable code degrades to "unknown format" rather than
+        // failing the open (see `AudioFormat::from_code`).
+        format: format.as_deref().and_then(AudioFormat::from_code),
+        bit_depth: row.get(9)?,
+        sample_rate: row.get(10)?,
+        bitrate: row.get(11)?,
     })
 }
 
@@ -628,6 +891,10 @@ mod tests {
             disc: None,
             year: None,
             duration: None,
+            format: None,
+            bit_depth: None,
+            sample_rate: None,
+            bitrate: None,
         });
         assert_eq!(track.haystack, "größenwahn\nlive\n\n");
         // The separator keeps queries from matching across field boundaries.
@@ -655,8 +922,51 @@ mod tests {
             disc: None,
             year: None,
             duration: Some(Duration::new(215, 123_456_789)),
+            format: None,
+            bit_depth: None,
+            sample_rate: None,
+            bitrate: None,
         };
         let nanos = duration_to_nanos(&meta).expect("convert").expect("some");
         assert_eq!(nanos, 215_123_456_789);
+    }
+
+    #[test]
+    fn backfill_only_trusts_unambiguous_extensions() {
+        use std::path::Path;
+        assert_eq!(
+            format_from_extension(Path::new("/m/a/01.FLAC")),
+            Some(AudioFormat::Flac)
+        );
+        assert_eq!(
+            format_from_extension(Path::new("/m/a/01.mp3")),
+            Some(AudioFormat::Mp3)
+        );
+        assert_eq!(
+            format_from_extension(Path::new("/m/a/01.wav")),
+            Some(AudioFormat::Wav)
+        );
+        assert_eq!(
+            format_from_extension(Path::new("/m/a/01.opus")),
+            Some(AudioFormat::Opus)
+        );
+        // Containers whose codec only the file itself knows stay unknown, so
+        // the rescan decides rather than the backfill guessing.
+        for ambiguous in ["/m/a/01.m4a", "/m/a/01.mp4", "/m/a/01.ogg", "/m/a/01"] {
+            assert_eq!(
+                format_from_extension(Path::new(ambiguous)),
+                None,
+                "{ambiguous} must not be guessed at"
+            );
+        }
+    }
+
+    #[test]
+    fn uniform_reports_only_a_value_every_track_agrees_on() {
+        assert_eq!(uniform([Some(16), Some(16)].into_iter()), Some(16));
+        assert_eq!(uniform([Some(16), Some(24)].into_iter()), None);
+        assert_eq!(uniform([Some(16), None].into_iter()), None);
+        assert_eq!(uniform([None, Some(16)].into_iter()), None);
+        assert_eq!(uniform(std::iter::empty::<Option<u8>>()), None);
     }
 }
