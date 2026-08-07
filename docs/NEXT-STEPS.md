@@ -1,6 +1,8 @@
 # baz — Next Steps
 
 > Concrete, ordered, with acceptance criteria. Standards in `ENGINEERING.md`; vision in `VISION.md`. Updated 2026-08-07.
+>
+> **Status**: Phase 0 ✅ (ADRs 0001–0003) · Phase 1 ✅ (spikes complete and deleted per standing rule; results in ADR-0004/0005 and at `git show dc13d7e`) · **Phase 2 is next.** GUI = iced (ADR-0005). Dev environment: `docs/DEVELOPMENT.md`.
 
 ## Phase 0 — Decisions (hours, not days)
 

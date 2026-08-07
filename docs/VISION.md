@@ -48,7 +48,7 @@ Betrayal list (things that would lose the community, from `research/01`): Electr
 Full analysis in `research/04`. Headline:
 
 - **Rust workspace, headless-core-first.** `baz-core` crate: Symphonia decode → custom gapless ring-buffer engine → cpal shared-mode + thin native exclusive backends (`wasapi` crate / CoreAudio hog mode / ALSA `hw:`); rusqlite + FTS5 persistence with an in-memory search index; `notify` file watching. Core API = serde-serializable commands/events, so GUI-in-process today can become a server transport tomorrow.
-- **GUI: Tauri 2 shell + Solid/Svelte frontend** (primary) — design freedom for shelves/visualizers, accessibility for free, dual contributor funnel; Museeks proves the migration path. **Runner-up: iced** (COSMIC-proven, single static binary). Because both sit on the same core, the GUI bet is reversible — a deliberate hedge. Electron, BASS, GStreamer, Flutter: rejected (reasons in `research/04`).
+- **GUI: iced** — decided empirically by the Phase 1 spike head-to-head (ADR-0005, 2026-08-07): equal search performance, but iced needed zero Linux system deps and stayed FPS-stable under fling-scroll where Tauri/WebKitGTK visibly janked. Costs accepted: hand-rolled widgets, AccessKit-dependent accessibility. The headless core keeps the choice reversible. Electron, BASS, GStreamer, Flutter: rejected (reasons in `research/04`).
 - **Remote libraries: OpenSubsonic client mode** (v2+) — one API covers Navidrome/gonic/Ampache and friends. Abstract the track-source layer from day one (local scanner and remote provider behind one interface) even though v1 ships local-only. A `baz-served` OpenSubsonic *server* wrapping the same core is the long-game option.
 
 ## Staged scope (sketch, not commitment)
