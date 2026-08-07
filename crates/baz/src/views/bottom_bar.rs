@@ -1,4 +1,5 @@
-//! The persistent now-playing bar: current track, transport, seek row.
+//! The persistent now-playing bar: current track, transport, seek row,
+//! volume.
 
 use iced::widget::{
     Space, button, column, container, horizontal_rule, image as iced_image, row, text, tooltip,
@@ -7,11 +8,11 @@ use iced::{Color, Element, Length, alignment};
 
 use crate::app::Message;
 use crate::player::PlayerState;
-use crate::{icon, player, seek, theme};
+use crate::{groove, icon, player, theme};
 
 /// The persistent now-playing bar, in three zones: the current track on the
 /// left, the transport centred over its seek bar in the middle, quiet status
-/// on the right.
+/// and the volume on the right.
 ///
 /// The transport sits *above* the groove rather than beside it because that
 /// is where a listener looks for it — the controls and the position they act
@@ -20,16 +21,29 @@ use crate::{icon, player, seek, theme};
 /// keeps the centre column optically centred no matter how long a track
 /// title runs; both clip rather than push.
 ///
+/// The **volume goes at the far right**, with the signal-path readout
+/// immediately to its left. That is where a listener reaches for it, and the
+/// adjacency is the point: the fader is the one control on screen that can
+/// take the path out of bit-exactness, and the note that says whether it is
+/// bit-exact sits next to it. Reading them together needs no explanation and
+/// no icon.
+///
 /// Nothing in here changes size as playback moves. The centre column is
 /// [`theme::SEEK_ROW_W`] wide with fixed-width timestamps, the seek row's
 /// height is reserved even when there is nothing to seek, the signal-path
-/// slot is [`theme::SIGNAL_W`] wide whether or not it says anything, and the
-/// transport glyphs live in fixed boxes — so starting a track, crossing the
-/// hour mark, sending a command, or meeting a device that cannot follow the
-/// music cannot reflow the bar. Every glyph, position, and enabled-state
-/// comes from [`PlayerState`] — event-derived, tested in `player.rs`.
+/// slot is [`theme::SIGNAL_W`] wide whether or not it says anything, the
+/// volume block is [`theme::VOLUME_BLOCK_W`] wide in every state, and every
+/// glyph lives in a fixed box — so starting a track, crossing the hour mark,
+/// sending a command, moving the fader, muting, or a device that cannot
+/// follow the music cannot reflow the bar. The right-hand zone is aligned to
+/// its right edge as well, so even the rarely-seen skipped-tracks note grows
+/// leftward into the gutter instead of shifting anything beside it. Every
+/// glyph, position, and enabled-state comes from [`PlayerState`] —
+/// event-derived, tested in `player.rs`.
 pub(crate) fn view(player: &PlayerState) -> Element<'_, Message> {
-    let mut status = row![].spacing(theme::GAP_SM);
+    let mut status = row![]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center);
     if let Some(skipped) = player.skipped_note() {
         status = status.push(
             text(skipped)
@@ -38,7 +52,7 @@ pub(crate) fn view(player: &PlayerState) -> Element<'_, Message> {
                 .color(theme::PAPER_FAINT),
         );
     }
-    status = status.push(signal_path(player));
+    status = status.push(signal_path(player)).push(volume(player));
     let bar = row![
         container(now_playing_line(player))
             .width(Length::Fill)
@@ -101,20 +115,23 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
 }
 
 /// The signal path, in the quietest terms the room has: a short monospace
-/// `48 → 44.1 kHz` in the same faint ink as the track durations and the
-/// counts, with one plain sentence on hover.
+/// `48 → 44.1 kHz` or `bit-perfect` in the same faint ink as the track
+/// durations and the counts, with one plain sentence on hover.
 ///
-/// Drawn **only** when [`PlayerState::signal_note`] answers — that is, only
-/// while the engine is converting (ADR-0009 §5). The direct case, which is
-/// the ordinary one, puts nothing here at all.
+/// Drawn **only** when [`PlayerState::signal_note`] answers — the engine is
+/// converting, or the whole path is transparent (ADR-0009 §5, as ADR-0011
+/// amends it). The in-between case, a direct chain with the volume scaling
+/// the samples, puts nothing here: that fact is already legible in the fader
+/// two controls to the right, which is visibly not at the top.
 ///
-/// Everything about the treatment is chosen to be ignorable. No lamp amber:
-/// the accent means playback truth, and a rate the device happens to be
-/// running at is not a claim about the music. No icon, no rule, no
-/// background — the label is the same weight as the "3 tracks skipped" note
-/// it sits beside. And the slot is [`theme::SIGNAL_W`] wide either way, so
-/// the note *appearing* moves nothing: a listener who is not looking for it
-/// will never see it arrive.
+/// Everything about the treatment is chosen to be ignorable, and the
+/// affirmative reading gets exactly the same treatment as the converting one
+/// so that neither can read as the other's verdict. No lamp amber: the accent
+/// means playback truth, and what the chain is doing is not a claim about the
+/// music. No icon, no rule, no background — the label is the same weight as
+/// the "3 tracks skipped" note it sits beside. And the slot is
+/// [`theme::SIGNAL_W`] wide in every case, so the note *appearing* moves
+/// nothing: a listener who is not looking for it will never see it arrive.
 fn signal_path(player: &PlayerState) -> Element<'_, Message> {
     let Some(note) = player.signal_note() else {
         return Space::with_width(Length::Fixed(theme::SIGNAL_W)).into();
@@ -150,14 +167,14 @@ fn transport_stack(player: &PlayerState) -> Element<'_, Message> {
     let pending = player.transport_pending();
     let toggle = player.play_pause();
     let transport = row![
-        transport_button(
+        glyph_button(
             toggle.into(),
             toggle.label(),
             player.play_pause_enabled(),
             pending,
             Message::PlayPause,
         ),
-        transport_button(
+        glyph_button(
             icon::Glyph::Next,
             "Next track",
             player.next_enabled(),
@@ -181,7 +198,7 @@ fn transport_stack(player: &PlayerState) -> Element<'_, Message> {
         .into()
 }
 
-/// One transport control: a glyph in a fixed square, named by a tooltip.
+/// One icon-only control: a glyph in a fixed square, named by a tooltip.
 ///
 /// The size is fixed in both axes and the glyph is drawn into a box of its
 /// own, so swapping play for pause moves nothing. `pending` reaches the ink
@@ -191,7 +208,7 @@ fn transport_stack(player: &PlayerState) -> Element<'_, Message> {
 /// accessibility tree and its buttons take no keyboard focus, so a hover
 /// label plus a target comfortably larger than the mark is the whole of what
 /// the toolkit can offer here — stated plainly rather than papered over.
-fn transport_button(
+fn glyph_button(
     glyph: icon::Glyph,
     label: &str,
     enabled: bool,
@@ -230,10 +247,11 @@ fn transport_button(
 /// where the hover preview floats. Timestamps are monospace so the digits do
 /// not shuffle the groove sideways as they tick.
 ///
-/// The groove is [`seek::Groove`] rather than iced's `slider`: it reports
+/// The rail is [`groove::Groove`] rather than iced's `slider`: it reports
 /// pointer *geometry*, which is what the click-vs-scrub threshold, the hover
 /// preview, and the cursor affordance are all built from (that module's docs
-/// carry the evidence for why the built-ins cannot).
+/// carry the evidence for why the built-ins cannot). The volume fader below
+/// is the same widget for the same reasons.
 ///
 /// A track whose length was never declared gets the inert groove: the
 /// elapsed time still counts up (that much is known), but there is nothing
@@ -251,11 +269,10 @@ fn seek_bar(state: player::SeekBar) -> Element<'static, Message> {
     } else {
         theme::PAPER_FAINT
     };
-    let groove = seek::Groove::new(state.position, theme::seek)
-        .width(Length::Fixed(theme::SEEK_W))
-        .height(theme::RAIL_HIT);
-    let groove: Element<'static, Message> = if state.interactive {
-        groove
+    let rail: Element<'static, Message> = if state.interactive {
+        groove::Groove::new(state.position, theme::seek)
+            .width(Length::Fixed(theme::SEEK_W))
+            .height(theme::RAIL_HIT)
             .on_pointer(
                 Message::SeekPressed,
                 Message::SeekDragged,
@@ -265,17 +282,84 @@ fn seek_bar(state: player::SeekBar) -> Element<'static, Message> {
             )
             .into()
     } else {
-        seek::Groove::new(state.position, theme::seek_inert)
+        groove::Groove::new(state.position, theme::seek_inert)
             .width(Length::Fixed(theme::SEEK_W))
             .height(theme::RAIL_HIT)
             .into()
     };
     row![
         seek_stamp(state.elapsed, elapsed_color, alignment::Horizontal::Right),
-        column![preview_lane(state.preview), groove],
+        column![
+            preview_lane(state.preview, theme::SEEK_W, theme::PREVIEW_W),
+            rail
+        ],
         seek_stamp(state.total, theme::PAPER_FAINT, alignment::Horizontal::Left),
     ]
     .spacing(theme::GAP_SM)
+    .into()
+}
+
+/// The volume control: a mute affordance and a fader, with a lane above the
+/// fader where the level preview floats.
+///
+/// The fader is the same [`groove::Groove`] as the seek bar — the same
+/// cursor affordance, the same hover preview, the same 4 px click-vs-drag
+/// threshold — plus the one thing a fader needs and a scrub bar does not: a
+/// **unity detent**, drawn as a small mark above the rail at the top of the
+/// travel. It is faint until the handle is on it and full paper when it is,
+/// which is what makes "at unity" and "a pixel below unity" different on
+/// sight rather than only in the readout. The other half of reaching it is
+/// [`player::UNITY_SNAP_PX`], where the hand's aim is resolved.
+///
+/// Not lamp amber, and the knob does not grow: the reasons are in
+/// [`theme::volume`]. Muting swaps the glyph and the fader's ink and moves
+/// nothing at all — the block is [`theme::VOLUME_BLOCK_W`] × the sum of its
+/// reserved lanes in every state this control has.
+fn volume(player: &PlayerState) -> Element<'_, Message> {
+    let state = player.volume_bar();
+    let detent = groove::Detent {
+        at: 1.0,
+        engaged: state.unity && !state.muted,
+    };
+    let style = match (state.interactive, state.muted) {
+        (false, _) => theme::volume_inert,
+        (true, true) => theme::volume_muted,
+        (true, false) => theme::volume,
+    };
+    let fader = groove::Groove::new(state.position, style)
+        .width(Length::Fixed(theme::VOLUME_W))
+        .height(theme::VOLUME_HIT)
+        .detent(detent);
+    let fader: Element<'_, Message> = if state.interactive {
+        fader
+            .on_pointer(
+                Message::VolumePressed,
+                Message::VolumeDragged,
+                Message::VolumeHovered,
+                Message::VolumeReleased,
+                Message::VolumeLeft,
+            )
+            .into()
+    } else {
+        fader.into()
+    };
+    row![
+        glyph_button(
+            icon::Glyph::speaker(state.muted),
+            state.mute_label,
+            state.interactive,
+            state.mute_pending,
+            Message::ToggleMute,
+        ),
+        column![
+            preview_lane(state.preview, theme::VOLUME_W, theme::LEVEL_W),
+            fader
+        ],
+    ]
+    .spacing(theme::GAP_SM)
+    .align_y(iced::Alignment::Center)
+    .width(Length::Fixed(theme::VOLUME_BLOCK_W))
+    .height(Length::Fixed(theme::VOLUME_ROW_H))
     .into()
 }
 
@@ -310,25 +394,31 @@ fn seek_stamp(
     .into()
 }
 
-/// The lane above the groove where the hover preview floats: a fixed-height
-/// strip, empty until the pointer rests on the bar, then carrying a small
-/// tip centered on the pointer with the timestamp a click would seek to.
+/// The lane above a groove where its hover preview floats: a fixed-height
+/// strip `width` wide, empty until the pointer rests on the bar, then
+/// carrying a `tip_width` tip centered on the pointer with what a click
+/// there would ask for — a timestamp over the seek bar, a level over the
+/// fader.
 ///
 /// The strip is reserved whether or not anything is hovering, so the bottom
 /// bar never changes height under the pointer; the horizontal placement is
 /// [`player::preview_offset`], which keeps the tip whole and on the bar at
 /// both ends (pure, and tested there).
-fn preview_lane(preview: Option<player::SeekPreview>) -> Element<'static, Message> {
+fn preview_lane(
+    preview: Option<player::Preview>,
+    width: f32,
+    tip_width: f32,
+) -> Element<'static, Message> {
     let mut lane = row![];
     if let Some(preview) = preview {
-        let offset = player::preview_offset(&preview, theme::PREVIEW_W);
+        let offset = player::preview_offset(&preview, tip_width);
         lane = lane.push(Space::with_width(Length::Fixed(offset))).push(
             container(
                 text(preview.label)
                     .size(theme::SIZE_CAPTION)
                     .font(theme::MONO),
             )
-            .width(Length::Fixed(theme::PREVIEW_W))
+            .width(Length::Fixed(tip_width))
             .height(Length::Fill)
             .align_x(alignment::Horizontal::Center)
             .align_y(alignment::Vertical::Center)
@@ -336,7 +426,7 @@ fn preview_lane(preview: Option<player::SeekPreview>) -> Element<'static, Messag
         );
     }
     container(lane)
-        .width(Length::Fixed(theme::SEEK_W))
+        .width(Length::Fixed(width))
         .height(Length::Fixed(theme::PREVIEW_H))
         .into()
 }

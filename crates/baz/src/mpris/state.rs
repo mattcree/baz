@@ -19,6 +19,19 @@
 //! both are tested against the boundary cases (zero, saturation, negative
 //! offsets, sub-millisecond truncation).
 //!
+//! The volume crosses the same kind of boundary and is handled the same way.
+//! MPRIS's `Volume` is a linear **amplitude** as an `f64`, where 1.0 is
+//! normal; baz's protocol unit is an integer **control position** on a cubic
+//! taper. [`volume_amplitude`] and [`position_for_amplitude`] are the two
+//! directions, and both go through
+//! [`Volume::amplitude`](baz_core::volume::Volume::amplitude) or its exact
+//! inverse — the cube root — rather than inventing a second curve. That
+//! matters more than it looks: a front end with its own idea of the taper
+//! would make "half volume" mean one thing on the lock screen and another on
+//! the fader six pixels from it, which is precisely what ADR-0011 put the
+//! taper in `baz-core` to prevent. `volume_round_trips_through_the_core_taper`
+//! pins every one of the 1001 positions.
+//!
 //! # The honesty rule, restated for D-Bus
 //!
 //! [`Snapshot::from_player`] reads only what the engine confirmed.
@@ -32,6 +45,8 @@
 //! can never disagree about what is possible.
 
 use std::path::Path;
+
+use baz_core::volume::{MAX_POSITION, Volume};
 
 use crate::player::{Phase, PlayerState};
 
@@ -106,7 +121,13 @@ pub(crate) struct TrackInfo {
 }
 
 /// The whole MPRIS-visible state at one instant.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+///
+/// Volume is stored as the **control position and the mute flag**, not as the
+/// `f64` the property carries, for two reasons: it keeps this type `Eq` — the
+/// publish loop decides what to signal by comparing snapshots, and an `f64`
+/// has no honest total equality — and it keeps the taper's application in one
+/// place ([`Snapshot::volume`]) rather than at every construction site.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "the five flags are MPRIS's five Can* properties, one for one; folding them into a \
@@ -121,6 +142,11 @@ pub(crate) struct Snapshot {
     pub(crate) track: Option<TrackInfo>,
     /// `Position`, in microseconds.
     pub(crate) position_us: i64,
+    /// The fader's control position, `0..=`[`MAX_POSITION`].
+    pub(crate) volume_position: u16,
+    /// Whether output is muted — separate engine state, folded into the
+    /// reported `Volume` by [`Snapshot::volume`].
+    pub(crate) muted: bool,
     /// `CanGoNext`.
     pub(crate) can_go_next: bool,
     /// `CanPlay`.
@@ -133,7 +159,43 @@ pub(crate) struct Snapshot {
     pub(crate) can_control: bool,
 }
 
+impl Default for Snapshot {
+    /// Everything absent or refused, except the volume — which defaults to
+    /// unity because that is what a freshly spawned engine is at (ADR-0011),
+    /// and because the server serves this value until the first publish
+    /// arrives. Defaulting it to zero would advertise a silent player.
+    fn default() -> Self {
+        Self {
+            status: PlaybackStatus::default(),
+            track: None,
+            position_us: 0,
+            volume_position: MAX_POSITION,
+            muted: false,
+            can_go_next: false,
+            can_play: false,
+            can_pause: false,
+            can_seek: false,
+            can_control: false,
+        }
+    }
+}
+
 impl Snapshot {
+    /// MPRIS `Volume`: a linear amplitude in `0.0..=1.0`.
+    ///
+    /// The **effective** level, so a muted player reports `0.0` — the fold
+    /// the engine itself performs, and the only reading that answers the
+    /// question a client is actually asking. Reporting the fader's position
+    /// while the output is silent would put a media widget at full volume
+    /// beside a player making no sound.
+    pub(crate) fn volume(&self) -> f64 {
+        if self.muted {
+            0.0
+        } else {
+            volume_amplitude(self.volume_position)
+        }
+    }
+
     /// Read the MPRIS state off the player state machine.
     ///
     /// `art_url` is resolved by the caller (it needs the filesystem, which
@@ -160,6 +222,8 @@ impl Snapshot {
             status: PlaybackStatus::from_phase(player.phase()),
             track,
             position_us: ms_to_us(player.elapsed_ms()),
+            volume_position: player.volume().position(),
+            muted: player.muted(),
             can_go_next: player.next_enabled(),
             can_play: player.play_pause_enabled(),
             // Pause is a documented engine no-op while stopped, so offering
@@ -190,6 +254,45 @@ pub(crate) fn ms_to_us(ms: u64) -> i64 {
 /// pretending to microsecond accuracy would be the wrong kind of precise.
 pub(crate) fn us_to_ms(us: i64) -> i64 {
     us / 1_000
+}
+
+/// A control position as the linear amplitude MPRIS `Volume` carries.
+///
+/// Straight through [`Volume::amplitude`] — the taper is `baz-core`'s and
+/// this is a widening cast, not a second opinion.
+pub(crate) fn volume_amplitude(position: u16) -> f64 {
+    f64::from(Volume::new(position).amplitude())
+}
+
+/// The control position an MPRIS `Volume` write is asking for: the exact
+/// inverse of the cubic taper, rounded to the nearest position.
+///
+/// Values outside `0.0..=1.0` are clamped rather than refused — the spec
+/// names negatives specifically ("the volume should be set to 0.0") and baz
+/// offers no gain above unity (ADR-0011), so the honest answer to "louder
+/// than the loudest" is the loudest. A non-finite value is not a level at
+/// all and reads as silence.
+pub(crate) fn position_for_amplitude(amplitude: f64) -> u16 {
+    // NaN first, because every comparison with it is false and it would
+    // otherwise fall through to the arithmetic. An infinity is a level, of a
+    // sort, and clamps like any other out-of-range one.
+    if amplitude.is_nan() || amplitude <= 0.0 {
+        return 0;
+    }
+    if amplitude >= 1.0 {
+        return MAX_POSITION;
+    }
+    // The taper is `(position / MAX)³`, so its inverse is a cube root. f64
+    // carries the f32 amplitude exactly and the cube root divides its
+    // relative error by three, so the rounding below lands on the position
+    // the amplitude came from — asserted for all 1001 of them.
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "cbrt of a value in (0, 1) is in (0, 1), so the product is inside 0..MAX_POSITION"
+    )]
+    let position = (amplitude.cbrt() * f64::from(MAX_POSITION)).round() as u16;
+    position.min(MAX_POSITION)
 }
 
 /// Where an MPRIS `SetPosition(track_id, position_us)` call should land, or
@@ -246,7 +349,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use baz_core::protocol::Event;
+    use baz_core::protocol::{Event, VolumePath};
 
     use crate::player::Availability;
     use crate::vm::{AlbumArtistVm, AlbumVm, EditionKey, EditionVm, TrackVm};
@@ -508,6 +611,105 @@ mod tests {
             None,
             "there is nothing to position when nothing is playing"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // Volume: MPRIS's linear amplitude, baz's control position
+    // -----------------------------------------------------------------
+
+    /// The claim the module docs make, checked at every one of the taper's
+    /// 1001 positions: the mapping to MPRIS and back is `baz-core`'s own
+    /// curve and its exact inverse, so a client that reads the property and
+    /// writes it back unchanged moves nothing.
+    #[test]
+    fn volume_round_trips_through_the_core_taper() {
+        for position in 0..=MAX_POSITION {
+            let amplitude = volume_amplitude(position);
+            assert!(
+                (0.0..=1.0).contains(&amplitude),
+                "position {position} is not an amplitude: {amplitude}"
+            );
+            assert_eq!(
+                position_for_amplitude(amplitude),
+                position,
+                "position {position} did not survive the round trip"
+            );
+        }
+    }
+
+    #[test]
+    fn the_taper_endpoints_are_the_specs_endpoints() {
+        // Unity is 1.0 exactly — the value MPRIS calls "normal volume", and
+        // the position at which baz touches nothing.
+        assert!((volume_amplitude(MAX_POSITION) - 1.0).abs() < f64::EPSILON);
+        assert!(volume_amplitude(0).abs() < f64::EPSILON);
+        assert_eq!(position_for_amplitude(1.0), MAX_POSITION);
+        assert_eq!(position_for_amplitude(0.0), 0);
+        // Half amplitude is a real position on the fader, not half travel:
+        // the cube root of 0.5 is ~0.7937 of the way up.
+        assert_eq!(position_for_amplitude(0.5), 794);
+        // Half *travel* is a eighth of the amplitude — the 60 dB fader law,
+        // read from the same curve the engine uses.
+        assert!((volume_amplitude(500) - 0.125).abs() < 1e-9);
+    }
+
+    /// The spec names negatives specifically, and baz offers no gain above
+    /// unity, so both ends clamp rather than erroring.
+    #[test]
+    fn out_of_range_volumes_clamp_rather_than_erroring() {
+        assert_eq!(position_for_amplitude(-1.0), 0);
+        assert_eq!(position_for_amplitude(-0.0), 0);
+        assert_eq!(position_for_amplitude(4.2), MAX_POSITION);
+        assert_eq!(position_for_amplitude(f64::INFINITY), MAX_POSITION);
+        assert_eq!(position_for_amplitude(f64::NEG_INFINITY), 0);
+        assert_eq!(position_for_amplitude(f64::NAN), 0, "not a level at all");
+    }
+
+    #[test]
+    fn the_reported_volume_is_the_effective_level() {
+        let albums = albums();
+        let mut player = playing(0, Some(1_000));
+        assert!((Snapshot::from_player(&player, None).volume() - 1.0).abs() < f64::EPSILON);
+
+        player.apply(
+            &Event::VolumeChanged {
+                position: 500,
+                muted: false,
+                path: VolumePath::SoftwareGain,
+            },
+            &albums,
+        );
+        let snapshot = Snapshot::from_player(&player, None);
+        assert_eq!(snapshot.volume_position, 500);
+        assert!(!snapshot.muted);
+        assert!((snapshot.volume() - 0.125).abs() < 1e-9);
+
+        // Muted reports silence — what is coming out — while the fader's own
+        // position is kept, so unmuting restores it.
+        player.apply(
+            &Event::VolumeChanged {
+                position: 500,
+                muted: true,
+                path: VolumePath::SoftwareGain,
+            },
+            &albums,
+        );
+        let snapshot = Snapshot::from_player(&player, None);
+        assert!(snapshot.volume().abs() < f64::EPSILON);
+        assert_eq!(
+            snapshot.volume_position, 500,
+            "the position mute will restore is not destroyed by reporting 0.0"
+        );
+    }
+
+    /// The server serves the default snapshot until the first publish, so
+    /// its volume has to be the one a freshly spawned engine is at.
+    #[test]
+    fn the_default_snapshot_advertises_unity_not_silence() {
+        let snapshot = Snapshot::default();
+        assert_eq!(snapshot.volume_position, MAX_POSITION);
+        assert!(!snapshot.muted);
+        assert!((snapshot.volume() - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

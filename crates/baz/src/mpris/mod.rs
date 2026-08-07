@@ -98,10 +98,38 @@
 //!   would refuse is the same lie in a different place.
 //! - **`LoopStatus`, `Shuffle`**: optional in the spec and unimplemented in
 //!   baz, so they are absent rather than present-and-fixed.
-//! - **`Rate`, `Volume`**: read-only, both `1.0`, with `MinimumRate` and
-//!   `MaximumRate` pinned to `1.0`. baz has neither a rate control nor a
-//!   volume control; a writable property that silently discarded writes
-//!   would be worse than an error.
+//! - **`Rate`**: read-only `1.0`, with `MinimumRate` and `MaximumRate` pinned
+//!   to `1.0`. baz plays at the source's rate and has no rate control
+//!   (ADR-0009); a writable property that silently discarded writes would be
+//!   worse than an error.
+//!
+//! # `Volume`
+//!
+//! Read *and* write, since ADR-0011. Three decisions worth stating, because
+//! MPRIS leaves all three open:
+//!
+//! - **The unit is bridged, never re-invented.** MPRIS's `Volume` is a linear
+//!   amplitude where 1.0 is normal; baz's is an integer control position on a
+//!   cubic taper. [`state::volume_amplitude`] and
+//!   [`state::position_for_amplitude`] are the only crossing, and both go
+//!   through `baz_core::volume`'s curve or its exact inverse — so "half
+//!   volume" from the lock screen and half-travel on the fader mean the same
+//!   sound, which is the whole reason ADR-0011 put the taper in `baz-core`.
+//! - **The reading is the *effective* level.** MPRIS has no mute, so a muted
+//!   player reports `0.0` — what is actually coming out — rather than where
+//!   the fader is sitting. The alternative advertises a player at full volume
+//!   that makes no sound.
+//! - **Writing a level above zero unmutes.** A person dragging a media
+//!   widget's volume up is asking to hear something, and leaving them at
+//!   silence while the number climbs would be the writable-property-that-does-
+//!   nothing this module refuses elsewhere. It costs one extra `SetMute`, sent
+//!   only when the player is actually muted. Writing `0.0` sets the *position*
+//!   to zero and does not mute: position 0 is a real place on the control that
+//!   survives a mute round trip (ADR-0011 §3).
+//!
+//! A write is refused with `NotSupported` when `CanControl` is false, which is
+//! what the spec asks for and what the rest of this interface already does by
+//! never offering a control it cannot honour.
 //!
 //! # The dependency
 //!
@@ -192,6 +220,12 @@ pub(crate) enum Request {
     /// `SetPosition`, already checked against the current track id and
     /// converted to milliseconds from the start of the track.
     SeekTo(u64),
+    /// A `Volume` write, already mapped through `baz-core`'s taper to a
+    /// control position.
+    SetVolume(u16),
+    /// Unmute, because a `Volume` write above zero arrived while muted (see
+    /// the module docs). Never sent to mute — MPRIS has no way to ask.
+    SetMute(bool),
     /// `Raise` — bring the window forward. Best effort: a Wayland compositor
     /// may decline, which is its right.
     Raise,

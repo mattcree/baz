@@ -99,6 +99,7 @@ mod imp {
     use baz_core::engine::EngineHandle;
     use baz_core::playback::EngineConfig;
     use baz_core::protocol::Command;
+    use baz_core::volume::VolumeState;
     use iced::Subscription;
     use iced::futures::channel::mpsc::{UnboundedReceiver, unbounded};
     use iced::futures::stream::{self, StreamExt as _};
@@ -184,6 +185,15 @@ mod imp {
             self.availability.clone()
         }
 
+        /// The engine's volume right now — the one *pull* in an otherwise
+        /// event-driven state machine, taken once at start-up so the fader is
+        /// right on the first frame rather than on the first change (ADR-0011
+        /// provides `EngineHandle::volume` for exactly this). `None` when
+        /// there is no engine to ask.
+        pub fn volume(&self) -> Option<VolumeState> {
+            self.handle.as_ref().map(EngineHandle::volume)
+        }
+
         /// Send a command; `false` means the engine is gone (the caller
         /// should downgrade the state machine, never assume success).
         pub fn send(&self, command: Command) -> bool {
@@ -214,6 +224,7 @@ mod imp {
 #[cfg(not(feature = "device-output"))]
 mod imp {
     use baz_core::protocol::Command;
+    use baz_core::volume::VolumeState;
     use iced::Subscription;
 
     use super::PlayerEvent;
@@ -236,6 +247,11 @@ mod imp {
         /// Always [`Availability::NotBuilt`] — playback UI stays hidden.
         pub fn availability(&self) -> Availability {
             Availability::NotBuilt
+        }
+
+        /// No engine, no volume to read.
+        pub fn volume(&self) -> Option<VolumeState> {
+            None
         }
 
         /// No engine: every send is refused. (Unreachable in practice —

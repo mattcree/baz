@@ -1,5 +1,5 @@
-//! The transport glyphs — play, pause, next — as vector outlines rasterized
-//! once into small RGBA sprites.
+//! The control glyphs — play, pause, next, and the speaker in its two
+//! states — as vector outlines rasterized once into small RGBA sprites.
 //!
 //! This is view-layer code (ADR-0006 layer 3): it draws with
 //! [`crate::theme`]'s tokens and holds no state. What lives here is the
@@ -14,7 +14,7 @@
 //! vendored sources (`iced_core` 0.13.2, `iced_widget` 0.13.4, `iced_wgpu`
 //! 0.13.5) rather than assumed:
 //!
-//! - **Quads from a custom widget** (the obvious sibling of [`crate::seek`])
+//! - **Quads from a custom widget** (the obvious sibling of [`crate::groove`])
 //!   cannot draw a triangle. `iced::advanced::renderer::Renderer` exposes
 //!   exactly one primitive — [`fill_quad`](iced::advanced::renderer::Renderer::fill_quad),
 //!   an axis-aligned rectangle — and `Transformation` offers only
@@ -55,6 +55,9 @@
 //! fixed-size box inside a fixed-size button. Swapping play for pause
 //! therefore cannot move anything — which is half of the fix for the
 //! bottom bar's flash (see [`crate::player`]'s pending-affordance note).
+//! The same property is what lets the mute affordance swap between
+//! [`Glyph::Speaker`] and [`Glyph::SpeakerMuted`] without the bottom bar
+//! reflowing: muting is a change of ink, never of geometry.
 
 use std::sync::LazyLock;
 
@@ -89,7 +92,7 @@ type Vertex = (f32, f32);
 /// One closed outline of a glyph.
 type Outline = &'static [Vertex];
 
-/// A transport glyph.
+/// A control glyph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Glyph {
     /// Play: the right-pointing triangle.
@@ -98,6 +101,10 @@ pub enum Glyph {
     Pause,
     /// Next: a triangle against a bar.
     Next,
+    /// Speaker, sounding: the cone with two waves off it.
+    Speaker,
+    /// Speaker, muted: the same cone with a cross where the waves were.
+    SpeakerMuted,
 }
 
 /// Play — one triangle, sitting a touch right of the box's centre so the
@@ -117,9 +124,76 @@ const NEXT: &[Outline] = &[
     &[(0.66, 0.15), (0.80, 0.15), (0.80, 0.85), (0.66, 0.85)],
 ];
 
+/// The speaker's cone — the duct and the flare as one closed outline, shared
+/// by both speaker glyphs so that muting cannot change the shape a user is
+/// aiming at. Symmetric about the horizontal centre line.
+const CONE: Outline = &[
+    (0.06, 0.37),
+    (0.20, 0.37),
+    (0.40, 0.16),
+    (0.40, 0.84),
+    (0.20, 0.63),
+    (0.06, 0.63),
+];
+
+/// Speaker, sounding — the cone with two waves.
+///
+/// The waves are chevrons rather than arcs, and that is a rasterizer
+/// decision rather than a stylistic one: an arc would have to be a polygon
+/// approximating it, and at [`RASTER_PX`] (32 px) the difference between a
+/// seven-segment arc and a straight chevron is under a pixel of coverage.
+/// Two hand-written hexagons say the same thing with no interpolation table.
+const SPEAKER: &[Outline] = &[
+    CONE,
+    &[
+        (0.50, 0.30),
+        (0.60, 0.50),
+        (0.50, 0.70),
+        (0.57, 0.70),
+        (0.67, 0.50),
+        (0.57, 0.30),
+    ],
+    &[
+        (0.72, 0.22),
+        (0.85, 0.50),
+        (0.72, 0.78),
+        (0.79, 0.78),
+        (0.92, 0.50),
+        (0.79, 0.22),
+    ],
+];
+
+/// Speaker, muted — the same cone, with a cross where the waves were.
+///
+/// The two bars of the cross **overlap** at their centre, which is why
+/// [`Glyph::covers`] takes the union of the outlines rather than the
+/// even-odd rule across all of them: an even-odd test over the pair would
+/// punch a diamond-shaped hole exactly where the cross should be solidest.
+const SPEAKER_MUTED: &[Outline] = &[
+    CONE,
+    &[
+        (0.481, 0.359),
+        (0.559, 0.281),
+        (0.919, 0.641),
+        (0.841, 0.719),
+    ],
+    &[
+        (0.481, 0.641),
+        (0.559, 0.719),
+        (0.919, 0.359),
+        (0.841, 0.281),
+    ],
+];
+
 impl Glyph {
     /// Every glyph, in sprite-sheet order.
-    const ALL: [Self; 3] = [Self::Play, Self::Pause, Self::Next];
+    const ALL: [Self; 5] = [
+        Self::Play,
+        Self::Pause,
+        Self::Next,
+        Self::Speaker,
+        Self::SpeakerMuted,
+    ];
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -128,6 +202,8 @@ impl Glyph {
             Self::Play => PLAY,
             Self::Pause => PAUSE,
             Self::Next => NEXT,
+            Self::Speaker => SPEAKER,
+            Self::SpeakerMuted => SPEAKER_MUTED,
         }
     }
 
@@ -137,11 +213,24 @@ impl Glyph {
             Self::Play => 0,
             Self::Pause => 1,
             Self::Next => 2,
+            Self::Speaker => 3,
+            Self::SpeakerMuted => 4,
         }
     }
 
-    /// Whether the unit-square point `(x, y)` is inside the glyph. The
-    /// outlines never overlap, so "inside any" is the whole rule.
+    /// The speaker in the state `muted` describes.
+    #[must_use]
+    pub fn speaker(muted: bool) -> Self {
+        if muted {
+            Self::SpeakerMuted
+        } else {
+            Self::Speaker
+        }
+    }
+
+    /// Whether the unit-square point `(x, y)` is inside the glyph — the
+    /// *union* of its outlines, so overlapping ones (the mute cross) fill
+    /// solid rather than cancelling.
     #[must_use]
     pub fn covers(self, x: f32, y: f32) -> bool {
         self.outlines()
@@ -159,13 +248,13 @@ impl From<PlayPause> for Glyph {
     }
 }
 
-/// The rasterized sheet, built once on first use: three sprites, all
+/// The rasterized sheet, built once on first use: one sprite per glyph, all
 /// [`RASTER_PX`] square, inked in [`theme::GLYPH`].
 ///
 /// Caching matters beyond the arithmetic — `image::Handle::from_rgba` mints
 /// a fresh id per call, and a fresh id per frame would churn the renderer's
-/// texture atlas. These three ids live as long as the process.
-static SHEET: LazyLock<[image::Handle; 3]> = LazyLock::new(|| {
+/// texture atlas. These ids live as long as the process.
+static SHEET: LazyLock<[image::Handle; 5]> = LazyLock::new(|| {
     let ink = rgb(theme::GLYPH);
     Glyph::ALL.map(|glyph| image::Handle::from_rgba(RASTER_PX, RASTER_PX, rasterize(glyph, ink)))
 });
@@ -384,6 +473,78 @@ mod tests {
     fn the_toggle_state_picks_its_own_glyph() {
         assert_eq!(Glyph::from(PlayPause::Play), Glyph::Play);
         assert_eq!(Glyph::from(PlayPause::Pause), Glyph::Pause);
+        assert_eq!(Glyph::speaker(false), Glyph::Speaker);
+        assert_eq!(Glyph::speaker(true), Glyph::SpeakerMuted);
+    }
+
+    #[test]
+    fn the_speaker_is_a_cone_with_two_waves_off_it() {
+        let pixels = rasterize(Glyph::Speaker, [255, 255, 255]);
+        let mid = RASTER_PX / 2;
+        // Across the middle: cone, gap, wave, gap, wave, gap.
+        let row: Vec<bool> = (0..RASTER_PX)
+            .map(|column| alpha(&pixels, column, mid) > 0)
+            .collect();
+        let runs = row.chunk_by(|a, b| a == b).count();
+        assert_eq!(runs, 7, "expected gap/cone/gap/wave/gap/wave/gap");
+        assert!(
+            !row[0] && !row[(RASTER_PX - 1) as usize],
+            "inset at both ends"
+        );
+        // The cone occupies the left two fifths and the waves the rest —
+        // the proportions that make the shape read as a speaker rather than
+        // as three unrelated marks.
+        let solid: Vec<u32> = (0..RASTER_PX).filter(|&c| row[c as usize]).collect();
+        assert!(*solid.first().expect("a cone") < RASTER_PX / 8);
+        assert!(*solid.last().expect("a wave") > RASTER_PX * 4 / 5);
+        // Vertically symmetric, so the glyph reads as centred.
+        for column in 0..RASTER_PX {
+            for row in 0..RASTER_PX / 2 {
+                assert_eq!(
+                    alpha(&pixels, column, row),
+                    alpha(&pixels, column, RASTER_PX - 1 - row),
+                    "the speaker is not symmetric at {column},{row}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn muting_swaps_the_waves_for_a_solid_cross_and_keeps_the_cone() {
+        let sounding = rasterize(Glyph::Speaker, [255, 255, 255]);
+        let muted = rasterize(Glyph::SpeakerMuted, [255, 255, 255]);
+        // The cone is shared, so the left third of the sprite is identical:
+        // the target a user aims at does not move when the state changes.
+        let cone_edge = RASTER_PX * 2 / 5;
+        for row in 0..RASTER_PX {
+            for column in 0..cone_edge {
+                assert_eq!(
+                    alpha(&sounding, column, row),
+                    alpha(&muted, column, row),
+                    "the cone moved at {column},{row}"
+                );
+            }
+        }
+        // The cross is solid where its two bars overlap — the union rule in
+        // `covers`. An even-odd test over both outlines would leave a hole.
+        let mid = RASTER_PX / 2;
+        let centre = (RASTER_PX * 7) / 10;
+        assert_eq!(
+            alpha(&muted, centre, mid),
+            u8::MAX,
+            "the bars of the cross must not cancel where they cross"
+        );
+        // And it is symmetric about the centre line, like the waves it
+        // replaced.
+        for column in 0..RASTER_PX {
+            for row in 0..RASTER_PX / 2 {
+                assert_eq!(
+                    alpha(&muted, column, row),
+                    alpha(&muted, column, RASTER_PX - 1 - row),
+                    "the muted speaker is not symmetric at {column},{row}"
+                );
+            }
+        }
     }
 
     #[test]

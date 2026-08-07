@@ -62,6 +62,11 @@ pub const LAMP_SOFT: Color = Color::from_rgba(0.890, 0.631, 0.306, 0.55);
 pub const LAMP_GLOW: Color = Color::from_rgba(0.890, 0.631, 0.306, 0.30);
 /// Near-black ink for text sitting *on* the amber lamp.
 pub const LAMP_INK: Color = Color::from_rgb(0.106, 0.078, 0.043);
+/// A control that is *set* but not currently sounding: the volume fader
+/// while muted. Dimmer than [`PAPER_FAINT`] and still plainly above
+/// [`RECESS`], so the position the listener chose stays readable while the
+/// control stops claiming to be audible.
+pub const PAPER_MUTED: Color = Color::from_rgb(0.290, 0.278, 0.263);
 /// Problems, stated quietly: a soft brick red, no alarm klaxon.
 pub const ALERT: Color = Color::from_rgb(0.851, 0.467, 0.420);
 /// Success (theme palette slot; nothing renders it directly yet).
@@ -133,7 +138,7 @@ pub const RADIUS_CHIP: f32 = 4.0;
 /// Edge of the playing-album lamp dot (a [`RADIUS_CTRL`]-free circle).
 pub const DOT: f32 = 6.0;
 
-/// Thickness of the seek bar's rail — a groove, not a gauge.
+/// Thickness of a groove's rail — a groove, not a gauge.
 pub const RAIL: f32 = 4.0;
 /// Vertical slop above *and* below the [`RAIL`] that still counts as the
 /// seek bar. A 4 px groove is a 4 px target, which is a miss waiting to
@@ -164,6 +169,54 @@ pub const PREVIEW_H: f32 = 15.0;
 /// [`SIZE_CAPTION`] in [`MONO`] plus its padding, fixed so the tip can be
 /// centered on the pointer without measuring text.
 pub const PREVIEW_W: f32 = 58.0;
+
+// ---------------------------------------------------------------------------
+// The volume control
+// ---------------------------------------------------------------------------
+
+/// Width of the volume fader's groove.
+///
+/// Shorter than the seek bar on purpose: a seek bar is a *map of the track*
+/// and wants resolution, while a fader is a setting and wants to sit quietly
+/// in the corner. 96 px still gives ~10 control positions per pixel, which is
+/// ~0.26 dB at the top of the taper — finer than a hand can aim and two
+/// hundred times finer than the ~1 dB a listener hears as a change.
+pub const VOLUME_W: f32 = 96.0;
+/// Width of the level tip that floats over the volume groove on hover:
+/// enough for `-18.1 dB` at [`SIZE_CAPTION`] in [`MONO`] plus its padding.
+pub const LEVEL_W: f32 = 62.0;
+/// Width of the detent mark on a groove's travel.
+pub const DETENT_W: f32 = 2.0;
+/// Height of the detent mark.
+pub const DETENT_H: f32 = 5.0;
+/// Clearance between the top of the handle and the bottom of the detent
+/// mark. The mark is lifted clear of the knob rather than drawn under it —
+/// see [`crate::groove::Detent`].
+pub const DETENT_GAP: f32 = 2.0;
+/// Hit height of the volume groove: the rail plus, on each side, room for
+/// the knob and the detent mark above it. Taller than [`RAIL_HIT`] because
+/// the mark has to live somewhere the handle is not.
+pub const VOLUME_HIT: f32 = RAIL + 2.0 * (KNOB + DETENT_GAP + DETENT_H);
+/// Height of the volume block: the level-preview lane over the groove,
+/// reserved whether or not the pointer is anywhere near it.
+pub const VOLUME_ROW_H: f32 = PREVIEW_H + VOLUME_HIT;
+/// Width of the whole volume block — the mute affordance, a gap, the
+/// groove. Fixed, so neither a volume change, a mute, nor the fader's own
+/// hover can move anything beside it.
+pub const VOLUME_BLOCK_W: f32 = TRANSPORT_HIT + GAP_SM + VOLUME_W;
+
+/// The detent mark's ink, faint at rest and full paper when the handle is
+/// sitting on it.
+///
+/// Deliberately *not* lamp amber even when engaged. Unity is a property of
+/// the control, not a claim about what is playing, and the accent is
+/// reserved (see the palette rationale). What distinguishes "on the detent"
+/// from "a pixel below it" is a five-fold jump in ink weight on a 2 px mark
+/// — findable when you look for it, invisible when you are not.
+#[must_use]
+pub fn detent_ink(engaged: bool) -> Color {
+    if engaged { PAPER } else { HAIRLINE }
+}
 
 // ---------------------------------------------------------------------------
 // The transport controls
@@ -232,18 +285,19 @@ pub fn glyph_opacity(enabled: bool, pending: bool) -> f32 {
     }
 }
 
-/// The cursor over a seekable bar. `Pointer` — the pointing hand every
+/// The cursor over a live groove. `Pointer` — the pointing hand every
 /// platform uses for "this responds to a click" — because clicking the bar
 /// is the primary gesture here and dragging is the refinement, not the
 /// other way round. (`Grab`, iced's slider default, promises a handle that
-/// must be picked up first, which is not how this bar behaves.)
-pub const SEEK_CURSOR: mouse::Interaction = mouse::Interaction::Pointer;
-/// The cursor while the bar is held: the closed hand, so the difference
+/// must be picked up first, which is not how these bars behave.)
+pub const GROOVE_CURSOR: mouse::Interaction = mouse::Interaction::Pointer;
+/// The cursor while a groove is held: the closed hand, so the difference
 /// between "you may" and "you are" is visible without looking at the bar.
-pub const SEEK_CURSOR_HELD: mouse::Interaction = mouse::Interaction::Grabbing;
-/// The cursor over a bar that cannot be scrubbed (a track of undeclared
-/// length): the plain arrow, promising nothing.
-pub const SEEK_CURSOR_INERT: mouse::Interaction = mouse::Interaction::None;
+pub const GROOVE_CURSOR_HELD: mouse::Interaction = mouse::Interaction::Grabbing;
+/// The cursor over a groove that cannot be driven (a track of undeclared
+/// length, or a volume fader with no engine behind it): the plain arrow,
+/// promising nothing.
+pub const GROOVE_CURSOR_INERT: mouse::Interaction = mouse::Interaction::None;
 
 /// Symmetric padding: `vertical` on top/bottom, `horizontal` on left/right.
 #[must_use]
@@ -458,6 +512,69 @@ pub fn seek_inert(_theme: &Theme, _status: slider::Status) -> slider::Style {
     }
 }
 
+/// The volume fader: the same recessed groove as the seek bar, inked in
+/// paper rather than lamp amber, with a knob that does **not** grow.
+///
+/// Two deliberate differences from [`seek`], each with a reason:
+///
+/// - **No accent.** The lamp means playback truth (see the palette
+///   rationale) — where the music is, which album is playing. A volume is a
+///   *setting*, the same class of thing as the edition selector, so it is
+///   drawn in the room's paper inks and brightens under the pointer instead.
+///   A second amber control in the bar would dilute the one signal reserved
+///   for the music itself.
+/// - **A constant handle radius.** The seek knob grows under the pointer,
+///   which shifts its centre by two pixels at the ends of the travel. That is
+///   harmless on a bar with nothing else drawn on it; here it would drag the
+///   unity detent along with it, and a detent that moves is not a detent. The
+///   hover affordance is the ink, the cursor, and the level tip instead.
+#[must_use]
+pub fn volume(_theme: &Theme, status: slider::Status) -> slider::Style {
+    let fill = match status {
+        slider::Status::Active => PAPER_FAINT,
+        slider::Status::Hovered | slider::Status::Dragged => PAPER_DIM,
+    };
+    volume_style(fill)
+}
+
+/// The volume fader while muted: the position the listener chose is still
+/// shown — mute does not move the fader, and pretending otherwise would lose
+/// the very setting mute exists to restore — but in the ink of something that
+/// is not currently sounding.
+#[must_use]
+pub fn volume_muted(_theme: &Theme, _status: slider::Status) -> slider::Style {
+    volume_style(PAPER_MUTED)
+}
+
+/// The volume fader with no engine behind it: the groove keeps its place and
+/// its detent, filled with nothing at all.
+#[must_use]
+pub fn volume_inert(_theme: &Theme, _status: slider::Status) -> slider::Style {
+    volume_style(RECESS)
+}
+
+/// The shared shape of every volume-fader state: only the ink varies, so no
+/// state of this control can move a pixel.
+fn volume_style(fill: Color) -> slider::Style {
+    slider::Style {
+        rail: Rail {
+            backgrounds: (Background::Color(fill), Background::Color(RECESS)),
+            width: RAIL,
+            border: Border {
+                color: HAIRLINE,
+                width: 1.0,
+                radius: (RAIL / 2.0).into(),
+            },
+        },
+        handle: Handle {
+            shape: HandleShape::Circle { radius: KNOB },
+            background: Background::Color(fill),
+            border_width: 0.0,
+            border_color: Color::TRANSPARENT,
+        },
+    }
+}
+
 /// The well holding the album's edition selector: the same inset treatment
 /// as a text input, so a segmented control reads as a place you *choose*
 /// something rather than a row of buttons that each do something.
@@ -619,6 +736,82 @@ mod tests {
         // `192 → 176.4 kHz`, fifteen monospace figures — so that a note
         // appearing there moves nothing beside it.
         const { assert!(SIGNAL_W > SIZE_META * 15.0 * 0.5) }
+    }
+
+    #[test]
+    fn the_volume_block_reserves_every_state_it_can_be_in() {
+        // The fader's hit band has to hold the knob *and* the detent mark
+        // above it on both sides, or the mark the unity detent is made of
+        // would be drawn outside the widget's own bounds.
+        const { assert!(VOLUME_HIT >= RAIL + 2.0 * (KNOB + DETENT_GAP + DETENT_H)) }
+        // The mark clears the knob rather than hiding under it — the whole
+        // reason it is lifted at all.
+        const { assert!(DETENT_GAP > 0.0 && DETENT_H > 0.0) }
+        // The block is the mute target plus a gap plus the groove, and its
+        // height is the level lane over the fader. Both fixed, in every
+        // state, so no volume change and no mute can move a pixel beside it.
+        assert!((VOLUME_BLOCK_W - (TRANSPORT_HIT + GAP_SM + VOLUME_W)).abs() < f32::EPSILON);
+        assert!((VOLUME_ROW_H - (PREVIEW_H + VOLUME_HIT)).abs() < f32::EPSILON);
+        // The level tip must hold `-18.1 dB` — eight monospace figures at
+        // caption size, around half an em each — without clipping.
+        const { assert!(LEVEL_W > SIZE_CAPTION * 8.0 * 0.5) }
+        // And the whole right-hand end has to fit beside the centre column
+        // in the shipped window, or the zone would clip on launch.
+        const { assert!(VOLUME_BLOCK_W + GAP_SM + SIGNAL_W < 1280.0 - SEEK_ROW_W) }
+    }
+
+    #[test]
+    fn the_volume_fader_changes_only_its_ink() {
+        // Every state of this control has to draw the same geometry: the
+        // detent's position is derived from the handle's width, so a knob
+        // that grew under the pointer would drag the detent with it, and a
+        // detent that moves is not a detent.
+        let radius = |style: slider::Style| match style.handle.shape {
+            HandleShape::Circle { radius } => radius,
+            HandleShape::Rectangle { width, .. } => f32::from(width),
+        };
+        let theme = theme();
+        let mut widths = Vec::new();
+        for status in [
+            slider::Status::Active,
+            slider::Status::Hovered,
+            slider::Status::Dragged,
+        ] {
+            for style in [volume, volume_muted, volume_inert] {
+                let drawn = style(&theme, status);
+                widths.push(radius(drawn));
+                assert!(
+                    (drawn.rail.width - RAIL).abs() < f32::EPSILON,
+                    "the rail thickness must not vary with state"
+                );
+            }
+        }
+        assert!(
+            widths
+                .windows(2)
+                .all(|pair| (pair[0] - pair[1]).abs() < f32::EPSILON),
+            "the volume knob must not change size: {widths:?}"
+        );
+        // Muted is quieter than live and still readable above the groove it
+        // sits in — the fader keeps showing the position mute will restore.
+        const { assert!(PAPER_MUTED.r < PAPER_FAINT.r) }
+        const { assert!(PAPER_MUTED.r > RECESS.r * 2.0) }
+    }
+
+    #[test]
+    fn the_unity_detent_is_visible_without_being_loud() {
+        // Engaged has to be plainly different from at-rest — that contrast
+        // is what makes "at unity" and "a pixel below" different on sight —
+        // and neither may reach for the accent, which means playback truth.
+        let rest = detent_ink(false);
+        let engaged = detent_ink(true);
+        assert!(engaged.a > rest.a || engaged.r > rest.r * 3.0);
+        for ink in [rest, engaged] {
+            assert!(
+                (ink.r - LAMP.r).abs() > 0.1 || (ink.b - LAMP.b).abs() > 0.1,
+                "the detent must not be lamp amber"
+            );
+        }
     }
 
     #[test]

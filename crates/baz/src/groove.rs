@@ -1,12 +1,22 @@
-//! The seek groove: the bottom bar's scrub bar as a custom iced widget.
+//! The groove: a horizontal rail with a handle, as a custom iced widget.
+//!
+//! Two of the bottom bar's controls are grooves — the seek bar and the volume
+//! fader — and they are the *same* widget deliberately. Everything that made
+//! the seek bar worth writing by hand (a cursor that says "clickable", a
+//! hover position to preview from, a press-to-release movement threshold, and
+//! tracking a held pointer wherever it wanders) is exactly what a volume
+//! fader needs, and a second widget would be a second place for those lessons
+//! to be forgotten. The only thing the fader adds is an optional
+//! [`Detent`] — a mark on the travel, drawn where it can be seen rather than
+//! where the handle will cover it.
 //!
 //! This is view-layer code (ADR-0006 layer 3) and holds **no** playback
 //! state: it measures the pointer against its own bounds and reports what it
 //! saw as a [`Pointer`]; every decision about what that means — click or
-//! scrub, preview or not, what position to seek to — belongs to
-//! [`crate::player`], where it is pure and unit-tested. The widget's own
-//! `held`/`hovered` flags exist only to know which raw events to forward and
-//! which cursor to ask for.
+//! scrub, preview or not, what position to seek to, whether the detent is
+//! engaged — belongs to [`crate::player`], where it is pure and unit-tested.
+//! The widget's own `held`/`hovered` flags exist only to know which raw
+//! events to forward and which cursor to ask for.
 //!
 //! # Why not `slider`, and why not `mouse_area`
 //!
@@ -50,6 +60,21 @@ use crate::theme;
 /// `slider::Style` and this widget stays a drawing detail.
 type StyleFn = fn(&Theme, iced::widget::slider::Status) -> Style;
 
+/// A marked position on the travel — the volume fader's unity detent.
+///
+/// It is drawn *above* the rail rather than on it, clear of the handle by
+/// [`theme::DETENT_GAP`], because a mark the handle covers is a mark that
+/// disappears at exactly the position it exists to advertise. `engaged` is
+/// pure state decided in [`crate::player`] (the control sits on the detent),
+/// never a float comparison made here.
+#[derive(Debug, Clone, Copy)]
+pub struct Detent {
+    /// Where the mark sits along the travel, `0.0..=1.0`.
+    pub at: f32,
+    /// Whether the handle is currently on it.
+    pub engaged: bool,
+}
+
 /// The pointer handlers a live groove reports through. Absent on an inert
 /// one (a track of undeclared length), which is how the widget knows to
 /// ignore the pointer entirely rather than to look identical and do nothing.
@@ -68,6 +93,7 @@ pub struct Groove<'a, Message> {
     width: Length,
     height: f32,
     style: StyleFn,
+    detent: Option<Detent>,
     pointers: Option<Pointers<'a, Message>>,
 }
 
@@ -93,8 +119,16 @@ impl<'a, Message> Groove<'a, Message> {
             width: Length::Fill,
             height: theme::RAIL_HIT,
             style,
+            detent: None,
             pointers: None,
         }
+    }
+
+    /// Marks `detent` on the travel (see [`Detent`]).
+    #[must_use]
+    pub fn detent(mut self, detent: Detent) -> Self {
+        self.detent = Some(detent);
+        self
     }
 
     /// Sets the groove's width.
@@ -249,14 +283,14 @@ where
     ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<State>();
         if self.pointers.is_none() {
-            return theme::SEEK_CURSOR_INERT;
+            return theme::GROOVE_CURSOR_INERT;
         }
         if state.held {
-            theme::SEEK_CURSOR_HELD
+            theme::GROOVE_CURSOR_HELD
         } else if cursor.is_over(layout.bounds()) {
-            theme::SEEK_CURSOR
+            theme::GROOVE_CURSOR
         } else {
-            theme::SEEK_CURSOR_INERT
+            theme::GROOVE_CURSOR_INERT
         }
     }
 
@@ -291,7 +325,8 @@ where
         // The handle's travel is inset by its own width so it never hangs
         // off either end — the same geometry iced's slider draws, kept so
         // the bar looks exactly as it did before it grew a brain.
-        let offset = (bounds.width - handle_width) * self.position.clamp(0.0, 1.0);
+        let travel = |fraction: f32| (bounds.width - handle_width) * fraction.clamp(0.0, 1.0);
+        let offset = travel(self.position);
         let rail_y = bounds.y + bounds.height / 2.0;
         let filled = offset + handle_width / 2.0;
 
@@ -321,6 +356,24 @@ where
             },
             style.rail.backgrounds.1,
         );
+        // The detent goes on before the handle but never under it: it is
+        // lifted clear of the knob's own radius, so the mark that says
+        // "here" is legible in the one state that matters most — when the
+        // handle is sitting on it.
+        if let Some(detent) = self.detent {
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: Rectangle {
+                        x: bounds.x + travel(detent.at) + (handle_width - theme::DETENT_W) / 2.0,
+                        y: rail_y - handle_height / 2.0 - theme::DETENT_GAP - theme::DETENT_H,
+                        width: theme::DETENT_W,
+                        height: theme::DETENT_H,
+                    },
+                    ..renderer::Quad::default()
+                },
+                theme::detent_ink(detent.engaged),
+            );
+        }
         renderer.fill_quad(
             renderer::Quad {
                 bounds: Rectangle {
