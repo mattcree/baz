@@ -25,8 +25,18 @@ playable.
 
 ### 1. The model: `Album { …, editions: Vec<Edition> }`
 
-`Library::albums()` groups tracks into albums exactly as before, then splits
-each album by **codec** into editions. An `Edition` is a format plus that
+`Library::albums()` groups tracks into albums, then splits each album by
+**codec** into editions.
+
+> **Amended by ADR-0008 (2026-08-07).** As written, this decision grouped
+> "exactly as before" — on case-folded (track artist, album title). It now
+> groups on (**album artist**, album title), and `Album::artist` is an
+> `AlbumArtist` enum rather than an `Option<&str>`; see
+> `docs/adr/0008-album-artist-grouping.md`. Nothing about editions changed:
+> the two axes are independent — album artist decides what one album *is*,
+> codec decides how many editions it has — and
+> `a_grouped_soundtrack_still_splits_into_editions_by_codec` holds them
+> apart. §3 below is likewise v2-of-3; the v3 migration is ADR-0008 §5. An `Edition` is a format plus that
 format's own track list; every track belongs to exactly one edition, and
 nothing is paired across editions by position — so a partial rip is simply a
 shorter edition, never a mis-alignment.

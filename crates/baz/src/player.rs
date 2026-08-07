@@ -126,7 +126,7 @@ pub fn resolve_now_playing(albums: &[AlbumVm], path: &Path) -> NowPlaying {
                 return NowPlaying {
                     album_id: Some(album.id),
                     title: track.title.clone(),
-                    artist: album.artist.clone(),
+                    artist: album.artist.name().map(str::to_owned),
                 };
             }
         }
@@ -481,7 +481,7 @@ fn format_ms(ms: u64) -> String {
 mod tests {
     use baz_core::library::AudioFormat;
 
-    use crate::vm::{EditionKey, EditionVm, TrackVm};
+    use crate::vm::{AlbumArtistVm, EditionKey, EditionVm, TrackVm};
 
     use super::*;
 
@@ -489,6 +489,7 @@ mod tests {
         TrackVm {
             number: Some(number),
             title: title.to_owned(),
+            artist: None,
             duration: Some(Duration::from_secs(200)),
             path: PathBuf::from(path),
         }
@@ -508,7 +509,8 @@ mod tests {
             AlbumVm {
                 id: 11,
                 title: Some("Geogaddi".into()),
-                artist: Some("Boards of Canada".into()),
+                artist: AlbumArtistVm::Named("Boards of Canada".into()),
+                track_artists_vary: false,
                 year: Some(2002),
                 first_track: PathBuf::from("/m/boc/geogaddi/01.flac"),
                 editions: vec![edition(
@@ -522,7 +524,8 @@ mod tests {
             AlbumVm {
                 id: 22,
                 title: Some("Untitled".into()),
-                artist: None,
+                artist: AlbumArtistVm::Unknown,
+                track_artists_vary: false,
                 year: None,
                 first_track: PathBuf::from("/m/strays/a.wav"),
                 editions: vec![edition(
@@ -708,7 +711,8 @@ mod tests {
         let albums = vec![AlbumVm {
             id: 33,
             title: Some("Northwest Passage".into()),
-            artist: Some("Stan Rogers".into()),
+            artist: AlbumArtistVm::Named("Stan Rogers".into()),
+            track_artists_vary: false,
             year: Some(1981),
             first_track: PathBuf::from("/m/flac/01.flac"),
             editions: vec![

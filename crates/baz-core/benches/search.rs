@@ -85,6 +85,8 @@ fn synthetic_tracks() -> Vec<TrackMeta> {
                         "/music/{artist}/{album}/{track_n:02} {title}.flac"
                     )),
                     artist: Some(artist.clone()),
+                    album_artist: Some(artist.clone()),
+                    compilation: None,
                     album: Some(album.clone()),
                     title: Some(title),
                     track: Some(track_n),

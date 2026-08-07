@@ -8,6 +8,15 @@
 //! search-to-album filtering, gradient placeholder colors, and duration
 //! formatting.
 //!
+//! # Album artist
+//!
+//! Who an album is filed under is a three-state enum all the way through
+//! ([`AlbumArtistVm`], mirroring [`baz_core::index::AlbumArtist`]) — named,
+//! an unnamed compilation, or unknown. The display strings for the latter
+//! two live on [`AlbumArtistVm::label`] and nowhere else, so no code path
+//! can confuse them with a tag that happens to read the same words
+//! (ADR-0008).
+//!
 //! # Editions
 //!
 //! An album the user owns in several codecs arrives here as one
@@ -22,8 +31,19 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use baz_core::index::{Edition, Library};
+use baz_core::index::{Album, AlbumArtist, Edition, Library};
 use baz_core::library::{AudioFormat, TrackMeta};
+
+/// What the shelf calls an album whose artist is not known at all.
+pub const UNKNOWN_ARTIST: &str = "Unknown Artist";
+
+/// What the shelf calls an album that is a compilation with no named album
+/// artist ([`AlbumArtist::Various`]). Chosen because it is the phrase every
+/// tagger, every CD sleeve and every other player already uses — but it is
+/// *only* a label: nothing in baz ever matches on this string, so a file
+/// whose tag genuinely reads "Various Artists" stays a
+/// [`AlbumArtistVm::Named`] album and is never confused with this one.
+pub const VARIOUS_ARTISTS: &str = "Various Artists";
 
 /// Cap on tracks fetched per search keystroke. Search feeds the shelf filter
 /// through track→album mapping, so the cap bounds worst-case per-keystroke
@@ -41,8 +61,20 @@ pub struct AlbumVm {
     pub id: u64,
     /// Album title as first seen on its tracks; `None` = unknown-album group.
     pub title: Option<String>,
-    /// Artist as first seen; `None` = unknown-artist group.
-    pub artist: Option<String>,
+    /// Who the album is filed under — the owned mirror of
+    /// [`baz_core::index::AlbumArtist`].
+    pub artist: AlbumArtistVm,
+    /// Whether the album's *track* artists say something its header does
+    /// not, in which case the side panel lists each track's own artist.
+    ///
+    /// True exactly when some track names an artist that is not the album's
+    /// artist: a soundtrack filed under one label with a different composer
+    /// per cue, or a compilation. False for the ordinary album, where a
+    /// per-track artist column would repeat the header on every row.
+    /// Marta's per-composer credits are the reason this exists — grouping a
+    /// soundtrack into one tile must not cost the information that made it
+    /// shatter in the first place.
+    pub track_artists_vary: bool,
     /// Release year, first one any track declares.
     pub year: Option<u32>,
     /// First track's path — the file art resolution reads for an embedded
@@ -54,6 +86,53 @@ pub struct AlbumVm {
     /// [`baz_core::index::Album::editions`]). Never empty. Exactly one for
     /// the ordinary single-format album, and the UI shows no selector then.
     pub editions: Vec<EditionVm>,
+}
+
+/// The owned, render-ready form of [`baz_core::index::AlbumArtist`].
+///
+/// A three-state enum rather than an `Option<String>` plus a sentinel, for
+/// the reason the core type gives: "the tagger wrote *Various Artists*" and
+/// "baz could not name this album's artist" must not be the same value. The
+/// display strings live on [`AlbumArtistVm::label`] and nowhere else.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AlbumArtistVm {
+    /// A named album artist.
+    Named(String),
+    /// A compilation with no named album artist.
+    Various,
+    /// Nothing known.
+    Unknown,
+}
+
+impl AlbumArtistVm {
+    fn from_core(artist: AlbumArtist<'_>) -> Self {
+        match artist {
+            AlbumArtist::Named(name) => Self::Named(name.to_owned()),
+            AlbumArtist::Various => Self::Various,
+            AlbumArtist::Unknown => Self::Unknown,
+        }
+    }
+
+    /// What the tile caption and the panel header say. Always something —
+    /// a shelf tile with a blank second line reads as a rendering bug.
+    #[must_use]
+    pub fn label(&self) -> &str {
+        match self {
+            Self::Named(name) => name,
+            Self::Various => VARIOUS_ARTISTS,
+            Self::Unknown => UNKNOWN_ARTIST,
+        }
+    }
+
+    /// The name, when the album has one — `None` for a compilation or an
+    /// unknown, whose labels are baz's words rather than the library's.
+    #[must_use]
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Self::Named(name) => Some(name),
+            Self::Various | Self::Unknown => None,
+        }
+    }
 }
 
 impl AlbumVm {
@@ -126,6 +205,10 @@ pub struct TrackVm {
     pub number: Option<u32>,
     /// Display title: the tag/inferred title, else the file name.
     pub title: String,
+    /// This track's *own* artist, verbatim from its tags. Kept even when it
+    /// equals the album's, so the decision to show it stays one place
+    /// ([`AlbumVm::track_artists_vary`]).
+    pub artist: Option<String>,
     /// Playing time, when the scan could read it cheaply.
     pub duration: Option<Duration>,
     /// The audio file — the future playback seam addresses tracks by path.
@@ -142,6 +225,7 @@ impl TrackVm {
         Self {
             number: meta.track,
             title,
+            artist: meta.artist.clone(),
             duration: meta.duration,
             path: meta.path.clone(),
         }
@@ -149,9 +233,10 @@ impl TrackVm {
 }
 
 /// Build the full shelf from the library, in [`Library::albums`] order
-/// (artist, then album, case-insensitively; unknowns first). Called after
-/// each applied scan batch — owned strings are cloned per rebuild, which is
-/// milliseconds for a 10k-album shelf and happens off the per-frame path.
+/// (album artist, then album, case-insensitively; unknowns first). Called
+/// after each applied scan batch — owned strings are cloned per rebuild,
+/// which is milliseconds for a 10k-album shelf and happens off the
+/// per-frame path.
 pub fn build_albums(library: &Library) -> Vec<AlbumVm> {
     library
         .albums()
@@ -161,13 +246,32 @@ pub fn build_albums(library: &Library) -> Vec<AlbumVm> {
             Some(AlbumVm {
                 id: album_id(album.artist, album.title),
                 title: album.title.map(str::to_owned),
-                artist: album.artist.map(str::to_owned),
+                track_artists_vary: track_artists_vary(&album),
+                artist: AlbumArtistVm::from_core(album.artist),
                 year: album.year,
                 first_track: first.path.clone(),
                 editions: album.editions.iter().map(build_edition).collect(),
             })
         })
         .collect()
+}
+
+/// Whether any track names an artist the album's header does not already
+/// state — the condition for listing per-track artists in the side panel.
+///
+/// A track with no artist of its own never triggers it: it adds nothing.
+/// An album with no *named* artist (a compilation, or an unknown) is
+/// covered by no name at all, so any track that names one differs.
+/// Comparison is case-folded, matching the grouping key, so "RODIK" and
+/// "Rodik" do not read as a difference worth a whole extra line per row.
+fn track_artists_vary(album: &Album<'_>) -> bool {
+    let header = album.artist.name().map(str::to_lowercase);
+    album
+        .editions
+        .iter()
+        .flat_map(|edition| edition.tracks.iter())
+        .filter_map(|track| track.artist.as_deref())
+        .any(|artist| Some(artist.to_lowercase()) != header)
 }
 
 /// Project one core edition into its owned, render-ready form.
@@ -246,7 +350,9 @@ pub fn matching_album_ids(library: &Library, query: &str) -> Option<HashSet<u64>
     }
     let mut ids = HashSet::new();
     for track in library.search(query, SEARCH_LIMIT) {
-        ids.insert(album_id(track.artist.as_deref(), track.album.as_deref()));
+        // The same per-track resolution the grouping key uses, so a matched
+        // track always maps onto the shelf entry it is actually filed under.
+        ids.insert(album_id(AlbumArtist::of(track), track.album.as_deref()));
     }
     Some(ids)
 }
@@ -286,23 +392,29 @@ pub fn visible_indices(albums: &[AlbumVm], library: &Library, query: &str) -> Ve
 }
 
 /// Deterministic album identity: FNV-1a 64 over the case-folded
-/// artist/album pair, exactly mirroring the grouping key
-/// [`Library::albums`] uses (`str::to_lowercase`), with `None` and `Some`
-/// kept distinct. Stable across processes and rebuilds — it feeds the
-/// thumbnail cache key and the gradient placeholder colors.
+/// (album artist, album title) pair, exactly mirroring the grouping key
+/// [`Library::albums`] uses (`str::to_lowercase`). Each of the three
+/// [`AlbumArtist`] states gets its own marker byte, so an album filed under
+/// a literal "Various Artists" tag and a nameless compilation never collide
+/// on one id. Stable across processes and rebuilds — it feeds the thumbnail
+/// cache key and the gradient placeholder colors.
 #[must_use]
-pub fn album_id(artist: Option<&str>, album: Option<&str>) -> u64 {
+pub fn album_id(artist: AlbumArtist<'_>, album: Option<&str>) -> u64 {
     let mut hash = fnv1a(0xcbf2_9ce4_8422_2325, &[]);
-    for field in [artist, album] {
-        match field {
-            // 0x01 marks "unknown", distinct from any real name's bytes.
-            None => hash = fnv1a(hash, &[0x01]),
-            Some(text) => hash = fnv1a(hash, text.to_lowercase().as_bytes()),
-        }
-        // Field separator: 0x00 never appears inside a Rust string's UTF-8.
-        hash = fnv1a(hash, &[0x00]);
+    match artist {
+        // 0x01 marks "unknown", distinct from any real name's bytes; 0x02
+        // marks the nameless compilation.
+        AlbumArtist::Unknown => hash = fnv1a(hash, &[0x01]),
+        AlbumArtist::Various => hash = fnv1a(hash, &[0x02]),
+        AlbumArtist::Named(name) => hash = fnv1a(hash, name.to_lowercase().as_bytes()),
     }
-    hash
+    // Field separator: 0x00 never appears inside a Rust string's UTF-8.
+    hash = fnv1a(hash, &[0x00]);
+    match album {
+        None => hash = fnv1a(hash, &[0x01]),
+        Some(text) => hash = fnv1a(hash, text.to_lowercase().as_bytes()),
+    }
+    fnv1a(hash, &[0x00])
 }
 
 /// One FNV-1a 64 round over `bytes`, continuing from `hash`.
@@ -395,6 +507,8 @@ mod tests {
         TrackMeta {
             path: PathBuf::from(format!("/m/{artist}/{album}/{track:02} {title}.flac")),
             artist: Some(artist.to_owned()),
+            album_artist: None,
+            compilation: None,
             album: Some(album.to_owned()),
             title: Some(title.to_owned()),
             track: Some(track),
@@ -446,15 +560,45 @@ mod tests {
 
     #[test]
     fn album_id_is_deterministic_and_case_folded() {
-        let a = album_id(Some("Boards of Canada"), Some("Geogaddi"));
-        assert_eq!(a, album_id(Some("boards of canada"), Some("GEOGADDI")));
-        assert_ne!(a, album_id(Some("Boards of Canada"), Some("Other")));
-        // None is distinct from Some(""), and field boundaries matter.
-        assert_ne!(album_id(None, None), album_id(Some(""), Some("")));
+        let named = |name| album_id(AlbumArtist::Named(name), Some("Geogaddi"));
+        let a = named("Boards of Canada");
+        assert_eq!(a, named("boards of canada"));
         assert_ne!(
-            album_id(Some("ab"), Some("c")),
-            album_id(Some("a"), Some("bc"))
+            a,
+            album_id(AlbumArtist::Named("Boards of Canada"), Some("Other"))
         );
+        // Unknown is distinct from Some(""), and field boundaries matter.
+        assert_ne!(
+            album_id(AlbumArtist::Unknown, None),
+            album_id(AlbumArtist::Named(""), Some(""))
+        );
+        assert_ne!(
+            album_id(AlbumArtist::Named("ab"), Some("c")),
+            album_id(AlbumArtist::Named("a"), Some("bc"))
+        );
+        // The three artist states are three identities. A tag that literally
+        // reads "Various Artists" is a *named* album, and must not land on
+        // the same shelf entry as a nameless compilation.
+        let title = Some("Cookie's Bustle");
+        let states = [
+            album_id(AlbumArtist::Named(VARIOUS_ARTISTS), title),
+            album_id(AlbumArtist::Various, title),
+            album_id(AlbumArtist::Unknown, title),
+        ];
+        assert_ne!(states[0], states[1]);
+        assert_ne!(states[1], states[2]);
+        assert_ne!(states[0], states[2]);
+    }
+
+    #[test]
+    fn album_artist_labels_never_leave_a_caption_blank() {
+        assert_eq!(AlbumArtistVm::Named("RODIK".into()).label(), "RODIK");
+        assert_eq!(AlbumArtistVm::Various.label(), VARIOUS_ARTISTS);
+        assert_eq!(AlbumArtistVm::Unknown.label(), UNKNOWN_ARTIST);
+        // `name` is the library's word for it; `label` is ours.
+        assert_eq!(AlbumArtistVm::Named("RODIK".into()).name(), Some("RODIK"));
+        assert_eq!(AlbumArtistVm::Various.name(), None);
+        assert_eq!(AlbumArtistVm::Unknown.name(), None);
     }
 
     #[test]
@@ -466,7 +610,7 @@ mod tests {
         ]);
         let albums = build_albums(&library);
         assert_eq!(albums.len(), 2);
-        assert_eq!(albums[0].artist.as_deref(), Some("Abel"));
+        assert_eq!(albums[0].artist, AlbumArtistVm::Named("Abel".into()));
         // One format in, one edition out — nothing for a selector to show.
         assert_eq!(albums[0].editions.len(), 1);
         let tracks = &albums[0].editions[0].tracks;
@@ -474,7 +618,7 @@ mod tests {
         // In-album order is by track number.
         assert_eq!(tracks[0].number, Some(1));
         assert_eq!(tracks[1].number, Some(2));
-        assert_eq!(albums[1].artist.as_deref(), Some("Zed"));
+        assert_eq!(albums[1].artist, AlbumArtistVm::Named("Zed".into()));
         // Ids are unique per shelf entry.
         assert_ne!(albums[0].id, albums[1].id);
         // First track path feeds art resolution.
@@ -626,6 +770,130 @@ mod tests {
         assert_eq!(vm.title, "03 mystery.flac");
     }
 
+    /// The owner's soundtrack: one album artist, a different composer on
+    /// every cue.
+    fn soundtrack() -> Library {
+        library_with(
+            ["Kouhei Okamura", "Katsuhiko Nakamichi", "Miki Nagamatsu"]
+                .into_iter()
+                .enumerate()
+                .map(|(index, composer)| {
+                    let number = u32::try_from(index).expect("small") + 1;
+                    TrackMeta {
+                        album_artist: Some("RODIK".to_owned()),
+                        ..meta(composer, "Cookie's Bustle OST (gamerip)", "Cue", number)
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn a_soundtrack_is_one_tile_captioned_by_its_album_artist() {
+        let albums = build_albums(&soundtrack());
+        assert_eq!(albums.len(), 1, "one tile, not one per composer");
+        let album = &albums[0];
+        assert_eq!(album.artist, AlbumArtistVm::Named("RODIK".into()));
+        assert_eq!(album.artist.label(), "RODIK");
+        // The header names the album artist; the rows keep the composers.
+        assert!(
+            album.track_artists_vary,
+            "the per-cue credits say something the header does not"
+        );
+        let credits: Vec<Option<&str>> = album.editions[0]
+            .tracks
+            .iter()
+            .map(|t| t.artist.as_deref())
+            .collect();
+        assert_eq!(
+            credits,
+            [
+                Some("Kouhei Okamura"),
+                Some("Katsuhiko Nakamichi"),
+                Some("Miki Nagamatsu"),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_ordinary_album_does_not_repeat_its_artist_on_every_row() {
+        let albums = build_albums(&library_with(vec![
+            meta("Stan Rogers", "Northwest Passage", "Lies", 2),
+            meta("Stan Rogers", "Northwest Passage", "Passage", 1),
+        ]));
+        assert_eq!(albums.len(), 1);
+        assert!(
+            !albums[0].track_artists_vary,
+            "a per-track artist column would just repeat the header"
+        );
+
+        // Case alone is not a difference worth a line per row.
+        let folded = build_albums(&library_with(vec![
+            TrackMeta {
+                album_artist: Some("STAN ROGERS".to_owned()),
+                ..meta("Stan Rogers", "Northwest Passage", "Lies", 2)
+            },
+            TrackMeta {
+                album_artist: Some("STAN ROGERS".to_owned()),
+                ..meta("stan rogers", "Northwest Passage", "Passage", 1)
+            },
+        ]));
+        assert_eq!(folded.len(), 1);
+        assert!(!folded[0].track_artists_vary);
+    }
+
+    #[test]
+    fn an_album_nothing_is_known_about_shows_no_track_artists() {
+        let mut stray = meta("x", "y", "z", 1);
+        stray.artist = None;
+        stray.album = None;
+        stray.album_artist = None;
+        let albums = build_albums(&library_with(vec![stray]));
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].artist, AlbumArtistVm::Unknown);
+        assert_eq!(albums[0].artist.label(), UNKNOWN_ARTIST);
+        assert!(
+            !albums[0].track_artists_vary,
+            "no track names an artist, so there is nothing to add"
+        );
+    }
+
+    #[test]
+    fn an_unnamed_compilation_is_labelled_and_lists_its_artists() {
+        let albums = build_albums(&library_with(
+            ["Alpha", "Beta"]
+                .into_iter()
+                .enumerate()
+                .map(|(index, artist)| {
+                    let number = u32::try_from(index).expect("small") + 1;
+                    TrackMeta {
+                        compilation: Some(true),
+                        ..meta(artist, "Now That's What I Call 42", "Song", number)
+                    }
+                })
+                .collect(),
+        ));
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].artist, AlbumArtistVm::Various);
+        assert_eq!(albums[0].artist.label(), VARIOUS_ARTISTS);
+        assert_eq!(albums[0].artist.name(), None);
+        assert!(
+            albums[0].track_artists_vary,
+            "the header names nobody, so every row must name someone"
+        );
+    }
+
+    #[test]
+    fn searching_the_album_artist_filters_the_shelf_to_that_album() {
+        let library = soundtrack();
+        let albums = build_albums(&library);
+        // The name shown on the tile has to be a name the search box finds,
+        // or the filtered shelf contradicts the unfiltered one.
+        assert_eq!(visible_indices(&albums, &library, "rodik"), vec![0]);
+        // A composer finds it too, through their own track.
+        assert_eq!(visible_indices(&albums, &library, "Katsuhiko"), vec![0]);
+    }
+
     #[test]
     fn search_filter_maps_tracks_to_albums_and_preserves_order() {
         let library = library_with(vec![
@@ -691,8 +959,8 @@ mod tests {
 
     #[test]
     fn gradient_colors_are_deterministic_and_distinct() {
-        let id_a = album_id(Some("a"), Some("x"));
-        let id_b = album_id(Some("b"), Some("y"));
+        let id_a = album_id(AlbumArtist::Named("a"), Some("x"));
+        let id_b = album_id(AlbumArtist::Named("b"), Some("y"));
         assert_eq!(gradient_colors(id_a), gradient_colors(id_a));
         assert_ne!(gradient_colors(id_a), gradient_colors(id_b));
         let (c1, c2) = gradient_colors(id_a);

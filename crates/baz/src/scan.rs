@@ -181,6 +181,8 @@ mod tests {
         ScanEntry::Track(TrackMeta {
             path: PathBuf::from(format!("/m/{n}.flac")),
             artist: None,
+            album_artist: None,
+            compilation: None,
             album: None,
             title: None,
             track: Some(n),
