@@ -525,6 +525,7 @@ mod tests {
             bit_depth: None,
             sample_rate: None,
             bitrate: None,
+            stamp: None,
         }
     }
 

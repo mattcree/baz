@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use baz_core::index::{AlbumArtist, IndexError, Library};
-use baz_core::library::{AudioFormat, TrackMeta};
+use baz_core::library::{AudioFormat, FileStamp, TrackMeta};
 
 /// A fully-`None` track except for its path — the shape a tagless file with
 /// an uninformative folder layout produces.
@@ -26,6 +26,7 @@ fn bare(path: &str) -> TrackMeta {
         bit_depth: None,
         sample_rate: None,
         bitrate: None,
+        stamp: None,
     }
 }
 
@@ -950,13 +951,13 @@ fn a_v1_database_migrates_in_place_without_losing_anything() {
     let library = Library::open(&db).expect("a v1 database must open");
     assert_eq!(library.len(), 4, "every v1 row survives the upgrade");
 
-    // The schema really did move — and all the way, v1 → v2 → v3, because
-    // migrations chain rather than jumping.
+    // The schema really did move — and all the way, v1 → v2 → v3 → v4,
+    // because migrations chain rather than jumping.
     let conn = rusqlite::Connection::open(&db).expect("raw open");
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 
     let by_path = |needle: &str| {
         library
@@ -994,6 +995,8 @@ fn a_v1_database_migrates_in_place_without_losing_anything() {
     assert_eq!(unicode.bit_depth, None);
     assert_eq!(unicode.sample_rate, None);
     assert_eq!(unicode.bitrate, None);
+    // Including the v4 stamp: an unstamped row is simply re-read.
+    assert_eq!(unicode.stamp, None);
 
     // The point of the whole exercise: the double rip is now one album with
     // two editions, defaulting to the lossless one.
@@ -1167,7 +1170,7 @@ fn a_v2_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 
     let by_path = |needle: &str| {
         library
@@ -1337,4 +1340,449 @@ fn newer_schema_versions_are_refused() {
         IndexError::SchemaTooNew { found } => assert_eq!(found, 99),
         other => panic!("expected SchemaTooNew, got {other:?}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Schema v4: the file stamps incremental scanning compares, and removal.
+// ---------------------------------------------------------------------------
+
+/// One row as the v3 schema stored it, for [`write_v3_database`].
+struct V3Row {
+    path: &'static str,
+    artist: &'static str,
+    album_artist: Option<&'static str>,
+    compilation: Option<i64>,
+    album: &'static str,
+    title: &'static str,
+    track: u32,
+    year: u32,
+    duration_ns: i64,
+    format: &'static str,
+    bit_depth: Option<u32>,
+    sample_rate: u32,
+    bitrate: u32,
+}
+
+/// Build a genuine v3 database with the v3 schema and v3 `INSERT`s only — no
+/// baz code involved. This is the shape of the `library.db` an installed baz
+/// leaves on disk today, contents included: the double rip that motivated
+/// editions, the soundtrack that motivated album artists, and the one file
+/// whose tagger really did write `Various Artists`.
+fn write_v3_database(db: &std::path::Path) {
+    let conn = rusqlite::Connection::open(db).expect("create v3 db");
+    conn.execute_batch(
+        "
+        BEGIN;
+        CREATE TABLE tracks (
+            id           INTEGER PRIMARY KEY,
+            path         BLOB NOT NULL UNIQUE,
+            artist       TEXT,
+            album        TEXT,
+            title        TEXT,
+            track        INTEGER,
+            disc         INTEGER,
+            year         INTEGER,
+            duration_ns  INTEGER,
+            format       TEXT,
+            bit_depth    INTEGER,
+            sample_rate  INTEGER,
+            bitrate      INTEGER,
+            album_artist TEXT,
+            compilation  INTEGER
+        ) STRICT;
+        PRAGMA user_version = 3;
+        COMMIT;
+        ",
+    )
+    .expect("v3 schema");
+
+    for row in v3_rows() {
+        conn.execute(
+            "INSERT INTO tracks
+                 (path, artist, album, title, track, disc, year, duration_ns,
+                  format, bit_depth, sample_rate, bitrate, album_artist,
+                  compilation)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            rusqlite::params![
+                row.path.as_bytes(),
+                row.artist,
+                row.album,
+                row.title,
+                row.track,
+                row.year,
+                row.duration_ns,
+                row.format,
+                row.bit_depth,
+                row.sample_rate,
+                row.bitrate,
+                row.album_artist,
+                row.compilation,
+            ],
+        )
+        .expect("insert v3 row");
+    }
+}
+
+/// The rows [`write_v3_database`] seeds.
+fn v3_rows() -> [V3Row; 5] {
+    [
+        V3Row {
+            path: "/m/FLAC/Stan Rogers/Northwest Passage/01 - Northwest Passage.flac",
+            artist: "Stan Rogers",
+            album_artist: Some("Stan Rogers"),
+            compilation: Some(0),
+            album: "Northwest Passage",
+            title: "Northwest Passage",
+            track: 1,
+            year: 1981,
+            duration_ns: 261_000_000_000,
+            format: "flac",
+            bit_depth: Some(16),
+            sample_rate: 44_100,
+            bitrate: 900,
+        },
+        V3Row {
+            path: "/m/MP3/Stan Rogers/Northwest Passage/01 - Northwest Passage.mp3",
+            artist: "Stan Rogers",
+            album_artist: Some("Stan Rogers"),
+            compilation: Some(0),
+            album: "Northwest Passage",
+            title: "Northwest Passage",
+            track: 1,
+            year: 1981,
+            duration_ns: 261_000_000_000,
+            format: "mp3",
+            bit_depth: None,
+            sample_rate: 44_100,
+            bitrate: 320,
+        },
+        // The soundtrack ADR-0008 collapsed: two per-track credits, one
+        // album artist.
+        V3Row {
+            path: "/m/[GST] Cookie's Bustle/1. Main Menu.flac",
+            artist: "Kouhei Okamura, Masashi Matsumoto, Katsuhiko Nakamichi",
+            album_artist: Some("RODIK"),
+            compilation: None,
+            album: "Cookie's Bustle OST (gamerip)",
+            title: "Main Menu",
+            track: 1,
+            year: 1998,
+            duration_ns: 95_000_000_000,
+            format: "flac",
+            bit_depth: Some(16),
+            sample_rate: 44_100,
+            bitrate: 700,
+        },
+        V3Row {
+            path: "/m/[GST] Cookie's Bustle/As For Dreams.m4a",
+            artist: "Miki Nagamatsu, Kouhei Okamura",
+            album_artist: Some("RODIK"),
+            compilation: None,
+            album: "Cookie's Bustle OST (gamerip)",
+            title: "As For Dreams (low quality)",
+            track: 2,
+            year: 1998,
+            duration_ns: 130_000_000_000,
+            format: "aac",
+            bit_depth: None,
+            sample_rate: 44_100,
+            bitrate: 256,
+        },
+        // Unicode everywhere, plus a genuine `Various Artists` tag and a
+        // real compilation flag, to prove the upgrade re-encodes nothing.
+        V3Row {
+            path: "/m/misc/Größenwahn/Debüt/03 Ærø — 序曲.wav",
+            artist: "Größenwahn",
+            album_artist: Some("Various Artists"),
+            compilation: Some(1),
+            album: "Debüt",
+            title: "Ærø — 序曲",
+            track: 3,
+            year: 1999,
+            duration_ns: 215_123_456_789,
+            format: "wav",
+            bit_depth: Some(24),
+            sample_rate: 96_000,
+            bitrate: 4_608,
+        },
+    ]
+}
+
+#[test]
+fn a_v3_database_migrates_in_place_without_losing_anything() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    write_v3_database(&db);
+
+    let library = Library::open(&db).expect("a v3 database must open");
+    assert_eq!(library.len(), 5, "every v3 row survives the upgrade");
+
+    let conn = rusqlite::Connection::open(&db).expect("raw open");
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("user_version");
+    assert_eq!(version, 4);
+
+    let by_path = |needle: &str| {
+        library
+            .tracks()
+            .find(|t| t.path.to_string_lossy().contains(needle))
+            .cloned()
+            .unwrap_or_else(|| panic!("{needle} must survive"))
+    };
+
+    // Every v3 column is intact — text, numbers, Unicode, and the two
+    // columns ADR-0008 added.
+    let unicode = by_path("Größenwahn");
+    assert_eq!(unicode.artist.as_deref(), Some("Größenwahn"));
+    assert_eq!(unicode.album.as_deref(), Some("Debüt"));
+    assert_eq!(unicode.title.as_deref(), Some("Ærø — 序曲"));
+    assert_eq!(unicode.track, Some(3));
+    assert_eq!(unicode.disc, Some(1));
+    assert_eq!(unicode.year, Some(1999));
+    assert_eq!(unicode.duration, Some(Duration::new(215, 123_456_789)));
+    assert_eq!(unicode.format, Some(AudioFormat::Wav));
+    assert_eq!(unicode.bit_depth, Some(24));
+    assert_eq!(unicode.sample_rate, Some(96_000));
+    assert_eq!(unicode.bitrate, Some(4_608));
+    assert_eq!(unicode.album_artist.as_deref(), Some("Various Artists"));
+    assert_eq!(unicode.compilation, Some(true));
+
+    let soundtrack = by_path("Main Menu.flac");
+    assert_eq!(soundtrack.album_artist.as_deref(), Some("RODIK"));
+    assert_eq!(soundtrack.compilation, None, "NULL is not Some(false)");
+
+    // The new columns are NULL for every row: nothing already in a v3
+    // database could honestly claim a file is unchanged, and stat'ing the
+    // whole library at startup is the cost this feature exists to remove.
+    for track in library.tracks() {
+        assert_eq!(track.stamp, None);
+    }
+    assert!(
+        library.known_files().values().all(Option::is_none),
+        "an upgraded library asks for a full first scan, and gets one"
+    );
+
+    // Grouping is *exactly* the pre-v4 behaviour — the upgrade changes what
+    // scanning costs, never what the shelf shows.
+    let albums = library.albums();
+    let passage = albums
+        .iter()
+        .find(|a| a.title == Some("Northwest Passage"))
+        .expect("the double rip");
+    assert_eq!(passage.artist, AlbumArtist::Named("Stan Rogers"));
+    assert_eq!(passage.editions.len(), 2);
+    let gamerip: Vec<_> = albums
+        .iter()
+        .filter(|a| a.title == Some("Cookie's Bustle OST (gamerip)"))
+        .collect();
+    assert_eq!(gamerip.len(), 1, "still one entry, two editions");
+    assert_eq!(gamerip[0].artist, AlbumArtist::Named("RODIK"));
+    assert_eq!(gamerip[0].editions.len(), 2);
+}
+
+#[test]
+fn the_first_scan_after_a_v3_upgrade_stamps_every_row() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    write_v3_database(&db);
+
+    let mut library = Library::open(&db).expect("open migrates to v4");
+    // What the first launch after the upgrade does: a full scan, because
+    // nothing is stamped, writing the stamp back with every row.
+    let stamp = FileStamp {
+        mtime_ns: 1_700_000_000_123_456_789,
+        size: 42_000_000,
+    };
+    let rescanned: Vec<TrackMeta> = library
+        .tracks()
+        .cloned()
+        .map(|meta| TrackMeta {
+            stamp: Some(stamp),
+            ..meta
+        })
+        .collect();
+    library.add_tracks(rescanned).expect("rescan batch");
+    assert_eq!(library.len(), 5, "an upsert, not a duplicate");
+
+    // Durable, and now the *second* launch can skip all five.
+    drop(library);
+    let reopened = Library::open(&db).expect("reopen");
+    assert!(reopened.tracks().all(|t| t.stamp == Some(stamp)));
+    let known = reopened.known_files();
+    assert_eq!(known.len(), 5);
+    assert!(known.values().all(|s| *s == Some(stamp)));
+}
+
+#[test]
+fn a_stamp_roundtrips_through_a_real_database_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    // Extremes that must survive the i64 column: a pre-epoch mtime and a
+    // size larger than a 32-bit file offset.
+    let original = TrackMeta {
+        stamp: Some(FileStamp {
+            mtime_ns: -86_400_000_000_001,
+            size: 5_000_000_000,
+        }),
+        ..track("/m/ancient.flac", "Karl", "Signal Chain", "Test Tone", 1)
+    };
+    {
+        let mut library = Library::open(&db).expect("open");
+        library.add_tracks(vec![original.clone()]).expect("add");
+    }
+    let reopened = Library::open(&db).expect("reopen");
+    let stored = reopened.tracks().next().expect("one track").clone();
+    assert_eq!(stored, original);
+}
+
+/// Half a stamp is not a stamp: a row that somehow carries only one of the
+/// two columns must read back as unstamped (and so be re-read) rather than
+/// as a comparison nobody can complete.
+#[test]
+fn a_half_written_stamp_reads_back_as_no_stamp() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    {
+        let mut library = Library::open(&db).expect("open");
+        library
+            .add_tracks(vec![TrackMeta {
+                stamp: Some(FileStamp {
+                    mtime_ns: 1_000,
+                    size: 2_000,
+                }),
+                ..bare("/m/a.flac")
+            }])
+            .expect("add");
+    }
+    let conn = rusqlite::Connection::open(&db).expect("raw open");
+    conn.execute("UPDATE tracks SET file_size = NULL", [])
+        .expect("blank half the stamp");
+    drop(conn);
+
+    let library = Library::open(&db).expect("reopen");
+    assert_eq!(library.tracks().next().expect("the row").stamp, None);
+}
+
+#[test]
+fn known_files_reports_every_path_with_the_stamp_recorded_for_it() {
+    let mut library = Library::open_in_memory().expect("open");
+    let stamp = FileStamp {
+        mtime_ns: 1_234,
+        size: 5_678,
+    };
+    library
+        .add_tracks(vec![
+            TrackMeta {
+                stamp: Some(stamp),
+                ..bare("/m/stamped.flac")
+            },
+            bare("/m/unstamped.flac"),
+        ])
+        .expect("add");
+
+    let known = library.known_files();
+    assert_eq!(known.len(), 2);
+    assert_eq!(known[&PathBuf::from("/m/stamped.flac")], Some(stamp));
+    assert_eq!(
+        known[&PathBuf::from("/m/unstamped.flac")],
+        None,
+        "a row with no stamp is offered as one, so it is re-read"
+    );
+}
+
+#[test]
+fn removing_tracks_deletes_the_rows_and_unindexes_them() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let mut library = Library::open(&db).expect("open");
+    library
+        .add_tracks(vec![
+            track(
+                "/m/a.flac",
+                "Stan Rogers",
+                "Fogarty's Cove",
+                "Barrett's Privateers",
+                1,
+            ),
+            track(
+                "/m/b.flac",
+                "Stan Rogers",
+                "Fogarty's Cove",
+                "Fogarty's Cove",
+                2,
+            ),
+        ])
+        .expect("add");
+    assert_eq!(library.len(), 2);
+
+    let removed = library
+        .remove_tracks([PathBuf::from("/m/b.flac")])
+        .expect("remove");
+    assert_eq!(removed, 1);
+    assert_eq!(library.len(), 1);
+
+    // Gone from the shelf, gone from search, and gone from the snapshot the
+    // next scan works off.
+    let albums = library.albums();
+    assert_eq!(albums.len(), 1);
+    assert_eq!(albums[0].editions[0].tracks.len(), 1);
+    assert!(library.search("Fogarty's Cove", 10).len() == 1);
+    assert!(
+        !library
+            .known_files()
+            .contains_key(&PathBuf::from("/m/b.flac"))
+    );
+
+    // And durable: reopening does not resurrect it.
+    drop(library);
+    let reopened = Library::open(&db).expect("reopen");
+    assert_eq!(reopened.len(), 1);
+    assert_eq!(
+        reopened.tracks().next().expect("the survivor").path,
+        PathBuf::from("/m/a.flac")
+    );
+}
+
+#[test]
+fn removing_paths_the_library_does_not_hold_changes_nothing() {
+    let mut library = Library::open_in_memory().expect("open");
+    library.add_tracks(vec![bare("/m/a.flac")]).expect("add");
+
+    let removed = library
+        .remove_tracks([PathBuf::from("/m/never-here.flac"), PathBuf::from("/m/a")])
+        .expect("remove");
+    assert_eq!(removed, 0, "no row matched, so nothing was deleted");
+    assert_eq!(library.len(), 1);
+    // Removing nothing at all is also fine.
+    assert_eq!(
+        library
+            .remove_tracks(Vec::<PathBuf>::new())
+            .expect("remove"),
+        0
+    );
+    assert_eq!(library.len(), 1);
+}
+
+/// Paths are bytes (module docs), and removal must key on exactly the same
+/// bytes an insert did — including on paths no `str` can hold.
+#[cfg(unix)]
+#[test]
+fn removal_matches_non_utf8_paths_exactly() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let raw = PathBuf::from(std::ffi::OsString::from_vec(
+        b"/m/\xFF\xFEbroken/tr\xF0ack.flac".to_vec(),
+    ));
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks(vec![TrackMeta {
+            path: raw.clone(),
+            ..bare("/m/placeholder.flac")
+        }])
+        .expect("add");
+    assert_eq!(library.len(), 1);
+
+    assert_eq!(library.remove_tracks([&raw]).expect("remove"), 1);
+    assert!(library.is_empty());
 }

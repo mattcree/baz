@@ -91,10 +91,30 @@
   reason — video/subtitle support, a codec only 0.6 has, or an upstream fix
   we need — rather than for its own sake.
 
-- **Deleted files linger in the index** — `add_tracks` is upsert-only; removal
-  support has not been written, so a file deleted on disk stays on the shelf.
-- **A full rescan runs on every launch** — cheap on small libraries, wasteful on
-  large ones; incremental scanning by mtime is the fix.
+- **A deleted *directory*'s tracks still linger in the index.** Removal
+  landed with ADR-0010 and deleting a *file* now clears its row on the next
+  scan — but only under positive confirmation, and one of the four gates is
+  "the file's parent directory is present". So `rm -rf ~/Music/Artist/Album`
+  leaves eight rows behind, deliberately: from the filesystem's side a
+  deleted folder and a mount point that is not mounted right now are the
+  same `NotFound` for every path below, and wrongly wiping a present
+  listener's library is not a bug worth trading a cosmetic stale row for.
+
+  **What would settle it**, in preference order: (1) a *user-initiated
+  prune* — "these 412 rows point at files I cannot find; remove them?" —
+  which is the honest home for every case automation should decline, and
+  needs a library-maintenance surface baz does not have yet; (2) remembered
+  mount points, so "this directory is gone" can be distinguished from "this
+  directory's filesystem is not attached"; (3) a per-row record of which
+  root a track came from, which would also let gate 2 stop relying on the
+  root currently being scanned. All three are features with their own
+  design, not a tweak to the rule.
+
+- **The index has no notion of which root a row came from.** Removal's
+  multi-root protection keys on `starts_with(root_being_scanned)`, which is
+  correct but coarse: rows imported from a folder baz has since stopped
+  scanning are immortal. A `roots` table is the fix, and it wants to land
+  with actual support for more than one music folder.
 - **Multichannel (>2ch) files are rejected**, not downmixed — a typed error
   rather than silently wrong output. 5.1 downmix is unwritten.
 - **Skip and seek are drain-and-restart**, not sample-accurate splices (tens of

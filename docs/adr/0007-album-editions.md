@@ -111,10 +111,16 @@ does not (`.m4a`, `.mp4`, `.ogg` are containers; only the file knows). Nothing
 is read from disk — an upgrade must not become a full library re-read at
 startup. `bit_depth`/`sample_rate`/`bitrate` stay `NULL` for the same reason.
 
-`NULL` is self-healing rather than permanent: baz rescans its music folder on
+`NULL` is self-healing rather than permanent: baz rescans its music folder at
 every start and `add_tracks` upserts, so each surviving file gets its true
 codec within the first scan after the upgrade. Until then an unbackfilled
 album shows one unnamed edition — precisely the pre-editions behaviour.
+
+> **Amended by ADR-0010 (2026-08-07).** That rescan is now *incremental*
+> (schema v4), so it no longer re-reads every file on every launch. The
+> self-healing claim above still holds unchanged: a migrated row carries no
+> file stamp either, and an unstamped row is always re-read — so the first
+> scan after any upgrade is a full one, exactly as this section assumes.
 
 Proof, not assurance: `crates/baz-core/tests/index.rs` builds a genuine v1
 database using the v1 schema and v1 `INSERT`s with no baz code involved,

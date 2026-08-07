@@ -38,3 +38,7 @@ workspace = true
 [[bench]]
 name = "search"
 harness = false
+
+[[bench]]
+name = "scan"
+harness = false
