@@ -16,10 +16,14 @@ The toolbox shares your `$HOME`, your session (Wayland/X11, PipeWire) and your r
 | Component | Why |
 |---|---|
 | `gcc`/`gcc-c++`/`make`/`pkgconf` | C toolchain for -sys crates |
-| `webkit2gtk4.1-devel`, `gtk3-devel`, `dbus-devel`, `librsvg2-devel`, `libappindicator-gtk3-devel`, `openssl-devel` | Tauri 2 native shell on Linux |
 | `alsa-lib-devel` | cpal / device audio output |
-| `flac`, (`ffmpeg` if present) | encoding test fixtures for audio golden tests |
-| `nodejs`, `npm` | frontend toolchain |
+| `libxkbcommon-devel`, `libxkbcommon-x11` | iced/winit window creation (the X11 one is required even for headless Xvfb runs) |
+| `xorg-x11-server-Xvfb`, `ImageMagick` | headless render verification — screenshot the real UI on a private display and diff it |
+| `flac`, (`ffmpeg` if present) | encoding test fixtures for the audio golden tests |
+
+baz itself needs **no GUI system libraries** to build on Linux: iced is pure
+Rust (ADR-0005) and SQLite is bundled. Everything above serves the toolchain or
+the test harness, not the binary.
 
 Rust itself is **not** installed in the container — it comes from your rustup install in `$HOME` (pinning via `rust-toolchain.toml` once the workspace exists in Phase 2).
 
@@ -27,7 +31,7 @@ Rust itself is **not** installed in the container — it comes from your rustup 
 
 - **Classic Fedora (no container)**: `sudo dnf install -y` the package list from `scripts/toolbox-setup.sh`.
 - **Dev container**: `.devcontainer/` carries the same environment as a Containerfile for VS Code / Claude Code / cloud agents. Keep its package list in sync with `scripts/toolbox-setup.sh` (single source of truth: the script).
-- **Debian/Ubuntu contributors**: equivalents are `libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev libssl-dev librsvg2-dev libasound2-dev` — to be verified when CI lands (CI runs on Ubuntu runners and is the reference for that list).
+- **Debian/Ubuntu contributors**: the equivalent of the build-critical one is `libasound2-dev` (what CI installs on its Ubuntu runners); add `libxkbcommon-x11-0 xvfb imagemagick` for the render harness.
 
 ## Running baz with audio output
 
@@ -43,19 +47,23 @@ but prints `built without audio output — see docs/DEVELOPMENT.md` and hides
 the playback UI. With the feature but no usable output device, the app still
 runs and the bottom bar reports "no audio device".
 
-## Running the Phase 1 spikes
+## Headless UI verification
 
-All spikes are throwaway (see `NEXT-STEPS.md`) but runnable:
+Agents (and you) can render the real binary without touching your desktop
+session. Always redirect the XDG dirs — the app writes its library on launch,
+and an earlier run polluted the maintainer's real database by relying on
+backup-and-restore, which races the app's own writes:
 
 ```sh
-# iced shelf — builds on host OR container (no system deps needed)
-cd spikes/shelf-iced && cargo run --release --bin gen_dataset && cargo run --release --bin shelf-iced
-
-# Tauri shelf — browser mode (host) / native (container)
-cd spikes/shelf-tauri && npm run dev          # browser mode at :5173
-toolbox run -c baz-dev npm run tauri dev      # native WebKitGTK window
-
-# audio engine — tests prove gapless; device output behind a feature
-cd spikes/audio-gapless && cargo test
-toolbox run -c baz-dev cargo test --features device-output
+toolbox run -c baz-dev env -u WAYLAND_DISPLAY WINIT_UNIX_BACKEND=x11 \
+  XDG_DATA_HOME=/tmp/scratch/data XDG_CONFIG_HOME=/tmp/scratch/config \
+  XDG_CACHE_HOME=/tmp/scratch/cache \
+  xvfb-run -s '-screen 0 1400x1000x24' cargo run --release -p baz -- /tmp/fixture-music
 ```
+
+Screenshot and diff with ImageMagick (`magick compare -metric AE`). Use the
+wgpu renderer, not tiny-skia: tiny-skia does damage-based partial repaints and
+is not run-to-run deterministic, so it cannot prove a refactor changed nothing.
+
+> The Phase 1 spikes referenced here previously were deleted when Phase 1
+> closed; they remain recoverable at `git show dc13d7e`.

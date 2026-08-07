@@ -6,14 +6,17 @@ set -euo pipefail
 
 PACKAGES=(
   gcc gcc-c++ make git pkgconf-pkg-config
-  # Tauri / GTK webview
-  webkit2gtk4.1-devel gtk3-devel dbus-devel openssl-devel
-  librsvg2-devel libappindicator-gtk3-devel
-  # Audio
+  # Audio output (cpal/ALSA) and fixture encoding for the golden-file tests
   alsa-lib-devel flac
-  # Frontend toolchain (containers may not see host-managed node)
-  nodejs npm
+  # iced/winit needs these to open a window; the X11 one is required even
+  # for headless Xvfb runs (winit panics without it).
+  libxkbcommon-devel libxkbcommon-x11
+  # Headless render verification: agents screenshot the real UI on a private
+  # display and diff it (that is how the views/ split was proven pixel-identical).
+  xorg-x11-server-Xvfb ImageMagick
 )
+# Note: the Tauri/WebKitGTK stack was removed after ADR-0005 chose iced —
+# baz has no webview dependency, and Linux builds need no GUI system libraries.
 
 if ! toolbox list --containers 2>/dev/null | grep -q '\bbaz-dev\b'; then
   toolbox create -y baz-dev

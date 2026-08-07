@@ -4,10 +4,9 @@ FROM registry.fedoraproject.org/fedora:42
 
 RUN dnf install -y \
       gcc gcc-c++ make git pkgconf-pkg-config \
-      webkit2gtk4.1-devel gtk3-devel dbus-devel openssl-devel \
-      librsvg2-devel libappindicator-gtk3-devel \
       alsa-lib-devel flac \
-      nodejs npm \
+      libxkbcommon-devel libxkbcommon-x11 \
+      xorg-x11-server-Xvfb ImageMagick \
     && dnf clean all
 
 # Rust via rustup (pinned by rust-toolchain.toml once the workspace exists)
