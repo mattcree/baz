@@ -87,7 +87,11 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --workspace --all-features --summary-only --fail-under-lines 80
+      # The 80% line floor gates baz-core (engine + library — where coverage
+      # is a meaningful promise). GUI view code needs a display to execute, so
+      # the workspace-wide number is reported in the HTML artifact, not gated.
+      - run: cargo llvm-cov -p baz-core --all-features --summary-only --fail-under-lines 80
+      - run: cargo llvm-cov --workspace --all-features --summary-only
       - name: Full report artifact
         run: cargo llvm-cov report --html --output-dir coverage-html
       - uses: actions/upload-artifact@v4
