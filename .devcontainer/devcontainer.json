@@ -1,0 +1,10 @@
+{
+  "name": "baz-dev",
+  "build": { "dockerfile": "Containerfile" },
+  "remoteUser": "dev",
+  "customizations": {
+    "vscode": {
+      "extensions": ["rust-lang.rust-analyzer", "tamasfe.even-better-toml"]
+    }
+  }
+}

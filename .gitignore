@@ -4,3 +4,4 @@ dist/
 spikes/*/dataset/
 *.flac
 *.wav
+fixtures/

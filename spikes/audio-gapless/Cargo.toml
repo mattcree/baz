@@ -1,0 +1,22 @@
+[package]
+name = "baz-spike-audio-gapless"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Spike B: prove the gapless engine architecture (Symphonia decode -> decode-ahead -> ring buffer -> sample-accurate splice) with offline verification tests. Throwaway code, real answers."
+
+[dependencies]
+symphonia = { version = "0.5", default-features = false, features = ["wav", "pcm", "flac"] }
+hound = "3.5"
+rtrb = "0.3"
+rubato = "0.16"
+# Device output is feature-gated: alsa-lib-devel is missing on this machine, so
+# cpal cannot build. All verification runs against the OfflineSink.
+cpal = { version = "0.16", optional = true }
+
+[features]
+device-output = ["dep:cpal"]
+
+[[bin]]
+name = "gen-signals"
+path = "src/bin/gen_signals.rs"

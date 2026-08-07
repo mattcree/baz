@@ -1,0 +1,30 @@
+[package]
+name = "shelf-iced"
+version = "0.1.0"
+edition = "2021"
+
+# Spike A (iced) — throwaway code. See RESULTS.md.
+
+[dependencies]
+iced = { version = "0.13", features = ["image", "tokio"] }
+image = { version = "0.25", default-features = false, features = ["png", "rayon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rayon = "1"
+lru = "0.12"
+tokio = { version = "1", features = ["rt"] }
+
+[[bin]]
+name = "gen_dataset"
+path = "src/bin/gen_dataset.rs"
+
+[[bin]]
+name = "bench_search"
+path = "src/bin/bench_search.rs"
+
+[[bin]]
+name = "shelf-iced"
+path = "src/main.rs"
+
+[profile.release]
+debug = false
