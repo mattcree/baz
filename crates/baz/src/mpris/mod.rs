@@ -1,0 +1,230 @@
+//! MPRIS2 desktop integration: baz in the shell's media controls, and
+//! hardware media keys routed to the transport.
+//!
+//! On Linux the desktop shell — GNOME's lock screen and quick-settings
+//! media widget, KDE's Media Player applet, `playerctl`, and the media-key
+//! daemons that sit behind Play/Pause/Next on a keyboard — all speak one
+//! protocol: [MPRIS2] over the D-Bus session bus. This module serves the two
+//! interfaces that protocol is made of, `org.mpris.MediaPlayer2` and
+//! `org.mpris.MediaPlayer2.Player`, at `/org/mpris/MediaPlayer2` under the
+//! well-known name `org.mpris.MediaPlayer2.baz`.
+//!
+//! [MPRIS2]: https://specifications.freedesktop.org/mpris-spec/latest/
+//!
+//! # Shape
+//!
+//! Same shape as [`crate::playback`], and for the same reason — so `app.rs`
+//! carries no `cfg` at all:
+//!
+//! - [`Mpris::start`] spawns a `baz-mpris` thread that owns the D-Bus
+//!   connection and the two served objects. It returns immediately and
+//!   cannot fail (see "When there is no bus" below).
+//! - [`Mpris::publish`] hands the thread a fresh [`state::Snapshot`] after
+//!   every engine event. The thread stores it and emits `PropertiesChanged`
+//!   for exactly the properties that differ from the last one it published —
+//!   never for `Position`, which the spec says is polled rather than
+//!   signalled.
+//! - [`Mpris::subscription`] is the return path: every D-Bus method call
+//!   becomes a [`Request`], which `app.rs` maps to the *same*
+//!   [`Message`](crate::app::Message) the corresponding on-screen control
+//!   emits. `PlayPause` from the lock screen and a click on the bottom bar's
+//!   toggle are the same message, take the same update-loop arm, and reach
+//!   the engine as the same [`Command`](baz_core::protocol::Command).
+//!
+//! On every other platform the same three methods exist and do nothing.
+//!
+//! # The honesty rule crosses the bus unchanged
+//!
+//! Everything MPRIS reports is derived from engine events by
+//! [`state::Snapshot::from_player`], which reads [`crate::player`]'s
+//! event-derived state and nothing else. There is no optimistic path: a
+//! `Play` arriving over D-Bus sends a command and changes no reported state
+//! until the engine says so, exactly as a click on the toggle does.
+//!
+//! `Position` deserves the explicit note. It is the last
+//! [`Progress`](baz_core::protocol::Event::Progress) reading — accurate to
+//! the engine's ~4 Hz cadence — and is **not** extrapolated with a wall
+//! clock between reports. Clients that want a smooth scrubber interpolate it
+//! themselves, which is what the spec expects them to do; what they get from
+//! us is what baz actually knows.
+//!
+//! # Album art
+//!
+//! `mpris:artUrl` is set **only** when the album has a cover file on disk
+//! (`cover.jpg`, `folder.jpg`, … — [`crate::art`]'s second resolution step),
+//! pointed at with a `file://` URL. Art that exists only as bytes embedded
+//! in a tag gets no URL at all.
+//!
+//! The alternative was to decode the embedded picture and write it to a
+//! cache file so a URL could exist. That was weighed and rejected: it means
+//! writing megabytes into the user's cache directory as a side effect of
+//! pressing play, inventing a lifetime policy for those files, and handing
+//! the shell a path to a file baz made up rather than to the user's own
+//! artwork. A missing thumbnail in a media widget is a small cost; the
+//! honest version of "here is your cover" is a file the user actually has.
+//! (MPRIS has no way to pass image *bytes*, so there is no third option.)
+//!
+//! # When there is no bus
+//!
+//! MPRIS is an enhancement, never a requirement. There is no session bus
+//! inside a minimal container, on a headless build machine, or under a
+//! `dbus-run-session`-less test harness — and baz must run there exactly as
+//! it does on a desktop. So:
+//!
+//! - The connection is opened on the `baz-mpris` thread, not on the way to
+//!   the first frame, so a slow or absent bus cannot delay startup.
+//! - Every failure — no `DBUS_SESSION_BUS_ADDRESS`, a refused socket, a
+//!   name already owned by something else, a serve that will not register —
+//!   prints one `[mpris]` line to stdout and ends the thread. Never a
+//!   modal, never a dialog, never a non-zero exit.
+//! - The app keeps its sender; publishing into a dead channel is a no-op.
+//!   The player works, the shelf works, only the desktop integration is
+//!   absent.
+//!
+//! If the well-known name is already taken (a second baz), the thread falls
+//! back to the spec's per-instance spelling,
+//! `org.mpris.MediaPlayer2.baz.instance<pid>`, so two copies can run without
+//! either of them going silent.
+//!
+//! # What is deliberately not implemented
+//!
+//! - **`Previous` / `CanGoPrevious`**: `baz-core`'s protocol has no previous
+//!   command, so `CanGoPrevious` is `false` and `Previous` does nothing.
+//!   Advertising a control we cannot honour is the one thing worse than not
+//!   having it.
+//! - **`SupportedUriSchemes` / `SupportedMimeTypes`**: both empty, because
+//!   `OpenUri` returns `NotSupported`. baz plays what it scanned; opening an
+//!   arbitrary URI is a feature, not a property, and listing schemes we
+//!   would refuse is the same lie in a different place.
+//! - **`LoopStatus`, `Shuffle`**: optional in the spec and unimplemented in
+//!   baz, so they are absent rather than present-and-fixed.
+//! - **`Rate`, `Volume`**: read-only, both `1.0`, with `MinimumRate` and
+//!   `MaximumRate` pinned to `1.0`. baz has neither a rate control nor a
+//!   volume control; a writable property that silently discarded writes
+//!   would be worse than an error.
+//!
+//! # The dependency
+//!
+//! `zbus` 4, the pure-Rust D-Bus implementation (MIT), declared as a
+//! Linux-only target dependency. Two things made it the choice over
+//! `mpris-server`, which wraps it:
+//!
+//! 1. **It adds nothing.** zbus 4.4 is *already* linked into every Linux baz
+//!    binary — `iced_core` depends on `dark-light`, which asks the desktop
+//!    portal over D-Bus what the system theme is. Depending on it directly
+//!    unifies with that copy and pulls in zero new crates, zero new
+//!    licenses, and no C or system library (the whole stack — zvariant,
+//!    `zbus_names`, `enumflags2`, `async-io` — is pure Rust; baz's Linux build
+//!    stays free of system dependencies as ADR-0005 intends).
+//! 2. **`mpris-server` would cost a second D-Bus stack.** Its current
+//!    release needs zbus 5, which would put zbus 4 *and* 5 (plus two
+//!    `zvariant`s and two `zbus_names`) in the binary — the duplicate-major
+//!    situation `docs/ENGINEERING.md` and `deny.toml` both push back on. Its
+//!    last zbus-4 release is two years stale, and pinning a stale version to
+//!    dodge a duplicate is not a better trade. What it would have saved is a
+//!    typed metadata builder and the trait skeleton — perhaps eighty lines,
+//!    against two interfaces whose entire surface is a few properties and
+//!    eight methods.
+//!
+//! When iced's transitive zbus moves to 5, this moves with it; the direct
+//! dependency is on the major already in the graph on purpose.
+
+#[cfg_attr(
+    not(target_os = "linux"),
+    allow(
+        dead_code,
+        reason = "the MPRIS reading is compiled — and unit-tested — on every platform in the CI \
+                  matrix so the microsecond arithmetic and the spec's status strings are checked \
+                  wherever the tests run; only the Linux build has a bus to spend them on"
+    )
+)]
+pub(crate) mod state;
+
+#[cfg(target_os = "linux")]
+mod server;
+
+pub(crate) use state::Snapshot;
+
+/// The basename of `packaging/baz.desktop`.
+///
+/// One constant with two customers, deliberately: it is MPRIS's
+/// `DesktopEntry` property *and* the window's Wayland `app_id` / X11
+/// `WM_CLASS` (set in [`crate::app`]). A desktop associates a running window
+/// with a launcher entry by matching exactly these two against the file name,
+/// so they cannot be allowed to drift apart.
+#[cfg(target_os = "linux")]
+pub(crate) const DESKTOP_ENTRY: &str = "baz";
+
+/// A D-Bus method call, in baz's vocabulary rather than MPRIS's.
+///
+/// The bridge stops here: `app.rs` turns each of these into the same
+/// [`Message`](crate::app::Message) the equivalent on-screen control emits,
+/// so there is exactly one path from an intention to the engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    not(target_os = "linux"),
+    allow(
+        dead_code,
+        reason = "only the Linux server constructs requests; every platform still maps them, so \
+                  the mapping to interface messages compiles and is tested everywhere"
+    )
+)]
+pub(crate) enum Request {
+    /// `Play` — start or resume. Not a toggle.
+    Play,
+    /// `Pause`.
+    Pause,
+    /// `PlayPause` — the toggle, resolved against the confirmed phase.
+    PlayPause,
+    /// `Stop`.
+    Stop,
+    /// `Next`.
+    Next,
+    /// `Seek(offset)`, converted to whole milliseconds; may be negative.
+    SeekBy(i64),
+    /// `SetPosition`, already checked against the current track id and
+    /// converted to milliseconds from the start of the track.
+    SeekTo(u64),
+    /// `Raise` — bring the window forward. Best effort: a Wayland compositor
+    /// may decline, which is its right.
+    Raise,
+    /// `Quit`.
+    Quit,
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) use server::Mpris;
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) use absent::Mpris;
+
+/// The stand-in for every platform without MPRIS: identical API, no thread,
+/// no bus, nothing to go wrong.
+#[cfg(not(target_os = "linux"))]
+mod absent {
+    use iced::Subscription;
+
+    use super::{Request, Snapshot};
+
+    /// No-op MPRIS integration (non-Linux builds).
+    pub(crate) struct Mpris;
+
+    #[expect(
+        clippy::unused_self,
+        reason = "method-for-method API parity with the Linux Mpris, so app.rs carries no cfg"
+    )]
+    impl Mpris {
+        /// Nothing to start.
+        pub(crate) fn start() -> Self {
+            Self
+        }
+
+        /// Nothing to publish to.
+        pub(crate) fn publish(&self, _snapshot: Snapshot, _seeked: bool) {}
+
+        /// No bus, no requests.
+        pub(crate) fn subscription(&self) -> Subscription<Request> {
+            Subscription::none()
+        }
+    }
+}

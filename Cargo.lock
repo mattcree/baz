@@ -343,6 +343,7 @@ dependencies = [
  "lru 0.16.4",
  "tempfile",
  "tokio",
+ "zbus",
 ]
 
 [[package]]

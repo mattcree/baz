@@ -39,17 +39,18 @@ use std::time::{Duration, Instant};
 
 use baz_core::index::Library;
 use baz_core::protocol::{Command, Event, SignalChain};
-use iced::keyboard::{self, key};
+use iced::keyboard;
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
 use iced::widget::{column, image as iced_image, row, scrollable, text_input, vertical_rule};
 use iced::{Element, Size, Subscription, Task, window};
 use lru::LruCache;
 
+use crate::mpris::Mpris;
 use crate::playback::{Playback, PlayerEvent};
 use crate::player::{Availability, PlayerState};
 use crate::scan::ScanUpdate;
 use crate::views::side_panel::PANEL_W;
-use crate::{art, config, player, scan, shelf, theme, views, vm};
+use crate::{art, config, keys, mpris, player, scan, shelf, theme, views, vm};
 
 /// Approximate top-bar height, used only for the pre-first-scroll estimate
 /// of the grid viewport (real bounds arrive with every scroll event).
@@ -77,8 +78,35 @@ pub fn run(started: Instant, cli_dir: Option<PathBuf>) -> iced::Result {
     iced::application("baz", App::update, App::view)
         .subscription(App::subscription)
         .theme(|_| theme::theme())
-        .window_size(WINDOW)
+        .window(window_settings())
         .run_with(move || App::new(started, cli_dir))
+}
+
+/// The window's settings: its size, and on Linux the application id.
+///
+/// iced 0.13 leaves the Wayland `app_id` / X11 `WM_CLASS` empty by default,
+/// which is what makes a launcher show a running window as an unrelated
+/// "unknown" entry beside its own icon. Setting it to the basename of
+/// `packaging/baz.desktop` is the whole of the association — the same string
+/// MPRIS advertises as `DesktopEntry`, which is why [`mpris::DESKTOP_ENTRY`]
+/// is the single place it is spelled.
+fn window_settings() -> window::Settings {
+    #[cfg_attr(
+        not(target_os = "linux"),
+        expect(
+            unused_mut,
+            reason = "only the Linux window settings carry an application id"
+        )
+    )]
+    let mut settings = window::Settings {
+        size: WINDOW,
+        ..window::Settings::default()
+    };
+    #[cfg(target_os = "linux")]
+    {
+        settings.platform_specific.application_id = String::from(mpris::DESKTOP_ENTRY);
+    }
+    settings
 }
 
 /// Top-level messages; one enum across both screens keeps the seams simple.
@@ -107,10 +135,31 @@ pub(crate) enum Message {
     PlayAlbum(u64),
     /// Side panel: a different format of the selected album was picked.
     EditionSelected(u64, vm::EditionKey),
-    /// Bottom bar: play/pause toggle.
+    /// Bottom bar, Space, or MPRIS `PlayPause`: play/pause toggle.
     PlayPause,
-    /// Bottom bar: skip to the next queued track.
+    /// Bottom bar, `N`, or MPRIS `Next`: skip to the next queued track.
     NextTrack,
+    /// MPRIS `Play` (or a `Play` media key): start or resume — *not* a
+    /// toggle. There is no on-screen control for it; the toggle covers both
+    /// directions, where a desktop media widget asks for one specifically.
+    Play,
+    /// MPRIS `Pause` (or a `Pause` media key): pause, never resume.
+    Pause,
+    /// MPRIS `Stop` (or a `MediaStop` key): end the current run through the
+    /// queue.
+    Stop,
+    /// Seek relative to the position the bar is showing, in milliseconds;
+    /// negative goes back. Arrow keys and MPRIS `Seek`.
+    SeekBy(i64),
+    /// Seek to an absolute position in the current track, in milliseconds.
+    /// MPRIS `SetPosition`, already checked against the current track id.
+    SeekTo(u64),
+    /// `/` or Ctrl+F: put the caret in the search well.
+    FocusSearch,
+    /// MPRIS `Raise`: ask the compositor to bring the window forward.
+    Raise,
+    /// MPRIS `Quit`: close baz.
+    Quit,
     /// Bottom bar: the pointer went down on the seek bar, this far along it.
     /// Nothing is requested and nothing moves yet — the gesture is a click
     /// until it travels [`player::DRAG_THRESHOLD_PX`].
@@ -145,6 +194,13 @@ struct App {
     playback: Playback,
     /// Event-derived playback state; the only thing playback widgets read.
     player: PlayerState,
+    /// Desktop media integration (Linux MPRIS2; a no-op elsewhere).
+    mpris: Mpris,
+    /// The current track's cover-art URL, with the
+    /// [`PlayerState::track_seq`](crate::player::PlayerState::track_seq) it
+    /// was resolved for. Resolving it reads the album directory, so it is
+    /// done once per track change rather than once per progress report.
+    mpris_art: (u64, Option<String>),
 }
 
 enum Screen {
@@ -166,6 +222,10 @@ impl App {
         // Availability::NoDevice state that the bottom bar reports.
         let playback = Playback::start();
         let player = PlayerState::new(playback.availability());
+        // Desktop integration is an enhancement: this spawns a thread and
+        // returns, and an absent session bus costs one stdout line (see
+        // crate::mpris).
+        let mpris = Mpris::start();
         let stored = config::config_file().and_then(|path| config::load(&path));
         let dir = cli_dir.or(stored.map(|c| c.music_dir));
         let (screen, task) = match dir {
@@ -182,6 +242,8 @@ impl App {
                 screen,
                 playback,
                 player,
+                mpris,
+                mpris_art: (0, None),
             },
             task,
         )
@@ -223,6 +285,40 @@ impl App {
                 self.send_transport(Command::Next);
                 Task::none()
             }
+            // Play/Pause/Stop have no button of their own; a desktop media
+            // widget (and a media key) asks for a direction rather than a
+            // toggle, and they take the same path to the engine as the
+            // toggle does.
+            Message::Play => {
+                self.send_transport(Command::Play);
+                Task::none()
+            }
+            Message::Pause => {
+                self.send_transport(Command::Pause);
+                Task::none()
+            }
+            Message::Stop => {
+                self.send_transport(Command::Stop);
+                Task::none()
+            }
+            Message::SeekBy(delta_ms) => {
+                let target = self.player.seek_by(delta_ms);
+                self.send_seek(target);
+                Task::none()
+            }
+            Message::SeekTo(position_ms) => {
+                let target = self.player.seek_to(position_ms);
+                self.send_seek(target);
+                Task::none()
+            }
+            Message::FocusSearch => match &self.screen {
+                Screen::Shelf(_) => text_input::focus(search_id()),
+                Screen::Setup(_) => Task::none(),
+            },
+            Message::Quit => iced::exit(),
+            // Best effort by nature: a Wayland compositor is entitled to
+            // refuse a focus request, and refusing is not an error here.
+            Message::Raise => window::get_latest().and_then(window::gain_focus),
             Message::SeekPressed(pointer) => {
                 self.player.press(pointer);
                 Task::none()
@@ -240,14 +336,8 @@ impl App {
                 Task::none()
             }
             Message::SeekReleased => {
-                // Nothing is assumed about the new position: the engine
-                // answers with Progress, and until it does the bar shows the
-                // request as pending (see player.rs).
-                if let Some(position_ms) = self.player.release_drag()
-                    && !self.playback.send(Command::Seek { position_ms })
-                {
-                    self.player.engine_closed();
-                }
+                let target = self.player.release_drag();
+                self.send_seek(target);
                 Task::none()
             }
             message => match &mut self.screen {
@@ -291,6 +381,14 @@ impl App {
     /// the notable per-track moments (matching the `[scan]`/`[config]` log
     /// style).
     fn apply_player_event(&mut self, message: PlayerEvent) {
+        // Whether a seek we asked for is still awaiting its confirming
+        // event. MPRIS wants a `Seeked` signal when the position jumps for a
+        // reason a polling client could not have predicted, and the engine's
+        // answer to an accepted Seek is an immediate Progress — so "a seek
+        // was pending and a Progress arrived" is that moment, read off
+        // events rather than assumed at request time.
+        let seek_pending = self.player.seek_pending();
+        let mut seek_confirmed = false;
         match message {
             PlayerEvent::Engine(event) => {
                 match &event {
@@ -334,11 +432,46 @@ impl App {
                     Screen::Setup(_) => &[],
                 };
                 self.player.apply(&event, albums);
+                seek_confirmed = seek_pending && matches!(event, Event::Progress { .. });
             }
             PlayerEvent::Closed => {
                 println!("[playback] engine shut down");
                 self.player.engine_closed();
             }
+        }
+        self.publish_mpris(seek_confirmed);
+    }
+
+    /// Hand the desktop integration the state the engine just confirmed.
+    ///
+    /// The snapshot is built unconditionally — `app.rs` carries no `cfg`, and
+    /// on a platform without MPRIS it is simply dropped. That costs a few
+    /// small clones at the engine's ~4 Hz progress cadence, which is a fair
+    /// price for one code path.
+    fn publish_mpris(&mut self, seeked: bool) {
+        let sequence = self.player.track_seq();
+        if self.mpris_art.0 != sequence {
+            let url = self
+                .player
+                .now_playing_path()
+                .and_then(art::cover_file_beside)
+                .as_deref()
+                .and_then(mpris::state::file_url);
+            self.mpris_art = (sequence, url);
+        }
+        let snapshot = mpris::Snapshot::from_player(&self.player, self.mpris_art.1.clone());
+        self.mpris.publish(snapshot, seeked);
+    }
+
+    /// Send an accepted seek target to the engine. `None` means there was
+    /// nothing honest to seek to and nothing was asked for; the state machine
+    /// has already recorded an accepted request as pending, and the bar keeps
+    /// showing it until an event confirms (see `player.rs`).
+    fn send_seek(&mut self, target: Option<u64>) {
+        if let Some(position_ms) = target
+            && !self.playback.send(Command::Seek { position_ms })
+        {
+            self.player.engine_closed();
         }
     }
 
@@ -363,6 +496,9 @@ impl App {
         } else {
             self.player.engine_closed();
         }
+        // A queue where there was none moves `CanPlay`, and that is the one
+        // MPRIS-visible change that arrives without an engine event.
+        self.publish_mpris(false);
     }
 
     /// Send a transport command, marking it pending on acceptance and
@@ -394,12 +530,18 @@ impl App {
 
     fn subscription(&self) -> Subscription<Message> {
         let mut subs = vec![
-            keyboard::on_key_press(|k, _mods| match k {
-                keyboard::Key::Named(key::Named::Escape) => Some(Message::EscapePressed),
+            // Raw events rather than `keyboard::on_key_press`, because the
+            // capture status is the focus rule: a key a focused text field
+            // consumed is not a shortcut (see `crate::keys`).
+            iced::event::listen_with(|event, status, _window| match event {
+                iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                    keys::binding_for(&key, modifiers, keys::Focus::from(status))
+                }
                 _ => None,
             }),
             window::resize_events().map(|(_, size)| Message::WindowResized(size)),
             self.playback.subscription().map(Message::Playback),
+            self.mpris.subscription().map(message_for),
         ];
         // Frame events only until startup-to-interactive is logged.
         if !self.first_frame_logged {
@@ -793,6 +935,26 @@ impl Shelf {
     }
 }
 
+/// The message a D-Bus method call asks for.
+///
+/// Every arm is a message the interface already emits from a control or a
+/// key, which is the point: there is one update-loop arm per intention, and
+/// the lock screen's Next and the bottom bar's Next are the same press as far
+/// as everything downstream is concerned.
+fn message_for(request: mpris::Request) -> Message {
+    match request {
+        mpris::Request::Play => Message::Play,
+        mpris::Request::Pause => Message::Pause,
+        mpris::Request::PlayPause => Message::PlayPause,
+        mpris::Request::Stop => Message::Stop,
+        mpris::Request::Next => Message::NextTrack,
+        mpris::Request::SeekBy(delta_ms) => Message::SeekBy(delta_ms),
+        mpris::Request::SeekTo(position_ms) => Message::SeekTo(position_ms),
+        mpris::Request::Raise => Message::Raise,
+        mpris::Request::Quit => Message::Quit,
+    }
+}
+
 /// Persist the chosen music dir (config module); best-effort with a log,
 /// never fatal — a read-only config dir must not block listening to music.
 fn persist_music_dir(music_dir: &std::path::Path) {
@@ -840,6 +1002,54 @@ mod tests {
         assert_eq!(
             expand_tilde("relative/~/odd"),
             PathBuf::from("relative/~/odd")
+        );
+    }
+
+    /// The claim `crate::mpris` makes — that a D-Bus call and a click on the
+    /// matching control produce the *same* message — pinned so it cannot
+    /// drift into a parallel transport path.
+    #[test]
+    fn every_mpris_request_maps_to_an_interface_message() {
+        let cases = [
+            (mpris::Request::Play, "Play"),
+            (mpris::Request::Pause, "Pause"),
+            (mpris::Request::PlayPause, "PlayPause"),
+            (mpris::Request::Stop, "Stop"),
+            (mpris::Request::Next, "NextTrack"),
+            (mpris::Request::SeekBy(-5_000), "SeekBy(-5000)"),
+            (mpris::Request::SeekTo(30_000), "SeekTo(30000)"),
+            (mpris::Request::Raise, "Raise"),
+            (mpris::Request::Quit, "Quit"),
+        ];
+        for (request, expected) in cases {
+            assert_eq!(format!("{:?}", message_for(request)), expected);
+        }
+    }
+
+    /// The bottom bar's toggle and MPRIS `PlayPause` are literally the same
+    /// message, and `N` and MPRIS `Next` likewise.
+    #[test]
+    fn the_transport_has_one_path_per_intention() {
+        use iced::keyboard::{Key, Modifiers, key};
+
+        let from_key = keys::binding_for(
+            &Key::Named(key::Named::Space),
+            Modifiers::empty(),
+            keys::Focus::Elsewhere,
+        );
+        assert_eq!(
+            format!("{from_key:?}"),
+            format!("{:?}", Some(message_for(mpris::Request::PlayPause)))
+        );
+
+        let from_key = keys::binding_for(
+            &Key::Character("n".into()),
+            Modifiers::empty(),
+            keys::Focus::Elsewhere,
+        );
+        assert_eq!(
+            format!("{from_key:?}"),
+            format!("{:?}", Some(message_for(mpris::Request::Next)))
         );
     }
 }

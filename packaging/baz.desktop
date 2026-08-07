@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=baz
+GenericName=Music Player
+Comment=A fast music player for people who own their music
+Exec=baz
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;audio;player;library;flac;
+StartupNotify=true
+StartupWMClass=baz

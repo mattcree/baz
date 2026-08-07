@@ -16,6 +16,12 @@ lofty = { workspace = true }
 lru = { workspace = true }
 tokio = { workspace = true }
 
+# MPRIS2 lives and dies with the freedesktop session bus, so the dependency is
+# scoped to the platform that has one: Windows and macOS never see zbus in
+# their dependency graph, let alone their binaries (see src/mpris/mod.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { workspace = true }
+
 [features]
 # Real audio-device output, forwarded to `baz-core/device-output`. Non-default
 # for the same reason as there: building cpal needs platform audio headers

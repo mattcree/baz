@@ -61,6 +61,29 @@ toolbox run -c baz-dev env -u WAYLAND_DISPLAY WINIT_UNIX_BACKEND=x11 \
   xvfb-run -s '-screen 0 1400x1000x24' cargo run --release -p baz -- /tmp/fixture-music
 ```
 
+### Verifying MPRIS without touching the owner's desktop
+
+The desktop integration talks to a D-Bus **session** bus, and the owner has one
+running. Never test against it — start a private one, point only the test
+instance at it, and inspect that:
+
+```sh
+dbus-daemon --session --fork --print-address=3 3>/tmp/scratch/addr \
+                              --print-pid=4 4>/tmp/scratch/pid
+export DBUS_SESSION_BUS_ADDRESS="$(cat /tmp/scratch/addr)"
+# ...launch baz with the XDG redirection above, plus this address...
+busctl --user introspect org.mpris.MediaPlayer2.baz /org/mpris/MediaPlayer2
+busctl --user call org.mpris.MediaPlayer2.baz /org/mpris/MediaPlayer2 \
+       org.mpris.MediaPlayer2.Player PlayPause
+kill "$(cat /tmp/scratch/pid)"
+```
+
+`XDG_RUNTIME_DIR` should be short: zbus falls back to `$XDG_RUNTIME_DIR/bus`,
+and a Unix socket path over ~100 bytes fails with `SUN_LEN` rather than the
+error you were testing for. To check graceful degradation, unset
+`DBUS_SESSION_BUS_ADDRESS` and point `XDG_RUNTIME_DIR` at a directory with no
+`bus` socket: the app must print one `[mpris]` line and run normally.
+
 Screenshot and diff with ImageMagick (`magick compare -metric AE`). Use the
 wgpu renderer, not tiny-skia: tiny-skia does damage-based partial repaints and
 is not run-to-run deterministic, so it cannot prove a refactor changed nothing.

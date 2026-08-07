@@ -203,6 +203,12 @@ impl PlayPause {
 }
 
 /// The bottom bar's resolved current track.
+///
+/// The first three fields are what the bottom bar draws; the rest are the
+/// catalogue facts a now-playing readout outside the window needs (MPRIS
+/// metadata — see [`crate::mpris`]). They are resolved in the same pass
+/// because they come from the same view-model lookup, and resolving them
+/// twice would risk the two readouts disagreeing about what is playing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NowPlaying {
     /// Shelf album containing the track, when the path resolves against the
@@ -212,6 +218,13 @@ pub struct NowPlaying {
     pub title: String,
     /// Album artist, when resolved.
     pub artist: Option<String>,
+    /// The track's own artist tag, when it has one that the album's does not
+    /// already cover.
+    pub track_artist: Option<String>,
+    /// Album title, when resolved.
+    pub album: Option<String>,
+    /// Track number within its disc, when the tags declared one.
+    pub track_number: Option<u32>,
 }
 
 /// Resolve a queue path against the shelf's view model: the engine
@@ -232,6 +245,9 @@ pub fn resolve_now_playing(albums: &[AlbumVm], path: &Path) -> NowPlaying {
                     album_id: Some(album.id),
                     title: track.title.clone(),
                     artist: album.artist.name().map(str::to_owned),
+                    track_artist: track.artist.clone(),
+                    album: album.title.clone(),
+                    track_number: track.number,
                 };
             }
         }
@@ -242,6 +258,9 @@ pub fn resolve_now_playing(albums: &[AlbumVm], path: &Path) -> NowPlaying {
             .file_name()
             .map_or_else(|| String::from("?"), |n| n.to_string_lossy().into_owned()),
         artist: None,
+        track_artist: None,
+        album: None,
+        track_number: None,
     }
 }
 
@@ -418,6 +437,11 @@ pub struct PlayerState {
     /// Path of the current track, to tell "the same track started again
     /// after a seek" from "a different track started".
     now_playing_path: Option<PathBuf>,
+    /// Count of *distinct* tracks this state machine has seen start, so a
+    /// consumer that must name the current track with a stable identity
+    /// (MPRIS's `mpris:trackid`) has one that changes exactly when the track
+    /// does — and never when a seek restarts the same file.
+    track_seq: u64,
     /// Tracks in the queue we last asked for (request-side; module docs).
     queued: usize,
     /// A transport command awaiting its confirming event (module docs).
@@ -448,6 +472,7 @@ impl PlayerState {
             phase: Phase::Stopped,
             now_playing: None,
             now_playing_path: None,
+            track_seq: 0,
             queued: 0,
             pending: false,
             failed: 0,
@@ -473,6 +498,7 @@ impl PlayerState {
                 // and the restarted track's audio arriving.
                 if self.now_playing_path.as_deref() != Some(path.as_path()) {
                     self.now_playing_path = Some(path.clone());
+                    self.track_seq = self.track_seq.wrapping_add(1);
                     self.reset_progress();
                 }
                 self.now_playing = Some(resolve_now_playing(albums, path));
@@ -627,6 +653,49 @@ impl PlayerState {
         Some(target)
     }
 
+    /// Seek `delta_ms` from where the bar is currently *showing* — the
+    /// keyboard's and MPRIS's relative seek.
+    ///
+    /// Returns the absolute position to ask the engine for, recorded as
+    /// pending exactly like a released drag, or `None` when there is nothing
+    /// to seek within (the same [`Self::seekable_total`] test the bar uses:
+    /// no engine, nothing playing, or a track of undeclared length — there is
+    /// no honest "5 seconds from here" without a here).
+    ///
+    /// The base is the shown position rather than the last confirmed one, so
+    /// three quick presses of Right move fifteen seconds instead of five: the
+    /// engine reports progress at ~4 Hz, and a step taken from a reading that
+    /// is up to a quarter-second stale would silently discard every press
+    /// that landed inside the same reporting window. That is the same
+    /// scrub → pending-seek → confirmed-progress precedence
+    /// [`Self::seek_bar`] renders, so the number a press moves from is
+    /// always the number the user was looking at.
+    ///
+    /// Backwards is clamped at zero. Forwards is clamped at the track length,
+    /// where [`Command::Seek`](baz_core::protocol::Command::Seek) is
+    /// documented to behave as [`Command::Next`](baz_core::protocol::Command::Next)
+    /// — seeking off the end of a track moves to the next one, which is what
+    /// holding the key means.
+    pub fn seek_by(&mut self, delta_ms: i64) -> Option<u64> {
+        let total = self.seekable_total()?;
+        let base = self
+            .scrub_ms()
+            .or(self.seek_pending)
+            .unwrap_or(self.elapsed_ms);
+        let target = base.saturating_add_signed(delta_ms).min(total);
+        self.seek_pending = Some(target);
+        Some(target)
+    }
+
+    /// Seek to an absolute position (MPRIS `SetPosition`), clamped into the
+    /// current track. `None` under the same conditions as [`Self::seek_by`].
+    pub fn seek_to(&mut self, position_ms: u64) -> Option<u64> {
+        let total = self.seekable_total()?;
+        let target = position_ms.min(total);
+        self.seek_pending = Some(target);
+        Some(target)
+    }
+
     /// The track length to scrub against, or `None` when scrubbing would be
     /// a lie: no engine, nothing playing, or a track of undeclared length.
     fn seekable_total(&self) -> Option<u64> {
@@ -716,17 +785,46 @@ impl PlayerState {
     }
 
     /// Confirmed transport phase.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the confirmed phase is this machine's central fact and the tests pin it \
-                      directly; the view reads it only through play_pause() and seek_bar()"
-        )
-    )]
     #[must_use]
     pub fn phase(&self) -> Phase {
         self.phase
+    }
+
+    /// Confirmed position in the current track, in milliseconds — the last
+    /// [`Event::Progress`] and nothing else. Never extrapolated between
+    /// reports: a consumer that wants a smoother number must say so itself.
+    #[must_use]
+    pub fn elapsed_ms(&self) -> u64 {
+        self.elapsed_ms
+    }
+
+    /// Confirmed length of the current track, when the engine reported one.
+    #[must_use]
+    pub fn track_ms(&self) -> Option<u64> {
+        self.track_ms
+    }
+
+    /// A count that changes exactly when the playing track changes, for
+    /// consumers that must give the current track a stable identity (module
+    /// docs on [`NowPlaying`]).
+    #[must_use]
+    pub fn track_seq(&self) -> u64 {
+        self.track_seq
+    }
+
+    /// Path of the track the engine last said it started, while one is
+    /// playing or paused.
+    #[must_use]
+    pub fn now_playing_path(&self) -> Option<&Path> {
+        self.now_playing_path.as_deref()
+    }
+
+    /// Whether a seek can be asked for at all: an engine, a session, and a
+    /// declared track length. The public spelling of the test the seek bar
+    /// and [`Self::seek_by`] share.
+    #[must_use]
+    pub fn can_seek(&self) -> bool {
+        self.seekable_total().is_some()
     }
 
     /// The resolved current track, while one is playing or paused.
@@ -2019,5 +2117,150 @@ mod tests {
                 "{source} -> {output}"
             );
         }
+    }
+
+    /// A track playing at `elapsed_ms` of a 200-second track.
+    fn seekable_at(elapsed_ms: u64) -> (Vec<AlbumVm>, PlayerState) {
+        let albums = albums();
+        let mut player = ready_with_queue(2);
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        player.apply(
+            &Event::Progress {
+                elapsed_ms,
+                track_ms: Some(200_000),
+            },
+            &albums,
+        );
+        (albums, player)
+    }
+
+    #[test]
+    fn a_relative_seek_moves_from_the_confirmed_position() {
+        let (_albums, mut player) = seekable_at(30_000);
+        assert_eq!(player.seek_by(5_000), Some(35_000));
+        assert!(
+            player.seek_pending(),
+            "the request is pending until an event confirms it"
+        );
+    }
+
+    /// Presses inside one progress window must accumulate — otherwise every
+    /// press after the first would land on the same stale reading.
+    #[test]
+    fn repeated_relative_seeks_accumulate_before_confirmation() {
+        let (albums, mut player) = seekable_at(30_000);
+        assert_eq!(player.seek_by(5_000), Some(35_000));
+        assert_eq!(player.seek_by(5_000), Some(40_000));
+        assert_eq!(player.seek_by(-30_000), Some(10_000));
+
+        // The engine's confirming Progress resets the base to truth.
+        player.apply(
+            &Event::Progress {
+                elapsed_ms: 10_000,
+                track_ms: Some(200_000),
+            },
+            &albums,
+        );
+        assert!(!player.seek_pending());
+        assert_eq!(player.seek_by(5_000), Some(15_000));
+    }
+
+    #[test]
+    fn relative_seeks_clamp_at_both_ends_of_the_track() {
+        let (_albums, mut player) = seekable_at(2_000);
+        assert_eq!(
+            player.seek_by(-30_000),
+            Some(0),
+            "before the start is the start"
+        );
+
+        let (_albums, mut player) = seekable_at(199_000);
+        assert_eq!(
+            player.seek_by(30_000),
+            Some(200_000),
+            "past the end is the end, where Command::Seek is documented to act as Next"
+        );
+    }
+
+    #[test]
+    fn an_absolute_seek_clamps_into_the_current_track() {
+        let (_albums, mut player) = seekable_at(0);
+        assert_eq!(player.seek_to(93_500), Some(93_500));
+        assert_eq!(player.seek_to(999_999), Some(200_000));
+        assert_eq!(player.seek_to(0), Some(0));
+    }
+
+    /// The same honesty test the bar makes: no engine, no session, or no
+    /// declared length means there is no position to seek relative to.
+    #[test]
+    fn seeking_is_refused_where_there_is_nothing_honest_to_seek_within() {
+        let albums = albums();
+
+        let mut stopped = ready_with_queue(2);
+        assert_eq!(stopped.seek_by(5_000), None, "nothing is playing");
+        assert_eq!(stopped.seek_to(5_000), None);
+
+        let mut unknown_length = ready_with_queue(2);
+        unknown_length.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        unknown_length.apply(
+            &Event::Progress {
+                elapsed_ms: 1_000,
+                track_ms: None,
+            },
+            &albums,
+        );
+        assert_eq!(
+            unknown_length.seek_by(5_000),
+            None,
+            "no declared length, no proportion to seek within"
+        );
+        assert!(!unknown_length.seek_pending());
+
+        let mut closed = ready_with_queue(2);
+        closed.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        closed.engine_closed();
+        assert_eq!(closed.seek_by(5_000), None, "no engine to ask");
+    }
+
+    /// The track sequence is what gives MPRIS a stable `mpris:trackid`: it
+    /// must not move when a seek restarts the same file.
+    #[test]
+    fn the_track_sequence_counts_tracks_not_track_starts() {
+        let albums = albums();
+        let mut player = ready_with_queue(2);
+        assert_eq!(player.track_seq(), 0);
+
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        let first = player.track_seq();
+        assert_eq!(first, 1);
+        assert_eq!(
+            player.now_playing_path(),
+            Some(Path::new("/m/boc/geogaddi/01.flac"))
+        );
+
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        assert_eq!(player.track_seq(), first, "a seek restarts the same track");
+
+        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+        assert_eq!(player.track_seq(), first + 1);
+    }
+
+    /// The catalogue facts MPRIS metadata needs come from the same lookup the
+    /// bottom bar uses, so the two readouts cannot disagree.
+    #[test]
+    fn now_playing_resolves_album_and_track_number_too() {
+        let albums = albums();
+        let resolved = resolve_now_playing(&albums, Path::new("/m/boc/geogaddi/02.flac"));
+        assert_eq!(resolved.title, "Music Is Math");
+        assert_eq!(resolved.album.as_deref(), Some("Geogaddi"));
+        assert_eq!(resolved.artist.as_deref(), Some("Boards of Canada"));
+        assert_eq!(resolved.track_number, Some(2));
+
+        // An unknown path keeps its file name and claims nothing else.
+        let stray = resolve_now_playing(&albums, Path::new("/m/gone/missing.flac"));
+        assert_eq!(stray.title, "missing.flac");
+        assert_eq!(stray.album, None);
+        assert_eq!(stray.track_number, None);
+        assert_eq!(stray.track_artist, None);
     }
 }

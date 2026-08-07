@@ -1,0 +1,394 @@
+//! Keyboard control: one pure function from a key press to a [`Message`].
+//!
+//! Every binding here resolves to a message the interface already emits —
+//! [`Message::PlayPause`] is the same message the bottom bar's toggle sends,
+//! [`Message::NextTrack`] the same one its Next button sends. There is no
+//! second transport path to keep in step with the first, and no keyboard
+//! shortcut can do something no control on screen can do.
+//!
+//! # The focus rule
+//!
+//! A key press belongs to a focused text field or it belongs to the
+//! application, never to both. baz does not *guess* which: iced reports an
+//! [`event::Status`](iced::event::Status) alongside every runtime event
+//! saying whether a widget already consumed it, and that report is the whole
+//! of the rule. [`Focus::TextField`] (iced said `Captured`) means the search
+//! well took the key — typed it, moved its cursor, or dismissed itself — and
+//! [`binding_for`] answers `None` for **every** key in that state. Space
+//! types a space. `/` types a slash. Left and Right move the caret. `n`
+//! types an `n`.
+//!
+//! This is stronger than tracking focus ourselves would be. iced 0.13 exposes
+//! no "is this widget focused" query a subscription could ask synchronously,
+//! so any hand-kept flag would have to *infer* blur from clicks it cannot
+//! locate — and the failure mode of a wrong guess is a space bar that pauses
+//! the music mid-word. Deferring to the toolkit's own capture report cannot
+//! be wrong, because it is the same decision the text field itself made a
+//! moment earlier.
+//!
+//! One consequence is worth stating plainly: iced's `text_input` captures
+//! *every* key press while focused except Tab and the vertical arrows, so
+//! while the search well has focus no transport binding is live at all. The
+//! way out is the way in — Escape, which the field consumes to blur itself,
+//! after which the transport keys work. (The search field takes focus at
+//! startup, so this is the first thing a keyboard user meets; it is
+//! documented in the README's key table.)
+//!
+//! # Why these steps
+//!
+//! [`SEEK_STEP_MS`] is 5 s because that is what an arrow key means to people
+//! already: mpv seeks ±5 s on Left/Right, and so does `YouTube`. It is long
+//! enough to skip an intro figure and short enough that overshooting costs
+//! one press back.
+//!
+//! [`SEEK_STEP_LARGE_MS`] is 30 s — the skip-forward step podcast players
+//! standardised on (Apple Podcasts, Pocket Casts) and roughly one section of
+//! a song. The point of a second step is that it is *obviously* different
+//! from the first; 6× reads as a different gesture, where 2× would just feel
+//! like an unreliable 5.
+//!
+//! Seeks are relative to the position the seek bar is *showing* (a scrub
+//! under the pointer, else a seek awaiting confirmation, else the engine's
+//! last report — [`crate::player`] pins that precedence), so holding Right
+//! accumulates instead of fighting the engine's 4 Hz progress cadence.
+//! Nothing here invents a position: the target is computed by
+//! [`PlayerState::seek_by`](crate::player::PlayerState::seek_by) from
+//! event-derived state and clamped to the track the engine confirmed.
+
+use iced::keyboard::{Key, Modifiers, key};
+
+use crate::app::Message;
+
+/// Step for an unmodified Left/Right, in milliseconds (module docs).
+pub(crate) const SEEK_STEP_MS: i64 = 5_000;
+
+/// Step for Shift+Left/Right, in milliseconds (module docs).
+pub(crate) const SEEK_STEP_LARGE_MS: i64 = 30_000;
+
+/// Who the key press belongs to — read off iced's capture report, not
+/// inferred (module docs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Focus {
+    /// A focused widget consumed the press. In baz that is always the search
+    /// well: `text_input` is the only widget in the tree that handles key
+    /// presses at all.
+    TextField,
+    /// No widget claimed the press, so it is the application's to interpret.
+    Elsewhere,
+}
+
+impl From<iced::event::Status> for Focus {
+    fn from(status: iced::event::Status) -> Self {
+        match status {
+            iced::event::Status::Captured => Self::TextField,
+            iced::event::Status::Ignored => Self::Elsewhere,
+        }
+    }
+}
+
+/// The message a key press asks for, or `None` when it asks for nothing.
+///
+/// Pure: no state, no side effects, no iced runtime. The whole binding table
+/// is this match, and it is exhaustively unit-tested below — including the
+/// modifier variants that must *not* fire.
+pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Option<Message> {
+    // The focused text field already had this key and made its decision.
+    if focus == Focus::TextField {
+        return None;
+    }
+    let bare = modifiers.is_empty();
+    let shift = modifiers == Modifiers::SHIFT;
+    let command = modifiers == Modifiers::COMMAND;
+
+    match key.as_ref() {
+        // Transport. Space is the universal play/pause and takes no
+        // modifiers at all — Ctrl+Space and friends belong to whatever binds
+        // them later.
+        Key::Named(key::Named::Space) | Key::Character(" ") if bare => Some(Message::PlayPause),
+        Key::Character("n" | "N") if bare || shift => Some(Message::NextTrack),
+        // Ctrl+Right (Cmd+Right on macOS) is the second spelling of Next, for
+        // hands that never leave the arrow cluster.
+        Key::Named(key::Named::ArrowRight) if command => Some(Message::NextTrack),
+
+        // Seeking. Shift widens the step; nothing else may ride along.
+        Key::Named(key::Named::ArrowRight) if bare => Some(Message::SeekBy(SEEK_STEP_MS)),
+        Key::Named(key::Named::ArrowRight) if shift => Some(Message::SeekBy(SEEK_STEP_LARGE_MS)),
+        Key::Named(key::Named::ArrowLeft) if bare => Some(Message::SeekBy(-SEEK_STEP_MS)),
+        Key::Named(key::Named::ArrowLeft) if shift => Some(Message::SeekBy(-SEEK_STEP_LARGE_MS)),
+
+        // Search. `/` is the reflex from every pager and browser; Ctrl+F
+        // (Cmd+F) is the reflex from every document. Shift is tolerated on
+        // `/` because plenty of layouts need it to type the character.
+        Key::Character("/") if bare || shift => Some(Message::FocusSearch),
+        Key::Character("f" | "F") if command => Some(Message::FocusSearch),
+
+        // Unchanged from the first keyboard pass: clear the search, else
+        // close the side panel.
+        Key::Named(key::Named::Escape) if bare => Some(Message::EscapePressed),
+
+        // Media keys, for the machines that deliver them to the focused
+        // window rather than to a desktop shortcut daemon. On Linux the
+        // desktop usually grabs these and routes them over MPRIS instead
+        // (see [`crate::mpris`]); these arms are what make them work on
+        // Windows and macOS, and on a bare Linux session with no shell
+        // listening.
+        Key::Named(key::Named::MediaPlayPause) => Some(Message::PlayPause),
+        Key::Named(key::Named::MediaTrackNext) => Some(Message::NextTrack),
+        Key::Named(key::Named::MediaStop) => Some(Message::Stop),
+        Key::Named(key::Named::Play) => Some(Message::Play),
+        Key::Named(key::Named::Pause) => Some(Message::Pause),
+
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `Message` variants this module can produce, compared structurally
+    /// (`Message` is deliberately not `PartialEq` — it carries iced payloads
+    /// that have no useful equality).
+    fn tag(message: &Message) -> String {
+        format!("{message:?}")
+    }
+
+    fn named(name: key::Named) -> Key {
+        Key::Named(name)
+    }
+
+    fn ch(c: &str) -> Key {
+        Key::Character(c.into())
+    }
+
+    fn bind(key: &Key, modifiers: Modifiers) -> Option<String> {
+        binding_for(key, modifiers, Focus::Elsewhere)
+            .as_ref()
+            .map(tag)
+    }
+
+    fn none() -> Modifiers {
+        Modifiers::empty()
+    }
+
+    #[test]
+    fn space_toggles_play_pause() {
+        assert_eq!(
+            bind(&named(key::Named::Space), none()).as_deref(),
+            Some("PlayPause")
+        );
+        // The character spelling, for backends that report it that way.
+        assert_eq!(bind(&ch(" "), none()).as_deref(), Some("PlayPause"));
+    }
+
+    /// The rule the whole module exists for: a focused search well types a
+    /// space, it does not pause the music.
+    #[test]
+    fn space_in_the_search_field_is_not_a_transport_key() {
+        assert!(binding_for(&named(key::Named::Space), none(), Focus::TextField).is_none());
+        assert!(binding_for(&ch(" "), none(), Focus::TextField).is_none());
+    }
+
+    /// …and neither is anything else. A captured press is the field's.
+    #[test]
+    fn a_focused_text_field_swallows_every_binding() {
+        let every_bound_key = [
+            (named(key::Named::Space), none()),
+            (named(key::Named::ArrowLeft), none()),
+            (named(key::Named::ArrowRight), none()),
+            (named(key::Named::ArrowLeft), Modifiers::SHIFT),
+            (named(key::Named::ArrowRight), Modifiers::SHIFT),
+            (named(key::Named::ArrowRight), Modifiers::COMMAND),
+            (ch("n"), none()),
+            (ch("/"), none()),
+            (ch("f"), Modifiers::COMMAND),
+            (named(key::Named::Escape), none()),
+            (named(key::Named::MediaPlayPause), none()),
+            (named(key::Named::MediaTrackNext), none()),
+        ];
+        for (key, modifiers) in &every_bound_key {
+            assert!(
+                binding_for(key, *modifiers, Focus::TextField).is_none(),
+                "{key:?} + {modifiers:?} must belong to the focused field"
+            );
+            // Each of them *is* a binding when the field does not have it —
+            // otherwise this test would pass vacuously.
+            assert!(
+                binding_for(key, *modifiers, Focus::Elsewhere).is_some(),
+                "{key:?} + {modifiers:?} should bind when nothing captured it"
+            );
+        }
+    }
+
+    #[test]
+    fn arrows_seek_by_the_documented_steps() {
+        assert_eq!(
+            bind(&named(key::Named::ArrowRight), none()).as_deref(),
+            Some("SeekBy(5000)")
+        );
+        assert_eq!(
+            bind(&named(key::Named::ArrowLeft), none()).as_deref(),
+            Some("SeekBy(-5000)")
+        );
+        assert_eq!(
+            bind(&named(key::Named::ArrowRight), Modifiers::SHIFT).as_deref(),
+            Some("SeekBy(30000)")
+        );
+        assert_eq!(
+            bind(&named(key::Named::ArrowLeft), Modifiers::SHIFT).as_deref(),
+            Some("SeekBy(-30000)")
+        );
+    }
+
+    #[test]
+    fn the_two_steps_are_the_documented_constants() {
+        assert_eq!(SEEK_STEP_MS, 5_000);
+        assert_eq!(SEEK_STEP_LARGE_MS, 30_000);
+    }
+
+    #[test]
+    fn next_track_has_two_spellings() {
+        assert_eq!(bind(&ch("n"), none()).as_deref(), Some("NextTrack"));
+        // Shift+N is still N, whatever the layout calls it.
+        assert_eq!(
+            bind(&ch("N"), Modifiers::SHIFT).as_deref(),
+            Some("NextTrack")
+        );
+        assert_eq!(
+            bind(&named(key::Named::ArrowRight), Modifiers::COMMAND).as_deref(),
+            Some("NextTrack")
+        );
+    }
+
+    /// Ctrl+Right is Next, not a 5-second seek: the modified arm must win.
+    #[test]
+    fn ctrl_right_is_next_not_a_seek() {
+        assert_eq!(
+            bind(&named(key::Named::ArrowRight), Modifiers::COMMAND).as_deref(),
+            Some("NextTrack")
+        );
+        // Ctrl+Left is nothing — there is no Previous in the engine protocol.
+        assert_eq!(
+            bind(&named(key::Named::ArrowLeft), Modifiers::COMMAND),
+            None
+        );
+    }
+
+    #[test]
+    fn search_focus_has_two_spellings() {
+        assert_eq!(bind(&ch("/"), none()).as_deref(), Some("FocusSearch"));
+        assert_eq!(
+            bind(&ch("/"), Modifiers::SHIFT).as_deref(),
+            Some("FocusSearch")
+        );
+        assert_eq!(
+            bind(&ch("f"), Modifiers::COMMAND).as_deref(),
+            Some("FocusSearch")
+        );
+        assert_eq!(
+            bind(&ch("F"), Modifiers::COMMAND).as_deref(),
+            Some("FocusSearch")
+        );
+        // Bare `f` types an `f`; it is not a shortcut.
+        assert_eq!(bind(&ch("f"), none()), None);
+    }
+
+    #[test]
+    fn escape_keeps_its_existing_meaning() {
+        assert_eq!(
+            bind(&named(key::Named::Escape), none()).as_deref(),
+            Some("EscapePressed")
+        );
+    }
+
+    #[test]
+    fn media_keys_reach_the_transport() {
+        assert_eq!(
+            bind(&named(key::Named::MediaPlayPause), none()).as_deref(),
+            Some("PlayPause")
+        );
+        assert_eq!(
+            bind(&named(key::Named::MediaTrackNext), none()).as_deref(),
+            Some("NextTrack")
+        );
+        assert_eq!(
+            bind(&named(key::Named::MediaStop), none()).as_deref(),
+            Some("Stop")
+        );
+        assert_eq!(
+            bind(&named(key::Named::Play), none()).as_deref(),
+            Some("Play")
+        );
+        assert_eq!(
+            bind(&named(key::Named::Pause), none()).as_deref(),
+            Some("Pause")
+        );
+    }
+
+    /// A binding must not fire because an unrelated modifier happened to be
+    /// down. Each case here is a key that *does* bind bare.
+    #[test]
+    fn unrelated_modifiers_suppress_a_binding() {
+        let suppressed = [
+            (named(key::Named::Space), Modifiers::COMMAND),
+            (named(key::Named::Space), Modifiers::ALT),
+            (named(key::Named::Space), Modifiers::SHIFT),
+            (named(key::Named::Space), Modifiers::LOGO),
+            (named(key::Named::ArrowRight), Modifiers::ALT),
+            (named(key::Named::ArrowLeft), Modifiers::ALT),
+            (
+                named(key::Named::ArrowRight),
+                Modifiers::COMMAND | Modifiers::SHIFT,
+            ),
+            (ch("n"), Modifiers::COMMAND),
+            (ch("n"), Modifiers::ALT),
+            (ch("/"), Modifiers::COMMAND),
+            (ch("f"), Modifiers::ALT),
+            (named(key::Named::Escape), Modifiers::COMMAND),
+            (named(key::Named::Escape), Modifiers::SHIFT),
+        ];
+        for (key, modifiers) in &suppressed {
+            assert_eq!(
+                bind(key, *modifiers),
+                None,
+                "{key:?} must not bind with {modifiers:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_keys_map_to_nothing() {
+        let unbound = [
+            named(key::Named::Enter),
+            named(key::Named::Tab),
+            named(key::Named::ArrowUp),
+            named(key::Named::ArrowDown),
+            named(key::Named::Backspace),
+            named(key::Named::Delete),
+            named(key::Named::Home),
+            named(key::Named::End),
+            named(key::Named::PageUp),
+            named(key::Named::F1),
+            named(key::Named::MediaTrackPrevious),
+            ch("a"),
+            ch("q"),
+            ch("z"),
+            ch("1"),
+            ch("."),
+            ch("?"),
+        ];
+        for key in &unbound {
+            assert_eq!(bind(key, none()), None, "{key:?} must be unbound");
+            assert!(
+                binding_for(key, none(), Focus::TextField).is_none(),
+                "{key:?} must be unbound in a text field too"
+            );
+        }
+    }
+
+    #[test]
+    fn focus_reads_iceds_capture_report() {
+        assert_eq!(Focus::from(iced::event::Status::Captured), Focus::TextField);
+        assert_eq!(Focus::from(iced::event::Status::Ignored), Focus::Elsewhere);
+    }
+}

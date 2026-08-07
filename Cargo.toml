@@ -61,6 +61,14 @@ walkdir = "2"       # directory traversal (Unlicense OR MIT)
 # baz_core::playback.
 symphonia = { version = "0.5", default-features = false, features = ["wav", "pcm", "flac", "mp3", "isomp4", "aac", "alac", "ogg", "vorbis"] }  # demux/decode (MPL-2.0 — allowlisted in deny.toml)
 tokio = { version = "1", features = ["rt"] }  # async runtime for the iced shell only (MIT)
+# D-Bus for MPRIS2 desktop integration on Linux (MIT). Pure Rust — no C, no
+# system library, no pkg-config — so the Linux build stays system-dep-free.
+# Deliberately major 4 rather than the current 5: zbus 4.4 is *already* linked
+# into every Linux baz binary (iced_core -> dark-light asks the desktop portal
+# for the system theme over D-Bus), so depending on it directly adds zero new
+# crates and no duplicate D-Bus stack. Move to 5 when iced's transitive copy
+# does. Rationale in full: crates/baz/src/mpris/mod.rs.
+zbus = "4.4"
 rtrb = "0.3"        # lock-free SPSC ring buffer, no hand-rolled unsafe here (MIT OR Apache-2.0)
 rubato = "0.16"     # windowed-sinc sample-rate conversion (MIT)
 cpal = "0.16"       # shared-mode device output, optional feature `device-output` (Apache-2.0)

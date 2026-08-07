@@ -166,13 +166,42 @@
   the whole of what the toolkit currently allows.
 - **Panel hiding / layout flexibility** — the v0.1 sketch promised a fixed
   layout *with hideable panels*; hiding is unwritten.
-- **Keyboard control beyond Escape** — no transport keybindings yet, which also
-  makes GUI automation impossible for testing.
+- **No keyboard route out of the search field.** Transport keys are bound
+  (`crates/baz/src/keys.rs`), but iced 0.13's `text_input` captures every key
+  press while focused except Tab and the vertical arrows, so while the search
+  well has focus *nothing* is a shortcut — the field takes the key and the
+  subscription never sees it. Escape blurs it, which is the whole of the
+  escape hatch today. A proper fix wants a focus-aware shell (or a toolkit
+  that reports focus synchronously), which is the same missing capability as
+  the accessibility gap above.
+- **No shortcut discovery in the interface.** The bindings are in the README
+  and nowhere the user can see them while running — no `?` overlay, no menu.
 
 ## Platform integration
 
-- **MPRIS + media keys** (Linux) — in the v0.1 scope sketch, deferred.
-- **Windows/macOS media-key and now-playing integration** — untouched.
+- **No application icon.** `packaging/baz.desktop` therefore carries no
+  `Icon=` key (a key naming a file no package installs is worse than none),
+  and desktops fall back to a generic launcher icon. Add the key in the same
+  change that adds the artwork; `crates/baz/src/icon.rs` is the in-UI transport
+  glyph sheet, not an app icon.
+- **`OpenUri` is not implemented**, so MPRIS's `SupportedUriSchemes` and
+  `SupportedMimeTypes` are empty and the desktop entry registers no
+  `MimeType=`. baz plays what it scanned; "open this file with baz" is a real
+  feature (queue-a-path, plus a `%U`-aware `Exec=`) rather than a property, and
+  advertising schemes we would refuse is the kind of small lie the honesty rule
+  rules out.
+- **MPRIS `Previous` is a documented no-op** and `CanGoPrevious` is `false`:
+  `baz_core::protocol::Command` has no previous-track command. Adding one is an
+  engine change, not a front-end one.
+- **No MPRIS `TrackList` or `Playlists` interface** (`HasTrackList` is
+  `false`), and no `LoopStatus`/`Shuffle` — baz has neither loop nor shuffle
+  yet, so they are absent rather than present-and-fixed.
+- **`Rate` and `Volume` are read-only `1.0`.** baz has no rate control
+  (ADR-0009: it plays at the source rate) and no volume control at all; a
+  writable property that discarded writes would be worse than an error.
+- **Windows/macOS media-key and now-playing integration** — untouched. The
+  `Media*` key names are bound in `keys.rs`, which covers a focused window;
+  SMTC (Windows) and `MPNowPlayingInfoCenter` (macOS) are not.
 
 ## Bigger chapters (see `VISION.md` staging)
 

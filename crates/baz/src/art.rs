@@ -60,7 +60,20 @@ pub fn resolve(first_track: &Path) -> Option<ArtSource> {
         return Some(ArtSource::Embedded(bytes));
     }
     let dir = first_track.parent()?;
-    cover_file_in(dir).map(ArtSource::File)
+    cover_file(dir).map(ArtSource::File)
+}
+
+/// The cover file sitting beside `first_track`, if the album has one — step 2
+/// of the resolution order on its own, with no tag parsing.
+///
+/// Separate from [`resolve`] because a *path* is useful where decoded bytes
+/// are not: MPRIS's `mpris:artUrl` can only carry a URL, so a cover file that
+/// genuinely exists is the only art baz can honestly advertise to the desktop
+/// (see [`crate::mpris`]). One `read_dir` of the album folder, cheap enough
+/// to run once per track change.
+#[must_use]
+pub fn cover_file_beside(first_track: &Path) -> Option<PathBuf> {
+    cover_file(first_track.parent()?)
 }
 
 /// The embedded picture bytes of `track`, if its tags carry any.
@@ -77,7 +90,7 @@ fn embedded_picture(track: &Path) -> Option<Vec<u8>> {
 }
 
 /// The best cover file in `dir` per [`COVER_FILE_NAMES`], case-insensitive.
-fn cover_file_in(dir: &Path) -> Option<PathBuf> {
+fn cover_file(dir: &Path) -> Option<PathBuf> {
     let entries: Vec<PathBuf> = std::fs::read_dir(dir)
         .ok()?
         .filter_map(Result::ok)
