@@ -125,30 +125,56 @@
   rather than silently wrong output. 5.1 downmix is unwritten.
 - **Skip and seek are drain-and-restart**, not sample-accurate splices (tens of
   ms of latency, documented in the engine module docs).
-- **Bit-perfect is shared-mode only.** Following the source rate and reopening
-  on a change is implemented and is now the default (ADR-0009): baz converts
-  nothing. What is still outstanding is the last hop — the system mixer may
-  resample downstream of us, and only exclusive-mode backends (ALSA `hw:`,
-  WASAPI exclusive, `CoreAudio` hog) can close that. `Event::SignalPath` will
-  grow a field for it when they land.
+- ~~**Bit-perfect is shared-mode only.**~~ — **closed on Linux (ADR-0012)**.
+  `baz_core::playback::exclusive::ExclusiveSink` opens an ALSA `hw:` PCM
+  directly, with libasound's rate plugin explicitly disabled, so no mixer sits
+  between the decoder and the converter. Opt in with
+  `BAZ_OUTPUT=exclusive BAZ_OUTPUT_DEVICE=hw:3,0` (or
+  `engine::spawn_device_with`), behind the non-default `exclusive-output`
+  feature. Reported as `SignalChain::Exclusive { conversion }` on the existing
+  `Event::SignalPath`. **Windows and macOS remain outstanding**: WASAPI
+  exclusive and `CoreAudio` hog mode each need a per-platform system dependency
+  baz does not take yet, and ADR-0012's last section says what each involves.
+  The engine side is finished for all three — a backend is one `Sink` impl
+  returning `true` from `is_exclusive`.
 
-- **Hardware volume needs exclusive mode, and waits for it** (ADR-0011, which
-  measured this rather than assuming it). In *shared* mode there is no
-  bit-exact per-application volume on any platform: the per-app controls
-  (PipeWire sink-input, WASAPI `ISimpleAudioVolume`) are a float multiply
-  inside the sound server, which buys nothing over doing it ourselves and costs
-  a libpipewire/libpulse or `windows-sys` dependency; the *hardware* controls
-  (the owner's iFi DAC has a real −127 dB attenuator, `amixer -c 3 numid=4`,
-  and `IAudioEndpointVolume`/`kAudioDevicePropertyVolumeScalar` are the same
-  shape) are card-wide, so driving one from a player's own slider would move
-  every other application's volume — and baz cannot even identify the card,
-  since cpal reports the device only as `"default"`. When baz owns the card,
-  all three objections vanish at once. The seam is already in place and tested:
-  `Sink::set_device_volume` returns `None` from every shipped backend, and a
-  backend that returns `Some` gets `VolumePath::DeviceAttenuator` reported and
-  the sample stream left untouched, with no other engine change.
-  (`alsa` 0.9.1 is already an indirect dependency via cpal on Linux, so that
-  platform's cost is a dependency *line*, not a new build requirement.)
+- ~~**Hardware volume needs exclusive mode**~~ — **shipped on Linux with it
+  (ADR-0012)**. All three of ADR-0011's objections vanish when baz holds the
+  card: it is no longer shared (nothing else is on that PCM), baz names the
+  card it chose, and a card without an attenuator now declines per-device
+  rather than the whole platform doing so. The backend drives the card mixer's
+  `PCM` element (or `Master`/`Speaker`/`Headphone`, or a USB DAC's own feature
+  unit) and leaves the sample stream unscaled. Measured on the ALC897: −51…0 dB
+  travel, a −6.02 dB request landing on −6.00 dB. Unity and mute decline on
+  purpose — there is nothing to attenuate at one, and only software gain
+  reaches exactly zero.
+
+- **`Event::SignalPath` still has no exclusivity *field*.** ADR-0012 reports it
+  inside the existing `chain` field instead, because `Event`'s variants are not
+  individually `#[non_exhaustive]` and `crates/baz` destructures `SignalPath`
+  exhaustively in three places — so a field is a source break, exactly as
+  ADR-0011 predicted. The sequencing is unchanged: those destructurings gain a
+  `..`, then moving exclusivity onto its own field is additive on the wire and
+  mechanical in the code. `SignalChain::is_exclusive()` is the API to use
+  either way, so no front end has to care which shape it is.
+
+- **Exclusive mode takes the card, and a desktop usually has it.** Inherent
+  rather than a defect: `PipeWire` held the maintainer's own DAC (`hw:3,0`) in
+  `RUNNING` state for an entire session with a client stream on it, so every
+  exclusive open of it refused — in 50 µs, with `PlaybackError::DeviceBusy`
+  naming the device, which is the designed behaviour. What is missing is any
+  *help*: a front end can only report it. Options, none built: a "release the
+  device" affordance (which means talking to the sound server, and so the
+  libpipewire dependency ADR-0011 declined), or simply documenting that
+  exclusive mode wants a device the desktop is not routed to.
+
+- **Exclusive mode has no loopback-verified bit-exactness measurement.** No
+  device on the maintainer's machine offers a playback loopback, and loading
+  `snd-aloop` would have measured the loopback driver rather than a DAC.
+  What is asserted instead (ADR-0012): the negotiated rate equals the source
+  rate, the negotiated format carries every 16- and 24-bit code exactly — over
+  the whole code space, not a sample — and no resampler is constructed. A
+  machine with a real digital loopback would close the last inch of this.
 - **A converted anchor is decoded whole before first audio.** Reached only when
   the device offers no mode at the source rate; measured at ~2.6 s on a
   5:24 24/48 FLAC (ADR-0009). Streaming the fallback resampler would fix it and
@@ -204,9 +230,14 @@
   feature (queue-a-path, plus a `%U`-aware `Exec=`) rather than a property, and
   advertising schemes we would refuse is the kind of small lie the honesty rule
   rules out.
-- **MPRIS `Previous` is a documented no-op** and `CanGoPrevious` is `false`:
-  `baz_core::protocol::Command` has no previous-track command. Adding one is an
-  engine change, not a front-end one.
+- **MPRIS `Previous` is a documented no-op** and `CanGoPrevious` is `false` —
+  **but the engine half now exists**. `Command::Previous` restarts the current
+  track past `baz_core::engine::PREVIOUS_RESTART_MS` (3 000 ms) and steps back
+  a queue position before it, restarting at the head; it resumes when paused,
+  exactly as `Next` does. All that is left is the front-end wiring: send the
+  command, and advertise `CanGoPrevious = true` whenever a queue is playing —
+  unlike `Next` at the end of a queue, `Previous` has no position at which it
+  does nothing.
 - **No MPRIS `TrackList` or `Playlists` interface** (`HasTrackList` is
   `false`), and no `LoopStatus`/`Shuffle` — baz has neither loop nor shuffle
   yet, so they are absent rather than present-and-fixed.

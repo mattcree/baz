@@ -19,12 +19,25 @@ symphonia = { workspace = true }
 thiserror = { workspace = true }
 walkdir = { workspace = true }
 
+# Exclusive-mode output (ADR-0012) is ALSA, and ALSA is Linux. The dependency
+# is target-scoped so that a Windows or macOS build with the feature enabled
+# still compiles — it simply has no exclusive backend to offer, and
+# `OutputMode::Exclusive` reports that rather than pretending.
+[target.'cfg(target_os = "linux")'.dependencies]
+alsa = { workspace = true, optional = true }
+
 [features]
 # Real audio-device output via cpal. Non-default: building cpal requires
 # platform audio headers (alsa-lib-devel on Linux), which the primary dev
 # machine lacks outside the baz-dev toolbox. Everything else — including the
 # whole playback test suite — runs headless against `OfflineSink`.
 device-output = ["dep:cpal"]
+# Exclusive-mode output: baz holds an ALSA `hw:` device itself, so no system
+# mixer sits between the decoder and the converter (ADR-0012). Implies
+# `device-output` because it is a second backend behind the same engine spawn,
+# not a separate one; needs the same `alsa-lib-devel` headers cpal already
+# needs, so it adds no build requirement to a `device-output` build.
+exclusive-output = ["device-output", "dep:alsa"]
 
 [dev-dependencies]
 criterion = { workspace = true }

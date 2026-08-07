@@ -148,9 +148,105 @@ pub mod source;
 #[cfg(feature = "device-output")]
 pub mod device;
 
+#[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+pub mod exclusive;
+
 pub use engine::{BoundaryPolicy, EngineConfig, PlayReport, PrefetchEvidence, run_playlist};
 pub use sink::{OfflineSink, Sink};
 pub use source::{AudioSource, DecodedAudio};
+
+/// Which arrangement the output device is opened under (ADR-0012).
+///
+/// ADR-0009 made baz follow the source rate and convert nothing, and was
+/// explicit that the guarantee stopped at baz's own process boundary: in
+/// shared mode the system mixer may still resample downstream, and it mixes
+/// baz with every other application. Exclusive mode closes that last hop by
+/// holding the hardware device itself.
+///
+/// # Opting in
+///
+/// Shared mode is the default and stays the default: it is what plays
+/// alongside a video call, survives the listener changing outputs in their
+/// desktop settings, and never takes a card away from anything else.
+/// Exclusive mode is a deliberate choice with real consequences — other
+/// applications cannot play while baz holds the device, and baz cannot start
+/// while they hold it — so it is opted into, never inferred.
+///
+/// The mechanism is the smallest one that works with no front end at all:
+/// **two environment variables**, read once by [`Self::from_env`] at the
+/// moment the engine's output is opened.
+///
+/// ```text
+/// BAZ_OUTPUT=exclusive BAZ_OUTPUT_DEVICE=hw:3,0 baz
+/// ```
+///
+/// A settings UI, a config key, or a `--output` flag are all front-end
+/// surfaces over the same value, and a front end that has one calls
+/// `baz_core::engine::spawn_device_with` (feature `device-output`) with an
+/// explicit mode instead. What this type refuses to be is *implicit*: an unrecognised
+/// `BAZ_OUTPUT` is an error rather than a silent fall back to shared, because
+/// a listener who typed `BAZ_OUTPUT=exlcusive` and got shared mode without
+/// being told would have been lied to in exactly the way ADR-0009 exists to
+/// prevent.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OutputMode {
+    /// Play through the system's audio server, mixed with everything else.
+    /// The default.
+    #[default]
+    Shared,
+    /// Hold a hardware device exclusively for as long as baz runs.
+    Exclusive {
+        /// Which device, as an ALSA `hw:CARD,DEV` name. `None` asks baz to
+        /// choose, which it will do only when the machine offers exactly one
+        /// — see `exclusive::choose` (feature `exclusive-output`).
+        device: Option<String>,
+    },
+}
+
+/// The environment variable naming the output arrangement.
+pub const OUTPUT_MODE_ENV: &str = "BAZ_OUTPUT";
+/// The environment variable naming the exclusive device.
+pub const OUTPUT_DEVICE_ENV: &str = "BAZ_OUTPUT_DEVICE";
+
+impl OutputMode {
+    /// Read the mode a listener configured from the environment.
+    ///
+    /// `BAZ_OUTPUT` is `shared` (or absent — the default) or `exclusive`;
+    /// `BAZ_OUTPUT_DEVICE` names the device for the latter and is ignored by
+    /// the former. Both are matched case-insensitively after trimming, because
+    /// the difference between `Exclusive` and `exclusive` is not a thing worth
+    /// failing over — but a value that is neither *is*.
+    ///
+    /// # Errors
+    ///
+    /// [`PlaybackError::Device`] if `BAZ_OUTPUT` holds anything else. Silently
+    /// ignoring it would mean playing in shared mode while the listener
+    /// believed otherwise, which is the failure this whole design is against.
+    pub fn from_env() -> Result<Self, PlaybackError> {
+        let raw = std::env::var(OUTPUT_MODE_ENV).unwrap_or_default();
+        let requested = raw.trim().to_ascii_lowercase();
+        match requested.as_str() {
+            "" | "shared" => Ok(Self::Shared),
+            "exclusive" => Ok(Self::Exclusive {
+                device: std::env::var(OUTPUT_DEVICE_ENV)
+                    .ok()
+                    .map(|d| d.trim().to_string())
+                    .filter(|d| !d.is_empty()),
+            }),
+            _ => Err(PlaybackError::Device(format!(
+                "{OUTPUT_MODE_ENV}={raw:?} is not an output mode: expected \"shared\" or \
+                 \"exclusive\""
+            ))),
+        }
+    }
+
+    /// Whether this mode asks for exclusive access.
+    #[must_use]
+    pub fn is_exclusive(&self) -> bool {
+        matches!(self, Self::Exclusive { .. })
+    }
+}
 
 /// The engine's fixed interleaved channel count. Every [`AudioSource`] block,
 /// ring-buffer slot, and [`Sink`] write is stereo-interleaved f32.
@@ -264,6 +360,23 @@ pub enum PlaybackError {
     /// error API.
     #[error("audio device error: {0}")]
     Device(String),
+
+    /// An **exclusive** output device is held by another application.
+    ///
+    /// The ordinary answer on a desktop: the sound server has the card, so
+    /// `snd_pcm_open` returns `EBUSY` immediately. It is its own variant rather
+    /// than a [`Self::Device`] string because it is the one device failure a
+    /// front end can act on — "close the other player, or pick another
+    /// device" — and because a caller must be able to tell it apart without
+    /// matching on prose.
+    ///
+    /// Reported, never waited on: nothing in the exclusive backend retries an
+    /// open in a loop or blocks hoping the holder goes away (ADR-0012).
+    #[error("audio device {device} is in use by another application")]
+    DeviceBusy {
+        /// The device that is busy, as it would be offered to a listener.
+        device: String,
+    },
 }
 
 impl From<rubato::ResamplerConstructionError> for PlaybackError {

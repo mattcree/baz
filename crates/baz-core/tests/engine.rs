@@ -13,7 +13,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
-use baz_core::engine::{OfflineOutput, spawn_offline};
+use baz_core::engine::{EngineHandle, OfflineOutput, PREVIOUS_RESTART_MS, spawn_offline};
 use baz_core::playback::{AudioSource, BoundaryPolicy, CHANNELS, EngineConfig};
 // Only the device-gated tests below distinguish "no audio hardware" from a
 // real failure; the headless build never constructs one.
@@ -1944,4 +1944,236 @@ fn an_out_of_range_position_clamps_to_unity() {
         }
     );
     engine.shutdown();
+}
+
+// ---------------------------------------------------------------------------
+// Command::Previous — the counterpart Next has been missing
+// ---------------------------------------------------------------------------
+
+/// Put a paused session at an exact position inside its current track, so a
+/// `Previous` test asserts against a known elapsed time rather than a raced
+/// one.
+///
+/// Seeking while paused is documented to move the position and deliver
+/// nothing, and the immediate `Progress` it emits is the confirmation that the
+/// engine agrees about where playback now is. Every test below uses this
+/// rather than sleeping and hoping, because the whole point of
+/// `PREVIOUS_RESTART_MS` is a comparison against that number.
+fn park_at(engine: &EngineHandle, events: &Receiver<Event>, position_ms: u64) {
+    engine.send(Command::Pause).expect("send");
+    assert_eq!(next_transport_event(events), Event::Paused);
+    engine.send(Command::Seek { position_ms }).expect("send");
+    let (elapsed, _) = next_progress(events);
+    assert_eq!(
+        elapsed, position_ms,
+        "the engine must agree about where playback is before Previous is judged against it"
+    );
+}
+
+/// **Past the threshold, `Previous` restarts the current track** — the first
+/// half of the conventional two-in-one control.
+///
+/// Parked 4 s into a 6 s track (past `PREVIOUS_RESTART_MS`), so the button
+/// means "this one again". Asserted on the samples, not merely on the events:
+/// what the engine delivers after the press must be the whole track from its
+/// first sample, bit for bit against a reference decode.
+#[test]
+fn previous_past_the_threshold_restarts_the_current_track() {
+    let f = fixtures();
+    let (engine, events, output) =
+        spawn_offline(paced_config(), 3 * f.chirp_ref.len()).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.chirp.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.chirp, 0));
+
+    // Checked at compile time so that moving the threshold turns this test
+    // into a build failure rather than a test that quietly stops testing the
+    // branch it names.
+    const { assert!(4_000 >= PREVIOUS_RESTART_MS) }
+    park_at(&engine, &events, 4_000);
+
+    engine.send(Command::Previous).expect("send");
+    assert_eq!(
+        next_transport_event(&events),
+        started(&f.chirp, 0),
+        "past the threshold, Previous restarts the track it is already on"
+    );
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+
+    engine.shutdown();
+    let out = collect(output);
+    assert_samples_eq(
+        &out[out.len() - f.chirp_ref.len()..],
+        &f.chirp_ref,
+        "a restarted track must be delivered whole, from its first sample",
+    );
+}
+
+/// **Before the threshold, `Previous` steps back a queue position** — the
+/// other half, and the reason the button exists at all.
+///
+/// Parked 1 s into the *second* track, so "back" means the first one. The
+/// audio assertion is the strong one: the tail of the run must be the earlier
+/// track in full followed by the later track in full, which is only true if
+/// the engine went back one position and then continued forward normally.
+#[test]
+fn previous_before_the_threshold_steps_back_a_queue_position() {
+    let f = fixtures();
+    let both = f.a_ref.len() + f.chirp_ref.len();
+    let (engine, events, output) = spawn_offline(paced_config(), 3 * both).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.chirp.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    engine.send(Command::Next).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.chirp, 1));
+
+    // Compile-time, for the reason the sibling test gives.
+    const { assert!(1_000 < PREVIOUS_RESTART_MS) }
+    park_at(&engine, &events, 1_000);
+
+    engine.send(Command::Previous).expect("send");
+    assert_eq!(
+        next_transport_event(&events),
+        started(&f.a, 0),
+        "before the threshold, Previous goes to the preceding queue entry"
+    );
+    assert_eq!(next_transport_event(&events), started(&f.chirp, 1));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+
+    engine.shutdown();
+    let out = collect(output);
+    let tail = &out[out.len() - both..];
+    assert_samples_eq(
+        &tail[..f.a_ref.len()],
+        &f.a_ref,
+        "the track stepped back to",
+    );
+    assert_samples_eq(
+        &tail[f.a_ref.len()..],
+        &f.chirp_ref,
+        "and the queue continues forward from there",
+    );
+}
+
+/// **At the head of the queue, `Previous` restarts rather than stopping.**
+///
+/// Parked half a second into the first track: before the threshold, so the
+/// rule would say "the one before" — and there is none. Restarting is what
+/// every transport does here, and it is what keeps the control from having a
+/// position where pressing it does nothing.
+#[test]
+fn previous_at_the_head_of_the_queue_restarts() {
+    let f = fixtures();
+    let (engine, events, output) =
+        spawn_offline(paced_config(), 3 * f.chirp_ref.len()).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.chirp.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.chirp, 0));
+
+    park_at(&engine, &events, 500);
+
+    engine.send(Command::Previous).expect("send");
+    assert_eq!(
+        next_transport_event(&events),
+        started(&f.chirp, 0),
+        "there is nothing before position 0, so the track restarts"
+    );
+    assert_eq!(
+        next_transport_event(&events),
+        Event::QueueEnded,
+        "and the queue ends once, at its true end"
+    );
+
+    engine.shutdown();
+    let out = collect(output);
+    assert_samples_eq(
+        &out[out.len() - f.chirp_ref.len()..],
+        &f.chirp_ref,
+        "restarting at the head of the queue delivers the whole track",
+    );
+}
+
+/// **`Previous` while paused moves *and* resumes**, exactly as `Next` does.
+///
+/// The two halves of one transport control must not disagree about whether
+/// pressing them starts the music. Asserted the way pause is asserted
+/// elsewhere: the delivered-sample counter was frozen, and after the press it
+/// advances again without a `Play`.
+#[test]
+fn previous_while_paused_moves_and_resumes() {
+    let f = fixtures();
+    let (engine, events, output) =
+        spawn_offline(paced_config(), 3 * f.chirp_ref.len()).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.chirp.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.chirp, 0));
+
+    park_at(&engine, &events, 4_000);
+    let frozen = engine.samples_delivered();
+    thread::sleep(Duration::from_millis(50));
+    assert_eq!(
+        engine.samples_delivered(),
+        frozen,
+        "the pause must actually be holding delivery for this test to mean anything"
+    );
+
+    engine.send(Command::Previous).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.chirp, 0));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    assert!(
+        engine.samples_delivered() > frozen,
+        "Previous while paused must resume, like Next — not move silently"
+    );
+
+    engine.shutdown();
+    let out = collect(output);
+    assert_samples_eq(
+        &out[out.len() - f.chirp_ref.len()..],
+        &f.chirp_ref,
+        "a Previous issued while paused still delivers the track whole",
+    );
+}
+
+/// **While stopped, `Previous` does nothing** — like `Next`, and for the same
+/// reason: there is no current track to be some number of seconds into.
+#[test]
+fn previous_while_stopped_is_a_no_op() {
+    let f = fixtures();
+    let (engine, events, output) =
+        spawn_offline(fast_config(), 2 * f.b_ref.len()).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.b.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Previous).expect("send");
+    assert_no_event_within(&events, Duration::from_millis(120));
+
+    // And the queue is untouched: a later Play still starts at the top.
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.b, 0));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+
+    engine.shutdown();
+    assert_samples_eq(
+        &collect(output),
+        &f.b_ref,
+        "a no-op Previous must not have disturbed the queue",
+    );
 }

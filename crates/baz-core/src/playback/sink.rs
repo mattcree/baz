@@ -138,6 +138,38 @@ pub trait Sink {
     fn set_device_volume(&mut self, _gain: f32) -> Option<()> {
         None
     }
+
+    /// Whether this sink holds its output device **exclusively** — no system
+    /// mixer between [`Self::write`] and the converter, and no other
+    /// application sharing it.
+    ///
+    /// This is the ADR-0012 half of the fidelity readout, and the engine asks
+    /// once per sink so that
+    /// [`Event::SignalPath`](crate::protocol::Event::SignalPath) can say which
+    /// of the two arrangements is in use
+    /// ([`SignalChain::Exclusive`](crate::protocol::SignalChain::Exclusive)
+    /// versus [`SignalChain::Direct`](crate::protocol::SignalChain::Direct)).
+    /// A sink answers for itself rather than the engine inferring it from a
+    /// spawn argument, because the sink is the only thing that knows whether
+    /// the open actually succeeded on those terms.
+    ///
+    /// # Default: shared, which is the honest answer for a record and for cpal
+    ///
+    /// The default is `false`. [`OfflineSink`] is a `Vec<f32>` and holds no
+    /// device at all; `DeviceSink` goes through cpal, which on every platform
+    /// opens a shared-mode stream and mixes with the rest of the system. Only
+    /// `ExclusiveSink` (feature `exclusive-output`, Linux/ALSA) returns
+    /// `true`, and it returns it only when it is holding an open `hw:` PCM.
+    ///
+    /// # Contract
+    ///
+    /// Read on the engine's control thread, never from a realtime callback,
+    /// and expected to be cheap — the engine may ask more than once. It
+    /// describes the arrangement, not the moment: a sink that answers `true`
+    /// must not start answering `false` while it still has the device.
+    fn is_exclusive(&self) -> bool {
+        false
+    }
 }
 
 /// Offline sink that collects every sample into preallocated storage — the
@@ -163,6 +195,9 @@ pub trait Sink {
 ///   is granted. An offline session therefore always runs at its source's
 ///   native rate and never resamples — which is what makes the headless suite
 ///   a test of the bit-perfect default rather than of a fallback.
+/// - [`Sink::is_exclusive`]: a record holds no device, so it cannot hold one
+///   exclusively. Headless sessions therefore report the shared-mode chain,
+///   which is what keeps the offline suite a test of the ordinary path.
 /// - [`Sink::set_device_volume`]: a `Vec<f32>` has no attenuator either, so
 ///   volume is always applied in software above it. That is exactly what makes
 ///   the headless suite able to measure the gain: the delivered record *is*

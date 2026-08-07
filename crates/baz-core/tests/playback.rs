@@ -2474,3 +2474,494 @@ fn discard_buffered_empties_the_device_ring() {
         audio_ms(buffered)
     );
 }
+
+// ---------------------------------------------------------------------------
+// Exclusive output (feature `exclusive-output`, Linux/ALSA) — ADR-0012
+//
+// These run against **real hardware**. Everything they assert is a claim about
+// a card rather than about a data structure, which is exactly why none of it
+// can be tested any other way; the engine's half of the arrangement is
+// asserted with doubles in `engine.rs`'s unit tests. A machine with no
+// hardware playback PCM (a CI container) skips with a notice, the same
+// convention the `device-output` tests above use.
+// ---------------------------------------------------------------------------
+
+/// The hardware device these tests run against: the one `BAZ_OUTPUT_DEVICE`
+/// names, or the first that will actually open.
+///
+/// `None` means every device is busy or unopenable, which on a desktop usually
+/// means the sound server is holding them — a skip, not a failure.
+///
+/// It honours the *real* opt-in variable rather than a test-only one on
+/// purpose: `BAZ_OUTPUT_DEVICE=hw:3,0 cargo test --features exclusive-output`
+/// points the whole suite at a particular DAC, which is exactly how a
+/// maintainer verifies the claims on the hardware they care about instead of
+/// on whatever the enumeration happens to list first.
+#[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+fn first_openable_device(
+    rate: u32,
+) -> Option<(
+    baz_core::playback::exclusive::ExclusiveDevice,
+    baz_core::playback::exclusive::ExclusiveSink,
+)> {
+    use baz_core::playback::exclusive::{ExclusiveSink, devices};
+
+    let requested = std::env::var("BAZ_OUTPUT_DEVICE").ok();
+    for device in devices() {
+        if requested.as_deref().is_some_and(|r| r != device.pcm_name) {
+            continue;
+        }
+        match ExclusiveSink::open(&device, rate, 8192) {
+            Ok(sink) => return Some((device, sink)),
+            Err(e) if requested.is_some() => {
+                eprintln!("[exclusive] {device} was named but will not open: {e}");
+            }
+            Err(_) => {}
+        }
+    }
+    None
+}
+
+/// **Enumeration finds real cards, and never the sound server.**
+///
+/// ADR-0011 measured what `"default"` actually is on a `PipeWire` desktop — the
+/// server's bridge, whose mixer is `PipeWire`'s own system volume — and that is
+/// the reason this backend enumerates cards instead. So the invariant is not
+/// "the list is non-empty", it is "everything in the list is hardware": every
+/// name is a `hw:CARD,DEV`, and none of the plugin names that would quietly
+/// put a converter or a mixer back in the path appears at all.
+#[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+#[test]
+fn exclusive_enumeration_offers_hardware_and_never_the_sound_server() {
+    use baz_core::playback::exclusive::devices;
+
+    let found = devices();
+    if found.is_empty() {
+        eprintln!("SKIP: no hardware playback device on this machine");
+        return;
+    }
+    for device in &found {
+        assert!(
+            device.pcm_name.starts_with("hw:"),
+            "enumeration must offer hardware PCMs only: {device}"
+        );
+        for plugin in [
+            "default",
+            "plughw",
+            "pulse",
+            "pipewire",
+            "dmix",
+            "sysdefault",
+        ] {
+            assert!(
+                !device.pcm_name.contains(plugin),
+                "{plugin} is the sound server or a converting wrapper, not a card: {device}"
+            );
+        }
+        assert!(
+            device.pcm_name.ends_with(&format!(
+                ",{}",
+                device
+                    .pcm_name
+                    .rsplit(',')
+                    .next()
+                    .expect("hw: names carry a device number")
+            )),
+            "a hw: name must carry a device number: {device}"
+        );
+        println!("[exclusive] {device}");
+    }
+}
+
+/// **A hardware device opens exclusively, negotiates the rate that was asked
+/// for, and carries the samples in a format that changes none of them.**
+///
+/// This is ADR-0012's headline claim measured on the hardware in front of it.
+/// Three assertions, because "bit-perfect" is three separate facts:
+///
+/// 1. the PCM opened is a `hw:` device baz holds itself ([`Sink::is_exclusive`]);
+/// 2. the **rate is the one requested**, not the nearest thing the driver felt
+///    like — which is what makes `SignalChain::Exclusive { conversion: None }`
+///    truthful;
+/// 3. the **format carries every 24-bit code exactly** (the ladder in the
+///    module docs, whose arithmetic is asserted exhaustively in that module's
+///    unit tests) — so no conversion is hiding in the last hop either.
+///
+/// Then it plays half a second of tone, because a claim about a device that
+/// was never fed is a claim about nothing. The tone is audible on whatever the
+/// chosen output drives; that is expected.
+#[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+#[test]
+fn an_exclusive_device_plays_at_the_requested_rate_in_an_exact_format() {
+    use baz_core::playback::Sink as _;
+
+    let Some((device, mut sink)) = first_openable_device(RATE) else {
+        eprintln!("SKIP: every hardware playback device is busy or unopenable");
+        return;
+    };
+    assert!(
+        sink.is_exclusive(),
+        "a sink built on a hw: PCM holds it exclusively, and must say so"
+    );
+    assert_eq!(
+        sink.sample_rate(),
+        RATE,
+        "{device}: the device must run at the rate asked for, or the chain is not direct"
+    );
+    assert!(
+        sink.format().is_exact_for_24_bit(),
+        "{device}: negotiated {:?}, which cannot carry a 24-bit master unchanged — the \
+         format ladder must prefer a wider carrier when the device offers one",
+        sink.format()
+    );
+
+    let samples = sine_stereo(RATE, RATE as usize / 2, 0.0);
+    sink.write(&samples);
+    assert!(!sink.failed(), "{device}: the stream faulted while playing");
+    sink.drain_buffered();
+    println!(
+        "[exclusive] {device}: {} Hz, {:?}, buffer {} frames, period {} frames, \
+         {} xrun(s) over 0.5 s of tone",
+        sink.sample_rate(),
+        sink.format(),
+        sink.buffer_frames(),
+        sink.period_frames(),
+        sink.xruns(),
+    );
+}
+
+/// **A busy device fails cleanly, with a typed error, immediately.**
+///
+/// The failure mode the design has to get right: on a desktop the sound server
+/// holds the card most of the time, and "baz hangs" or "baz panics" would be
+/// unacceptable answers. The busy condition is created deterministically here
+/// — baz opens the device, then asks for it again — rather than by hoping
+/// another application is using it.
+///
+/// What is asserted is the *type*, not the prose:
+/// [`PlaybackError::DeviceBusy`] is its own variant precisely so a front end
+/// can tell "someone else has it" from "there is no such device" without
+/// matching on a string.
+#[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+#[test]
+fn a_busy_exclusive_device_fails_cleanly_with_a_typed_error() {
+    use std::time::Instant;
+
+    use baz_core::playback::exclusive::ExclusiveSink;
+
+    let Some((device, _held)) = first_openable_device(RATE) else {
+        eprintln!("SKIP: every hardware playback device is busy or unopenable");
+        return;
+    };
+    let t0 = Instant::now();
+    let error = ExclusiveSink::open(&device, RATE, 8192)
+        .expect_err("a device baz is already holding cannot be opened again");
+    let elapsed = t0.elapsed();
+
+    match &error {
+        PlaybackError::DeviceBusy { device: named } => {
+            assert!(
+                named.contains(&device.pcm_name),
+                "the error must name the device that is busy: {named}"
+            );
+        }
+        other => panic!("a held device must report DeviceBusy, got {other}"),
+    }
+    assert!(
+        elapsed < Duration::from_millis(500),
+        "a busy open must fail immediately rather than wait for the holder: took {elapsed:?}"
+    );
+    println!("[exclusive] second open of {device} refused in {elapsed:?}: {error}");
+}
+
+/// **A discard empties the device outright, synchronously.**
+///
+/// Shared mode needs a monotone watermark and a callback to honour it, because
+/// only cpal's callback may advance the ring's read index (`device.rs`'s module
+/// docs argue the whole design). Owning the PCM removes the constraint:
+/// `snd_pcm_drop` is the discard, and it is complete when it returns. So the
+/// assertion here is stronger than shared mode's — not "empty within 400 ms"
+/// but "empty now".
+#[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+#[test]
+fn an_exclusive_discard_empties_the_device_immediately() {
+    use baz_core::playback::Sink as _;
+
+    let Some((device, mut sink)) = first_openable_device(RATE) else {
+        eprintln!("SKIP: every hardware playback device is busy or unopenable");
+        return;
+    };
+    // A full kernel buffer, which is as much as the device can be holding at
+    // once: `write` returns when the last frame has been handed over, so
+    // writing *more* than a buffer would only mean the excess had already
+    // played. At the size the app uses that is ~186 ms of audio standing
+    // between the write and the speaker.
+    let frames = sink.buffer_frames();
+    sink.write(&sine_stereo(RATE, frames, 0.0));
+    let queued = sink.queued_frames();
+    assert!(
+        queued > frames as u64 / 2,
+        "{device}: the device must actually be holding audio for the discard to mean \
+         anything (only {queued} of a {frames}-frame buffer queued)"
+    );
+
+    sink.discard_buffered();
+    // Read once, immediately: no polling loop, no settle budget, no callback
+    // to wait for. That is the whole difference from the shared-mode test
+    // above, which needs all three.
+    let left = sink.queued_frames();
+    assert!(
+        left * 100 < queued,
+        "{device}: a discard on a device baz owns is complete when it returns, but \
+         {left} of {queued} frames are still reported"
+    );
+    assert!(
+        left < u64::from(RATE) / 100,
+        "{device}: {left} frames reported after a discard is over 10 ms of the abandoned \
+         position, which is what the discard exists to remove"
+    );
+    assert!(
+        !sink.failed(),
+        "{device}: the stream faulted on the discard"
+    );
+    #[allow(clippy::cast_precision_loss)] // frame counts are far below 2^52
+    let ms = |f: u64| 1000.0 * f as f64 / f64::from(RATE);
+    println!(
+        "[exclusive] {device}: {queued} frames ({:.1} ms) discarded synchronously; \
+         {left} frames ({:.2} ms) still reported by snd_pcm_delay on the reprepared stream",
+        ms(queued),
+        ms(left),
+    );
+}
+
+/// **Reopening at a new rate really produces a stream at that rate**, and
+/// getting back to the rate already open costs nothing.
+///
+/// The exclusive counterpart of `device_sink_reopens_at_the_requested_rate`,
+/// and the reason it has to exist separately: this backend must *release* the
+/// device before it can reopen it, where the shared one builds the new stream
+/// first and swaps. A device that only offers one of the two rates is a
+/// documented outcome, not a failure.
+#[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+#[test]
+fn an_exclusive_sink_reopens_at_the_requested_rate() {
+    use std::time::Instant;
+
+    use baz_core::playback::Sink as _;
+
+    const HI_RATE: u32 = 48_000;
+
+    let Some((device, mut sink)) = first_openable_device(RATE) else {
+        eprintln!("SKIP: every hardware playback device is busy or unopenable");
+        return;
+    };
+    let t0 = Instant::now();
+    let granted = sink.negotiate_rate(HI_RATE);
+    let reopen = t0.elapsed();
+    if granted != Some(HI_RATE) {
+        eprintln!("SKIP: {device} has no {HI_RATE} Hz mode (granted {granted:?})");
+        return;
+    }
+    assert_eq!(sink.sample_rate(), HI_RATE);
+    assert!(
+        !sink.failed(),
+        "{device}: reopening must leave a working stream"
+    );
+
+    let t1 = Instant::now();
+    assert_eq!(sink.negotiate_rate(HI_RATE), Some(HI_RATE));
+    let noop = t1.elapsed();
+    assert!(
+        noop < Duration::from_millis(10),
+        "{device}: re-requesting the open rate must not reopen anything, took {noop:?}"
+    );
+
+    // And back down, which is what a mixed-rate queue does at every boundary.
+    assert_eq!(sink.negotiate_rate(RATE), Some(RATE));
+    assert_eq!(sink.sample_rate(), RATE);
+    println!(
+        "[exclusive] {device}: {RATE} Hz -> {HI_RATE} Hz reopened in {:.1} ms; \
+         re-requesting the open rate took {:.3} ms",
+        reopen.as_secs_f64() * 1e3,
+        noop.as_secs_f64() * 1e3,
+    );
+}
+
+/// **The hardware volume is real, and it is the hardware that moves.**
+///
+/// ADR-0011 built [`Sink::set_device_volume`] and found nothing correct to put
+/// behind it in shared mode. This is the measurement that says whether owning
+/// the card changed that on *this* hardware: ask for −6.02 dB (half
+/// amplitude), then read the element back and check it landed there.
+///
+/// Two things are deliberately *not* asserted here. That the samples are
+/// unscaled is the engine's half, asserted in `engine.rs`'s
+/// `a_sink_with_an_attenuator_carries_the_volume_and_the_stream_is_untouched`
+/// against the delivered stream itself; and the exact decibel is only asserted
+/// to within one element step, because a mixer's travel is quantised far more
+/// coarsely than the 1000-position control is (0.2 dB per step on the element
+/// this machine picks, against the control's ~0.06 dB) and the element lands on
+/// the nearest value it has.
+///
+/// A card with no attenuator (S/PDIF and HDMI outputs generally have none) is
+/// a documented outcome — software gain, honestly reported — not a failure.
+#[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+#[test]
+fn the_exclusive_hardware_volume_moves_the_cards_own_attenuator() {
+    use baz_core::playback::Sink as _;
+
+    let Some((device, mut sink)) = first_openable_device(RATE) else {
+        eprintln!("SKIP: every hardware playback device is busy or unopenable");
+        return;
+    };
+    let Some(element) = sink.hardware_volume_element().map(ToOwned::to_owned) else {
+        eprintln!("SKIP: {device} has no playback attenuator with a decibel scale");
+        return;
+    };
+    let (min_db, max_db) = sink
+        .hardware_volume_db_range()
+        .expect("an element was found, so it has a range");
+    let restore = sink.hardware_volume_db();
+
+    // Half amplitude: −6.0206 dB, comfortably inside every attenuator's travel.
+    let taken = sink.set_device_volume(0.5);
+    assert_eq!(
+        taken,
+        Some(()),
+        "{device}: {element} has a {min_db:.2}..{max_db:.2} dB travel, so it must take −6 dB"
+    );
+    let landed = sink
+        .hardware_volume_db()
+        .expect("the element was just written");
+    assert!(
+        (landed - (-6.0206)).abs() < 1.5,
+        "{device}: asked {element} for −6.02 dB, it landed on {landed:.2} dB — further \
+         than one step of any ordinary mixer"
+    );
+    assert!(
+        landed < 0.0,
+        "{device}: the element must actually have moved off unity: {landed:.2} dB"
+    );
+
+    // Unity declines on purpose: with nothing to attenuate, "no gain stage
+    // anywhere" (VolumePath::Unity) is the more precise of the two true
+    // statements — and the element is parked at 0 dB so it is also accurate.
+    assert_eq!(
+        sink.set_device_volume(1.0),
+        None,
+        "{device}: at unity there is nothing for the hardware to carry"
+    );
+    let at_unity = sink
+        .hardware_volume_db()
+        .expect("the element was just written");
+    assert!(
+        at_unity.abs() < 1.5,
+        "{device}: declining at unity must still leave the hardware at 0 dB, not wherever \
+         the last change put it: {at_unity:.2} dB"
+    );
+
+    // Mute reaches exactly zero, which no attenuator does.
+    assert_eq!(
+        sink.set_device_volume(0.0),
+        None,
+        "{device}: only software gain reaches exactly zero"
+    );
+    // The test leaves the listener's card where the unity call put it — 0 dB,
+    // the resting state — rather than wherever the −6 dB step left it.
+    assert!(
+        sink.hardware_volume_db().is_some_and(|db| db.abs() < 1.5),
+        "{device}: a test must not leave the machine's mixer attenuated"
+    );
+
+    println!(
+        "[exclusive] {device}: hardware volume on {element:?}, travel {min_db:.2}..{max_db:.2} dB; \
+         asked −6.02 dB, landed {landed:.2} dB (was {restore:?})"
+    );
+}
+
+/// **End to end: an engine spawned in exclusive mode plays real audio and
+/// reports an exclusive chain.**
+///
+/// The whole of ADR-0012 in one test — the opt-in, the backend, the engine and
+/// the readout — measured against a card. What it asserts is the sentence a
+/// front end will render: source rate, output rate, and a chain that says baz
+/// holds the device and is converting nothing.
+#[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+#[test]
+fn an_exclusive_engine_plays_and_reports_an_exclusive_chain() {
+    use std::time::Instant;
+
+    use baz_core::engine::spawn_device_with;
+    use baz_core::playback::OutputMode;
+    use baz_core::protocol::{Command, Event, SignalChain};
+
+    let Some((device, sink)) = first_openable_device(RATE) else {
+        eprintln!("SKIP: every hardware playback device is busy or unopenable");
+        return;
+    };
+    // Release it: the engine is about to hold it, and exclusive means one
+    // holder. (This is also the reason the busy test above is deterministic.)
+    drop(sink);
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let track = dir.path().join("half_second.wav");
+    write_wav_f32(&track, RATE, &sine_stereo(RATE, RATE as usize / 2, 0.0));
+
+    let spawned = spawn_device_with(
+        EngineConfig::default(),
+        &OutputMode::Exclusive {
+            device: Some(device.pcm_name.clone()),
+        },
+        RATE,
+        8192,
+    );
+    let (engine, events) = match spawned {
+        Ok(pair) => pair,
+        Err(e) => {
+            eprintln!("SKIP: {device} could not be held for the engine ({e})");
+            return;
+        }
+    };
+    engine
+        .send(Command::SetQueue {
+            paths: vec![track.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut chain = None;
+    let mut started = false;
+    while Instant::now() < deadline {
+        match events.recv_timeout(Duration::from_millis(200)) {
+            Ok(Event::SignalPath {
+                source_rate_hz,
+                output_rate_hz,
+                chain: reported,
+                ..
+            }) => {
+                assert_eq!(source_rate_hz, RATE);
+                assert_eq!(
+                    output_rate_hz, RATE,
+                    "the device was opened at the source's own rate"
+                );
+                chain = Some(reported);
+            }
+            Ok(Event::TrackStarted { .. }) => started = true,
+            Ok(Event::QueueEnded) => break,
+            // Everything else is noise here, and so is a poll timeout: the
+            // loop's own deadline is what bounds the wait.
+            Ok(_) | Err(_) => {}
+        }
+    }
+    engine.shutdown();
+
+    assert!(started, "{device}: the track never started");
+    let chain = chain.expect("an engine session must report its signal path");
+    assert_eq!(
+        chain,
+        SignalChain::Exclusive { conversion: None },
+        "{device}: baz held the card and converted nothing, and must say exactly that"
+    );
+    println!("[exclusive] {device}: engine played {RATE} Hz with chain {chain:?}");
+}
