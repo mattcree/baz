@@ -1,9 +1,10 @@
 //! The baz application: the iced shelf GUI over `baz-core` (ADR-0005).
 //!
 //! v0.1 scope: pick (or remember) a music folder, scan it live onto a
-//! virtualized album shelf with lazy artwork, search-as-you-type, and an
-//! album side panel. Playback is the next unit; its seam is the side
-//! panel's documented no-op play button (see `app.rs`).
+//! virtualized album shelf with lazy artwork, search-as-you-type, an album
+//! side panel, and — with the `device-output` feature — album playback
+//! through `baz-core`'s engine (see `playback.rs` and `player.rs`; without
+//! the feature the app builds everywhere with playback UI hidden).
 //!
 //! Usage: `baz [DIR]` — `DIR` overrides (and updates) the remembered
 //! music folder in `~/.config/baz/config.toml`.
@@ -14,6 +15,8 @@ use std::time::Instant;
 mod app;
 mod art;
 mod config;
+mod playback;
+mod player;
 mod scan;
 mod shelf;
 mod vm;

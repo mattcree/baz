@@ -16,6 +16,14 @@ lofty = { workspace = true }
 lru = { workspace = true }
 tokio = { workspace = true }
 
+[features]
+# Real audio-device output, forwarded to `baz-core/device-output`. Non-default
+# for the same reason as there: building cpal needs platform audio headers
+# (alsa-lib-devel), present in the baz-dev toolbox but not on the primary dev
+# host. Without it the app builds and runs everywhere with playback UI hidden
+# (see src/playback.rs).
+device-output = ["baz-core/device-output"]
+
 [dev-dependencies]
 hound = { workspace = true }
 tempfile = { workspace = true }

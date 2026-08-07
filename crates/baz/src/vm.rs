@@ -112,6 +112,20 @@ pub fn matching_album_ids(library: &Library, query: &str) -> Option<HashSet<u64>
     Some(ids)
 }
 
+/// The album's play queue: every track's path in the side panel's
+/// disc/track/title order (the order [`AlbumVm::tracks`] already carries,
+/// straight from [`Library::albums`]), byte-for-byte verbatim — this is
+/// exactly the `paths` payload for
+/// [`Command::SetQueue`](baz_core::protocol::Command::SetQueue).
+#[must_use]
+pub fn album_queue(album: &AlbumVm) -> Vec<PathBuf> {
+    album
+        .tracks
+        .iter()
+        .map(|track| track.path.clone())
+        .collect()
+}
+
 /// Indices into `albums` that survive the current query filter (all of them
 /// for a blank query). This is the shelf's render list.
 pub fn visible_indices(albums: &[AlbumVm], library: &Library, query: &str) -> Vec<usize> {
@@ -319,6 +333,42 @@ mod tests {
         assert_eq!(visible_indices(&albums, &library, "CID").len(), 1);
         // No match: empty shelf, not "no filter".
         assert!(visible_indices(&albums, &library, "zzz").is_empty());
+    }
+
+    #[test]
+    fn album_queue_orders_by_disc_then_track_with_verbatim_paths() {
+        // Deliberately shuffled input across two discs, with a path that
+        // exercises spaces and non-ASCII — queue paths must be the library's
+        // paths byte-for-byte.
+        let odd_path = PathBuf::from("/m/Ártist/Dühble Album/d2 01 — søng.flac");
+        let mut d2t1 = meta("Artist", "Double", "Song", 1);
+        d2t1.disc = Some(2);
+        d2t1.path = odd_path.clone();
+        let mut d1t2 = meta("Artist", "Double", "Later", 2);
+        d1t2.disc = Some(1);
+        let mut d1t1 = meta("Artist", "Double", "Early", 1);
+        d1t1.disc = Some(1);
+
+        let library = library_with(vec![d2t1, d1t2, d1t1.clone()]);
+        let albums = build_albums(&library);
+        assert_eq!(albums.len(), 1);
+        let queue = album_queue(&albums[0]);
+        assert_eq!(
+            queue,
+            vec![
+                d1t1.path.clone(),
+                PathBuf::from("/m/Artist/Double/02 Later.flac"),
+                odd_path,
+            ],
+            "disc 1 tracks 1..2, then disc 2 track 1; paths verbatim"
+        );
+        // Fidelity both ways: every queued path is a library track path.
+        for path in &queue {
+            assert!(
+                albums[0].tracks.iter().any(|t| &t.path == path),
+                "queue path {path:?} must come from the album's tracks"
+            );
+        }
     }
 
     #[test]

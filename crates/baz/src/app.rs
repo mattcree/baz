@@ -15,9 +15,13 @@
 //!   `tokio::task::spawn_blocking` ([`crate::art`]); decoded RGBA lands in a
 //!   600-entry LRU (budget derivation in `art.rs`). Tiles without art render
 //!   a deterministic gradient placeholder.
-//! - **Playback**: deliberately absent. The side panel's play button is the
-//!   documented no-op seam for the engine being built in parallel (see
-//!   `Message::PlayAlbum`).
+//! - **Playback** ([`crate::playback`], [`crate::player`]): the device
+//!   engine is spawned once at app start (feature `device-output`; without
+//!   it playback UI is hidden). Commands go straight to the
+//!   [`baz_core::engine`] handle; events come back through a bridge
+//!   subscription and are the *only* source of playback UI state — see
+//!   `player.rs` for the honesty rule. The persistent bottom bar and the
+//!   side panel's Play button render that state.
 
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
@@ -26,6 +30,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 use baz_core::index::Library;
+use baz_core::protocol::{Command, Event};
 use iced::keyboard::{self, key};
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
 use iced::widget::{
@@ -35,6 +40,8 @@ use iced::widget::{
 use iced::{Color, Element, Length, Size, Subscription, Task, Theme, window};
 use lru::LruCache;
 
+use crate::playback::{Playback, PlayerEvent};
+use crate::player::{Availability, Phase, PlayerState};
 use crate::scan::ScanUpdate;
 use crate::shelf::{ART_PX, CELL_H, CELL_W, GRID_PADDING};
 use crate::{art, config, scan, shelf, vm};
@@ -48,6 +55,10 @@ const TOP_BAR_H: f32 = 56.0;
 const WINDOW: Size = Size::new(1280.0, 860.0);
 /// Muted foreground for secondary text.
 const DIM: Color = Color::from_rgb(0.55, 0.55, 0.60);
+/// Accent for the playing-album highlight on the shelf.
+const ACCENT: Color = Color::from_rgb(0.35, 0.62, 0.95);
+/// Two clicks on the same tile within this window play the album.
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
 fn scroll_id() -> scrollable::Id {
     scrollable::Id::new("baz-shelf")
@@ -82,10 +93,18 @@ enum Message {
     Scrolled(Viewport),
     /// Window resized (approximate grid geometry until the next scroll).
     WindowResized(Size),
-    /// An album tile was clicked (toggles selection / side panel).
+    /// An album tile was clicked (toggles selection / side panel; a second
+    /// click within [`DOUBLE_CLICK`] plays the album).
     AlbumClicked(u64),
-    /// The side panel's play button. **Playback seam — no-op in v0.1.**
+    /// Queue the album's tracks and play (side-panel Play, tile
+    /// double-click).
     PlayAlbum(u64),
+    /// Bottom bar: play/pause toggle.
+    PlayPause,
+    /// Bottom bar: skip to the next queued track.
+    NextTrack,
+    /// An engine event arrived over the bridge subscription.
+    Playback(PlayerEvent),
     /// An off-thread thumbnail decode finished (`None` = no usable art).
     ThumbLoaded(u64, Option<iced_image::Handle>),
     /// ~10 Hz drain of the scan worker's channel while a scan runs.
@@ -98,6 +117,11 @@ struct App {
     started: Instant,
     first_frame_logged: bool,
     screen: Screen,
+    /// The engine connection (or its documented absence) — spawned once at
+    /// app start, before the first screen.
+    playback: Playback,
+    /// Event-derived playback state; the only thing playback widgets read.
+    player: PlayerState,
 }
 
 enum Screen {
@@ -113,6 +137,10 @@ struct Setup {
 
 impl App {
     fn new(started: Instant, cli_dir: Option<PathBuf>) -> (Self, Task<Message>) {
+        // Engine first: open failure must not kill the app — it becomes
+        // Availability::NoDevice state that the bottom bar reports.
+        let playback = Playback::start();
+        let player = PlayerState::new(playback.availability());
         let stored = config::config_file().and_then(|path| config::load(&path));
         let dir = cli_dir.or(stored.map(|c| c.music_dir));
         let (screen, task) = match dir {
@@ -127,6 +155,8 @@ impl App {
                 started,
                 first_frame_logged: false,
                 screen,
+                playback,
+                player,
             },
             task,
         )
@@ -145,6 +175,28 @@ impl App {
                 Task::none()
             }
             Message::SetupSubmit => self.submit_setup(),
+            Message::Playback(event) => {
+                self.apply_player_event(event);
+                Task::none()
+            }
+            Message::PlayAlbum(id) => {
+                self.play_album(id);
+                Task::none()
+            }
+            Message::PlayPause => {
+                // Choose the action from the *confirmed* phase (Play also
+                // resumes a paused engine, so a stale read is still safe).
+                let command = match self.player.phase() {
+                    Phase::Playing => Command::Pause,
+                    Phase::Paused | Phase::Stopped => Command::Play,
+                };
+                self.send_transport(command);
+                Task::none()
+            }
+            Message::NextTrack => {
+                self.send_transport(Command::Next);
+                Task::none()
+            }
             message => match &mut self.screen {
                 Screen::Setup(setup) => {
                     if let Message::SetupInput(value) = message {
@@ -182,11 +234,83 @@ impl App {
         }
     }
 
-    fn view(&self) -> Element<'_, Message> {
-        match &self.screen {
-            Screen::Setup(setup) => setup.view(),
-            Screen::Shelf(state) => state.view(),
+    /// Fold a bridge message into the state machine, with a stdout trace of
+    /// the notable per-track moments (matching the `[scan]`/`[config]` log
+    /// style).
+    fn apply_player_event(&mut self, message: PlayerEvent) {
+        match message {
+            PlayerEvent::Engine(event) => {
+                match &event {
+                    Event::TrackStarted { path, position } => {
+                        println!(
+                            "[playback] track started (queue #{position}): {}",
+                            path.display()
+                        );
+                    }
+                    Event::TrackFailed { path, reason } => {
+                        println!("[playback] track skipped: {} ({reason})", path.display());
+                    }
+                    Event::QueueEnded => println!("[playback] queue ended"),
+                    _ => {}
+                }
+                let albums: &[vm::AlbumVm] = match &self.screen {
+                    Screen::Shelf(state) => &state.albums,
+                    Screen::Setup(_) => &[],
+                };
+                self.player.apply(&event, albums);
+            }
+            PlayerEvent::Closed => {
+                println!("[playback] engine shut down");
+                self.player.engine_closed();
+            }
         }
+    }
+
+    /// Queue an album (tracks in the view model's disc/track order) and
+    /// play it. State stays untouched until events confirm — only the
+    /// request-side notes are recorded (see `player.rs`).
+    fn play_album(&mut self, id: u64) {
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        let Some(album) = state.albums.iter().find(|album| album.id == id) else {
+            return;
+        };
+        let paths = vm::album_queue(album);
+        if paths.is_empty() {
+            return;
+        }
+        let queued = paths.len();
+        if self.playback.send(Command::SetQueue { paths }) && self.playback.send(Command::Play) {
+            self.player.note_queue_sent(queued);
+            self.player.note_transport_sent();
+        } else {
+            self.player.engine_closed();
+        }
+    }
+
+    /// Send a transport command, marking it pending on acceptance and
+    /// downgrading to engine-closed state when the channel is gone.
+    fn send_transport(&mut self, command: Command) {
+        if self.playback.send(command) {
+            self.player.note_transport_sent();
+        } else {
+            self.player.engine_closed();
+        }
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        let screen: Element<'_, Message> = match &self.screen {
+            Screen::Setup(setup) => return setup.view(),
+            Screen::Shelf(state) => state.view(&self.player),
+        };
+        // The persistent bottom bar lives under the shelf — unless this
+        // build has no audio output at all, in which case playback UI is
+        // hidden entirely.
+        if *self.player.availability() == Availability::NotBuilt {
+            return screen;
+        }
+        column![screen, bottom_bar(&self.player)].into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -196,6 +320,7 @@ impl App {
                 _ => None,
             }),
             window::resize_events().map(|(_, size)| Message::WindowResized(size)),
+            self.playback.subscription().map(Message::Playback),
         ];
         // Frame events only until startup-to-interactive is logged.
         if !self.first_frame_logged {
@@ -275,6 +400,8 @@ struct Shelf {
     scroll_offset: f32,
     grid_size: Size,
     last_scan_log: Instant,
+    /// Last tile click, for double-click-to-play detection.
+    last_click: Option<(u64, Instant)>,
 }
 
 impl Shelf {
@@ -320,6 +447,7 @@ impl Shelf {
             scroll_offset: 0.0,
             grid_size: Size::new(WINDOW.width, WINDOW.height - TOP_BAR_H),
             last_scan_log: Instant::now(),
+            last_click: None,
         };
         let task = Task::batch([
             text_input::focus(search_id()),
@@ -374,6 +502,28 @@ impl Shelf {
                 self.request_visible_thumbs()
             }
             Message::AlbumClicked(id) => {
+                let now = Instant::now();
+                let double = self
+                    .last_click
+                    .take()
+                    .is_some_and(|(last, at)| last == id && now.duration_since(at) <= DOUBLE_CLICK);
+                if double {
+                    // Second press of a double-click. The first press
+                    // already ran the selection toggle, so just make sure
+                    // the album ends up selected (re-select if the first
+                    // press toggled it *off*), then hand play upward.
+                    if self.selected != Some(id) {
+                        if self.selected.is_none() {
+                            self.grid_size.width -= PANEL_W;
+                        }
+                        self.selected = Some(id);
+                    }
+                    return Task::batch([
+                        self.request_visible_thumbs(),
+                        Task::done(Message::PlayAlbum(id)),
+                    ]);
+                }
+                self.last_click = Some((id, now));
                 if self.selected == Some(id) {
                     self.selected = None;
                     self.grid_size.width += PANEL_W;
@@ -384,16 +534,6 @@ impl Shelf {
                     self.selected = Some(id);
                 }
                 self.request_visible_thumbs()
-            }
-            Message::PlayAlbum(id) => {
-                // TODO(playback): this is the deliberate v0.1 seam. The
-                // playback engine + protocol (baz_core::playback,
-                // baz_core::protocol::Command) is being built in parallel;
-                // the next unit replaces this no-op with "queue the album's
-                // tracks, send Command::Play". UI-wise the button, selection
-                // and track list are already the shapes that wiring needs.
-                println!("[play] no-op: playback lands next unit (album id {id:#018x})");
-                Task::none()
             }
             Message::ThumbLoaded(id, handle) => {
                 self.pending.remove(&id);
@@ -536,10 +676,10 @@ impl Shelf {
         Task::batch(tasks)
     }
 
-    fn view(&self) -> Element<'_, Message> {
+    fn view<'a>(&'a self, player: &'a PlayerState) -> Element<'a, Message> {
         let body: Element<'_, Message> = match self.selected_album() {
-            Some(album) => row![self.grid(), self.side_panel(album)].into(),
-            None => self.grid(),
+            Some(album) => row![self.grid(player), self.side_panel(album, player)].into(),
+            None => self.grid(player),
         };
         column![self.top_bar(), body].into()
     }
@@ -591,7 +731,7 @@ impl Shelf {
     }
 
     /// The virtualized grid: spacer, visible rows, spacer (see [`shelf`]).
-    fn grid(&self) -> Element<'_, Message> {
+    fn grid<'a>(&'a self, player: &'a PlayerState) -> Element<'a, Message> {
         let cols = shelf::columns(self.grid_size.width);
         let total_rows = shelf::total_rows(self.visible.len(), cols);
         let (first_row, end_row) =
@@ -609,7 +749,7 @@ impl Shelf {
                     break;
                 };
                 if let Some(album) = self.albums.get(album_index) {
-                    cells = cells.push(self.tile(album));
+                    cells = cells.push(self.tile(album, player.playing_album() == Some(album.id)));
                 }
             }
             grid = grid.push(container(cells).height(Length::Fixed(CELL_H)));
@@ -628,7 +768,8 @@ impl Shelf {
     }
 
     /// One album tile: art (thumbnail or gradient placeholder) + caption.
-    fn tile<'a>(&'a self, album: &'a vm::AlbumVm) -> Element<'a, Message> {
+    /// The currently playing album carries an accent border.
+    fn tile<'a>(&'a self, album: &'a vm::AlbumVm, playing: bool) -> Element<'a, Message> {
         let art: Element<'_, Message> = match self.thumbs.peek(&album.id) {
             Some(handle) => iced_image(handle.clone())
                 .width(Length::Fixed(ART_PX))
@@ -652,24 +793,33 @@ impl Shelf {
         .height(Length::Fixed(CELL_H))
         .padding(6)
         .style(move |_theme| {
+            let mut style = container::Style::default();
             if selected {
-                container::Style {
-                    background: Some(Color::from_rgb(0.18, 0.18, 0.24).into()),
-                    border: iced::border::rounded(8),
-                    ..container::Style::default()
-                }
-            } else {
-                container::Style::default()
+                style.background = Some(Color::from_rgb(0.18, 0.18, 0.24).into());
+                style.border = iced::border::rounded(8);
             }
+            if playing {
+                style.border = iced::Border {
+                    color: ACCENT,
+                    width: 2.0,
+                    radius: 8.into(),
+                };
+            }
+            style
         });
         mouse_area(cell)
             .on_press(Message::AlbumClicked(album.id))
             .into()
     }
 
-    /// The album side panel: art, header, no-op play button, track list.
-    /// This layout is the integration point for the playback unit.
-    fn side_panel<'a>(&'a self, album: &'a vm::AlbumVm) -> Element<'a, Message> {
+    /// The album side panel: art, header, Play button (queues the album),
+    /// track list. In a build without audio output the button is hidden;
+    /// with an unusable or closed engine it renders disabled.
+    fn side_panel<'a>(
+        &'a self,
+        album: &'a vm::AlbumVm,
+        player: &'a PlayerState,
+    ) -> Element<'a, Message> {
         let art: Element<'_, Message> = match self.thumbs.peek(&album.id) {
             Some(handle) => iced_image(handle.clone())
                 .width(Length::Fixed(PANEL_W - 28.0))
@@ -700,28 +850,76 @@ impl Shelf {
             })
             .collect();
 
-        container(
-            column![
-                art,
-                text(title).size(18),
-                text(subtitle).size(13).color(DIM),
-                button(text("Play").size(14)).on_press(Message::PlayAlbum(album.id)),
-                scrollable(Column::with_children(rows).spacing(4)).height(Length::Fill),
-                text("Esc closes · playback arrives with the engine")
-                    .size(11)
-                    .color(DIM),
-            ]
-            .spacing(10),
+        let mut content = column![
+            art,
+            text(title).size(18),
+            text(subtitle).size(13).color(DIM),
+        ]
+        .spacing(10);
+        if *player.availability() != Availability::NotBuilt {
+            content = content.push(
+                button(text("Play").size(14)).on_press_maybe(
+                    player
+                        .engine_ready()
+                        .then_some(Message::PlayAlbum(album.id)),
+                ),
+            );
+        }
+        let hint = if *player.availability() == Availability::NotBuilt {
+            "Esc closes · built without audio output"
+        } else {
+            "Esc closes · double-click a tile to play"
+        };
+        content = content
+            .push(scrollable(Column::with_children(rows).spacing(4)).height(Length::Fill))
+            .push(text(hint).size(11).color(DIM));
+
+        container(content)
+            .width(Length::Fixed(PANEL_W))
+            .height(Length::Fill)
+            .padding(14)
+            .style(|_theme| container::Style {
+                background: Some(Color::from_rgb(0.10, 0.10, 0.13).into()),
+                ..container::Style::default()
+            })
+            .into()
+    }
+}
+
+/// The persistent bottom bar: play/pause toggle, Next, and the current
+/// track (or the engine's plainly-stated absence). Every label and
+/// enabled-state comes from [`PlayerState`] — event-derived, tested in
+/// `player.rs`. No seek bar: the engine has no seek yet, and we do not fake
+/// affordances.
+fn bottom_bar(player: &PlayerState) -> Element<'_, Message> {
+    let toggle = button(text(player.play_pause_label()).size(14))
+        .width(Length::Fixed(64.0))
+        .on_press_maybe(player.play_pause_enabled().then_some(Message::PlayPause));
+    let next = button(text("Next").size(14))
+        .on_press_maybe(player.next_enabled().then_some(Message::NextTrack));
+    let line = player.availability_note().unwrap_or_else(|| {
+        player.now_playing().map_or_else(
+            || "Nothing playing".to_owned(),
+            |now| match &now.artist {
+                Some(artist) => format!("{} — {artist}", now.title),
+                None => now.title.clone(),
+            },
         )
-        .width(Length::Fixed(PANEL_W))
-        .height(Length::Fill)
-        .padding(14)
+    });
+    let mut bar = row![toggle, next, text(line).size(14)]
+        .spacing(10)
+        .align_y(iced::Alignment::Center);
+    if let Some(skipped) = player.skipped_note() {
+        bar = bar.push(text(skipped).size(12).color(DIM));
+    }
+    container(bar)
+        .width(Length::Fill)
+        .padding(10)
         .style(|_theme| container::Style {
-            background: Some(Color::from_rgb(0.10, 0.10, 0.13).into()),
+            background: Some(Color::from_rgb(0.08, 0.08, 0.10).into()),
             ..container::Style::default()
         })
         .into()
-    }
 }
 
 /// A `size`×`size` block filled with the album's deterministic two-color
