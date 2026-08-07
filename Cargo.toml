@@ -8,7 +8,7 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.92"
 license = "GPL-3.0-or-later"
-# repository = set when the GitHub home is created (ADR-0002 leaves it open)
+repository = "https://github.com/mattcree/baz"
 authors = ["baz contributors"]
 
 [workspace.dependencies]
