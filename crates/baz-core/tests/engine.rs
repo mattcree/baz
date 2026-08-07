@@ -14,8 +14,12 @@ use std::thread;
 use std::time::Duration;
 
 use baz_core::engine::{OfflineOutput, spawn_offline};
-use baz_core::playback::{AudioSource, BoundaryPolicy, CHANNELS, EngineConfig, PlaybackError};
-use baz_core::protocol::{Command, Event};
+use baz_core::playback::{AudioSource, BoundaryPolicy, CHANNELS, EngineConfig};
+// Only the device-gated tests below distinguish "no audio hardware" from a
+// real failure; the headless build never constructs one.
+#[cfg(feature = "device-output")]
+use baz_core::playback::PlaybackError;
+use baz_core::protocol::{Command, ConversionReason, Event, SignalChain};
 
 /// Test tone parameters (arbitrary; equality checks are exact either way).
 const FREQ: f64 = 440.0;
@@ -61,6 +65,8 @@ struct Fixtures {
     a_ref: Vec<f32>,
     b_ref: Vec<f32>,
     chirp_ref: Vec<f32>,
+    head_44k_ref: Vec<f32>,
+    tail_48k_ref: Vec<f32>,
 }
 
 fn wav_spec(rate: u32) -> hound::WavSpec {
@@ -139,6 +145,14 @@ fn fixtures() -> &'static Fixtures {
         assert_eq!(a_ref.len(), A_FRAMES * CHANNELS);
         assert_eq!(b_ref.len(), B_FRAMES * CHANNELS);
         assert_eq!(chirp_ref.len(), CHIRP_FRAMES * CHANNELS);
+        let head_44k_ref = AudioSource::decode_all(&head_44k)
+            .expect("decode head")
+            .samples;
+        let tail_48k_ref = AudioSource::decode_all(&tail_48k)
+            .expect("decode tail")
+            .samples;
+        assert_eq!(head_44k_ref.len(), HEAD_44K_FRAMES * CHANNELS);
+        assert_eq!(tail_48k_ref.len(), TAIL_48K_FRAMES * CHANNELS);
         Fixtures {
             a,
             b,
@@ -149,6 +163,8 @@ fn fixtures() -> &'static Fixtures {
             a_ref,
             b_ref,
             chirp_ref,
+            head_44k_ref,
+            tail_48k_ref,
         }
     })
 }
@@ -156,12 +172,26 @@ fn fixtures() -> &'static Fixtures {
 /// Engine config paced so a 5 s track takes a few hundred ms to drain:
 /// slow enough that pause/skip/stop always land mid-track, fast enough for
 /// a snappy suite.
+///
+/// The boundary policy is left at its default — follow the source, convert
+/// nothing (ADR-0009) — so the whole suite below exercises what a shipped baz
+/// actually does. The one test that is *about* conversion opts in explicitly
+/// with [`fixed_rate_config`].
 fn paced_config() -> EngineConfig {
     EngineConfig {
         ring_frames: 8192,
         consumer_chunk_frames: 2048,
         consumer_pace: Duration::from_millis(4),
+        ..EngineConfig::default()
+    }
+}
+
+/// [`paced_config`] with the explicit fixed-output-rate opt-in: one stream
+/// rate for the whole queue, everything else converted into it.
+fn fixed_rate_config() -> EngineConfig {
+    EngineConfig {
         boundary: BoundaryPolicy::ResampleToStreamRate,
+        ..paced_config()
     }
 }
 
@@ -179,18 +209,31 @@ fn next_event(events: &Receiver<Event>) -> Event {
         .expect("timed out waiting for an engine event")
 }
 
-/// The next event that is not [`Event::Progress`].
+/// The next event that is not a readout — [`Event::Progress`] or
+/// [`Event::SignalPath`].
 ///
-/// `Progress` is a continuous readout rather than a transport transition,
-/// and it interleaves with everything by design; the tests that assert the
-/// *transport* vocabulary's ordering therefore step over it. `Progress` has
-/// its own contract (cadence, immediacy, the elapsed value itself) and its
-/// own tests below — it is not going unasserted.
+/// Both are continuous or incidental *descriptions* of playback rather than
+/// transport transitions, and both interleave with everything by design; the
+/// tests that assert the *transport* vocabulary's ordering therefore step over
+/// them. Each has its own contract and its own tests below — neither is going
+/// unasserted.
 fn next_transport_event(events: &Receiver<Event>) -> Event {
     loop {
         match next_event(events) {
-            Event::Progress { .. } => {}
+            Event::Progress { .. } | Event::SignalPath { .. } => {}
             other => return other,
+        }
+    }
+}
+
+/// Wait for the next [`Event::SignalPath`], stepping over `Progress` (which
+/// is emitted on the same transitions and would otherwise race it).
+fn next_signal_path(events: &Receiver<Event>) -> Event {
+    loop {
+        match next_event(events) {
+            Event::Progress { .. } => {}
+            signal @ Event::SignalPath { .. } => return signal,
+            other => panic!("expected SignalPath, got {other:?}"),
         }
     }
 }
@@ -203,14 +246,19 @@ fn assert_no_event_within(events: &Receiver<Event>, window: Duration) {
     }
 }
 
-/// Wait for the next [`Event::Progress`], failing on any other event first.
+/// Wait for the next [`Event::Progress`], failing on any other event first —
+/// except [`Event::SignalPath`], which is a description of the chain rather
+/// than a transport event and rides along with `TrackStarted`.
 fn next_progress(events: &Receiver<Event>) -> (u64, Option<u64>) {
-    match next_event(events) {
-        Event::Progress {
-            elapsed_ms,
-            track_ms,
-        } => (elapsed_ms, track_ms),
-        other => panic!("expected Progress, got {other:?}"),
+    loop {
+        match next_event(events) {
+            Event::SignalPath { .. } => {}
+            Event::Progress {
+                elapsed_ms,
+                track_ms,
+            } => return (elapsed_ms, track_ms),
+            other => panic!("expected Progress, got {other:?}"),
+        }
     }
 }
 
@@ -563,18 +611,21 @@ fn next_past_last_track_ends_queue() {
     assert_no_event_within(&events, Duration::from_millis(120));
 }
 
-/// The engine service inherits `run_playlist`'s contract for the
-/// unimplemented bit-perfect reopen mode: refuse at spawn, plainly.
+/// Follow-the-source is the shipped default (ADR-0009), not something a
+/// caller has to opt into. Asserted on [`EngineConfig::default`] rather than
+/// on a config the test built, because the thing under test is what an
+/// unconfigured baz does.
 #[test]
-fn bit_perfect_reopen_is_refused_at_spawn() {
-    let cfg = EngineConfig {
-        boundary: BoundaryPolicy::BitPerfectReopen,
-        ..paced_config()
-    };
-    let Err(err) = spawn_offline(cfg, 16) else {
-        panic!("reopen mode must be refused")
-    };
-    assert!(matches!(err, PlaybackError::BitPerfectReopenUnimplemented));
+fn following_the_source_rate_is_the_default_policy() {
+    assert_eq!(
+        EngineConfig::default().boundary,
+        BoundaryPolicy::BitPerfectReopen,
+        "the default must be the mode that converts nothing"
+    );
+    // And it is a mode the engine service actually runs, not one it refuses.
+    let (engine, _events, _output) =
+        spawn_offline(EngineConfig::default(), 16).expect("the default policy must spawn");
+    engine.shutdown();
 }
 
 /// Commands after shutdown fail with a clear error instead of vanishing.
@@ -853,8 +904,13 @@ fn progress_cadence_is_quarter_second_and_immediate_after_transitions() {
 /// **Elapsed time is wall-clock true across a resampled track** — the one
 /// place a plausible implementation goes quietly wrong.
 ///
+/// Runs under the explicit fixed-output-rate opt-in, because that (and a
+/// device that cannot do the source rate, which reaches the same code) is now
+/// the only way a track gets resampled at all. The arithmetic it guards is
+/// unchanged and still has to be right wherever conversion happens.
+///
 /// The queue is 1 s at 44.1 kHz (which fixes the session's stream rate)
-/// followed by 4 s at 48 kHz, which the ADR-0004 boundary policy resamples
+/// followed by 4 s at 48 kHz, which the fixed-rate policy resamples
 /// down to 44.1 kHz before it reaches the ring. Counting delivered frames
 /// against the *file's* 48 kHz would under-report by 8 %: the 4 s track
 /// would appear to run 3.675 s, and every position inside it would be short
@@ -870,7 +926,8 @@ fn elapsed_is_wall_clock_true_across_a_resampled_track() {
     // The 48 kHz track resamples to exactly 4 s at the 44.1 kHz stream rate.
     let head_samples = HEAD_44K_FRAMES * CHANNELS;
     let capacity = head_samples + TAIL_48K_SECS * RATE as usize * CHANNELS;
-    let (engine, events, _output) = spawn_offline(paced_config(), capacity).expect("spawn engine");
+    let (engine, events, _output) =
+        spawn_offline(fixed_rate_config(), capacity).expect("spawn engine");
 
     engine
         .send(Command::SetQueue {
@@ -926,15 +983,246 @@ fn elapsed_is_wall_clock_true_across_a_resampled_track() {
     engine.shutdown();
 }
 
+/// **Nothing is resampled when the output can run at the source rate.**
+///
+/// The headline claim of ADR-0009, asserted from the engine's own conversion
+/// counters rather than from a stopwatch: `resampled_tracks == 0` means no
+/// resampler was ever constructed, which no amount of "it felt fast" could
+/// establish. The 48 kHz fixture is the case that used to be converted.
+///
+/// The delivered audio is compared against a plain reference decode, so
+/// "unconverted" is checked at the samples too, not only at the counter.
+#[test]
+fn nothing_is_resampled_when_the_output_can_run_at_the_source_rate() {
+    let f = fixtures();
+    let (engine, events, output) =
+        spawn_offline(paced_config(), f.tail_48k_ref.len()).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.tail_48k.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.tail_48k, 0));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+
+    let conversions = engine.conversions();
+    assert_eq!(
+        conversions.resampled_tracks, 0,
+        "a 48 kHz track played into a 48 kHz stream must not construct a resampler"
+    );
+    assert!(
+        conversions.resample_ms <= 0.0,
+        "no resampler ran, so no time can have been spent in one: {conversions:?}"
+    );
+    engine.shutdown();
+    assert_samples_eq(
+        &collect(output),
+        &f.tail_48k_ref,
+        "48 kHz track delivered unconverted",
+    );
+}
+
+/// The signal-path readout for that same case: source and output rates agree
+/// and the chain is [`SignalChain::Direct`]. This is what a front end renders,
+/// so it is asserted as the protocol value a front end would receive.
+#[test]
+fn the_signal_path_reports_a_direct_chain_at_the_source_rate() {
+    let f = fixtures();
+    let (engine, events, _output) =
+        spawn_offline(paced_config(), f.tail_48k_ref.len()).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.tail_48k.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.tail_48k, 0));
+    assert_eq!(
+        next_signal_path(&events),
+        Event::SignalPath {
+            source_rate_hz: TAIL_48K_RATE,
+            source_bits: Some(32),
+            output_rate_hz: TAIL_48K_RATE,
+            chain: SignalChain::Direct,
+        },
+        "a 48 kHz file on a stream that can run at 48 kHz is a direct chain"
+    );
+    engine.shutdown();
+}
+
+/// An album does not repeat itself: the chain is stated when a session starts
+/// and then only when it changes, so a ten-track album at one rate produces
+/// exactly one `SignalPath`.
+#[test]
+fn the_signal_path_is_stated_once_while_it_does_not_change() {
+    let f = fixtures();
+    let capacity = f.a_ref.len() + f.b_ref.len();
+    let (engine, events, _output) = spawn_offline(fast_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+
+    let mut signals = 0usize;
+    loop {
+        match next_event(&events) {
+            Event::SignalPath { .. } => signals += 1,
+            Event::QueueEnded => break,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        signals, 1,
+        "two same-rate tracks describe one chain, so they should say so once"
+    );
+    engine.shutdown();
+}
+
+/// **A rate change reopens the output and loses not one sample.**
+///
+/// The queue is 1 s at 44.1 kHz followed by 4 s at 48 kHz. Under the default
+/// the first session stops at the boundary, the engine drains and renegotiates,
+/// and a second session plays the 48 kHz track *at 48 kHz*. What must come out
+/// the far end is both files' own samples, in order, unconverted — which is
+/// asserted here against reference decodes of each, concatenated.
+///
+/// This is the test that would fail if the split dropped the tail of the first
+/// track, replayed part of it, or quietly resampled either half.
+#[test]
+fn a_rate_change_replays_both_tracks_unconverted() {
+    let f = fixtures();
+    let capacity = f.head_44k_ref.len() + f.tail_48k_ref.len();
+    let (engine, events, output) = spawn_offline(fast_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.head_44k.clone(), f.tail_48k.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.head_44k, 0));
+    assert_eq!(next_transport_event(&events), started(&f.tail_48k, 1));
+    // Exactly one QueueEnded: the split is an internal handover, not the end
+    // of the queue, and a front end must never see it as one.
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    assert_no_event_within(&events, Duration::from_millis(120));
+
+    assert_eq!(
+        engine.conversions().resampled_tracks,
+        0,
+        "following the source means neither half is converted"
+    );
+    engine.shutdown();
+
+    let mut want = f.head_44k_ref.clone();
+    want.extend_from_slice(&f.tail_48k_ref);
+    assert_samples_eq(&collect(output), &want, "both tracks at their own rates");
+}
+
+/// The readout across that same rate change: two chains, each direct, at the
+/// two different rates. A front end watching this sees the output follow the
+/// music.
+#[test]
+fn a_rate_change_restates_the_signal_path() {
+    let f = fixtures();
+    let capacity = f.head_44k_ref.len() + f.tail_48k_ref.len();
+    let (engine, events, _output) = spawn_offline(fast_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.head_44k.clone(), f.tail_48k.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+
+    let mut signals = Vec::new();
+    loop {
+        match next_event(&events) {
+            Event::SignalPath {
+                source_rate_hz,
+                output_rate_hz,
+                chain,
+                ..
+            } => signals.push((source_rate_hz, output_rate_hz, chain)),
+            Event::QueueEnded => break,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        signals,
+        vec![
+            (RATE, RATE, SignalChain::Direct),
+            (TAIL_48K_RATE, TAIL_48K_RATE, SignalChain::Direct),
+        ],
+        "the output must follow the source across the change, and say so both times"
+    );
+    engine.shutdown();
+}
+
+/// The explicit fixed-output-rate mode reports itself honestly: the same queue
+/// converts instead of reopening, and the readout says *converting*, with the
+/// reason being the setting rather than the hardware.
+///
+/// Reporting it is the whole point — a conversion nobody is told about is the
+/// one outcome ADR-0009 rules out.
+#[test]
+fn a_fixed_output_rate_reports_a_converting_chain() {
+    let f = fixtures();
+    let capacity = f.head_44k_ref.len() + TAIL_48K_SECS * RATE as usize * CHANNELS;
+    let (engine, events, _output) =
+        spawn_offline(fixed_rate_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.head_44k.clone(), f.tail_48k.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+
+    let mut signals = Vec::new();
+    loop {
+        match next_event(&events) {
+            Event::SignalPath {
+                source_rate_hz,
+                output_rate_hz,
+                chain,
+                ..
+            } => signals.push((source_rate_hz, output_rate_hz, chain)),
+            Event::QueueEnded => break,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        signals,
+        vec![
+            (RATE, RATE, SignalChain::Direct),
+            (
+                TAIL_48K_RATE,
+                RATE,
+                SignalChain::Converting {
+                    reason: ConversionReason::FixedOutputRate,
+                },
+            ),
+        ],
+        "a converted track must be reported as converted, with the reason"
+    );
+    assert_eq!(
+        engine.conversions().resampled_tracks,
+        1,
+        "exactly the one track whose rate differed"
+    );
+    engine.shutdown();
+}
+
 /// Device output (feature `device-output`): the engine spawns against the
 /// default device — or reports the documented `Device` error on headless
 /// machines — and shuts down cleanly either way. Never a panic.
 ///
-/// Also the one place the **forced-rate anchor** path is exercised: with a
-/// fixed 44.1 kHz output stream, a 48 kHz track is decoded and resampled
-/// whole before it is pushed, which is a different branch from the
-/// block-by-block streaming an offline session takes. Seeking into it must
-/// still report a wall-clock-true position and a rate-independent length.
+/// The second half seeks into a 48 kHz track on an engine that was *spawned*
+/// at 44.1 kHz, so it also covers the interaction of rate negotiation with
+/// seek: whichever rate the session ends up negotiating, the reported position
+/// must stay wall-clock true and the track's length must stay a property of
+/// the track rather than of the stream it is played into.
 #[cfg(feature = "device-output")]
 #[test]
 fn device_engine_spawns_or_reports_cleanly() {
@@ -977,7 +1265,7 @@ fn device_engine_spawns_or_reports_cleanly() {
         assert_eq!(
             total,
             Some(TAIL_48K_MS),
-            "a resampled track keeps its own length"
+            "a track's length is a property of the track, not of the stream rate"
         );
         if elapsed >= 2_500 {
             break (elapsed, total);
@@ -989,7 +1277,7 @@ fn device_engine_spawns_or_reports_cleanly() {
     );
     assert_eq!(next_transport_event(&events), started(&f.tail_48k, 0));
     engine.shutdown();
-    println!("[device] seek into a resampled track reported {elapsed} ms of {total:?}");
+    println!("[device] seek into a 48 kHz track reported {elapsed} ms of {total:?}");
 }
 
 /// Device output (feature `device-output`): the whole transport vocabulary,
@@ -1068,4 +1356,93 @@ fn device_engine_transport_survives_repeated_session_abandonment() {
     assert_eq!(next_transport_event(&events), started(&f.chirp, 0));
     engine.shutdown();
     println!("[device] transport survived 4 seeks, a skip, a stop, and a restart");
+}
+
+/// **Device output (feature `device-output`): a 48 kHz album really plays at
+/// 48 kHz on real hardware.**
+///
+/// The end-to-end version of ADR-0009's claim, on the only apparatus that can
+/// settle it. The engine is spawned at 44.1 kHz — deliberately the *wrong*
+/// rate, exactly as the app spawns it before it knows what will be played —
+/// and then handed a 48 kHz track. Negotiation must move the output to
+/// 48 kHz and no resampler must be constructed.
+///
+/// A device that genuinely cannot do 48 kHz is not a test failure: it is the
+/// documented fallback, and the assertion adapts to say so. What is asserted
+/// either way is the invariant that matters — **the readout and the counters
+/// agree with each other**, so the chain is never described as direct while a
+/// resampler is running, nor the reverse.
+#[cfg(feature = "device-output")]
+#[test]
+fn device_engine_follows_the_source_rate() {
+    let f = fixtures();
+    let spawned = baz_core::engine::spawn_device(EngineConfig::default(), RATE, 8192);
+    let (engine, events) = match spawned {
+        Ok(pair) => pair,
+        Err(PlaybackError::Device(msg)) => {
+            eprintln!("SKIP: no usable output device ({msg})");
+            return;
+        }
+        Err(other) => panic!("unexpected error spawning device engine: {other}"),
+    };
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.tail_48k.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.tail_48k, 0));
+
+    let Event::SignalPath {
+        source_rate_hz,
+        output_rate_hz,
+        chain,
+        ..
+    } = next_signal_path(&events)
+    else {
+        unreachable!("next_signal_path returns only SignalPath")
+    };
+    assert_eq!(source_rate_hz, TAIL_48K_RATE, "the file is 48 kHz");
+
+    // Give the engine a moment to have resampled, if it were going to.
+    thread::sleep(Duration::from_millis(200));
+    let conversions = engine.conversions();
+    match chain {
+        SignalChain::Direct => {
+            assert_eq!(
+                output_rate_hz, TAIL_48K_RATE,
+                "a direct chain means the output followed the source"
+            );
+            assert_eq!(
+                conversions.resampled_tracks, 0,
+                "a direct chain must not have a resampler behind it"
+            );
+            println!(
+                "[device] 48 kHz content negotiated a 48 kHz output stream; \
+                 {} reconfiguration(s), no resampling",
+                conversions.output_reconfigurations
+            );
+        }
+        SignalChain::Converting { reason } => {
+            assert_eq!(
+                reason,
+                ConversionReason::DeviceRateUnavailable,
+                "following the source can only be defeated by the device"
+            );
+            assert_ne!(
+                output_rate_hz, TAIL_48K_RATE,
+                "a converting chain means the rates differ"
+            );
+            assert!(
+                conversions.resampled_tracks >= 1,
+                "a converting chain must have a resampler behind it"
+            );
+            println!(
+                "[device] this device offers no {TAIL_48K_RATE} Hz mode; played at \
+                 {output_rate_hz} Hz and reported the conversion"
+            );
+        }
+        other => panic!("unexpected chain state: {other:?}"),
+    }
+    engine.shutdown();
 }

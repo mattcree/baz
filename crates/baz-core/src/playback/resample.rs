@@ -1,7 +1,14 @@
-//! Splice-exact sample-rate conversion for the ADR-0004 default boundary
-//! policy, built on `rubato`'s windowed-sinc resampler.
+//! Splice-exact sample-rate conversion, built on `rubato`'s windowed-sinc
+//! resampler.
 //!
 //! Runs on the prefetch thread only — never the realtime pull path.
+//!
+//! ADR-0004 made this the default path for every rate change; ADR-0009 moved
+//! the default to *following the source rate* and left this as the two places
+//! conversion is still correct: an explicitly chosen fixed output rate, and a
+//! device that offers no mode at the source's rate. Both are reported to the
+//! listener rather than done quietly, and the alignment guarantee below is
+//! what makes either of them sound right.
 //!
 //! # Alignment (the hard-won part — do not "fix" this)
 //!

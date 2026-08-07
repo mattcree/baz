@@ -14,12 +14,17 @@
 //!   realtime-disciplined **by construction**: wait-free ring reads, writes
 //!   into a preallocated [`Sink`], no locking, no allocation, no I/O, no
 //!   panics. See `docs/ENGINEERING.md`, "the audio thread is sacred".
-//! - Sample-rate changes at track boundaries follow ADR-0004: by default the
-//!   incoming track is resampled to the stream rate on the prefetch side
-//!   ([`BoundaryPolicy::ResampleToStreamRate`]); the bit-perfect reopen mode
-//!   is an accepted part of the API contract but is not implemented until the
-//!   exclusive-mode output backends exist
-//!   ([`BoundaryPolicy::BitPerfectReopen`]).
+//! - Sample-rate handling follows ADR-0009 (which inverted ADR-0004's
+//!   default): the output **follows the source** and baz resamples nothing.
+//!   A session opens the device at the rate of the track that starts it, and a
+//!   track at a different rate reopens it ([`BoundaryPolicy::BitPerfectReopen`],
+//!   the default) — gapless within a rate, a short reconfiguration gap
+//!   between rates. Converting to one fixed rate is still available as an
+//!   explicit opt-in ([`BoundaryPolicy::ResampleToStreamRate`]), and the one
+//!   case where conversion happens without being asked for — hardware that
+//!   cannot do the source rate at all — is reported through
+//!   [`Event::SignalPath`](crate::protocol::Event::SignalPath) rather than
+//!   done silently.
 //!
 //! # Gapless status by format
 //!
@@ -176,16 +181,29 @@ pub enum PlaybackError {
         min_frames: usize,
     },
 
-    /// [`BoundaryPolicy::BitPerfectReopen`] was requested. The mode is part
-    /// of the ADR-0004 contract but its implementation arrives with the
-    /// exclusive-mode output backends; until then the engine refuses rather
-    /// than approximating it.
+    /// A queue changes sample rate part-way through and the caller asked for
+    /// the bit-perfect default, which answers a rate change by reopening the
+    /// output — something [`run_playlist`] has no output to do.
+    ///
+    /// Produced only by [`run_playlist`], never by the interactive engine
+    /// ([`crate::engine`]), which *does* reopen and for which a mixed-rate
+    /// queue is ordinary. Callers who want a single buffer at a single rate
+    /// select [`BoundaryPolicy::ResampleToStreamRate`] and accept the
+    /// conversion knowingly.
     #[error(
-        "bit-perfect reopen mode is not yet implemented: it requires the \
-         exclusive-mode device backends (ADR-0004); use \
-         BoundaryPolicy::ResampleToStreamRate"
+        "track {index} changes the sample rate from {from} Hz to {to} Hz: the \
+         bit-perfect default reopens the output at the new rate, which an \
+         offline one-shot render cannot do (ADR-0009). Use the interactive \
+         engine, or BoundaryPolicy::ResampleToStreamRate to convert instead"
     )]
-    BitPerfectReopenUnimplemented,
+    SampleRateChangeRequiresReopen {
+        /// Queue index of the track whose rate differs.
+        index: usize,
+        /// Rate the render is running at, in Hz.
+        from: u32,
+        /// Rate the track declares, in Hz.
+        to: u32,
+    },
 
     /// A decode or prefetch worker thread panicked. Panics are a bug
     /// (`docs/ENGINEERING.md`); this variant reports them instead of

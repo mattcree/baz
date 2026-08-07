@@ -111,6 +111,10 @@ pub struct DecodedAudio {
     pub samples: Vec<f32>,
     /// Native sample rate of the source in Hz.
     pub sample_rate: u32,
+    /// Bit depth the source declared, when it declared one
+    /// ([`AudioSource::bits_per_sample`]). Carried for the signal-path
+    /// readout; the samples themselves are f32 either way.
+    pub bits_per_sample: Option<u32>,
 }
 
 impl DecodedAudio {
@@ -161,6 +165,9 @@ pub struct AudioSource {
     /// after a [`Self::seek`] (module docs). Zero on the un-seeked path, so
     /// steady-state decoding is byte-for-byte what it always was.
     skip_frames: u64,
+    /// Bit depth the container declares, when it declares one. Reported, never
+    /// acted on: decoding is to f32 regardless (see [`Self::bits_per_sample`]).
+    bits_per_sample: Option<u32>,
 }
 
 impl AudioSource {
@@ -252,6 +259,9 @@ impl AudioSource {
         // `delay` in its params, so applying it here would double-trim).
         // See the module docs.
         let emit_cap = params.n_frames;
+        // Read for the signal-path readout only; decoding is to f32 whatever
+        // the container says (see `Self::bits_per_sample`).
+        let bits_per_sample = params.bits_per_sample;
         let decoder = symphonia::default::get_codecs().make(params, &DecoderOptions::default())?;
         let mut source = Self {
             format,
@@ -267,6 +277,7 @@ impl AudioSource {
             frames_seen: 0,
             emit_cap,
             skip_frames: 0,
+            bits_per_sample,
         };
         let channels = if let Some(n) = declared_channels {
             n
@@ -336,6 +347,21 @@ impl AudioSource {
     #[must_use]
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
+    }
+
+    /// Bit depth the container declares, when it declares one — 24 for the
+    /// owner's 24-bit FLACs, 16 for a CD rip, `None` for float PCM and for
+    /// containers that stay silent about it.
+    ///
+    /// Reported for the signal-path readout
+    /// ([`Event::SignalPath`](crate::protocol::Event::SignalPath)), never
+    /// acted on. Every source decodes to f32 whatever its depth, and f32's
+    /// 24-bit mantissa represents 24-bit and narrower integer PCM exactly, so
+    /// there is no depth at which the engine has to choose what to throw
+    /// away.
+    #[must_use]
+    pub fn bits_per_sample(&self) -> Option<u32> {
+        self.bits_per_sample
     }
 
     /// Total frames the container declares for this stream, post gapless
@@ -554,6 +580,7 @@ impl AudioSource {
         Ok(DecodedAudio {
             samples,
             sample_rate: src.sample_rate,
+            bits_per_sample: src.bits_per_sample,
         })
     }
 }
