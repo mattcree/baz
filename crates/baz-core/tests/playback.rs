@@ -867,6 +867,153 @@ fn pull_path_does_not_reallocate() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Seeking (source level, per format)
+// ---------------------------------------------------------------------------
+
+/// Decode everything a source yields after seeking to `position_ms`.
+fn decode_from(path: &Path, position_ms: u64) -> Vec<f32> {
+    let mut src = AudioSource::open(path).expect("open");
+    src.seek(position_ms).expect("seek");
+    let mut out = Vec::new();
+    while let Some(block) = src.next_block().expect("decode") {
+        out.extend_from_slice(block);
+    }
+    out
+}
+
+/// Seeking a losslessly-coded stream is **sample-exact**: what comes back is
+/// bit-for-bit the tail of the un-seeked decode. Both formats are covered
+/// because they take different code paths inside Symphonia (WAV computes a
+/// byte offset; FLAC binary-searches its seek table), and both land on a
+/// packet boundary *before* the target — so this is really a test that the
+/// residue is discarded correctly.
+#[test]
+fn seek_is_sample_exact_for_wav_and_flac() {
+    let f = fixtures();
+    let mut cases: Vec<(&str, &Path)> = vec![("wav f32", f.ref_f32.as_path())];
+    match &f.flac {
+        Some(flac) => cases.push(("flac", flac.full.as_path())),
+        None => eprintln!("SKIP(flac): no FLAC encoder available"),
+    }
+    for (what, path) in cases {
+        let reference = AudioSource::decode_all(path)
+            .expect("reference decode")
+            .samples;
+        assert_eq!(reference.len(), TOTAL_FRAMES * CHANNELS, "{what}: fixture");
+        for position_ms in [0u64, 1, 3_000, 9_999] {
+            let target = (position_ms * u64::from(RATE) / 1000) as usize;
+            let got = decode_from(path, position_ms);
+            assert_samples_eq(
+                &got,
+                &reference[target * CHANNELS..],
+                &format!("{what}: decode after seek to {position_ms} ms"),
+            );
+        }
+    }
+}
+
+/// Seeking an MP3 is *not* bit-exact — the decoder restarts mid-stream and
+/// Symphonia rewinds a few reference frames to refill the bit reservoir —
+/// but it must be **accurate in time and in content**: the audio that comes
+/// back has to be the ideal sine at the position asked for (not shifted, not
+/// phase-slipped), and the remaining length has to be the declared length
+/// minus the seek target, which is what proves the gapless trim was neither
+/// lost nor applied twice by the seek.
+#[test]
+fn seek_into_mp3_is_time_accurate_and_keeps_the_trim() {
+    let f = fixtures();
+    let Some(mp3) = &f.mp3 else {
+        eprintln!("SKIP(mp3): ffmpeg libmp3lame not available");
+        return;
+    };
+    for position_ms in [0u64, 3_000, 7_500] {
+        let target = (position_ms * u64::from(RATE) / 1000) as usize;
+        let got = decode_from(&mp3.full, position_ms);
+
+        // Length: exactly the declared remainder. A double-applied encoder
+        // delay, or a lost one, would show up here as a shifted count.
+        assert_eq!(
+            got.len(),
+            (TOTAL_FRAMES - target) * CHANNELS,
+            "mp3 seek to {position_ms} ms must leave exactly the remaining frames"
+        );
+
+        // Content: the sine picked up at absolute time `target`, compared
+        // against synthesized ground truth rather than any recorded decode.
+        // The first MP3 frame after the restart is excluded — the reservoir
+        // is still warming — and the file's own tail edge likewise.
+        let ch0 = channel(&got, 0);
+        let from = MP3_FRAME.min(ch0.len());
+        let to = ch0.len().saturating_sub(MP3_EDGE_FRAMES);
+        let mut worst = 0.0f32;
+        for (i, &s) in ch0.iter().enumerate().take(to).skip(from) {
+            worst = worst.max((s - ideal_sample_at(RATE, target + i, 0.0)).abs());
+        }
+        println!(
+            "[seek mp3] {position_ms} ms: steady-state max error {worst:.2e} \
+             ({} frames compared, encoder {})",
+            to - from,
+            mp3.encoder
+        );
+        assert!(
+            worst <= MP3_STEADY_TOL,
+            "mp3 seek to {position_ms} ms: max error {worst} exceeds {MP3_STEADY_TOL}; \
+             a time-inaccurate seek shows up here as a large phase error"
+        );
+    }
+}
+
+/// A seek past the declared end is reported plainly, not guessed at or
+/// silently clamped — the engine needs to be able to tell the difference in
+/// order to advance to the next track.
+#[test]
+fn seek_past_the_declared_end_is_an_error() {
+    let f = fixtures();
+    let mut src = AudioSource::open(&f.ref_f32).expect("open");
+    assert_eq!(src.duration_ms(), Some(10_000));
+    assert_eq!(src.total_frames(), Some(TOTAL_FRAMES as u64));
+    // Exactly at the end counts as past it: there is no audio there.
+    match src.seek(10_000) {
+        Err(PlaybackError::SeekPastEnd {
+            position_ms,
+            track_ms,
+        }) => {
+            assert_eq!(position_ms, 10_000);
+            assert_eq!(track_ms, Some(10_000));
+        }
+        other => panic!("expected SeekPastEnd, got {other:?}"),
+    }
+    assert!(matches!(
+        src.seek(60_000),
+        Err(PlaybackError::SeekPastEnd { .. })
+    ));
+}
+
+/// Repeated seeks on one source stay correct: no accumulated skip counter,
+/// no drift, and backwards works as well as forwards.
+#[test]
+fn repeated_seeks_do_not_drift() {
+    let f = fixtures();
+    let reference = AudioSource::decode_all(&f.ref_f32)
+        .expect("reference decode")
+        .samples;
+    let mut src = AudioSource::open(&f.ref_f32).expect("open");
+    for position_ms in [5_000u64, 1_000, 8_000, 1_000, 0] {
+        src.seek(position_ms).expect("seek");
+        let target = (position_ms * u64::from(RATE) / 1000) as usize;
+        let block = src
+            .next_block()
+            .expect("decode")
+            .expect("audio after a mid-stream seek");
+        assert_samples_eq(
+            &block[..64],
+            &reference[target * CHANNELS..][..64],
+            &format!("first block after seeking to {position_ms} ms"),
+        );
+    }
+}
+
 /// An empty playlist is a clear error, not a silent no-op.
 #[test]
 fn empty_playlist_is_an_error() {

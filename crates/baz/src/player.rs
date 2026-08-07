@@ -23,6 +23,27 @@
 //!   raced into a no-op — pause just as the queue ended, say — cannot wedge
 //!   the button forever). It never sets a phase.
 //!
+//! # The seek bar
+//!
+//! Position comes from [`Event::Progress`] and nothing else — the same
+//! honesty rule. Two pieces of request-side state sit on top of it, both
+//! purely about what the *pointer* is doing:
+//!
+//! - **A drag in progress** ([`PlayerState::drag_to`]): while the handle is
+//!   held, the bar shows where the pointer is and incoming `Progress` is
+//!   recorded but not displayed. Anything else would fight the user's hand.
+//! - **A seek awaiting confirmation** ([`PlayerState::release_drag`]): on
+//!   release the bar shows the requested position, marked pending, until an
+//!   event confirms. This is the transport buttons' affordance applied to
+//!   the bar, and it clears the same way — on the next event of any kind,
+//!   for the same anti-wedging reason. In practice that event is the
+//!   `Progress` the engine emits immediately on accepting a `Seek`; a
+//!   cadence report that was already in flight can clear it one report
+//!   early, which costs at most a quarter-second of showing the position the
+//!   seek came from. That is the honest trade against a pending state that
+//!   could stick forever, and it is the trade the transport buttons already
+//!   make.
+//!
 //! Engine availability ([`Availability`]) is seeded from the spawn result at
 //! startup — that is a returned fact, not an assumption — and downgrades to
 //! [`Availability::Closed`] when the event bridge reports the engine gone or
@@ -32,11 +53,12 @@
 //! tested on the host without a window, an audio device, or the
 //! `device-output` feature.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use baz_core::protocol::Event;
 
-use crate::vm::AlbumVm;
+use crate::vm::{self, AlbumVm};
 
 /// Whether a playback engine exists to talk to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,18 +136,57 @@ pub fn resolve_now_playing(albums: &[AlbumVm], path: &Path) -> NowPlaying {
     }
 }
 
+/// The seek bar's render-ready state — everything the view needs to compose
+/// a slider and two timestamps, and nothing about how to draw them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeekBar {
+    /// Handle position as a fraction of the track, `0.0..=1.0`. Always 0
+    /// when the track length is unknown (there is no proportion to show).
+    pub position: f32,
+    /// Left timestamp: the position being shown — dragged, pending, or
+    /// confirmed, in that order of precedence.
+    pub elapsed: String,
+    /// Right timestamp: the track's length, or `--:--` when undeclared.
+    pub total: String,
+    /// Whether dragging the bar can do anything. False when the engine is
+    /// unavailable, nothing is playing, or the track declares no length —
+    /// there is no honest position to seek *to* without one.
+    pub interactive: bool,
+    /// Whether the position shown is a *request* rather than a confirmed
+    /// reading: the handle is being dragged, or a seek is awaiting its
+    /// confirming event. The view marks it so the number is never mistaken
+    /// for playback truth it has not earned yet.
+    pub pending: bool,
+}
+
+/// The placeholder shown where a track length would be, when the container
+/// never declared one. Same width as a real `m:ss` so the bar does not jump.
+const UNKNOWN_TOTAL: &str = "--:--";
+
 /// The event-derived playback state behind every playback widget.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlayerState {
     availability: Availability,
     phase: Phase,
     now_playing: Option<NowPlaying>,
+    /// Path of the current track, to tell "the same track started again
+    /// after a seek" from "a different track started".
+    now_playing_path: Option<PathBuf>,
     /// Tracks in the queue we last asked for (request-side; module docs).
     queued: usize,
     /// A transport command awaiting its confirming event (module docs).
     pending: bool,
     /// [`Event::TrackFailed`] count since the last queue request.
     failed: usize,
+    /// Confirmed position in the current track, from [`Event::Progress`].
+    elapsed_ms: u64,
+    /// Confirmed track length, when the engine reported one.
+    track_ms: Option<u64>,
+    /// Position under the pointer while the bar is being dragged.
+    drag_ms: Option<u64>,
+    /// Position a sent-but-unconfirmed [`Command::Seek`](baz_core::protocol::Command::Seek)
+    /// asked for.
+    seek_pending: Option<u64>,
 }
 
 impl PlayerState {
@@ -136,9 +197,14 @@ impl PlayerState {
             availability,
             phase: Phase::Stopped,
             now_playing: None,
+            now_playing_path: None,
             queued: 0,
             pending: false,
             failed: 0,
+            elapsed_ms: 0,
+            track_ms: None,
+            drag_ms: None,
+            seek_pending: None,
         }
     }
 
@@ -148,6 +214,15 @@ impl PlayerState {
         match event {
             Event::TrackStarted { path, .. } => {
                 self.phase = Phase::Playing;
+                // A seek restarts the *current* track, so TrackStarted is not
+                // by itself news of a new track. Only a genuinely different
+                // path resets the position; otherwise the bar would snap to
+                // zero for the moment between a seek's confirming Progress
+                // and the restarted track's audio arriving.
+                if self.now_playing_path.as_deref() != Some(path.as_path()) {
+                    self.now_playing_path = Some(path.clone());
+                    self.reset_progress();
+                }
                 self.now_playing = Some(resolve_now_playing(albums, path));
             }
             Event::Paused => self.phase = Phase::Paused,
@@ -155,14 +230,33 @@ impl PlayerState {
             Event::Stopped | Event::QueueEnded => {
                 self.phase = Phase::Stopped;
                 self.now_playing = None;
+                self.now_playing_path = None;
+                self.reset_progress();
             }
             Event::TrackFailed { .. } => self.failed += 1,
+            Event::Progress {
+                elapsed_ms,
+                track_ms,
+            } => {
+                self.elapsed_ms = *elapsed_ms;
+                self.track_ms = *track_ms;
+            }
             // `Event` is #[non_exhaustive]: tolerate unknown messages.
             _ => {}
         }
         // Any received event proves the engine made progress past whatever
-        // we last sent (module docs).
+        // we last sent (module docs). A drag is the pointer's business, not
+        // the engine's, so it survives.
         self.pending = false;
+        self.seek_pending = None;
+    }
+
+    /// Forget where we were: a different track, or none at all.
+    fn reset_progress(&mut self) {
+        self.elapsed_ms = 0;
+        self.track_ms = None;
+        self.drag_ms = None;
+        self.seek_pending = None;
     }
 
     /// Record that a new queue of `len` tracks was requested.
@@ -186,7 +280,79 @@ impl PlayerState {
         }
         self.phase = Phase::Stopped;
         self.now_playing = None;
+        self.now_playing_path = None;
         self.pending = false;
+        self.reset_progress();
+    }
+
+    /// The pointer moved to `fraction` (`0.0..=1.0`) of the track with the
+    /// bar held. Records the drag position; the bar shows it in place of the
+    /// engine's reports until [`Self::release_drag`].
+    ///
+    /// A no-op when [`Self::seek_bar`] reports the bar non-interactive —
+    /// there is nothing a fraction could mean without a track length.
+    pub fn drag_to(&mut self, fraction: f32) {
+        let Some(total) = self.seekable_total() else {
+            return;
+        };
+        self.drag_ms = Some(scale(total, fraction));
+    }
+
+    /// The bar was released. Returns the position to ask the engine for, and
+    /// records it as pending so the bar keeps showing it until an event
+    /// confirms. `None` when no drag was in progress.
+    pub fn release_drag(&mut self) -> Option<u64> {
+        let target = self.drag_ms.take()?;
+        self.seek_pending = Some(target);
+        Some(target)
+    }
+
+    /// The track length to scrub against, or `None` when scrubbing would be
+    /// a lie: no engine, nothing playing, or a track of undeclared length.
+    fn seekable_total(&self) -> Option<u64> {
+        if !self.engine_ready() || self.phase == Phase::Stopped {
+            return None;
+        }
+        self.track_ms.filter(|&total| total > 0)
+    }
+
+    /// The seek bar's render-ready state, or `None` when there is no track
+    /// to report on at all (nothing playing, or no engine to play it) — in
+    /// which case the view omits the bar rather than drawing an empty one.
+    ///
+    /// The position shown is the drag under the pointer if there is one,
+    /// else the seek awaiting confirmation, else what the engine last
+    /// reported.
+    #[must_use]
+    pub fn seek_bar(&self) -> Option<SeekBar> {
+        if !self.engine_ready() || self.now_playing.is_none() {
+            return None;
+        }
+        let shown = self
+            .drag_ms
+            .or(self.seek_pending)
+            .unwrap_or(self.elapsed_ms);
+        let total = self.seekable_total();
+        Some(SeekBar {
+            position: total.map_or(0.0, |total| fraction(shown, total)),
+            elapsed: format_ms(total.map_or(shown, |total| shown.min(total))),
+            total: total.map_or_else(|| UNKNOWN_TOTAL.to_owned(), format_ms),
+            interactive: total.is_some(),
+            pending: self.dragging() || self.seek_pending(),
+        })
+    }
+
+    /// Whether the bar is currently being dragged — the view uses this to
+    /// keep the handle lit, and the tests to pin the state machine.
+    #[must_use]
+    pub fn dragging(&self) -> bool {
+        self.drag_ms.is_some()
+    }
+
+    /// Whether a seek has been sent and not yet confirmed.
+    #[must_use]
+    pub fn seek_pending(&self) -> bool {
+        self.seek_pending.is_some()
     }
 
     /// Current engine availability.
@@ -272,11 +438,43 @@ impl PlayerState {
     }
 }
 
+/// A position in `0..=total` from a `0.0..=1.0` fraction, clamped at both
+/// ends so a pointer dragged off the widget cannot produce a nonsense
+/// target.
+fn scale(total: u64, fraction: f32) -> u64 {
+    let fraction = f64::from(fraction.clamp(0.0, 1.0));
+    // Track lengths are far below f64's exact-integer range, and the product
+    // is bounded by `total` by construction.
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "0 <= fraction*total <= total, and total is far below 2^52"
+    )]
+    let scaled = (total as f64 * fraction).round() as u64;
+    scaled.min(total)
+}
+
+/// The inverse of [`scale`]: where `position` sits in `0..=total`.
+fn fraction(position: u64, total: u64) -> f32 {
+    if total == 0 {
+        return 0.0;
+    }
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "track lengths are far below f32's useful range for a 0..1 ratio"
+    )]
+    let ratio = position as f32 / total as f32;
+    ratio.clamp(0.0, 1.0)
+}
+
+/// Milliseconds as the shelf's `m:ss` / `h:mm:ss` timestamp.
+fn format_ms(ms: u64) -> String {
+    vm::format_duration(Duration::from_millis(ms))
+}
+
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-    use std::time::Duration;
-
     use crate::vm::TrackVm;
 
     use super::*;
@@ -476,5 +674,194 @@ mod tests {
         assert_eq!(now.title, "a.wav");
         assert_eq!(now.album_id, Some(22));
         assert_eq!(now.artist, None);
+    }
+
+    // -----------------------------------------------------------------
+    // Progress, drag, and the pending seek affordance
+    // -----------------------------------------------------------------
+
+    fn progress(elapsed_ms: u64, track_ms: Option<u64>) -> Event {
+        Event::Progress {
+            elapsed_ms,
+            track_ms,
+        }
+    }
+
+    /// A player mid-track: playing `/m/boc/geogaddi/01.flac`, 30 s into a
+    /// 200 s track.
+    fn playing_with_progress() -> (Vec<AlbumVm>, PlayerState) {
+        let albums = albums();
+        let mut player = ready_with_queue(2);
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        player.apply(&progress(30_000, Some(200_000)), &albums);
+        (albums, player)
+    }
+
+    #[test]
+    fn progress_drives_the_bar_and_both_timestamps() {
+        let (albums, mut player) = playing_with_progress();
+        let bar = player.seek_bar().expect("a playing track has a seek bar");
+        assert_eq!(bar.elapsed, "0:30");
+        assert_eq!(bar.total, "3:20");
+        assert!((bar.position - 0.15).abs() < 1e-6, "30/200 of the way in");
+        assert!(bar.interactive);
+        assert!(!bar.pending, "a confirmed reading is not pending");
+
+        // Later reports move it; the track length rides along on each one.
+        player.apply(&progress(100_000, Some(200_000)), &albums);
+        let bar = player.seek_bar().expect("bar");
+        assert_eq!(bar.elapsed, "1:40");
+        assert!((bar.position - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_track_without_a_declared_length_shows_elapsed_but_does_not_scrub() {
+        let albums = albums();
+        let mut player = ready_with_queue(1);
+        player.apply(&started("/m/strays/a.wav", 0), &albums);
+        player.apply(&progress(7_000, None), &albums);
+        let bar = player.seek_bar().expect("bar");
+        assert_eq!(bar.elapsed, "0:07");
+        assert_eq!(bar.total, "--:--", "an undeclared length is not invented");
+        assert!(!bar.interactive, "there is no proportion to drag against");
+        // Dragging it does nothing at all.
+        player.drag_to(0.5);
+        assert!(!player.dragging());
+        assert_eq!(player.release_drag(), None);
+    }
+
+    #[test]
+    fn dragging_shows_the_pointer_and_ignores_incoming_progress() {
+        let (albums, mut player) = playing_with_progress();
+        player.drag_to(0.75);
+        assert!(player.dragging());
+        let bar = player.seek_bar().expect("bar");
+        assert_eq!(bar.elapsed, "2:30", "the bar follows the pointer");
+        assert!((bar.position - 0.75).abs() < 1e-6);
+        assert!(
+            bar.pending,
+            "a dragged position is a request, not a reading"
+        );
+
+        // Reports keep arriving from the still-playing engine; the bar must
+        // not fight the hand holding it.
+        player.apply(&progress(35_000, Some(200_000)), &albums);
+        assert!(player.dragging(), "an event does not end a drag");
+        let bar = player.seek_bar().expect("bar");
+        assert_eq!(bar.elapsed, "2:30");
+        assert!((bar.position - 0.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn release_yields_a_target_then_shows_pending_until_an_event_confirms() {
+        let (albums, mut player) = playing_with_progress();
+        player.drag_to(0.25);
+        assert_eq!(player.release_drag(), Some(50_000), "25% of 200 s");
+        assert!(!player.dragging());
+        assert!(player.seek_pending());
+
+        // Pending: the bar holds the requested position rather than snapping
+        // back to the last confirmed one.
+        let bar = player.seek_bar().expect("bar");
+        assert_eq!(bar.elapsed, "0:50");
+        assert!((bar.position - 0.25).abs() < 1e-6);
+        assert!(bar.pending);
+
+        // The engine's confirming report clears pending and takes over.
+        player.apply(&progress(50_000, Some(200_000)), &albums);
+        assert!(!player.seek_pending());
+        let bar = player.seek_bar().expect("bar");
+        assert_eq!(bar.elapsed, "0:50");
+        assert!(!bar.pending, "confirmed by the engine's report");
+    }
+
+    #[test]
+    fn a_release_without_a_drag_asks_for_nothing() {
+        let (_albums, mut player) = playing_with_progress();
+        assert_eq!(player.release_drag(), None);
+        assert!(!player.seek_pending());
+    }
+
+    #[test]
+    fn drag_positions_clamp_to_the_track() {
+        let (_albums, mut player) = playing_with_progress();
+        player.drag_to(-3.0);
+        assert_eq!(player.release_drag(), Some(0));
+        player.drag_to(9.0);
+        assert_eq!(player.release_drag(), Some(200_000));
+    }
+
+    #[test]
+    fn a_seek_restarting_the_same_track_does_not_reset_the_bar() {
+        // The engine re-emits TrackStarted for the track a seek restarted;
+        // treating that as a new track would snap the bar to zero for a
+        // frame. Only a different path resets it.
+        let (albums, mut player) = playing_with_progress();
+        player.drag_to(0.6);
+        let target = player.release_drag().expect("target");
+        assert_eq!(target, 120_000);
+
+        player.apply(&progress(120_000, Some(200_000)), &albums);
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        assert_eq!(
+            player.seek_bar().expect("bar").elapsed,
+            "2:00",
+            "the restarted track keeps its position"
+        );
+
+        // A genuinely different track does reset it.
+        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+        let bar = player.seek_bar().expect("bar");
+        assert_eq!(bar.elapsed, "0:00");
+        assert_eq!(bar.total, "--:--", "no length until the engine reports one");
+    }
+
+    #[test]
+    fn stopping_clears_the_bar_entirely() {
+        let (albums, mut player) = playing_with_progress();
+        player.drag_to(0.5);
+        player.apply(&Event::Stopped, &albums);
+        assert!(
+            player.seek_bar().is_none(),
+            "nothing playing, nothing to seek"
+        );
+        assert!(!player.dragging());
+        assert!(!player.seek_pending());
+
+        // The queue ending is the same story.
+        let (albums, mut player) = playing_with_progress();
+        player.apply(&Event::QueueEnded, &albums);
+        assert!(player.seek_bar().is_none());
+    }
+
+    #[test]
+    fn a_paused_track_still_shows_and_accepts_a_seek() {
+        let (albums, mut player) = playing_with_progress();
+        player.apply(&Event::Paused, &albums);
+        let bar = player.seek_bar().expect("pause keeps the bar on screen");
+        assert!(bar.interactive, "seeking while paused is supported");
+        assert_eq!(bar.elapsed, "0:30");
+        player.drag_to(0.9);
+        assert_eq!(player.release_drag(), Some(180_000));
+    }
+
+    #[test]
+    fn a_closed_engine_takes_the_bar_with_it() {
+        let (_albums, mut player) = playing_with_progress();
+        player.engine_closed();
+        assert!(player.seek_bar().is_none());
+        player.drag_to(0.5);
+        assert_eq!(player.release_drag(), None);
+    }
+
+    #[test]
+    fn hour_long_tracks_get_hour_timestamps() {
+        let albums = albums();
+        let mut player = ready_with_queue(1);
+        player.apply(&started("/m/strays/a.wav", 0), &albums);
+        player.apply(&progress(3_723_000, Some(7_200_000)), &albums);
+        let bar = player.seek_bar().expect("bar");
+        assert_eq!(bar.elapsed, "1:02:03");
+        assert_eq!(bar.total, "2:00:00");
     }
 }

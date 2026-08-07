@@ -35,7 +35,7 @@ use iced::keyboard::{self, key};
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
 use iced::widget::{
     Column, Space, button, column, container, horizontal_rule, image as iced_image, row,
-    scrollable, text, text_input, vertical_rule,
+    scrollable, slider, text, text_input, vertical_rule,
 };
 use iced::{Color, Element, Length, Size, Subscription, Task, alignment, window};
 use lru::LruCache;
@@ -111,6 +111,14 @@ enum Message {
     PlayPause,
     /// Bottom bar: skip to the next queued track.
     NextTrack,
+    /// Bottom bar: the seek handle moved to this fraction of the track.
+    /// Fires on press and on every drag step (iced's slider has no separate
+    /// press event), which is exactly when the bar should follow the
+    /// pointer.
+    SeekDragged(f32),
+    /// Bottom bar: the seek handle was released — the moment the request
+    /// actually goes to the engine.
+    SeekReleased,
     /// An engine event arrived over the bridge subscription.
     Playback(PlayerEvent),
     /// An off-thread thumbnail decode finished (`None` = no usable art).
@@ -203,6 +211,21 @@ impl App {
             }
             Message::NextTrack => {
                 self.send_transport(Command::Next);
+                Task::none()
+            }
+            Message::SeekDragged(fraction) => {
+                self.player.drag_to(fraction);
+                Task::none()
+            }
+            Message::SeekReleased => {
+                // Nothing is assumed about the new position: the engine
+                // answers with Progress, and until it does the bar shows the
+                // request as pending (see player.rs).
+                if let Some(position_ms) = self.player.release_drag()
+                    && !self.playback.send(Command::Seek { position_ms })
+                {
+                    self.player.engine_closed();
+                }
                 Task::none()
             }
             message => match &mut self.screen {
@@ -1054,10 +1077,10 @@ fn track_row(track: &vm::TrackVm) -> Element<'_, Message> {
 
 /// The persistent now-playing bar: transport controls on the left, the
 /// current track as a title-over-artist stack (or the engine's
-/// plainly-stated absence as quiet status text), skip notes on the right.
-/// Every label and enabled-state comes from [`PlayerState`] —
-/// event-derived, tested in `player.rs`. No seek bar: the engine has no
-/// seek yet, and we do not fake affordances.
+/// plainly-stated absence as quiet status text), the seek bar and its
+/// timestamps in the middle, skip notes on the right. Every label,
+/// position, and enabled-state comes from [`PlayerState`] — event-derived,
+/// tested in `player.rs`.
 fn bottom_bar(player: &PlayerState) -> Element<'_, Message> {
     let toggle = button(
         container(
@@ -1112,6 +1135,10 @@ fn bottom_bar(player: &PlayerState) -> Element<'_, Message> {
     let mut bar = row![toggle, next, line, Space::with_width(Length::Fill)]
         .spacing(theme::GAP_MD)
         .align_y(iced::Alignment::Center);
+    if let Some(seek) = player.seek_bar() {
+        bar = bar.push(seek_bar(seek));
+        bar = bar.push(Space::with_width(Length::Fill));
+    }
     if let Some(skipped) = player.skipped_note() {
         bar = bar.push(
             text(skipped)
@@ -1127,6 +1154,50 @@ fn bottom_bar(player: &PlayerState) -> Element<'_, Message> {
             .padding(theme::pad(theme::GAP_MD, theme::GAP_LG))
             .style(theme::bar),
     ]
+    .into()
+}
+
+/// The seek bar: elapsed timestamp, groove, total timestamp — a row that
+/// reads left to right the way the track plays. Timestamps are monospace so
+/// the digits do not shuffle the groove sideways as they tick.
+///
+/// A track whose length was never declared gets the inert groove: the
+/// elapsed time still counts up (that much is known), but there is nothing
+/// to scrub against and the widget says so by refusing the drag rather than
+/// by looking identical and doing nothing.
+fn seek_bar(state: crate::player::SeekBar) -> Element<'static, Message> {
+    let stamp = |value: String, color| {
+        text(value)
+            .size(theme::SIZE_META)
+            .font(theme::MONO)
+            .color(color)
+    };
+    // While a position is being asked for rather than reported, the elapsed
+    // timestamp warms to lamp amber — the same accent the rest of the room
+    // reserves for playback truth, here saying "this is where you are asking
+    // to be". It cools back to the quiet default the moment the engine
+    // confirms.
+    let elapsed_color = if state.pending {
+        theme::LAMP
+    } else {
+        theme::PAPER_FAINT
+    };
+    let groove = slider(0.0..=1.0, state.position, Message::SeekDragged)
+        .step(0.001)
+        .height(theme::RAIL_HIT)
+        .width(Length::Fixed(theme::SEEK_W));
+    let groove = if state.interactive {
+        groove.on_release(Message::SeekReleased).style(theme::seek)
+    } else {
+        groove.style(theme::seek_inert)
+    };
+    row![
+        stamp(state.elapsed, elapsed_color),
+        groove,
+        stamp(state.total, theme::PAPER_FAINT),
+    ]
+    .spacing(theme::GAP_SM)
+    .align_y(iced::Alignment::Center)
     .into()
 }
 

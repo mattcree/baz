@@ -49,12 +49,22 @@
 //! | [`Command::Pause`] | no-op | pauses ([`Event::Paused`]) | no-op |
 //! | [`Command::Stop`] | no-op | stops ([`Event::Stopped`]); a later `Play` starts from the queue top | same |
 //! | [`Command::Next`] | no-op | skips to the next queue position (see below) | skips and *resumes playing* |
+//! | [`Command::Seek`] | no-op | jumps within the current track, keeps playing | jumps within the current track, **stays paused** |
 //!
 //! # Event semantics
 //!
 //! - [`Event::TrackStarted`] fires when a track's first samples are
 //!   delivered to the sink (not when they are decoded — decode-ahead runs
-//!   seconds early).
+//!   seconds early). A [`Command::Seek`] restarts the current track, so it
+//!   fires again for that same track when the post-seek audio reaches the
+//!   sink — the statement it makes ("this track's audio is now arriving") is
+//!   true both times, and a front end that folds it idempotently sees
+//!   nothing unusual.
+//! - [`Event::Progress`] reports the position inside the current track at
+//!   the cadence its protocol docs pin: one per quarter-second of delivered
+//!   audio, plus one immediately after every `TrackStarted`, `Resumed`, and
+//!   accepted `Seek`. See "Elapsed time" below for what "position" means
+//!   precisely.
 //! - [`Event::TrackFailed`] fires when a track cannot be opened or decoded;
 //!   the queue continues with the next track. Because failures are found by
 //!   decode-ahead, a `TrackFailed` for position *n+1* can arrive while
@@ -83,6 +93,56 @@
 //! path stays reserved for its one guarantee — *adjacent* tracks playing to
 //! completion.
 //!
+//! **Seek is the same drain-and-restart**, aimed at the *current* queue
+//! position instead of the next one, with the new session's first track
+//! opened and [`AudioSource::seek`]ed to the target before its first block is
+//! pushed. The cost is identical and identically documented: the running
+//! session's undelivered ring audio is discarded and the target track is
+//! decoded afresh, so first audio at the new position arrives within tens of
+//! milliseconds rather than instantly. Two consequences worth stating
+//! plainly:
+//!
+//! - **Seeking while paused** moves the position and stays paused: the new
+//!   session is created in the paused state, so not one sample reaches the
+//!   sink until the next [`Command::Play`]. An [`Event::Progress`] is emitted
+//!   immediately so the position is never stale on screen.
+//! - **Seeking at or past the end of the track** is [`Command::Next`]: the
+//!   following queue position starts from its beginning, or the queue ends.
+//!   The engine decides this from the track length it already knows; when a
+//!   length was never declared, [`AudioSource::seek`] reports the overrun and
+//!   the producer skips that track instead.
+//!
+//! # Elapsed time
+//!
+//! [`Event::Progress::elapsed_ms`] is `seek target + delivered audio since
+//! the current track began`, where "delivered audio" is counted **in output
+//! frames at the session's stream rate** — not in the source file's frames.
+//!
+//! That distinction is the whole correctness argument, and it matters
+//! exactly when the two rates differ. A 48 kHz track played into a 44.1 kHz
+//! stream is resampled by the ADR-0004 boundary policy before it reaches the
+//! ring, so one second of that track occupies 44 100 delivered frames, not
+//! 48 000. Dividing delivered frames by the *file's* rate would report a
+//! 60-second track as running 55.1 seconds — wrong by 8 %, and wrong in a way
+//! that grows over the track. Dividing by the stream rate is wall-clock true
+//! by construction, because the stream rate is the rate the audio is
+//! actually being consumed at. The producer therefore publishes the
+//! negotiated stream rate to the engine thread and the arithmetic uses only
+//! that.
+//!
+//! [`Event::Progress::track_ms`] is the track's own length, computed from
+//! its native frame count at its native rate, so it is unaffected by
+//! resampling — as it must be: converting a track's sample rate does not
+//! change how long it plays for.
+//!
+//! Two honest caveats:
+//!
+//! - Position is measured at the **sink**, so with device output it leads
+//!   what is audible by up to one device ring (~0.19 s at the default size),
+//!   the same ordinary output latency the pause docs above describe.
+//! - `track_ms` is `None` for a stream that declares no length. Progress is
+//!   still reported; there is simply no total to render against.
+//!
 //! # Shutdown
 //!
 //! Dropping the [`EngineHandle`] (or calling [`EngineHandle::shutdown`])
@@ -101,7 +161,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -112,6 +172,7 @@ use rtrb::RingBuffer;
 use crate::playback::device::DeviceSink;
 use crate::playback::engine::push_with_backpressure;
 use crate::playback::resample::resample_interleaved;
+use crate::playback::source::frames_to_ms;
 use crate::playback::{
     AudioSource, BoundaryPolicy, CHANNELS, DecodedAudio, EngineConfig, OfflineSink, PlaybackError,
     Sink,
@@ -124,6 +185,12 @@ const PAUSED_POLL: Duration = Duration::from_millis(2);
 /// Sleep when the ring is empty but the producer is still working
 /// (mirrors `playback::engine::consume`).
 const STARVED_POLL: Duration = Duration::from_micros(50);
+/// [`Event::Progress`] cadence divisor: one report per `1/PROGRESS_HZ` of
+/// *delivered audio*. Deriving the cadence from the sample counter rather
+/// than a clock keeps it exactly 4 Hz of playing time (never faster when the
+/// pump runs ahead, never slower when it is starved) and keeps the check on
+/// the engine loop down to one integer comparison.
+const PROGRESS_HZ: u32 = 4;
 
 /// The engine could not accept the command because its thread has shut
 /// down (the handle was already consumed by shutdown, or the engine
@@ -417,6 +484,11 @@ impl<S: Sink> Control<S> {
             self.position = 0;
             return;
         }
+        // Between pump iterations, never inside one: `pump` above is the
+        // realtime-disciplined path and stays a ring read plus a sink write.
+        if session.progress_due() {
+            self.emit_progress();
+        }
         if pumped {
             if !self.cfg.consumer_pace.is_zero() {
                 thread::sleep(self.cfg.consumer_pace);
@@ -438,9 +510,13 @@ impl<S: Sink> Control<S> {
                     if self.paused {
                         self.paused = false;
                         let _ = self.events.send(Event::Resumed);
+                        // Resumed is always followed by a fresh reading, so
+                        // a front end that dropped the position while paused
+                        // has it back before the first frame is drawn.
+                        self.emit_progress();
                     }
                 } else {
-                    self.start_session(self.position);
+                    self.start_session(self.position, 0, None);
                 }
             }
             Command::Pause => {
@@ -458,9 +534,51 @@ impl<S: Sink> Control<S> {
                     let next = session.current + 1;
                     drop(session); // abort: stop flag + join
                     self.paused = false;
-                    self.start_session(next);
+                    self.start_session(next, 0, None);
                 }
             }
+            Command::Seek { position_ms } => self.seek(position_ms),
+        }
+    }
+
+    /// [`Command::Seek`]: drain-and-restart the *current* track at
+    /// `position_ms` (module docs). Same machinery as [`Command::Next`],
+    /// aimed one queue position earlier and with a start offset.
+    fn seek(&mut self, position_ms: u64) {
+        let Some(session) = self.session.take() else {
+            return; // stopped: there is no current track to seek within
+        };
+        let current = session.current;
+        let track_ms = session.track_ms;
+        let was_paused = self.paused;
+        drop(session); // abort: stop flag + join, exactly as Next does
+        if track_ms.is_some_and(|total| position_ms >= total) {
+            // At or past the end is Next, per Command::Seek's contract.
+            self.paused = false;
+            self.start_session(current + 1, 0, None);
+            return;
+        }
+        // The length carries over: it belongs to the track, not the session,
+        // so the immediate Progress below can report a total straight away
+        // instead of leaving the front end with a blank right-hand timestamp
+        // until the new session's first bound arrives.
+        self.start_session(current, position_ms, track_ms);
+        if self.session.is_some() {
+            // Seeking never changes whether audio is flowing.
+            self.paused = was_paused;
+            self.emit_progress();
+        }
+    }
+
+    /// Send one [`Event::Progress`] now and re-arm the cadence, so an
+    /// immediate report never doubles up with a scheduled one.
+    fn emit_progress(&mut self) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        session.arm_progress();
+        if let Some(event) = session.progress() {
+            let _ = self.events.send(event);
         }
     }
 
@@ -473,9 +591,12 @@ impl<S: Sink> Control<S> {
         self.paused = false;
     }
 
-    /// Start a session at queue index `start`; past the end of the queue
-    /// (or on an empty queue) the run is already over: [`Event::QueueEnded`].
-    fn start_session(&mut self, start: usize) {
+    /// Start a session at queue index `start`, beginning `seek_ms` into that
+    /// track (0 for an ordinary start) and carrying `track_ms` as the known
+    /// length of it (`None` until the producer reports one). Past the end of
+    /// the queue (or on an empty queue) the run is already over:
+    /// [`Event::QueueEnded`].
+    fn start_session(&mut self, start: usize, seek_ms: u64, track_ms: Option<u64>) {
         self.paused = false;
         if start >= self.queue.len() {
             self.position = 0;
@@ -485,6 +606,8 @@ impl<S: Sink> Control<S> {
         self.session = Some(Session::start(
             self.queue.clone().into(),
             start,
+            seek_ms,
+            track_ms,
             self.forced_rate,
             self.cfg,
         ));
@@ -503,6 +626,28 @@ struct SessionShared {
     stop: AtomicBool,
     /// Producer → engine: every track has been pushed or failed.
     producer_done: AtomicBool,
+    /// Producer → engine: the rate this session's audio is delivered at,
+    /// published once the first playable track has been opened (0 until
+    /// then). Every elapsed-time calculation divides by this and nothing
+    /// else — see "Elapsed time" in the module docs for why the source
+    /// file's own rate would be the wrong denominator.
+    stream_rate: AtomicU32,
+}
+
+/// A track's position and length within a session, as the producer reports
+/// it to the engine thread over the bounds ring.
+#[derive(Clone, Copy, Debug)]
+struct TrackBound {
+    /// Queue index of the track.
+    index: usize,
+    /// Session-relative interleaved sample offset where its audio begins.
+    start_sample: usize,
+    /// Its playing time, when known. The streamed anchor track reports the
+    /// length its container declares (it has not finished decoding yet);
+    /// decode-ahead tracks report the length they actually decoded to, which
+    /// is the same number for a well-formed file and strictly more truthful
+    /// for one whose header lies or is missing.
+    duration_ms: Option<u64>,
 }
 
 /// One run through the queue from a starting position. Owned by the engine
@@ -510,7 +655,7 @@ struct SessionShared {
 /// through SPSC rings and the shared atomics.
 struct Session {
     audio: rtrb::Consumer<f32>,
-    bounds: rtrb::Consumer<(usize, usize)>,
+    bounds: rtrb::Consumer<TrackBound>,
     fails: rtrb::Consumer<(usize, String)>,
     shared: Arc<SessionShared>,
     producer: Option<JoinHandle<()>>,
@@ -519,20 +664,37 @@ struct Session {
     pulled: usize,
     /// Start sample of each queue index's audio, once known.
     boundaries: Vec<Option<usize>>,
+    /// Declared length of each queue index's track, once known.
+    durations: Vec<Option<u64>>,
     /// Failure reason per queue index, once known (taken when reported).
     failures: Vec<Option<String>>,
     /// Reporting cursor: per-track events are emitted strictly in queue
     /// order, so a decode-ahead discovery never outruns the track before it.
     next_report: usize,
     /// Last queue index reported as started — what [`Command::Next`] skips
-    /// from.
+    /// from and what [`Command::Seek`] seeks within.
     current: usize,
+    /// Where in the delivered stream the current track's audio begins; the
+    /// origin every elapsed time is measured from.
+    track_origin: usize,
+    /// The current track's playing time, when known.
+    track_ms: Option<u64>,
+    /// Milliseconds into the *first* track of this session that its audio
+    /// starts at — the [`Command::Seek`] target that created the session, 0
+    /// otherwise. Applies to that track only; later tracks start at 0.
+    seek_ms: u64,
+    /// Queue index `seek_ms` applies to.
+    seek_index: usize,
+    /// `pulled` value at which the next cadence [`Event::Progress`] is due.
+    next_progress: usize,
 }
 
 impl Session {
     fn start(
         queue: Arc<[PathBuf]>,
         start: usize,
+        seek_ms: u64,
+        track_ms: Option<u64>,
         forced_rate: Option<u32>,
         cfg: EngineConfig,
     ) -> Self {
@@ -544,6 +706,7 @@ impl Session {
         let task = ProducerTask {
             queue: Arc::clone(&queue),
             start,
+            seek_ms,
             forced_rate,
             ring: ring_tx,
             bounds: bounds_tx,
@@ -561,10 +724,76 @@ impl Session {
             queue,
             pulled: 0,
             boundaries: vec![None; len],
+            durations: vec![None; len],
             failures: vec![None; len],
             next_report: start,
             current: start,
+            // The session's first track always begins at delivered sample 0,
+            // whichever queue index turns out to be playable.
+            track_origin: 0,
+            track_ms,
+            seek_ms,
+            seek_index: start,
+            // Nothing to report until a track actually starts (or a seek or
+            // resume asks for a reading), so the cadence starts disarmed.
+            next_progress: usize::MAX,
         }
+    }
+
+    /// The current position reading, or `None` when audio has been delivered
+    /// but the producer has not yet published the rate to interpret it at —
+    /// a window of microseconds at the very start of a session, during which
+    /// there is nothing truthful to say.
+    ///
+    /// The arithmetic is the module docs' "Elapsed time" contract, in
+    /// integers: delivered frames since this track's origin, converted at
+    /// the **stream** rate, offset by the seek target that started it.
+    fn progress(&self) -> Option<Event> {
+        let frames = (self.pulled.saturating_sub(self.track_origin) / CHANNELS) as u64;
+        let rate = self.shared.stream_rate.load(Ordering::Acquire);
+        let delivered_ms = match (frames, rate) {
+            // Nothing delivered yet — the position is the seek target, and
+            // no rate is needed to say so. This is the reading a Seek's
+            // immediate Progress carries, before the new session's producer
+            // has so much as opened the file.
+            (0, _) => 0,
+            (_, 0) => return None,
+            (frames, rate) => frames_to_ms(frames, rate),
+        };
+        let offset = if self.current == self.seek_index {
+            self.seek_ms
+        } else {
+            0
+        };
+        let elapsed = offset.saturating_add(delivered_ms);
+        Some(Event::Progress {
+            // Never report past the end: the last pump before a boundary can
+            // carry a few frames of the next track's audio into this track's
+            // count, and "3:01 of 3:00" is a bug on screen.
+            elapsed_ms: self.track_ms.map_or(elapsed, |total| elapsed.min(total)),
+            track_ms: self.track_ms,
+        })
+    }
+
+    /// Whether the cadence has come due, arming the next one. One integer
+    /// comparison in the common case.
+    fn progress_due(&mut self) -> bool {
+        if self.pulled < self.next_progress {
+            return false;
+        }
+        self.arm_progress();
+        true
+    }
+
+    /// Schedule the next cadence report a quarter-second of delivered audio
+    /// from now. Called by [`Self::progress_due`] and by every immediate
+    /// report, so the two can never emit back-to-back.
+    fn arm_progress(&mut self) {
+        let rate = self.shared.stream_rate.load(Ordering::Acquire);
+        let step = (rate / PROGRESS_HZ) as usize * CHANNELS;
+        // Before the rate is known, retry on the next iteration rather than
+        // arming a zero-length (and so always-due) interval.
+        self.next_progress = self.pulled + step.max(1);
     }
 
     /// Pull up to `chunk_samples` from the ring into the sink. This is the
@@ -595,9 +824,12 @@ impl Session {
     /// boundary); failures are reported as soon as order allows. With
     /// `flush` (session complete) every remaining known track is reported.
     fn report(&mut self, events: &Sender<Event>, flush: bool) {
-        while let Ok((i, start_sample)) = self.bounds.pop() {
-            if let Some(slot) = self.boundaries.get_mut(i) {
-                *slot = Some(start_sample);
+        while let Ok(bound) = self.bounds.pop() {
+            if let Some(slot) = self.boundaries.get_mut(bound.index) {
+                *slot = Some(bound.start_sample);
+            }
+            if let Some(slot) = self.durations.get_mut(bound.index) {
+                *slot = bound.duration_ms;
             }
         }
         while let Ok((i, reason)) = self.fails.pop() {
@@ -614,6 +846,12 @@ impl Session {
                         position: i,
                     });
                     self.current = i;
+                    self.track_origin = start_sample;
+                    self.track_ms = self.durations[i];
+                    // A new track means a new position: make the cadence due
+                    // now so `Progress` follows `TrackStarted` immediately
+                    // (protocol docs) instead of up to 250 ms later.
+                    self.next_progress = self.pulled;
                     if let Some(reason) = self.failures[i].take() {
                         // Opened, then failed mid-decode: started AND failed.
                         let _ = events.send(Event::TrackFailed {
@@ -670,9 +908,12 @@ impl Drop for Session {
 struct ProducerTask {
     queue: Arc<[PathBuf]>,
     start: usize,
+    /// Milliseconds into the session's first playable track to begin at
+    /// ([`Command::Seek`]'s target); 0 for an ordinary start.
+    seek_ms: u64,
     forced_rate: Option<u32>,
     ring: rtrb::Producer<f32>,
-    bounds: rtrb::Producer<(usize, usize)>,
+    bounds: rtrb::Producer<TrackBound>,
     fails: rtrb::Producer<(usize, String)>,
     shared: Arc<SessionShared>,
 }
@@ -694,34 +935,34 @@ impl ProducerTask {
         let stop = Arc::clone(&self.shared);
         let stop = &stop.stop;
 
-        // Anchor: the first track that opens. Failures before it are
-        // recorded and skipped.
-        let mut idx = self.start;
-        let mut anchor = None;
-        while idx < self.queue.len() && !stop.load(Ordering::Acquire) {
-            match AudioSource::open(&self.queue[idx]) {
-                Ok(src) => {
-                    anchor = Some(src);
-                    break;
-                }
-                Err(e) => {
-                    let _ = self.fails.push((idx, e.to_string()));
-                    idx += 1;
-                }
-            }
-        }
-        let Some(mut src) = anchor else {
+        let Some((idx, mut src)) = self.find_anchor(stop) else {
             return; // nothing playable (or stopping)
         };
         let stream_rate = self.forced_rate.unwrap_or_else(|| src.sample_rate());
+        // Publish the rate before any bound: the engine thread's Acquire on
+        // the bounds ring synchronizes with this Release, so a bound is
+        // never visible without the rate that gives it meaning.
+        self.shared
+            .stream_rate
+            .store(stream_rate, Ordering::Release);
+        // The track's own length, unaffected by any resampling below.
+        let anchor_ms = src.duration_ms();
         let mut pushed = 0usize;
         let mut pending: Option<Prefetch> = self.spawn_prefetch(idx + 1);
 
         // The anchor track. Same-rate: stream block-by-block for fast
         // start. Different rate (forced-rate/device mode): decode fully and
-        // resample first — the ADR-0004 policy applied to track one.
+        // resample first — the ADR-0004 policy applied to track one. A seek
+        // has already positioned the source either way; on the resampling
+        // path the remaining tail must still be longer than the resampler's
+        // alignment padding (a few milliseconds), or it is reported as a
+        // track failure like any other decode problem.
         if src.sample_rate() == stream_rate {
-            let _ = self.bounds.push((idx, pushed));
+            let _ = self.bounds.push(TrackBound {
+                index: idx,
+                start_sample: pushed,
+                duration_ms: anchor_ms,
+            });
             loop {
                 if stop.load(Ordering::Acquire) {
                     break;
@@ -744,7 +985,11 @@ impl ProducerTask {
             match decode_open(src, stop).and_then(|d| at_rate(d, stream_rate)) {
                 Ok(samples) => {
                     if !stop.load(Ordering::Acquire) {
-                        let _ = self.bounds.push((idx, pushed));
+                        let _ = self.bounds.push(TrackBound {
+                            index: idx,
+                            start_sample: pushed,
+                            duration_ms: anchor_ms,
+                        });
                         if push_with_backpressure(&mut self.ring, &samples, stop) {
                             pushed += samples.len();
                         }
@@ -769,9 +1014,20 @@ impl ProducerTask {
             if stop.load(Ordering::Acquire) {
                 break;
             }
-            match decoded.and_then(|d| at_rate(d, stream_rate)) {
-                Ok(samples) => {
-                    let _ = self.bounds.push((i, pushed));
+            match decoded.and_then(|d| {
+                // The decoded length at the *native* rate is the track's
+                // playing time; take it before the samples are converted to
+                // the stream rate, which changes their count but not the
+                // seconds they represent.
+                let duration_ms = Some(frames_to_ms(d.frames() as u64, d.sample_rate));
+                at_rate(d, stream_rate).map(|samples| (samples, duration_ms))
+            }) {
+                Ok((samples, duration_ms)) => {
+                    let _ = self.bounds.push(TrackBound {
+                        index: i,
+                        start_sample: pushed,
+                        duration_ms,
+                    });
                     if !push_with_backpressure(&mut self.ring, &samples, stop) {
                         break;
                     }
@@ -788,6 +1044,38 @@ impl ProducerTask {
             // The prefetch loop observes `stop`, so this join is bounded.
             let _ = handle.join();
         }
+    }
+
+    /// Find the session's first playable track and open it, positioned at
+    /// [`Self::seek_ms`]. Tracks that cannot be opened are reported as
+    /// failures and skipped; a track the seek target lies past is skipped
+    /// *silently*, and the search continues from the beginning of the next
+    /// one — that is [`Command::Seek`]'s "past the end means Next" contract,
+    /// reached here only when the engine could not apply it itself for want
+    /// of a declared track length.
+    ///
+    /// Returns the queue index and the positioned source, or `None` if the
+    /// queue ran out (or the session is stopping).
+    fn find_anchor(&mut self, stop: &AtomicBool) -> Option<(usize, AudioSource)> {
+        let mut idx = self.start;
+        let mut seek_ms = self.seek_ms;
+        while idx < self.queue.len() && !stop.load(Ordering::Acquire) {
+            let opened = AudioSource::open(&self.queue[idx]).and_then(|mut src| {
+                if seek_ms > 0 {
+                    src.seek(seek_ms)?;
+                }
+                Ok(src)
+            });
+            match opened {
+                Ok(src) => return Some((idx, src)),
+                Err(PlaybackError::SeekPastEnd { .. }) => seek_ms = 0,
+                Err(e) => {
+                    let _ = self.fails.push((idx, e.to_string()));
+                }
+            }
+            idx += 1;
+        }
+        None
     }
 
     fn spawn_prefetch(&self, index: usize) -> Option<Prefetch> {

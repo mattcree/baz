@@ -24,6 +24,32 @@
 //! JSON serialization requires them to be valid UTF-8 (serde errors on
 //! non-UTF-8 paths rather than corrupting them), a constraint any future
 //! remote transport inherits.
+//!
+//! # Time on the wire: integer milliseconds
+//!
+//! Every duration and position in this protocol is an **unsigned integer
+//! count of milliseconds** (`u64`), never floating-point seconds. Three
+//! reasons, in order of weight:
+//!
+//! 1. **One canonical encoding.** A byte-pinned stability test
+//!    (`wire_format_is_stable`) is only meaningful if a value has exactly one
+//!    serialization. `1`, `1.0`, and `1.0000000000000002` are all plausible
+//!    JSON renderings of the same `f64` across serializers and languages; an
+//!    integer has one. The pinned bytes therefore test the protocol rather
+//!    than `serde_json`'s float formatter.
+//! 2. **The enums stay `Eq`.** Both [`Command`] and [`Event`] derive `Eq`,
+//!    which every test in the workspace leans on (`assert_eq!` on whole
+//!    events) and which any future de-duplication or replay logic would
+//!    want. `f64` cannot derive `Eq` — `NaN` is a legal `f64` and a legal
+//!    JSON-decoded value — so seconds-as-`f64` would have meant deleting a
+//!    working guarantee from the public API.
+//! 3. **The resolution is free.** One millisecond is ~44 samples at 44.1 kHz:
+//!    two orders of magnitude finer than the [`Event::Progress`] cadence and
+//!    finer than any seek a pointing device can express. `u64` milliseconds
+//!    span ~5·10⁸ years, so saturation is not a concern.
+//!
+//! Front ends that want seconds divide by 1000 at the presentation edge,
+//! which is where rounding belongs.
 
 use std::path::PathBuf;
 
@@ -50,6 +76,27 @@ pub enum Command {
     /// Skip to the next track in the queue. Past the last track this ends
     /// the queue ([`Event::QueueEnded`]).
     Next,
+    /// Jump to an absolute position within the **currently playing track**
+    /// and keep the transport state (playing stays playing, paused stays
+    /// paused — see [`crate::engine`] for the runtime contract).
+    ///
+    /// # Range and clamping
+    ///
+    /// - Below zero is unrepresentable: the field is unsigned, so "seek
+    ///   before the start" clamps to 0 by construction.
+    /// - At or past the end of the current track the engine treats the seek
+    ///   as [`Command::Next`]: the following queue position starts from its
+    ///   beginning, or the queue ends ([`Event::QueueEnded`]) if there is no
+    ///   following position. It is *not* clamped to the last moment of the
+    ///   track — stalling on the final frame is not a state any listener
+    ///   asks for.
+    /// - While stopped it is a no-op (there is no current track), like
+    ///   [`Command::Next`].
+    Seek {
+        /// Target position from the start of the current track, in
+        /// milliseconds (module docs explain the unit).
+        position_ms: u64,
+    },
 }
 
 /// A notification from the engine to its front end.
@@ -81,6 +128,31 @@ pub enum Event {
         /// Human-readable description of the failure.
         reason: String,
     },
+    /// Where playback is inside the current track.
+    ///
+    /// # Cadence
+    ///
+    /// Roughly **4 Hz while audio is flowing** — the engine emits one every
+    /// quarter-second *of delivered audio*, not of wall time, so the rate is
+    /// tied to the stream rather than to a clock — **plus one immediately
+    /// after** [`Event::TrackStarted`], [`Event::Resumed`], and every
+    /// accepted [`Command::Seek`]. Those three extras are what keep a front
+    /// end from ever showing a stale position after a transport action.
+    ///
+    /// No `Progress` is emitted while paused (the position is not moving) or
+    /// while stopped (there is no position); [`Event::Paused`],
+    /// [`Event::Stopped`], and [`Event::QueueEnded`] are the transitions
+    /// that say so.
+    Progress {
+        /// Position within the current track, in milliseconds, clamped to
+        /// `track_ms` when that is known.
+        elapsed_ms: u64,
+        /// Total length of the current track in milliseconds, when the
+        /// container declares one. `None` for streams whose length is not
+        /// known before decoding (an MP3 with no Xing/Info header, say) — a
+        /// front end must render that case rather than invent a duration.
+        track_ms: Option<u64>,
+    },
 }
 
 #[cfg(test)]
@@ -99,6 +171,10 @@ mod tests {
             Command::Pause,
             Command::Stop,
             Command::Next,
+            Command::Seek { position_ms: 0 },
+            Command::Seek {
+                position_ms: 93_500,
+            },
         ]
     }
 
@@ -115,6 +191,14 @@ mod tests {
             Event::TrackFailed {
                 path: PathBuf::from("/music/broken.flac"),
                 reason: "decode error: oops".into(),
+            },
+            Event::Progress {
+                elapsed_ms: 0,
+                track_ms: None,
+            },
+            Event::Progress {
+                elapsed_ms: 93_500,
+                track_ms: Some(214_000),
             },
         ]
     }
@@ -167,6 +251,19 @@ mod tests {
                 r#"{"cmd":"next"}"#,
             ),
             (
+                serde_json::to_string(&Command::Seek {
+                    position_ms: 93_500,
+                })
+                .expect("serialize"),
+                r#"{"cmd":"seek","position_ms":93500}"#,
+            ),
+            (
+                // Zero must encode as `0`, not `0.0` or `-0`: the integer
+                // choice is exactly what makes this assertable (module docs).
+                serde_json::to_string(&Command::Seek { position_ms: 0 }).expect("serialize"),
+                r#"{"cmd":"seek","position_ms":0}"#,
+            ),
+            (
                 serde_json::to_string(&Event::TrackStarted {
                     path: PathBuf::from("/music/a.flac"),
                     position: 3,
@@ -197,6 +294,25 @@ mod tests {
                 })
                 .expect("serialize"),
                 r#"{"event":"track_failed","path":"/music/broken.flac","reason":"decode error: oops"}"#,
+            ),
+            (
+                serde_json::to_string(&Event::Progress {
+                    elapsed_ms: 93_500,
+                    track_ms: Some(214_000),
+                })
+                .expect("serialize"),
+                r#"{"event":"progress","elapsed_ms":93500,"track_ms":214000}"#,
+            ),
+            (
+                // An undeclared track length is `null`, never a sentinel
+                // number: a front end must be able to tell "unknown" from
+                // "zero-length".
+                serde_json::to_string(&Event::Progress {
+                    elapsed_ms: 0,
+                    track_ms: None,
+                })
+                .expect("serialize"),
+                r#"{"event":"progress","elapsed_ms":0,"track_ms":null}"#,
             ),
         ];
         for (got, want) in cases {

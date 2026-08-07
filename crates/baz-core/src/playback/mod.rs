@@ -104,6 +104,19 @@ pub enum PlaybackError {
     #[error("empty playlist")]
     EmptyPlaylist,
 
+    /// A seek target lies at or past the end of the track.
+    ///
+    /// Not a failure of the file: the engine turns this into "advance to the
+    /// next queue position" (see [`crate::protocol::Command::Seek`]), so it
+    /// travels as an error only between [`AudioSource::seek`] and its caller.
+    #[error("seek to {position_ms} ms is past the end of the track")]
+    SeekPastEnd {
+        /// The requested position in milliseconds.
+        position_ms: u64,
+        /// The track's declared length in milliseconds, when it has one.
+        track_ms: Option<u64>,
+    },
+
     /// Constructing or running the resampler failed.
     #[error("resampler error: {0}")]
     Resample(String),

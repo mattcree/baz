@@ -23,7 +23,8 @@ use std::sync::LazyLock;
 
 use iced::font::Weight;
 use iced::widget::rule::FillMode;
-use iced::widget::{button, container, rule, text_input};
+use iced::widget::slider::{Handle, HandleShape, Rail};
+use iced::widget::{button, container, rule, slider, text_input};
 use iced::{Background, Border, Color, Font, Padding, Shadow, Theme, Vector};
 
 // ---------------------------------------------------------------------------
@@ -123,6 +124,19 @@ pub const RADIUS_CTRL: f32 = 6.0;
 pub const RADIUS_TILE: f32 = 10.0;
 /// Edge of the playing-album lamp dot (a [`RADIUS_CTRL`]-free circle).
 pub const DOT: f32 = 6.0;
+
+/// Thickness of the seek bar's rail — a groove, not a gauge.
+pub const RAIL: f32 = 4.0;
+/// Hit height of the seek bar. Far taller than [`RAIL`] so the thin groove
+/// is still easy to grab; the widget draws the rail centered in it.
+pub const RAIL_HIT: f32 = 16.0;
+/// Radius of the seek handle at rest.
+pub const KNOB: f32 = 5.0;
+/// Radius of the seek handle while hovered or held — the control grows
+/// under the pointer rather than changing color alone.
+pub const KNOB_ACTIVE: f32 = 7.0;
+/// Minimum width the seek bar is given in the now-playing bar.
+pub const SEEK_W: f32 = 260.0;
 
 /// Symmetric padding: `vertical` on top/bottom, `horizontal` on left/right.
 #[must_use]
@@ -276,6 +290,64 @@ pub fn input(_theme: &Theme, status: text_input::Status) -> text_input::Style {
         placeholder: PAPER_FAINT,
         value: PAPER,
         selection: LAMP_GLOW,
+    }
+}
+
+/// The seek bar: lamp amber elapsed running through a recessed groove, with
+/// a small amber knob that grows under the pointer.
+///
+/// Position is playback truth, so it earns the accent — the same rule that
+/// gives the playing sleeve its halo. The unplayed remainder is [`RECESS`]:
+/// the groove is *cut into* the bar rather than laid on top of it, matching
+/// the inset treatment of the input wells.
+#[must_use]
+pub fn seek(_theme: &Theme, status: slider::Status) -> slider::Style {
+    let (fill, radius) = match status {
+        slider::Status::Active => (LAMP, KNOB),
+        slider::Status::Hovered => (LAMP_BRIGHT, KNOB_ACTIVE),
+        slider::Status::Dragged => (LAMP_DEEP, KNOB_ACTIVE),
+    };
+    slider::Style {
+        rail: Rail {
+            backgrounds: (Background::Color(fill), Background::Color(RECESS)),
+            width: RAIL,
+            border: Border {
+                color: HAIRLINE,
+                width: 1.0,
+                radius: (RAIL / 2.0).into(),
+            },
+        },
+        handle: Handle {
+            shape: HandleShape::Circle { radius },
+            background: Background::Color(fill),
+            border_width: 0.0,
+            border_color: Color::TRANSPARENT,
+        },
+    }
+}
+
+/// The seek bar with nothing to scrub: a track of undeclared length, where
+/// showing a proportional fill would be inventing one. The groove stays,
+/// unfilled and knobless, so the bar's place in the layout does not jump
+/// when a length does arrive.
+#[must_use]
+pub fn seek_inert(_theme: &Theme, _status: slider::Status) -> slider::Style {
+    slider::Style {
+        rail: Rail {
+            backgrounds: (Background::Color(RECESS), Background::Color(RECESS)),
+            width: RAIL,
+            border: Border {
+                color: HAIRLINE,
+                width: 1.0,
+                radius: (RAIL / 2.0).into(),
+            },
+        },
+        handle: Handle {
+            shape: HandleShape::Circle { radius: 0.0 },
+            background: Background::Color(Color::TRANSPARENT),
+            border_width: 0.0,
+            border_color: Color::TRANSPARENT,
+        },
     }
 }
 
