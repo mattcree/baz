@@ -9,7 +9,15 @@
 //! external-reference test; it skips with a notice when neither exists.
 //! MP3 fixtures are encoded with ffmpeg's `libmp3lame` (LAME via ffmpeg),
 //! which writes the Xing/Info + LAME header the gapless trim relies on; the
-//! MP3 tests skip with a notice when that encoder is unavailable.
+//! MP3 tests skip with a notice when that encoder is unavailable. The `.m4a`
+//! (ISO-MP4) fixtures — ALAC, AAC-LC, HE-AAC and a video-first `.mp4` — are
+//! encoded the same way and skip the same way; the HE-AAC one additionally
+//! needs `libfdk_aac`, since ffmpeg's native AAC encoder cannot produce SBR.
+//!
+//! No test here reads the developer's own music library: every fixture is
+//! generated from the synthesized reference at run time, so the suite is
+//! reproducible on any machine with ffmpeg and honest on any machine
+//! without it.
 
 use std::f64::consts::PI;
 use std::path::{Path, PathBuf};
@@ -169,6 +177,28 @@ struct Mp3Fixtures {
     encoder: &'static str,
 }
 
+/// One codec's worth of `.m4a` (ISO-MP4) encodings of the reference set.
+struct M4aCodecFixtures {
+    full: PathBuf,
+    part1: PathBuf,
+    part2: PathBuf,
+    encoder: &'static str,
+}
+
+struct M4aFixtures {
+    /// ALAC (lossless) in MP4.
+    alac: M4aCodecFixtures,
+    /// AAC-LC (lossy) in MP4.
+    aac: M4aCodecFixtures,
+    /// HE-AAC v1 (AAC-LC core + SBR), if ffmpeg carries `libfdk_aac` —
+    /// ffmpeg's native AAC encoder is LC-only. This is what streaming rips
+    /// and downloaded video soundtracks in a real library actually are.
+    he_aac: Option<PathBuf>,
+    /// A `.mp4` whose *first* track is video and whose audio is AAC — the
+    /// layout the `mp4` entry in `AUDIO_EXTENSIONS` inevitably meets.
+    video_first: PathBuf,
+}
+
 struct FixtureSet {
     /// 10 s continuous reference, f32 WAV.
     ref_f32: PathBuf,
@@ -190,6 +220,8 @@ struct FixtureSet {
     flac: Option<FlacFixtures>,
     /// MP3 encodings (LAME via ffmpeg), if the encoder was found.
     mp3: Option<Mp3Fixtures>,
+    /// ALAC and AAC in MP4 (`.m4a`), if ffmpeg with both encoders was found.
+    m4a: Option<M4aFixtures>,
 }
 
 fn have(cmd: &str, arg: &str) -> bool {
@@ -288,6 +320,105 @@ fn encode_mp3(dir: &Path, full: &Path, part1: &Path, part2: &Path) -> Option<Mp3
     })
 }
 
+/// Is `ffmpeg` present and does it carry encoder `name`?
+fn have_ffmpeg_encoder(name: &str) -> bool {
+    Command::new("ffmpeg")
+        .args(["-hide_banner", "-h"])
+        .arg(format!("encoder={name}"))
+        .output()
+        .map(|o| {
+            o.status.success()
+                && String::from_utf8_lossy(&o.stdout).contains(&format!("Encoder {name}"))
+        })
+        .unwrap_or(false)
+}
+
+/// Encode the i16 reference WAVs into `.m4a` (ISO-MP4) twice over: once with
+/// ALAC (lossless) and once with AAC-LC at 256 kbps.
+///
+/// Both are plain `ffmpeg -c:a …` invocations, i.e. exactly what a user's
+/// library holds. The AAC bitrate is high on purpose for the same reason the
+/// MP3 fixture is 320 kbps: the numbers these tests pin describe the *best*
+/// case honestly labelled as such. ffmpeg's native `aac` encoder is AAC-LC
+/// only; HE-AAC (SBR) is a separate fixture below because it needs
+/// `libfdk_aac` and because Symphonia treats it very differently.
+fn encode_m4a(dir: &Path, full: &Path, part1: &Path, part2: &Path) -> Option<M4aFixtures> {
+    if !have_ffmpeg_encoder("alac") || !have_ffmpeg_encoder("aac") {
+        return None;
+    }
+    let encode = |codec: &str, extra: &[&str], stem: &str| -> M4aCodecFixtures {
+        let paths = [
+            dir.join(format!("{stem}_ref_10s.m4a")),
+            dir.join(format!("{stem}_part1.m4a")),
+            dir.join(format!("{stem}_part2.m4a")),
+        ];
+        for (wav, out) in [full, part1, part2].into_iter().zip(&paths) {
+            run_encoder(
+                Command::new("ffmpeg")
+                    .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                    .arg(wav)
+                    .args(["-c:a", codec])
+                    .args(extra)
+                    .arg(out),
+            );
+        }
+        let [full, part1, part2] = paths;
+        M4aCodecFixtures {
+            full,
+            part1,
+            part2,
+            encoder: if codec == "alac" {
+                "ffmpeg alac"
+            } else {
+                "ffmpeg aac (native LC) 256 kbps"
+            },
+        }
+    };
+    let lossless = encode("alac", &[], "alac");
+    let lossy = encode("aac", &["-b:a", "256k"], "aac");
+
+    // HE-AAC needs libfdk_aac; optional, tested separately.
+    let he_aac = have_ffmpeg_encoder("libfdk_aac").then(|| {
+        let out = dir.join("he_aac_ref_10s.m4a");
+        run_encoder(
+            Command::new("ffmpeg")
+                .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+                .arg(full)
+                .args(["-c:a", "libfdk_aac", "-profile:a", "aac_he", "-b:a", "64k"])
+                .arg(&out),
+        );
+        out
+    });
+
+    // A video-first `.mp4`: a still colour source muxed ahead of the AAC
+    // audio, which is how every real `.mp4` is laid out.
+    let video_first = dir.join("video_first.mp4");
+    run_encoder(
+        Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=64x64:r=5",
+                "-i",
+            ])
+            .arg(full)
+            .args(["-c:v", "mpeg4", "-c:a", "aac", "-b:a", "256k", "-shortest"])
+            .arg(&video_first),
+    );
+
+    Some(M4aFixtures {
+        alac: lossless,
+        aac: lossy,
+        he_aac,
+        video_first,
+    })
+}
+
 fn fixtures() -> &'static FixtureSet {
     static FIXTURES: OnceLock<FixtureSet> = OnceLock::new();
     FIXTURES.get_or_init(|| {
@@ -338,6 +469,7 @@ fn fixtures() -> &'static FixtureSet {
 
         let flac = encode_flac(&dir, &pcm_ref, &pcm_part1, &pcm_part2);
         let mp3 = encode_mp3(&dir, &pcm_ref, &pcm_part1, &pcm_part2);
+        let m4a = encode_m4a(&dir, &pcm_ref, &pcm_part1, &pcm_part2);
 
         FixtureSet {
             ref_f32,
@@ -350,6 +482,7 @@ fn fixtures() -> &'static FixtureSet {
             quad,
             flac,
             mp3,
+            m4a,
         }
     })
 }
@@ -680,18 +813,471 @@ fn gapless_mp3_no_gap_bounded_boundary() {
     );
 }
 
-/// Decode-ahead: track N+1 is demonstrably decoded while track N is still
-/// draining (prefetch overlap evidence).
+// ---------------------------------------------------------------------------
+// MP4 / .m4a — ALAC (lossless) and AAC (lossy)
+// ---------------------------------------------------------------------------
+
+/// Playing time of `frames` frames at `rate` Hz, in milliseconds.
+#[allow(clippy::cast_precision_loss)] // frame counts are far below 2^52
+fn frames_ms(frames: usize, rate: u32) -> f64 {
+    1000.0 * frames as f64 / f64::from(rate)
+}
+
+/// The `.m4a` fixture set, or `None` with a skip notice on the toolbox and
+/// any other machine without ffmpeg — the same contract the MP3 tests keep.
+fn m4a_or_skip() -> Option<&'static M4aFixtures> {
+    let m4a = fixtures().m4a.as_ref();
+    if m4a.is_none() {
+        eprintln!(
+            "SKIP: ffmpeg with the alac and aac encoders is not available; \
+             m4a fixtures not generated"
+        );
+    }
+    m4a
+}
+
+/// Encoder delay Symphonia leaves at the head of an AAC-in-MP4 stream,
+/// in frames, for the fixture encoder.
+///
+/// Not a choice of ours and not a tolerance: it is the *measured* consequence
+/// of Symphonia 0.5's ISO-MP4 reader applying neither the edit list (`elst`)
+/// nor iTunes' `iTunSMPB` atom — the only two places an MP4 records encoder
+/// delay. ffmpeg's native AAC encoder primes with exactly one 1024-sample
+/// frame, and every one of those samples is emitted as audio. Other encoders
+/// prime differently (Apple's AAC uses 2112 frames), so the *number* is
+/// encoder-specific; that the delay survives untrimmed is not.
+///
+/// [`aac_m4a_delay_is_untrimmed_and_measured`] pins this against the source
+/// so the claim in the [`baz_core::playback`] docs cannot silently rot.
+const AAC_UNTRIMMED_DELAY_FRAMES: usize = 1024;
+
+/// One AAC-LC frame at 44.1 kHz, and the width of the codec edge region
+/// excluded from steady-state content comparisons.
+const AAC_FRAME: usize = 1024;
+
+/// Steady-state accuracy bound for the 256 kbps AAC fixture, as max |error|
+/// vs the ideal sine (amplitude 0.8) once the delay is accounted for.
+/// Measured 1.87e-2 (−32.6 dB re. amplitude) with ffmpeg 8.1's *native* AAC
+/// encoder, which is markedly less accurate on a pure tone than LAME at
+/// 320 kbps (cf. [`MP3_STEADY_TOL`]); pinned at ~3x so a decode regression
+/// fails while encoder-version noise does not. A *fixture* bound, not a
+/// general AAC quality claim.
+///
+/// The bound is loose enough that it earns its keep only alongside the
+/// deliberately-misaligned comparison in
+/// [`aac_m4a_delay_is_untrimmed_and_measured`]: unshifted, the same
+/// measurement reads 1.01e0 — 54x larger — so a change in the delay is
+/// unmissable even at this tolerance.
+const AAC_STEADY_TOL: f32 = 6.0e-2;
+
+/// ALAC in MP4 is lossless and its container carries an exact frame count:
+/// decoding must reproduce the i16 WAV it was encoded from, sample for
+/// sample, with no length fudge at either end. This is the same bar FLAC is
+/// held to — and the reason the docs may call ALAC gapless "exact".
+///
+/// Also drives the hint-less `open_bytes` path (the fuzz target's entry
+/// point), proving MP4 probes by content and not merely by file extension.
 #[test]
-fn decode_ahead_overlaps_playback() {
-    let f = fixtures();
-    let mut sink = OfflineSink::with_capacity(TOTAL_FRAMES * CHANNELS);
+fn alac_m4a_is_lossless_and_length_exact() {
+    let Some(m4a) = m4a_or_skip() else { return };
+    let alac = &m4a.alac;
+    let decoded = AudioSource::decode_all(&alac.full).expect("decode alac m4a");
+    let reference = AudioSource::decode_all(&fixtures().ref_i16).expect("decode i16 reference");
+    assert_eq!(decoded.sample_rate, RATE);
+    assert_eq!(
+        decoded.frames(),
+        TOTAL_FRAMES,
+        "ALAC in MP4 must decode to exactly the source frame count"
+    );
+    assert_samples_eq(
+        &decoded.samples,
+        &reference.samples,
+        "ALAC vs i16 WAV reference (lossless means bit-exact)",
+    );
+
+    let p1 = AudioSource::decode_all(&alac.part1).expect("decode alac part1");
+    let p2 = AudioSource::decode_all(&alac.part2).expect("decode alac part2");
+    assert_eq!(p1.frames(), SPLIT_FRAME, "alac part1 length");
+    assert_eq!(p2.frames(), TOTAL_FRAMES - SPLIT_FRAME, "alac part2 length");
+
+    // The declared length is the emitted length, so the UI's duration and the
+    // engine's frame budget agree with the audio.
+    let src = AudioSource::open(&alac.full).expect("open alac");
+    assert_eq!(src.total_frames(), Some(TOTAL_FRAMES as u64));
+    assert_eq!(src.duration_ms(), Some(10_000));
+
+    // Hint-less in-memory probe: the MP4 `ftyp` brand must be enough.
+    let bytes = std::fs::read(&alac.full).expect("read alac bytes");
+    let mut src = AudioSource::open_bytes(bytes).expect("m4a must probe with no extension hint");
+    assert_eq!(src.sample_rate(), RATE);
+    let mut frames = 0usize;
+    while let Some(block) = src.next_block().expect("decode block") {
+        frames += block.len() / CHANNELS;
+    }
+    assert_eq!(
+        frames, TOTAL_FRAMES,
+        "open_bytes path must decode identically"
+    );
+    println!(
+        "[alac-m4a] encoder={}: {} frames, bit-exact vs the i16 WAV source; \
+         probed by content with no extension hint",
+        alac.encoder,
+        decoded.frames()
+    );
+}
+
+/// AAC in MP4 plays, and the encoder delay is **not** trimmed — measured, not
+/// hand-waved.
+///
+/// Symphonia 0.5's ISO-MP4 reader reads neither the edit list nor `iTunSMPB`,
+/// the only two places an MP4 records encoder delay, so the priming frames
+/// come out as audio at the head of every AAC track. This test pins both
+/// halves of that statement: the *length* excess against the source, and the
+/// *content* alignment — the decoded sine matches the source when shifted by
+/// exactly the delay and does not match when it is not, which is what makes
+/// the excess a leading offset rather than a stray tail.
+#[test]
+fn aac_m4a_delay_is_untrimmed_and_measured() {
+    let Some(m4a) = m4a_or_skip() else { return };
+    let aac = &m4a.aac;
+    let decoded = AudioSource::decode_all(&aac.full).expect("decode aac m4a");
+    assert_eq!(decoded.sample_rate, RATE);
+    let frames = decoded.frames();
+    let excess = frames.saturating_sub(TOTAL_FRAMES);
+    println!(
+        "[aac-m4a] encoder={}: decoded {frames} frames vs {TOTAL_FRAMES} in the source \
+         — +{excess} frames ({:.2} ms) of untrimmed encoder delay",
+        aac.encoder,
+        frames_ms(excess, RATE)
+    );
+    assert_eq!(
+        frames,
+        TOTAL_FRAMES + AAC_UNTRIMMED_DELAY_FRAMES,
+        "AAC decode length changed: the documented gapless claim in \
+         baz_core::playback must be re-measured"
+    );
+
+    // Content: the sine is the source's, offset by exactly the delay. Compare
+    // over the steady state, one AAC frame in from each end.
+    let ch0 = channel(&decoded.samples, 0);
+    let mut aligned = 0.0f32;
+    let mut unaligned = 0.0f32;
+    for n in AAC_FRAME..TOTAL_FRAMES - AAC_FRAME {
+        let ideal = ideal_sample_at(RATE, n, 0.0);
+        aligned = aligned.max((ch0[n + AAC_UNTRIMMED_DELAY_FRAMES] - ideal).abs());
+        unaligned = unaligned.max((ch0[n] - ideal).abs());
+    }
+    println!(
+        "[aac-m4a] steady-state max |error| vs the ideal sine: {aligned:.2e} when \
+         shifted by {AAC_UNTRIMMED_DELAY_FRAMES} frames, {unaligned:.2e} unshifted \
+         (bound {AAC_STEADY_TOL:.2e})"
+    );
+    assert!(
+        aligned <= AAC_STEADY_TOL,
+        "AAC content does not match the source when shifted by the measured \
+         delay ({aligned} > {AAC_STEADY_TOL})"
+    );
+    assert!(
+        unaligned > AAC_STEADY_TOL,
+        "the unshifted comparison also passed, so this test would not notice \
+         a delay change at all"
+    );
+
+    // Hint-less probe, same as ALAC: content-based, and the same length.
+    let bytes = std::fs::read(&aac.full).expect("read aac bytes");
+    let mut src = AudioSource::open_bytes(bytes).expect("m4a must probe with no extension hint");
+    let mut frames = 0usize;
+    while let Some(block) = src.next_block().expect("decode block") {
+        frames += block.len() / CHANNELS;
+    }
+    assert_eq!(frames, decoded.frames(), "open_bytes path must agree");
+}
+
+/// Gapless (ALAC): two `.m4a` files through the engine reconstruct the
+/// reference exactly — the FLAC/WAV bar, met by a second lossless container.
+#[test]
+fn gapless_alac_m4a_bit_exact() {
+    let Some(m4a) = m4a_or_skip() else { return };
+    let alac = &m4a.alac;
+    let reference = AudioSource::decode_all(&fixtures().ref_i16).expect("decode i16 reference");
+    let mut sink = OfflineSink::with_capacity(reference.samples.len());
     let report = run_playlist(
-        &[f.part1_f32.clone(), f.part2_f32.clone()],
+        &[alac.part1.clone(), alac.part2.clone()],
         test_config(),
         &mut sink,
     )
     .expect("run playlist");
+    assert_eq!(report.stream_rate, RATE);
+    assert_eq!(report.track_start_frames, vec![0, SPLIT_FRAME]);
+    assert_samples_eq(sink.samples(), &reference.samples, "gapless ALAC output");
+    let max_delta = assert_boundary_continuous(sink.samples(), SPLIT_FRAME, "gapless ALAC");
+    println!(
+        "[gapless-alac] encoder={}, output={} samples (exact); boundary max adjacent \
+         delta={max_delta:.6} (bound {:.6})",
+        alac.encoder,
+        sink.samples().len(),
+        sine_adjacent_bound(RATE)
+    );
+}
+
+/// Gapless (AAC): two `.m4a` files through the engine play cleanly and the
+/// gap is exactly the untrimmed delay of the *second* track — measured here
+/// at the seam so the number in the docs is enforced end to end, not just at
+/// the decoder.
+///
+/// This is the honest AAC story: the engine's own splice is still
+/// bookkeeping-only (nothing is dropped, nothing is duplicated), but the
+/// second file arrives with [`AAC_UNTRIMMED_DELAY_FRAMES`] frames of encoder
+/// priming in front of its music, and that is audible as a short gap. FLAC,
+/// WAV, ALAC and LAME-tagged MP3 have none.
+#[test]
+fn gapless_aac_m4a_carries_the_measured_delay() {
+    let Some(m4a) = m4a_or_skip() else { return };
+    let aac = &m4a.aac;
+    let p1 = AudioSource::decode_all(&aac.part1).expect("decode aac part1");
+    let p2 = AudioSource::decode_all(&aac.part2).expect("decode aac part2");
+    let expected = p1.frames() + p2.frames();
+
+    let mut sink = OfflineSink::with_capacity(expected * CHANNELS);
+    let report = run_playlist(
+        &[aac.part1.clone(), aac.part2.clone()],
+        test_config(),
+        &mut sink,
+    )
+    .expect("run playlist");
+    assert_eq!(report.stream_rate, RATE);
+    assert_eq!(report.track_start_frames, vec![0, p1.frames()]);
+    // The engine itself neither drops nor duplicates: output is exactly the
+    // two decodes concatenated.
+    assert_eq!(
+        sink.samples().len(),
+        expected * CHANNELS,
+        "engine output must be exactly the two decoded lengths concatenated"
+    );
+
+    // Each track carries the delay, so the total overshoots the source by
+    // twice it. That is the number a two-track AAC album pays.
+    let gap_ms = frames_ms(AAC_UNTRIMMED_DELAY_FRAMES, RATE);
+    assert_eq!(
+        expected,
+        TOTAL_FRAMES + 2 * AAC_UNTRIMMED_DELAY_FRAMES,
+        "each AAC track must carry exactly one untrimmed delay"
+    );
+
+    // The seam: the second track's music starts `delay` frames after the
+    // boundary, so the source sine resumes there and not at the boundary.
+    let ch0 = channel(sink.samples(), 0);
+    let seam = p1.frames() + AAC_UNTRIMMED_DELAY_FRAMES;
+    let mut worst = 0.0f32;
+    for n in SPLIT_FRAME + AAC_FRAME..TOTAL_FRAMES - AAC_FRAME {
+        worst = worst.max((ch0[seam + n - SPLIT_FRAME] - ideal_sample_at(RATE, n, 0.0)).abs());
+    }
+    println!(
+        "[gapless-aac] encoder={}: output={} frames = source {} + 2x{} delay; \
+         per-track gap {AAC_UNTRIMMED_DELAY_FRAMES} frames ({gap_ms:.2} ms at {RATE} Hz); \
+         second track's steady-state max |error| vs the source sine once the delay is \
+         skipped: {worst:.2e} (bound {AAC_STEADY_TOL:.2e}). FLAC/WAV/ALAC gap: 0.",
+        aac.encoder, expected, TOTAL_FRAMES, AAC_UNTRIMMED_DELAY_FRAMES,
+    );
+    assert!(
+        worst <= AAC_STEADY_TOL,
+        "second AAC track is not the source audio offset by the delay: \
+         max error {worst} exceeds {AAC_STEADY_TOL}"
+    );
+}
+
+/// A mixed `.m4a` queue (ALAC then AAC) runs end to end: the two MP4 codec
+/// paths coexist in one session and the totals are each format's own
+/// documented length, no crash and no cross-contamination.
+#[test]
+fn mixed_m4a_queue_plays_through() {
+    let Some(m4a) = m4a_or_skip() else { return };
+    let lossless_frames = AudioSource::decode_all(&m4a.alac.part1)
+        .expect("decode alac part1")
+        .frames();
+    let lossy_frames = AudioSource::decode_all(&m4a.aac.part2)
+        .expect("decode aac part2")
+        .frames();
+    assert_eq!(lossless_frames, SPLIT_FRAME);
+    assert_eq!(
+        lossy_frames,
+        TOTAL_FRAMES - SPLIT_FRAME + AAC_UNTRIMMED_DELAY_FRAMES
+    );
+
+    let total = lossless_frames + lossy_frames;
+    let mut sink = OfflineSink::with_capacity(total * CHANNELS);
+    let report = run_playlist(
+        &[m4a.alac.part1.clone(), m4a.aac.part2.clone()],
+        test_config(),
+        &mut sink,
+    )
+    .expect("run playlist");
+    assert_eq!(report.stream_rate, RATE);
+    assert_eq!(report.track_start_frames, vec![0, lossless_frames]);
+    assert_eq!(sink.samples().len(), total * CHANNELS);
+    assert_eq!(sink.dropped_samples(), 0);
+    println!("[mixed-m4a] ALAC ({lossless_frames}) + AAC ({lossy_frames}) = {total} frames");
+}
+
+/// Mean rate of zero crossings per second on a mono signal — a
+/// dependency-free pitch check. A sinusoid at f Hz crosses zero 2f times a
+/// second regardless of amplitude, so this distinguishes "played at the right
+/// rate" from "played an octave up" without an FFT.
+fn zero_crossing_rate(mono: &[f32], rate: u32) -> f64 {
+    let crossings = mono
+        .windows(2)
+        .filter(|w| (w[0] < 0.0) != (w[1] < 0.0))
+        .count();
+    #[allow(clippy::cast_precision_loss)] // sample counts are far below 2^52
+    let seconds = mono.len() as f64 / f64::from(rate);
+    #[allow(clippy::cast_precision_loss)] // ditto
+    let rate = crossings as f64 / seconds;
+    rate
+}
+
+/// HE-AAC (SBR) is the format a streaming rip actually is, and Symphonia 0.5
+/// implements no SBR: it decodes the AAC-LC *core*, which is at half the rate
+/// the MP4 sample entry advertises. Believing the container would play that
+/// core an octave up at double speed; [`AudioSource`] takes the decoder's
+/// rate instead and rescales the declared length through the same ratio.
+///
+/// This test is the guard on that reconciliation. It asserts the two things
+/// a listener would notice: the **pitch** is the source's (measured by zero
+/// crossings — 880/s for the 440 Hz test tone, not 1760/s), and the
+/// **duration** is the source's, so seek bars and track lengths are right.
+/// The bandwidth loss from the missing SBR band is real and documented in
+/// [`baz_core::playback`]; it is not something this test can hide.
+#[test]
+fn he_aac_m4a_plays_at_the_core_rate_not_the_container_rate() {
+    let Some(m4a) = m4a_or_skip() else { return };
+    let Some(he) = &m4a.he_aac else {
+        eprintln!("SKIP: ffmpeg has no libfdk_aac; HE-AAC fixture not generated");
+        return;
+    };
+    let src = AudioSource::open(he).expect("open he-aac m4a");
+    let rate = src.sample_rate();
+    assert_eq!(
+        rate,
+        RATE / 2,
+        "Symphonia decodes the AAC-LC core of an HE-AAC stream, which is at \
+         half the rate the MP4 sample entry declares"
+    );
+    let decoded = AudioSource::decode_all(he).expect("decode he-aac m4a");
+    assert_eq!(decoded.sample_rate, rate);
+    assert_eq!(
+        decoded.frames() as u64,
+        src.total_frames().expect("declared length"),
+        "the rescaled declared length must be the length actually emitted"
+    );
+
+    // Duration: the source is 10 s, and the only legitimate excess is the
+    // encoder delay this format does not trim (see the AAC test). A rate
+    // taken from the container instead of the decoder would read 20 s here.
+    let secs = frames_ms(decoded.frames(), rate) / 1000.0;
+    assert!(
+        (10.0..10.5).contains(&secs),
+        "decoded duration {secs:.3} s is not the source's 10 s plus untrimmed delay"
+    );
+
+    // Pitch: 440 Hz means 880 zero crossings per second. Measured over the
+    // interior only, so the delay's near-silent priming frames cannot skew
+    // the count. A rate error of 2x would read ~1760.
+    let ch0 = channel(&decoded.samples, 0);
+    let interior = &ch0[rate as usize..ch0.len() - rate as usize];
+    let zcr = zero_crossing_rate(interior, rate);
+    println!(
+        "[he-aac] decoded {} frames at {rate} Hz ({secs:.3} s; container declared {RATE} Hz); \
+         zero-crossing rate {zcr:.1}/s (440 Hz tone => 880/s)",
+        decoded.frames()
+    );
+    assert!(
+        (860.0..900.0).contains(&zcr),
+        "zero-crossing rate {zcr:.1}/s is not a 440 Hz tone: the stream is \
+         being played at the wrong rate"
+    );
+}
+
+/// A `.mp4` whose first track is video still plays its audio.
+///
+/// `AUDIO_EXTENSIONS` accepts `mp4`, and Symphonia's `default_track` is
+/// simply the container's first track — which in a `.mp4` is the video. The
+/// source picks the first track that declares a sample rate instead, so the
+/// shelf does not list a file it then refuses with "stream does not declare a
+/// sample rate".
+#[test]
+fn video_first_mp4_plays_its_audio_track() {
+    let Some(m4a) = m4a_or_skip() else { return };
+    let decoded = AudioSource::decode_all(&m4a.video_first).expect("decode video-first mp4");
+    assert_eq!(decoded.sample_rate, RATE);
+    assert_eq!(
+        decoded.frames(),
+        TOTAL_FRAMES + AAC_UNTRIMMED_DELAY_FRAMES,
+        "the audio track must decode in full (AAC's untrimmed delay included)"
+    );
+    // It is the right audio, not the video track misread as samples.
+    let ch0 = channel(&decoded.samples, 0);
+    let mut worst = 0.0f32;
+    for n in AAC_FRAME..TOTAL_FRAMES - AAC_FRAME {
+        worst =
+            worst.max((ch0[n + AAC_UNTRIMMED_DELAY_FRAMES] - ideal_sample_at(RATE, n, 0.0)).abs());
+    }
+    println!(
+        "[video-first-mp4] audio track decoded: {} frames, steady-state max |error| \
+         vs the source sine {worst:.2e} (bound {AAC_STEADY_TOL:.2e})",
+        decoded.frames()
+    );
+    assert!(
+        worst <= AAC_STEADY_TOL,
+        "decoded audio is not the source sine"
+    );
+}
+
+/// Seeking inside a lossless MP4 is sample-exact, the same contract WAV and
+/// FLAC meet: the MP4 sample table lands on a packet boundary at or before
+/// the target and the residue is discarded, so what comes back is bit-for-bit
+/// the tail of the un-seeked decode.
+#[test]
+fn seek_into_alac_m4a_is_sample_exact() {
+    let Some(m4a) = m4a_or_skip() else { return };
+    let path = m4a.alac.full.as_path();
+    let reference = AudioSource::decode_all(path)
+        .expect("reference decode")
+        .samples;
+    assert_eq!(reference.len(), TOTAL_FRAMES * CHANNELS);
+    for position_ms in [0u64, 1, 3_000, 9_999] {
+        let target = (position_ms * u64::from(RATE) / 1000) as usize;
+        let got = decode_from(path, position_ms);
+        assert_samples_eq(
+            &got,
+            &reference[target * CHANNELS..],
+            &format!("alac m4a: decode after seek to {position_ms} ms"),
+        );
+    }
+    println!("[seek alac-m4a] sample-exact at 0/1/3000/9999 ms");
+}
+
+/// Decode-ahead: track N+1 is demonstrably decoded while track N is still
+/// draining (prefetch overlap evidence).
+///
+/// The consumer is paced slower here than in [`test_config`] — 2 ms per
+/// 2048-frame chunk instead of 500 µs. That is still **23x faster than
+/// realtime** (2048 frames at 44.1 kHz is 46.4 ms of audio), so the claim
+/// being made is unchanged and remains far stricter than any real playback:
+/// the prefetch has to finish track 2 inside ~216 ms of wall clock rather
+/// than the 10.2 s a device would give it. The slower pace only stops the
+/// assertion from turning into a measurement of how many other test threads
+/// happen to be decoding at the same moment — at 500 µs the whole margin was
+/// ~30 ms on an idle machine, which a saturated CPU erases.
+#[test]
+fn decode_ahead_overlaps_playback() {
+    let f = fixtures();
+    let cfg = EngineConfig {
+        consumer_pace: Duration::from_millis(2),
+        ..test_config()
+    };
+    let mut sink = OfflineSink::with_capacity(TOTAL_FRAMES * CHANNELS);
+    let report = run_playlist(&[f.part1_f32.clone(), f.part2_f32.clone()], cfg, &mut sink)
+        .expect("run playlist");
     let p = &report.prefetch;
     #[allow(clippy::cast_precision_loss)] // diagnostic percentage only
     let pct =

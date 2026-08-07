@@ -23,9 +23,31 @@
 //!
 //! # Gapless status by format
 //!
+//! Every format the library scanner accepts ([`crate::library::AUDIO_EXTENSIONS`])
+//! plays. Gapless quality varies by format and the differences are stated
+//! here as measurements, not adjectives; each number below is pinned by a
+//! test in `crates/baz-core/tests/playback.rs`, so a claim that stops being
+//! true fails the build rather than aging quietly in a comment.
+//!
+//! | Format | Gapless | Cost at a track boundary |
+//! |---|---|---|
+//! | WAV, FLAC | exact | none (bit-exact) |
+//! | ALAC in MP4 (`.m4a`) | exact | none (bit-exact) |
+//! | MP3 with LAME header | exact | ~3 ms MDCT edge artifact, ≈ −25 dB peak |
+//! | MP3 without LAME header | none available | untrimmed delay + padding |
+//! | AAC in MP4 (`.m4a`, `.mp4`) | **not trimmed** | ~23 ms of encoder priming |
+//!
 //! - **WAV, FLAC**: exact sample counts in the container; gapless is exact
 //!   concatenation, verified bit-for-bit in the integration tests.
-//! - **MP3**: enabled, with Symphonia's gapless trim active
+//! - **ALAC** (lossless, in MP4): the same standard, met. The MP4 media
+//!   header carries an exact frame count and ALAC has no encoder delay or
+//!   padding to trim, so there is nothing for a gapless mode to do:
+//!   `codec_params.n_frames` is the exact stream length, decode is bit-exact
+//!   against the PCM the file was encoded from, and two consecutive tracks
+//!   concatenate to the original sample-for-sample. Seeking is sample-exact
+//!   too. (Symphonia's ISO-MP4 reader is not gapless-capable — see AAC below
+//!   — but for ALAC that is a distinction without a difference.)
+//! - **MP3**: Symphonia's gapless trim is active
 //!   (`FormatOptions::enable_gapless`). Files with a Xing/Info + LAME header
 //!   (LAME, and ffmpeg's `libmp3lame`) decode to *exactly* the encoded
 //!   sample count — encoder delay and padding are trimmed — so consecutive
@@ -37,11 +59,35 @@
 //!   no trim metadata and play with their delay/padding intact. Exact
 //!   numbers and methodology: `tests/playback.rs` and the [`source`] module
 //!   docs.
-//! - **AAC**: deliberately not enabled. Symphonia 0.5 supports no gapless
-//!   trim for AAC in any container we would use (upstream: AAC-LC codec and
-//!   ISO/MP4 demuxer are both "gapless: No"; ADTS has no delay/padding
-//!   signaling at all), so AAC could not meet the verified-gapless standard
-//!   the other formats are held to. It stays off until it can.
+//! - **AAC** (lossy, in MP4): plays, but **encoder delay and padding are not
+//!   trimmed**, so AAC albums do not join gaplessly. This is a limitation of
+//!   Symphonia 0.5, stated plainly rather than papered over: an MP4 records
+//!   encoder delay in exactly two places — the edit list (`elst`) and
+//!   iTunes' `iTunSMPB` free-form atom — and the ISO-MP4 reader applies
+//!   neither. It parses `elst` and never consults it; it does not read
+//!   `iTunSMPB` at all, and it parses iTunes' `pgap` "gapless album" flag
+//!   only to discard it. The priming frames therefore come out as audio at
+//!   the head of every AAC track. **Measured**: with ffmpeg 8.1's native AAC
+//!   encoder at 44.1 kHz, decoding is exactly 1024 frames — **23.2 ms** —
+//!   longer than the source, all of it a leading offset, so a two-track AAC
+//!   album pays that gap once per transition. The number is encoder-specific
+//!   (Apple's AAC primes with 2112 frames, 47.9 ms); that the delay survives
+//!   untrimmed is not. Trailing padding is bounded by the container's
+//!   declared media duration and, on the fixture, disappears entirely.
+//!   Everything else about AAC playback is correct: the engine's own splice
+//!   still drops and duplicates nothing, and content, length and seek
+//!   positions are accurate to the sample within each track.
+//! - **HE-AAC** (AAC-LC + SBR — what most streaming rips are): plays, with
+//!   one fidelity caveat beyond the AAC gapless story above. Symphonia 0.5
+//!   implements no SBR, so it decodes the AAC-LC *core*, which sits at half
+//!   the sample rate the MP4 sample entry advertises. [`AudioSource`] takes
+//!   the rate from the decoder rather than the container and rescales the
+//!   declared length through the same ratio, so pitch, tempo and duration
+//!   are right — a 224.072562 s file reports 224.072562 s, agreeing with
+//!   `ffprobe` to the microsecond. What is missing is the SBR band: the top
+//!   octave is not reconstructed, so the track sounds duller than it should.
+//!   Trusting the container's rate instead would play the core an octave up
+//!   at double speed, which is why we do not.
 
 pub mod engine;
 pub(crate) mod resample;
