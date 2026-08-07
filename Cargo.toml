@@ -72,6 +72,13 @@ zbus = "4.4"
 rtrb = "0.3"        # lock-free SPSC ring buffer, no hand-rolled unsafe here (MIT OR Apache-2.0)
 rubato = "0.16"     # windowed-sinc sample-rate conversion (MIT)
 cpal = "0.16"       # shared-mode device output, optional feature `device-output` (Apache-2.0)
+# Exclusive-mode output on Linux (ADR-0012), optional feature
+# `exclusive-output`. Not a new build requirement: this exact version is
+# **already** in `Cargo.lock` as an indirect dependency of cpal's ALSA host,
+# and `alsa-sys` already links `libasound` for every `device-output` build. So
+# the cost is a dependency *line* and a `cfg(target_os = "linux")` module, as
+# ADR-0011's costing table said it would be. (MIT)
+alsa = "0.9.1"
 
 # dev-dependencies
 criterion = "0.8"   # benchmarks per docs/ENGINEERING.md (MIT OR Apache-2.0)

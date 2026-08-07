@@ -15,6 +15,34 @@
 //! `spawn_device` (feature `device-output`) plays through the default audio device instead. Both
 //! return an [`EngineHandle`] plus the event [`Receiver`].
 //!
+//! # Which output, and what it claims
+//!
+//! `spawn_device` opens the arrangement the listener configured
+//! ([`crate::playback::OutputMode`]); `spawn_device_with` takes it
+//! as an argument, for a front end with a setting of its own.
+//!
+//! - **Shared** (the default) goes through cpal and the system's audio server.
+//!   baz converts nothing (ADR-0009), and says nothing about what the mixer
+//!   does downstream — because it cannot.
+//! - **Exclusive** (ADR-0012, `exclusive-output`, Linux/ALSA today) holds a
+//!   hardware device outright, so there is no mixer downstream to say anything
+//!   about. It also makes a hardware volume legitimate for the first time
+//!   (ADR-0011 built the seam and found nothing correct to put behind it in
+//!   shared mode; owning the card is what changes that).
+//!
+//! The engine's own behaviour is identical either way — same negotiation, same
+//! reopen, same drain-and-restart — and the difference reaches a front end as
+//! one fact on [`Event::SignalPath`]: [`SignalChain::Exclusive`] instead of
+//! [`SignalChain::Direct`]. **Neither is a better or worse state to be in**,
+//! and the vocabulary stays informational for exactly the reason ADR-0009 §5
+//! gives.
+//!
+//! An exclusive open that cannot happen — the device is busy, the name is not
+//! one this machine has, the platform has no backend — **fails the spawn**. It
+//! is never quietly downgraded to shared mode: a listener who asked baz to
+//! hold the card and was told it had would have been misinformed about the one
+//! thing the setting exists to state.
+//!
 //! # Threading model
 //!
 //! - **Engine (control + pump) thread** — spawned by `spawn_*`, owns the
@@ -125,6 +153,7 @@
 //! | [`Command::Pause`] | no-op | pauses ([`Event::Paused`]) | no-op |
 //! | [`Command::Stop`] | no-op | stops ([`Event::Stopped`]); a later `Play` starts from the queue top | same |
 //! | [`Command::Next`] | no-op | skips to the next queue position (see below) | skips and *resumes playing* |
+//! | [`Command::Previous`] | no-op | restarts the current track past [`PREVIOUS_RESTART_MS`], else steps back one position | same, and *resumes playing* |
 //! | [`Command::Seek`] | no-op | jumps within the current track, keeps playing | jumps within the current track, **stays paused** |
 //! | [`Command::SetVolume`] / [`Command::SetMute`] | applies, silently | applies within one pump iteration, slewed | applies, silently |
 //!
@@ -164,11 +193,16 @@
 //!
 //! **Reporting.** [`Event::VolumeChanged`] carries the position, the mute
 //! state, and the [`VolumePath`] — which of the two places the volume is
-//! actually being applied. Under every backend baz ships it is
-//! [`VolumePath::SoftwareGain`] below unity and [`VolumePath::Unity`] at it;
-//! [`VolumePath::DeviceAttenuator`] is what [`Sink::set_device_volume`]
-//! reports when a sink takes the gain itself. ADR-0011 records why no shipped
-//! backend does.
+//! actually being applied. In **shared** mode it is
+//! [`VolumePath::SoftwareGain`] below unity and [`VolumePath::Unity`] at it,
+//! for the reasons ADR-0011 measured: there is no bit-exact per-application
+//! volume to reach for. In **exclusive** mode baz owns the card, so
+//! [`Sink::set_device_volume`] can drive its attenuator and
+//! [`VolumePath::DeviceAttenuator`] becomes the ordinary reading — the stream
+//! reaches the converter unscaled and the volume happens below everything baz
+//! does (ADR-0012). Unity is still reported as [`VolumePath::Unity`] even
+//! then: with nothing to attenuate, "no gain stage anywhere" is the more
+//! precise of the two true statements.
 //!
 //! # Event semantics
 //!
@@ -220,6 +254,18 @@
 //! the running stream. That trade is deliberate for v0.1; the gapless path
 //! stays reserved for its one guarantee — *adjacent* tracks playing to
 //! completion.
+//!
+//! **Previous is the same drain-and-restart as Next**, aimed at whichever
+//! queue position the conventional rule selects: at or past
+//! [`PREVIOUS_RESTART_MS`] into the current track it aims at that track again,
+//! before it at the one before, and at the head of the queue it restarts
+//! because there is nothing before position 0. Restarting and stepping back
+//! are the *same* operation with a different index — deliberately, so the two
+//! halves of one button cannot drift apart in latency or in what they discard.
+//! Its cost is `Next`'s cost, and its position reading is the one the module's
+//! "Elapsed time" section describes, lead and all: the ~0.19 s a device buffer
+//! can put between the counter and the speaker is two orders of magnitude
+//! below the threshold it is compared against.
 //!
 //! **Seek is the same drain-and-restart**, aimed at the *current* queue
 //! position instead of the next one, with the new session's first track
@@ -305,8 +351,12 @@ use std::time::{Duration, Instant};
 use rtrb::RingBuffer;
 
 #[cfg(feature = "device-output")]
+use crate::playback::OutputMode;
+#[cfg(feature = "device-output")]
 use crate::playback::device::DeviceSink;
 use crate::playback::engine::push_with_backpressure;
+#[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+use crate::playback::exclusive::ExclusiveSink;
 use crate::playback::resample::resample_interleaved;
 use crate::playback::source::frames_to_ms;
 use crate::playback::{
@@ -336,6 +386,31 @@ const NO_RATE_CHANGE: usize = usize::MAX;
 /// pump runs ahead, never slower when it is starved) and keeps the check on
 /// the engine loop down to one integer comparison.
 const PROGRESS_HZ: u32 = 4;
+
+/// How far into a track [`Command::Previous`] stops meaning "the track before
+/// this one" and starts meaning "this one again", in milliseconds.
+///
+/// Three seconds is the convention every transport with this button uses, and
+/// it is a convention rather than a measurement — but it is not arbitrary, and
+/// the two failure modes it sits between are not symmetric:
+///
+/// - **Too short** and the button becomes a restart button. A listener two
+///   seconds into a track they did not want has to press it twice, and the
+///   second press is the one that does what they meant by the first.
+/// - **Too long** and it becomes a skip-back button, taking away the ordinary
+///   "start this again" gesture partway through a song.
+///
+/// Three seconds is comfortably past the moment a listener recognises the
+/// track that just started (so a wrong-track correction is still one press)
+/// and comfortably short of anywhere anyone deliberately listens from (so
+/// restarting is still available where it is wanted). It is also an order of
+/// magnitude larger than the position readout's own worst-case lead over what
+/// is audible — up to one device buffer, ~0.19 s at the app's settings — so
+/// that lead cannot move a press across the boundary.
+///
+/// It is public because a front end labelling or explaining the control should
+/// quote the engine's number rather than a copy of it.
+pub const PREVIOUS_RESTART_MS: u64 = 3_000;
 
 /// The engine could not accept the command because its thread has shut
 /// down (the handle was already consumed by shutdown, or the engine
@@ -555,8 +630,122 @@ pub fn spawn_offline(
     ))
 }
 
-/// Spawn an engine playing through the default audio device (shared mode),
+/// The output a device engine is playing through, so that one [`Control`] can
+/// drive either backend.
+///
+/// A `Sink` implementation that forwards to whichever variant is present.
+/// Every method is a one-line delegation, and the defaults the trait provides
+/// are *not* re-implemented here — an added trait method with a sensible
+/// default must not be silently swallowed by the wrapper.
+#[cfg(feature = "device-output")]
+enum Output {
+    /// cpal, mixed with the rest of the system (ADR-0009).
+    Shared(DeviceSink),
+    /// An ALSA `hw:` device baz holds itself (ADR-0012).
+    #[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+    Exclusive(ExclusiveSink),
+}
+
+#[cfg(feature = "device-output")]
+impl Sink for Output {
+    fn write(&mut self, samples: &[f32]) {
+        match self {
+            Self::Shared(sink) => sink.write(samples),
+            #[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+            Self::Exclusive(sink) => sink.write(samples),
+        }
+    }
+
+    fn discard_buffered(&mut self) {
+        match self {
+            Self::Shared(sink) => sink.discard_buffered(),
+            #[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+            Self::Exclusive(sink) => sink.discard_buffered(),
+        }
+    }
+
+    fn negotiate_rate(&mut self, desired: u32) -> Option<u32> {
+        match self {
+            Self::Shared(sink) => sink.negotiate_rate(desired),
+            #[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+            Self::Exclusive(sink) => sink.negotiate_rate(desired),
+        }
+    }
+
+    fn drain_buffered(&mut self) {
+        match self {
+            Self::Shared(sink) => sink.drain_buffered(),
+            #[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+            Self::Exclusive(sink) => sink.drain_buffered(),
+        }
+    }
+
+    fn set_device_volume(&mut self, gain: f32) -> Option<()> {
+        match self {
+            Self::Shared(sink) => sink.set_device_volume(gain),
+            #[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+            Self::Exclusive(sink) => sink.set_device_volume(gain),
+        }
+    }
+
+    fn is_exclusive(&self) -> bool {
+        match self {
+            Self::Shared(sink) => sink.is_exclusive(),
+            #[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+            Self::Exclusive(sink) => sink.is_exclusive(),
+        }
+    }
+}
+
+/// Open the output `mode` asks for, on the engine thread.
+///
+/// Failure is failure: an exclusive open that cannot happen — the device is
+/// busy, the name is not one of this machine's, the platform has no exclusive
+/// backend — is reported, never quietly downgraded to shared mode. A listener
+/// who asked baz to hold the card and got the sound server instead would have
+/// been told the wrong thing about their signal path, which is the one outcome
+/// ADR-0009 and ADR-0012 both exist to prevent.
+#[cfg(feature = "device-output")]
+fn open_output(
+    mode: &OutputMode,
+    sample_rate: u32,
+    ring_frames: usize,
+) -> Result<Output, PlaybackError> {
+    match mode {
+        OutputMode::Shared => DeviceSink::open(sample_rate, ring_frames).map(Output::Shared),
+        #[cfg(all(target_os = "linux", feature = "exclusive-output"))]
+        OutputMode::Exclusive { device } => {
+            let chosen = crate::playback::exclusive::choose(device.as_deref())?;
+            ExclusiveSink::open(&chosen, sample_rate, ring_frames).map(Output::Exclusive)
+        }
+        #[cfg(not(all(target_os = "linux", feature = "exclusive-output")))]
+        OutputMode::Exclusive { .. } => Err(PlaybackError::Device(
+            "exclusive output is not built into this baz: it needs the `exclusive-output` \
+             feature, and today only Linux (ALSA hw:) has a backend — WASAPI exclusive and \
+             CoreAudio hog mode are unwritten (ADR-0012)"
+                .into(),
+        )),
+    }
+}
+
+/// Spawn an engine playing through the audio output the listener configured,
 /// with a device ring of `device_ring_frames` frames.
+///
+/// # Which output
+///
+/// This is the resolution point for [`OutputMode::from_env`]: `BAZ_OUTPUT`
+/// (and `BAZ_OUTPUT_DEVICE` with it) decides between shared mode — cpal, the
+/// default, and what every earlier version of baz did — and exclusive mode, in
+/// which baz holds an ALSA `hw:` device itself and nothing sits between the
+/// decoder and the converter (ADR-0012). A front end with a settings surface
+/// of its own should call [`spawn_device_with`] and pass the mode explicitly
+/// rather than exporting variables into its own process; this function exists
+/// so that opting in needs no front-end change at all.
+///
+/// # Errors
+///
+/// Whatever [`spawn_device_with`] reports, plus [`PlaybackError::Device`] if
+/// `BAZ_OUTPUT` names something that is not an output mode.
 ///
 /// `initial_sample_rate` is the rate the device is opened at *before any queue
 /// exists* — the engine has to hold an open sink from the moment it spawns, and
@@ -581,6 +770,43 @@ pub fn spawn_device(
     initial_sample_rate: u32,
     device_ring_frames: usize,
 ) -> Result<(EngineHandle, Receiver<Event>), PlaybackError> {
+    spawn_device_with(
+        cfg,
+        &OutputMode::from_env()?,
+        initial_sample_rate,
+        device_ring_frames,
+    )
+}
+
+/// Spawn an engine playing through an explicitly chosen output arrangement.
+///
+/// [`spawn_device`] is this function with the mode read from the environment;
+/// this one is for a front end that has its own setting to honour, and it is
+/// the whole of what wiring an output picker costs.
+///
+/// Everything else is identical, including `initial_sample_rate`'s meaning:
+/// the rate the device is opened at *before any queue exists*, renegotiated to
+/// the music's own rate by the first session either way (ADR-0009).
+///
+/// # Errors
+///
+/// - [`PlaybackError::DeviceBusy`] if exclusive mode was asked for and another
+///   application — usually the sound server — holds the device. This is the
+///   ordinary failure and it is reported rather than worked around: baz does
+///   not fall back to shared mode behind the listener's back, because the
+///   whole point of the setting is what it claims about the signal path.
+/// - [`PlaybackError::Device`] if the output cannot be opened for any other
+///   reason: no device, an unknown device name, several devices and none
+///   chosen, or a platform with no exclusive backend.
+/// - [`PlaybackError::Io`] if the engine thread cannot be spawned.
+#[cfg(feature = "device-output")]
+pub fn spawn_device_with(
+    cfg: EngineConfig,
+    output: &OutputMode,
+    initial_sample_rate: u32,
+    device_ring_frames: usize,
+) -> Result<(EngineHandle, Receiver<Event>), PlaybackError> {
+    let output = output.clone();
     let (cmd_tx, cmd_rx) = mpsc::channel();
     let (event_tx, event_rx) = mpsc::channel();
     let (ack_tx, ack_rx) = mpsc::channel();
@@ -596,8 +822,12 @@ pub fn spawn_device(
             // cpal streams are not Send, so the sink must be created (and
             // dropped) on the engine thread; the open result is reported
             // back through a one-shot channel. Reopening for a rate change
-            // happens on this same thread for the same reason.
-            match DeviceSink::open(initial_sample_rate, device_ring_frames) {
+            // happens on this same thread for the same reason. An ALSA PCM
+            // *is* Send, but it is opened here too: exclusive means the
+            // handle must be released on the same thread's shutdown path,
+            // and one arrangement for both backends is one thing to reason
+            // about rather than two.
+            match open_output(&output, initial_sample_rate, device_ring_frames) {
                 Ok(sink) => {
                     let _ = ack_tx.send(Ok(()));
                     let control = Control::new(
@@ -648,6 +878,11 @@ struct Control<S: Sink> {
     /// (offline), which is also why a zero here never counts as a
     /// reconfiguration.
     open_rate: u32,
+    /// Whether the sink holds its device exclusively ([`Sink::is_exclusive`]),
+    /// read once when the engine thread starts because the arrangement is a
+    /// property of the sink rather than of a moment. It is the ADR-0012 half of
+    /// [`Event::SignalPath`].
+    exclusive: bool,
     delivered: Arc<AtomicUsize>,
     instruments: Arc<Instruments>,
     queue: Vec<PathBuf>,
@@ -707,6 +942,7 @@ impl<S: Sink> Control<S> {
             events,
             cfg,
             open_rate,
+            exclusive: sink.is_exclusive(),
             delivered,
             instruments,
             queue: Vec::new(),
@@ -851,6 +1087,7 @@ impl<S: Sink> Control<S> {
                     self.start_session(next, 0, None);
                 }
             }
+            Command::Previous => self.previous(),
             Command::Seek { position_ms } => self.seek(position_ms),
             Command::SetVolume { position } => {
                 let volume = Volume::new(position);
@@ -953,6 +1190,42 @@ impl<S: Sink> Control<S> {
                 path,
             });
         }
+    }
+
+    /// [`Command::Previous`]: go back — restart the current track, or step to
+    /// the one before it.
+    ///
+    /// The same drain-and-restart machinery [`Command::Next`] and
+    /// [`Command::Seek`] use, aimed at whichever queue position the
+    /// [`PREVIOUS_RESTART_MS`] rule selects. Deliberately *one* mechanism
+    /// rather than "seek to 0 when restarting, skip when stepping back":
+    /// restarting a track and starting the one before it are the same
+    /// operation with a different index, and the alternative would have made
+    /// the two halves of one button take different code paths, differ in
+    /// latency, and need separate tests for the same guarantee.
+    ///
+    /// Like `Next`, and unlike `Seek`, it **resumes**: the two halves of one
+    /// transport control must not disagree about whether pressing them starts
+    /// the music.
+    fn previous(&mut self) {
+        let Some(session) = self.session.take() else {
+            return; // stopped: there is no current track to go back from
+        };
+        let current = session.current;
+        let elapsed = session.elapsed_ms();
+        drop(session); // abort: stop flag + join, exactly as Next does
+        // The abandoned position's audio is still queued in the sink; drop it
+        // for the reason `Sink::discard_buffered` exists.
+        self.sink.discard_buffered();
+        // Past the threshold, or already at the head of the queue with nothing
+        // before it: this track again. Otherwise the one before it.
+        let target = if elapsed >= PREVIOUS_RESTART_MS || current == 0 {
+            current
+        } else {
+            current - 1
+        };
+        self.paused = false;
+        self.start_session(target, 0, None);
     }
 
     /// [`Command::Seek`]: drain-and-restart the *current* track at
@@ -1107,6 +1380,7 @@ impl<S: Sink> Control<S> {
             track_ms,
             Arc::clone(&self.instruments),
             self.cfg,
+            self.exclusive,
         ));
     }
 }
@@ -1203,6 +1477,10 @@ struct Session {
     /// Which policy this session runs under, needed only to say *why* a
     /// conversion is happening when one is.
     boundary: BoundaryPolicy,
+    /// Whether the output is held exclusively — the other half of the chain
+    /// this session reports (ADR-0012). Copied from [`Control`] at start,
+    /// because a sink does not change arrangement while it is open.
+    exclusive: bool,
     /// Failure reason per queue index, once known (taken when reported).
     failures: Vec<Option<String>>,
     /// Reporting cursor: per-track events are emitted strictly in queue
@@ -1238,6 +1516,7 @@ impl Session {
         track_ms: Option<u64>,
         instruments: Arc<Instruments>,
         cfg: EngineConfig,
+        exclusive: bool,
     ) -> Self {
         let (ring_tx, ring_rx) = RingBuffer::new(cfg.ring_frames * CHANNELS);
         let remaining = (queue.len() - start).max(1);
@@ -1270,6 +1549,7 @@ impl Session {
             formats: vec![None; len],
             last_signal: None,
             boundary: cfg.boundary,
+            exclusive,
             failures: vec![None; len],
             next_report: start,
             current: start,
@@ -1305,17 +1585,21 @@ impl Session {
     fn signal_path(&self, index: usize) -> Option<Event> {
         let (source_rate_hz, source_bits) = (*self.formats.get(index)?)?;
         let output_rate_hz = self.shared.stream_rate.load(Ordering::Acquire);
-        let chain = if source_rate_hz == output_rate_hz {
-            SignalChain::Direct
-        } else {
-            SignalChain::Converting {
-                reason: match self.boundary {
-                    // Following the source is the policy, so a mismatch here
-                    // means the output could not be made to follow.
-                    BoundaryPolicy::BitPerfectReopen => ConversionReason::DeviceRateUnavailable,
-                    _ => ConversionReason::FixedOutputRate,
-                },
-            }
+        let why = match self.boundary {
+            // Following the source is the policy, so a mismatch here means the
+            // output could not be made to follow.
+            BoundaryPolicy::BitPerfectReopen => ConversionReason::DeviceRateUnavailable,
+            _ => ConversionReason::FixedOutputRate,
+        };
+        let conversion = (source_rate_hz != output_rate_hz).then_some(why);
+        // Two independent facts, three states (see `SignalChain`): whether baz
+        // converts, and whether baz owns the device. Owning the device does not
+        // give it modes it does not have, which is why the exclusive variant
+        // carries the reason rather than excluding it.
+        let chain = match (self.exclusive, conversion) {
+            (true, conversion) => SignalChain::Exclusive { conversion },
+            (false, None) => SignalChain::Direct,
+            (false, Some(reason)) => SignalChain::Converting { reason },
         };
         Some(Event::SignalPath {
             source_rate_hz,
@@ -1325,25 +1609,21 @@ impl Session {
         })
     }
 
-    /// The current position reading, or `None` when audio has been delivered
-    /// but the producer has not yet published the rate to interpret it at —
-    /// a window of microseconds at the very start of a session, during which
-    /// there is nothing truthful to say.
+    /// Position inside the current track, in milliseconds — the number
+    /// [`Event::Progress`] reports and the one [`Command::Previous`] compares
+    /// against [`PREVIOUS_RESTART_MS`].
     ///
-    /// The arithmetic is the module docs' "Elapsed time" contract, in
-    /// integers: delivered frames since this track's origin, converted at
-    /// the **stream** rate, offset by the seek target that started it.
-    fn progress(&self) -> Option<Event> {
+    /// The module docs' "Elapsed time" contract, in integers: delivered frames
+    /// since this track's origin, converted at the **stream** rate, offset by
+    /// the seek target that started the session, and never past the track's
+    /// declared end.
+    fn elapsed_ms(&self) -> u64 {
         let frames = (self.pulled.saturating_sub(self.track_origin) / CHANNELS) as u64;
         let rate = self.shared.stream_rate.load(Ordering::Acquire);
-        let delivered_ms = match (frames, rate) {
-            // Nothing delivered yet — the position is the seek target, and
-            // no rate is needed to say so. This is the reading a Seek's
-            // immediate Progress carries, before the new session's producer
-            // has so much as opened the file.
-            (0, _) => 0,
-            (_, 0) => return None,
-            (frames, rate) => frames_to_ms(frames, rate),
+        let delivered_ms = if frames == 0 || rate == 0 {
+            0
+        } else {
+            frames_to_ms(frames, rate)
         };
         let offset = if self.current == self.seek_index {
             self.seek_ms
@@ -1351,11 +1631,31 @@ impl Session {
             0
         };
         let elapsed = offset.saturating_add(delivered_ms);
+        // Never report past the end: the last pump before a boundary can carry
+        // a few frames of the next track's audio into this track's count, and
+        // "3:01 of 3:00" is a bug on screen.
+        self.track_ms.map_or(elapsed, |total| elapsed.min(total))
+    }
+
+    /// The current position reading, or `None` when audio has been delivered
+    /// but the producer has not yet published the rate to interpret it at —
+    /// a window of microseconds at the very start of a session, during which
+    /// there is nothing truthful to say.
+    ///
+    /// The arithmetic is [`Self::elapsed_ms`]; what this adds is the one case
+    /// where there is nothing truthful to *report*.
+    fn progress(&self) -> Option<Event> {
+        let frames = self.pulled.saturating_sub(self.track_origin) / CHANNELS;
+        // Audio has been delivered but the producer has not published the rate
+        // to interpret it at — a window of microseconds at the very start of a
+        // session. (Nothing delivered yet is fine: the position is the seek
+        // target, and no rate is needed to say so. That is the reading a
+        // Seek's immediate Progress carries.)
+        if frames > 0 && self.shared.stream_rate.load(Ordering::Acquire) == 0 {
+            return None;
+        }
         Some(Event::Progress {
-            // Never report past the end: the last pump before a boundary can
-            // carry a few frames of the next track's audio into this track's
-            // count, and "3:01 of 3:00" is a bug on screen.
-            elapsed_ms: self.track_ms.map_or(elapsed, |total| elapsed.min(total)),
+            elapsed_ms: self.elapsed_ms(),
             track_ms: self.track_ms,
         })
     }
@@ -2525,6 +2825,125 @@ mod tests {
         assert!(
             !log.contains(&Op::Discard),
             "nothing about a rate change abandons audio: {log:?}"
+        );
+    }
+
+    /// A [`DeviceDouble`] that holds its device exclusively — the ADR-0012
+    /// backend's answer to [`Sink::is_exclusive`], without needing the
+    /// hardware.
+    ///
+    /// It exists for the reason every double in this module does: the
+    /// behaviour under test is the *engine's* — that the chain it reports says
+    /// which arrangement is in use, in both the converting and the
+    /// non-converting case — and that behaviour is identical whether the sink
+    /// underneath is a real ALSA PCM or a struct that says `true`. The real
+    /// backend's half (that a `hw:` device was actually opened, and at the
+    /// format and rate claimed) is asserted against real hardware in
+    /// `tests/playback.rs`, feature `exclusive-output`.
+    struct ExclusiveDouble(DeviceDouble);
+
+    impl Sink for ExclusiveDouble {
+        fn write(&mut self, samples: &[f32]) {
+            self.0.write(samples);
+        }
+
+        fn negotiate_rate(&mut self, desired: u32) -> Option<u32> {
+            self.0.negotiate_rate(desired)
+        }
+
+        fn is_exclusive(&self) -> bool {
+            true
+        }
+    }
+
+    /// **A sink that owns its device is reported as owning it**, and the
+    /// ordinary state is the one with no conversion in it.
+    ///
+    /// The same queue and the same device as `a_48k_queue_negotiates_a_48k_output`,
+    /// which asserts `SignalChain::Direct` for the shared-mode sink: the only
+    /// difference between the two tests is the sink's answer to
+    /// [`Sink::is_exclusive`], and the only difference between their
+    /// assertions is the variant. That pairing is the point — nothing else
+    /// about the engine changes.
+    #[test]
+    fn an_exclusive_sink_reports_an_exclusive_chain() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let track = fixture_at(dir.path(), "hi.wav", HI_RATE, SHORT_FRAMES);
+        let opened: Opened = Arc::default();
+        let sink = ExclusiveDouble(DeviceDouble::new(RATE, &[RATE, HI_RATE], &opened));
+        let (events, conversions) = run_queue(vec![track], EngineConfig::default(), sink, RATE);
+
+        assert_eq!(
+            chains(&events),
+            vec![(
+                HI_RATE,
+                HI_RATE,
+                SignalChain::Exclusive { conversion: None },
+            )],
+        );
+        assert_eq!(conversions.resampled_tracks, 0, "nothing may be converted");
+        let chain = chains(&events)[0].2;
+        assert!(chain.is_exclusive());
+        assert!(!chain.is_converting());
+    }
+
+    /// **Owning the device does not give it modes it does not have.**
+    ///
+    /// A `hw:` DAC with no 48 kHz mode is still a DAC with no 48 kHz mode, so
+    /// the engine converts and reports *both* facts on one chain. This is why
+    /// exclusivity is not a fourth `SignalChain` variant that excludes
+    /// conversion: a front end must be able to say "held exclusively, and
+    /// converting because the hardware cannot follow", which is a true and
+    /// perfectly ordinary sentence.
+    #[test]
+    fn an_exclusive_sink_that_cannot_follow_reports_both_facts() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let track = fixture_at(dir.path(), "hi.wav", HI_RATE, SHORT_FRAMES);
+        let opened: Opened = Arc::default();
+        // 44.1 kHz only: the nearest thing this device has to 48 kHz.
+        let sink = ExclusiveDouble(DeviceDouble::new(RATE, &[RATE], &opened));
+        let (events, conversions) = run_queue(vec![track], EngineConfig::default(), sink, RATE);
+
+        assert_eq!(
+            chains(&events),
+            vec![(
+                HI_RATE,
+                RATE,
+                SignalChain::Exclusive {
+                    conversion: Some(ConversionReason::DeviceRateUnavailable),
+                },
+            )],
+        );
+        assert_eq!(conversions.resampled_tracks, 1, "the track did play");
+        let chain = chains(&events)[0].2;
+        assert!(chain.is_exclusive());
+        assert_eq!(
+            chain.conversion_reason(),
+            Some(ConversionReason::DeviceRateUnavailable)
+        );
+    }
+
+    /// **A sink that says nothing about exclusivity is shared**, and the whole
+    /// shared-mode readout is byte-for-byte what it was before ADR-0012.
+    ///
+    /// The default on [`Sink::is_exclusive`] is what every existing backend
+    /// and every existing test double relies on, so this pins the default
+    /// rather than leaving "unchanged" to be inferred from the other tests
+    /// still passing.
+    #[test]
+    fn a_sink_that_does_not_claim_exclusivity_reports_the_shared_chain() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let track = fixture_at(dir.path(), "hi.wav", HI_RATE, SHORT_FRAMES);
+        let opened: Opened = Arc::default();
+        let sink = DeviceDouble::new(RATE, &[RATE, HI_RATE], &opened);
+        assert!(
+            !sink.is_exclusive(),
+            "the trait default is shared, and every shipped cpal backend keeps it"
+        );
+        let (events, _) = run_queue(vec![track], EngineConfig::default(), sink, RATE);
+        assert_eq!(
+            chains(&events),
+            vec![(HI_RATE, HI_RATE, SignalChain::Direct)],
         );
     }
 

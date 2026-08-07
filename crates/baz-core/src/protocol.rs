@@ -91,6 +91,30 @@ pub enum Command {
     /// Skip to the next track in the queue. Past the last track this ends
     /// the queue ([`Event::QueueEnded`]).
     Next,
+    /// Go back: restart the current track, or step to the one before it.
+    ///
+    /// The conventional two-in-one transport button, and the counterpart
+    /// [`Command::Next`] has been missing. Which of the two things it does is
+    /// decided by how far into the current track playback has reached:
+    ///
+    /// - **At or past
+    ///   [`PREVIOUS_RESTART_MS`](crate::engine::PREVIOUS_RESTART_MS)** (3 000 ms)
+    ///   — restart the current track from its beginning.
+    /// - **Before it** — start the preceding queue entry from its beginning.
+    /// - **Before it, at the head of the queue** — restart, because there is
+    ///   nothing before position 0 and stopping would be a worse answer than
+    ///   the thing the button does everywhere else.
+    ///
+    /// While stopped it is a no-op, exactly like [`Command::Next`]: there is
+    /// no current track to be some number of seconds into. While **paused** it
+    /// behaves like [`Command::Next`] too — it moves and *resumes* — because
+    /// the two halves of one transport control must not disagree about that
+    /// ([`crate::engine`]'s command table states it for both).
+    ///
+    /// A front end can therefore advertise this as always available whenever a
+    /// queue is playing: unlike `Next` at the end of the queue, `Previous` has
+    /// no position at which it does nothing.
+    Previous,
     /// Jump to an absolute position within the **currently playing track**
     /// and keep the transport state (playing stays playing, paused stays
     /// paused — see [`crate::engine`] for the runtime contract).
@@ -236,8 +260,9 @@ pub enum Event {
     /// It says *baz* converted nothing: the decoder's samples reached the
     /// output at the file's own rate, in a format that carries them exactly.
     /// It does not claim the operating system's mixer left them alone
-    /// downstream — only exclusive-mode output could claim that, and it is a
-    /// later phase.
+    /// downstream — that is the claim [`SignalChain::Exclusive`] makes, and
+    /// only an exclusive-mode backend can make it (ADR-0012). `Direct` is
+    /// therefore precisely "shared mode, nothing converted by baz".
     ///
     /// Since ADR-0011 it also does not claim, on its own, that the samples
     /// were unaltered: **a volume below unity is a second, independent gain
@@ -303,6 +328,23 @@ pub enum Event {
 /// device has no 48 kHz mode" and "converting, because you asked for a fixed
 /// output rate" are different facts about the system, and a front end that
 /// wants to explain itself needs to tell them apart.
+///
+/// # Two questions, three states
+///
+/// The chain answers two questions — *does baz convert?* and *how far down
+/// does the claim reach?* — and the variants are the combinations that
+/// actually occur. [`Self::Direct`] and [`Self::Converting`] are shared-mode
+/// output, where the system mixer owns the last hop and baz can say nothing
+/// about it; [`Self::Exclusive`] is the exclusive-mode backend of ADR-0012,
+/// which holds the device itself and so *can*. Exclusive mode can still be
+/// converting (a DAC that has no 96 kHz mode is a DAC that has no 96 kHz mode
+/// whoever owns it), which is why that variant carries the reason as an
+/// `Option` rather than there being a fourth state.
+///
+/// Ask through [`Self::is_exclusive`] and [`Self::conversion_reason`] rather
+/// than by enumerating variants, for the reason
+/// [`VolumePath::is_transparent`] exists: the questions are stable, the list
+/// of variants is not.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -310,16 +352,68 @@ pub enum SignalChain {
     /// The output is running at the source's own sample rate and the
     /// decoder's samples reach it unconverted. The default, and the case for
     /// every album whose rate the output device can run at.
+    ///
+    /// Shared mode: what the system mixer does downstream is not claimed.
     Direct,
     /// The output is running at a different rate, so the engine converts the
     /// source to it (rubato windowed sinc — see
     /// [`crate::playback`]). Ordinary and expected in the situations
     /// [`ConversionReason`] enumerates; the point of reporting it is that a
     /// listener who cares can see it, not that anything has gone wrong.
+    ///
+    /// Shared mode, like [`Self::Direct`].
     Converting {
         /// Why the conversion is in the path.
         reason: ConversionReason,
     },
+    /// baz holds the output device itself, so nothing — no mixer, no
+    /// resampler, no other application's stream — sits between the samples and
+    /// the converter (ADR-0012: ALSA `hw:` today; WASAPI exclusive and
+    /// `CoreAudio` hog are the platform equivalents).
+    ///
+    /// `conversion` is `None` in the ordinary case, where the device was
+    /// opened at the source's own rate. It is `Some` when the device offers no
+    /// mode for this material and the engine converted to the nearest one it
+    /// does offer — the same fact [`Self::Converting`] reports, on a chain
+    /// that still owns the device.
+    ///
+    /// **Still information, not a badge of merit.** Shared mode is the normal
+    /// way to play music and describes a perfectly good listening experience;
+    /// this variant says which device arrangement is in use, no more.
+    Exclusive {
+        /// Why the engine is converting, when it is. `None` — the ordinary
+        /// case — means the device is running at the source's own rate.
+        conversion: Option<ConversionReason>,
+    },
+}
+
+impl SignalChain {
+    /// Whether baz holds the output device exclusively, so that the "nothing
+    /// is between these samples and the converter" claim extends past baz's
+    /// own process.
+    #[must_use]
+    pub fn is_exclusive(self) -> bool {
+        matches!(self, Self::Exclusive { .. })
+    }
+
+    /// Why a sample-rate conversion is in the path, or `None` when there is
+    /// none — in either output mode.
+    #[must_use]
+    pub fn conversion_reason(self) -> Option<ConversionReason> {
+        match self {
+            Self::Direct => None,
+            Self::Converting { reason } => Some(reason),
+            Self::Exclusive { conversion } => conversion,
+        }
+    }
+
+    /// Whether the engine is sample-rate converting. The question most front
+    /// ends actually have; `conversion_reason` is for the one that wants to
+    /// say *why*.
+    #[must_use]
+    pub fn is_converting(self) -> bool {
+        self.conversion_reason().is_some()
+    }
 }
 
 /// Why a [`SignalChain::Converting`] chain is converting.
@@ -414,6 +508,7 @@ mod tests {
             Command::Pause,
             Command::Stop,
             Command::Next,
+            Command::Previous,
             Command::Seek { position_ms: 0 },
             Command::Seek {
                 position_ms: 93_500,
@@ -468,6 +563,20 @@ mod tests {
                 output_rate_hz: 44_100,
                 chain: SignalChain::Converting {
                     reason: ConversionReason::FixedOutputRate,
+                },
+            },
+            Event::SignalPath {
+                source_rate_hz: 96_000,
+                source_bits: Some(24),
+                output_rate_hz: 96_000,
+                chain: SignalChain::Exclusive { conversion: None },
+            },
+            Event::SignalPath {
+                source_rate_hz: 96_000,
+                source_bits: Some(24),
+                output_rate_hz: 48_000,
+                chain: SignalChain::Exclusive {
+                    conversion: Some(ConversionReason::DeviceRateUnavailable),
                 },
             },
             Event::VolumeChanged {
@@ -539,6 +648,10 @@ mod tests {
             (
                 serde_json::to_string(&Command::Next).expect("serialize"),
                 r#"{"cmd":"next"}"#,
+            ),
+            (
+                serde_json::to_string(&Command::Previous).expect("serialize"),
+                r#"{"cmd":"previous"}"#,
             ),
             (
                 serde_json::to_string(&Command::Seek {
@@ -678,6 +791,78 @@ mod tests {
         for (got, want) in cases {
             assert_eq!(got, want);
         }
+    }
+
+    /// [`SignalChain::Exclusive`]'s bytes, pinned — split from its sibling
+    /// above for the same reason the volume event was: one test listing every
+    /// variant of a growing enum outgrows what is readable, not because the
+    /// contract is any weaker.
+    #[test]
+    fn exclusive_signal_path_wire_format_is_stable() {
+        let cases: Vec<(String, &str)> = vec![
+            (
+                // ADR-0012: baz owns the device, and nothing is converted.
+                // The absent conversion is `null`, never a missing key: a
+                // reader must be able to tell "not converting" from "this
+                // sender did not say".
+                serde_json::to_string(&Event::SignalPath {
+                    source_rate_hz: 96_000,
+                    source_bits: Some(24),
+                    output_rate_hz: 96_000,
+                    chain: SignalChain::Exclusive { conversion: None },
+                })
+                .expect("serialize"),
+                r#"{"event":"signal_path","source_rate_hz":96000,"source_bits":24,"output_rate_hz":96000,"chain":{"state":"exclusive","conversion":null}}"#,
+            ),
+            (
+                // Owning the device does not give it modes it does not have:
+                // exclusive and converting is a real, reportable state.
+                serde_json::to_string(&Event::SignalPath {
+                    source_rate_hz: 96_000,
+                    source_bits: Some(24),
+                    output_rate_hz: 48_000,
+                    chain: SignalChain::Exclusive {
+                        conversion: Some(ConversionReason::DeviceRateUnavailable),
+                    },
+                })
+                .expect("serialize"),
+                r#"{"event":"signal_path","source_rate_hz":96000,"source_bits":24,"output_rate_hz":48000,"chain":{"state":"exclusive","conversion":"device_rate_unavailable"}}"#,
+            ),
+        ];
+        for (got, want) in cases {
+            assert_eq!(got, want);
+        }
+    }
+
+    /// The two questions a front end has about the chain, answered by the type
+    /// in every output mode rather than by enumerating variants at each call
+    /// site (the rule [`VolumePath::is_transparent`] set).
+    #[test]
+    fn the_chain_answers_exclusivity_and_conversion_separately() {
+        let shared_direct = SignalChain::Direct;
+        let shared_converting = SignalChain::Converting {
+            reason: ConversionReason::FixedOutputRate,
+        };
+        let exclusive_direct = SignalChain::Exclusive { conversion: None };
+        let exclusive_converting = SignalChain::Exclusive {
+            conversion: Some(ConversionReason::DeviceRateUnavailable),
+        };
+
+        assert!(!shared_direct.is_exclusive());
+        assert!(!shared_converting.is_exclusive());
+        assert!(exclusive_direct.is_exclusive());
+        assert!(exclusive_converting.is_exclusive());
+
+        assert!(!shared_direct.is_converting());
+        assert!(shared_converting.is_converting());
+        assert!(!exclusive_direct.is_converting());
+        assert!(exclusive_converting.is_converting());
+
+        assert_eq!(exclusive_direct.conversion_reason(), None);
+        assert_eq!(
+            exclusive_converting.conversion_reason(),
+            Some(ConversionReason::DeviceRateUnavailable),
+        );
     }
 
     /// [`Event::VolumeChanged`]'s bytes, pinned — split from its sibling above

@@ -47,6 +47,39 @@ but prints `built without audio output — see docs/DEVELOPMENT.md` and hides
 the playback UI. With the feature but no usable output device, the app still
 runs and the bottom bar reports "no audio device".
 
+### Exclusive-mode output (Linux, ADR-0012)
+
+Shared mode is the default. To have baz hold an ALSA `hw:` device outright —
+no system mixer between the decoder and the converter — build with the
+`exclusive-output` feature and name a device:
+
+```sh
+toolbox run -c baz-dev env BAZ_OUTPUT=exclusive BAZ_OUTPUT_DEVICE=hw:3,0 \
+  cargo run --release -p baz --features device-output,baz-core/exclusive-output
+```
+
+`BAZ_OUTPUT` is `shared` (the default) or `exclusive`; anything else is an
+error rather than a silent fall back. `BAZ_OUTPUT_DEVICE` is an ALSA
+`hw:CARD,DEV` name — never `plughw:`, which converts without saying so and is
+refused. With several devices and none named, the open fails with a message
+listing them; with exactly one, it is used.
+
+**Expect `DeviceBusy` on a desktop.** The sound server usually holds the card
+the desktop is routed to, and exclusive mode cannot share it: pick a device
+`PipeWire` is not using, or release the one it is. The failure is immediate
+(~50 µs) and named, never a hang.
+
+The device-gated tests honour the same variable, which is how to verify the
+claims on a particular DAC rather than on whatever enumerates first:
+
+```sh
+toolbox run -c baz-dev env BAZ_OUTPUT_DEVICE=hw:3,0 \
+  cargo test -p baz-core --features exclusive-output --test playback exclusive -- --nocapture
+```
+
+They play short tones on real hardware, so they are audible; they skip with a
+notice when every device is busy.
+
 ## Headless UI verification
 
 Agents (and you) can render the real binary without touching your desktop
