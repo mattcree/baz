@@ -52,6 +52,21 @@
 //! walks the same chain from 0, so "created fresh" and "upgraded" can never
 //! drift into two different shapes.
 //!
+//! # What leaves the library
+//!
+//! [`Library::remove_tracks`] is the only path out, and it decides nothing:
+//! it deletes the paths it is handed. Whether a file is *gone* — as opposed
+//! to unseen, unreadable, or on a drive that is not plugged in today — is
+//! answered against the filesystem before a path ever reaches here
+//! ([`crate::library::is_confirmed_gone`], and the four gates in
+//! `docs/adr/0010-incremental-scanning-and-removal.md`). Keeping the
+//! judgement out of the store is what makes "baz deleted my library" a
+//! thing that can be tested for in one place.
+//!
+//! [`Library::known_files`] is the other half of the same conversation: the
+//! snapshot a scan needs to skip unchanged files, and the only list of rows
+//! a scan worker can ever nominate for removal.
+//!
 //! # Albums and editions
 //!
 //! [`Library::albums`] groups tracks into albums by **album artist** +
@@ -62,18 +77,18 @@
 //! [`Album::editions`] and in `docs/adr/0007-album-editions.md`.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::iter::Peekable;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rusqlite::{Connection, params};
 
-use crate::library::{AudioFormat, TrackMeta};
+use crate::library::{AudioFormat, FileStamp, KnownFiles, TrackMeta};
 
 /// The schema version this build reads and writes (`PRAGMA user_version`).
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// Rows per write transaction in [`Library::add_tracks`]. A scan yields tens
 /// of thousands of tracks; committing in batches keeps any single
@@ -125,13 +140,26 @@ const SCHEMA_V3_COLUMNS: &str = "
     ALTER TABLE tracks ADD COLUMN compilation  INTEGER; -- 0/1 flag; NULL = unsaid
 ";
 
+/// Version 4: the file stamp incremental scanning compares
+/// (`docs/adr/0010-incremental-scanning-and-removal.md`). Two more nullable columns,
+/// added rather than rebuilt, exactly as v2 and v3 were.
+///
+/// The transaction and the `user_version` bump are applied by
+/// [`migrate_v3_to_v4`].
+const SCHEMA_V4_COLUMNS: &str = "
+    ALTER TABLE tracks ADD COLUMN mtime_ns  INTEGER; -- ns since the Unix epoch
+    ALTER TABLE tracks ADD COLUMN file_size INTEGER; -- bytes
+";
+
 /// Insert-or-replace by path: a rescan of the same file updates its metadata
 /// instead of failing the batch or duplicating the track.
 const UPSERT_TRACK: &str = "
     INSERT INTO tracks
         (path, artist, album, title, track, disc, year, duration_ns,
-         format, bit_depth, sample_rate, bitrate, album_artist, compilation)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+         format, bit_depth, sample_rate, bitrate, album_artist, compilation,
+         mtime_ns, file_size)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+            ?15, ?16)
     ON CONFLICT(path) DO UPDATE SET
         artist = excluded.artist,
         album = excluded.album,
@@ -145,14 +173,21 @@ const UPSERT_TRACK: &str = "
         sample_rate = excluded.sample_rate,
         bitrate = excluded.bitrate,
         album_artist = excluded.album_artist,
-        compilation = excluded.compilation
+        compilation = excluded.compilation,
+        mtime_ns = excluded.mtime_ns,
+        file_size = excluded.file_size
 ";
 
 const SELECT_ALL_TRACKS: &str = "
     SELECT path, artist, album, title, track, disc, year, duration_ns,
-           format, bit_depth, sample_rate, bitrate, album_artist, compilation
+           format, bit_depth, sample_rate, bitrate, album_artist, compilation,
+           mtime_ns, file_size
     FROM tracks
 ";
+
+/// Delete one row by path. The `path` column is `UNIQUE`, so this removes at
+/// most one row and reports whether it did.
+const DELETE_TRACK: &str = "DELETE FROM tracks WHERE path = ?1";
 
 /// The library index could not be opened or updated.
 #[derive(Debug, thiserror::Error)]
@@ -299,6 +334,8 @@ impl Library {
                         meta.bitrate,
                         meta.album_artist,
                         meta.compilation,
+                        meta.stamp.map(|stamp| stamp.mtime_ns),
+                        meta.stamp.and_then(|stamp| i64::try_from(stamp.size).ok()),
                     ])?;
                 }
             }
@@ -311,6 +348,87 @@ impl Library {
             }
         }
         Ok(())
+    }
+
+    /// Remove tracks by path: delete their rows and drop them from the
+    /// in-RAM index. Paths the library does not hold are ignored. Returns
+    /// the number of rows actually deleted.
+    ///
+    /// This is the only way anything leaves the library, and it is
+    /// deliberately dumb: it deletes exactly the paths it is handed and
+    /// decides nothing. Whether a file is *gone* — as opposed to merely
+    /// unseen, unreadable, or on a drive that is not plugged in today — is
+    /// [`crate::library::is_confirmed_gone`]'s question, answered against
+    /// the filesystem before a path ever reaches here.
+    ///
+    /// # Errors
+    ///
+    /// [`IndexError::Sqlite`] if a delete fails. Batches committed before
+    /// the failure stay deleted; the failing batch is rolled back and the
+    /// in-RAM index is left matching whatever the database now holds.
+    pub fn remove_tracks<I, P>(&mut self, paths: I) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        let paths: Vec<PathBuf> = paths
+            .into_iter()
+            .map(|path| path.as_ref().to_path_buf())
+            .collect();
+        let mut deleted = 0;
+        let mut gone: HashSet<&Path> = HashSet::new();
+        let result = self.delete_batches(&paths, &mut deleted, &mut gone);
+        if !gone.is_empty() {
+            self.index
+                .tracks
+                .retain(|track| !gone.contains(track.meta.path.as_path()));
+            self.index.rebuild_order();
+        }
+        result.map(|()| deleted)
+    }
+
+    fn delete_batches<'p>(
+        &mut self,
+        paths: &'p [PathBuf],
+        deleted: &mut usize,
+        gone: &mut HashSet<&'p Path>,
+    ) -> Result<(), IndexError> {
+        for chunk in paths.chunks(TRANSACTION_BATCH) {
+            let tx = self.conn.transaction()?;
+            let mut removed_here: Vec<&Path> = Vec::new();
+            {
+                let mut stmt = tx.prepare_cached(DELETE_TRACK)?;
+                for path in chunk {
+                    if stmt.execute(params![path_to_blob(path)])? > 0 {
+                        removed_here.push(path.as_path());
+                    }
+                }
+            }
+            tx.commit()?;
+            // Mirror into RAM only after the batch is durably committed, so
+            // a failed batch never drops a track the database still holds.
+            *deleted += removed_here.len();
+            gone.extend(removed_here);
+        }
+        Ok(())
+    }
+
+    /// Every path the library holds, with the [`FileStamp`] recorded for it
+    /// — the input an incremental scan needs
+    /// ([`crate::library::scan_incremental`]).
+    ///
+    /// A row written before schema v4, or one for a file whose filesystem
+    /// could not report a usable timestamp, maps to `None` and is therefore
+    /// always re-read. The map is a snapshot: it is handed to a scan worker
+    /// that runs while the library keeps being written to, so it owns its
+    /// paths rather than borrowing them.
+    #[must_use]
+    pub fn known_files(&self) -> KnownFiles {
+        self.index
+            .tracks
+            .iter()
+            .map(|track| (track.meta.path.clone(), track.meta.stamp))
+            .collect()
     }
 
     /// Search the library: literal, case-insensitive substring match over
@@ -825,7 +943,7 @@ impl ArtistKey {
 /// `user_version`, so versions chain automatically: a v3 adds a `2 => ...`
 /// arm and bumps [`SCHEMA_VERSION`], nothing else.
 ///
-/// A brand-new database walks the *whole* chain (0 → v1 → v2 → v3) rather
+/// A brand-new database walks the *whole* chain (0 → v1 → … → v4) rather
 /// than being stamped with the current schema directly. That costs a few
 /// statements once, and buys the guarantee that a freshly created database
 /// and an upgraded one are byte-identical in shape — no class of "works on a
@@ -838,6 +956,7 @@ fn migrate(conn: &Connection) -> Result<(), IndexError> {
             0 => conn.execute_batch(SCHEMA_V1)?,
             1 => migrate_v1_to_v2(conn)?,
             2 => migrate_v2_to_v3(conn)?,
+            3 => migrate_v3_to_v4(conn)?,
             SCHEMA_VERSION => return Ok(()),
             found => return Err(IndexError::SchemaTooNew { found }),
         }
@@ -871,9 +990,11 @@ fn migrate_v1_to_v2(conn: &Connection) -> Result<(), IndexError> {
 /// turn into a full library re-read at startup.
 ///
 /// `NULL` is self-healing rather than permanent, exactly as v2's was: baz
-/// rescans its music folder on every start and [`Library::add_tracks`]
+/// rescans its music folder at every start and [`Library::add_tracks`]
 /// upserts, so the first scan after the upgrade fills in every surviving
-/// file's real album artist. Until then, [`AlbumArtist::of`] falls through
+/// file's real album artist. (Since v4 that rescan is incremental — but a
+/// migrated row carries no file stamp either, so it is re-read regardless;
+/// see [`migrate_v3_to_v4`].) Until then, [`AlbumArtist::of`] falls through
 /// to the track artist and grouping is precisely the pre-v3 behavior — the
 /// upgrade cannot make the shelf worse, only later.
 ///
@@ -888,6 +1009,33 @@ fn migrate_v2_to_v3(conn: &Connection) -> Result<(), IndexError> {
     Ok(())
 }
 
+/// v3 → v4: add the file-stamp columns incremental scanning compares.
+///
+/// `NULL` for every existing row, and the *only* honest value. A stamp is a
+/// pair of facts about a file on disk right now; filling it from anything
+/// already in the database would be inventing a claim that the file is
+/// unchanged — the one claim that, if wrong, makes baz show stale tags
+/// forever. Stat'ing every file to fill it properly is exactly the startup
+/// re-read this feature exists to remove, and would make the upgrade itself
+/// the slow launch it is meant to prevent.
+///
+/// `NULL` is self-healing, as v2's and v3's backfill gaps were: an unstamped
+/// row is always re-read (see [`crate::library::Scan`]), so the first scan
+/// after the upgrade is a full one and stamps everything it touches. From
+/// the second launch on, scanning is incremental. The upgrade therefore
+/// costs one ordinary scan and no correctness at all.
+///
+/// The `ALTER TABLE`s and the `user_version` bump are one transaction
+/// (SQLite's DDL is transactional), so an interrupted upgrade leaves a v3
+/// database that the next open migrates again.
+fn migrate_v3_to_v4(conn: &Connection) -> Result<(), IndexError> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(SCHEMA_V4_COLUMNS)?;
+    tx.pragma_update(None, "user_version", 4)?;
+    tx.commit()?;
+    Ok(())
+}
+
 /// Fill `format` for existing rows from the file extension, where the
 /// extension settles the question by itself.
 ///
@@ -898,10 +1046,12 @@ fn migrate_v2_to_v3(conn: &Connection) -> Result<(), IndexError> {
 /// an upgrade must not turn into a full library re-read at startup.
 ///
 /// NULL is self-healing rather than permanent: baz rescans its music folder
-/// on every start, and [`Library::add_tracks`] upserts, so each surviving
+/// at every start, and [`Library::add_tracks`] upserts, so each surviving
 /// file gets its true codec and properties within the first scan after the
-/// upgrade. Until then an unbackfilled album simply shows one unnamed
-/// edition — exactly the pre-editions behavior.
+/// upgrade. (Since v4 that rescan is incremental — but a migrated row has no
+/// file stamp either, so it is re-read regardless; see
+/// [`migrate_v3_to_v4`].) Until then an unbackfilled album simply shows one
+/// unnamed edition — exactly the pre-editions behavior.
 fn backfill_formats(conn: &Connection) -> Result<(), IndexError> {
     let mut updates: Vec<(i64, &'static str)> = Vec::new();
     {
@@ -963,7 +1113,25 @@ fn row_to_meta(row: &rusqlite::Row<'_>) -> Result<TrackMeta, IndexError> {
         bitrate: row.get(11)?,
         album_artist: row.get(12)?,
         compilation: row.get(13)?,
+        stamp: row_to_stamp(row)?,
     })
+}
+
+/// The [`FileStamp`] a row carries, or `None` when either half is missing —
+/// a pre-v4 row, or a file whose filesystem declined to timestamp it. Half a
+/// stamp is not a stamp: a comparison needs both, so an incomplete pair is
+/// reported as no pair rather than as a partial match nobody can use.
+fn row_to_stamp(row: &rusqlite::Row<'_>) -> Result<Option<FileStamp>, IndexError> {
+    let mtime_ns: Option<i64> = row.get(14)?;
+    let size: Option<i64> = row.get(15)?;
+    let (Some(mtime_ns), Some(size)) = (mtime_ns, size) else {
+        return Ok(None);
+    };
+    // A negative size is not something this code writes; treat it as the
+    // corrupt value it is and fall back to "unstamped", i.e. always re-read.
+    Ok(u64::try_from(size)
+        .ok()
+        .map(|size| FileStamp { mtime_ns, size }))
 }
 
 /// A track duration as the nanosecond count stored in `duration_ns`.
@@ -1063,6 +1231,7 @@ mod tests {
             bit_depth: None,
             sample_rate: None,
             bitrate: None,
+            stamp: None,
         }
     }
 

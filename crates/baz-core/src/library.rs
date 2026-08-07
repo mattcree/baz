@@ -27,10 +27,35 @@
 //!
 //! A file carrying a codec baz cannot decode is neither: it is dropped, and
 //! [`Scan`] says why.
+//!
+//! # Incremental scanning
+//!
+//! Re-reading every file's tags on every launch is the honest thing to do
+//! exactly once. [`scan_incremental`] takes the [`FileStamp`]s the index
+//! already holds ([`crate::index::Library::known_files`]) and, for any file
+//! whose size *and* modification time are unchanged, reports
+//! [`ScanEntry::Unchanged`] without opening it: one `stat` instead of a tag
+//! parse.
+//!
+//! Measured over a synthetic 10 000-file library (`benches/scan.rs`, which
+//! carries the full table): the scan drops from **61.2 ms to 10.3 ms**
+//! (5.9×), and a whole launch — scan plus the index writes it causes — from
+//! **83.4 ms to 11.6 ms** (7.2×), because an unchanged file is also a row
+//! nobody rewrites. Both are lower bounds: the fixtures have no embedded
+//! cover art and fit in the page cache, and neither of those costs applies
+//! to the `stat` side at all.
+//!
+//! The stamp is deliberately (mtime, size) and not a content hash: a hash
+//! would have to read every byte of every file, which is the cost the whole
+//! exercise exists to avoid. The failure mode is a file rewritten in place
+//! to exactly the same length *and* with its mtime restored — which is
+//! something only a deliberate tool does, and which a user can always force
+//! past by touching the file.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lofty::file::{FileType, TaggedFile};
 use lofty::prelude::*;
@@ -182,6 +207,81 @@ impl fmt::Display for AudioFormat {
     }
 }
 
+/// What the scanner compares to decide whether a file needs re-reading:
+/// its last-modification time and its size, as the filesystem reports them.
+///
+/// Both halves matter. Size alone misses an edit that keeps the length;
+/// mtime alone misses a filesystem with coarse timestamp granularity where
+/// two writes in the same second are indistinguishable. Together they are
+/// the same pair `make`, `rsync` and every backup tool in existence trust,
+/// and they cost one `stat` — which the directory walk is doing anyway.
+///
+/// This is **not** a content hash, deliberately: hashing means reading every
+/// byte of every file, which is precisely the cost incremental scanning
+/// exists to avoid. A file rewritten in place to exactly its old length with
+/// its old mtime restored will be missed; that is a thing only a deliberate
+/// tool does, and `touch` is the user's escape hatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FileStamp {
+    /// Modification time in nanoseconds relative to the Unix epoch —
+    /// negative for the (theoretical) pre-1970 file.
+    pub mtime_ns: i64,
+    /// File size in bytes.
+    pub size: u64,
+}
+
+impl FileStamp {
+    /// The stamp of a file from its metadata, or `None` when the platform
+    /// cannot report a modification time or the time does not fit in an
+    /// `i64` of nanoseconds (before 1678 or after 2262).
+    ///
+    /// `None` is never a claim that the file is unchanged: an unstamped file
+    /// is always re-read, so an exotic filesystem degrades to the old
+    /// full-rescan behaviour rather than to a stale library.
+    #[must_use]
+    pub fn of(metadata: &std::fs::Metadata) -> Option<Self> {
+        let mtime_ns = match metadata.modified().ok()?.duration_since(UNIX_EPOCH) {
+            Ok(since) => i64::try_from(since.as_nanos()).ok()?,
+            Err(before) => i64::try_from(before.duration().as_nanos())
+                .ok()?
+                .checked_neg()?,
+        };
+        Some(Self {
+            mtime_ns,
+            size: metadata.len(),
+        })
+    }
+
+    /// The stamp of the file at `path`, or `None` if it cannot be stat'ed or
+    /// its timestamp is unrepresentable (see [`FileStamp::of`]). Symlinks are
+    /// followed, matching what reading the file would do.
+    #[must_use]
+    pub fn of_path(path: &Path) -> Option<Self> {
+        Self::of(&std::fs::metadata(path).ok()?)
+    }
+
+    /// The `SystemTime` this stamp's `mtime_ns` denotes, for tests and for
+    /// any caller that wants to restore a timestamp.
+    #[must_use]
+    pub fn modified(self) -> SystemTime {
+        let magnitude = Duration::from_nanos(self.mtime_ns.unsigned_abs());
+        if self.mtime_ns < 0 {
+            UNIX_EPOCH - magnitude
+        } else {
+            UNIX_EPOCH + magnitude
+        }
+    }
+}
+
+/// Every path the index already knows, with the [`FileStamp`] recorded for
+/// it — `None` for a row written before stamps existed (schema v4) that no
+/// rescan has refreshed yet.
+///
+/// This is what [`scan_incremental`] consults to skip unchanged files, and
+/// what a removal pass uses to enumerate the rows a scan did not see. An
+/// entry whose value is `None` is simply always re-read.
+pub type KnownFiles = HashMap<PathBuf, Option<FileStamp>>;
+
 /// Metadata for one audio file, as the indexer and shelf UI will consume it.
 ///
 /// Every descriptive field is optional: files are the source of truth, and
@@ -257,6 +357,17 @@ pub struct TrackMeta {
     /// Audio bitrate in kbit/s as declared or derived by the container; an
     /// average for VBR encodings.
     pub bitrate: Option<u32>,
+    /// The file's size and modification time as of this read — what the next
+    /// scan compares to decide whether the tags above are still current (see
+    /// [`FileStamp`] and [`scan_incremental`]).
+    ///
+    /// `None` means "not known": a filesystem that could not report a usable
+    /// timestamp, or an index row written before schema v4. Such a file is
+    /// always re-read, which is exactly the pre-v4 behaviour.
+    ///
+    /// It describes the *file*, not the work — like the four encoding fields
+    /// above, and unlike them it is not read from the file's contents at all.
+    pub stamp: Option<FileStamp>,
 }
 
 /// One result from a running scan: a successfully read track, or a per-file
@@ -265,6 +376,18 @@ pub struct TrackMeta {
 pub enum ScanEntry {
     /// An audio file that was read successfully.
     Track(TrackMeta),
+    /// An audio file the index already holds whose [`FileStamp`] is
+    /// unchanged, so its tags were **not** re-read (see
+    /// [`scan_incremental`]).
+    ///
+    /// It is reported rather than silently dropped because "we looked at
+    /// this file and it is still there" is exactly the fact a removal pass
+    /// needs: a path that produced no entry at all is a path the scan may
+    /// simply never have reached.
+    Unchanged {
+        /// The file that was skipped.
+        path: PathBuf,
+    },
     /// A file or directory the scanner could not process. The scan continues
     /// past it; the consumer decides whether and how to surface it.
     Failed {
@@ -304,8 +427,30 @@ pub enum ScanError {
 /// [`ScanError::RootNotFound`] if `root` does not exist, and
 /// [`ScanError::RootNotDirectory`] if it is not a directory. Everything after
 /// that is reported in-stream as [`ScanEntry::Failed`].
-pub fn scan(root: impl AsRef<Path>) -> Result<Scan, ScanError> {
-    let root = root.as_ref().to_path_buf();
+pub fn scan(root: impl AsRef<Path>) -> Result<Scan<'static>, ScanError> {
+    start(root.as_ref(), None)
+}
+
+/// Start scanning `root`, reusing what the index already knows.
+///
+/// Identical to [`scan`] except that a file whose [`FileStamp`] matches the
+/// one recorded in `known` is reported as [`ScanEntry::Unchanged`] instead
+/// of being opened and re-tagged. Everything else — new files, files whose
+/// size or mtime moved, files `known` has no stamp for — is read exactly as
+/// [`scan`] reads it, so the two produce the same library from the same
+/// disk; only the work differs.
+///
+/// # Errors
+///
+/// The same two as [`scan`]: [`ScanError::RootNotFound`] and
+/// [`ScanError::RootNotDirectory`].
+pub fn scan_incremental(root: impl AsRef<Path>, known: &KnownFiles) -> Result<Scan<'_>, ScanError> {
+    start(root.as_ref(), Some(known))
+}
+
+/// The body [`scan`] and [`scan_incremental`] share.
+fn start<'a>(root: &Path, known: Option<&'a KnownFiles>) -> Result<Scan<'a>, ScanError> {
+    let root = root.to_path_buf();
     if !root.exists() {
         return Err(ScanError::RootNotFound { path: root });
     }
@@ -313,7 +458,11 @@ pub fn scan(root: impl AsRef<Path>) -> Result<Scan, ScanError> {
         return Err(ScanError::RootNotDirectory { path: root });
     }
     let walker = walkdir::WalkDir::new(&root).into_iter();
-    Ok(Scan { root, walker })
+    Ok(Scan {
+        root,
+        walker,
+        known,
+    })
 }
 
 /// A running scan; see [`scan`].
@@ -335,13 +484,19 @@ pub fn scan(root: impl AsRef<Path>) -> Result<Scan, ScanError> {
 ///
 /// The codec filter costs no extra I/O — the codec comes from the same lofty
 /// read that produced the tags.
+///
+/// A third filter applies only to [`scan_incremental`]: a file whose
+/// [`FileStamp`] matches the index's is reported as
+/// [`ScanEntry::Unchanged`] and never opened.
 #[derive(Debug)]
-pub struct Scan {
+pub struct Scan<'a> {
     root: PathBuf,
     walker: walkdir::IntoIter,
+    /// What the index already holds, when this is an incremental scan.
+    known: Option<&'a KnownFiles>,
 }
 
-impl Iterator for Scan {
+impl Iterator for Scan<'_> {
     type Item = ScanEntry;
 
     fn next(&mut self) -> Option<ScanEntry> {
@@ -360,21 +515,76 @@ impl Iterator for Scan {
                     });
                 }
             };
-            if !entry.file_type().is_file() {
+            if !entry.file_type().is_file() || !has_audio_extension(entry.path()) {
                 continue;
             }
+            // One `stat` — the whole cost of the incremental check, and the
+            // value the row carries forward so the *next* scan can make it.
+            // A file we cannot stat has no stamp and is simply read.
+            let stamp = entry.metadata().ok().and_then(|m| FileStamp::of(&m));
             let path = entry.into_path();
-            if !has_audio_extension(&path) {
-                continue;
+            if self.is_unchanged(&path, stamp) {
+                return Some(ScanEntry::Unchanged { path });
             }
             // `None` is a playable-container-with-unplayable-codec (Ogg
             // Opus in a `.ogg`): not an entry, not a failure. See the type
             // docs.
-            if let Some(entry) = read_track(&self.root, path) {
+            if let Some(entry) = read_track(&self.root, path, stamp) {
                 return Some(entry);
             }
         }
     }
+}
+
+impl Scan<'_> {
+    /// Whether this file's tags can be taken from the index unread: an
+    /// incremental scan, a path the index knows, a stamp recorded for it,
+    /// and a stamp that still matches what is on disk. Any missing link
+    /// means a full read.
+    fn is_unchanged(&self, path: &Path, stamp: Option<FileStamp>) -> bool {
+        let (Some(known), Some(stamp)) = (self.known, stamp) else {
+            return false;
+        };
+        known.get(path).copied().flatten() == Some(stamp)
+    }
+}
+
+/// Whether `path` is **positively confirmed** to no longer exist — the one
+/// question a caller may delete an index row on.
+///
+/// Two conditions, both required:
+///
+/// 1. **The parent directory is present and is a directory.** An absent
+///    parent is not evidence: an unmounted NAS, an unplugged drive and a
+///    deleted folder are indistinguishable from below, and `stat` on a file
+///    under a missing directory returns `NotFound` for all three. Requiring
+///    the parent is what makes "the mount is not here today" cost nothing.
+/// 2. **`symlink_metadata` on the file itself fails with `NotFound`.** Any
+///    other outcome keeps the row: the file existing obviously does, and so
+///    does a permission error or an I/O error, because those say the
+///    filesystem would not answer — not that the answer is "gone".
+///
+/// `symlink_metadata` rather than `metadata` on purpose: a *broken symlink*
+/// is a file that exists (the link does), and deleting the row for one would
+/// be deleting a row for something still on disk.
+///
+/// The residual cost of rule 1 is stated plainly: deleting an entire album
+/// *folder* leaves its rows in the index, because nothing on the filesystem
+/// distinguishes that from the folder being a mount point that is not
+/// mounted right now. Keeping a stale row is a cosmetic bug; deleting a
+/// present listener's library is not, and `docs/BACKLOG.md` carries the gap.
+#[must_use]
+pub fn is_confirmed_gone(path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    if !parent.is_dir() {
+        return false;
+    }
+    matches!(
+        std::fs::symlink_metadata(path),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound
+    )
 }
 
 /// Does the path carry one of [`AUDIO_EXTENSIONS`] (ASCII case-insensitive)?
@@ -397,10 +607,10 @@ fn has_audio_extension(path: &Path) -> bool {
 /// format lofty could not identify at all is *kept*: an honest "unknown
 /// format" row for something we can very likely still play beats dropping a
 /// track on a guess.
-fn read_track(root: &Path, path: PathBuf) -> Option<ScanEntry> {
+fn read_track(root: &Path, path: PathBuf, stamp: Option<FileStamp>) -> Option<ScanEntry> {
     match read_tagged_file(&path) {
         Ok(file) => {
-            let meta = build_meta(root, path, &file);
+            let meta = build_meta(root, path, &file, stamp);
             match meta.format {
                 Some(format) if !format.is_decodable() => None,
                 _ => Some(ScanEntry::Track(meta)),
@@ -439,7 +649,12 @@ fn read_tagged_file(path: &Path) -> Result<TaggedFile, String> {
 
 /// Merge tag data with folder-structure inference. Tags win field by field;
 /// inference only fills what tags leave blank.
-fn build_meta(root: &Path, path: PathBuf, file: &TaggedFile) -> TrackMeta {
+fn build_meta(
+    root: &Path,
+    path: PathBuf,
+    file: &TaggedFile,
+    stamp: Option<FileStamp>,
+) -> TrackMeta {
     // Inference must only ever see the part of the path below the scan root,
     // so directories the user did not choose to scan cannot leak in.
     let relative = path.strip_prefix(root).unwrap_or(&path);
@@ -492,6 +707,7 @@ fn build_meta(root: &Path, path: PathBuf, file: &TaggedFile) -> TrackMeta {
         bit_depth: properties.bit_depth(),
         sample_rate: nonzero(properties.sample_rate()),
         bitrate: nonzero(properties.audio_bitrate()),
+        stamp,
         path,
     }
 }

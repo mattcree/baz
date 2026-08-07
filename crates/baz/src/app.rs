@@ -501,7 +501,9 @@ impl Shelf {
         );
 
         persist_music_dir(&music_dir);
-        let scan_rx = scan::spawn(music_dir);
+        // The snapshot is what makes the scan incremental — and the only
+        // rows it is ever allowed to prune (see `scan::vanished`).
+        let scan_rx = scan::spawn(music_dir, library.known_files());
 
         let mut shelf = Self {
             library,
@@ -646,6 +648,7 @@ impl Shelf {
             return Task::none();
         };
         let mut fresh_tracks: Vec<baz_core::library::TrackMeta> = Vec::new();
+        let mut vanished: Vec<std::path::PathBuf> = Vec::new();
         let mut finished = false;
         loop {
             match rx.try_recv() {
@@ -653,23 +656,25 @@ impl Shelf {
                     self.files_skipped += failed;
                     fresh_tracks.extend(tracks);
                 }
+                Ok(ScanUpdate::Removed { paths }) => vanished.extend(paths),
                 Ok(ScanUpdate::Done {
-                    tracks,
+                    added,
+                    updated,
+                    unchanged,
+                    removed,
                     failed,
                     elapsed,
                 }) => {
                     let secs = elapsed.as_secs_f64();
+                    let read = added + updated;
                     #[expect(
                         clippy::cast_precision_loss,
                         reason = "track counts are far below f64's exact-integer range"
                     )]
-                    let rate = if secs > 0.0 {
-                        tracks as f64 / secs
-                    } else {
-                        0.0
-                    };
+                    let rate = if secs > 0.0 { read as f64 / secs } else { 0.0 };
                     println!(
-                        "[scan] done: {tracks} tracks read, {failed} files skipped, {secs:.1} s ({rate:.0} tracks/s)"
+                        "[scan] done: {added} added, {updated} updated, {unchanged} unchanged, \
+                         {removed} removed, {failed} files skipped, {secs:.1} s ({rate:.0} tracks/s)"
                     );
                     finished = true;
                     break;
@@ -689,10 +694,19 @@ impl Shelf {
         }
 
         let mut task = Task::none();
-        if !fresh_tracks.is_empty() {
+        if !fresh_tracks.is_empty() || !vanished.is_empty() {
             if let Err(error) = self.library.add_tracks(fresh_tracks) {
                 println!("[index] write failed: {error}");
                 self.problem = Some(format!("library write failed: {error}"));
+            }
+            if !vanished.is_empty() {
+                match self.library.remove_tracks(&vanished) {
+                    Ok(count) => println!("[index] {count} vanished tracks removed"),
+                    Err(error) => {
+                        println!("[index] removal failed: {error}");
+                        self.problem = Some(format!("library removal failed: {error}"));
+                    }
+                }
             }
             self.albums = vm::build_albums(&self.library);
             self.refilter();

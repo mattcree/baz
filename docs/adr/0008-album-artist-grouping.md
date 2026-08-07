@@ -113,8 +113,11 @@ copying the stored track artist into it would be indistinguishable, forever
 after, from a value the user's tagger actually wrote. An upgrade must not
 become a full library re-read at startup either.
 
-`NULL` is self-healing: baz rescans on every launch and `add_tracks` upserts,
-so the first scan fills every surviving file's real album artist. Until then
+`NULL` is self-healing: baz rescans at every launch and `add_tracks` upserts,
+so the first scan fills every surviving file's real album artist. (ADR-0010
+made that rescan incremental; a migrated row carries no file stamp, and an
+unstamped row is always re-read, so the first scan after an upgrade is still
+a full one.) Until then
 `AlbumArtist::of` falls through to the track artist and grouping is precisely
 the pre-v3 behaviour — the upgrade cannot make the shelf worse, only later
 better. Both halves are asserted in `crates/baz-core/tests/index.rs` against a

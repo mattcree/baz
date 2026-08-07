@@ -13,8 +13,12 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
-use baz_core::library::{AudioFormat, ScanEntry, ScanError, TrackMeta, scan};
+use baz_core::library::{
+    AudioFormat, FileStamp, KnownFiles, ScanEntry, ScanError, TrackMeta, is_confirmed_gone, scan,
+    scan_incremental,
+};
 use lofty::config::WriteOptions;
 use lofty::prelude::*;
 use lofty::tag::{ItemKey, ItemValue, Tag, TagItem, TagType};
@@ -397,6 +401,12 @@ fn scan_tracks(root: &Path) -> Vec<TrackMeta> {
             ScanEntry::Failed { path, reason } => {
                 panic!("unexpected failure for {}: {reason}", path.display())
             }
+            ScanEntry::Unchanged { path } => {
+                panic!(
+                    "a full scan never skips a file, but skipped {}",
+                    path.display()
+                )
+            }
         })
         .collect()
 }
@@ -570,7 +580,7 @@ fn opus_files_are_not_scanned_at_all() {
     );
     match &entries[0] {
         ScanEntry::Track(meta) => assert_eq!(meta.title.as_deref(), Some("Keeper")),
-        other @ ScanEntry::Failed { .. } => panic!("expected only the wav track, got {other:?}"),
+        other => panic!("expected only the wav track, got {other:?}"),
     }
 }
 
@@ -603,7 +613,7 @@ fn ogg_opus_is_dropped_but_ogg_vorbis_is_kept() {
                 "the surviving .ogg must be the Vorbis one"
             );
         }
-        other @ ScanEntry::Failed { .. } => panic!("expected the Vorbis track, got {other:?}"),
+        other => panic!("expected the Vorbis track, got {other:?}"),
     }
 }
 
@@ -655,9 +665,7 @@ fn a_mislabelled_file_is_read_by_its_content() {
                 "the codec must come from the bytes, not from `.mp3`"
             );
         }
-        other @ ScanEntry::Failed { .. } => {
-            panic!("a mislabelled file must still be read, got {other:?}")
-        }
+        other => panic!("a mislabelled file must still be read, got {other:?}"),
     }
 }
 
@@ -675,14 +683,14 @@ fn corrupt_file_is_reported_and_scan_continues() {
         .iter()
         .filter_map(|e| match e {
             ScanEntry::Track(meta) => Some(meta),
-            ScanEntry::Failed { .. } => None,
+            ScanEntry::Failed { .. } | ScanEntry::Unchanged { .. } => None,
         })
         .collect();
     let failures: Vec<(&PathBuf, &String)> = entries
         .iter()
         .filter_map(|e| match e {
             ScanEntry::Failed { path, reason } => Some((path, reason)),
-            ScanEntry::Track(_) => None,
+            ScanEntry::Track(_) | ScanEntry::Unchanged { .. } => None,
         })
         .collect();
 
@@ -885,5 +893,331 @@ fn file_root_is_a_scan_error() {
     match scan(&file) {
         Err(ScanError::RootNotDirectory { path }) => assert_eq!(path, file),
         other => panic!("expected RootNotDirectory, got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Incremental scanning: the stamp check, and what counts as proof of absence.
+// ---------------------------------------------------------------------------
+
+/// The stamps a full scan of `root` produces, keyed by path — what the index
+/// would hold after that scan (`Library::known_files`).
+fn stamps_from_full_scan(root: &Path) -> KnownFiles {
+    scan_tracks(root)
+        .into_iter()
+        .map(|meta| {
+            assert!(
+                meta.stamp.is_some(),
+                "every track a scan reads must carry the stamp the next scan compares: {}",
+                meta.path.display()
+            );
+            (meta.path, meta.stamp)
+        })
+        .collect()
+}
+
+/// Replace a file's contents with `len` bytes of garbage and put its
+/// modification time back, so its stamp is unchanged but its bytes are not.
+/// Anything that actually *opens* it afterwards fails to parse it.
+fn gut_but_keep_the_stamp(path: &Path, stamp: FileStamp) {
+    let len = usize::try_from(stamp.size).expect("fixtures are small");
+    fs::write(path, vec![0xABu8; len]).expect("overwrite");
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .expect("reopen")
+        .set_modified(stamp.modified())
+        .expect("restore mtime");
+    assert_eq!(
+        FileStamp::of_path(path),
+        Some(stamp),
+        "the fixture must be indistinguishable by size and mtime"
+    );
+}
+
+/// The core claim of incremental scanning: an unchanged file is **not read**.
+///
+/// Proved without trusting a timer or a counter. The file's bytes are
+/// replaced with garbage no parser accepts while its size and mtime are
+/// restored, so a scan that opened it could only report
+/// [`ScanEntry::Failed`]. It reports `Unchanged` instead.
+#[test]
+fn an_unchanged_file_is_reported_without_being_read() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_wav(dir.path(), "Artist/Album/01 - Quiet.wav");
+    write_tags(
+        &path,
+        &Tags {
+            title: Some("Quiet"),
+            ..Tags::default()
+        },
+    );
+    let known = stamps_from_full_scan(dir.path());
+    let stamp = known[&path].expect("a stamp");
+    gut_but_keep_the_stamp(&path, stamp);
+
+    let entries: Vec<ScanEntry> = scan_incremental(dir.path(), &known)
+        .expect("scan starts")
+        .collect();
+    assert_eq!(
+        entries,
+        vec![ScanEntry::Unchanged { path }],
+        "the tags must have been taken from the index, not from the file"
+    );
+}
+
+#[test]
+fn a_touched_file_is_read_again() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_wav(dir.path(), "Artist/Album/01 - Moved.wav");
+    write_tags(
+        &path,
+        &Tags {
+            title: Some("Before"),
+            ..Tags::default()
+        },
+    );
+    let known = stamps_from_full_scan(dir.path());
+
+    // Same bytes, later mtime — a `touch`, or a tagger that rewrote in place.
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .expect("reopen")
+        .set_modified(SystemTime::now() + Duration::from_secs(600))
+        .expect("touch");
+
+    let entries: Vec<ScanEntry> = scan_incremental(dir.path(), &known)
+        .expect("scan starts")
+        .collect();
+    match entries.as_slice() {
+        [ScanEntry::Track(meta)] => {
+            assert_eq!(meta.title.as_deref(), Some("Before"));
+            assert_ne!(
+                meta.stamp, known[&path],
+                "the row must carry the *new* stamp, or every scan re-reads it"
+            );
+        }
+        other => panic!("a touched file must be re-read, got {other:?}"),
+    }
+}
+
+/// Size alone is enough: an edit that lands in the same second on a
+/// coarse-timestamp filesystem still changes the length.
+#[test]
+fn a_file_that_changed_size_is_read_again() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_wav(dir.path(), "Artist/Album/01 - Grew.wav");
+    let known = stamps_from_full_scan(dir.path());
+    let stamp = known[&path].expect("a stamp");
+
+    // Longer file, original mtime restored: only the size gives it away.
+    let mut bytes = fs::read(&path).expect("read");
+    bytes.extend_from_slice(&[0u8; 64]);
+    fs::write(&path, &bytes).expect("grow");
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .expect("reopen")
+        .set_modified(stamp.modified())
+        .expect("restore mtime");
+
+    let entries: Vec<ScanEntry> = scan_incremental(dir.path(), &known)
+        .expect("scan starts")
+        .collect();
+    assert!(
+        matches!(entries.as_slice(), [ScanEntry::Track(_)]),
+        "a size change must force a re-read, got {entries:?}"
+    );
+}
+
+#[test]
+fn a_new_file_is_read_even_when_its_neighbours_are_cached() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let old = write_wav(dir.path(), "Artist/Album/01 - Old.wav");
+    let known = stamps_from_full_scan(dir.path());
+    let fresh = write_wav(dir.path(), "Artist/Album/02 - New.wav");
+    write_tags(
+        &fresh,
+        &Tags {
+            title: Some("New"),
+            ..Tags::default()
+        },
+    );
+
+    let entries: Vec<ScanEntry> = scan_incremental(dir.path(), &known)
+        .expect("scan starts")
+        .collect();
+    assert_eq!(entries.len(), 2);
+    assert!(
+        entries.contains(&ScanEntry::Unchanged { path: old }),
+        "the known file is skipped: {entries:?}"
+    );
+    let read: Vec<&TrackMeta> = entries
+        .iter()
+        .filter_map(|e| match e {
+            ScanEntry::Track(meta) => Some(meta),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(read.len(), 1);
+    assert_eq!(read[0].path, fresh);
+    assert_eq!(read[0].title.as_deref(), Some("New"));
+}
+
+/// A row the index has no stamp for — every row, on the first launch after
+/// the v4 upgrade — is read, not assumed current.
+#[test]
+fn a_known_path_without_a_stamp_is_still_read() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_wav(dir.path(), "Artist/Album/01 - Unstamped.wav");
+    let known: KnownFiles = KnownFiles::from([(path.clone(), None)]);
+
+    let entries: Vec<ScanEntry> = scan_incremental(dir.path(), &known)
+        .expect("scan starts")
+        .collect();
+    match entries.as_slice() {
+        [ScanEntry::Track(meta)] => assert!(meta.stamp.is_some(), "and it gains one"),
+        other => panic!("an unstamped row must be re-read, got {other:?}"),
+    }
+}
+
+/// The stamps in the cache are matched **per path**. A file that happens to
+/// share another file's size and mtime — trivially true of two files written
+/// in the same instant — must not inherit its cached row.
+#[test]
+fn a_stamp_belongs_to_one_path_only() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let one = write_wav(dir.path(), "Artist/Album/01 - One.wav");
+    let two = write_wav(dir.path(), "Artist/Album/02 - Two.wav");
+    // Give them genuinely identical stamps.
+    let stamp = FileStamp::of_path(&one).expect("a stamp");
+    fs::File::options()
+        .write(true)
+        .open(&two)
+        .expect("reopen")
+        .set_modified(stamp.modified())
+        .expect("align mtime");
+    assert_eq!(FileStamp::of_path(&two), Some(stamp));
+
+    // Only `one` is in the index.
+    let known: KnownFiles = KnownFiles::from([(one.clone(), Some(stamp))]);
+    let entries: Vec<ScanEntry> = scan_incremental(dir.path(), &known)
+        .expect("scan starts")
+        .collect();
+    assert!(entries.contains(&ScanEntry::Unchanged { path: one }));
+    assert!(
+        entries
+            .iter()
+            .any(|e| matches!(e, ScanEntry::Track(meta) if meta.path == two)),
+        "the unknown file must be read despite a matching stamp: {entries:?}"
+    );
+}
+
+/// A plain [`scan`] ignores everything the index knows — it is the full pass,
+/// unchanged from before v4, and still the one an empty library performs.
+#[test]
+fn a_full_scan_never_skips_anything() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_wav(dir.path(), "Artist/Album/01 - One.wav");
+    let known = stamps_from_full_scan(dir.path());
+    assert_eq!(known.len(), 1);
+
+    let entries: Vec<ScanEntry> = scan(dir.path()).expect("scan starts").collect();
+    assert!(matches!(entries.as_slice(), [ScanEntry::Track(_)]));
+}
+
+#[test]
+fn a_file_that_is_really_gone_is_confirmed_gone() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_wav(dir.path(), "Artist/Album/01 - Doomed.wav");
+    assert!(
+        !is_confirmed_gone(&path),
+        "a file that is present is never confirmed gone"
+    );
+    fs::remove_file(&path).expect("delete");
+    assert!(is_confirmed_gone(&path));
+}
+
+/// The conservative rule: a missing *directory* proves nothing about the
+/// files under it. An unplugged drive, an unmounted share and a deleted
+/// folder all answer `NotFound` for every path below, so none of them may
+/// authorise a delete.
+#[test]
+fn a_file_under_a_missing_directory_is_not_confirmed_gone() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("NAS/Artist/Album/01 - Unplugged.wav");
+    assert!(!path.exists());
+    assert!(
+        !is_confirmed_gone(&path),
+        "no parent directory means no evidence"
+    );
+
+    // Once the directory is back and the file still is not, the answer flips.
+    make_dirs(&path);
+    assert!(is_confirmed_gone(&path));
+}
+
+/// A broken symlink is a directory entry that exists. Removing its row would
+/// be removing a row for something still on disk.
+#[cfg(unix)]
+#[test]
+fn a_broken_symlink_is_not_confirmed_gone() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let link = dir.path().join("Artist/Album/01 - Dangling.wav");
+    make_dirs(&link);
+    std::os::unix::fs::symlink(dir.path().join("nowhere.wav"), &link).expect("symlink");
+    assert!(fs::metadata(&link).is_err(), "the target really is missing");
+    assert!(!is_confirmed_gone(&link), "the link itself is still there");
+}
+
+/// A directory that exists but cannot be read answers with a permission
+/// error, not `NotFound` — and a permission error is not evidence of
+/// absence. (Skipped when the test runs as root, for whom nothing is
+/// unreadable.)
+#[cfg(unix)]
+#[test]
+fn a_file_in_an_unreadable_directory_is_not_confirmed_gone() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let locked = dir.path().join("Locked");
+    fs::create_dir_all(&locked).expect("mkdir");
+    let path = locked.join("01 - Hidden.wav");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).expect("lock");
+
+    let unreadable = fs::symlink_metadata(&path)
+        .err()
+        .is_some_and(|err| err.kind() != std::io::ErrorKind::NotFound);
+    if unreadable {
+        assert!(
+            !is_confirmed_gone(&path),
+            "\"I was not allowed to look\" is not \"it is not there\""
+        );
+    }
+    // Restore, or the tempdir cannot be cleaned up.
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("unlock");
+}
+
+#[test]
+fn a_stamp_survives_a_round_trip_through_system_time() {
+    for mtime_ns in [0, 1, 1_700_000_000_123_456_789, -86_400_000_000_001] {
+        let stamp = FileStamp {
+            mtime_ns,
+            size: 123,
+        };
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = write_wav(dir.path(), "a.wav");
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .expect("reopen")
+            .set_modified(stamp.modified())
+            .expect("set mtime");
+        assert_eq!(
+            FileStamp::of_path(&path).map(|s| s.mtime_ns),
+            Some(mtime_ns),
+            "the filesystem must give back the nanosecond count we set"
+        );
     }
 }

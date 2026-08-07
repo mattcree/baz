@@ -97,6 +97,7 @@ fn synthetic_tracks() -> Vec<TrackMeta> {
                     bit_depth: Some(16),
                     sample_rate: Some(44_100),
                     bitrate: Some(900),
+                    stamp: None,
                 });
             }
         }
