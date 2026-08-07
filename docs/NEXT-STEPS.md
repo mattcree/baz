@@ -2,7 +2,7 @@
 
 > Concrete, ordered, with acceptance criteria. Standards in `ENGINEERING.md`; vision in `VISION.md`. Updated 2026-08-07.
 >
-> **Status**: Phase 0 ✅ (ADRs 0001–0003) · Phase 1 ✅ (spikes complete and deleted per standing rule; results in ADR-0004/0005 and at `git show dc13d7e`) · **Phase 2 is next.** GUI = iced (ADR-0005). Dev environment: `docs/DEVELOPMENT.md`.
+> **Status**: Phase 0 ✅ (ADRs 0001–0003) · Phase 1 ✅ (spikes complete and deleted; results in ADR-0004/0005, code at `git show dc13d7e`) · Phase 2 ✅ locally (`b8bcac6`: workspace + all gates green; CI workflow written but unexercised until a GitHub remote exists) · **Remaining before Phase 3**: push to GitHub (CI must go green there), reserve `baz`/`baz-core`/`baz-player` on crates.io (ADR-0002), then start the v0.1 vertical slice.
 
 ## Phase 0 — Decisions (hours, not days)
 
