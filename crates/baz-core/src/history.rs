@@ -1,5 +1,5 @@
 //! The play-history ledger: an append-only, plain-text record of what was
-//! played, kept beside the library in the user's own data directory (ADR-0016).
+//! played, kept beside the library in the user's own data directory (ADR-0018).
 //!
 //! History is the one thing in baz that **cannot be backfilled**. A missing
 //! thumbnail cache rebuilds; a missing ReplayGain figure re-measures; a day of

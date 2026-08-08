@@ -1,4 +1,4 @@
-//! Fuzz the history ledger's line reader (ADR-0016): arbitrary bytes must
+//! Fuzz the history ledger's line reader (ADR-0018): arbitrary bytes must
 //! produce `Some` or `None`, never a panic, and anything accepted must
 //! round-trip back to the exact same line.
 //!

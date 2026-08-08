@@ -131,7 +131,7 @@ next commit.
 **History**
 
 - **An append-only play-history ledger** at `$XDG_DATA_HOME/baz/history.tsv`,
-  beside the library and in plain text (ADR-0016). One tab-separated line per
+  beside the library and in plain text (ADR-0018). One tab-separated line per
   play — `started_utc`, `played`/`skipped`, `listened_ms`, `track_ms`, path —
   documented by a comment header inside the file itself, so it is greppable,
   `awk`-able, backup-able and deletable without any tool knowing what baz is.

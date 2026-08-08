@@ -1,4 +1,4 @@
-# ADR-0016: The play-history ledger — a plain append-only file, written by the engine, that nothing sends anywhere
+# ADR-0018: The play-history ledger — a plain append-only file, written by the engine, that nothing sends anywhere
 
 **Status**: accepted (2026-08-08) · first unit of the `docs/design/critique` build order, which puts history **before everything else** · introduces `baz_core::history` and `Event::PlayRecorded` · **not** a schema change: the ledger is deliberately not in `library.db` (see §3)
 

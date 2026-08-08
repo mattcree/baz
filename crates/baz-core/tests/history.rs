@@ -1,4 +1,4 @@
-//! Integration tests for the play-history ledger (ADR-0016): a real engine
+//! Integration tests for the play-history ledger (ADR-0018): a real engine
 //! run, and then assertions **on the file** rather than on intentions.
 //!
 //! Everything here is headless (`spawn_offline`) and everything here writes to

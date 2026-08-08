@@ -653,7 +653,7 @@ pub enum Event {
         /// because it ran out of work.
         cancelled: bool,
     },
-    /// A play was written to the history ledger (ADR-0016).
+    /// A play was written to the history ledger (ADR-0018).
     ///
     /// # What it means, precisely
     ///
@@ -688,7 +688,7 @@ pub enum Event {
     /// nothing to it, and hearing a passage twice counts it twice.
     ///
     /// **This is not a scrobble.** Scrobbling is an optional consumer of this
-    /// event and never a dependency of it (ADR-0016); the ledger is complete
+    /// event and never a dependency of it (ADR-0018); the ledger is complete
     /// whether or not anything is listening here.
     PlayRecorded {
         /// The file that was played.
@@ -715,7 +715,7 @@ pub enum Event {
 }
 
 /// Whether a play met the threshold, in [`Event::PlayRecorded`] and in the
-/// ledger (ADR-0016).
+/// ledger (ADR-0018).
 ///
 /// Two states rather than a `bool` for [`SignalChain`]'s reason: "played" and
 /// "skipped" are different facts about a listening session and a front end that
@@ -1245,7 +1245,7 @@ mod tests {
         .collect()
     }
 
-    /// The [`Event::PlayRecorded`] samples (ADR-0016).
+    /// The [`Event::PlayRecorded`] samples (ADR-0018).
     fn sample_history_events() -> Vec<Event> {
         vec![
             Event::PlayRecorded {
@@ -2076,7 +2076,7 @@ mod tests {
         }
     }
 
-    /// [`Event::PlayRecorded`]'s bytes, pinned (ADR-0016) — split from its
+    /// [`Event::PlayRecorded`]'s bytes, pinned (ADR-0018) — split from its
     /// siblings above for the reason the others were: one test listing every
     /// variant of a growing enum outgrows what is readable, not because the
     /// contract is any weaker.

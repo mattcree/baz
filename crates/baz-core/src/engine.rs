@@ -457,7 +457,7 @@
 //!
 //! # Play history
 //!
-//! ADR-0016 is the governing decision and [`crate::history`] holds the file
+//! ADR-0018 is the governing decision and [`crate::history`] holds the file
 //! format, the play/skip rule and the privacy stance. What belongs *here* is
 //! where a play begins and ends, what is counted, and why the writing happens
 //! in the engine at all.
@@ -761,7 +761,7 @@ impl EngineHandle {
     }
 
     /// Give the engine a play-history ledger to append to, or `None` to detach
-    /// (ADR-0016).
+    /// (ADR-0018).
     ///
     /// # Why the engine writes it, and a front end does not
     ///
@@ -1232,7 +1232,7 @@ struct Control<S: Sink> {
     scratch: Box<[f32]>,
     sink: S,
     /// Where finished plays are appended, or `None` — the default, and the
-    /// state of an engine no front end has handed a ledger to (ADR-0016).
+    /// state of an engine no front end has handed a ledger to (ADR-0018).
     ///
     /// Shared with [`EngineHandle::set_history`], which is the only writer, on
     /// exactly the terms [`Self::computed_gains`] is: read on this thread once
@@ -1267,7 +1267,7 @@ struct Control<S: Sink> {
     resume_play: bool,
 }
 
-/// A play the engine is still accumulating (ADR-0016).
+/// A play the engine is still accumulating (ADR-0018).
 ///
 /// Becomes a [`PlayRecord`] when the track stops being the one being delivered
 /// — or nothing at all, if no audio ever reached the sink.
@@ -1383,7 +1383,7 @@ impl<S: Sink> Control<S> {
         }
         // Shutdown: the play in progress is finished listening to, so it is
         // written before the session it was measured from goes away
-        // (ADR-0016). A front end closing is not a reason to lose the album
+        // (ADR-0018). A front end closing is not a reason to lose the album
         // somebody just heard.
         self.end_play();
         // Dropping the session sets its stop flag and joins the producer (and
@@ -1393,7 +1393,7 @@ impl<S: Sink> Control<S> {
     }
 
     /// Fold the audio the running session has delivered for the track it is on
-    /// into the play in progress (ADR-0016).
+    /// into the play in progress (ADR-0018).
     ///
     /// **Idempotent**: it remembers how much of this delivery segment it has
     /// already counted, so calling it twice counts nothing twice and calling it
@@ -1414,7 +1414,7 @@ impl<S: Sink> Control<S> {
     }
 
     /// Hand the play in progress to the ledger, if there is one and if anything
-    /// was heard (ADR-0016).
+    /// was heard (ADR-0018).
     ///
     /// Banks nothing itself: the caller has already done that, because *when*
     /// to bank and *when* to close are different moments at a track boundary —
@@ -1454,7 +1454,7 @@ impl<S: Sink> Control<S> {
     }
 
     /// Emit the session's per-track events, keeping the ledger's notion of
-    /// which track is being delivered in step with them (ADR-0016).
+    /// which track is being delivered in step with them (ADR-0018).
     ///
     /// The one place [`Session::report`] is called, so that the bank-report-roll
     /// order is stated once rather than at every call site. A `report` that
@@ -1482,7 +1482,7 @@ impl<S: Sink> Control<S> {
     }
 
     /// Close the play in progress and open one for `next`, unless a seek said
-    /// the two are the same listening act (ADR-0016).
+    /// the two are the same listening act (ADR-0018).
     fn roll_play(&mut self, next: Option<(PathBuf, Option<u64>)>) {
         let continues = self.resume_play
             && match (self.play.as_ref(), next.as_ref()) {
@@ -1575,7 +1575,7 @@ impl<S: Sink> Control<S> {
             self.report_session(true);
             let resume_at = self.session.as_ref().and_then(Session::rate_change_at);
             // The last of this session's audio has been delivered; count it
-            // before the session it is counted from goes away (ADR-0016).
+            // before the session it is counted from goes away (ADR-0018).
             self.bank_listening();
             self.session = None; // joins the (already finished) producer
             self.close_play();
@@ -2013,7 +2013,7 @@ impl<S: Sink> Control<S> {
     fn abandon_for_move(&mut self) {
         // Count what this session delivered before it goes away; whether the
         // play *ends* here is [`Self::start_session`]'s question, because a
-        // seek is a move that does not end one (ADR-0016).
+        // seek is a move that does not end one (ADR-0018).
         self.bank_listening();
         let Some(session) = self.session.take() else {
             return; // stopped: nothing to abandon
@@ -2033,7 +2033,7 @@ impl<S: Sink> Control<S> {
     fn hand_over_after_edit(&mut self) {
         let next = self.playing_index().map_or(0, |current| current + 1);
         // The track this session was told to finish has been delivered in
-        // full — count it before the session goes away (ADR-0016).
+        // full — count it before the session goes away (ADR-0018).
         self.bank_listening();
         self.session = None; // joins the (finished or aborted) producer
         self.sink.drain_buffered();
@@ -2092,7 +2092,7 @@ impl<S: Sink> Control<S> {
         }
         // Seeking inside a track is one listening act, not two: the play in
         // progress carries across the new session rather than being written out
-        // and started again (ADR-0016). Without this, dragging the needle three
+        // and started again (ADR-0018). Without this, dragging the needle three
         // times would file four half-listens where one person heard one album
         // track.
         self.resume_play = true;
@@ -2196,7 +2196,7 @@ impl<S: Sink> Control<S> {
     fn stop_session(&mut self) {
         // Whatever has been heard is heard, and stopping is the end of hearing
         // it: bank while the session is still here to be measured, and write
-        // the line (ADR-0016).
+        // the line (ADR-0018).
         self.bank_listening();
         if let Some(session) = self.session.take() {
             drop(session);
@@ -2222,7 +2222,7 @@ impl<S: Sink> Control<S> {
         // any translation left over from an edit is spent (ADR-0014).
         self.edited_index = None;
         // A session that starts a track from its beginning ends the play in
-        // progress; a session created by a *seek* continues it (ADR-0016).
+        // progress; a session created by a *seek* continues it (ADR-0018).
         // Either way the delivery segment restarts, and so does the session's
         // own start counter.
         let continues = std::mem::take(&mut self.resume_play);
@@ -2240,7 +2240,7 @@ impl<S: Sink> Control<S> {
             self.position = 0;
             // Nothing will start, so a seek's continuation has nowhere to land:
             // the play in progress ends here rather than waiting for a track
-            // that is never coming (ADR-0016).
+            // that is never coming (ADR-0018).
             self.close_play();
             let _ = self.events.send(Event::QueueEnded);
             return;
@@ -2457,7 +2457,7 @@ struct Session {
     /// Engine-thread state only — the producer learns the answer from
     /// [`SessionShared::stream_rate`].
     rate_settled: bool,
-    /// How many [`Event::TrackStarted`]s this session has emitted (ADR-0016).
+    /// How many [`Event::TrackStarted`]s this session has emitted (ADR-0018).
     ///
     /// A counter rather than a flag because the ledger's question is "did the
     /// track being delivered change since I last looked", and one
@@ -2607,7 +2607,7 @@ impl Session {
     }
 
     /// Milliseconds of the **current track's own audio** this session has
-    /// delivered — what the history ledger counts (ADR-0016).
+    /// delivered — what the history ledger counts (ADR-0018).
     ///
     /// [`Self::elapsed_ms`] with both of its presentation adjustments removed,
     /// and the removals are the point. The seek offset is gone because a
@@ -2642,7 +2642,7 @@ impl Session {
         }
     }
 
-    /// How many tracks this session has reported as started (ADR-0016).
+    /// How many tracks this session has reported as started (ADR-0018).
     fn starts(&self) -> u64 {
         self.starts
     }
@@ -2929,7 +2929,7 @@ impl Session {
                     self.track_origin = start_sample;
                     self.track_ms = self.durations[i];
                     // The ledger's cue that the track being delivered changed
-                    // (ADR-0016). Counted here, beside the event, because this
+                    // (ADR-0018). Counted here, beside the event, because this
                     // is the one place a track becomes the current one.
                     self.starts += 1;
                     // The chain follows the track it describes, and is stated
