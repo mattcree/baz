@@ -200,7 +200,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::protocol::{Event, PlayOutcome};
 
-mod format;
+// Crate-visible: [`crate::playlist`] borrows `format_timestamp` for its
+// provenance comment rather than growing a second calendar.
+pub(crate) mod format;
 mod read;
 
 pub use read::{
