@@ -9,13 +9,19 @@
 //! which is what makes it unit-testable in a table and fuzzable without a
 //! decoder.
 //!
-//! # Scope: read the tags, do not compute them
+//! # Scope: the tags, and how a measurement is chosen against them
 //!
 //! baz honours `REPLAYGAIN_*` values that a scanner (foobar2000, `rsgain`,
-//! `metaflac`, `loudgain`, …) already wrote into the files. *Computing* them —
-//! an EBU R128 analysis pass over every track in a library — is a separate,
-//! much larger unit and is not here. A library with no ReplayGain tags plays
-//! exactly as it did before this module existed.
+//! `metaflac`, `loudgain`, …) already wrote into the files. Since ADR-0015 it
+//! can also **compute** them for a file that carries none — the meter is
+//! [`crate::loudness`] and the pass that drives it over a library is
+//! [`crate::analysis`], neither of which is here. What *is* here is the rule
+//! that chooses between the two ([`ReplayGainSettings::resolve_with`]) and the
+//! type a measurement travels in ([`ComputedReplayGain`]).
+//!
+//! **Tags win, field by field.** A library that has never been measured
+//! behaves exactly as it did before ADR-0015 existed, and a library that has
+//! been measured still plays its tagged tracks at their tagged levels.
 //!
 //! # The units are integers, and that is a decision
 //!
@@ -421,6 +427,101 @@ fn fill<T>(slot: &mut Option<T>, value: Option<T>) -> bool {
     }
 }
 
+/// What a ReplayGain **analysis** measured for one file, and which version of
+/// the file it measured (ADR-0015).
+///
+/// The four figures are the same four a tag carries, in the same units, which
+/// is what lets [`ReplayGainSettings::resolve_with`] choose between them field
+/// by field. What makes this type different from [`ReplayGainTags`] is the
+/// second field: a computed figure is a claim about a file's *samples*, so it
+/// stops being true the moment the file changes, and it therefore has to
+/// remember which file it was.
+///
+/// Stored in the index in its own columns (schema v6), never mixed into the
+/// tag columns — so a rescan, which knows nothing about measurements, cannot
+/// overwrite one, and a listener asking where a figure came from gets the true
+/// answer from the storage layer up.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct ComputedReplayGain {
+    /// The measured figures, in the units [`ReplayGainTags`] uses.
+    pub figures: ReplayGainTags,
+    /// The file as it was when it was measured — the stamp the index held for
+    /// it at that moment ([`FileStamp`](crate::library::FileStamp)).
+    ///
+    /// `None` means the measurement cannot be shown to still apply, which is
+    /// the honest state for a file the filesystem would not timestamp, and it
+    /// is treated as stale rather than as fresh ([`Self::figures_for`]).
+    /// ADR-0010 made the same call for the scan stamp and for the same reason:
+    /// `None` is never a claim of freshness.
+    pub stamp: Option<crate::library::FileStamp>,
+}
+
+impl ComputedReplayGain {
+    /// Whether this measurement still describes the file the index now knows,
+    /// whose stamp is `current`.
+    ///
+    /// Both stamps must be present *and* equal. A missing stamp on either side
+    /// is not a match: a measurement of a file that cannot be identified is a
+    /// measurement of something, and "something" is not enough to play a gain
+    /// from.
+    #[must_use]
+    pub fn is_fresh_for(self, current: Option<crate::library::FileStamp>) -> bool {
+        matches!((self.stamp, current), (Some(a), Some(b)) if a == b)
+    }
+
+    /// The figures, if they still describe the file whose stamp is `current`,
+    /// and nothing otherwise.
+    ///
+    /// The only accessor the selection path uses, so a stale measurement
+    /// cannot reach a gain stage by anybody forgetting to check.
+    #[must_use]
+    pub fn figures_for(self, current: Option<crate::library::FileStamp>) -> ReplayGainTags {
+        if self.is_fresh_for(current) {
+            self.figures
+        } else {
+            ReplayGainTags::default()
+        }
+    }
+
+    /// Whether nothing was measured at all.
+    #[must_use]
+    pub fn is_empty(self) -> bool {
+        self.figures.is_empty()
+    }
+}
+
+/// Where the engine looks for figures baz measured itself (ADR-0015).
+///
+/// The engine is given **paths and nothing else** — that is ADR-0013 §7, and it
+/// is what makes a queue the library has never seen play at the right level. A
+/// computed figure, unlike a tag, is not in the file, so there has to be
+/// somewhere to ask; this trait is that seam, and
+/// [`EngineHandle::set_computed_gains`](crate::engine::EngineHandle::set_computed_gains)
+/// is how a front end plugs its library into it.
+///
+/// It is a trait rather than a concrete map for the reason
+/// [`Sink::set_device_volume`](crate::playback::Sink::set_device_volume) is a
+/// trait method rather than an unimplemented enum variant (ADR-0011 §7): the
+/// branch is reachable by a test double *today*, so the engine's half of the
+/// arrangement is tested before anything ships behind it.
+///
+/// # Contract
+///
+/// - **Answer without blocking.** It is consulted on the engine's control
+///   thread at a track boundary, between pump iterations. It is never on the
+///   realtime path — the resolved gain is folded into the single number the
+///   pump reads — but a boundary is not a place to do I/O.
+/// - **Answer with fresh figures only.** Staleness is the implementation's
+///   business ([`ComputedReplayGain::figures_for`]); by the time a figure
+///   reaches the engine it is a figure to be used.
+/// - **All-`None` is a perfectly good answer** and is what an unmeasured
+///   library returns for everything.
+pub trait ComputedGains: std::fmt::Debug + Send + Sync {
+    /// The figures baz measured for `path`, or all-`None` if it has measured
+    /// none that still apply.
+    fn computed(&self, path: &std::path::Path) -> ReplayGainTags;
+}
+
 /// How ReplayGain is configured: the mode, the two pre-amps, and whether to
 /// stay below full scale.
 ///
@@ -540,25 +641,72 @@ impl ReplayGainSettings {
     /// is nothing to clip, and `1/0` is not a gain.
     #[must_use]
     pub fn resolve(self, tags: ReplayGainTags) -> ReplayGainDecision {
+        self.resolve_with(tags, ReplayGainTags::default())
+    }
+
+    /// [`Self::resolve`], with baz's **own measurements** as a second source
+    /// of figures (ADR-0015).
+    ///
+    /// `computed` is what a ReplayGain analysis pass measured for this file —
+    /// all-`None` for a file nothing has measured, which is what makes
+    /// [`Self::resolve`] exactly this function with an empty second argument
+    /// rather than a different rule that could drift from it.
+    ///
+    /// # Tags win, field by field
+    ///
+    /// For every figure the mode needs, a value the **file** carries is used in
+    /// preference to one baz computed. Three reasons, in order of weight:
+    ///
+    /// 1. **The tag is what the listener's other software will use.** A library
+    ///    is played by more than one program, and a track that is 0.3 dB
+    ///    different in baz than in foobar2000 is a difference nobody asked for.
+    /// 2. **The tag may encode a decision.** A scanner run with a different
+    ///    reference, or a figure a user edited by hand, is a statement about
+    ///    how the file should be played; baz's measurement is a statement about
+    ///    what is in it. The first outranks the second.
+    /// 3. **It makes the analysis pass safe to run.** Measuring a library can
+    ///    never change how an already-tagged track sounds, so "analyse my
+    ///    library" carries no risk of undoing work a scanner already did.
+    ///
+    /// Field by field rather than whole-set, because the two sets are not
+    /// alternatives: a file may carry a track gain and no album gain, and an
+    /// album figure baz measured is the right answer for the second without
+    /// disturbing the first.
+    ///
+    /// # Which peak
+    ///
+    /// The peak follows the **gain's own origin** first, then the other origin,
+    /// then the other field — so a tagged gain is clip-checked against the
+    /// tagged peak where there is one, and against baz's measured peak where
+    /// the file gives none. That second case is a strict improvement on
+    /// ADR-0013's "no peak declared, so apply the gain in full": a peak baz
+    /// measured is a fact about the same samples.
+    ///
+    /// The [`ReplayGainSource`] reported names the origin as well as the field
+    /// — [`ReplayGainSource::ComputedTrack`] beside
+    /// [`ReplayGainSource::Track`] — so "where did this figure come from" has a
+    /// true answer rather than a plausible one.
+    #[must_use]
+    pub fn resolve_with(
+        self,
+        tags: ReplayGainTags,
+        computed: ReplayGainTags,
+    ) -> ReplayGainDecision {
         let (source, gain, peak) = match self.mode {
             ReplayGainMode::Off => return ReplayGainDecision::UNITY,
-            ReplayGainMode::Track => (
-                ReplayGainSource::Track,
-                tags.track_gain_centidb,
-                tags.track_peak_micro,
-            ),
-            ReplayGainMode::Album => match tags.album_gain_centidb {
-                Some(gain) => (
-                    ReplayGainSource::Album,
+            ReplayGainMode::Track => match (tags.track_gain_centidb, computed.track_gain_centidb) {
+                (Some(gain), _) => (
+                    ReplayGainSource::Track,
                     Some(gain),
-                    tags.album_peak_micro.or(tags.track_peak_micro),
+                    first([tags.track_peak_micro, computed.track_peak_micro]),
                 ),
-                None => (
-                    ReplayGainSource::TrackFallback,
-                    tags.track_gain_centidb,
-                    tags.track_peak_micro.or(tags.album_peak_micro),
+                (None, computed_gain) => (
+                    ReplayGainSource::ComputedTrack,
+                    computed_gain,
+                    first([computed.track_peak_micro, tags.track_peak_micro]),
                 ),
             },
+            ReplayGainMode::Album => album_figure(tags, computed),
         };
         let Some(gain) = gain else {
             return ReplayGainDecision {
@@ -589,6 +737,84 @@ impl ReplayGainSettings {
             },
         }
     }
+}
+
+/// The first present value, in the order given — the "prefer this, then that"
+/// chain [`ReplayGainSettings::resolve_with`] is written in terms of.
+fn first<T: Copy, const N: usize>(candidates: [Option<T>; N]) -> Option<T> {
+    candidates.into_iter().flatten().next()
+}
+
+/// [`ReplayGainMode::Album`]'s half of [`ReplayGainSettings::resolve_with`]:
+/// which album figure to use, from which origin, and which peak goes with it.
+///
+/// Split out because the four-way choice (album or track figure × tagged or
+/// computed) is the one part of the selection rule that does not read as one
+/// expression, and the rule is the thing this module exists to state clearly.
+/// The order is: the file's album gain, then baz's measured album gain, then
+/// the file's track gain, then baz's measured track gain — tags before
+/// measurements at each level, and an *album* figure of either origin before a
+/// track figure of either, because album mode exists to preserve the level
+/// relationships inside an album and a track figure removes them.
+fn album_figure(
+    tags: ReplayGainTags,
+    computed: ReplayGainTags,
+) -> (ReplayGainSource, Option<i16>, Option<u32>) {
+    // Album peaks before track peaks, own origin before the other: the album
+    // peak is the loudest sample anywhere in the album, which is what makes
+    // album mode reduce every track of it by the same amount (ADR-0013 §3).
+    let album_peaks = |own_first: bool| {
+        if own_first {
+            first([
+                tags.album_peak_micro,
+                computed.album_peak_micro,
+                tags.track_peak_micro,
+                computed.track_peak_micro,
+            ])
+        } else {
+            first([
+                computed.album_peak_micro,
+                tags.album_peak_micro,
+                computed.track_peak_micro,
+                tags.track_peak_micro,
+            ])
+        }
+    };
+    if let Some(gain) = tags.album_gain_centidb {
+        return (ReplayGainSource::Album, Some(gain), album_peaks(true));
+    }
+    if let Some(gain) = computed.album_gain_centidb {
+        return (
+            ReplayGainSource::ComputedAlbum,
+            Some(gain),
+            album_peaks(false),
+        );
+    }
+    // No album figure of either origin: a single downloaded track has no album
+    // to be relative to, and playing it unnormalised would be worse than
+    // playing it as its own album of one (ADR-0013 §3, rule 3).
+    if let Some(gain) = tags.track_gain_centidb {
+        return (
+            ReplayGainSource::TrackFallback,
+            Some(gain),
+            first([
+                tags.track_peak_micro,
+                computed.track_peak_micro,
+                tags.album_peak_micro,
+                computed.album_peak_micro,
+            ]),
+        );
+    }
+    (
+        ReplayGainSource::ComputedTrackFallback,
+        computed.track_gain_centidb,
+        first([
+            computed.track_peak_micro,
+            tags.track_peak_micro,
+            computed.album_peak_micro,
+            tags.album_peak_micro,
+        ]),
+    )
 }
 
 /// The largest gain, in whole centidecibels, that keeps `peak` at or below full
@@ -774,6 +1000,9 @@ const fn source_code(source: ReplayGainSource) -> u32 {
         ReplayGainSource::Album => 2,
         ReplayGainSource::TrackFallback => 3,
         ReplayGainSource::NoTag => 4,
+        ReplayGainSource::ComputedTrack => 5,
+        ReplayGainSource::ComputedAlbum => 6,
+        ReplayGainSource::ComputedTrackFallback => 7,
     }
 }
 
@@ -784,6 +1013,9 @@ const fn source_from_code(code: u32) -> ReplayGainSource {
         2 => ReplayGainSource::Album,
         3 => ReplayGainSource::TrackFallback,
         4 => ReplayGainSource::NoTag,
+        5 => ReplayGainSource::ComputedTrack,
+        6 => ReplayGainSource::ComputedAlbum,
+        7 => ReplayGainSource::ComputedTrackFallback,
         _ => ReplayGainSource::Disabled,
     }
 }

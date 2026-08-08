@@ -8,8 +8,8 @@
 
 use std::f64::consts::PI;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -22,7 +22,7 @@ use baz_core::playback::PlaybackError;
 use baz_core::protocol::{
     Command, ConversionReason, Event, ReplayGainMode, ReplayGainSource, SignalChain, VolumePath,
 };
-use baz_core::replaygain::MAX_PREAMP_CENTIDB;
+use baz_core::replaygain::{ComputedGains, MAX_PREAMP_CENTIDB, ReplayGainTags};
 use baz_core::volume::{MAX_POSITION, RAMP_MS, Volume, VolumeState};
 
 /// Test tone parameters (arbitrary; equality checks are exact either way).
@@ -3551,5 +3551,268 @@ fn out_of_range_pre_amps_clamp_and_are_reported_clamped() {
         engine.replay_gain().settings.preamp_centidb,
         MAX_PREAMP_CENTIDB
     );
+    engine.shutdown();
+}
+
+// ---------------------------------------------------------------------------
+// Computed ReplayGain reaching playback (ADR-0015)
+// ---------------------------------------------------------------------------
+
+/// A [`ComputedGains`] double: the map a library would hand the engine, built
+/// by hand so the seam is exercised without a database.
+///
+/// This is the ADR-0011 §7 pattern — the branch is reachable by a test double
+/// *today*, so the engine's half of the arrangement is tested before a front
+/// end wires the real one in.
+#[derive(Debug, Default)]
+struct MeasuredLibrary(std::collections::HashMap<PathBuf, ReplayGainTags>);
+
+impl MeasuredLibrary {
+    fn with(path: &Path, figures: ReplayGainTags) -> Arc<Self> {
+        let mut map = std::collections::HashMap::new();
+        map.insert(path.to_path_buf(), figures);
+        Arc::new(Self(map))
+    }
+}
+
+impl ComputedGains for MeasuredLibrary {
+    fn computed(&self, path: &Path) -> ReplayGainTags {
+        self.0.get(path).copied().unwrap_or_default()
+    }
+}
+
+/// Play `queue` with a measured-gain snapshot attached before playback starts,
+/// returning the delivered samples and the ReplayGain the engine reported.
+fn play_with_measurements(
+    queue: &[PathBuf],
+    capacity: usize,
+    gains: Arc<dyn ComputedGains>,
+    commands: &[Command],
+) -> (Vec<f32>, Vec<(ReplayGainSource, i16)>) {
+    let (engine, events, output) = spawn_offline(fast_config(), capacity).expect("spawn engine");
+    engine.set_computed_gains(Some(gains));
+    engine
+        .send(Command::SetQueue {
+            paths: queue.to_vec(),
+        })
+        .expect("send");
+    for command in commands {
+        engine.send(command.clone()).expect("send");
+    }
+    engine.send(Command::Play).expect("send");
+    let mut reported = Vec::new();
+    loop {
+        match next_event(&events) {
+            Event::QueueEnded => break,
+            Event::ReplayGainChanged {
+                source,
+                applied_centidb,
+                ..
+            } => reported.push((source, applied_centidb)),
+            _ => {}
+        }
+    }
+    engine.shutdown();
+    (collect(output), reported)
+}
+
+/// **A measured figure reaches the samples, and says it was measured.**
+///
+/// The untagged fixture carries no ReplayGain at all, so before ADR-0015 it
+/// resolved to `no_tag` and played untouched. With a measurement attached it is
+/// scaled by exactly that figure — asserted with `==`, because the expected
+/// gain comes from the definition of the decibel and not from the engine — and
+/// the readout names the origin as `computed_track` rather than `track`.
+#[test]
+#[allow(clippy::float_cmp)] // exactness is the assertion
+fn a_measured_track_is_scaled_by_its_measured_gain_and_says_so() {
+    let f = fixtures();
+    let gains = MeasuredLibrary::with(
+        &f.a,
+        ReplayGainTags {
+            track_gain_centidb: Some(-602),
+            track_peak_micro: Some(500_000),
+            ..ReplayGainTags::default()
+        },
+    );
+    let (out, reported) = play_with_measurements(
+        std::slice::from_ref(&f.a),
+        f.a_ref.len(),
+        gains,
+        &[replay_gain(ReplayGainMode::Track)],
+    );
+    let gain = amplitude_of(-602);
+    let want: Vec<f32> = f.a_ref.iter().map(|s| s * gain).collect();
+    assert_eq!(out.len(), want.len(), "scaling must not drop a sample");
+    assert_samples_eq(&out, &want, "a measured track gain");
+    assert!(
+        reported.contains(&(ReplayGainSource::ComputedTrack, -602)),
+        "the readout must name the origin: {reported:?}"
+    );
+    assert!(
+        reported
+            .iter()
+            .all(|(source, _)| *source != ReplayGainSource::Track),
+        "nothing came from a tag here: {reported:?}"
+    );
+}
+
+/// **A tag outranks a measurement, all the way to the samples.**
+///
+/// The tagged fixture asks for −6.02 dB; the measurement attached asks for
+/// +10 dB. The delivered stream must carry the tag's figure, and the readout
+/// must say `track` rather than `computed_track` — the honesty half of the
+/// same rule.
+#[test]
+#[allow(clippy::float_cmp)] // exactness is the assertion
+fn a_tagged_track_outranks_a_measurement_in_the_engine_too() {
+    let f = fixtures();
+    let gains = MeasuredLibrary::with(
+        &f.rg_a,
+        ReplayGainTags {
+            track_gain_centidb: Some(1_000),
+            track_peak_micro: Some(100_000),
+            ..ReplayGainTags::default()
+        },
+    );
+    let (out, reported) = play_with_measurements(
+        std::slice::from_ref(&f.rg_a),
+        f.a_ref.len(),
+        gains,
+        &[replay_gain(ReplayGainMode::Track)],
+    );
+    let gain = amplitude_of(-602);
+    let want: Vec<f32> = f.a_ref.iter().map(|s| s * gain).collect();
+    assert_samples_eq(&out, &want, "the file's own tag, not the measurement");
+    assert!(
+        reported.contains(&(ReplayGainSource::Track, -602)),
+        "and it says the figure came from the tag: {reported:?}"
+    );
+}
+
+/// **An engine with no library attached behaves exactly as ADR-0013 left it.**
+///
+/// The default is no seam at all, which is the state every engine spawns in and
+/// the one every pre-ADR-0015 test already asserts against. Stated here as its
+/// own claim because "the new feature is off unless asked for" is the property,
+/// not a coincidence of the other tests.
+#[test]
+fn an_engine_with_no_measurements_attached_is_unchanged() {
+    let f = fixtures();
+    let (engine, events, output) =
+        spawn_offline(fast_config(), f.a_ref.len()).expect("spawn engine");
+    // Explicitly detached, which is also the default.
+    engine.set_computed_gains(None);
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone()],
+        })
+        .expect("send");
+    engine
+        .send(replay_gain(ReplayGainMode::Track))
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    let mut sources = Vec::new();
+    loop {
+        match next_event(&events) {
+            Event::QueueEnded => break,
+            Event::ReplayGainChanged { source, .. } => sources.push(source),
+            _ => {}
+        }
+    }
+    engine.shutdown();
+    assert_samples_eq(
+        &collect(output),
+        &f.a_ref,
+        "untagged, unmeasured, untouched",
+    );
+    assert!(
+        sources.contains(&ReplayGainSource::NoTag),
+        "an unmeasured, untagged file reads as `no_tag`: {sources:?}"
+    );
+}
+
+/// **A measured album figure is one gain across the whole album**, and it is
+/// reported once rather than at every boundary — the same property album mode
+/// already had for tagged figures, now for measured ones.
+#[test]
+fn a_measured_album_figure_holds_across_the_album() {
+    let f = fixtures();
+    let figures = ReplayGainTags {
+        track_gain_centidb: Some(1_100),
+        track_peak_micro: Some(200_000),
+        album_gain_centidb: Some(-602),
+        album_peak_micro: Some(500_000),
+    };
+    let mut map = std::collections::HashMap::new();
+    map.insert(f.a.clone(), figures);
+    map.insert(f.b.clone(), figures);
+    let gains: Arc<dyn ComputedGains> = Arc::new(MeasuredLibrary(map));
+
+    let mut want = f.a_ref.clone();
+    want.extend_from_slice(&f.b_ref);
+    let (out, reported) = play_with_measurements(
+        &[f.a.clone(), f.b.clone()],
+        want.len(),
+        gains,
+        &[replay_gain(ReplayGainMode::Album)],
+    );
+    assert_eq!(out.len(), want.len());
+    let announcements: Vec<_> = reported
+        .iter()
+        .filter(|(source, _)| *source == ReplayGainSource::ComputedAlbum)
+        .collect();
+    assert_eq!(
+        announcements.len(),
+        1,
+        "one album, one gain, one announcement: {reported:?}"
+    );
+    assert_eq!(announcements[0].1, -602);
+}
+
+/// **The shared readout agrees with the event**, for a measured figure exactly
+/// as for a tagged one — the state-before-event contract, from the pull side.
+#[test]
+fn the_handle_reports_a_measured_source_too() {
+    let f = fixtures();
+    let gains = MeasuredLibrary::with(
+        &f.a,
+        ReplayGainTags {
+            track_gain_centidb: Some(-602),
+            ..ReplayGainTags::default()
+        },
+    );
+    let (engine, events, _output) =
+        spawn_offline(fast_config(), f.a_ref.len()).expect("spawn engine");
+    engine.set_computed_gains(Some(gains));
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone()],
+        })
+        .expect("send");
+    engine
+        .send(replay_gain(ReplayGainMode::Track))
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    loop {
+        match next_event(&events) {
+            Event::ReplayGainChanged {
+                source: ReplayGainSource::ComputedTrack,
+                applied_centidb,
+                ..
+            } => {
+                // Read *after* the event, which is what the ordering contract
+                // is for: the state was published first, so this cannot be
+                // older than the news that prompted it.
+                let state = engine.replay_gain();
+                assert_eq!(state.applied.source, ReplayGainSource::ComputedTrack);
+                assert_eq!(state.applied.gain_centidb, applied_centidb);
+                assert_eq!(applied_centidb, -602);
+                break;
+            }
+            Event::QueueEnded => panic!("the queue ended before a measured figure was reported"),
+            _ => {}
+        }
+    }
     engine.shutdown();
 }

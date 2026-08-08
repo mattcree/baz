@@ -315,9 +315,11 @@ pub enum Command {
     /// # What it does and does not do
     ///
     /// baz **reads** the `REPLAYGAIN_*` (and Opus-style `R128_*`) tags files
-    /// already carry and applies them. It does not *compute* them: there is no
-    /// analysis pass here, so a library nothing has ever scanned is unaffected
-    /// by this command except through
+    /// already carry and applies them, preferring them over anything it
+    /// measured itself. Measuring is a separate service and a separate command
+    /// ([`AnalysisCommand::StartReplayGainAnalysis`], ADR-0015); a library that
+    /// has neither been tagged nor measured is unaffected by this command
+    /// except through
     /// [`no_tag_preamp_centidb`](Self::SetReplayGain::no_tag_preamp_centidb),
     /// which is zero by default.
     ///
@@ -591,6 +593,127 @@ pub enum Event {
         /// the full figure would have exceeded full scale.
         clipping_prevented: bool,
     },
+    /// A ReplayGain analysis pass has begun, and this is how much work it
+    /// found (ADR-0015).
+    ///
+    /// Emitted once per accepted
+    /// [`AnalysisCommand::StartReplayGainAnalysis`], **after** the plan has
+    /// been made — so the totals are real counts rather than an estimate that
+    /// will be revised. A start that finds nothing to do still emits this (with
+    /// `tracks: 0`) and then [`Self::ReplayGainAnalysisFinished`], because
+    /// "there was nothing to measure" is the answer to the question the front
+    /// end asked.
+    ReplayGainAnalysisStarted {
+        /// Tracks this pass will decode and measure.
+        tracks: usize,
+        /// Album editions those tracks belong to (ADR-0007) — the unit the
+        /// pass commits its work in, and therefore the granularity a cancel
+        /// resumes from.
+        editions: usize,
+    },
+    /// One more track has been measured (ADR-0015).
+    ///
+    /// # Cadence
+    ///
+    /// One per track the pass finishes with — measured or failed — which is a
+    /// few per second at worst, because measuring a track means decoding it.
+    /// A front end can render a bar from `analysed / tracks` and a label from
+    /// `path` without any smoothing of its own.
+    ///
+    /// The counts are cumulative for this pass, not deltas.
+    ReplayGainAnalysisProgress {
+        /// The file just finished with.
+        path: PathBuf,
+        /// Tracks finished with so far, including failures.
+        analysed: usize,
+        /// Tracks this pass set out to measure — the same number
+        /// [`Self::ReplayGainAnalysisStarted`] carried.
+        tracks: usize,
+        /// Tracks that could not be measured or stored. Counted rather than
+        /// itemised, as the scanner counts its own failures: a wall of red for
+        /// a library with a handful of corrupt files helps nobody.
+        failed: usize,
+    },
+    /// The ReplayGain analysis pass ended (ADR-0015).
+    ///
+    /// Emitted exactly once per accepted start, whether the pass ran out of
+    /// work or was cancelled. `cancelled` distinguishes them, and it is the
+    /// difference between "your library is measured" and "as much of it as we
+    /// got to is measured" — both are true states and a front end that
+    /// explains itself needs to tell them apart.
+    ///
+    /// **A cancelled pass keeps what it measured.** Starting again resumes;
+    /// see [`AnalysisCommand::CancelReplayGainAnalysis`].
+    ReplayGainAnalysisFinished {
+        /// Tracks finished with, including failures.
+        analysed: usize,
+        /// Tracks that could not be measured or stored.
+        failed: usize,
+        /// Whether the pass stopped because it was cancelled rather than
+        /// because it ran out of work.
+        cancelled: bool,
+    },
+}
+
+/// A request from a front end to the **ReplayGain analysis service**
+/// ([`crate::analysis`]), which measures the loudness of files that carry no
+/// ReplayGain tags (ADR-0015).
+///
+/// # Why this is a separate enum from [`Command`]
+///
+/// Because it is addressed to a different service, and a misrouted command
+/// should be a compile error rather than a silence. The playback engine is
+/// given *paths* and owns no library ([`crate::engine`]); the analyser owns a
+/// library and decodes no audio for anybody to hear. Folding both vocabularies
+/// into one enum would mean each service holding match arms for messages it
+/// cannot act on — and the only honest thing such an arm can do is nothing,
+/// which is exactly the silent no-op this protocol avoids everywhere else.
+///
+/// **Events are not split the same way**, deliberately: a front end has one
+/// event loop, and the analyser's news arrives on [`Event`] beside the
+/// engine's. Commands are addressed; events are announced.
+///
+/// The wire conventions are [`Command`]'s, unchanged — internally tagged
+/// `"cmd"`, `snake_case`, `#[non_exhaustive]`, `Eq`, and byte-pinned by
+/// `analysis_command_wire_format_is_stable`.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "cmd", rename_all = "snake_case")]
+pub enum AnalysisCommand {
+    /// Measure every track in the library that needs a ReplayGain figure and
+    /// store what is measured.
+    ///
+    /// Idempotent in the way that matters: a pass that has already measured a
+    /// track does not measure it again, so sending this repeatedly costs
+    /// nothing after the first completed run. It is also how a **cancelled**
+    /// pass is resumed — there is no separate "resume" command, because
+    /// resuming is just starting again over a library that now needs less
+    /// work.
+    ///
+    /// Sent while a pass is already running it is ignored (and emits nothing):
+    /// two passes over one library would fight over the same rows.
+    StartReplayGainAnalysis {
+        /// Re-measure tracks baz has already measured, discarding the stored
+        /// figures.
+        ///
+        /// `false` — the ordinary case — measures only what has no figure yet.
+        /// It never re-measures a file whose **tags** already carry the figure:
+        /// a tag is what a scanner wrote and ADR-0013's selection rule prefers
+        /// it, so measuring it again would spend a decode to produce a number
+        /// nothing would use.
+        ///
+        /// `true` does not touch tags either — baz does not write to music
+        /// files — it only discards and recomputes baz's own measurements.
+        redo: bool,
+    },
+    /// Stop the running pass.
+    ///
+    /// Takes effect within one decode block, and what has already been measured
+    /// **stays measured**: a later
+    /// [`Self::StartReplayGainAnalysis`] carries on from there rather than
+    /// starting over. A cancel while nothing is running is a no-op and emits
+    /// nothing, like every other redundant command in this protocol.
+    CancelReplayGainAnalysis,
 }
 
 /// Which of a track's ReplayGain figures to honour, in
@@ -648,12 +771,49 @@ pub enum ReplayGainSource {
     /// used instead. The ordinary reading for a single downloaded track, which
     /// has no album to be relative to.
     TrackFallback,
-    /// The file declares no usable ReplayGain at all, so the "no ReplayGain"
-    /// pre-amp applies (zero by default, i.e. the file is played as stored).
+    /// Neither the file's tags nor an analysis provides a usable figure, so
+    /// the "no ReplayGain" pre-amp applies (zero by default, i.e. the file is
+    /// played as stored).
     ///
-    /// This is the reading for an unscanned library, and it is not a failure:
-    /// baz reads ReplayGain, it does not compute it.
+    /// The reading for a library that has neither been tagged by a scanner nor
+    /// analysed by baz, and it is not a failure. The wire name stays `no_tag`,
+    /// which ADR-0015 kept deliberately: renaming it would break a protocol a
+    /// front end already reads, and "no tag" remains true — there is now simply
+    /// a second way for a figure to exist, and its absence is reported here
+    /// too.
     NoTag,
+    /// baz measured this track itself (ADR-0015) and used the **track** figure
+    /// it computed, because the file carries no `REPLAYGAIN_TRACK_GAIN`.
+    ///
+    /// The computed twin of [`Self::Track`]. Worth rendering differently: a
+    /// listener asking where a number came from is entitled to know that this
+    /// one is baz's own measurement rather than something their tagger wrote.
+    ComputedTrack,
+    /// baz measured this track's **album** itself and used the album figure it
+    /// computed — the computed twin of [`Self::Album`].
+    ComputedAlbum,
+    /// Album mode over a track baz measured, where neither the file nor the
+    /// analysis has an album figure — so the computed *track* figure was used.
+    /// The computed twin of [`Self::TrackFallback`].
+    ComputedTrackFallback,
+}
+
+impl ReplayGainSource {
+    /// Whether the figure came from baz's own analysis rather than from the
+    /// file's tags (ADR-0015).
+    ///
+    /// Ask this rather than enumerating variants, for the reason
+    /// [`VolumePath::is_transparent`] exists: the question is stable, the list
+    /// of variants is not. [`Self::Disabled`] and [`Self::NoTag`] are neither —
+    /// there is no figure at all — and both answer `false`, because nothing was
+    /// computed.
+    #[must_use]
+    pub fn is_computed(self) -> bool {
+        matches!(
+            self,
+            Self::ComputedTrack | Self::ComputedAlbum | Self::ComputedTrackFallback
+        )
+    }
 }
 
 /// What sits between the decoded file and the output, in
@@ -995,6 +1155,7 @@ mod tests {
         ]
         .into_iter()
         .chain(sample_replay_gain_events())
+        .chain(sample_analysis_events())
         .collect()
     }
 
@@ -1047,7 +1208,244 @@ mod tests {
                 applied_centidb: -500,
                 clipping_prevented: false,
             },
+            Event::ReplayGainChanged {
+                mode: ReplayGainMode::Track,
+                preamp_centidb: 0,
+                no_tag_preamp_centidb: 0,
+                prevent_clipping: true,
+                source: ReplayGainSource::ComputedTrack,
+                applied_centidb: 412,
+                clipping_prevented: false,
+            },
+            Event::ReplayGainChanged {
+                mode: ReplayGainMode::Album,
+                preamp_centidb: 0,
+                no_tag_preamp_centidb: 0,
+                prevent_clipping: true,
+                source: ReplayGainSource::ComputedAlbum,
+                applied_centidb: -318,
+                clipping_prevented: false,
+            },
+            Event::ReplayGainChanged {
+                mode: ReplayGainMode::Album,
+                preamp_centidb: 0,
+                no_tag_preamp_centidb: 0,
+                prevent_clipping: true,
+                source: ReplayGainSource::ComputedTrackFallback,
+                applied_centidb: 77,
+                clipping_prevented: true,
+            },
         ]
+    }
+
+    /// The [`Event`] samples an analysis pass emits (ADR-0015).
+    fn sample_analysis_events() -> Vec<Event> {
+        vec![
+            Event::ReplayGainAnalysisStarted {
+                tracks: 128,
+                editions: 12,
+            },
+            Event::ReplayGainAnalysisStarted {
+                tracks: 0,
+                editions: 0,
+            },
+            Event::ReplayGainAnalysisProgress {
+                path: PathBuf::from("/music/a.flac"),
+                analysed: 7,
+                tracks: 128,
+                failed: 1,
+            },
+            Event::ReplayGainAnalysisFinished {
+                analysed: 128,
+                failed: 1,
+                cancelled: false,
+            },
+            Event::ReplayGainAnalysisFinished {
+                analysed: 40,
+                failed: 0,
+                cancelled: true,
+            },
+        ]
+    }
+
+    fn sample_analysis_commands() -> Vec<AnalysisCommand> {
+        vec![
+            AnalysisCommand::StartReplayGainAnalysis { redo: false },
+            AnalysisCommand::StartReplayGainAnalysis { redo: true },
+            AnalysisCommand::CancelReplayGainAnalysis,
+        ]
+    }
+
+    #[test]
+    fn analysis_command_json_roundtrip() {
+        for cmd in sample_analysis_commands() {
+            let json = serde_json::to_string(&cmd).expect("serialize");
+            let back: AnalysisCommand = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(cmd, back);
+        }
+    }
+
+    /// [`AnalysisCommand`]'s bytes, pinned — the same contract [`Command`]'s
+    /// are held to, because it is the same wire.
+    #[test]
+    fn analysis_command_wire_format_is_stable() {
+        let cases: Vec<(String, &str)> = vec![
+            (
+                serde_json::to_string(&AnalysisCommand::StartReplayGainAnalysis { redo: false })
+                    .expect("serialize"),
+                r#"{"cmd":"start_replay_gain_analysis","redo":false}"#,
+            ),
+            (
+                serde_json::to_string(&AnalysisCommand::StartReplayGainAnalysis { redo: true })
+                    .expect("serialize"),
+                r#"{"cmd":"start_replay_gain_analysis","redo":true}"#,
+            ),
+            (
+                serde_json::to_string(&AnalysisCommand::CancelReplayGainAnalysis)
+                    .expect("serialize"),
+                r#"{"cmd":"cancel_replay_gain_analysis"}"#,
+            ),
+        ];
+        for (got, want) in cases {
+            assert_eq!(got, want);
+        }
+    }
+
+    /// The analysis events' bytes, pinned (ADR-0015) — counts are integers for
+    /// the reason every other number here is one, and `cancelled` is a real
+    /// boolean rather than an absent key, so "finished" and "stopped" cannot be
+    /// confused by a reader that forgot to look.
+    #[test]
+    fn analysis_event_wire_format_is_stable() {
+        let cases: Vec<(String, &str)> = vec![
+            (
+                serde_json::to_string(&Event::ReplayGainAnalysisStarted {
+                    tracks: 128,
+                    editions: 12,
+                })
+                .expect("serialize"),
+                r#"{"event":"replay_gain_analysis_started","tracks":128,"editions":12}"#,
+            ),
+            (
+                // Nothing to do is a real answer to the question that was
+                // asked, and it encodes as zeroes rather than as no event.
+                serde_json::to_string(&Event::ReplayGainAnalysisStarted {
+                    tracks: 0,
+                    editions: 0,
+                })
+                .expect("serialize"),
+                r#"{"event":"replay_gain_analysis_started","tracks":0,"editions":0}"#,
+            ),
+            (
+                serde_json::to_string(&Event::ReplayGainAnalysisProgress {
+                    path: PathBuf::from("/music/a.flac"),
+                    analysed: 7,
+                    tracks: 128,
+                    failed: 1,
+                })
+                .expect("serialize"),
+                r#"{"event":"replay_gain_analysis_progress","path":"/music/a.flac","analysed":7,"tracks":128,"failed":1}"#,
+            ),
+            (
+                serde_json::to_string(&Event::ReplayGainAnalysisFinished {
+                    analysed: 128,
+                    failed: 1,
+                    cancelled: false,
+                })
+                .expect("serialize"),
+                r#"{"event":"replay_gain_analysis_finished","analysed":128,"failed":1,"cancelled":false}"#,
+            ),
+            (
+                serde_json::to_string(&Event::ReplayGainAnalysisFinished {
+                    analysed: 40,
+                    failed: 0,
+                    cancelled: true,
+                })
+                .expect("serialize"),
+                r#"{"event":"replay_gain_analysis_finished","analysed":40,"failed":0,"cancelled":true}"#,
+            ),
+        ];
+        for (got, want) in cases {
+            assert_eq!(got, want);
+        }
+    }
+
+    /// The three computed [`ReplayGainSource`]s' bytes, pinned (ADR-0015).
+    ///
+    /// `source` is the field a front end switches on to say where a figure came
+    /// from, so a computed one having its own name on the wire *is* the honest
+    /// answer to "where did this number come from" — and the tagged names are
+    /// unchanged beside them, which is what keeps a front end written against
+    /// ADR-0013 correct.
+    #[test]
+    fn computed_replay_gain_sources_have_their_own_wire_names() {
+        let cases: Vec<(String, &str)> = vec![
+            (
+                serde_json::to_string(&Event::ReplayGainChanged {
+                    mode: ReplayGainMode::Track,
+                    preamp_centidb: 0,
+                    no_tag_preamp_centidb: 0,
+                    prevent_clipping: true,
+                    source: ReplayGainSource::ComputedTrack,
+                    applied_centidb: 412,
+                    clipping_prevented: false,
+                })
+                .expect("serialize"),
+                r#"{"event":"replay_gain_changed","mode":"track","preamp_centidb":0,"no_tag_preamp_centidb":0,"prevent_clipping":true,"source":"computed_track","applied_centidb":412,"clipping_prevented":false}"#,
+            ),
+            (
+                serde_json::to_string(&Event::ReplayGainChanged {
+                    mode: ReplayGainMode::Album,
+                    preamp_centidb: 0,
+                    no_tag_preamp_centidb: 0,
+                    prevent_clipping: true,
+                    source: ReplayGainSource::ComputedAlbum,
+                    applied_centidb: -318,
+                    clipping_prevented: false,
+                })
+                .expect("serialize"),
+                r#"{"event":"replay_gain_changed","mode":"album","preamp_centidb":0,"no_tag_preamp_centidb":0,"prevent_clipping":true,"source":"computed_album","applied_centidb":-318,"clipping_prevented":false}"#,
+            ),
+            (
+                serde_json::to_string(&Event::ReplayGainChanged {
+                    mode: ReplayGainMode::Album,
+                    preamp_centidb: 0,
+                    no_tag_preamp_centidb: 0,
+                    prevent_clipping: true,
+                    source: ReplayGainSource::ComputedTrackFallback,
+                    applied_centidb: 77,
+                    clipping_prevented: true,
+                })
+                .expect("serialize"),
+                r#"{"event":"replay_gain_changed","mode":"album","preamp_centidb":0,"no_tag_preamp_centidb":0,"prevent_clipping":true,"source":"computed_track_fallback","applied_centidb":77,"clipping_prevented":true}"#,
+            ),
+        ];
+        for (got, want) in cases {
+            assert_eq!(got, want);
+        }
+    }
+
+    /// The property a front end asks, rather than the variants it would
+    /// otherwise enumerate.
+    #[test]
+    fn only_the_computed_sources_report_themselves_as_computed() {
+        for source in [
+            ReplayGainSource::ComputedTrack,
+            ReplayGainSource::ComputedAlbum,
+            ReplayGainSource::ComputedTrackFallback,
+        ] {
+            assert!(source.is_computed(), "{source:?}");
+        }
+        for source in [
+            ReplayGainSource::Disabled,
+            ReplayGainSource::Track,
+            ReplayGainSource::Album,
+            ReplayGainSource::TrackFallback,
+            // No figure at all is not a computed figure: nothing was measured.
+            ReplayGainSource::NoTag,
+        ] {
+            assert!(!source.is_computed(), "{source:?}");
+        }
     }
 
     #[test]

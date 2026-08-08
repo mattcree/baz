@@ -96,7 +96,25 @@ next commit.
   — and changes on the track boundary's own first sample. Reported through the
   same `VolumePath` the volume uses, because there is one gain stage and one
   answer to "is this bit-exact" (ADR-0013, schema v5).
-  baz reads these figures; it does not compute them.
+- **ReplayGain *analysis*** — baz computes the figures for files that carry
+  none (ADR-0015, schema v6). An EBU R128 / ITU-R BS.1770-4 **gated integrated
+  loudness** meter and a sample-peak meter, written in `baz-core` with no new
+  dependency and validated against the **EBU Tech 3341 compliance signals** at
+  48 kHz and 44.1 kHz: every case lands inside the ±0.1 LU the specification
+  states, worst measured error **0.0241 LU**, and the K-weighting coefficients
+  are asserted against BS.1770-4's own published 48 kHz table to 1e-12. A
+  background pass measures the library album edition by album edition —
+  cancellable within one decode block, resumable (a cancelled pass keeps what
+  it measured), skipping anything a tag already answers, and structurally
+  unable to fight the incremental scanner because a scan writes the tag columns
+  and a pass writes its own. Computed figures are distinguishable from tagged
+  ones everywhere it matters: separate columns, a file stamp that makes a
+  measurement stale when the file changes, and three new `ReplayGainSource`
+  variants (`computed_track`, `computed_album`, `computed_track_fallback`).
+  **Tags still win, field by field**, so measuring a library can never change
+  how an already-tagged track sounds. Driven by a second command vocabulary,
+  `AnalysisCommand`, because it is a second service — the player has no
+  database and the analyser has no sink.
 - **Queue editing that does not stop the music.** `JumpTo { position }` plays
   the entry it names — the queue-relative sibling of `Seek` — from wherever the
   transport is, including stopped. `UpdateQueue { paths }` removes, reorders,
@@ -305,14 +323,18 @@ next commit.
   fixing it means changing a seek path five formats share.
 - Deleting an entire album folder leaves its rows in the index (see Removal,
   above).
-- **No ReplayGain *scanning*.** baz honours the tags a file already has; it
-  cannot produce them. A library that has never been through foobar2000,
-  `rsgain` or `loudgain` gets no normalisation from baz, and is played exactly
-  as stored rather than guessed at (ADR-0013).
-- **ReplayGain's clipping check uses the declared *sample* peak**, which is
-  what ReplayGain 2.0 scanners write. Inter-sample (true-peak) overshoot after
+- **baz does not write ReplayGain into music files.** It reads the tags a file
+  has and computes what it lacks (ADR-0015), but the figures it computes live
+  in baz's own index — another player will not see them.
+- **ReplayGain's clipping check uses a *sample* peak** — the declared one where
+  a file has it, baz's own measurement where it does not — which is what
+  ReplayGain 2.0 scanners write. Inter-sample (true-peak) overshoot after
   reconstruction is not modelled, and there is no limiter: if the gain has to
   be cut, the whole track's gain is cut rather than ridden.
+- **No UI for the analysis pass yet.** It is reachable through
+  `AnalysisCommand` and reports progress on the event stream; the control is a
+  parallel unit, exactly as the volume slider and the ReplayGain mode selector
+  were before them.
 - No playlists, no cue sheets, no watch folders, no tag editing, no application
   icon, and no exclusive-mode output (which is also what puts hardware volume
   out of reach). `docs/BACKLOG.md` is the honest list.

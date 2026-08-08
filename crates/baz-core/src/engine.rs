@@ -473,6 +473,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
@@ -495,7 +496,8 @@ use crate::playback::{
 };
 use crate::protocol::{Command, ConversionReason, Event, SignalChain, VolumePath};
 use crate::replaygain::{
-    ReplayGainDecision, ReplayGainSettings, ReplayGainState, ReplayGainTags, SharedReplayGain,
+    ComputedGains, ReplayGainDecision, ReplayGainSettings, ReplayGainState, ReplayGainTags,
+    SharedReplayGain,
 };
 use crate::volume::{Fader, SharedVolume, Volume, VolumeState};
 
@@ -564,6 +566,7 @@ pub struct EngineHandle {
     instruments: Arc<Instruments>,
     volume: Arc<SharedVolume>,
     replay_gain: Arc<SharedReplayGain>,
+    computed_gains: Arc<Mutex<Option<Arc<dyn ComputedGains>>>>,
 }
 
 /// A running count of the conversions the engine has performed, readable from
@@ -679,6 +682,44 @@ impl EngineHandle {
         self.replay_gain.snapshot()
     }
 
+    /// Tell the engine where to find the ReplayGain figures baz measured
+    /// itself (ADR-0015), replacing whatever it was consulting before.
+    ///
+    /// # Why this is a method and not a [`Command`]
+    ///
+    /// Because the payload is a whole library's worth of figures, and this
+    /// protocol's commands are things a front end could reasonably send over a
+    /// wire. A `SetComputedGains { … }` carrying forty thousand paths would be
+    /// a message nobody could send twice, and an incremental one would be a
+    /// second copy of the library index kept in sync by hand. The engine
+    /// instead consults a snapshot the library already has
+    /// ([`Library::computed_gains`](crate::index::Library::computed_gains)),
+    /// and swapping that snapshot is this call.
+    ///
+    /// # When to call it
+    ///
+    /// Once at start-up, and again whenever an analysis pass reports
+    /// [`Event::ReplayGainAnalysisFinished`] — the figures a pass measured
+    /// reach playback at that moment and not before, which is deliberate: a
+    /// gain that changed under a track that was already playing would be a
+    /// level change nobody asked for.
+    ///
+    /// Passing `None` detaches: the engine then knows only what files' own
+    /// tags say, which is exactly ADR-0013's behaviour and is the default a
+    /// freshly spawned engine starts in.
+    ///
+    /// The new snapshot takes effect at the next track boundary (or the next
+    /// [`Command::SetReplayGain`]), for the same reason the resolved figure
+    /// only changes there: ReplayGain is per track, and re-resolving mid-track
+    /// would move the level under a listener.
+    pub fn set_computed_gains(&self, gains: Option<Arc<dyn ComputedGains>>) {
+        let mut slot = self
+            .computed_gains
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot = gains;
+    }
+
     /// Shut the engine down and wait for its threads to finish. Equivalent
     /// to dropping the handle; provided so intent reads explicitly.
     pub fn shutdown(self) {
@@ -750,6 +791,8 @@ pub fn spawn_offline(
     let gain = Arc::clone(&volume);
     let replay_gain = Arc::new(SharedReplayGain::default());
     let loudness = Arc::clone(&replay_gain);
+    let computed_gains: Arc<Mutex<Option<Arc<dyn ComputedGains>>>> = Arc::new(Mutex::new(None));
+    let measured = Arc::clone(&computed_gains);
     let thread = thread::Builder::new()
         .name("baz-engine".into())
         .spawn(move || {
@@ -763,6 +806,7 @@ pub fn spawn_offline(
                     instruments: probes,
                     volume: gain,
                     replay_gain: loudness,
+                    computed_gains: measured,
                 },
                 OfflineSink::with_capacity(capacity_samples),
             );
@@ -777,6 +821,7 @@ pub fn spawn_offline(
             instruments,
             volume,
             replay_gain,
+            computed_gains,
         },
         event_rx,
         OfflineOutput { output: out_rx },
@@ -971,6 +1016,8 @@ pub fn spawn_device_with(
     let gain = Arc::clone(&volume);
     let replay_gain = Arc::new(SharedReplayGain::default());
     let loudness = Arc::clone(&replay_gain);
+    let computed_gains: Arc<Mutex<Option<Arc<dyn ComputedGains>>>> = Arc::new(Mutex::new(None));
+    let measured = Arc::clone(&computed_gains);
     let thread = thread::Builder::new()
         .name("baz-engine".into())
         .spawn(move || {
@@ -995,6 +1042,7 @@ pub fn spawn_device_with(
                             instruments: probes,
                             volume: gain,
                             replay_gain: loudness,
+                            computed_gains: measured,
                         },
                         sink,
                     );
@@ -1012,6 +1060,7 @@ pub fn spawn_device_with(
         instruments,
         volume,
         replay_gain,
+        computed_gains,
     };
     match ack_rx.recv() {
         Ok(Ok(())) => Ok((handle, event_rx)),
@@ -1077,6 +1126,15 @@ struct Control<S: Sink> {
     /// What those settings resolved to for the track currently being
     /// delivered, as last reported.
     rg_applied: ReplayGainDecision,
+    /// Where to look for ReplayGain figures baz measured itself (ADR-0015),
+    /// or `None` — the default, and the state of an engine no front end has
+    /// handed a library to.
+    ///
+    /// Shared with [`EngineHandle::set_computed_gains`], which is the only
+    /// writer. Read on this thread at a track boundary and *never* by the
+    /// pump: the resolved gain is folded into the one number
+    /// [`SharedVolume`] publishes, exactly as the tagged figure already was.
+    computed_gains: Arc<Mutex<Option<Arc<dyn ComputedGains>>>>,
     /// Scratch for the scaled block: one pump chunk, allocated when the engine
     /// thread starts and never grown.
     ///
@@ -1102,6 +1160,7 @@ struct Observable {
     instruments: Arc<Instruments>,
     volume: Arc<SharedVolume>,
     replay_gain: Arc<SharedReplayGain>,
+    computed_gains: Arc<Mutex<Option<Arc<dyn ComputedGains>>>>,
 }
 
 impl<S: Sink> Control<S> {
@@ -1118,6 +1177,7 @@ impl<S: Sink> Control<S> {
             instruments,
             volume,
             replay_gain,
+            computed_gains,
         } = observable;
         let rg_settings = ReplayGainSettings::default();
         // `SharedReplayGain::default` already holds exactly this, so a handle
@@ -1144,6 +1204,7 @@ impl<S: Sink> Control<S> {
             replay_gain,
             rg_settings,
             rg_applied: ReplayGainDecision::UNITY,
+            computed_gains,
             // One pump chunk is the most `pump` can ever hand to the fader in
             // one call (the ring read is `min`'d against it), so this is
             // exactly enough and is allocated before any audio flows.
@@ -1373,7 +1434,16 @@ impl<S: Sink> Control<S> {
             .session
             .as_ref()
             .map_or_else(ReplayGainTags::default, Session::active_replay_gain);
-        let applied = self.rg_settings.resolve(tags);
+        // What baz measured for this file, when a front end has plugged a
+        // library into the seam (ADR-0015). A hash lookup on the control
+        // thread at a track boundary; the pump reads the *product*, as it
+        // always did, and never this.
+        let computed = self
+            .session
+            .as_ref()
+            .and_then(Session::active_path)
+            .map_or_else(ReplayGainTags::default, |path| self.computed_for(path));
+        let applied = self.rg_settings.resolve_with(tags, computed);
         let news = applied != self.rg_applied;
         self.rg_applied = applied;
         self.replay_gain.publish(self.rg_settings, applied);
@@ -1402,6 +1472,21 @@ impl<S: Sink> Control<S> {
             applied_centidb: applied.gain_centidb,
             clipping_prevented: applied.clipping_prevented,
         });
+    }
+
+    /// What baz measured for `path`, or all-`None` when no library has been
+    /// plugged into the seam (ADR-0015).
+    ///
+    /// A poisoned lock is read through rather than propagated: the value
+    /// behind it is an immutable snapshot a front end swapped in, so a panic
+    /// in another thread cannot have left it half-written, and refusing to read
+    /// it would silence ReplayGain rather than protect anything.
+    fn computed_for(&self, path: &Path) -> ReplayGainTags {
+        self.computed_gains
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map_or_else(ReplayGainTags::default, |gains| gains.computed(path))
     }
 
     /// The gain the sample stream should end up carrying: the taper's
@@ -1868,6 +1953,24 @@ impl<S: Sink> Control<S> {
     }
 }
 
+/// One track's delivery bound, as the pump and the gain path need it: where
+/// its audio starts in the delivered stream, which queue entry it is, and what
+/// its file's tags declare.
+///
+/// The queue index is carried so that a *computed* ReplayGain can be looked up
+/// by path (ADR-0015) at the same moment the tagged one is read — a
+/// measurement lives in the library rather than in the file, so the engine
+/// needs to know which file it is holding, not only what that file said.
+#[derive(Clone, Copy, Debug)]
+struct GainBound {
+    /// Delivered-sample index at which this track's audio begins.
+    start_sample: usize,
+    /// The track's position in the session's own queue snapshot.
+    index: usize,
+    /// What the file's tags declare.
+    tags: ReplayGainTags,
+}
+
 /// Where the track that was at `index` playing `path` sits in `queue` now —
 /// the identity-not-index rule of ADR-0014, in three lines.
 ///
@@ -1985,7 +2088,7 @@ struct Session {
     /// order over an SPSC ring and `start_sample` is a running total, so the
     /// starts here are non-decreasing by construction — which is what makes the
     /// cursor O(1) instead of a scan of the whole queue per pump block.
-    replay_gains: Vec<(usize, ReplayGainTags)>,
+    replay_gains: Vec<GainBound>,
     /// Cursor into [`Self::replay_gains`]: the track whose audio the next pump
     /// will deliver. `None` until the producer has published the first bound.
     active_slot: Option<usize>,
@@ -2335,8 +2438,11 @@ impl Session {
             if let Some(slot) = self.formats.get_mut(bound.index) {
                 *slot = Some((bound.source_rate, bound.source_bits));
             }
-            self.replay_gains
-                .push((bound.start_sample, bound.replay_gain));
+            self.replay_gains.push(GainBound {
+                start_sample: bound.start_sample,
+                index: bound.index,
+                tags: bound.replay_gain,
+            });
         }
         while let Ok((i, reason)) = self.fails.pop() {
             if let Some(slot) = self.failures.get_mut(i) {
@@ -2350,7 +2456,7 @@ impl Session {
     /// across.
     fn next_boundary(&self) -> Option<usize> {
         let next = self.active_slot.map_or(0, |slot| slot + 1);
-        self.replay_gains.get(next).map(|(start, _)| *start)
+        self.replay_gains.get(next).map(|bound| bound.start_sample)
     }
 
     /// Move the cursor onto whichever track's audio the next pump will
@@ -2414,9 +2520,28 @@ impl Session {
     /// `None` before the first bound arrives, which resolves to "the file said
     /// nothing" and so to the no-ReplayGain pre-amp.
     fn active_replay_gain(&self) -> ReplayGainTags {
+        self.active_bound()
+            .map_or_else(ReplayGainTags::default, |bound| bound.tags)
+    }
+
+    /// The file whose audio is being delivered, or `None` before the first
+    /// bound arrives.
+    ///
+    /// The path the *session* is delivering, from its own queue snapshot —
+    /// which is what a computed-ReplayGain lookup has to be keyed on, because
+    /// a measurement is a fact about a file rather than about a queue position
+    /// (ADR-0015). An edit that renumbers the queue therefore cannot make the
+    /// engine look up the wrong track's figure.
+    fn active_path(&self) -> Option<&Path> {
+        let bound = self.active_bound()?;
+        self.queue.get(bound.index).map(PathBuf::as_path)
+    }
+
+    /// The delivery bound the cursor is on.
+    fn active_bound(&self) -> Option<GainBound> {
         self.active_slot
             .and_then(|slot| self.replay_gains.get(slot))
-            .map_or_else(ReplayGainTags::default, |(_, tags)| *tags)
+            .copied()
     }
 
     /// Emit per-track events in strict queue order. A track is reported

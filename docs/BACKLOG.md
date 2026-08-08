@@ -331,20 +331,37 @@
   `applied_centidb` and explains the `source` (`no_tag` reads as a fact about
   the file, `disabled` states no figure at all). It is remembered across
   restarts in `config.toml`'s `[replaygain]` table.
-- **No ReplayGain *scanning*.** baz cannot produce the tags, only read them, so
-  a library that has never been through foobar2000, `rsgain`, `loudgain` or
-  `metaflac` gets nothing from the feature — and is played exactly as stored
-  rather than guessed at, which is what the no-ReplayGain pre-amp's default of
-  0 dB guarantees. Producing them means an EBU R128 loudness meter, a true-peak
-  meter, a scan UI with progress and cancellation, and **writing to the
-  listener's music files**, which baz has never done. `docs/ENGINEERING.md`
-  already names the acceptance criterion: validation against the EBU R128 test
-  vectors.
-- **The clipping check trusts the declared *sample* peak.** That is what
-  ReplayGain 2.0 scanners write, and it is what the tags can support;
-  inter-sample (true-peak) overshoot after reconstruction is not modelled, and
-  there is no limiter riding the gain. A true-peak check needs the audio, so it
-  belongs with the scanning work above.
+- ~~**No ReplayGain *scanning*.**~~ — **closed (ADR-0015).** baz computes the
+  figures for files that carry none: an EBU R128 / BS.1770-4 gated integrated
+  loudness meter (`baz_core::loudness`, validated against the EBU Tech 3341
+  compliance signals inside the ±0.1 LU the specification states — worst
+  measured error 0.0241 LU) driven by a cancellable, resumable background pass
+  over the library (`baz_core::analysis`), stored in schema v6's own columns and
+  reported through the `ReplayGainSource` vocabulary as `computed_*` so a
+  listener can tell a measurement from a tag. Tags still win, field by field.
+  ~~The controls are unbuilt~~ — still true: the pass is reachable through
+  `AnalysisCommand`, and the UI for it is a parallel unit.
+- **baz still does not write ReplayGain into music files.** The figures it
+  measures live in its own index, so another player will not see them.
+  Writing them means a backup story, a dry run, and an answer for a file that
+  is read-only or on a share that lies about being writable — its own unit,
+  and the first time baz would ever modify a listener's music.
+- **The clipping check trusts a *sample* peak** — the declared one where a file
+  has it, and baz's own measurement where it does not. That is what
+  ReplayGain 2.0 scanners write and what the tags can support; inter-sample
+  (true-peak) overshoot after reconstruction is not modelled, and there is no
+  limiter riding the gain. True peak means BS.1770-4 Annex 2's four-times
+  oversampling filter **and its own compliance vectors** — shipping the first
+  without the second would be the unverified number ADR-0015 exists to rule out.
+- **No momentary or short-term loudness meter, and no loudness range.**
+  ReplayGain needs the integrated figure and nothing else; the others are a
+  meter's features rather than a normaliser's, and EBU Tech 3341's cases 7–9
+  would come with them.
+- **An analysis pass hydrates a second in-RAM index** (its worker opens the
+  library on its own SQLite connection, which WAL makes safe). On a 100k
+  library that is real memory for the duration of the service. A lighter
+  read-only accessor would fix it; the current shape is not wrong, only
+  generous.
 - **A file with an album gain but no track gain is treated as untagged in track
   mode.** Deliberate (ADR-0013 §3) and vanishingly rare; noted so the asymmetry
   is a decision on record rather than an oversight.
