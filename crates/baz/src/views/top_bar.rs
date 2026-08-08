@@ -36,7 +36,6 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
     let mut status = row![
         text(counts_line(shelf))
             .size(theme::SIZE_META)
-            .font(theme::MONO)
             .color(theme::PAPER_FAINT)
     ]
     .spacing(theme::GAP_SM)
@@ -59,7 +58,6 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
         status = status.push(
             text(format!("{} files skipped", shelf.files_skipped))
                 .size(theme::SIZE_META)
-                .font(theme::MONO)
                 .color(theme::PAPER_FAINT),
         );
     }

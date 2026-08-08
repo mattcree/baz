@@ -68,7 +68,6 @@ pub(crate) fn view(player: &PlayerState, up_next_open: bool) -> Element<'_, Mess
         status = status.push(
             text(skipped)
                 .size(theme::SIZE_META)
-                .font(theme::MONO)
                 .color(theme::PAPER_FAINT),
         );
     }
@@ -150,7 +149,6 @@ fn up_next_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
         Some(note) => container(
             text(note)
                 .size(theme::SIZE_META)
-                .font(theme::MONO)
                 .color(theme::PAPER_FAINT)
                 .wrapping(text::Wrapping::None),
         )
@@ -240,7 +238,6 @@ fn signal_path(player: &PlayerState) -> Element<'_, Message> {
     let label = container(
         text(note.label)
             .size(theme::SIZE_META)
-            .font(theme::MONO)
             .color(theme::PAPER_FAINT)
             .wrapping(text::Wrapping::None),
     )
@@ -500,7 +497,6 @@ fn seek_stamp(
         container(
             text(value)
                 .size(theme::SIZE_META)
-                .font(theme::MONO)
                 .color(color)
                 .wrapping(text::Wrapping::None)
         )
@@ -531,16 +527,12 @@ fn preview_lane(
     if let Some(preview) = preview {
         let offset = player::preview_offset(&preview, tip_width);
         lane = lane.push(Space::with_width(Length::Fixed(offset))).push(
-            container(
-                text(preview.label)
-                    .size(theme::SIZE_CAPTION)
-                    .font(theme::MONO),
-            )
-            .width(Length::Fixed(tip_width))
-            .height(Length::Fill)
-            .align_x(alignment::Horizontal::Center)
-            .align_y(alignment::Vertical::Center)
-            .style(theme::preview_tip),
+            container(text(preview.label).size(theme::SIZE_CAPTION))
+                .width(Length::Fixed(tip_width))
+                .height(Length::Fill)
+                .align_x(alignment::Horizontal::Center)
+                .align_y(alignment::Vertical::Center)
+                .style(theme::preview_tip),
         );
     }
     container(lane)

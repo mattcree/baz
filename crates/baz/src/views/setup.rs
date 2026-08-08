@@ -23,7 +23,6 @@ pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
         // accent-discipline note).
         text("baz")
             .size(theme::SIZE_EMPHASIS)
-            .font(theme::MONO)
             .color(theme::PAPER_FAINT),
         text("Where's your music?")
             .size(theme::SIZE_HERO)

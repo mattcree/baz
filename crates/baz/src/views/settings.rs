@@ -300,7 +300,6 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
             column![
                 text(readout.gain)
                     .size(theme::SIZE_META)
-                    .font(theme::MONO)
                     .color(theme::PAPER),
                 text(readout.detail)
                     .size(theme::SIZE_META)
@@ -354,10 +353,11 @@ fn mode_selector(state: replaygain::ReplayGain, live: bool) -> Element<'static, 
 
 /// One numeric setting: its name, its value, and a `−`/`+` pair.
 ///
-/// The value sits in a [`theme::SETTING_VALUE_W`] slot in [`theme::MONO`], so
-/// a repeated press cannot move the button under the pointer holding it — the
-/// same fixed-slot rule the bottom bar is built on. A stepper at the end of
-/// its travel renders disabled rather than absorbing the press.
+/// The value sits in a [`theme::SETTING_VALUE_W`] slot, so a repeated press
+/// cannot move the button under the pointer holding it — the same fixed-slot
+/// rule the bottom bar is built on, and it holds in a proportional face because
+/// Plex Sans's figures are tabular. A stepper at the end of its travel renders
+/// disabled rather than absorbing the press.
 fn stepper_row(
     label: &'static str,
     value: String,
@@ -375,7 +375,6 @@ fn stepper_row(
         container(
             text(value)
                 .size(theme::SIZE_META)
-                .font(theme::MONO)
                 .color(theme::PAPER)
                 .wrapping(text::Wrapping::None)
         )
@@ -395,16 +394,11 @@ fn stepper_row(
 /// `+` in width and in height, and these two sit side by side.
 fn stepper(glyph: &'static str, enabled: bool, message: Message) -> Element<'static, Message> {
     button(
-        container(
-            text(glyph)
-                .size(theme::SIZE_BODY)
-                .font(theme::MONO)
-                .color(if enabled {
-                    theme::PAPER
-                } else {
-                    theme::PAPER_MUTED
-                }),
-        )
+        container(text(glyph).size(theme::SIZE_BODY).color(if enabled {
+            theme::PAPER
+        } else {
+            theme::PAPER_MUTED
+        }))
         .width(Length::Fill)
         .height(Length::Fill)
         .align_x(alignment::Horizontal::Center)

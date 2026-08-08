@@ -236,17 +236,11 @@ fn album_header<'a>(
             .color(theme::PAPER_DIM),
         text(meta.join(" · "))
             .size(theme::SIZE_META)
-            .font(theme::MONO)
             .color(theme::PAPER_FAINT),
     ]
     .spacing(theme::GAP_XS);
     if let Some(line) = edition.and_then(vm::EditionVm::encoding_line) {
-        header = header.push(
-            text(line)
-                .size(theme::SIZE_META)
-                .font(theme::MONO)
-                .color(theme::PAPER_FAINT),
-        );
+        header = header.push(text(line).size(theme::SIZE_META).color(theme::PAPER_FAINT));
     }
     header.into()
 }
@@ -321,7 +315,6 @@ fn track_row(
     } else {
         text(track.number.map(|n| n.to_string()).unwrap_or_default())
             .size(theme::SIZE_META)
-            .font(theme::MONO)
             .color(theme::PAPER_FAINT)
             .into()
     };
@@ -353,7 +346,6 @@ fn track_row(
             container(title).width(Length::Fill),
             text(duration)
                 .size(theme::SIZE_META)
-                .font(theme::MONO)
                 .color(theme::PAPER_FAINT),
         ]
         .spacing(theme::GAP_SM)

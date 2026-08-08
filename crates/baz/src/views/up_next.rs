@@ -119,7 +119,6 @@ pub(crate) fn view(
                         .wrapping(text::Wrapping::None),
                     text(list.summary)
                         .size(theme::SIZE_META)
-                        .font(theme::MONO)
                         .color(theme::PAPER_FAINT),
                 ]
                 .spacing(theme::GAP_XXS),
@@ -234,7 +233,6 @@ fn queue_row(
     } else {
         text(row_state.position.to_string())
             .size(theme::SIZE_META)
-            .font(theme::MONO)
             .color(theme::PAPER_FAINT)
             .into()
     };
@@ -267,7 +265,6 @@ fn queue_row(
             container(title).width(Length::Fill),
             text(row_state.duration)
                 .size(theme::SIZE_META)
-                .font(theme::MONO)
                 .color(theme::PAPER_FAINT),
         ]
         .spacing(theme::GAP_SM)

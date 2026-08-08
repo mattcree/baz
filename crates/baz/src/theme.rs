@@ -175,18 +175,17 @@ pub const SEMIBOLD: Font = Font {
     weight: Weight::Semibold,
     ..SANS
 };
-/// Monospace for data: track numbers, durations, counts, dB values, rates.
-/// iced 0.13 has no OpenType feature control (no `tnum`), so the monospace
-/// face *is* our tabular figures.
-///
-/// The **bundled** mono, not `Font::MONOSPACE` (which is the generic
-/// `Family::Monospace` the platform picks): Plex Mono shares Plex Sans's
-/// x-height, stem weight and terminal treatment, so a line like
-/// `2022 · 8 tracks · 47:21` reads as one typeface with two settings rather
-/// than as two unrelated voices. Its advance is uniform at 0.6 em, which is
-/// the number every reserved slot in the bottom bar is measured against —
-/// `crate::font`'s `every_reserved_slot_holds_its_worst_case_in_the_bundled_face`.
-pub const MONO: Font = Font::with_name(crate::font::MONO);
+
+// There is deliberately **no monospace token**, and no monospace face. Every
+// figure baz draws — track numbers, durations, counts, dB values, sample rates,
+// queue positions — is set in [`SANS`], because Plex Sans's digits are already
+// tabular: 600/1000 em in Regular, Medium and SemiBold alike, the same advance
+// the deleted Plex Mono gave. `crate::font`'s
+// `the_sans_carries_baz_s_tabular_figures_in_every_weight_it_sets_them_in`
+// measures that, and `no_monospace_survives_anywhere_in_the_crate` below keeps
+// the second face from creeping back. The argument is
+// `.interface-design/system.md` §8; the owner's complaint that started it was
+// that the readouts looked like a typewriter.
 
 // ---------------------------------------------------------------------------
 // Spacing (base unit 4) and shape
@@ -227,7 +226,7 @@ pub const RADIUS_TILE: f32 = 10.0;
 /// step with it (see [`crate::selection`]).
 pub const PANEL_W: f32 = 340.0;
 /// Width of the number column in a track or queue list (logical px). Enough
-/// for three monospace figures at [`SIZE_META`], so a long queue's positions
+/// for three figures at [`SIZE_META`], so a long queue's positions
 /// stay in their column.
 pub const TRACK_NO_W: f32 = 24.0;
 /// Corner radius for small floating chips (the seek preview tip).
@@ -252,19 +251,24 @@ pub const KNOB: f32 = 5.0;
 pub const KNOB_ACTIVE: f32 = 7.0;
 /// Minimum width the seek bar is given in the now-playing bar.
 pub const SEEK_W: f32 = 260.0;
-/// Width reserved for each of the seek bar's timestamps: enough for
-/// `h:mm:ss` at [`SIZE_META`] in [`MONO`]. Fixed, so the groove keeps its
-/// place when a track crosses the hour mark or a stamp gains a digit — the
-/// same reason an undeclared length renders as `--:--` rather than as
-/// nothing.
+/// Width reserved for each of the seek bar's timestamps: enough for `h:mm:ss`
+/// at [`SIZE_META`]. Fixed, so the groove keeps its place when a track crosses
+/// the hour mark or a stamp gains a digit — the same reason an undeclared
+/// length renders as `--:--` rather than as nothing.
+///
+/// The number is unchanged from the build that set it in the monospace, and it
+/// gained a capability by standing still: `10:00:00` measures 57.60 px in Plex
+/// Mono, so the shipped build *clipped* a ten-hour track in this very slot, and
+/// 50.21 px in Plex Sans, which it holds with 1.79 px to spare. `crate::font`
+/// measures both.
 pub const STAMP_W: f32 = 52.0;
 /// Height of the lane the hover preview floats in, directly above the
 /// groove. Reserved whether or not anything is hovering, so the bottom bar
 /// never changes height under the pointer.
 pub const PREVIEW_H: f32 = 15.0;
-/// Width of the hover-preview tip: enough for `h:mm:ss` at
-/// [`SIZE_CAPTION`] in [`MONO`] plus its padding, fixed so the tip can be
-/// centered on the pointer without measuring text.
+/// Width of the hover-preview tip: enough for `h:mm:ss` at [`SIZE_CAPTION`]
+/// plus its padding, fixed so the tip can be centered on the pointer without
+/// measuring text.
 pub const PREVIEW_W: f32 = 58.0;
 
 // ---------------------------------------------------------------------------
@@ -280,7 +284,7 @@ pub const PREVIEW_W: f32 = 58.0;
 /// hundred times finer than the ~1 dB a listener hears as a change.
 pub const VOLUME_W: f32 = 96.0;
 /// Width of the level tip that floats over the volume groove on hover:
-/// enough for `-18.1 dB` at [`SIZE_CAPTION`] in [`MONO`] plus its padding.
+/// enough for `-18.1 dB` at [`SIZE_CAPTION`] plus its padding.
 pub const LEVEL_W: f32 = 62.0;
 /// Width of the detent mark on a groove's travel.
 pub const DETENT_W: f32 = 2.0;
@@ -362,8 +366,7 @@ pub const SEEK_ROW_W: f32 = SEEK_W + 2.0 * (STAMP_W + GAP_SM);
 /// always there and usually empty.
 ///
 /// Wide enough for the longest chain a consumer device produces —
-/// `192 → 176.4 kHz`, fifteen monospace figures at [`SIZE_META`] — with room
-/// to spare.
+/// `192 → 176.4 kHz` — with room to spare.
 pub const SIGNAL_W: f32 = 120.0;
 
 /// Width of a vertical scrollbar, and of the lane a scrolling list keeps
@@ -395,8 +398,8 @@ pub const SCROLLBAR_LANE: f32 = SCROLLBAR_W + 2.0 * SCROLLBAR_MARGIN;
 /// hurry. Still a square, and still fixed in both axes, so a value changing
 /// under them moves nothing.
 pub const STEPPER_HIT: f32 = 24.0;
-/// Width reserved for a setting's value readout: enough for `-20.00 dB` in
-/// [`MONO`] at [`SIZE_META`].
+/// Width reserved for a setting's value readout: enough for `−20.00 dB` at
+/// [`SIZE_META`].
 ///
 /// Fixed for the reason [`STAMP_W`] is: the digits change as the control is
 /// driven, and a row that re-flowed under a repeated press would make the
@@ -1145,9 +1148,8 @@ pub const POPOVER_MAX_H: f32 = 0.6;
 ///
 /// A **reserved slot**, exactly like [`SIGNAL_W`] and [`STAMP_W`]: the readout
 /// is absent when nothing is playing and present when something is, and the bar
-/// must not move between those two states. Wide enough for `999 / 999` — nine
-/// monospace figures at [`SIZE_META`] — because a queue's length is not
-/// something the front end gets to bound.
+/// must not move between those two states. Wide enough for `999 / 999`,
+/// because a queue's length is not something the front end gets to bound.
 pub const QUEUE_POS_W: f32 = 72.0;
 
 /// Width of the bar's **Up next** control (logical px) — the label, the
@@ -1316,19 +1318,24 @@ mod tests {
         // And its width is the groove plus a fixed stamp on each side, so
         // the centre column never resizes as the digits tick.
         assert!((SEEK_ROW_W - (SEEK_W + 2.0 * (STAMP_W + GAP_SM))).abs() < f32::EPSILON);
-        // A stamp must hold `h:mm:ss` — seven figures in the bundled mono,
-        // whose advance is [`MONO_EM`] of the size — without clipping.
-        const { assert!(STAMP_W > SIZE_META * 7.0 * MONO_EM) }
+        // A stamp must hold `h:mm:ss` without clipping. The face is
+        // proportional everywhere except its figures, so what a const
+        // assertion can bound is the *figures*: six of them, each [`DIGIT_EM`]
+        // of the size, in both `0:00:00` and the ten-hour `10:00:00`. The whole
+        // string, colons and all, is measured against the real advances by
+        // `crate::font`'s slot test — which is where the ten-hour case is
+        // actually proven, because in the *mono* it did not fit.
+        const { assert!(STAMP_W > SIZE_META * 6.0 * DIGIT_EM) }
         // The signal-path slot is reserved on the same principle, and must
         // hold the longest chain a consumer device produces —
-        // `192 → 176.4 kHz`, fifteen monospace figures — so that a note
-        // appearing there moves nothing beside it.
-        const { assert!(SIGNAL_W > SIZE_META * 15.0 * MONO_EM) }
+        // `192 → 176.4 kHz`, seven figures — so that a note appearing there
+        // moves nothing beside it.
+        const { assert!(SIGNAL_W > SIZE_META * 7.0 * DIGIT_EM) }
         // And the queue-position readout the left zone gained with the popover
-        // is the same rule again: `999 / 999` is nine monospace figures, the
-        // slot holds them, and it is that wide whether or not anything is
-        // playing — so `3 / 12` appearing as a track starts moves no title.
-        const { assert!(QUEUE_POS_W > SIZE_META * 9.0 * MONO_EM) }
+        // is the same rule again: `999 / 999` is six figures, the slot holds
+        // them, and it is that wide whether or not anything is playing — so
+        // `3 / 12` appearing as a track starts moves no title.
+        const { assert!(QUEUE_POS_W > SIZE_META * 6.0 * DIGIT_EM) }
         // …and the control that carries it holds the readout, its label and the
         // padding around both. The label itself is measured in the face that
         // draws it by `font.rs`; this is the arithmetic that leaves room.
@@ -1428,21 +1435,25 @@ mod tests {
         );
     }
 
-    /// The advance width of one glyph in the bundled monospace, as a fraction
+    /// The advance width of one **figure** in the bundled face, as a fraction
     /// of the type size.
     ///
-    /// **0.6, not the 0.5 these assertions used to guess with.** Before the
-    /// typeface was bundled the face was whatever the platform resolved
-    /// `Family::SansSerif`/`Family::Monospace` to, so the slot arithmetic here
-    /// could only be a conservative estimate; now the face ships with the
-    /// binary and the number is a property of a file we hash. The const
-    /// assertions below stay because they are cheap and they fail at compile
-    /// time, but the claim they stand for is *measured* — against these very
-    /// bytes, string by string — in
-    /// `crate::font`'s `every_reserved_slot_holds_its_worst_case_in_the_bundled_face`,
-    /// which is the test `docs/design/02-visual-language.md` §4.6 requires
-    /// before a font change may ship.
-    const MONO_EM: f32 = 0.6;
+    /// **0.6, and it is now a property of the Sans rather than of a second
+    /// face.** IBM Plex Sans ships tabular figures by default — every digit
+    /// advances 600/1000 em in Regular, Medium and `SemiBold` alike, which is
+    /// exactly what Plex Mono advanced at, and is why the monospace could be
+    /// deleted without re-deriving a single slot
+    /// (`.interface-design/system.md` §8).
+    ///
+    /// The const assertions below stay because they are cheap and they fail at
+    /// compile time, but they bound only the digits in a worst-case string: the
+    /// face is proportional everywhere else, so `n glyphs × DIGIT_EM` is no
+    /// longer arithmetic about a whole string. That claim is *measured* —
+    /// against these very bytes, string by string — in `crate::font`'s
+    /// `every_reserved_slot_holds_its_worst_case_in_the_bundled_face`, which is
+    /// the test `docs/design/02-visual-language.md` §3.4 requires before a face
+    /// change may ship.
+    const DIGIT_EM: f32 = 0.6;
 
     /// The duration-column defect, as arithmetic: the lane a list keeps clear
     /// is exactly the lane its scrollbar occupies, and it is kept clear on the
@@ -1490,9 +1501,10 @@ mod tests {
             inner > 200.0,
             "the lane left only {inner} px for a track title"
         );
-        // `-20.00 dB` is nine monospace figures at SIZE_META; the slot is
-        // fixed so a value changing cannot move the stepper beside it.
-        const { assert!(SETTING_VALUE_W > SIZE_META * 9.0 * MONO_EM) }
+        // `-20.00 dB` is five figures' worth of sign and digits at SIZE_META
+        // (U+2212 advances the same 0.6 em a digit does); the slot is fixed so
+        // a value changing cannot move the stepper beside it.
+        const { assert!(SETTING_VALUE_W > SIZE_META * 5.0 * DIGIT_EM) }
         // A stepper is smaller than the transport but still a real target.
         const { assert!(STEPPER_HIT < TRANSPORT_HIT && STEPPER_HIT >= ICON_PX) }
     }
@@ -1598,9 +1610,10 @@ mod tests {
         // state, so no volume change and no mute can move a pixel beside it.
         assert!((VOLUME_BLOCK_W - (TRANSPORT_HIT + GAP_SM + VOLUME_W)).abs() < f32::EPSILON);
         assert!((VOLUME_ROW_H - (PREVIEW_H + VOLUME_HIT)).abs() < f32::EPSILON);
-        // The level tip must hold `-18.1 dB` — eight monospace figures at
-        // caption size — without clipping.
-        const { assert!(LEVEL_W > SIZE_CAPTION * 8.0 * MONO_EM) }
+        // The level tip must hold `-18.1 dB` — four figures at caption size,
+        // plus the proportional remainder `crate::font` measures — without
+        // clipping.
+        const { assert!(LEVEL_W > SIZE_CAPTION * 4.0 * DIGIT_EM) }
         // And the whole right-hand end has to fit beside the centre column
         // in the shipped window, or the zone would clip on launch.
         const { assert!(VOLUME_BLOCK_W + GAP_SM + SIGNAL_W < 1280.0 - SEEK_ROW_W) }
@@ -2063,6 +2076,69 @@ mod tests {
             "no view names the accent at all — the seek bar's in-flight \
              timestamp is supposed to, and this test just stopped meaning \
              anything"
+        );
+    }
+
+    /// **The monospace is gone, and it stays gone.**
+    ///
+    /// The owner's complaint about the shipped UI was, verbatim, *"some weird
+    /// monospace looking fonts which are lame"*, and
+    /// `.interface-design/system.md` §8 answers it in one line: **no monospace
+    /// anywhere in baz**. Deleting the token makes today's build compile
+    /// without one; this is what makes tomorrow's build do the same.
+    ///
+    /// A second face cannot come back by accident — the compiler would ask for
+    /// its bytes — but it can come back on purpose, one generic typewriter
+    /// family at a time, and the reason it must not is *measured* rather than
+    /// aesthetic:
+    /// Plex Sans's figures are already tabular
+    /// (`crate::font`'s `the_sans_carries_baz_s_tabular_figures_in_every_weight_it_sets_them_in`),
+    /// so a monospace would buy nothing and cost the interface its voice.
+    ///
+    /// Read from the sources rather than asserted about the tokens, in the
+    /// shape `the_lamp_is_named_only_where_playback_truth_is_drawn` established:
+    /// a style sweep cannot see a view that names a face.
+    #[test]
+    fn no_monospace_survives_anywhere_in_the_crate() {
+        // Spelled in halves so this test does not find itself.
+        let token = concat!("MO", "NO");
+        let asset = concat!("IBMPlex", "Mono");
+
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut offenders: Vec<String> = Vec::new();
+        for path in rust_sources(&manifest.join("src")) {
+            let source = std::fs::read_to_string(&path).expect("a source file baz ships");
+            if source.contains(token) || source.contains(asset) {
+                offenders.push(path.to_string_lossy().into_owned());
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "{offenders:?} name a monospace. baz sets every figure in the Sans, \
+             whose digits are tabular by default (.interface-design/system.md \
+             §8); a second face buys nothing and reads as a typewriter."
+        );
+
+        // …and the asset directory carries no face the crate could reach for.
+        let faces = std::fs::read_dir(manifest.join("assets/fonts"))
+            .expect("the bundled typeface")
+            .map(|entry| entry.expect("a readable directory entry").path())
+            .filter(|path| path.extension().is_some_and(|kind| kind == "ttf"))
+            .map(|path| {
+                path.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !faces.iter().any(|name| name.contains(asset)),
+            "the monospace is still on disk: {faces:?}"
+        );
+        assert_eq!(
+            faces.len(),
+            crate::font::FACES.len(),
+            "the bundled faces and the shipped files disagree: {faces:?}"
         );
     }
 
