@@ -399,11 +399,31 @@ pub fn source_phrase(source: ReplayGainSource, applied_centidb: i16) -> &'static
 /// between turning a track up and turning it down is the whole content of the
 /// number. **Zero carries no sign**: `0.00 dB` is baz not changing the level,
 /// and `+0.00 dB` would dress that up as a direction.
+///
+/// # The minus is U+2212, not hyphen-minus
+///
+/// This is the one place in baz where a proportional face could still make a
+/// fixed slot jiggle, and it is fixed here rather than padded around in the
+/// view. In IBM Plex Sans a hyphen-minus advances 0.399 em where `+` and the
+/// true minus sign U+2212 both advance 0.600, so `-20.00 dB` measured 54.48 px
+/// against `+20.00 dB`'s 56.89 — a 2.4 px shift in the *left* edge of a
+/// right-aligned [`crate::theme::SETTING_VALUE_W`] slot every time the pre-amp
+/// stepped through zero. With U+2212 the two are 56.89 px each, exactly.
+///
+/// It is also the typographically correct glyph for a negative quantity, and it
+/// is the one the stepper beside this readout already draws for its own
+/// decrement button — so the formatter and the control now agree rather than
+/// disagreeing by a codepoint.
+///
+/// The cost is that the output is no longer `str::parse`-able as a number
+/// without translating the sign back, which is a thing only this module's own
+/// tests ever did.
 #[must_use]
 pub fn format_centidb(centidb: i16) -> String {
     let sign = match centidb.signum() {
         1 => "+",
-        -1 => "-",
+        // U+2212 MINUS SIGN, which advances exactly as wide as the `+` above.
+        -1 => "\u{2212}",
         _ => "",
     };
     // `unsigned_abs` rather than `abs`, so `i16::MIN` cannot panic on a value
@@ -604,7 +624,7 @@ mod tests {
         let readout = state
             .readout(true)
             .expect("a mode is set and a track plays");
-        assert_eq!(readout.gain, "-2.33 dB");
+        assert_eq!(readout.gain, "\u{2212}2.33 dB");
         assert!(readout.detail.contains("no album figure"), "{readout:?}");
         assert!(readout.detail.contains("below full scale"), "{readout:?}");
     }
@@ -613,35 +633,57 @@ mod tests {
     // The dB rendering
     // -----------------------------------------------------------------------
 
-    /// Sign, magnitude and the two decimals, pinned as bytes.
+    /// Sign, magnitude and the two decimals, pinned as bytes — **including
+    /// which codepoint the sign is**, which is the half of this a reserved
+    /// slot's width depends on.
     #[test]
     fn a_gain_renders_as_hundredths_of_a_decibel_with_its_sign() {
         for (centidb, rendered) in [
             (0_i16, "0.00 dB"),
-            (-775, "-7.75 dB"),
+            (-775, "\u{2212}7.75 dB"),
             (600, "+6.00 dB"),
             (104, "+1.04 dB"),
             (233, "+2.33 dB"),
-            (-500, "-5.00 dB"),
+            (-500, "\u{2212}5.00 dB"),
             (50, "+0.50 dB"),
-            (-50, "-0.50 dB"),
+            (-50, "\u{2212}0.50 dB"),
             (2000, "+20.00 dB"),
-            (-2000, "-20.00 dB"),
-            (-9000, "-90.00 dB"),
+            (-2000, "\u{2212}20.00 dB"),
+            (-9000, "\u{2212}90.00 dB"),
         ] {
             assert_eq!(format_centidb(centidb), rendered, "for {centidb}");
         }
+    }
+
+    /// **The negative sign is U+2212, never hyphen-minus.**
+    ///
+    /// A typographic preference that is also a layout fact: in the bundled Sans
+    /// a hyphen advances 0.399 em and both `+` and U+2212 advance 0.600, so a
+    /// hyphen here would move the *left* edge of the right-aligned
+    /// `SETTING_VALUE_W` slot by 2.4 px every time the pre-amp crossed zero.
+    /// The stepper beside this readout already draws U+2212 for its own
+    /// decrement button; this is the formatter agreeing with the control.
+    #[test]
+    fn a_negative_gain_is_signed_with_a_real_minus_so_it_measures_as_a_plus_does() {
+        let down = format_centidb(-2000);
+        let up = format_centidb(2000);
+        assert!(down.starts_with('\u{2212}'), "{down:?}");
+        assert!(!down.contains('-'), "{down:?} carries a hyphen-minus");
+        // The same glyph count — and in a face whose figures are tabular and
+        // whose sign glyphs share an advance, that is the same width.
+        // `crate::font` measures both strings against the slot itself.
+        assert_eq!(down.chars().count(), up.chars().count());
     }
 
     /// The two places nearest zero, where a naive `centidb / 100` loses the
     /// sign entirely and a naive remainder prints a bare minus.
     #[test]
     fn a_gain_below_a_tenth_of_a_decibel_keeps_its_sign_and_its_leading_zero() {
-        assert_eq!(format_centidb(-5), "-0.05 dB");
+        assert_eq!(format_centidb(-5), "\u{2212}0.05 dB");
         assert_eq!(format_centidb(5), "+0.05 dB");
-        assert_eq!(format_centidb(-1), "-0.01 dB");
-        assert_eq!(format_centidb(-99), "-0.99 dB");
-        assert_eq!(format_centidb(-100), "-1.00 dB");
+        assert_eq!(format_centidb(-1), "\u{2212}0.01 dB");
+        assert_eq!(format_centidb(-99), "\u{2212}0.99 dB");
+        assert_eq!(format_centidb(-100), "\u{2212}1.00 dB");
     }
 
     /// Zero is *not* signed: it is baz not changing the level, and a `+`
@@ -651,25 +693,32 @@ mod tests {
         assert_eq!(format_centidb(0), "0.00 dB");
         assert!(!format_centidb(0).contains('+'));
         assert!(!format_centidb(0).contains('-'));
+        assert!(!format_centidb(0).contains('\u{2212}'));
     }
 
     /// A figure only a broken engine could send must render, not panic —
     /// `i16::MIN` has no positive counterpart, which is what `abs` trips over.
     #[test]
     fn the_extremes_of_the_type_render_rather_than_panic() {
-        assert_eq!(format_centidb(i16::MIN), "-327.68 dB");
+        assert_eq!(format_centidb(i16::MIN), "\u{2212}327.68 dB");
         assert_eq!(format_centidb(i16::MAX), "+327.67 dB");
     }
 
     /// Rendering and parsing are the same decision: every value the engine can
     /// send comes back through the string as itself.
+    ///
+    /// The sign has to be translated back to hyphen-minus before `parse` will
+    /// look at it, and that is the whole cost of drawing a real minus sign:
+    /// nothing in baz round-trips these strings, so the only reader that ever
+    /// has to do it is this test.
     #[test]
     fn the_rendering_is_reversible_over_the_whole_applied_range() {
         for centidb in -9_000_i16..=2_000 {
             let rendered = format_centidb(centidb);
             let number = rendered
                 .strip_suffix(" dB")
-                .expect("every rendering carries the unit");
+                .expect("every rendering carries the unit")
+                .replace('\u{2212}', "-");
             let parsed: f64 = number.parse().expect("a bare decimal");
             #[expect(
                 clippy::cast_possible_truncation,
@@ -947,7 +996,7 @@ mod tests {
         assert!(!state.no_tag_preamp_can_step(-1), "already at the bottom");
         assert!(state.no_tag_preamp_can_step(1));
         assert_eq!(state.preamp_label(), "+20.00 dB");
-        assert_eq!(state.no_tag_preamp_label(), "-20.00 dB");
+        assert_eq!(state.no_tag_preamp_label(), "\u{2212}20.00 dB");
     }
 
     /// Stepping up and back down returns to where it started, at every point

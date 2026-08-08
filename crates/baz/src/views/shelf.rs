@@ -106,12 +106,18 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
     let mut content = column![
         text(line)
             .size(theme::SIZE_EMPHASIS)
+            .line_height(theme::LEADING_EMPHASIS)
             .color(theme::PAPER_DIM)
     ]
     .spacing(theme::GAP_SM)
     .align_x(iced::Alignment::Center);
     if let Some(hint) = hint {
-        content = content.push(text(hint).size(theme::SIZE_META).color(theme::PAPER_FAINT));
+        content = content.push(
+            text(hint)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(theme::PAPER_FAINT),
+        );
     }
     container(content).center(Length::Fill).into()
 }
@@ -155,6 +161,7 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
     title_row = title_row.push(
         text(title)
             .size(theme::SIZE_BODY)
+            .line_height(theme::LEADING_BODY)
             .font(theme::MEDIUM)
             .wrapping(text::Wrapping::None),
     );
@@ -179,6 +186,7 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
         caption_lane(
             text(caption)
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_DIM)
                 .wrapping(text::Wrapping::None)
                 .into(),

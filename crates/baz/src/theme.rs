@@ -4,11 +4,22 @@
 //!
 //! # Palette rationale
 //!
-//! baz's room is a **dim listening room**: charcoal walls, matte record
-//! sleeves, low warm light. The chrome must recede so 10 000 covers — the
-//! actual interface — supply all the chroma; every surface is therefore a
-//! *warm* near-neutral (a hint of brown, never the blue-grey of a stock
-//! dark theme), and text is warm off-white like liner-note paper.
+//! **A record archive after closing time. The works are lit; the room is not.**
+//!
+//! baz is a hang, not a dashboard. The wall is near-black and *neutral-cool* —
+//! the matte paint of a black-cube gallery, never the warm charcoal of the
+//! listening room this replaced and never the blue-grey of a stock dark theme.
+//! The type is warm ivory, the colour of archival mount board. **The room is
+//! cold and the paper is warm**, which is what a gallery looks like at night,
+//! and it is the one decision that keeps a near-black grid of covers from
+//! reading as every other media app. The chrome recedes so that 10 000 sleeves
+//! — the actual interface — supply every other colour in the room.
+//!
+//! There is one light in it, and it is pointed at one thing: the record that is
+//! playing. Everything else — every control, count, setting and state — is made
+//! of surface, edge and ink. The long argument is
+//! `docs/design/02-visual-language.md`; the condensed version that governs is
+//! `.interface-design/system.md`.
 //!
 //! # The accent discipline
 //!
@@ -43,10 +54,25 @@
 //! — a scan is the library working, not the music). Blue, every streaming
 //! app's accent, remains deliberately absent.
 //!
-//! Depth strategy: hairline borders plus whisper-quiet surface steps
-//! (`WALL` → `CARD` → `CARD_HIGH`, with `RECESS` for inset chrome), and one
-//! soft shadow under artwork so sleeves sit *on* the shelf. Corners: sleeves
-//! are square like the physical object; controls are gently rounded.
+//! # Depth strategy: surface steps, and nothing else
+//!
+//! Four planes — [`RECESS`] below the wall, [`WALL`], [`PLINTH`] one step up,
+//! [`PLINTH_LIT`] one above that — whisper-quiet in bytes (8 apart) and plainly
+//! felt in linear light (nearly 2× per step, which is what the eye actually
+//! uses at these levels). Squint and you perceive four planes and no edges.
+//!
+//! **Not shadows**, and that is measured rather than preferred: black at 55 %
+//! over `#0C0D0E` composites to `#050606`, a contrast ratio of **1.04 : 1**. On
+//! near-black a drop shadow is not a design tool, it is a rounding error, so
+//! the sleeve's contact shadow is deleted rather than tuned (that deletion is
+//! B1 of the adoption order, not this pass). The one shadow primitive left in
+//! the product is the playing halo, and it is not elevation — it is light.
+//!
+//! Hairlines survive in three structural roles — under the top bar, above the
+//! now-playing bar, and dividing the inspector from the shelf — plus a tile's
+//! own hover rule and control borders. Corners: artwork is always square, like
+//! the physical object; controls are barely rounded, because an archive is
+//! rectilinear.
 //!
 //! # Contrast
 //!
@@ -68,34 +94,71 @@ use iced::{Background, Border, Color, Font, Padding, Shadow, Theme, Vector, mous
 // Palette
 // ---------------------------------------------------------------------------
 
-/// The room: the app background behind the shelf. Warm near-black.
-pub const WALL: Color = Color::from_rgb(0.075, 0.067, 0.061);
-/// Inset chrome — the now-playing bar and text-input wells sit *below* the
-/// wall.
-pub const RECESS: Color = Color::from_rgb(0.051, 0.045, 0.041);
-/// Raised card surface: the side panel, resting controls, hovered tiles.
-pub const CARD: Color = Color::from_rgb(0.106, 0.096, 0.088);
-/// One step above [`CARD`]: selected tiles, hovered controls.
-pub const CARD_HIGH: Color = Color::from_rgb(0.133, 0.121, 0.110);
+/// **The hanging wall**: the app background behind the shelf. `#0C0D0E` — a
+/// neutral-cool near-black, the matte paint of a black-cube gallery.
+///
+/// Cool, and that is the single decision that keeps a dark grid of covers from
+/// reading as every other media app: the room is cold and the paper is warm
+/// ([`PAPER`]), which is what a gallery actually looks like at night. The
+/// previous direction's warm charcoal is gone with the listening room it
+/// belonged to.
+pub const WALL: Color = Color::from_rgb(0.047, 0.051, 0.055);
+/// **The shadow gap** where the wall meets the floor: the now-playing bar,
+/// input wells, groove troughs and the backing behind a sleeve — everything
+/// that sits *below* the wall. `#060708`.
+pub const RECESS: Color = Color::from_rgb(0.024, 0.027, 0.031);
+/// **One step up from the wall**: the album inspector's column, the popover,
+/// a resting control. `#141517`.
+///
+/// A plinth is the thing a work stands on. It was called `CARD`, which is
+/// web-app vocabulary and, under this direction, a lie — there are no cards,
+/// and the shelf in particular may never be drawn on one.
+pub const PLINTH: Color = Color::from_rgb(0.078, 0.082, 0.090);
+/// **One step above [`PLINTH`]**: a selected segment, the playing row, a
+/// hovered control. `#1C1D20`. Never a resting state.
+pub const PLINTH_LIT: Color = Color::from_rgb(0.110, 0.114, 0.125);
 /// Hairline border: findable when you look, invisible when you don't.
-pub const HAIRLINE: Color = Color::from_rgba(0.93, 0.89, 0.85, 0.08);
-/// The hairline, slightly firmer — selection edges, hovered controls.
-pub const HAIRLINE_STRONG: Color = Color::from_rgba(0.93, 0.89, 0.85, 0.17);
-/// Primary text: warm off-white, liner-note paper.
-pub const PAPER: Color = Color::from_rgb(0.918, 0.902, 0.878);
-/// Secondary text: artists, captions, subtitles.
-pub const PAPER_DIM: Color = Color::from_rgb(0.659, 0.635, 0.604);
+/// [`PAPER`] at **7 %**.
+///
+/// Down from 8 %, and the *perceived* weight is unchanged: the same alpha over
+/// a darker ground is a larger step, so holding a hairline steady across the
+/// repaint meant lowering its number. iced 0.13's `Border` is four-sided, so
+/// every single line in the product is a `rule` widget.
+pub const HAIRLINE: Color = Color { a: 0.07, ..PAPER };
+/// The hairline, firmer — a selected control's edge, the playing row's edge.
+/// [`PAPER`] at **15 %** (down from 17 %, for the reason [`HAIRLINE`] gives).
+pub const HAIRLINE_STRONG: Color = Color { a: 0.15, ..PAPER };
+/// Primary text: **archival mount board**, `#E8E4DB`.
+///
+/// A warm ivory that is a *material* rather than "white text" — the colour the
+/// wall label is printed on. The room is cool ([`WALL`]) and the paper is warm,
+/// and that pairing is the whole of what stops a near-black grid of covers
+/// reading as a stock dark theme.
+///
+/// [`PAPER_DIM`], [`PAPER_FAINT`] and [`PAPER_MUTED`] are **the same r : g : b
+/// ratios scaled down**, so the ink family is one board at four levels of light
+/// rather than four greys that drifted apart. (The ramp baz shipped drifted
+/// warmer as it darkened, which against a cool wall reads yellowish.) Each is
+/// the *smallest* point on that ramp that clears its floor on every surface it
+/// can land on, with 0.1 of margin.
+pub const PAPER: Color = Color::from_rgb(0.910, 0.894, 0.859);
+/// Secondary text: artists, captions, subtitles. `#ABA8A1`. Never a figure that
+/// ticks — those are primary or tertiary, never in between.
+pub const PAPER_DIM: Color = Color::from_rgb(0.671, 0.659, 0.631);
 /// Tertiary text: counts, durations, hints, signal notes, the resting fader —
 /// present, never loud.
 ///
-/// `#8A857C`. This carries the whole of baz's readout vocabulary, and the
-/// value it had through v0.1 (`#726D66`) measured **3.4 : 1** on the panel —
-/// below the 4.5 : 1 AA floor for text on every surface it can land on. The
-/// value here is the same hue lightened until it clears that floor everywhere
-/// (5.1 on `WALL`, 4.8 on `CARD`, 5.4 on `RECESS`, 4.5 on `CARD_HIGH`);
+/// `#888680`. This carries the whole of baz's readout vocabulary, and the value
+/// it had through v0.1 (`#726D66`) measured **3.4 : 1** on the panel — below
+/// the 4.5 : 1 AA floor for text on every surface it can land on. Re-derived
+/// against the gallery's surfaces it lands two bytes from the correction that
+/// preceded it, which is the interesting result: the near-black wall does not
+/// demand different inks. What it changes is the margin at the top of the
+/// range — this ink on [`PLINTH_LIT`] used to compute to 4.483 and be excused
+/// as a rounding case, and now measures **4.62**.
 /// `every_ink_clears_its_contrast_floor_on_every_surface_it_lands_on` is what
-/// keeps it there.
-pub const PAPER_FAINT: Color = Color::from_rgb(0.541, 0.522, 0.486);
+/// keeps it there, and it no longer has an exception to make.
+pub const PAPER_FAINT: Color = Color::from_rgb(0.533, 0.525, 0.502);
 /// The accent: amplifier-lamp amber. **Playback truth only** — see the
 /// module's accent-discipline note for the five places it may appear.
 pub const LAMP: Color = Color::from_rgb(0.890, 0.631, 0.306);
@@ -114,23 +177,24 @@ pub const LAMP_INK: Color = Color::from_rgb(0.106, 0.078, 0.043);
 /// with where the music is, and the search field takes focus at launch — so
 /// an amber focus ring made the first frame baz ever drew a lit lamp with
 /// nothing playing.
-pub const PAPER_RING: Color = Color::from_rgba(0.918, 0.902, 0.878, 0.45);
+pub const PAPER_RING: Color = Color { a: 0.45, ..PAPER };
 /// Selected text in a `text_input`: paper at 18%.
 ///
 /// Also not the accent, and for the same reason as [`PAPER_RING`]: a
 /// selection is a fact about the keyboard, not about the music. A wash rather
 /// than a fill so the glyphs under it keep their own ink.
-pub const SELECT_WASH: Color = Color::from_rgba(0.918, 0.902, 0.878, 0.18);
+pub const SELECT_WASH: Color = Color { a: 0.18, ..PAPER };
 /// A control that is *set* but not currently sounding: the volume fader
 /// while muted, or a stepper at the end of its travel.
 ///
-/// `#6E6A62`. Not text a user must read, so the 3 : 1 non-text floor applies —
+/// `#6C6A66`. Not text a user must read, so the 3 : 1 non-text floor applies —
 /// but the value it had through v0.1 (`#4A4743`) measured **1.9 : 1**, below
 /// even that, which made the position the listener chose effectively invisible
 /// while muted. Restoring that position is the entire reason mute leaves the
-/// fader where it is. The value here clears 3 : 1 on every surface (3.5 / 3.3
-/// / 3.6 / 3.1) while staying plainly quieter than a live control.
-pub const PAPER_MUTED: Color = Color::from_rgb(0.431, 0.416, 0.384);
+/// fader where it is. Re-derived on the gallery's ink ramp it clears 3 : 1 on
+/// every surface (3.74 / 3.61 / 3.39 / 3.13) while staying plainly quieter
+/// than a live control.
+pub const PAPER_MUTED: Color = Color::from_rgb(0.424, 0.416, 0.400);
 /// Problems, stated quietly: a soft brick red, no alarm klaxon.
 pub const ALERT: Color = Color::from_rgb(0.851, 0.467, 0.420);
 /// Success (theme palette slot; nothing renders it directly yet).
@@ -142,18 +206,42 @@ pub const SHADOW: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.45);
 // Type scale
 // ---------------------------------------------------------------------------
 
+// Every size below carries its own line height, as a `LineHeight::Relative`
+// factor named beside it. baz used to take iced 0.13's toolkit default of 1.3
+// everywhere, which is a single compromise applied to type from 11 px to 28 px:
+// small type wants air and a heading wants none, and a caption set at the same
+// leading as a hero is why a two-line block can read as a paragraph. The pairs
+// are the type scale of `.interface-design/system.md` §8, and a `text` widget
+// that sets a size without its leading is a review-blocking defect for the same
+// reason a hardcoded colour is (ADR-0006).
+
 /// Hints and footnotes (11 px).
 pub const SIZE_CAPTION: f32 = 11.0;
+/// Leading for [`SIZE_CAPTION`]: the loosest in the scale, because the smallest
+/// type is the type that needs the air.
+pub const LEADING_CAPTION: f32 = 1.45;
 /// Metadata: captions, durations, status counts (12 px).
 pub const SIZE_META: f32 = 12.0;
+/// Leading for [`SIZE_META`].
+pub const LEADING_META: f32 = 1.35;
 /// Body: tile titles, track titles, control labels (13 px).
 pub const SIZE_BODY: f32 = 13.0;
+/// Leading for [`SIZE_BODY`] — and, through [`CAPTION_LINE_H`], the height of
+/// a wall label's line.
+pub const LEADING_BODY: f32 = 1.40;
 /// Emphasis: search text, panel artist, empty-state lines (15 px).
 pub const SIZE_EMPHASIS: f32 = 15.0;
+/// Leading for [`SIZE_EMPHASIS`].
+pub const LEADING_EMPHASIS: f32 = 1.35;
 /// Titles: the side panel's album title (19 px).
 pub const SIZE_TITLE: f32 = 19.0;
+/// Leading for [`SIZE_TITLE`]: tight, because a two-line album title is one
+/// object and should look like one.
+pub const LEADING_TITLE: f32 = 1.20;
 /// Hero: the first-run question (28 px).
 pub const SIZE_HERO: f32 = 28.0;
+/// Leading for [`SIZE_HERO`]: the tightest in the scale.
+pub const LEADING_HERO: f32 = 1.15;
 
 /// The UI face at Regular: baz's default font, and the family every weight
 /// below is a member of.
@@ -175,18 +263,17 @@ pub const SEMIBOLD: Font = Font {
     weight: Weight::Semibold,
     ..SANS
 };
-/// Monospace for data: track numbers, durations, counts, dB values, rates.
-/// iced 0.13 has no OpenType feature control (no `tnum`), so the monospace
-/// face *is* our tabular figures.
-///
-/// The **bundled** mono, not `Font::MONOSPACE` (which is the generic
-/// `Family::Monospace` the platform picks): Plex Mono shares Plex Sans's
-/// x-height, stem weight and terminal treatment, so a line like
-/// `2022 · 8 tracks · 47:21` reads as one typeface with two settings rather
-/// than as two unrelated voices. Its advance is uniform at 0.6 em, which is
-/// the number every reserved slot in the bottom bar is measured against —
-/// `crate::font`'s `every_reserved_slot_holds_its_worst_case_in_the_bundled_face`.
-pub const MONO: Font = Font::with_name(crate::font::MONO);
+
+// There is deliberately **no monospace token**, and no monospace face. Every
+// figure baz draws — track numbers, durations, counts, dB values, sample rates,
+// queue positions — is set in [`SANS`], because Plex Sans's digits are already
+// tabular: 600/1000 em in Regular, Medium and SemiBold alike, the same advance
+// the deleted Plex Mono gave. `crate::font`'s
+// `the_sans_carries_baz_s_tabular_figures_in_every_weight_it_sets_them_in`
+// measures that, and `no_monospace_survives_anywhere_in_the_crate` below keeps
+// the second face from creeping back. The argument is
+// `.interface-design/system.md` §8; the owner's complaint that started it was
+// that the readouts looked like a typewriter.
 
 // ---------------------------------------------------------------------------
 // Spacing (base unit 4) and shape
@@ -205,16 +292,21 @@ pub const GAP_LG: f32 = 16.0;
 /// 24 px — screen-level breathing room.
 pub const GAP_XL: f32 = 24.0;
 
-/// Corner radius for controls (buttons, inputs).
-pub const RADIUS_CTRL: f32 = 6.0;
-/// Corner radius of a segment inside the segmented control — one step
-/// tighter than its enclosing well, so the raised segment nests rather than
-/// straining against the edge.
-pub const RADIUS_SEGMENT: f32 = 4.0;
+// The radii come down across the board, because **an archive is rectilinear
+// and a sleeve has square corners** (`.interface-design/system.md` §6). Artwork
+// is radius 0 always, and every rule is too; what is left is barely rounded
+// rather than softly rounded, and the nesting rule still holds — 3 inside 4.
+
+/// Corner radius for controls (buttons, inputs, wells, steppers, the popover).
+/// **4**, down from 6.
+pub const RADIUS_CTRL: f32 = 4.0;
+/// Corner radius of a segment inside the segmented control, a checkbox, a
+/// queue or track row — one step tighter than the well enclosing it, so the
+/// raised segment nests rather than straining against the edge. **3**, down
+/// from 4.
+pub const RADIUS_SEGMENT: f32 = 3.0;
 /// Inset of the segmented control's well around its segments.
 pub const SEGMENT_INSET: f32 = 2.0;
-/// Corner radius for the tile's hover/selection card.
-pub const RADIUS_TILE: f32 = 10.0;
 /// Width of the album inspector, the column beside the shelf (logical px).
 ///
 /// **One number, and now for one surface.** It was one number for three — the
@@ -227,11 +319,12 @@ pub const RADIUS_TILE: f32 = 10.0;
 /// step with it (see [`crate::selection`]).
 pub const PANEL_W: f32 = 340.0;
 /// Width of the number column in a track or queue list (logical px). Enough
-/// for three monospace figures at [`SIZE_META`], so a long queue's positions
+/// for three figures at [`SIZE_META`], so a long queue's positions
 /// stay in their column.
 pub const TRACK_NO_W: f32 = 24.0;
-/// Corner radius for small floating chips (the seek preview tip).
-pub const RADIUS_CHIP: f32 = 4.0;
+/// Corner radius for small floating chips — the seek preview tip, the
+/// tooltips. **3**, down from 4.
+pub const RADIUS_CHIP: f32 = 3.0;
 /// Edge of the playing-album lamp dot (a [`RADIUS_CTRL`]-free circle).
 pub const DOT: f32 = 6.0;
 
@@ -252,20 +345,30 @@ pub const KNOB: f32 = 5.0;
 pub const KNOB_ACTIVE: f32 = 7.0;
 /// Minimum width the seek bar is given in the now-playing bar.
 pub const SEEK_W: f32 = 260.0;
-/// Width reserved for each of the seek bar's timestamps: enough for
-/// `h:mm:ss` at [`SIZE_META`] in [`MONO`]. Fixed, so the groove keeps its
-/// place when a track crosses the hour mark or a stamp gains a digit — the
-/// same reason an undeclared length renders as `--:--` rather than as
-/// nothing.
+/// Width reserved for each of the seek bar's timestamps: enough for `h:mm:ss`
+/// at [`SIZE_META`]. Fixed, so the groove keeps its place when a track crosses
+/// the hour mark or a stamp gains a digit — the same reason an undeclared
+/// length renders as `--:--` rather than as nothing.
+///
+/// The number is unchanged from the build that set it in the monospace, and it
+/// gained a capability by standing still: `10:00:00` measures 57.60 px in Plex
+/// Mono, so the shipped build *clipped* a ten-hour track in this very slot, and
+/// 50.21 px in Plex Sans, which it holds with 1.79 px to spare. `crate::font`
+/// measures both.
 pub const STAMP_W: f32 = 52.0;
 /// Height of the lane the hover preview floats in, directly above the
 /// groove. Reserved whether or not anything is hovering, so the bottom bar
 /// never changes height under the pointer.
 pub const PREVIEW_H: f32 = 15.0;
-/// Width of the hover-preview tip: enough for `h:mm:ss` at
-/// [`SIZE_CAPTION`] in [`MONO`] plus its padding, fixed so the tip can be
-/// centered on the pointer without measuring text.
-pub const PREVIEW_W: f32 = 58.0;
+/// Width of the hover-preview tip: enough for `h:mm:ss` at [`SIZE_CAPTION`]
+/// plus its padding, fixed so the tip can be centered on the pointer without
+/// measuring text.
+///
+/// **48**, re-derived from the Sans's real advances: `0:00:00` is 39.42 px at
+/// caption size, and a [`GAP_XS`] of padding on each side is 47.42. The tip is
+/// the tightest slot in the bar and it is meant to be — it floats over the
+/// groove, and every pixel of it is a pixel of the track it is describing.
+pub const PREVIEW_W: f32 = 48.0;
 
 // ---------------------------------------------------------------------------
 // The volume control
@@ -280,8 +383,12 @@ pub const PREVIEW_W: f32 = 58.0;
 /// hundred times finer than the ~1 dB a listener hears as a change.
 pub const VOLUME_W: f32 = 96.0;
 /// Width of the level tip that floats over the volume groove on hover:
-/// enough for `-18.1 dB` at [`SIZE_CAPTION`] in [`MONO`] plus its padding.
-pub const LEVEL_W: f32 = 62.0;
+/// enough for `-18.1 dB` at [`SIZE_CAPTION`] plus its padding.
+///
+/// **48**, where the monospace needed 62: the widest thing this slot draws
+/// measures 43.34 px in the Sans, because only its four figures cost 0.6 em
+/// and `dB`, the point and the sign do not.
+pub const LEVEL_W: f32 = 48.0;
 /// Width of the detent mark on a groove's travel.
 pub const DETENT_W: f32 = 2.0;
 /// Height of the detent mark.
@@ -339,7 +446,7 @@ pub const GLYPH_OPACITY: f32 = 1.0;
 /// the measured round trip, are in [`crate::player`]'s module docs).
 pub const GLYPH_OPACITY_PENDING: f32 = 0.55;
 /// Opacity of a glyph on a control that genuinely cannot act — no engine,
-/// or nothing queued. Lands on roughly [`PAPER_FAINT`] over [`CARD`], the
+/// or nothing queued. Lands on roughly [`PAPER_FAINT`] over [`PLINTH`], the
 /// weight the rest of the room gives inert text.
 pub const GLYPH_OPACITY_DISABLED: f32 = 0.45;
 
@@ -362,9 +469,13 @@ pub const SEEK_ROW_W: f32 = SEEK_W + 2.0 * (STAMP_W + GAP_SM);
 /// always there and usually empty.
 ///
 /// Wide enough for the longest chain a consumer device produces —
-/// `192 → 176.4 kHz`, fifteen monospace figures at [`SIZE_META`] — with room
-/// to spare.
-pub const SIGNAL_W: f32 = 120.0;
+/// `192 → 176.4 kHz`, which measures 92.38 px in the Sans against the 108 the
+/// monospace charged for the same fifteen glyphs — with room to spare.
+///
+/// **96**, down from 120. The 24 px this gives back is the largest single
+/// saving of the face change, and it goes to the bar's left zone, which is the
+/// zone that clips.
+pub const SIGNAL_W: f32 = 96.0;
 
 /// Width of a vertical scrollbar, and of the lane a scrolling list keeps
 /// clear for it (logical px).
@@ -395,16 +506,24 @@ pub const SCROLLBAR_LANE: f32 = SCROLLBAR_W + 2.0 * SCROLLBAR_MARGIN;
 /// hurry. Still a square, and still fixed in both axes, so a value changing
 /// under them moves nothing.
 pub const STEPPER_HIT: f32 = 24.0;
-/// Width reserved for a setting's value readout: enough for `-20.00 dB` in
-/// [`MONO`] at [`SIZE_META`].
+/// Width reserved for a setting's value readout: enough for `−20.00 dB` at
+/// [`SIZE_META`].
 ///
 /// Fixed for the reason [`STAMP_W`] is: the digits change as the control is
 /// driven, and a row that re-flowed under a repeated press would make the
 /// button move away from the pointer holding it.
-pub const SETTING_VALUE_W: f32 = 68.0;
-/// iced 0.13's default relative line height (`LineHeight::Relative(1.3)`),
-/// named here because a reserved text slot has to be measured in it.
-pub const LINE_HEIGHT: f32 = 1.3;
+///
+/// **60**, from a measured 56.89 px. This is also the one slot in the product
+/// where a proportional face could still jiggle, and the jiggle is fixed at the
+/// source rather than padded around: hyphen-minus advances 0.399 em where `+`
+/// and U+2212 both advance 0.600, so `-20.00 dB` and `+20.00 dB` used to differ
+/// by 2.4 px and shift this right-aligned slot's *left* edge as the pre-amp
+/// stepped through zero. [`crate::replaygain::format_centidb`] emits U+2212, so
+/// they now measure 56.89 px each, exactly — and the formatter agrees with the
+/// `−` this very stepper already draws. The residual is `0.00 dB`, 7.2 px
+/// narrower because it carries no sign at all, at one point in the travel,
+/// changing only when a human presses a button.
+pub const SETTING_VALUE_W: f32 = 60.0;
 /// Height reserved for a setting's explanatory note: **two** lines at
 /// [`SIZE_META`].
 ///
@@ -415,7 +534,7 @@ pub const LINE_HEIGHT: f32 = 1.3;
 /// pointer that just chose it. Two lines is the tallest note the panel's
 /// content width can produce (`a_setting_note_fits_the_slot_it_is_given`
 /// pins it), and the empty half-slot in the short cases costs nothing.
-pub const SETTING_NOTE_H: f32 = 2.0 * SIZE_META * LINE_HEIGHT;
+pub const SETTING_NOTE_H: f32 = 2.0 * SIZE_META * LEADING_META;
 
 /// The lane a scrolling list keeps clear for its scrollbar: padding on the
 /// right of the list's contents and nowhere else.
@@ -494,12 +613,13 @@ pub fn scrollbar(_theme: &Theme, status: scrollable::Status) -> scrollable::Styl
 #[must_use]
 pub fn check(_theme: &Theme, status: checkbox::Status) -> checkbox::Style {
     let (background, border_color) = match status {
-        checkbox::Status::Active { is_checked } => {
-            (if is_checked { CARD_HIGH } else { RECESS }, HAIRLINE_STRONG)
-        }
-        checkbox::Status::Hovered { .. } => (CARD_HIGH, HAIRLINE_STRONG),
+        checkbox::Status::Active { is_checked } => (
+            if is_checked { PLINTH_LIT } else { RECESS },
+            HAIRLINE_STRONG,
+        ),
+        checkbox::Status::Hovered { .. } => (PLINTH_LIT, HAIRLINE_STRONG),
         checkbox::Status::Disabled { is_checked } => {
-            (if is_checked { CARD } else { RECESS }, HAIRLINE)
+            (if is_checked { PLINTH } else { RECESS }, HAIRLINE)
         }
     };
     let disabled = matches!(status, checkbox::Status::Disabled { .. });
@@ -582,6 +702,14 @@ pub fn theme() -> Theme {
 /// A shelf tile's button chrome: invisible at rest (the sleeve leads),
 /// a quiet raised card on hover, one step higher plus a hairline edge when
 /// selected.
+///
+/// **Radius 0**, where the tile had a `RADIUS_TILE` of 10. That token is
+/// deleted: the shelf has no rectangles that are not artwork, and artwork is
+/// always square (`.interface-design/system.md` §6). What is left here is
+/// square-cornered chrome, which looks odd on purpose and briefly — B1 of the
+/// adoption order deletes the tile's background and border outright and gives
+/// hover and selection a rule under the *label* instead. This commit is values
+/// only, so it does not reach for that.
 #[must_use]
 pub fn tile(status: button::Status, selected: bool) -> button::Style {
     let mut style = button::Style {
@@ -590,17 +718,17 @@ pub fn tile(status: button::Status, selected: bool) -> button::Style {
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
-            radius: RADIUS_TILE.into(),
+            radius: 0.0.into(),
         },
         shadow: Shadow::default(),
     };
     if selected {
-        style.background = Some(Background::Color(CARD_HIGH));
+        style.background = Some(Background::Color(PLINTH_LIT));
         style.border.color = HAIRLINE_STRONG;
         // Two pixels, not one: see [`SELECTION_EDGE`].
         style.border.width = SELECTION_EDGE;
     } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-        style.background = Some(Background::Color(CARD));
+        style.background = Some(Background::Color(PLINTH));
     }
     style
 }
@@ -644,10 +772,10 @@ pub fn lamp_dot(_theme: &Theme) -> container::Style {
 #[must_use]
 pub fn transport(_theme: &Theme, status: button::Status) -> button::Style {
     let (background, border, text_color) = match status {
-        button::Status::Hovered => (CARD_HIGH, HAIRLINE_STRONG, PAPER),
+        button::Status::Hovered => (PLINTH_LIT, HAIRLINE_STRONG, PAPER),
         button::Status::Pressed => (RECESS, HAIRLINE_STRONG, PAPER),
-        button::Status::Disabled => (CARD, HAIRLINE, PAPER_FAINT),
-        button::Status::Active => (CARD, HAIRLINE, PAPER),
+        button::Status::Disabled => (PLINTH, HAIRLINE, PAPER_FAINT),
+        button::Status::Active => (PLINTH, HAIRLINE, PAPER),
     };
     button::Style {
         background: Some(Background::Color(background)),
@@ -668,7 +796,7 @@ pub fn primary(_theme: &Theme, status: button::Status) -> button::Style {
         button::Status::Active => (LAMP, LAMP_INK),
         button::Status::Hovered => (LAMP_BRIGHT, LAMP_INK),
         button::Status::Pressed => (LAMP_DEEP, LAMP_INK),
-        button::Status::Disabled => (CARD, PAPER_FAINT),
+        button::Status::Disabled => (PLINTH, PAPER_FAINT),
     };
     button::Style {
         background: Some(Background::Color(background)),
@@ -859,7 +987,7 @@ pub fn segmented(_theme: &Theme) -> container::Style {
 #[must_use]
 pub fn preview_tip(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(CARD_HIGH)),
+        background: Some(Background::Color(PLINTH_LIT)),
         text_color: Some(PAPER_DIM),
         border: Border {
             color: HAIRLINE_STRONG,
@@ -880,10 +1008,10 @@ pub fn preview_tip(_theme: &Theme) -> container::Style {
 #[must_use]
 pub fn segment(status: button::Status, selected: bool) -> button::Style {
     let (background, text_color) = if selected {
-        (Some(CARD_HIGH), PAPER)
+        (Some(PLINTH_LIT), PAPER)
     } else {
         match status {
-            button::Status::Hovered | button::Status::Pressed => (Some(CARD), PAPER),
+            button::Status::Hovered | button::Status::Pressed => (Some(PLINTH), PAPER),
             button::Status::Active | button::Status::Disabled => (None, PAPER_DIM),
         }
     };
@@ -907,7 +1035,7 @@ pub fn segment(status: button::Status, selected: bool) -> button::Style {
 #[must_use]
 pub fn panel(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(CARD)),
+        background: Some(Background::Color(PLINTH)),
         ..container::Style::default()
     }
 }
@@ -955,7 +1083,7 @@ pub fn hairline(_theme: &Theme) -> rule::Style {
 #[must_use]
 pub fn tooltip(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(CARD_HIGH)),
+        background: Some(Background::Color(PLINTH_LIT)),
         text_color: Some(PAPER_DIM),
         border: Border {
             color: HAIRLINE_STRONG,
@@ -980,7 +1108,7 @@ pub fn tooltip(_theme: &Theme) -> container::Style {
 /// Border width of a **selected** shelf tile (logical px).
 ///
 /// Two, where hover is none and the surface step between the two states is one
-/// [`CARD`] → [`CARD_HIGH`] tick. The audit's finding was that in a still
+/// [`PLINTH`] → [`PLINTH_LIT`] tick. The audit's finding was that in a still
 /// frame you cannot tell which tile is selected and which is merely under the
 /// pointer — one surface step and a 1 px hairline apart is below the threshold
 /// at which two states read as two states.
@@ -1030,7 +1158,12 @@ pub const CAPTION_H: f32 = 2.0 * CAPTION_LINE_H;
 /// title is the affordable failure here: the sleeve above it is the
 /// identification a shelf is built on, and the album panel one click away
 /// carries the whole string.
-pub const CAPTION_LINE_H: f32 = SIZE_BODY * LINE_HEIGHT;
+///
+/// **18.2 px**, where it was 16.9: the lane is set from the body text's own
+/// leading ([`LEADING_BODY`]) now that each type token carries one, instead of
+/// from the toolkit's 1.3 default. The block is therefore 36.4 rather than
+/// 33.8 — the number `.interface-design/system.md` §8 calls `LABEL_H`.
+pub const CAPTION_LINE_H: f32 = SIZE_BODY * LEADING_BODY;
 
 /// A track row — in the album inspector **and** in the **Up next** popover:
 /// invisible at rest, a quiet card under the pointer, and the playing row
@@ -1058,8 +1191,8 @@ pub fn track_row(status: button::Status, playing: bool) -> button::Style {
     let background = match (playing, status) {
         // The playing row keeps its card whatever the pointer is doing, and
         // lifts no further under it: it is already the emphasised row.
-        (true, _) => Some(CARD_HIGH),
-        (false, button::Status::Hovered | button::Status::Pressed) => Some(CARD),
+        (true, _) => Some(PLINTH_LIT),
+        (false, button::Status::Hovered | button::Status::Pressed) => Some(PLINTH),
         (false, button::Status::Active | button::Status::Disabled) => None,
     };
     button::Style {
@@ -1090,28 +1223,14 @@ pub fn track_row(status: button::Status, playing: bool) -> button::Style {
 // consumes it has shipped.
 // ---------------------------------------------------------------------------
 
-/// The serif, at `SemiBold` — the album's title and the first-run question, and
-/// **nothing else** (`docs/design/02-visual-language.md` §2.2.3).
-///
-/// Both are "the thing itself" rather than chrome: a record's name, and the
-/// product's single line of copy. Sleeve typography is overwhelmingly serif or
-/// display, where UI sans is what a settings dialog looks like. Everything baz
-/// says *about itself* — Settings, Queue, ReplayGain, Play album, every label,
-/// every note — stays [`SANS`]. No exceptions.
-///
-/// The face is bundled with the rest of the family ([`crate::font`]), so it
-/// resolves to a real drawn `SemiBold` rather than a synthesised one.
-#[expect(
-    dead_code,
-    reason = "the token lands with the typeface; the two surfaces that spend \
-              it — the album title and the first-run question — are step 7 of \
-              the redesign's adoption order and change no value here. Delete \
-              this attribute (the compiler will ask) when the first one ships."
-)]
-pub const SERIF: Font = Font {
-    weight: Weight::Semibold,
-    ..Font::with_name(crate::font::SERIF)
-};
+// There is no serif token either, and it never got a call site. Revision 1
+// nominated Plex Serif SemiBold for exactly two jobs — the album's title and
+// the first-run question — and said in the same paragraph that if one thing had
+// to be cut to keep the design disciplined, it was this. The gallery direction
+// is that moment: its whole thesis is that **the room supplies nothing and the
+// work supplies everything**, and a display face is the room supplying
+// personality. The album title is [`SEMIBOLD`] at [`SIZE_TITLE`]
+// (`.interface-design/system.md` §8).
 
 // ---------------------------------------------------------------------------
 // The information-architecture move: places, an inspector, a popover, the bar
@@ -1145,13 +1264,22 @@ pub const POPOVER_MAX_H: f32 = 0.6;
 ///
 /// A **reserved slot**, exactly like [`SIGNAL_W`] and [`STAMP_W`]: the readout
 /// is absent when nothing is playing and present when something is, and the bar
-/// must not move between those two states. Wide enough for `999 / 999` — nine
-/// monospace figures at [`SIZE_META`] — because a queue's length is not
-/// something the front end gets to bound.
-pub const QUEUE_POS_W: f32 = 72.0;
+/// must not move between those two states.
+///
+/// **56, where it was 72 and was called `QUEUE_POS_W`.** The old number was 9
+/// glyphs at the monospace's flat 0.6 em; the same string measures 53.46 px in
+/// Plex Sans, because only the figures are 0.6 em and the space and the slash
+/// are not. The design system names this slot `POSITION_W` and bounds it at
+/// three figures a side (`199 / 240`), which is the same width as `999 / 999`
+/// — the digits are tabular, so the widest three-figure queue and the widest
+/// three-figure position measure identically. A four-figure queue
+/// (`9999 / 9999`, 67.86 px) would clip, and that is a deliberate bound: no
+/// album has 1000 tracks, and a whole-library shuffle queue is a different
+/// surface's problem.
+pub const POSITION_W: f32 = 56.0;
 
 /// Width of the bar's **Up next** control (logical px) — the label, the
-/// [`QUEUE_POS_W`] readout, and the padding around them.
+/// [`POSITION_W`] readout, and the padding around them.
 ///
 /// The control is **labelled and always visible**, and that is a requirement
 /// rather than a preference: `docs/design/03-interface-prior-art.md` §5.3(1)
@@ -1224,7 +1352,7 @@ pub const SETTINGS_BREAKPOINT: f32 = 1000.0;
 #[must_use]
 pub fn popover(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(CARD_HIGH)),
+        background: Some(Background::Color(PLINTH_LIT)),
         border: Border {
             color: HAIRLINE_STRONG,
             width: 1.0,
@@ -1258,10 +1386,10 @@ pub fn popover(_theme: &Theme) -> container::Style {
 #[must_use]
 pub fn now_playing(status: button::Status, open: bool) -> button::Style {
     let background = if open {
-        CARD_HIGH
+        PLINTH_LIT
     } else {
         match status {
-            button::Status::Hovered => CARD,
+            button::Status::Hovered => PLINTH,
             button::Status::Pressed => RECESS,
             button::Status::Active | button::Status::Disabled => Color::TRANSPARENT,
         }
@@ -1316,23 +1444,28 @@ mod tests {
         // And its width is the groove plus a fixed stamp on each side, so
         // the centre column never resizes as the digits tick.
         assert!((SEEK_ROW_W - (SEEK_W + 2.0 * (STAMP_W + GAP_SM))).abs() < f32::EPSILON);
-        // A stamp must hold `h:mm:ss` — seven figures in the bundled mono,
-        // whose advance is [`MONO_EM`] of the size — without clipping.
-        const { assert!(STAMP_W > SIZE_META * 7.0 * MONO_EM) }
+        // A stamp must hold `h:mm:ss` without clipping. The face is
+        // proportional everywhere except its figures, so what a const
+        // assertion can bound is the *figures*: six of them, each [`DIGIT_EM`]
+        // of the size, in both `0:00:00` and the ten-hour `10:00:00`. The whole
+        // string, colons and all, is measured against the real advances by
+        // `crate::font`'s slot test — which is where the ten-hour case is
+        // actually proven, because in the *mono* it did not fit.
+        const { assert!(STAMP_W > SIZE_META * 6.0 * DIGIT_EM) }
         // The signal-path slot is reserved on the same principle, and must
         // hold the longest chain a consumer device produces —
-        // `192 → 176.4 kHz`, fifteen monospace figures — so that a note
-        // appearing there moves nothing beside it.
-        const { assert!(SIGNAL_W > SIZE_META * 15.0 * MONO_EM) }
+        // `192 → 176.4 kHz`, seven figures — so that a note appearing there
+        // moves nothing beside it.
+        const { assert!(SIGNAL_W > SIZE_META * 7.0 * DIGIT_EM) }
         // And the queue-position readout the left zone gained with the popover
-        // is the same rule again: `999 / 999` is nine monospace figures, the
-        // slot holds them, and it is that wide whether or not anything is
-        // playing — so `3 / 12` appearing as a track starts moves no title.
-        const { assert!(QUEUE_POS_W > SIZE_META * 9.0 * MONO_EM) }
+        // is the same rule again: `999 / 999` is six figures, the slot holds
+        // them, and it is that wide whether or not anything is playing — so
+        // `3 / 12` appearing as a track starts moves no title.
+        const { assert!(POSITION_W > SIZE_META * 6.0 * DIGIT_EM) }
         // …and the control that carries it holds the readout, its label and the
         // padding around both. The label itself is measured in the face that
         // draws it by `font.rs`; this is the arithmetic that leaves room.
-        const { assert!(UP_NEXT_W > QUEUE_POS_W + 3.0 * GAP_SM) }
+        const { assert!(UP_NEXT_W > POSITION_W + 3.0 * GAP_SM) }
     }
 
     /// The popover is an overlay, and an overlay's whole promise is that it
@@ -1428,21 +1561,25 @@ mod tests {
         );
     }
 
-    /// The advance width of one glyph in the bundled monospace, as a fraction
+    /// The advance width of one **figure** in the bundled face, as a fraction
     /// of the type size.
     ///
-    /// **0.6, not the 0.5 these assertions used to guess with.** Before the
-    /// typeface was bundled the face was whatever the platform resolved
-    /// `Family::SansSerif`/`Family::Monospace` to, so the slot arithmetic here
-    /// could only be a conservative estimate; now the face ships with the
-    /// binary and the number is a property of a file we hash. The const
-    /// assertions below stay because they are cheap and they fail at compile
-    /// time, but the claim they stand for is *measured* — against these very
-    /// bytes, string by string — in
-    /// `crate::font`'s `every_reserved_slot_holds_its_worst_case_in_the_bundled_face`,
-    /// which is the test `docs/design/02-visual-language.md` §4.6 requires
-    /// before a font change may ship.
-    const MONO_EM: f32 = 0.6;
+    /// **0.6, and it is now a property of the Sans rather than of a second
+    /// face.** IBM Plex Sans ships tabular figures by default — every digit
+    /// advances 600/1000 em in Regular, Medium and `SemiBold` alike, which is
+    /// exactly what Plex Mono advanced at, and is why the monospace could be
+    /// deleted without re-deriving a single slot
+    /// (`.interface-design/system.md` §8).
+    ///
+    /// The const assertions below stay because they are cheap and they fail at
+    /// compile time, but they bound only the digits in a worst-case string: the
+    /// face is proportional everywhere else, so `n glyphs × DIGIT_EM` is no
+    /// longer arithmetic about a whole string. That claim is *measured* —
+    /// against these very bytes, string by string — in `crate::font`'s
+    /// `every_reserved_slot_holds_its_worst_case_in_the_bundled_face`, which is
+    /// the test `docs/design/02-visual-language.md` §3.4 requires before a face
+    /// change may ship.
+    const DIGIT_EM: f32 = 0.6;
 
     /// The duration-column defect, as arithmetic: the lane a list keeps clear
     /// is exactly the lane its scrollbar occupies, and it is kept clear on the
@@ -1490,9 +1627,10 @@ mod tests {
             inner > 200.0,
             "the lane left only {inner} px for a track title"
         );
-        // `-20.00 dB` is nine monospace figures at SIZE_META; the slot is
-        // fixed so a value changing cannot move the stepper beside it.
-        const { assert!(SETTING_VALUE_W > SIZE_META * 9.0 * MONO_EM) }
+        // `-20.00 dB` is five figures' worth of sign and digits at SIZE_META
+        // (U+2212 advances the same 0.6 em a digit does); the slot is fixed so
+        // a value changing cannot move the stepper beside it.
+        const { assert!(SETTING_VALUE_W > SIZE_META * 5.0 * DIGIT_EM) }
         // A stepper is smaller than the transport but still a real target.
         const { assert!(STEPPER_HIT < TRANSPORT_HIT && STEPPER_HIT >= ICON_PX) }
     }
@@ -1512,7 +1650,7 @@ mod tests {
         use crate::replaygain::{MODES, mode_note};
 
         // The slot is exactly two lines — not "about two".
-        assert!((SETTING_NOTE_H - 2.0 * SIZE_META * LINE_HEIGHT).abs() < f32::EPSILON);
+        assert!((SETTING_NOTE_H - 2.0 * SIZE_META * LEADING_META).abs() < f32::EPSILON);
         // The width a wrapped line actually has: the panel, less its inset on
         // both sides, less the scrollbar lane.
         let content_w = PANEL_W - 2.0 * GAP_XL - SCROLLBAR_LANE;
@@ -1598,9 +1736,10 @@ mod tests {
         // state, so no volume change and no mute can move a pixel beside it.
         assert!((VOLUME_BLOCK_W - (TRANSPORT_HIT + GAP_SM + VOLUME_W)).abs() < f32::EPSILON);
         assert!((VOLUME_ROW_H - (PREVIEW_H + VOLUME_HIT)).abs() < f32::EPSILON);
-        // The level tip must hold `-18.1 dB` — eight monospace figures at
-        // caption size — without clipping.
-        const { assert!(LEVEL_W > SIZE_CAPTION * 8.0 * MONO_EM) }
+        // The level tip must hold `-18.1 dB` — four figures at caption size,
+        // plus the proportional remainder `crate::font` measures — without
+        // clipping.
+        const { assert!(LEVEL_W > SIZE_CAPTION * 4.0 * DIGIT_EM) }
         // And the whole right-hand end has to fit beside the centre column
         // in the shipped window, or the zone would clip on launch.
         const { assert!(VOLUME_BLOCK_W + GAP_SM + SIGNAL_W < 1280.0 - SEEK_ROW_W) }
@@ -1707,22 +1846,21 @@ mod tests {
     /// carrying every duration, count, hint and signal note in the product —
     /// and [`PAPER_MUTED`] at 1.9 : 1, which made the muted fader's position
     /// effectively invisible. Both were corrected;
-    /// `docs/design/02-visual-language.md` §2.1.2 has the full table and the
-    /// argument, and this is what stops either drifting back.
+    /// `.interface-design/system.md` §4.1 has the full table and the argument,
+    /// and this is what stops either drifting back.
     ///
     /// Floors are WCAG 2.1's: **4.5 : 1** for anything a user has to read,
     /// **3 : 1** for a non-text mark whose job is to be locatable rather than
-    /// legible. Ratios are compared at the precision the specification
-    /// publishes them to — one decimal place — which matters for exactly one
-    /// pairing: `PAPER_FAINT` on `CARD_HIGH` computes to 4.483, published as
-    /// 4.5. Moving it further would mean re-deriving the palette, which this
-    /// change deliberately does not do; the pairing is a duration inside a
-    /// playing queue row, and it is named here rather than quietly rounded.
+    /// legible. **Every ratio clears its floor outright.** The previous palette
+    /// had one that did not — `PAPER_FAINT` on `CARD_HIGH` computed to 4.483,
+    /// and this test had to excuse it by comparing at the one-decimal precision
+    /// WCAG publishes to. On the gallery's surfaces the same ink measures
+    /// **4.62**, so the excuse is deleted along with the constant that carried
+    /// it. No pairing in this palette needs one, and if a future value needs
+    /// one again that is the palette asking to be re-derived, not the test
+    /// asking to be loosened.
     #[test]
     fn every_ink_clears_its_contrast_floor_on_every_surface_it_lands_on() {
-        /// Half of the one-decimal precision the specification's table is
-        /// published to.
-        const ROUNDING: f32 = 0.05;
         /// The AA floor for text.
         const TEXT: f32 = 4.5;
         /// The floor for a non-text mark.
@@ -1730,9 +1868,9 @@ mod tests {
 
         let surfaces = [
             ("WALL", WALL),
-            ("CARD", CARD),
+            ("PLINTH", PLINTH),
             ("RECESS", RECESS),
-            ("CARD_HIGH", CARD_HIGH),
+            ("PLINTH_LIT", PLINTH_LIT),
         ];
         // Every ink the theme paints, with the floor its *use* implies.
         // `PAPER_MUTED` is the muted fader and a stepper at the end of its
@@ -1750,7 +1888,7 @@ mod tests {
             for (surface_name, surface) in surfaces {
                 let ratio = contrast(ink, surface);
                 assert!(
-                    ratio + ROUNDING >= floor,
+                    ratio >= floor,
                     "{ink_name} on {surface_name} is {ratio:.2} : 1, below its \
                      {floor} : 1 floor"
                 );
@@ -1770,22 +1908,22 @@ mod tests {
         let old_faint = Color::from_rgb(0.447, 0.427, 0.400);
         let old_muted = Color::from_rgb(0.290, 0.278, 0.263);
         assert!(
-            contrast(old_faint, CARD) < TEXT,
+            contrast(old_faint, PLINTH) < TEXT,
             "the old PAPER_FAINT is supposed to be the failure this test exists for"
         );
-        assert!(contrast(old_muted, CARD) < MARK);
+        assert!(contrast(old_muted, PLINTH) < MARK);
         assert!(
-            contrast(PAPER_FAINT, CARD) > contrast(old_faint, CARD),
+            contrast(PAPER_FAINT, PLINTH) > contrast(old_faint, PLINTH),
             "the correction must be lighter, not merely different"
         );
-        assert!(contrast(PAPER_MUTED, CARD) > contrast(old_muted, CARD));
+        assert!(contrast(PAPER_MUTED, PLINTH) > contrast(old_muted, PLINTH));
 
         // The correction must not have cost the *ordering* the room is built
         // on: faint is quieter than dim, muted is quieter than faint, and
         // muted is still plainly above the groove it sits in.
-        assert!(contrast(PAPER, CARD) > contrast(PAPER_DIM, CARD));
-        assert!(contrast(PAPER_DIM, CARD) > contrast(PAPER_FAINT, CARD));
-        assert!(contrast(PAPER_FAINT, CARD) > contrast(PAPER_MUTED, CARD));
+        assert!(contrast(PAPER, PLINTH) > contrast(PAPER_DIM, PLINTH));
+        assert!(contrast(PAPER_DIM, PLINTH) > contrast(PAPER_FAINT, PLINTH));
+        assert!(contrast(PAPER_FAINT, PLINTH) > contrast(PAPER_MUTED, PLINTH));
     }
 
     // -----------------------------------------------------------------------
@@ -2063,6 +2201,110 @@ mod tests {
             "no view names the accent at all — the seek bar's in-flight \
              timestamp is supposed to, and this test just stopped meaning \
              anything"
+        );
+    }
+
+    /// **Every type size is drawn with its own leading.**
+    ///
+    /// The scale is six size/leading pairs (§8 of the design system), and the
+    /// pairing only exists if the views honour it: a `text` that sets
+    /// [`SIZE_CAPTION`] and leaves the line height alone gets iced 0.13's 1.3
+    /// default, which is the single compromise the per-token leadings were
+    /// introduced to replace. That is invisible in a screenshot of one line and
+    /// obvious in a block of three.
+    ///
+    /// Read from the sources for the same reason the accent's second test is:
+    /// no style function is involved, so nothing else can see it.
+    ///
+    /// The window is 80 characters because rustfmt will break the two calls
+    /// onto separate lines with indentation between them. One size in the
+    /// product is not type at all — `checkbox`'s `.size` is the *box*, and its
+    /// label is `.text_size` / `.text_line_height` — so a size followed
+    /// immediately by a `.text_size` is skipped rather than special-cased by
+    /// file name.
+    #[test]
+    fn every_type_size_a_view_sets_is_drawn_with_its_own_leading() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
+        let mut offenders: Vec<String> = Vec::new();
+        for path in rust_sources(&root) {
+            let source = std::fs::read_to_string(&path).expect("a source file baz ships");
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            for (at, _) in source.match_indices("theme::SIZE_") {
+                let window = &source[at..source.len().min(at + 80)];
+                if window.contains("theme::LEADING_") || window.contains(".text_size(") {
+                    continue;
+                }
+                offenders.push(format!("{name}: {}", window.lines().next().unwrap_or("")));
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "a type size is set without its line height: {offenders:#?}\nEvery \
+             size token in `theme` has a LEADING_ beside it; taking iced's 1.3 \
+             default instead is the compromise those pairs exist to replace."
+        );
+    }
+
+    /// **The monospace is gone, and it stays gone.**
+    ///
+    /// The owner's complaint about the shipped UI was, verbatim, *"some weird
+    /// monospace looking fonts which are lame"*, and
+    /// `.interface-design/system.md` §8 answers it in one line: **no monospace
+    /// anywhere in baz**. Deleting the token makes today's build compile
+    /// without one; this is what makes tomorrow's build do the same.
+    ///
+    /// A second face cannot come back by accident — the compiler would ask for
+    /// its bytes — but it can come back on purpose, one generic typewriter
+    /// family at a time, and the reason it must not is *measured* rather than
+    /// aesthetic:
+    /// Plex Sans's figures are already tabular
+    /// (`crate::font`'s `the_sans_carries_baz_s_tabular_figures_in_every_weight_it_sets_them_in`),
+    /// so a monospace would buy nothing and cost the interface its voice.
+    ///
+    /// Read from the sources rather than asserted about the tokens, in the
+    /// shape `the_lamp_is_named_only_where_playback_truth_is_drawn` established:
+    /// a style sweep cannot see a view that names a face.
+    #[test]
+    fn no_monospace_survives_anywhere_in_the_crate() {
+        // Spelled in halves so this test does not find itself.
+        let token = concat!("MO", "NO");
+        let asset = concat!("IBMPlex", "Mono");
+
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut offenders: Vec<String> = Vec::new();
+        for path in rust_sources(&manifest.join("src")) {
+            let source = std::fs::read_to_string(&path).expect("a source file baz ships");
+            if source.contains(token) || source.contains(asset) {
+                offenders.push(path.to_string_lossy().into_owned());
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "{offenders:?} name a monospace. baz sets every figure in the Sans, \
+             whose digits are tabular by default (.interface-design/system.md \
+             §8); a second face buys nothing and reads as a typewriter."
+        );
+
+        // …and the asset directory carries no face the crate could reach for.
+        let faces = std::fs::read_dir(manifest.join("assets/fonts"))
+            .expect("the bundled typeface")
+            .map(|entry| entry.expect("a readable directory entry").path())
+            .filter(|path| path.extension().is_some_and(|kind| kind == "ttf"))
+            .map(|path| {
+                path.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !faces.iter().any(|name| name.contains(asset)),
+            "the monospace is still on disk: {faces:?}"
+        );
+        assert_eq!(
+            faces.len(),
+            crate::font::FACES.len(),
+            "the bundled faces and the shipped files disagree: {faces:?}"
         );
     }
 

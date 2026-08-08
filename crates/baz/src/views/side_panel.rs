@@ -72,7 +72,7 @@ const PANEL_PAD: f32 = theme::GAP_XL;
 /// The album side panel: large art, a title/artist/meta header, the
 /// edition selector when the album is owned in more than one format, the
 /// primary Play action, and the selected edition's numbered track list
-/// (durations in monospace, right-hugged). In a build without audio
+/// (durations right-hugged). In a build without audio
 /// output the button is hidden; with an unusable or closed engine it
 /// renders disabled.
 pub(crate) fn view<'a>(
@@ -141,6 +141,7 @@ pub(crate) fn view<'a>(
                 container(
                     text("Play album")
                         .size(theme::SIZE_BODY)
+                        .line_height(theme::LEADING_BODY)
                         .font(theme::MEDIUM),
                 )
                 .width(Length::Fill)
@@ -164,6 +165,7 @@ pub(crate) fn view<'a>(
     content = content.push(track_list(rows)).push(
         text(hint)
             .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION)
             .color(theme::PAPER_FAINT),
     );
 
@@ -230,13 +232,17 @@ fn album_header<'a>(
         meta.push(vm::format_duration(total));
     }
     let mut header = column![
-        text(title).size(theme::SIZE_TITLE).font(theme::SEMIBOLD),
+        text(title)
+            .size(theme::SIZE_TITLE)
+            .line_height(theme::LEADING_TITLE)
+            .font(theme::SEMIBOLD),
         text(artist)
             .size(theme::SIZE_EMPHASIS)
+            .line_height(theme::LEADING_EMPHASIS)
             .color(theme::PAPER_DIM),
         text(meta.join(" · "))
             .size(theme::SIZE_META)
-            .font(theme::MONO)
+            .line_height(theme::LEADING_META)
             .color(theme::PAPER_FAINT),
     ]
     .spacing(theme::GAP_XS);
@@ -244,7 +250,7 @@ fn album_header<'a>(
         header = header.push(
             text(line)
                 .size(theme::SIZE_META)
-                .font(theme::MONO)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_FAINT),
         );
     }
@@ -271,6 +277,7 @@ fn edition_selector<'a>(
                 container(
                     text(edition.key.label())
                         .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
                         .font(theme::MEDIUM)
                         .wrapping(text::Wrapping::None),
                 )
@@ -291,7 +298,7 @@ fn edition_selector<'a>(
 }
 
 /// One track-list row: right-aligned number — or the lamp dot when this is the
-/// track sounding — title, monospace duration; and a press that plays the
+/// track sounding — title, right-aligned duration; and a press that plays the
 /// album from here.
 ///
 /// The dot goes **in** the number column rather than beside it, at
@@ -321,7 +328,7 @@ fn track_row(
     } else {
         text(track.number.map(|n| n.to_string()).unwrap_or_default())
             .size(theme::SIZE_META)
-            .font(theme::MONO)
+            .line_height(theme::LEADING_META)
             .color(theme::PAPER_FAINT)
             .into()
     };
@@ -330,6 +337,7 @@ fn track_row(
     // agree about what is sounding.
     let heading = text(track.title.as_str())
         .size(theme::SIZE_BODY)
+        .line_height(theme::LEADING_BODY)
         .wrapping(text::Wrapping::None);
     let heading = if playing {
         heading.font(theme::MEDIUM)
@@ -341,6 +349,7 @@ fn track_row(
         title = title.push(
             text(artist)
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_DIM)
                 .wrapping(text::Wrapping::None),
         );
@@ -353,7 +362,7 @@ fn track_row(
             container(title).width(Length::Fill),
             text(duration)
                 .size(theme::SIZE_META)
-                .font(theme::MONO)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_FAINT),
         ]
         .spacing(theme::GAP_SM)

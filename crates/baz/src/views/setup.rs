@@ -23,13 +23,15 @@ pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
         // accent-discipline note).
         text("baz")
             .size(theme::SIZE_EMPHASIS)
-            .font(theme::MONO)
+            .line_height(theme::LEADING_EMPHASIS)
             .color(theme::PAPER_FAINT),
         text("Where's your music?")
             .size(theme::SIZE_HERO)
+            .line_height(theme::LEADING_HERO)
             .font(theme::SEMIBOLD),
         text("Point baz at a folder — the shelf fills as it scans.")
             .size(theme::SIZE_EMPHASIS)
+            .line_height(theme::LEADING_EMPHASIS)
             .color(theme::PAPER_DIM),
     ]
     .spacing(theme::GAP_SM)
@@ -41,6 +43,7 @@ pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
             .on_submit(Message::SetupSubmit)
             .padding(theme::pad(theme::GAP_SM + 2.0, theme::GAP_MD))
             .size(theme::SIZE_EMPHASIS)
+            .line_height(theme::LEADING_EMPHASIS)
             .width(Length::Fixed(SETUP_INPUT_W))
             .style(theme::input),
     ]
@@ -50,12 +53,14 @@ pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
         content = content.push(
             text(error.as_str())
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::ALERT),
         );
     }
     content = content.push(
         text("Enter confirms · next time, `baz` remembers (or run `baz DIR`)")
             .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION)
             .color(theme::PAPER_FAINT),
     );
     container(content).center(Length::Fill).into()

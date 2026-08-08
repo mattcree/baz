@@ -114,7 +114,9 @@ pub(crate) fn close_button(label: &'static str, message: Message) -> Element<'st
             .padding(0)
             .style(theme::transport)
             .on_press(message),
-        text(label).size(theme::SIZE_CAPTION),
+        text(label)
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
         tooltip::Position::Bottom,
     )
     .gap(theme::GAP_XS)

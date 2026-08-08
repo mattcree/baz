@@ -26,39 +26,63 @@
 //!
 //! # What is bundled, and what it costs
 //!
-//! Five faces, verbatim from upstream, 1 001 520 bytes in total. They are
-//! **not subset**: OFL-1.1 §3 forbids a modified copy from using the Reserved
-//! Font Name, a subset *is* a modified copy, and baz also renders other
-//! people's tags — the complete faces carry Greek and Cyrillic, which a Latin
-//! subset would push back onto whatever the host machine has. The measured
-//! trade (a subset saves ~666 KB), the provenance hashes, and the OFL
+//! **One family at three weights** — Sans Regular, Medium and `SemiBold`,
+//! 605 592 bytes — verbatim from upstream. They are **not subset**: OFL-1.1 §3
+//! forbids a modified copy from using the Reserved Font Name, a subset *is* a
+//! modified copy, and baz also renders other people's tags — the complete faces
+//! carry Greek and Cyrillic, which a Latin subset would push back onto whatever
+//! the host machine has. The measured trade, the provenance hashes, and the OFL
 //! obligations are in `assets/fonts/README.md`.
 //!
 //! Codepoints Plex does not carry — CJK, Hebrew, Arabic, and the rest — still
 //! fall back to the platform's fonts, exactly as they do today. Bundling
 //! guarantees the glyphs baz itself draws, not every glyph a tag can hold.
 //!
+//! # There is no display face either
+//!
+//! Plex Serif `SemiBold` was bundled for two jobs — the album's title and the
+//! first-run question — and revision 1 of the spec nominated it, in the same
+//! paragraph that introduced it, as the first thing to cut if the design ever
+//! needed disciplining. The gallery direction is that moment: the room supplies
+//! nothing and the work supplies everything, and a display face is the room
+//! supplying personality. The album title is Sans `SemiBold` at 22.
+//!
+//! # There is no monospace, and there never needed to be one
+//!
+//! baz used to bundle Plex Mono for one job: iced 0.13 exposes no OpenType
+//! feature control, so there is no `tnum` to ask for, and the conclusion drawn
+//! was that every figure which changes in place had to be set in a monospaced
+//! face. The premise is true; the conclusion does not follow.
+//!
+//! **IBM Plex Sans ships tabular figures by default.** Every digit advances
+//! exactly 600/1000 em in Regular, Medium *and* `SemiBold` — the same advance
+//! Plex Mono gave, with no kerning between digits and no default-on
+//! substitution that touches them. `0:00:00` and `9:59:59` both measure
+//! 43.008 px at [`crate::theme::SIZE_META`], to 0.000 px.
+//! `the_sans_carries_baz_s_tabular_figures_in_every_weight_it_sets_them_in`
+//! measures that against these very bytes, and it is the licence for the
+//! deletion (`docs/design/02-visual-language.md` §3.1, `.interface-design/system.md` §8).
+//!
+//! Deleting it also *fixed* something: `theme::STAMP_W` is 52 px, and
+//! `10:00:00` measures 57.60 px in Plex Mono — the shipped build could not
+//! hold a ten-hour track — against 50.21 px in Plex Sans, which it can. The
+//! slot test below now includes that string.
+//!
 //! # The risk this module is accountable for
 //!
-//! Plex Mono advances 600/1000 em for *every* glyph, where `theme.rs`'s
-//! reserved-slot assertions used to guess with 0.5 em — the new face is 20%
-//! wider than the old assumption, and every fixed-width slot in the
-//! pixel-stable bottom bar was sized against the old one. The tests below
-//! therefore parse these very bytes and measure the real advance width of each
-//! worst-case string against the token that reserves room for it, rather than
-//! trusting an em-fraction. `docs/design/02-visual-language.md` §4.6 asks for
-//! this test by name and says not to ship the font change without it.
+//! Every fixed-width slot in the pixel-stable bottom bar is sized against a
+//! face's real advances, and `theme.rs`'s cheap compile-time guards can only
+//! bound the *figures* in a string once the face is proportional everywhere
+//! else. The tests below therefore parse these very bytes and measure the real
+//! advance width of each worst-case string against the token that reserves room
+//! for it, rather than trusting an em-fraction.
+//! `docs/design/02-visual-language.md` §3.4 asks for this test by name and says
+//! not to ship a face change without it.
 
 /// The bundled sans family, as the `name` table spells it. This is the string
 /// `Font::with_name` must be given for the Regular, Medium and `SemiBold` faces
 /// to resolve as one family at three weights.
 pub const SANS: &str = "IBM Plex Sans";
-/// The bundled monospace family — baz's tabular figures (iced 0.13 has no
-/// OpenType feature control, so there is no `tnum` to ask for instead).
-pub const MONO: &str = "IBM Plex Mono";
-/// The bundled serif family: the album title and the first-run question, and
-/// nothing else (`docs/design/02-visual-language.md` §2.2.3).
-pub const SERIF: &str = "IBM Plex Serif";
 
 /// IBM Plex Sans Regular — body text.
 pub const SANS_REGULAR: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf");
@@ -66,10 +90,6 @@ pub const SANS_REGULAR: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Regu
 pub const SANS_MEDIUM: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Medium.ttf");
 /// IBM Plex Sans `SemiBold` — headings, and the primary action's label.
 pub const SANS_SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-SemiBold.ttf");
-/// IBM Plex Mono Regular — every figure that changes in place.
-pub const MONO_REGULAR: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf");
-/// IBM Plex Serif `SemiBold` — the album title and the first-run question.
-pub const SERIF_SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexSerif-SemiBold.ttf");
 
 /// Every bundled face, in the order the application loads them.
 ///
@@ -77,13 +97,7 @@ pub const SERIF_SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexSerif-S
 /// entry, before the window exists. The bytes are `'static` slices of the
 /// binary's own rodata, so each `Cow` iced takes is borrowed and nothing is
 /// copied or read from disk.
-pub const FACES: [&[u8]; 5] = [
-    SANS_REGULAR,
-    SANS_MEDIUM,
-    SANS_SEMIBOLD,
-    MONO_REGULAR,
-    SERIF_SEMIBOLD,
-];
+pub const FACES: [&[u8]; 3] = [SANS_REGULAR, SANS_MEDIUM, SANS_SEMIBOLD];
 
 #[cfg(test)]
 mod tests {
@@ -95,10 +109,10 @@ mod tests {
     /// Four tables — `head` for the em square, `hhea`/`hmtx` for advances,
     /// `cmap` for codepoint-to-glyph — and no dependency. A shaping engine
     /// would add kerning and ligatures on top of this; neither applies to the
-    /// figures in baz's fixed slots (Plex Mono is uniform-advance and pairs no
-    /// kerns between digits), so the sum of advances *is* the rendered width
-    /// for everything measured here, and is an upper bound elsewhere because
-    /// kerning only ever pulls glyphs together.
+    /// figures in baz's fixed slots (Plex Sans's digits are uniform-advance and
+    /// pair no kerns with each other), so the sum of advances *is* the rendered
+    /// width for everything measured here, and is an upper bound elsewhere
+    /// because kerning only ever pulls glyphs together.
     ///
     /// Deliberately hand-written and test-only rather than a `ttf-parser`
     /// dev-dependency: the crate is already flagged unmaintained in
@@ -265,13 +279,8 @@ mod tests {
 
     use ttf::Face;
 
-    /// The mono face, parsed. Every figure baz sets in a reserved slot is in
-    /// this one.
-    fn mono() -> Face<'static> {
-        Face::parse(MONO_REGULAR)
-    }
-
-    /// The sans face at Regular, which is what wraps in the settings note.
+    /// The sans face at Regular: baz's whole voice, and every figure it sets
+    /// in a reserved slot.
     fn sans() -> Face<'static> {
         Face::parse(SANS_REGULAR)
     }
@@ -304,8 +313,6 @@ mod tests {
             ("Sans Regular", SANS_REGULAR),
             ("Sans Medium", SANS_MEDIUM),
             ("Sans SemiBold", SANS_SEMIBOLD),
-            ("Mono Regular", MONO_REGULAR),
-            ("Serif SemiBold", SERIF_SEMIBOLD),
         ] {
             let face = Face::parse(bytes);
             assert!(
@@ -314,7 +321,12 @@ mod tests {
                 face.units_per_em()
             );
         }
-        assert_eq!(FACES.len(), 5, "five faces, per the visual language §2.2.1");
+        assert_eq!(
+            FACES.len(),
+            3,
+            "one family at three weights: the monospace and the serif are both \
+             deleted (`.interface-design/system.md` §8)"
+        );
     }
 
     /// Every character baz can put in a fixed slot has a real glyph in the
@@ -326,88 +338,124 @@ mod tests {
     /// formatters can emit — timestamps, levels, rates, counts, the minus sign
     /// the stepper uses, and the separators the captions use.
     #[test]
-    fn the_mono_face_carries_every_figure_baz_sets_in_it() {
-        let mono = mono();
+    fn the_sans_face_carries_every_figure_baz_sets_in_it() {
+        let sans = sans();
         for character in "0123456789:.,-+ dBkHz∞→−·…—".chars() {
             assert_ne!(
-                mono.glyph(character),
+                sans.glyph(character),
                 0,
-                "IBM Plex Mono has no glyph for {character:?} — it would fall \
+                "IBM Plex Sans has no glyph for {character:?} — it would fall \
                  back to a system font mid-readout"
             );
         }
-        // The serif and sans carry the punctuation the copy uses.
-        for face in [sans(), Face::parse(SERIF_SEMIBOLD)] {
+        // Every weight the readouts, their labels and the album title can be
+        // set in — which, with the serif deleted, is the whole bundle.
+        for face in [Face::parse(SANS_MEDIUM), Face::parse(SANS_SEMIBOLD)] {
             for character in "…—·’“”→".chars() {
                 assert_ne!(face.glyph(character), 0, "no glyph for {character:?}");
             }
         }
     }
 
-    /// The mono really is monospaced, which is the whole reason baz sets its
-    /// figures in it: a digit changing must not move its neighbour.
+    /// **The measurement that deleted the monospace.**
+    ///
+    /// baz shipped a second face for one reason: iced 0.13 exposes no
+    /// OpenType feature control, so there is no `tnum`, and a column of figures
+    /// that ticks must not move its neighbours. That reasoning skipped a step —
+    /// it never asked whether the *sans* already had tabular figures. It does,
+    /// in all three weights, at the same 600/1000 em the mono gave.
+    ///
+    /// This is the licence for the monospace's deletion, taken against the bytes baz
+    /// ships rather than against a foundry's specimen page, so a face swapped
+    /// for one with proportional figures fails here rather than in a user's
+    /// bottom bar.
     #[test]
-    fn the_mono_face_advances_uniformly() {
-        let mono = mono();
-        let reference = mono.advance('0');
-        for character in "0123456789:.- dBkHz".chars() {
+    fn the_sans_carries_baz_s_tabular_figures_in_every_weight_it_sets_them_in() {
+        for (name, bytes) in [
+            ("Sans Regular", SANS_REGULAR),
+            ("Sans Medium", SANS_MEDIUM),
+            ("Sans SemiBold", SANS_SEMIBOLD),
+        ] {
+            let face = Face::parse(bytes);
+            let reference = face.advance('0');
+            for digit in "0123456789".chars() {
+                assert!(
+                    (face.advance(digit) - reference).abs() < f32::EPSILON,
+                    "{name}: {digit:?} advances {} where '0' advances {reference} \
+                     — the figures are not tabular and a ticking readout will jitter",
+                    face.advance(digit)
+                );
+            }
+            // The same 0.6 em the mono advanced at, which is what makes this a
+            // substitution rather than a re-derivation of every reserved slot.
             assert!(
-                (mono.advance(character) - reference).abs() < f32::EPSILON,
-                "{character:?} advances {} where '0' advances {reference}",
-                mono.advance(character)
+                (reference / face.units_per_em() - 0.6).abs() < 0.001,
+                "{name}'s digit advance moved off 0.6 em"
             );
         }
-        // The figure the old assertions guessed with was 0.5 em. The face
-        // actually ships is 0.6 em — 20% wider — which is exactly why the
-        // slot checks below measure rather than estimate.
-        assert!(
-            (reference / mono.units_per_em() - 0.6).abs() < 0.001,
-            "Plex Mono's advance moved off 0.6 em"
-        );
+
+        // And end to end, in the strings that actually tick: a timestamp
+        // rolling from all-zeroes to all-nines moves nothing beside it.
+        let sans = sans();
+        for (left, right) in [
+            ("0:00:00", "9:59:59"),
+            ("1:23:45", "8:07:02"),
+            ("999", "111"),
+            ("199 / 240", "999 / 999"),
+        ] {
+            let (a, b) = (
+                sans.width(left, theme::SIZE_META),
+                sans.width(right, theme::SIZE_META),
+            );
+            assert!(
+                (a - b).abs() < f32::EPSILON,
+                "{left:?} measures {a} px and {right:?} measures {b} px"
+            );
+        }
     }
 
-    /// **The advance-width test** `docs/design/02-visual-language.md` §4.6
-    /// requires before the typeface may ship.
+    /// **The advance-width test** `docs/design/02-visual-language.md` §3.4
+    /// requires before a face change may ship.
     ///
     /// The bottom bar is pixel-stable because nothing in it is sized to its
     /// content: every slot is a token wide enough for its worst case. Those
-    /// tokens were chosen against the platform face baz used to borrow, and a
-    /// different face has different figure widths. Each assertion here takes
-    /// the worst-case string the token's own documentation names, measures it
-    /// in the face that will actually draw it, and checks the reservation
-    /// against the measurement — so a font change can never silently overflow
-    /// a reserved slot, it can only fail this test.
+    /// tokens were chosen against a face, and a different face has different
+    /// figure widths. Each assertion here takes the worst-case string the
+    /// token's own documentation names, measures it in the face that will
+    /// actually draw it, and checks the reservation against the measurement —
+    /// so a font change can never silently overflow a reserved slot, it can
+    /// only fail this test.
+    ///
+    /// **Every slot is now measured in the Sans**, which is the whole of what
+    /// deleting the monospace cost: one face draws every string in the bar.
     #[test]
     fn every_reserved_slot_holds_its_worst_case_in_the_bundled_face() {
-        let mono = mono();
+        let sans = sans();
 
         // The seek bar's timestamps: `h:mm:ss`, the widest shape
-        // `vm::format_duration` produces for a track.
-        fits(
-            &mono,
-            "0:00:00",
-            theme::SIZE_META,
-            theme::STAMP_W,
-            "STAMP_W",
-        );
+        // `vm::format_duration` produces for a track — including the ten-hour
+        // case the *mono* could not hold in this slot (57.60 px against 52).
+        for stamp in ["0:00:00", "10:00:00"] {
+            fits(&sans, stamp, theme::SIZE_META, theme::STAMP_W, "STAMP_W");
+        }
         // …and the undeclared-length placeholder, which shares the slot.
-        fits(&mono, "--:--", theme::SIZE_META, theme::STAMP_W, "STAMP_W");
+        fits(&sans, "--:--", theme::SIZE_META, theme::STAMP_W, "STAMP_W");
 
         // The signal-path readout: the longest chain a consumer device
         // produces, and the affirmative reading that shares its slot.
         for note in ["192 → 176.4 kHz", "44.1 → 48 kHz", "bit-perfect"] {
-            fits(&mono, note, theme::SIZE_META, theme::SIGNAL_W, "SIGNAL_W");
+            fits(&sans, note, theme::SIZE_META, theme::SIGNAL_W, "SIGNAL_W");
         }
 
         // The volume level tip: `player::level_label`'s widest output, and the
         // silent end of the taper, which uses a different glyph entirely.
         for level in ["-18.1 dB", "-60.0 dB", "-∞ dB"] {
-            fits(&mono, level, theme::SIZE_CAPTION, theme::LEVEL_W, "LEVEL_W");
+            fits(&sans, level, theme::SIZE_CAPTION, theme::LEVEL_W, "LEVEL_W");
         }
 
         // The seek preview tip, one size down from the stamps.
         fits(
-            &mono,
+            &sans,
             "0:00:00",
             theme::SIZE_CAPTION,
             theme::PREVIEW_W,
@@ -415,35 +463,50 @@ mod tests {
         );
 
         // A setting's value slot: `replaygain::format_centidb` at either end
-        // of the pre-amp travel.
-        for value in ["-20.00 dB", "+20.00 dB"] {
+        // of the pre-amp travel, in the glyphs it actually emits — the minus is
+        // U+2212, which advances as wide as the `+` and so keeps the slot's
+        // left edge still as the value steps through zero.
+        for value in ["\u{2212}20.00 dB", "+20.00 dB"] {
             fits(
-                &mono,
+                &sans,
                 value,
                 theme::SIZE_META,
                 theme::SETTING_VALUE_W,
                 "SETTING_VALUE_W",
             );
         }
+        assert!(
+            (sans.width("\u{2212}20.00 dB", theme::SIZE_META)
+                - sans.width("+20.00 dB", theme::SIZE_META))
+            .abs()
+                < f32::EPSILON,
+            "the two ends of the pre-amp travel must measure the same, or the \
+             slot's left edge moves as the value crosses zero"
+        );
 
         // The track/queue number column: three figures, per its own docs.
         fits(
-            &mono,
+            &sans,
             "999",
             theme::SIZE_META,
             theme::TRACK_NO_W,
             "TRACK_NO_W",
         );
 
-        // The bar's queue-position readout, which reserves for a queue nobody
-        // bounded: `999 / 999` is the widest it can be asked to draw.
-        fits(
-            &mono,
-            "999 / 999",
-            theme::SIZE_META,
-            theme::QUEUE_POS_W,
-            "QUEUE_POS_W",
-        );
+        // The bar's queue-position readout, bounded at three figures a side:
+        // `199 / 240` is the spec's worst case and `999 / 999` is the widest
+        // the same shape can be, and with tabular figures they are the same
+        // width — which is the whole reason the bound can be stated in figures
+        // rather than in pixels.
+        for position in ["199 / 240", "999 / 999"] {
+            fits(
+                &sans,
+                position,
+                theme::SIZE_META,
+                theme::POSITION_W,
+                "POSITION_W",
+            );
+        }
 
         // The bar's Up next control: its label in the Medium face it is set
         // in, inside what the slot has left after the readout and the padding.
@@ -451,7 +514,7 @@ mod tests {
             &Face::parse(SANS_MEDIUM),
             "Up next",
             theme::SIZE_META,
-            theme::UP_NEXT_W - theme::QUEUE_POS_W - 3.0 * theme::GAP_SM,
+            theme::UP_NEXT_W - theme::POSITION_W - 3.0 * theme::GAP_SM,
             "UP_NEXT_W",
         );
 
@@ -498,7 +561,7 @@ mod tests {
         // The width a wrapped line actually has: the panel, less its inset on
         // both sides, less the scrollbar lane the list keeps clear.
         let content_w = theme::PANEL_W - 2.0 * theme::GAP_XL - theme::SCROLLBAR_LANE;
-        let lines = theme::SETTING_NOTE_H / (theme::SIZE_META * theme::LINE_HEIGHT);
+        let lines = theme::SETTING_NOTE_H / (theme::SIZE_META * theme::LEADING_META);
         for mode in MODES {
             let note = mode_note(mode);
             let used = wrapped_lines(&sans, note, theme::SIZE_META, content_w);

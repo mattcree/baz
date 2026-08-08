@@ -31,27 +31,25 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
         .on_input(Message::SearchChanged)
         .padding(theme::pad(theme::GAP_SM, theme::GAP_MD))
         .size(theme::SIZE_BODY)
+        .line_height(theme::LEADING_BODY)
         .width(Length::Fixed(SEARCH_W))
         .style(theme::input);
     let mut status = row![
         text(counts_line(shelf))
             .size(theme::SIZE_META)
-            .font(theme::MONO)
+            .line_height(theme::LEADING_META)
             .color(theme::PAPER_FAINT)
     ]
     .spacing(theme::GAP_SM)
     .align_y(iced::Alignment::Center);
     if shelf.scanning {
-        // Neither the accent nor the mono. A scan is the library working, not
-        // the music — the lamp means playback truth (`theme`'s
-        // accent-discipline note) and this note used to light it while nothing
-        // was playing. It loses the monospace face with it, because the mono
-        // is baz's tabular figures and this is a sentence fragment, not a
-        // figure: set beside the counts it shares a line with, it should read
-        // as prose next to numbers rather than as another readout.
+        // Not the accent. A scan is the library working, not the music — the
+        // lamp means playback truth (`theme`'s accent-discipline note) and this
+        // note used to light it while nothing was playing.
         status = status.push(
             text("scanning…")
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_DIM),
         );
     }
@@ -59,7 +57,7 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
         status = status.push(
             text(format!("{} files skipped", shelf.files_skipped))
                 .size(theme::SIZE_META)
-                .font(theme::MONO)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_FAINT),
         );
     }
@@ -67,6 +65,7 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
         status = status.push(
             text(problem.as_str())
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::ALERT),
         );
     }
@@ -105,6 +104,7 @@ fn settings_toggle() -> Element<'static, Message> {
         container(
             text("Settings")
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .font(theme::MEDIUM)
                 .wrapping(text::Wrapping::None),
         )
