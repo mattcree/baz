@@ -38,7 +38,7 @@
 //! 1. the playing album's halo — [`sleeve`] with `playing`;
 //! 2. the playing dot — [`lamp_dot`], beside a tile's title or in a row's
 //!    number column;
-//! 3. the seek groove's elapsed fill and knob — [`seek`];
+//! 3. the needle's fill — [`needle`], where the queue has played;
 //! 4. a seek in flight — the elapsed timestamp warms to [`Palette::lamp`] while a
 //!    position has been asked for and not yet confirmed, because a position
 //!    being asked for is a claim about the playhead;
@@ -1097,26 +1097,98 @@ pub const DOT: f32 = 6.0;
 /// Thickness of a groove's rail — a groove, not a gauge.
 pub const RAIL: f32 = 4.0;
 /// Vertical slop above *and* below the [`RAIL`] that still counts as the
-/// seek bar. A 4 px groove is a 4 px target, which is a miss waiting to
+/// groove. A 4 px rail is a 4 px target, which is a miss waiting to
 /// happen (Fitts); the pointer gets a band an order of magnitude taller to
-/// aim at, and the cursor changes across the whole of it.
+/// aim at, and the cursor changes across the whole of it. [`NEEDLE_HIT`] is the
+/// same idea for a control that cannot afford to reserve the height.
 ///
 /// **10, where it was 9**: [`RAIL_HIT`] is a reserved slot height and law L2
 /// puts every reserved slot on the 4 px lattice, so the band is 24 rather than
 /// 22. The target got larger, which is the only direction a hit band is allowed
 /// to move.
 pub const HIT_SLOP: f32 = 10.0;
-/// Hit height of the seek bar: the groove plus [`HIT_SLOP`] on each side.
-/// The widget draws the rail centered in it.
+/// Hit height of a groove: the rail plus [`HIT_SLOP`] on each side. The widget
+/// draws the rail centered in it.
 pub const RAIL_HIT: f32 = RAIL + 2.0 * HIT_SLOP;
-/// Radius of the seek handle at rest.
+/// Radius of the fader's handle.
 pub const KNOB: f32 = 5.0;
-/// Radius of the seek handle while hovered or held — the control grows
-/// under the pointer rather than changing color alone.
-pub const KNOB_ACTIVE: f32 = 7.0;
-/// Minimum width the seek bar is given in the now-playing bar.
-pub const SEEK_W: f32 = 260.0;
-/// Width reserved for each of the seek bar's timestamps: enough for `h:mm:ss`
+// ---------------------------------------------------------------------------
+// The needle (ADR-0017 §1.1, step 9)
+// ---------------------------------------------------------------------------
+
+/// Thickness of the needle — the seek line flush on the window's bottom edge,
+/// segmented by the queue's real entry lengths.
+///
+/// **2**, and the number is the argument. The 260 px groove plus its two stamps
+/// and its hit band spent 45 of the bar's 102 px saying *where the playhead is*,
+/// and the composition audit measured what that bought: the seek row was **last
+/// of six** in the bar's own ink hierarchy, at 2.5 %, while occupying 37 of the
+/// 77 px of content height. The needle states position *and* structure in 2 px —
+/// you can see that you are three minutes into a nine-minute closer, which no
+/// scalar groove has ever said — and gives the other 43 back to the collection.
+pub const NEEDLE_H: f32 = 2.0;
+
+/// The band the pointer may aim at above the needle.
+///
+/// A 2 px mark is a 2 px target, which is a miss waiting to happen (Fitts), so
+/// the needle claims height the way [`HIT_SLOP`] does — except **upward, and
+/// out of layout**: it reserves [`NEEDLE_H`] of row and tests the pointer
+/// against a band [`NEEDLE_HIT`] tall reaching into the empty lane the bar
+/// keeps under its transport. That is the only way a 2 px control can be
+/// aimed at without charging the collection for the aiming.
+///
+/// **12 = [`GAP_MD`] = [`BAR_LEAD`]**, and the equality is the safety property
+/// rather than a coincidence: the band is exactly the bar's bottom lane, which
+/// is empty recess, so it can never take a press meant for a control.
+/// ADR-0017's `NEEDLE_HIT 22` is amended here — 22 would reach 8 px into the
+/// transport row's boxes, and a needle that swallows a press aimed at Next is
+/// a worse bargain than a smaller band.
+///
+/// It is a **third** pointer height beside law L7's `TRANSPORT_HIT` 32 and
+/// `STEPPER_HIT`/`RAIL_HIT` 24, and it is named here rather than smuggled: L7's
+/// two heights are the heights of *boxes*, and the alternative for a line
+/// flush on the window's edge is either 10 px of the transport row or 22 px of
+/// the wall. The bound that keeps it honest is asserted, not asserted-about:
+/// `NEEDLE_HIT <= BAR_LEAD`.
+pub const NEEDLE_HIT: f32 = GAP_MD;
+
+/// The gap the needle leaves between two consecutive queue entries.
+///
+/// [`GAP_XXS`], the lattice's one named exception (law L2) — an *intra-block*
+/// gap, which is exactly what this is: the segments are one line, not a row of
+/// slots. The critique specified 2 px here and this is that 2 px.
+pub const SEGMENT_GAP: f32 = GAP_XXS;
+
+/// The gap the needle leaves where one record ends and the next begins.
+///
+/// **8, where the critique said 6.** Six is off the 4 px lattice law L2 puts
+/// every gap on, and 8 is the lattice's neighbour in the direction that makes
+/// the break *more* legible on a 2 px line — four times the track gap rather
+/// than three. It is the critique's "side break", generalised: baz's queue is
+/// one list with a cursor (ADR-0016), so the wide gap falls at an **album
+/// boundary** and the critique's spec is the single-album case of this one.
+pub const ALBUM_GAP: f32 = GAP_XS * 2.0;
+
+/// The narrowest a segment may be drawn.
+///
+/// Every entry in the queue is a control — clicking it jumps there — and the
+/// visible-control rule (`docs/REFUSALS.md`) does not have a "unless the track
+/// is short" clause. So a segment's width is a floor plus a proportional share,
+/// never a bare proportion: a 40-second interlude between two 12-minute sides
+/// stays clickable, and an entry whose length the scan never read gets the
+/// floor **and no proportional claim at all** — which is the honest drawing of
+/// "we do not know how long this is".
+pub const SEGMENT_MIN: f32 = GAP_XS;
+
+/// Width of the needle's hover tip.
+///
+/// **160**: two thirds of the queue popover's own title lane (246 px), which is
+/// where the same titles are listed in full. A floating chip wider than that
+/// stops reading as a label and starts reading as a panel. Longer titles elide,
+/// as they do in the popover and in the index rail — a title is free text and
+/// no slot can bound it (§1.7's amendment made the same call for genre names).
+pub const NEEDLE_TIP_W: f32 = 160.0;
+/// Width reserved for each of the bar's two timestamps: enough for `h:mm:ss`
 /// at [`SIZE_META`]. Fixed, so the groove keeps its place when a track crosses
 /// the hour mark or a stamp gains a digit — the same reason an undeclared
 /// length renders as `--:--` rather than as nothing.
@@ -1141,15 +1213,6 @@ pub const STAMP_W: f32 = 52.0;
 /// It is still a reserved *lane* in the volume block, which is symmetric about
 /// its own rail ([`VOLUME_ROW_H`]) and needs no such trick.
 pub const PREVIEW_H: f32 = 16.0;
-/// Width of the hover-preview tip: enough for `h:mm:ss` at [`SIZE_CAPTION`]
-/// plus its padding, fixed so the tip can be centered on the pointer without
-/// measuring text.
-///
-/// **48**, re-derived from the Sans's real advances: `0:00:00` is 39.42 px at
-/// caption size, and a [`GAP_XS`] of padding on each side is 47.42. The tip is
-/// the tightest slot in the bar and it is meant to be — it floats over the
-/// groove, and every pixel of it is a pixel of the track it is describing.
-pub const PREVIEW_W: f32 = 48.0;
 
 // ---------------------------------------------------------------------------
 // The volume control
@@ -1157,9 +1220,9 @@ pub const PREVIEW_W: f32 = 48.0;
 
 /// Width of the volume fader's groove.
 ///
-/// Shorter than the seek bar on purpose: a seek bar is a *map of the track*
-/// and wants resolution, while a fader is a setting and wants to sit quietly
-/// in the corner. 96 px still gives ~10 control positions per pixel, which is
+/// Short on purpose: a fader is a setting and wants to sit quietly in the
+/// corner (the thing that is a *map* now runs the whole width of the window and
+/// is called [`NEEDLE_H`]). 96 px still gives ~10 control positions per pixel, which is
 /// ~0.26 dB at the top of the taper — finer than a hand can aim and two
 /// hundred times finer than the ~1 dB a listener hears as a change.
 pub const VOLUME_W: f32 = 96.0;
@@ -1182,21 +1245,24 @@ pub const DETENT_GAP: f32 = 2.0;
 /// the knob and the detent mark above it. Taller than [`RAIL_HIT`] because
 /// the mark has to live somewhere the handle is not.
 pub const VOLUME_HIT: f32 = RAIL + 2.0 * (KNOB + DETENT_GAP + DETENT_H);
-/// Height of the volume block: a level-preview lane, the groove's hit band, and
-/// **an empty lane of the same height under it** — 16 + 28 + 16 = **60**.
+/// Height of the volume block — **32**, [`TRANSPORT_HIT`], one control height.
 ///
-/// The empty lane is the whole point and it is law L4 made structural: the block
-/// is *symmetric about its own rail*, so centring the block in the bar centres
-/// the **rail**, not the block. It was `PREVIEW_H + VOLUME_HIT` = 45 with a
-/// preview lane on top and nothing below, which put the rail 6.5 px below the
-/// bar's mid-line and made the mute glyph — lifted to meet it by a `MUTE_TOP`
-/// constant that no longer exists — 6.5 px low with it.
+/// It was `2 × PREVIEW_H + VOLUME_HIT` = 60: a level-preview lane, the groove's
+/// hit band, and an empty lane of the same height under it, so that the block
+/// was *symmetric about its own rail* and centring the block centred the
+/// **rail** rather than the block (law L4). That was right, and 60 no longer
+/// fits: [`BAR_CONTENT_H`] is 56 once ADR-0017 step 10 takes the seek row out,
+/// and a zone taller than the band would be the thing setting the bar's height.
 ///
-/// The lift is gone because the asymmetry that needed it is gone: the mute
-/// button is simply centred beside the fader, and both centres land on the
-/// bar's one line. One fewer constant, and one fewer number that had to be
-/// re-derived every time the block's contents changed.
-pub const VOLUME_ROW_H: f32 = 2.0 * PREVIEW_H + VOLUME_HIT;
+/// The symmetry survives without the two lanes, because the fader's own hit
+/// band is already symmetric about its rail: [`VOLUME_HIT`] 28 centred in 32
+/// puts the rail on the block's centre line with 2 px of clearance to spare, and
+/// the mute button beside it is [`TRANSPORT_HIT`] centred in the same 32. Both
+/// marks land on the bar's one line, the block is now one of law L7's two
+/// heights instead of a third, and the preview lane becomes a **layer** over the
+/// [`BAR_LEAD`] gap above the fader — the same move [`PREVIEW_H`] documents for
+/// the seek groove, generalised to the control that still exists.
+pub const VOLUME_ROW_H: f32 = TRANSPORT_HIT;
 /// Width of the whole volume block — the mute affordance, a gap, the
 /// groove. Fixed, so neither a volume change, a mute, nor the fader's own
 /// hover can move anything beside it.
@@ -1302,61 +1368,55 @@ pub const GLYPH_OPACITY_PENDING: f32 = 0.42;
 /// readings.
 pub const GLYPH_OPACITY_DISABLED: f32 = 0.28;
 
-/// Height of the bottom bar's seek row: the groove's hit band, and nothing
-/// else. Reserved whether or not there is anything to seek, so the bar keeps its
-/// height from launch through play to stop.
-///
-/// **24, where it was `PREVIEW_H + RAIL_HIT` = 37.** The preview lane left the
-/// column and became a layer over the [`BAR_LEAD`] gap above the groove
-/// ([`PREVIEW_H`]); what is left is the band a pointer aims at.
-pub const SEEK_ROW_H: f32 = RAIL_HIT;
-
 /// The lane the bottom bar keeps **above and below** its transport row
-/// (logical px) — `GAP_SM` of clear recess and then the seek row, mirrored.
+/// (logical px) — [`GAP_MD`], and the same on both sides.
 ///
 /// This is the composition audit's defect 2, expressed as one number. The bar
 /// used to be a row of three zones each `align_y(Center)`, which centres them as
-/// *blocks*: the centre column is `TRANSPORT_HIT + GAP_SM + SEEK_ROW_H`, so it
+/// *blocks*: the centre column was `TRANSPORT_HIT + GAP_SM + SEEK_ROW_H`, so it
 /// set the bar's height and hung the transport at the **top** of it — 22.5 px
 /// above the bar's own mid-line, with the seek groove 27.5 px below it and the
 /// volume rail 6.5 px below that. Seven mark-lines in a 102 px band, and the
 /// mid-line carried nothing.
 ///
-/// The fix is to make the centre column symmetric about the transport rather
-/// than to nudge anything: reserve `BAR_LEAD` above the transport row and spend
-/// `BAR_LEAD` below it on the gap and the groove. The transport's centre is then
-/// the band's centre by construction, at every width and in every state, and the
-/// flanking zones — which are centred in the same band — put their own marks on
-/// the same line.
-pub const BAR_LEAD: f32 = GAP_SM + SEEK_ROW_H;
+/// The fix was to make the band symmetric about the transport rather than to
+/// nudge anything, and it survives step 10 unchanged in principle and changed
+/// in size: `BAR_LEAD` was `GAP_SM + SEEK_ROW_H` = 32 because a seek row hung
+/// below the line. Nothing hangs below it now — the needle took that job to the
+/// window's edge — so the lane is a *gap*, and the gap is `GAP_MD` 12: it is
+/// ADR-0017 §1.1's own sketch of this bar, and it is what [`NEEDLE_HIT`] is
+/// bounded by.
+pub const BAR_LEAD: f32 = GAP_MD;
 
-/// Height of the bottom bar's content band — **96**; the bar is this, a
-/// [`GAP_XS`] of padding on each side, and its hairline: **105**.
+/// Height of the bottom bar's content band — **56**; the bar is this plus its
+/// hairline, **57**, and the needle takes 2 px more at the window's edge.
 ///
 /// `2 × BAR_LEAD + TRANSPORT_HIT`, so **the band's mid-line is the transport's
-/// centre line** (law L4). It was 77 px of centre column inside 12 px of
-/// vertical padding, which came to the same 101 px of bar and put the transport
-/// nowhere near the middle of it.
+/// centre line** (law L4). It was 96, in a 105 px bar.
+///
+/// # The arithmetic of step 10, and where it lands
+///
+/// ADR-0017 §1.1 wrote this column as `1 rule + 12 + 32 + 12` and totalled it
+/// **58**. The parts are right and the total is one out: 1 + 12 + 32 + 12 = 57,
+/// and 58 is not reachable at all — a bar is `2a + 2ℓ + TRANSPORT_HIT + 1` for a
+/// symmetric padding `a` and lead `ℓ`, which is **odd** for every integer `a`
+/// and `ℓ`, because the hairline is odd and everything else is doubled. So the
+/// parts are held and the total is corrected:
+///
+/// | | today | step 10 |
+/// |---|---:|---:|
+/// | rule | 1 | 1 |
+/// | band | 104 | **56** |
+/// | needle | — | 2 |
+/// | **bottom furniture** | **105** | **59** |
+///
+/// The ADR predicted "recover 44, concede 28" against a 102 px bar it inherited
+/// from before the composition audit re-derived the band. Measured against what
+/// is actually there: the collection gets **46 px** back, and we concede **27**
+/// against the critique's ~32 px of bottom furniture to keep skip
+/// pointer-reachable. Both numbers moved a pixel in our favour, and saying so is
+/// cheaper than quietly shipping 57 under a heading that says 58.
 pub const BAR_CONTENT_H: f32 = 2.0 * BAR_LEAD + TRANSPORT_HIT;
-
-/// The bar's own vertical padding (logical px) — [`GAP_XS`], and **symmetric**.
-///
-/// Symmetry is the whole requirement: the band's mid-line is the transport's
-/// centre, and equal padding above and below moves both by the same amount, so
-/// the centring survives. Unequal padding would undo it, which is exactly how
-/// the bar came to hang its transport 22.5 px high in the first place.
-///
-/// It exists so the seek groove does not run into the window's bottom edge:
-/// with the seek row hanging below the centre line, zero padding put the
-/// groove's hit band flush against it.
-pub const BAR_PAD_V: f32 = GAP_XS;
-
-/// The bar's drawn height, hairline excluded — **104**.
-///
-/// The content band and its symmetric padding. Fixed rather than derived from
-/// whichever zone happens to be tallest, so no state of any zone can change how
-/// tall the bar is (the reserved-slot rule, applied to the bar itself).
-pub const BAR_BAND_H: f32 = BAR_CONTENT_H + 2.0 * BAR_PAD_V;
 
 /// Vertical padding of the top bar and of the Settings place's header strip
 /// (logical px) — the two strips that have to be one frame.
@@ -1385,10 +1445,16 @@ pub const TOP_BAR_H: f32 = 2.0 * TOP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
 /// 20 px line box, so there is **one** number rather than two that would drift:
 /// the search well used to stand 30 px and the first-run well 40 (law L7).
 pub const WELL_PAD_V: f32 = (TRANSPORT_HIT - LINE_BODY) / 2.0;
-/// Width of the bottom bar's centre column: a timestamp, the groove, a
-/// timestamp, and the gaps between them. The transport row centres itself
-/// over this, and the column is fixed so the whole block stays put.
-pub const SEEK_ROW_W: f32 = SEEK_W + 2.0 * (STAMP_W + GAP_SM);
+/// Width of the bottom bar's centre column: three [`TRANSPORT_HIT`] squares and
+/// the two [`GAP_SM`] gaps between them — **112**.
+///
+/// It was `SEEK_W + 2 × (STAMP_W + GAP_SM)` = 380, because the column held a
+/// timestamp, a 260 px groove and a timestamp, and the transport centred itself
+/// over that. With the seek row gone the column *is* the transport row, so the
+/// centre is the buttons' own centre by construction rather than by a shared
+/// width, and the 268 px the column gives up go to the two flanking zones — the
+/// left one being the zone the audit found clipping below ~900 px.
+pub const TRANSPORT_W: f32 = 3.0 * TRANSPORT_HIT + 2.0 * GAP_SM;
 
 /// Width reserved at the end of the bottom bar for the signal-path readout
 /// (`48 → 44.1 kHz`, [`crate::player::PlayerState::signal_note`]).
@@ -1471,7 +1537,7 @@ pub const SETTING_NOTE_H: f32 = 2.0 * LINE_META;
 /// right of the list's contents and nowhere else.
 ///
 /// Reserved **whether or not the list currently overflows**, on the same
-/// principle as [`SEEK_ROW_H`] and [`SIGNAL_W`]: a gutter that appeared with
+/// principle as [`STAMP_W`] and [`SIGNAL_W`]: a gutter that appeared with
 /// the scrollbar would shift every duration in the list sideways the moment
 /// one more track arrived, which is a jump where there is currently a
 /// clipped glyph. The cost when nothing is scrolling is ten invisible pixels.
@@ -2206,53 +2272,45 @@ pub fn input(p: &Palette, status: text_input::Status) -> text_input::Style {
     }
 }
 
-/// The seek bar: lamp amber elapsed running through a recessed groove, with
-/// a small amber knob that grows under the pointer.
+/// **The needle**: lamp amber where the queue has played, the room's faintest
+/// mark where it has not.
 ///
 /// Position is playback truth, so it earns the accent — the same rule that
-/// gives the playing sleeve its halo. The unplayed remainder is [`Palette::recess`]:
-/// the groove is *cut into* the bar rather than laid on top of it, matching
-/// the inset treatment of the input wells.
+/// gives the playing sleeve its halo, and the same rule the 260 px groove this
+/// replaces was drawn by. Two things change with the shape:
+///
+/// - **The unplayed track is [`Palette::hairline`], not [`Palette::recess`].**
+///   The groove was *cut into* the bar and read as a recess against the bar's
+///   own plane; a 2 px line flush on the window's bottom edge has no plane
+///   behind it to be cut into, so recess-on-recess would be a line you cannot
+///   see. The hairline is the room's "this is here and you are not meant to
+///   read it" mark, and it is already on the contrast test's exemption list by
+///   name — where §1.6 put "the needle's unfilled track" before it existed.
+/// - **No handle, and no border.** A knob on a 2 px line is a dot on a hair, and
+///   the fill's own leading edge is the playhead. The border a groove drew to
+///   separate itself from the bar would be 1 px of edge around a 2 px mark.
+///
+/// The states are the ladder the groove used: amber at rest, brighter under the
+/// pointer, deeper while held — so the line answers the hand the way every
+/// other control in the bar does, on the ink rather than on a ground.
 #[must_use]
-pub fn seek(p: &Palette, status: slider::Status) -> slider::Style {
-    let (fill, radius) = match status {
-        slider::Status::Active => (p.lamp, KNOB),
-        slider::Status::Hovered => (p.lamp_bright, KNOB_ACTIVE),
-        slider::Status::Dragged => (p.lamp_deep, KNOB_ACTIVE),
+pub fn needle(p: &Palette, status: slider::Status) -> slider::Style {
+    let fill = match status {
+        slider::Status::Active => p.lamp,
+        slider::Status::Hovered => p.lamp_bright,
+        slider::Status::Dragged => p.lamp_deep,
     };
     slider::Style {
         rail: Rail {
-            backgrounds: (Background::Color(fill), Background::Color(p.recess)),
-            width: RAIL,
+            backgrounds: (
+                Background::Color(fill),
+                Background::Color(p.hairline(p.recess)),
+            ),
+            width: NEEDLE_H,
             border: Border {
-                color: p.hairline(p.recess),
-                width: 1.0,
-                radius: (RAIL / 2.0).into(),
-            },
-        },
-        handle: Handle {
-            shape: HandleShape::Circle { radius },
-            background: Background::Color(fill),
-            border_width: 0.0,
-            border_color: Color::TRANSPARENT,
-        },
-    }
-}
-
-/// The seek bar with nothing to scrub: a track of undeclared length, where
-/// showing a proportional fill would be inventing one. The groove stays,
-/// unfilled and knobless, so the bar's place in the layout does not jump
-/// when a length does arrive.
-#[must_use]
-pub fn seek_inert(p: &Palette, _status: slider::Status) -> slider::Style {
-    slider::Style {
-        rail: Rail {
-            backgrounds: (Background::Color(p.recess), Background::Color(p.recess)),
-            width: RAIL,
-            border: Border {
-                color: p.hairline(p.recess),
-                width: 1.0,
-                radius: (RAIL / 2.0).into(),
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 0.0.into(),
             },
         },
         handle: Handle {
@@ -2264,10 +2322,41 @@ pub fn seek_inert(p: &Palette, _status: slider::Status) -> slider::Style {
     }
 }
 
-/// The volume fader: the same recessed groove as the seek bar, inked in
-/// paper rather than lamp amber, with a knob that does **not** grow.
+/// The needle with nothing queued, or a queue this process never sent: the
+/// track alone, drawn rather than hidden.
 ///
-/// Two deliberate differences from [`seek`], each with a reason:
+/// Drawn, because a line that came and went with the music would be movement in
+/// the one place ADR-0020 forbids it and the reserved-slot rule forbids it
+/// twice; and unfilled, because a fill is a claim about a playhead there is no
+/// queue to have.
+#[must_use]
+pub fn needle_inert(p: &Palette, _status: slider::Status) -> slider::Style {
+    slider::Style {
+        rail: Rail {
+            backgrounds: (
+                Background::Color(p.hairline(p.recess)),
+                Background::Color(p.hairline(p.recess)),
+            ),
+            width: NEEDLE_H,
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: 0.0.into(),
+            },
+        },
+        handle: Handle {
+            shape: HandleShape::Circle { radius: 0.0 },
+            background: Background::Color(Color::TRANSPARENT),
+            border_width: 0.0,
+            border_color: Color::TRANSPARENT,
+        },
+    }
+}
+
+/// The volume fader: a recessed groove inked in paper rather than lamp amber,
+/// with a knob that does **not** grow.
+///
+/// Two deliberate differences from [`needle`], each with a reason:
 ///
 /// - **No accent.** The lamp means playback truth (see the palette
 ///   rationale) — where the music is, which album is playing. A volume is a
@@ -2343,7 +2432,7 @@ pub fn segmented(p: &Palette) -> container::Style {
     }
 }
 
-/// The seek bar's hover preview: a small card floating over the groove with
+/// A hover preview: a small card floating over a control with
 /// the timestamp the pointer is pointing at.
 ///
 /// Deliberately *not* amber. The lamp is reserved for playback truth and for
@@ -2993,6 +3082,14 @@ pub fn pool_ring(p: &Palette, ringed: bool) -> container::Style {
 
 #[cfg(test)]
 mod tests {
+    /// The bar's drawn height including its hairline — **57**. Stated here
+    /// rather than as a token because nothing *draws* with it: the band is the
+    /// whole bar, and a token nothing draws with is a comment that can rot.
+    const BAR_H: f32 = BAR_CONTENT_H + 1.0;
+    /// The whole of what the window's bottom edge costs the collection — the
+    /// bar, its hairline and the needle. **59**, where it was 105.
+    const BOTTOM_FURNITURE_H: f32 = BAR_H + NEEDLE_H;
+
     use super::*;
 
     /// **The ink ladder, all four rungs** — the one ADR-0020 §2.1 completes by
@@ -3079,13 +3176,22 @@ mod tests {
         // there is no expression anywhere above that could vary one of them.
         const { assert!(TRANSPORT_HIT == 32.0) }
         const { assert!(ICON_PX == 16.0) }
-        const { assert!(SEEK_ROW_H == RAIL_HIT) }
-        const { assert!(VOLUME_ROW_H == 2.0 * PREVIEW_H + VOLUME_HIT) }
+        const { assert!(VOLUME_ROW_H == TRANSPORT_HIT) }
         // The band the bar draws in, and the lane that centres the transport in
         // it — both constants, so no transition can move the one line every
         // mark in the bar sits on (law L4).
         const { assert!(BAR_CONTENT_H == 2.0 * BAR_LEAD + TRANSPORT_HIT) }
-        const { assert!(BAR_LEAD == GAP_SM + SEEK_ROW_H) }
+        const { assert!(BAR_LEAD == GAP_MD) }
+        // **And the needle's geometry is a constant too** — ADR-0020 forbids
+        // animating bar geometry, and the needle is the one new surface a
+        // transition could have been tempted onto. Its thickness, its aiming
+        // band and both its gaps are literals; its *segments* move only when
+        // the queue changes, and its fill only when playback does. Neither is
+        // a tween (`docs/REFUSALS.md`: "the needle advancing with playback
+        // (data arriving) and scrolling" were never animation).
+        const { assert!(NEEDLE_H == 2.0) }
+        const { assert!(NEEDLE_HIT == GAP_MD) }
+        const { assert!(SEGMENT_GAP == GAP_XXS && ALBUM_GAP == 8.0) }
         // …and the popover the bar anchors rises in a layer whose inner height
         // never changes, so the layer above the bar cannot push it either.
         for step in 0..=20_u8 {
@@ -3289,23 +3395,31 @@ mod tests {
     }
 
     #[test]
-    fn the_bottom_bar_reserves_the_seek_row_whether_or_not_it_has_one() {
-        // The bar must not change height when a track starts or ends, so the
-        // reserved strip has to be exactly what the real row occupies: the
-        // groove's hit band.
-        assert!((SEEK_ROW_H - RAIL_HIT).abs() < f32::EPSILON);
-        // The hover preview is a **layer** over the `GAP_MD` the row already
-        // keeps between the transport and the groove, so it costs the column no
-        // height at all — which is the whole reason the transport can sit on the
-        // bar's own centre line ([`BAR_LEAD`], law L4). The lane it floats in is
-        // still reserved; it is reserved by the gap rather than by a row.
-        const { assert!(PREVIEW_H <= GAP_SM + HIT_SLOP) }
-        // And the row plus that gap is exactly the lane mirrored above the
-        // transport, or the transport would not be centred.
-        const { assert!(GAP_SM + SEEK_ROW_H == BAR_LEAD) }
-        // And its width is the groove plus a fixed stamp on each side, so
-        // the centre column never resizes as the digits tick.
-        assert!((SEEK_ROW_W - (SEEK_W + 2.0 * (STAMP_W + GAP_SM))).abs() < f32::EPSILON);
+    fn the_bottom_bar_reserves_every_slot_whether_or_not_it_has_one() {
+        // **The bar's whole height, stated once.** The seek row is gone and the
+        // needle has it; what the window's bottom edge costs the collection is
+        // the band, the hairline and 2 px of line. 105 → 59.
+        const { assert!(BAR_CONTENT_H == 56.0) }
+        const { assert!(BAR_H == 57.0) }
+        const { assert!(BOTTOM_FURNITURE_H == 59.0) }
+        // The needle's aiming band reaches into the bar's bottom lane and **no
+        // further**: that lane is empty recess, so a press aimed at Next can
+        // never be taken by a 2 px line at the window's edge. This is the whole
+        // safety argument for claiming height out of layout ([`NEEDLE_HIT`]).
+        const { assert!(NEEDLE_HIT <= BAR_LEAD) }
+        // The hover preview is a **layer** over that same lane rather than a row
+        // in it, so it costs the column no height at all — which is the whole
+        // reason the transport can sit on the bar's own centre line
+        // ([`BAR_LEAD`], law L4). It floats above the needle and stops short of
+        // the transport glyphs' own box.
+        const { assert!(PREVIEW_H <= BAR_LEAD + HIT_SLOP) }
+        // The volume block's preview lane is the same trick, and the lane it
+        // floats in is the bar's lead plus the fader's own slop above its rail.
+        const { assert!(PREVIEW_H <= BAR_LEAD + (VOLUME_HIT - RAIL) / 2.0) }
+        // The centre column is the transport row and nothing else now, so the
+        // buttons' centre is the column's centre by construction rather than by
+        // a width they happen to share with a groove.
+        const { assert!(TRANSPORT_W == 3.0 * TRANSPORT_HIT + 2.0 * GAP_SM) }
         // A stamp must hold `h:mm:ss` without clipping. The face is
         // proportional everywhere except its figures, so what a const
         // assertion can bound is the *figures*: six of them, each [`DIGIT_EM`]
@@ -3341,10 +3455,11 @@ mod tests {
     /// arithmetic.
     #[test]
     fn the_left_zone_reserves_the_continuation_line_whether_or_not_it_has_one() {
-        /// The zone's whole height with the third line in it: title, artist,
-        /// continuation and the gaps between them. Every lane is reserved, so
-        /// this is the zone's height in *every* state rather than its tallest.
-        const LEFT_H: f32 = LINE_BODY + GAP_XXS + LINE_META + GAP_XXS + CONTINUATION_H;
+        /// The zone's whole height with the third line in it: title, artist
+        /// and continuation, stacked line box on line box. Every lane is
+        /// reserved, so this is the zone's height in *every* state rather than
+        /// its tallest.
+        const LEFT_H: f32 = LINE_BODY + LINE_META + CONTINUATION_H;
 
         // 1. The lane holds one line of the type that draws it with air to
         //    spare, so the strip reserved when there is nothing to say is the
@@ -3356,15 +3471,21 @@ mod tests {
         //    about the wrong thing. (The *lane* is `LINE_BODY`; the type in it
         //    is `SIZE_CAPTION`, and the two are different claims.)
         const { assert!(SIZE_CAPTION < SIZE_META && SIZE_META < SIZE_BODY) }
-        // 3. The whole zone is still shorter than the bar's content band, so
-        //    the bar's height stays a property of the transport and the
-        //    continuation appearing cannot grow it. This is the same claim
+        // 3. The whole zone is exactly the bar's content band, so the bar's
+        //    height stays a property of the transport and the continuation
+        //    appearing cannot grow it. This is the same claim
         //    `views::bottom_bar` asserts against the composed row; it is stated
         //    here too because the numbers are this module's.
-        const { assert!(LEFT_H < BAR_CONTENT_H) }
-        // And it fits with room to spare rather than by a rounding error — a
-        // whole gap's worth, so the reading survives a leading being nudged.
-        const { assert!(LEFT_H + GAP_MD < BAR_CONTENT_H) }
+        //
+        //    **Exactly**, not with room to spare: at 56 px the three lanes and
+        //    the transport's two leads are the same 56, which is what makes the
+        //    zone's middle lane the bar's centre line without a nudge. The air
+        //    the old `GAP_XXS` gaps bought is now inside the line boxes, where
+        //    it always was — `LINE_BODY` 20 around a 13 px face is 7 px of
+        //    leading, so the block's first ink sits ~3.5 px below the hairline
+        //    and its last ~4.5 px above the needle.
+        const { assert!(LEFT_H == BAR_CONTENT_H) }
+        const { assert!(LINE_BODY > SIZE_BODY && LINE_CAPTION > SIZE_CAPTION) }
         // 4. **The stack is symmetric about its middle lane** (law L4): the
         //    title's lane and the continuation's are the same height, so the
         //    artist's line box is the block's exact centre and centring the
@@ -3758,28 +3879,40 @@ mod tests {
         // height is the level lane over the fader. Both fixed, in every
         // state, so no volume change and no mute can move a pixel beside it.
         assert!((VOLUME_BLOCK_W - (TRANSPORT_HIT + GAP_SM + VOLUME_W)).abs() < f32::EPSILON);
-        // The row holds a level lane, the fader, and a lane of the same height
-        // under it — and the mute target fits inside that.
-        const { assert!(VOLUME_ROW_H == 2.0 * PREVIEW_H + VOLUME_HIT) }
-        const { assert!(VOLUME_ROW_H >= TRANSPORT_HIT) }
-        // **The mute glyph sits on the rail, and now it does so by symmetry.**
+        // The block is **one control height** with the fader centred in it, so
+        // it is one of law L7's two heights rather than a third, and it fits
+        // the 56 px band the bar became at step 10 (60 did not).
+        const { assert!(VOLUME_ROW_H == TRANSPORT_HIT) }
+        const { assert!(VOLUME_HIT < VOLUME_ROW_H) }
+        const { assert!(VOLUME_ROW_H <= BAR_CONTENT_H) }
+        // **The mute glyph sits on the rail, and it does so by symmetry.**
         // The block's centre *is* the fader's rail centre, so a mute button
         // centred in the block lands on it — where the shipped build bought the
         // same alignment with a `MUTE_TOP` offset that had to be re-derived
         // whenever either lane changed. This is also law L4's right-hand mark:
         // centring the block centres the rail, and the rail is what the bar's
         // one line has to carry.
+        //
+        // It used to be bought with two 16 px lanes, a preview lane above the
+        // fader and an empty one below it. The preview became a *layer* over
+        // the bar's own lead, which is what freed 28 px of the block — and a
+        // hit band centred in a square is the same symmetry with two fewer
+        // numbers in it.
         assert!(
-            ((VOLUME_ROW_H / 2.0) - (PREVIEW_H + VOLUME_HIT / 2.0)).abs() < f32::EPSILON,
+            ((VOLUME_ROW_H - VOLUME_HIT) / 2.0 - (VOLUME_ROW_H / 2.0 - VOLUME_HIT / 2.0)).abs()
+                < f32::EPSILON,
             "the volume block is not symmetric about the fader's rail"
         );
+        // And the lane the level tip floats in is real: the bar's lead above
+        // the block, plus the fader's own slop above its rail.
+        const { assert!(PREVIEW_H <= BAR_LEAD + (VOLUME_HIT - RAIL) / 2.0) }
         // The level tip must hold `-18.1 dB` — four figures at caption size,
         // plus the proportional remainder `crate::font` measures — without
         // clipping.
         const { assert!(LEVEL_W > SIZE_CAPTION * 4.0 * DIGIT_EM) }
         // And the whole right-hand end has to fit beside the centre column
         // in the shipped window, or the zone would clip on launch.
-        const { assert!(VOLUME_BLOCK_W + GAP_SM + SIGNAL_W < 1280.0 - SEEK_ROW_W) }
+        const { assert!(VOLUME_BLOCK_W + GAP_SM + SIGNAL_W < 1280.0 - TRANSPORT_W) }
     }
 
     #[test]
@@ -3869,7 +4002,7 @@ mod tests {
         // The hit area is larger than the mark it carries…
         const { assert!(TRANSPORT_HIT > ICON_PX) }
         // …and the pair of them fits inside the column they centre in.
-        const { assert!(2.0 * TRANSPORT_HIT + GAP_SM < SEEK_ROW_W) }
+        const { assert!(2.0 * TRANSPORT_HIT + GAP_SM < TRANSPORT_W) }
         // …and it is *only* a target: the chrome went and the square stayed.
         // The floor is a property of the button's bounds, which no amount of
         // paint can shrink, so the two claims are independent and both are
@@ -4596,8 +4729,8 @@ mod tests {
             }
         }
         for status in slider_states {
-            painted.push(("seek", slider_colors(&seek(p, status))));
-            painted.push(("seek_inert", slider_colors(&seek_inert(p, status))));
+            painted.push(("needle", slider_colors(&needle(p, status))));
+            painted.push(("needle_inert", slider_colors(&needle_inert(p, status))));
             painted.push(("volume", slider_colors(&volume(p, status))));
             painted.push(("volume_muted", slider_colors(&volume_muted(p, status))));
             painted.push(("volume_inert", slider_colors(&volume_inert(p, status))));
@@ -4700,7 +4833,7 @@ mod tests {
     ///
     /// The four styles on the permitted list are the four in
     /// `docs/design/02-visual-language.md` §2.1.1 that this module owns: the
-    /// playing sleeve's halo, the playing dot, the seek groove, and the
+    /// playing sleeve's halo, the playing dot, the needle's fill, and the
     /// primary Play action. (The fifth permitted use — the elapsed timestamp
     /// warming while a seek is in flight — is a view-level colour rather than
     /// a style function, and is pinned by
@@ -4721,7 +4854,7 @@ mod tests {
     fn the_lamp_is_spent_only_on_playback_truth() {
         /// The styles §2.1.1 permits the accent in. Nothing may be added here
         /// without the specification changing first.
-        const PERMITTED: [&str; 4] = ["sleeve(playing)", "lamp_dot", "seek", "primary"];
+        const PERMITTED: [&str; 4] = ["sleeve(playing)", "lamp_dot", "needle", "primary"];
 
         for room in Room::ALL {
             let p = room.palette();
@@ -4909,7 +5042,7 @@ mod tests {
         );
         assert!(
             permitted_seen,
-            "no view names the accent at all — the seek bar's in-flight \
+            "no view names the accent at all — the elapsed stamp's in-flight \
              timestamp is supposed to, and this test just stopped meaning \
              anything"
         );
@@ -5066,7 +5199,7 @@ mod tests {
         // The now-playing bar. Its vertical padding is zero because the band is
         // `BAR_CONTENT_H` and the lane that centres the transport is inside it.
         assert!(
-            read("bottom_bar.rs").contains("theme::pad(theme::BAR_PAD_V, theme::HANG)"),
+            read("bottom_bar.rs").contains("theme::pad(0.0, theme::HANG)"),
             "the bottom bar no longer hangs from HANG"
         );
         // The Settings **place** — a place fills the window, so its content
@@ -5162,7 +5295,6 @@ mod tests {
             assert!(on_lattice(CONTINUATION_H));
             assert!(on_lattice(SETTING_NOTE_H));
             assert!(on_lattice(DETAIL_ROW_H));
-            assert!(on_lattice(SEEK_ROW_H));
             assert!(on_lattice(RAIL_HIT));
             assert!(on_lattice(VOLUME_HIT));
             assert!(on_lattice(VOLUME_ROW_H));
@@ -5172,8 +5304,10 @@ mod tests {
             assert!(on_lattice(RAIL_PITCH));
             assert!(on_lattice(BAR_LEAD));
             assert!(on_lattice(BAR_CONTENT_H));
-            assert!(on_lattice(BAR_BAND_H));
-            assert!(on_lattice(BAR_PAD_V));
+            assert!(on_lattice(NEEDLE_HIT));
+            assert!(on_lattice(ALBUM_GAP));
+            assert!(on_lattice(SEGMENT_MIN));
+            assert!(on_lattice(NEEDLE_TIP_W));
         }
         // Every control height.
         const {
@@ -5189,6 +5323,12 @@ mod tests {
         // line gap, never a slot — and it is named rather than silently on the
         // lattice, because a law with an unnamed exception is a habit.
         const { assert!(GAP_XXS == 2.0 && !on_lattice(GAP_XXS)) }
+        // …and the needle's track gap **is** that exception rather than a
+        // second one: the segments are one line, not a row of slots, so the gap
+        // between two of them is an intra-block gap by the same reading. The
+        // album gap is a slot-scale break and is on the lattice, which is why
+        // the critique's 6 became 8 (see [`ALBUM_GAP`]).
+        const { assert!(SEGMENT_GAP == GAP_XXS) }
     }
 
     /// **L3 — optical centring: the box centres the ink, not the line box.**
@@ -5255,22 +5395,34 @@ mod tests {
     fn the_bar_has_one_centre_line_and_every_mark_is_on_it() {
         // The band's mid-line is the transport's centre line.
         const { assert!(BAR_CONTENT_H / 2.0 == BAR_LEAD + TRANSPORT_HIT / 2.0) }
-        // What hangs below the transport is exactly what is reserved above it.
-        const { assert!(BAR_LEAD == GAP_SM + SEEK_ROW_H) }
+        // What is below the transport is exactly what is above it — a gap
+        // now, where it used to be a gap and a seek row.
+        const { assert!(BAR_LEAD == GAP_MD) }
         // The right zone's block is symmetric about its own rail, so centring
-        // the block centres the rail.
-        const { assert!(VOLUME_ROW_H / 2.0 == PREVIEW_H + VOLUME_HIT / 2.0) }
+        // the block centres the rail. The fader's hit band is centred in a
+        // block of one control height, which is the same claim with two fewer
+        // constants than the preview-lane-above-and-empty-lane-below it
+        // replaces.
+        const { assert!(VOLUME_ROW_H == TRANSPORT_HIT) }
+        const { assert!(VOLUME_HIT < VOLUME_ROW_H) }
         // The left zone's stack is symmetric about its middle lane, so centring
-        // the block centres the zone's own line.
+        // the block centres the zone's own line: 20 · 16 · 20, and the artist's
+        // line box is the block's exact centre.
         const { assert!(CONTINUATION_H == LINE_BODY) }
-        // Every zone fits the band; none of them can be what sets the line.
+        // Every zone fits the band; none of them can be what sets the line. The
+        // left zone now fits it **exactly** — three stacked line boxes and no
+        // gaps between them, because at 56 px there is no room for a gap and a
+        // line box already carries its own leading. `GAP_XXS` left this stack
+        // when the bar lost 48 px, which is one fewer user of the lattice's one
+        // exception.
         const { assert!(VOLUME_ROW_H < BAR_CONTENT_H) }
-        // The padding is symmetric, so it moves the band without moving the line.
-        const { assert!(BAR_BAND_H == BAR_CONTENT_H + 2.0 * BAR_PAD_V) }
-        const { assert!(LINE_BODY + GAP_XXS + LINE_META + GAP_XXS + CONTINUATION_H < BAR_CONTENT_H) }
+        const { assert!(LINE_BODY + LINE_META + CONTINUATION_H == BAR_CONTENT_H) }
+        // The bar is the band and its hairline; there is no padding left to be
+        // asymmetric, which is the cheapest possible way to keep the centring.
+        const { assert!(BAR_H == BAR_CONTENT_H + 1.0) }
         // The audit measured a **50 px** spread across seven mark-lines in a
         // 102 px band. The law's ceiling is 2 px; what the tokens prove is that
-        // the three primary marks are on one line *exactly*, and the render pass
+        // the marks are on one line *exactly*, and the render pass
         // (`composition/tools/census2.py`, "the marks") measures the rest.
     }
 

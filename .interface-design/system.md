@@ -809,9 +809,10 @@ render harness's gate.
 
 ### L7 — One control height
 
-> Every pointer target is `TRANSPORT_HIT` **32** tall. The only exception is
-> `STEPPER_HIT` **24**, and it is named. A control that is neither is a defect,
-> including a checkbox, a text well and the first-run input.
+> Every pointer target is `TRANSPORT_HIT` **32** tall. The only exceptions are
+> `STEPPER_HIT` **24** and `NEEDLE_HIT` **12**, and both are named. A control
+> that is none of the three is a defect, including a checkbox, a text well and
+> the first-run input.
 
 The product drew **five** heights — 40, 32, 30, 24, 13 — while publishing a
 floor of 32, and asserted `TRANSPORT_HIT >= 32` and `STEPPER_HIT <
@@ -819,3 +820,14 @@ TRANSPORT_HIT` and nothing about the other three. The groove's own hit band
 `RAIL_HIT` is 24, i.e. the named secondary square, so the one control in baz
 that is a rail rather than a box is still one of the two heights and not a
 third with a rail-shaped excuse.
+
+**`NEEDLE_HIT` 12 is the third, and it is the one exception this law grants a
+size it does not otherwise permit.** ADR-0017 §1.1's needle is 2 px flush on the
+window's bottom edge and its whole bargain is that it costs the collection 2 px
+rather than the 45 the seek row spent; reserving 24 or 32 of *layout* would undo
+that, and claiming 24 of *aim* would reach into the transport row's boxes and
+take presses meant for Next. So the needle reserves `NEEDLE_H` and claims its
+band upward, out of layout, bounded by the empty lane the bar keeps under its
+transport: `NEEDLE_HIT == GAP_MD` and `NEEDLE_HIT <= BAR_LEAD`, both asserted.
+The exception is a *size with a proof attached* rather than a rail-shaped
+excuse — the bound is what makes it safe, and the bound is the test.

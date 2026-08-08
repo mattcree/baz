@@ -623,13 +623,27 @@ mod tests {
             fits(&sans, level, theme::SIZE_CAPTION, theme::LEVEL_W, "LEVEL_W");
         }
 
-        // The seek preview tip, one size down from the stamps.
+        // **The needle's hover tip**, which carries two different kinds of
+        // string because a click on the needle means two different things: a
+        // timestamp inside the sounding entry, the entry's own name outside it.
+        // The timestamp has a bound and is asserted; a title does not — it is
+        // free text, and it elides, exactly as a genre name does in the index
+        // rail (ADR-0017 §1.7's amendment made the same call). What is asserted
+        // for the title is that the slot holds a *useful* one rather than a
+        // word and a half.
         fits(
             &sans,
             "0:00:00",
             theme::SIZE_CAPTION,
-            theme::PREVIEW_W,
-            "PREVIEW_W",
+            theme::NEEDLE_TIP_W,
+            "NEEDLE_TIP_W",
+        );
+        fits(
+            &sans,
+            "Everything You Do Is a Balloon",
+            theme::SIZE_CAPTION,
+            theme::NEEDLE_TIP_W,
+            "NEEDLE_TIP_W",
         );
 
         // A setting's value slot: `replaygain::format_centidb` at either end

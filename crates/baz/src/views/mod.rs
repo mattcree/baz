@@ -12,7 +12,8 @@
 //!   is in it.
 //! - [`settings`] — the Settings place: the standing decisions, today
 //!   ReplayGain.
-//! - [`bottom_bar`] — now-playing, transport, seek row.
+//! - [`bottom_bar`] — now-playing, transport, the two timestamps, and the
+//!   needle flush on the window's bottom edge.
 //!
 //! They are the four kinds ADR-0016 names, and which kind a surface is decides
 //! what it may cost. [`top_bar`] and [`shelf`] compose the Library **place**,
