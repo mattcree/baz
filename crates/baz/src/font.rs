@@ -463,8 +463,10 @@ mod tests {
         );
 
         // A setting's value slot: `replaygain::format_centidb` at either end
-        // of the pre-amp travel.
-        for value in ["-20.00 dB", "+20.00 dB"] {
+        // of the pre-amp travel, in the glyphs it actually emits — the minus is
+        // U+2212, which advances as wide as the `+` and so keeps the slot's
+        // left edge still as the value steps through zero.
+        for value in ["\u{2212}20.00 dB", "+20.00 dB"] {
             fits(
                 &sans,
                 value,
@@ -473,6 +475,14 @@ mod tests {
                 "SETTING_VALUE_W",
             );
         }
+        assert!(
+            (sans.width("\u{2212}20.00 dB", theme::SIZE_META)
+                - sans.width("+20.00 dB", theme::SIZE_META))
+            .abs()
+                < f32::EPSILON,
+            "the two ends of the pre-amp travel must measure the same, or the \
+             slot's left edge moves as the value crosses zero"
+        );
 
         // The track/queue number column: three figures, per its own docs.
         fits(
@@ -483,15 +493,20 @@ mod tests {
             "TRACK_NO_W",
         );
 
-        // The bar's queue-position readout, which reserves for a queue nobody
-        // bounded: `999 / 999` is the widest it can be asked to draw.
-        fits(
-            &sans,
-            "999 / 999",
-            theme::SIZE_META,
-            theme::QUEUE_POS_W,
-            "QUEUE_POS_W",
-        );
+        // The bar's queue-position readout, bounded at three figures a side:
+        // `199 / 240` is the spec's worst case and `999 / 999` is the widest
+        // the same shape can be, and with tabular figures they are the same
+        // width — which is the whole reason the bound can be stated in figures
+        // rather than in pixels.
+        for position in ["199 / 240", "999 / 999"] {
+            fits(
+                &sans,
+                position,
+                theme::SIZE_META,
+                theme::POSITION_W,
+                "POSITION_W",
+            );
+        }
 
         // The bar's Up next control: its label in the Medium face it is set
         // in, inside what the slot has left after the readout and the padding.
@@ -499,7 +514,7 @@ mod tests {
             &Face::parse(SANS_MEDIUM),
             "Up next",
             theme::SIZE_META,
-            theme::UP_NEXT_W - theme::QUEUE_POS_W - 3.0 * theme::GAP_SM,
+            theme::UP_NEXT_W - theme::POSITION_W - 3.0 * theme::GAP_SM,
             "UP_NEXT_W",
         );
 

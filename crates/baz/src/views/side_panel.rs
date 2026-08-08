@@ -72,7 +72,7 @@ const PANEL_PAD: f32 = theme::GAP_XL;
 /// The album side panel: large art, a title/artist/meta header, the
 /// edition selector when the album is owned in more than one format, the
 /// primary Play action, and the selected edition's numbered track list
-/// (durations in monospace, right-hugged). In a build without audio
+/// (durations right-hugged). In a build without audio
 /// output the button is hidden; with an unusable or closed engine it
 /// renders disabled.
 pub(crate) fn view<'a>(
@@ -298,7 +298,7 @@ fn edition_selector<'a>(
 }
 
 /// One track-list row: right-aligned number — or the lamp dot when this is the
-/// track sounding — title, monospace duration; and a press that plays the
+/// track sounding — title, right-aligned duration; and a press that plays the
 /// album from here.
 ///
 /// The dot goes **in** the number column rather than beside it, at

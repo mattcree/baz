@@ -13,7 +13,7 @@
 //!
 //! The rows are the rail's queue-panel rows, unchanged: the position (or the
 //! lamp dot) in a fixed [`theme::TRACK_NO_W`] column, the title over its
-//! artist, the duration in monospace, the played rows falling to the faint ink
+//! artist, the duration right-aligned, the played rows falling to the faint ink
 //! while the upcoming ones keep full paper. A listener who learned that list in
 //! the rail has learned this one.
 //!
@@ -198,7 +198,7 @@ fn empty_state() -> Element<'static, Message> {
 }
 
 /// One queue row: position (or the lamp dot when it is playing), title over
-/// its artist where there is one, monospace duration — and, now, two things a
+/// its artist where there is one, right-aligned duration — and, now, two things a
 /// listener can do to it.
 ///
 /// **Clicking the row plays from there.** ADR-0014's `JumpTo`, and this list is

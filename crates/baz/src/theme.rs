@@ -363,7 +363,12 @@ pub const PREVIEW_H: f32 = 15.0;
 /// Width of the hover-preview tip: enough for `h:mm:ss` at [`SIZE_CAPTION`]
 /// plus its padding, fixed so the tip can be centered on the pointer without
 /// measuring text.
-pub const PREVIEW_W: f32 = 58.0;
+///
+/// **48**, re-derived from the Sans's real advances: `0:00:00` is 39.42 px at
+/// caption size, and a [`GAP_XS`] of padding on each side is 47.42. The tip is
+/// the tightest slot in the bar and it is meant to be — it floats over the
+/// groove, and every pixel of it is a pixel of the track it is describing.
+pub const PREVIEW_W: f32 = 48.0;
 
 // ---------------------------------------------------------------------------
 // The volume control
@@ -379,7 +384,11 @@ pub const PREVIEW_W: f32 = 58.0;
 pub const VOLUME_W: f32 = 96.0;
 /// Width of the level tip that floats over the volume groove on hover:
 /// enough for `-18.1 dB` at [`SIZE_CAPTION`] plus its padding.
-pub const LEVEL_W: f32 = 62.0;
+///
+/// **48**, where the monospace needed 62: the widest thing this slot draws
+/// measures 43.34 px in the Sans, because only its four figures cost 0.6 em
+/// and `dB`, the point and the sign do not.
+pub const LEVEL_W: f32 = 48.0;
 /// Width of the detent mark on a groove's travel.
 pub const DETENT_W: f32 = 2.0;
 /// Height of the detent mark.
@@ -460,8 +469,13 @@ pub const SEEK_ROW_W: f32 = SEEK_W + 2.0 * (STAMP_W + GAP_SM);
 /// always there and usually empty.
 ///
 /// Wide enough for the longest chain a consumer device produces —
-/// `192 → 176.4 kHz` — with room to spare.
-pub const SIGNAL_W: f32 = 120.0;
+/// `192 → 176.4 kHz`, which measures 92.38 px in the Sans against the 108 the
+/// monospace charged for the same fifteen glyphs — with room to spare.
+///
+/// **96**, down from 120. The 24 px this gives back is the largest single
+/// saving of the face change, and it goes to the bar's left zone, which is the
+/// zone that clips.
+pub const SIGNAL_W: f32 = 96.0;
 
 /// Width of a vertical scrollbar, and of the lane a scrolling list keeps
 /// clear for it (logical px).
@@ -498,7 +512,18 @@ pub const STEPPER_HIT: f32 = 24.0;
 /// Fixed for the reason [`STAMP_W`] is: the digits change as the control is
 /// driven, and a row that re-flowed under a repeated press would make the
 /// button move away from the pointer holding it.
-pub const SETTING_VALUE_W: f32 = 68.0;
+///
+/// **60**, from a measured 56.89 px. This is also the one slot in the product
+/// where a proportional face could still jiggle, and the jiggle is fixed at the
+/// source rather than padded around: hyphen-minus advances 0.399 em where `+`
+/// and U+2212 both advance 0.600, so `-20.00 dB` and `+20.00 dB` used to differ
+/// by 2.4 px and shift this right-aligned slot's *left* edge as the pre-amp
+/// stepped through zero. [`crate::replaygain::format_centidb`] emits U+2212, so
+/// they now measure 56.89 px each, exactly — and the formatter agrees with the
+/// `−` this very stepper already draws. The residual is `0.00 dB`, 7.2 px
+/// narrower because it carries no sign at all, at one point in the travel,
+/// changing only when a human presses a button.
+pub const SETTING_VALUE_W: f32 = 60.0;
 /// Height reserved for a setting's explanatory note: **two** lines at
 /// [`SIZE_META`].
 ///
@@ -1239,12 +1264,22 @@ pub const POPOVER_MAX_H: f32 = 0.6;
 ///
 /// A **reserved slot**, exactly like [`SIGNAL_W`] and [`STAMP_W`]: the readout
 /// is absent when nothing is playing and present when something is, and the bar
-/// must not move between those two states. Wide enough for `999 / 999`,
-/// because a queue's length is not something the front end gets to bound.
-pub const QUEUE_POS_W: f32 = 72.0;
+/// must not move between those two states.
+///
+/// **56, where it was 72 and was called `QUEUE_POS_W`.** The old number was 9
+/// glyphs at the monospace's flat 0.6 em; the same string measures 53.46 px in
+/// Plex Sans, because only the figures are 0.6 em and the space and the slash
+/// are not. The design system names this slot `POSITION_W` and bounds it at
+/// three figures a side (`199 / 240`), which is the same width as `999 / 999`
+/// — the digits are tabular, so the widest three-figure queue and the widest
+/// three-figure position measure identically. A four-figure queue
+/// (`9999 / 9999`, 67.86 px) would clip, and that is a deliberate bound: no
+/// album has 1000 tracks, and a whole-library shuffle queue is a different
+/// surface's problem.
+pub const POSITION_W: f32 = 56.0;
 
 /// Width of the bar's **Up next** control (logical px) — the label, the
-/// [`QUEUE_POS_W`] readout, and the padding around them.
+/// [`POSITION_W`] readout, and the padding around them.
 ///
 /// The control is **labelled and always visible**, and that is a requirement
 /// rather than a preference: `docs/design/03-interface-prior-art.md` §5.3(1)
@@ -1426,11 +1461,11 @@ mod tests {
         // is the same rule again: `999 / 999` is six figures, the slot holds
         // them, and it is that wide whether or not anything is playing — so
         // `3 / 12` appearing as a track starts moves no title.
-        const { assert!(QUEUE_POS_W > SIZE_META * 6.0 * DIGIT_EM) }
+        const { assert!(POSITION_W > SIZE_META * 6.0 * DIGIT_EM) }
         // …and the control that carries it holds the readout, its label and the
         // padding around both. The label itself is measured in the face that
         // draws it by `font.rs`; this is the arithmetic that leaves room.
-        const { assert!(UP_NEXT_W > QUEUE_POS_W + 3.0 * GAP_SM) }
+        const { assert!(UP_NEXT_W > POSITION_W + 3.0 * GAP_SM) }
     }
 
     /// The popover is an overlay, and an overlay's whole promise is that it

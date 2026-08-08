@@ -15,7 +15,7 @@
 //! written — on evidence the spec did not have. See [`up_next_button`].
 //!
 //! Every addition is a **reserved slot**, which is the promise this module is
-//! built on: [`theme::UP_NEXT_W`] and [`theme::QUEUE_POS_W`] are that wide
+//! built on: [`theme::UP_NEXT_W`] and [`theme::POSITION_W`] are that wide
 //! whether or not anything is playing, and [`theme::now_playing`]'s border is
 //! 1 px in all four states so that finding the control with the pointer does
 //! not move the title under it. The bar gained a route to a new surface and did
@@ -134,7 +134,7 @@ fn now_playing_block(player: &PlayerState, open: bool) -> Element<'_, Message> {
 ///   what they just did. It is offered with nothing queued too, because the
 ///   popover has an honest empty state and a control that came and went with
 ///   the music would be a moving target in the one row that does not move.
-/// - **The readout is a reserved slot.** [`theme::QUEUE_POS_W`] wide whether or
+/// - **The readout is a reserved slot.** [`theme::POSITION_W`] wide whether or
 ///   not there is a position to report, so a queue starting moves no title;
 ///   and `None` rather than `0 / 12`, because a queue that has not started has
 ///   no position in it.
@@ -146,7 +146,7 @@ fn now_playing_block(player: &PlayerState, open: bool) -> Element<'_, Message> {
 /// It is the same message <kbd>Q</kbd> sends.
 fn up_next_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
     let readout: Element<'_, Message> = match player.queue_position_note() {
-        None => Space::with_width(Length::Fixed(theme::QUEUE_POS_W)).into(),
+        None => Space::with_width(Length::Fixed(theme::POSITION_W)).into(),
         Some(note) => container(
             text(note)
                 .size(theme::SIZE_META)
@@ -154,7 +154,7 @@ fn up_next_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
                 .color(theme::PAPER_FAINT)
                 .wrapping(text::Wrapping::None),
         )
-        .width(Length::Fixed(theme::QUEUE_POS_W))
+        .width(Length::Fixed(theme::POSITION_W))
         .align_x(alignment::Horizontal::Right)
         .into(),
     };
@@ -220,7 +220,7 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
     stack.into()
 }
 
-/// The signal path, in the quietest terms the room has: a short monospace
+/// The signal path, in the quietest terms the room has: a short
 /// `48 → 44.1 kHz` or `bit-perfect` in the same faint ink as the track
 /// durations and the counts, with one plain sentence on hover.
 ///
@@ -371,8 +371,10 @@ fn glyph_button(
 
 /// The seek bar: elapsed timestamp, groove, total timestamp — a row that
 /// reads left to right the way the track plays, with a lane above the groove
-/// where the hover preview floats. Timestamps are monospace so the digits do
-/// not shuffle the groove sideways as they tick.
+/// where the hover preview floats. The timestamps' digits are tabular — a
+/// property of the bundled Sans rather than of a second face — and each sits in
+/// a fixed [`theme::STAMP_W`] slot, so they cannot shuffle the groove sideways
+/// as they tick.
 ///
 /// The rail is [`groove::Groove`] rather than iced's `slider`: it reports
 /// pointer *geometry*, which is what the click-vs-scrub threshold, the hover
@@ -624,7 +626,7 @@ mod tests {
     /// must not regress. The left zone gained a labelled control carrying a
     /// readout that comes and goes with the music. Both are reservations rather
     /// than additions — the control is [`theme::UP_NEXT_W`] and the readout
-    /// inside it [`theme::QUEUE_POS_W`], whether either says anything or not,
+    /// inside it [`theme::POSITION_W`], whether either says anything or not,
     /// and the control's border is present in every state — so the bar carries
     /// a route to a whole new surface and still cannot move.
     #[test]
