@@ -14,7 +14,7 @@
 //!
 //! It was a panel in the right-hand rail, sharing 340 px with the album
 //! inspector and the queue, and the argument for that is answered at length in
-//! [`crate::place`] and ADR-0015. In short: a preference is not a glance, the
+//! [`crate::place`] and ADR-0016. In short: a preference is not a glance, the
 //! rail was simultaneously too narrow and 60% empty for the settings that
 //! exist, and none of the settings that are *coming* is a section in a 292 px
 //! column. Leaving the shelf is the right cost — you are not browsing while you

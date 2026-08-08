@@ -8,7 +8,7 @@
 //! through `baz-core`'s engine (see `playback.rs` and `player.rs`; without
 //! the feature the app builds everywhere with playback UI hidden).
 //!
-//! The interface's shape is ADR-0015's: **one place at a time, one inspector
+//! The interface's shape is ADR-0016's: **one place at a time, one inspector
 //! attached to that place, one popover attached to the transport, and the
 //! now-playing bar always** — `place`, `selection`, `overlay` and
 //! `views::bottom_bar` respectively.

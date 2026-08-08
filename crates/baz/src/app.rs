@@ -461,7 +461,7 @@ impl App {
             Message::EscapePressed => self.escape(),
             // Navigation, not a panel toggle: the same key, the top bar's
             // control and the Settings place's own Back all send this, and it
-            // moves the window between the two places (ADR-0015).
+            // moves the window between the two places (ADR-0016).
             Message::ToggleSettings => {
                 if matches!(self.screen, Screen::Shelf(_)) {
                     self.place = self.place.toggled();
@@ -598,7 +598,7 @@ impl App {
     /// The whole of the rule the redesign bought, and the reason it is short:
     /// the window holds one place, one inspector attached to it, and one
     /// popover attached to the bar, so at any moment exactly one of them is the
-    /// top layer and the key has nothing to arbitrate (ADR-0015 §2.2 rule 5).
+    /// top layer and the key has nothing to arbitrate (ADR-0016 §2.2 rule 5).
     /// It used to mean "clear the search, else close whichever of three
     /// unrelated panels the rail happened to be showing".
     ///

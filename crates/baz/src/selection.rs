@@ -11,7 +11,7 @@
 //! unrelated subjects: the album you had pointed at, the play queue, and the
 //! application's settings. The audit's central finding was that they shared
 //! nothing except a width, and that the rail was therefore a **slot rather than
-//! a place** (ADR-0015; `docs/design/01-ux-audit-and-ia.md` §2.1). The
+//! a place** (ADR-0016; `docs/design/01-ux-audit-and-ia.md` §2.1). The
 //! machinery here was not the problem — it was careful, pure and exhaustively
 //! tested — it was correctly implementing a model with no answer, and the
 //! give-away was in this file: un-hiding an *empty* rail used to open the

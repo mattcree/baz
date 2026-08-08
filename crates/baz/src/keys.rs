@@ -95,7 +95,7 @@
 //!
 //! Three keys move between what is on screen, and each one now names exactly
 //! one layer — which is the change the information-architecture move bought
-//! (ADR-0015, `docs/design/01-ux-audit-and-ia.md` §4.8).
+//! (ADR-0016, `docs/design/01-ux-audit-and-ia.md` §4.8).
 //!
 //! `Q` shows and hides **Up next**. Same key, same meaning, better place: it
 //! used to raise a queue *panel* in the right-hand rail, costing the shelf two

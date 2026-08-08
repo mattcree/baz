@@ -13,7 +13,7 @@
 //!   ReplayGain.
 //! - [`bottom_bar`] — now-playing, transport, seek row.
 //!
-//! They are the four kinds ADR-0015 names, and which kind a surface is decides
+//! They are the four kinds ADR-0016 names, and which kind a surface is decides
 //! what it may cost. [`top_bar`] and [`shelf`] compose the Library **place**,
 //! and [`settings`] is the other one — places fill the window and replace each
 //! other. [`side_panel`] is the Library's **inspector**, the sole tenant of the
