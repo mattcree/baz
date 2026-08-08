@@ -11,8 +11,9 @@
 //! so far: the [`library`] scanner, the [`index`] it feeds, the gapless
 //! [`playback`] machinery, the [`volume`] control, [`replaygain`], the
 //! [`loudness`] meter and the [`analysis`] pass that computes ReplayGain for
-//! files that carry none, the append-only play [`history`] ledger, and the
-//! [`engine`] service that runs it all behind the [`protocol`].
+//! files that carry none, the append-only play [`history`] ledger, the
+//! [`playlist`] store that reads and writes the user's own `.m3u8` files,
+//! and the [`engine`] service that runs it all behind the [`protocol`].
 //!
 //! There are **two** services, deliberately: [`engine`] plays and is given
 //! paths, [`analysis`] measures and is given a library. Each takes its own
@@ -30,6 +31,7 @@ pub mod index;
 pub mod library;
 pub mod loudness;
 pub mod playback;
+pub mod playlist;
 pub mod protocol;
 pub mod replaygain;
 pub mod volume;

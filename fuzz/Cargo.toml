@@ -52,3 +52,10 @@ path = "fuzz_targets/history_line.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "playlist_m3u"
+path = "fuzz_targets/playlist_m3u.rs"
+test = false
+doc = false
+bench = false
