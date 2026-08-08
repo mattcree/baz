@@ -854,6 +854,31 @@ struct V1Row {
     duration_ns: i64,
 }
 
+/// Encode a path the way the *platform* stores it in the index, so a
+/// hand-built fixture is a genuine database for the machine running the test.
+///
+/// baz stores paths as platform-native bytes — raw `OsStr` bytes on Unix,
+/// UTF-16LE code units on Windows — because that is the only lossless
+/// encoding on each (see `index`'s module docs). A fixture that wrote UTF-8
+/// everywhere would be a *Unix* database, and Windows would rightly refuse to
+/// decode it: exactly the false failure this helper exists to prevent. It
+/// deliberately mirrors the production encoder rather than calling it, so the
+/// fixture stays independent of the code under test.
+#[cfg(unix)]
+fn stored_path_bytes(path: &str) -> Vec<u8> {
+    path.as_bytes().to_vec()
+}
+
+/// See the Unix twin: the same contract, in the encoding Windows stores.
+#[cfg(windows)]
+fn stored_path_bytes(path: &str) -> Vec<u8> {
+    use std::os::windows::ffi::OsStrExt;
+    std::ffi::OsStr::new(path)
+        .encode_wide()
+        .flat_map(u16::to_le_bytes)
+        .collect()
+}
+
 /// Build a genuine v1 database with the v1 schema and v1 statements only —
 /// no baz code involved, so this is what a real pre-editions `library.db`
 /// looks like on the owner's disk.
@@ -928,7 +953,7 @@ fn write_v1_database(db: &std::path::Path) {
             "INSERT INTO tracks (path, artist, album, title, track, disc, year, duration_ns)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![
-                row.path.as_bytes(),
+                stored_path_bytes(row.path),
                 row.artist,
                 row.album,
                 row.title,
@@ -1064,7 +1089,7 @@ fn write_v2_database(db: &std::path::Path) {
                   format, bit_depth, sample_rate, bitrate)
              VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?11)",
             rusqlite::params![
-                row.path.as_bytes(),
+                stored_path_bytes(row.path),
                 row.artist,
                 row.album,
                 row.title,
@@ -1404,7 +1429,7 @@ fn write_v3_database(db: &std::path::Path) {
                   compilation)
              VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             rusqlite::params![
-                row.path.as_bytes(),
+                stored_path_bytes(row.path),
                 row.artist,
                 row.album,
                 row.title,
