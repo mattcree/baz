@@ -5021,7 +5021,9 @@ mod tests {
             if relative == "theme.rs" || relative == "font.rs" {
                 continue;
             }
-            let source = std::fs::read_to_string(&path).expect("a source file baz ships");
+            let source = std::fs::read_to_string(&path)
+                .expect("a source file baz ships")
+                .replace("\r\n", "\n");
             if !source.contains(needle) {
                 continue;
             }
@@ -5071,7 +5073,9 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
         let mut offenders: Vec<String> = Vec::new();
         for path in rust_sources(&root) {
-            let source = std::fs::read_to_string(&path).expect("a source file baz ships");
+            let source = std::fs::read_to_string(&path)
+                .expect("a source file baz ships")
+                .replace("\r\n", "\n");
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             for (at, _) in source.match_indices("theme::SIZE_") {
                 let window = &source[at..source.len().min(at + 80)];
@@ -5117,7 +5121,9 @@ mod tests {
         let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut offenders: Vec<String> = Vec::new();
         for path in rust_sources(&manifest.join("src")) {
-            let source = std::fs::read_to_string(&path).expect("a source file baz ships");
+            let source = std::fs::read_to_string(&path)
+                .expect("a source file baz ships")
+                .replace("\r\n", "\n");
             if source.contains(token) || source.contains(asset) {
                 offenders.push(path.to_string_lossy().into_owned());
             }
@@ -5185,7 +5191,9 @@ mod tests {
     fn one_gutter_touches_every_window_edge() {
         let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
         let read = |name: &str| {
-            std::fs::read_to_string(views.join(name)).expect("a view module baz ships")
+            std::fs::read_to_string(views.join(name))
+                .expect("a view module baz ships")
+                .replace("\r\n", "\n")
         };
         // The top strip, in both places — they are one frame and must hang from
         // one line, or navigating between them would slide the content area.
@@ -5352,7 +5360,9 @@ mod tests {
         let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
         let mut offenders: Vec<String> = Vec::new();
         for path in rust_sources(&views) {
-            let source = std::fs::read_to_string(&path).expect("a view module baz ships");
+            let source = std::fs::read_to_string(&path)
+                .expect("a view module baz ships")
+                .replace("\r\n", "\n");
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             for (at, _) in source.match_indices(".height(Length::Fixed(theme::TRANSPORT_HIT))") {
                 // The alignment may be stated on the content (composed *above*
@@ -5447,7 +5457,9 @@ mod tests {
     fn every_surface_declares_the_edges_it_permits() {
         let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
         let read = |name: &str| {
-            std::fs::read_to_string(views.join(name)).expect("a view module baz ships")
+            std::fs::read_to_string(views.join(name))
+                .expect("a view module baz ships")
+                .replace("\r\n", "\n")
         };
         // The two lists are the same twelve rows in two surfaces, and both hang
         // from their surface's own content lane.
@@ -5544,7 +5556,8 @@ mod tests {
         // square rather than the 13 px box it had.
         let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
         let settings = std::fs::read_to_string(views.join("settings.rs"))
-            .expect("the Settings place baz ships");
+            .expect("the Settings place baz ships")
+            .replace("\r\n", "\n");
         assert!(
             settings.contains(".size(theme::STEPPER_HIT)"),
             "the checkbox has left the two published control sizes"
@@ -5559,7 +5572,9 @@ mod tests {
         // in the product states its box.
         let mut offenders: Vec<String> = Vec::new();
         for path in rust_sources(&views) {
-            let source = std::fs::read_to_string(&path).expect("a view module baz ships");
+            let source = std::fs::read_to_string(&path)
+                .expect("a view module baz ships")
+                .replace("\r\n", "\n");
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             for (at, _) in source.match_indices("_HIT))") {
                 let head = at.saturating_sub(48);

@@ -1,0 +1,10 @@
+# Rust sources are read *as text by the test suite* — several tests pin a
+# property by scanning this crate's own source (the placement law, the accent
+# discipline, "the pull sends no command"). A CRLF checkout breaks their line
+# matching on Windows, so line endings are not a local preference here.
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.sh text eol=lf
+*.py text eol=lf

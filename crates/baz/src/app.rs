@@ -3859,10 +3859,16 @@ mod tests {
     /// that started nothing would be the other kind of lie.
     #[test]
     fn the_pull_offers_a_record_and_sends_no_command_at_all() {
+        // Read the source with line endings normalised. `.gitattributes`
+        // pins these files to LF, but a working tree can still be checked out
+        // with CRLF, and every scan below matches on "\n    }\n" — which a
+        // CRLF file simply never contains. The property is about the code, not
+        // about how the file was written to disk.
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
         )
-        .expect("this module's own source");
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
         let body = |name: &str| {
             let start = source
                 .find(&format!("fn {name}(&mut self"))
@@ -3911,10 +3917,16 @@ mod tests {
     /// literal a reviewer would have to move to break it.
     #[test]
     fn escape_returns_the_pull_first_and_the_pools_marks_last() {
+        // Read the source with line endings normalised. `.gitattributes`
+        // pins these files to LF, but a working tree can still be checked out
+        // with CRLF, and every scan below matches on "\n    }\n" — which a
+        // CRLF file simply never contains. The property is about the code, not
+        // about how the file was written to disk.
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
         )
-        .expect("this module's own source");
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
         let arm = source
             .split_once("fn peel(&mut self)")
             .expect("the shelf's Escape peel")
