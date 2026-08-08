@@ -168,6 +168,13 @@ place change is a hard cut**, and that is a decision rather than an omission:
 the surfaces either side of a navigation share no element to move, so any
 transition between them would be decoration, which this entry forbids.
 
+**One thing moves without being a transition at all**: the index rail's fisheye
+(ADR-0020's amendment). It is a pure function of the pointer's position — no
+clock, no tween, no subscription — so it costs exactly nothing when nothing is
+moving, which is this entry's actual rule. Its snap back to rest when the
+pointer leaves is a hard cut, argued in the amendment; a sixth tween is not the
+door it came in through.
+
 **Still refused, and these are refusals rather than omissions**: shelf-grid
 stagger or pop-in; any fade as a thumbnail decodes (a thumbnail replacing its
 placeholder stays an instant swap); album-art crossfades; **any animation of the

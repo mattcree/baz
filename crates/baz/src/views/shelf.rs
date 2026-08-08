@@ -13,8 +13,9 @@ use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf, scroll_id};
 use crate::player::PlayerState;
-use crate::rail::{RailEntry, RailSlot};
+use crate::rail::RailSlot;
 use crate::shelf::{Grid, Run, Shelves};
+use crate::spine::{Slot, Spine};
 use crate::views::gradient_block;
 use crate::{rail, theme, vm};
 
@@ -335,12 +336,13 @@ fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
 /// # Where its edges are
 ///
 /// Entries are right-aligned to the lane, so the rail's right edge is
-/// [`theme::GAP_LG`] from the wall's — the top bar's own gutter, which is the
-/// alignment edge the `Settings` word above already established. An entry
-/// wider than [`theme::INDEX_W`] grows *leftwards* to that cap and then clips,
-/// which is why the lane keeps [`theme::INDEX_CLEARANCE`] between itself and
-/// the last column of covers. The full value is never lost: it is set in the
-/// shelf header one `HANG` to the left, at the same moment, in the same voice.
+/// [`theme::HANG`] from the window's — the one window gutter (law L1), which
+/// is the alignment edge the `Settings` word above already established. An
+/// entry wider than [`theme::INDEX_W`] grows *leftwards* to that cap and then
+/// clips, which is why the lane keeps [`theme::INDEX_CLEARANCE`] between
+/// itself and the last column of covers. The full value is never lost: it is
+/// set in the shelf header one `HANG` to the left, at the same moment, in the
+/// same voice.
 ///
 /// # It is the wall's scroll affordance, and now it is the only one
 ///
@@ -350,8 +352,14 @@ fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
 /// the place it is taking you to. Two vertical strips against the same edge,
 /// one of them saying `ARTIST → S` and the other saying nothing, is one strip
 /// too many.
+///
+/// # It magnifies under the pointer
+///
+/// The drawing, the fisheye and the hit lane are [`Spine`]'s — a hand-built
+/// widget, because a letter's size is layout and no style function can touch
+/// layout. This function still owns everything the rail *says*: what the
+/// entries are, which one is current, and what fits.
 fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
-    let room = theme::active();
     let runs = shelves.runs();
     let headers: Vec<vm::GroupHeaderVm> = runs
         .iter()
@@ -371,80 +379,29 @@ fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
     )]
     let capacity = (shelf.grid_size.height.max(0.0) / theme::RAIL_PITCH).floor() as usize;
 
-    // `Fill`, so that aligning the entries right aligns them to the *lane*
-    // rather than to the widest of them: a column of single letters would
-    // otherwise sit wherever the longest entry happened to put it.
-    let mut lane = column![]
-        .width(Length::Fill)
-        .spacing(theme::GAP_XS)
-        .align_x(alignment::Horizontal::Right);
-    for slot in rail::elide(&entries, capacity, focus) {
-        lane = lane.push(match slot {
-            RailSlot::Gap => rail_text(rail::GAP_MARK.to_owned(), room.paper_muted, false),
-            RailSlot::Entry(index) => match entries.get(index) {
-                Some(entry) => rail_entry(entry, entry.shelf == here),
-                None => rail_text(String::new(), room.paper_muted, false),
+    let slots: Vec<Slot> = rail::elide(&entries, capacity, focus)
+        .into_iter()
+        .map(|slot| match slot {
+            RailSlot::Gap => Slot {
+                label: rail::GAP_MARK.to_owned(),
+                shelf: None,
+                current: false,
             },
-        });
-    }
-    container(lane)
-        .width(Length::Fixed(theme::INDEX_LANE_W))
-        .height(Length::Fill)
-        .padding(iced::Padding {
-            top: 0.0,
-            // The one window gutter (law L1): the rail's right edge is the same
-            // x as `Settings` above it and as the last column of covers beside
-            // it. It was `GAP_LG`, the old chrome gutter.
-            right: theme::HANG,
-            bottom: 0.0,
-            left: theme::INDEX_CLEARANCE,
+            RailSlot::Entry(index) => entries.get(index).map_or_else(
+                || Slot {
+                    label: String::new(),
+                    shelf: None,
+                    current: false,
+                },
+                |entry| Slot {
+                    label: entry.label.clone(),
+                    shelf: entry.shelf,
+                    current: entry.present() && entry.shelf == here,
+                },
+            ),
         })
-        .align_y(alignment::Vertical::Center)
-        .into()
-}
-
-/// One value in the rail: a jump when the collection has it, a statement of a
-/// gap when it does not.
-fn rail_entry(entry: &RailEntry, current: bool) -> Element<'static, Message> {
-    let room = theme::active();
-    if !entry.present() {
-        return rail_text(entry.label.clone(), room.paper_muted, false);
-    }
-    let Some(target) = entry.shelf else {
-        return rail_text(entry.label.clone(), room.paper_muted, false);
-    };
-    let ink = if current {
-        room.paper
-    } else {
-        room.paper_faint
-    };
-    button(rail_text(entry.label.clone(), ink, current))
-        .padding(0)
-        .style(move |_theme, status| theme::group_key(room, room.wall, status, current))
-        .on_press(Message::RailJumped(target))
-        .into()
-}
-
-/// One line of rail type: shrink-to-fit up to [`theme::INDEX_W`], clipped
-/// there, right-aligned by the lane that holds it.
-///
-/// Shrink rather than a fixed box, so a single letter sits flush against the
-/// rail's right edge instead of floating at the left of a 36 px lane, while a
-/// long value still fills the lane and clips at its own right edge — the head
-/// of the word survives, which is the half you navigate by.
-fn rail_text(label: String, ink: iced::Color, current: bool) -> Element<'static, Message> {
-    container(
-        text(label)
-            .size(theme::SIZE_HEADING)
-            .line_height(theme::LEADING_HEADING)
-            .font(if current { theme::MEDIUM } else { theme::SANS })
-            .color(ink)
-            .wrapping(text::Wrapping::None),
-    )
-    .max_width(theme::INDEX_W)
-    .height(Length::Fixed(theme::RAIL_LINE_H))
-    .clip(true)
-    .into()
+        .collect();
+    Spine::new(slots, theme::active(), Message::RailJumped).into()
 }
 
 /// The shelf with nothing to show: a zero-result search, the first moments of

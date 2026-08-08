@@ -1018,7 +1018,63 @@ pub const RAIL_LINE_H: f32 = LINE_HEADING;
 /// to 12 and §7.2's *the smallest type is the type that needs the air* has to be
 /// spent somewhere: it is now spent on the gap rather than on the leading, which
 /// keeps the pitch on the 4 px lattice where a 14.5 px line box never could be.
+///
+/// The view drew a 16 px pitch for a while — it stacked the entries with
+/// [`GAP_XS`] while this token, its doc and the capacity arithmetic all said
+/// 20 — and the divergence was caught on the pixels
+/// (docs/design/impl/index-magnification/, the `before` frames measure 16
+/// exactly). [`crate::spine`] lays the strip out from this number now, so the
+/// slot the capacity budgets is the slot that is drawn.
 pub const RAIL_PITCH: f32 = RAIL_LINE_H + GAP_SM;
+
+/// How large the fisheye grows the rail entry under the pointer, as a factor
+/// of its rest size (ADR-0020's amendment: pointer-derived deformation).
+///
+/// **1.9, and a bound chose it rather than taste**: at 1.9 the swollen entry's
+/// type stands at `MAGNIFY_MAX × SIZE_HEADING` = 19 px — still inside one
+/// [`RAIL_PITCH`], so the largest letter the fisheye ever makes can overdraw
+/// its neighbours' *air* but never their ink, and the strip never has to move
+/// a slot to make room (nothing in the lane displaces; that is the whole
+/// deformation contract). 2.0 — the dock's own ceiling — is the first value to
+/// break that bound. Judged against real renders at 1280 and 1920
+/// (docs/design/impl/index-magnification/).
+pub const MAGNIFY_MAX: f32 = 1.9;
+
+/// How far the fisheye's swell reaches: the rest distance (logical px, along
+/// the strip) at which an entry stands at rest again — **60**, three slots
+/// each side of the pointer.
+///
+/// The dock's feel is a generous peak with a *local* skirt: at three slots the
+/// letter under the pointer has two visibly-swollen neighbours each side
+/// (≈1.7× and ≈1.2×), and the fourth letter out has not moved — the
+/// deformation reads as a lens passing over the strip rather than the strip
+/// breathing. At two and a half slots the second neighbour barely moved
+/// (≈1.09×) and the lens read as a single popped letter; wider than three and
+/// half the alphabet stirs. Judged on the captures beside [`MAGNIFY_MAX`]'s.
+pub const MAGNIFY_REACH: f32 = 3.0 * RAIL_PITCH;
+
+/// The fisheye's falloff: how large a rail entry stands, as a factor of its
+/// rest size, given how far its rest centre is from the pointer.
+///
+/// A raised cosine — [`MAGNIFY_MAX`] at zero, easing monotonically to exactly
+/// 1 at [`MAGNIFY_REACH`], 1 beyond. Smooth at both ends, so no letter pops as
+/// the pointer travels and there is no seam where the swell meets the rest of
+/// the strip; symmetric, because a lens has no upstream side.
+///
+/// Pure, and **a function of the pointer rather than of time** (ADR-0020
+/// §Amendment): given the same distance it returns the same scale forever.
+/// Distances are measured to the slot's *rest* centre — the strip's slots
+/// never move, so the mapping from pointer to deformation has no feedback
+/// through the deformed geometry and a resting pointer draws a stable frame.
+#[must_use]
+pub fn magnify(distance: f32) -> f32 {
+    let distance = distance.abs();
+    if distance >= MAGNIFY_REACH {
+        return 1.0;
+    }
+    let wave = (std::f32::consts::PI * distance / MAGNIFY_REACH).cos();
+    (MAGNIFY_MAX - 1.0).mul_add(0.5 * (wave + 1.0), 1.0)
+}
 
 /// The letter-spacing baz applies to a heading, as the string it is spelled
 /// with: U+2009 THIN SPACE, one fifth of an em.
@@ -3783,6 +3839,46 @@ mod tests {
         const { assert!(27.0 * RAIL_PITCH < 640.0) }
     }
 
+    /// **The fisheye is a lens, measured**: largest under the pointer, falling
+    /// off smoothly and symmetrically, at rest beyond its reach — and its
+    /// largest letter still fits inside one slot, so the strip never has to
+    /// move anything to make room (ADR-0020's amendment).
+    #[test]
+    fn the_fisheye_peaks_under_the_pointer_and_rests_beyond_its_reach() {
+        // The peak is the peak, and only at zero distance.
+        assert!((magnify(0.0) - MAGNIFY_MAX).abs() < 1e-6);
+        // A lens has no upstream side.
+        for distance in [0.5, 7.0, 19.5, 33.0, MAGNIFY_REACH - 0.5] {
+            assert!((magnify(distance) - magnify(-distance)).abs() < 1e-6);
+        }
+        // Monotone all the way out: no letter is ever larger than one nearer
+        // the pointer, which is what makes the swell read as one lens rather
+        // than a ripple.
+        let mut previous = magnify(0.0);
+        let mut distance = 0.0;
+        while distance <= MAGNIFY_REACH + 2.0 {
+            let scale = magnify(distance);
+            assert!(
+                scale <= previous + 1e-6,
+                "the falloff climbs at {distance}: {scale} after {previous}"
+            );
+            assert!((1.0..=MAGNIFY_MAX).contains(&scale));
+            previous = scale;
+            distance += 0.25;
+        }
+        // Rest at the reach exactly and everywhere past it — no seam where the
+        // swell meets the rest of the strip, and no letter that never quite
+        // settles.
+        assert!((magnify(MAGNIFY_REACH) - 1.0).abs() < 1e-6);
+        assert!((magnify(MAGNIFY_REACH - 0.25) - 1.0).abs() < 1e-4);
+        assert!((magnify(4096.0) - 1.0).abs() < f32::EPSILON);
+        // The bound that chose MAGNIFY_MAX: the swollen type stays inside one
+        // pitch, so magnification overdraws air and never ink.
+        const { assert!(MAGNIFY_MAX * SIZE_HEADING < RAIL_PITCH) }
+        // The reach is slots, not an unrelated number: three each side.
+        const { assert!(MAGNIFY_REACH == 3.0 * RAIL_PITCH) }
+    }
+
     /// The tracking is inserted **between** characters and nowhere else.
     ///
     /// Total on every input: the empty string, one character, and a string
@@ -5163,9 +5259,16 @@ mod tests {
             read("settings.rs").contains("const PLACE_PAD: f32 = theme::HANG;"),
             "the Settings place no longer hangs from HANG"
         );
-        // And the index rail, which is the wall's own right-hand edge.
+        // And the index rail, which is the wall's own right-hand edge. Its
+        // gutter lives in the rail's own widget now (`crate::spine` draws the
+        // lane; the view only says what the lane holds), and the law is the
+        // same one: the ink's right edge is `W − HANG`.
+        let spine = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/spine.rs");
+        let spine = std::fs::read_to_string(spine)
+            .expect("the index rail's widget")
+            .replace("\r\n", "\n");
         assert!(
-            read("shelf.rs").contains("right: theme::HANG,"),
+            spine.contains("bounds.width - theme::HANG"),
             "the index rail no longer hangs from HANG"
         );
         // **The rail is the only thing against that edge** (ADR-0022): the wall
