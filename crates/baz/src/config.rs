@@ -1,77 +1,213 @@
-//! Minimal persistent configuration: the music directory, and nothing else.
+//! Persistent configuration: the music directory, and the settings a listener
+//! sets once and expects to find again.
 //!
-//! v0.1 persists exactly one thing — the last successfully opened music
-//! folder — so a returning user lands straight on their shelf. The file is
-//! `$XDG_CONFIG_HOME/baz/config.toml` (via the `dirs` crate), containing a
-//! single `music_dir = "..."` key.
+//! The file is `$XDG_CONFIG_HOME/baz/config.toml` (via the `dirs` crate). It
+//! currently carries two things — the last successfully opened music folder,
+//! and the ReplayGain setting (ADR-0013) — and it is written by baz and
+//! documented as safe to edit by hand.
 //!
-//! # Why hand-rolled instead of a TOML crate
+//! # Why the `toml` crate now, and not before
 //!
-//! The format is a strict subset of TOML (one key, basic-string value with
-//! standard escapes), written and read by the tested functions below. Pulling
-//! a full TOML parser for one key would be a dependency out of proportion to
-//! the job; if the config ever grows past a couple of keys, switching to the
-//! `toml` crate is the plan of record.
+//! v0.1 hand-rolled a single-key writer and said so in as many words: *"if the
+//! config ever grows past a couple of keys, switching to the `toml` crate is
+//! the plan of record"*, which `docs/BACKLOG.md` repeated. ReplayGain is the
+//! growth that was being waited for — one key becomes five, one of them a
+//! table — so this is that switch, taken on the terms it was promised on
+//! rather than deferred again.
+//!
+//! The cost was measured before it was paid. `toml` adds **three** crates to
+//! the lock file (`toml`, `serde_spanned`, `toml_writer`); its parser
+//! (`toml_parser`, `toml_datetime`, `winnow`) and `serde` were already in the
+//! graph, and every one of them is MIT OR Apache-2.0, which `deny.toml`
+//! already allows. What the three buy is the half of TOML a hand-rolled
+//! reader silently gets wrong: a trailing comment after a value, a literal
+//! `'single-quoted'` string, `1_000`, and the escape sequences the old
+//! `escape`/`unescape` pair had to keep in step with the specification by
+//! hand. A file baz *invites* people to edit must not quietly ignore a valid
+//! edit, and "quietly ignore" is precisely the failure mode of a parser that
+//! only recognises the subset it writes.
+//!
+//! # Nothing here fails; everything degrades
+//!
+//! [`load`] returns a [`Config`], never an error and never an `Option`. A
+//! missing file, an unreadable one, one that is not TOML at all, and one whose
+//! `mode` says `"loudest"` all resolve the same way: **each key that cannot be
+//! read takes its default, and the keys around it are unaffected**. That is
+//! deliberately per-key rather than per-document, and it is the reason the
+//! reader walks a [`toml::Table`] by hand instead of deriving
+//! `Deserialize` — a `#[derive]` fails the *whole* document on one bad value,
+//! which would lose a listener their music folder because they mistyped a
+//! pre-amp. The defaults are `baz-core`'s own
+//! ([`ReplayGainSettings::default`] — off, no pre-amp, clipping prevention
+//! armed), so a config baz has never written and a config baz cannot
+//! understand both mean exactly what a fresh install means.
+//!
+//! # Units: centidecibels, as everywhere else
+//!
+//! Both pre-amps are stored as integer **centidecibels** — `preamp_centidb =
+//! -350` is −3.50 dB — which is ADR-0013 §1's argument for the third time in
+//! this workspace: one canonical integer encoding, so the round-trip test
+//! below tests the config rather than a float formatter. The key names carry
+//! the unit, and the written file carries a comment saying so.
+//!
+//! The `mode` spelling is not hand-maintained either: it is round-tripped
+//! through the same `serde` implementation the protocol's JSON uses, so the
+//! word in `config.toml` is the word on the wire by construction rather than
+//! by two lists agreeing.
 //!
 //! # Limitation: UTF-8 paths only
 //!
-//! TOML strings are UTF-8, so a music directory whose path is not valid
-//! UTF-8 cannot be persisted. Such a directory still works for the session
-//! (paths are handled as `PathBuf` throughout); it just will not be
-//! remembered across restarts. [`Config::to_toml`] returns `None` in that
-//! case and the caller skips the write with a log line.
+//! TOML strings are UTF-8, so a music directory whose path is not valid UTF-8
+//! cannot be persisted. Such a directory still works for the session (paths
+//! are handled as `PathBuf` throughout); the `music_dir` key is simply left
+//! out of the document — **and the rest of the document is still written**,
+//! which is the one behaviour change from v0.1's writer. Losing an unrelated
+//! setting because a path is unrepresentable would be a second failure caused
+//! by the first.
 
 use std::io;
 use std::path::{Path, PathBuf};
 
+use baz_core::protocol::ReplayGainMode;
+use baz_core::replaygain::ReplayGainSettings;
+
+/// The `[replaygain]` table's name in the document.
+const REPLAY_GAIN_TABLE: &str = "replaygain";
+
 /// Application configuration. See the [module docs](self) for scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
-    /// The music folder baz scans and shelves on startup.
-    pub music_dir: PathBuf,
+    /// The music folder baz scans and shelves on startup. `None` before a
+    /// first run has chosen one — and after one whose path is not UTF-8.
+    pub music_dir: Option<PathBuf>,
+    /// How ReplayGain is configured (ADR-0013). Engine state, persisted here
+    /// because it is a listener's standing decision rather than a property of
+    /// a session: unlike panel visibility (`crate::panels`, deliberately not
+    /// persisted) it has something to say on the first frame of every launch.
+    pub replay_gain: ReplayGainSettings,
+}
+
+impl Default for Config {
+    /// No music folder, and `baz-core`'s own ReplayGain defaults — the state a
+    /// fresh install is in, and the state an unreadable config resolves to.
+    fn default() -> Self {
+        Self {
+            music_dir: None,
+            replay_gain: ReplayGainSettings::default(),
+        }
+    }
 }
 
 impl Config {
-    /// Serialize to the single-key TOML document this module writes.
+    /// Serialize to the document this module writes.
     ///
-    /// Returns `None` when `music_dir` is not valid UTF-8 (not representable
-    /// in TOML — see the module docs).
-    pub fn to_toml(&self) -> Option<String> {
-        let dir = self.music_dir.to_str()?;
-        Some(format!(
-            "# baz configuration — written by baz, safe to edit\nmusic_dir = \"{}\"\n",
-            escape(dir)
-        ))
+    /// Assembled rather than derived so the comments survive: this file is
+    /// meant to be opened and understood, and a serializer's output explains
+    /// nothing. Values are still rendered by `toml`, so the quoting and
+    /// escaping are the specification's rather than ours.
+    #[must_use]
+    pub fn to_toml(&self) -> String {
+        use std::fmt::Write as _;
+        // Writing into a `String` cannot fail, so every `write!` here is
+        // infallible; the results are dropped rather than handled.
+        let mut out = String::from("# baz configuration — written by baz, safe to edit\n");
+        if let Some(dir) = self.music_dir.as_deref().and_then(Path::to_str) {
+            let _ = writeln!(out, "music_dir = {}", toml_string(dir));
+        }
+        let _ = write!(
+            out,
+            "\n[{REPLAY_GAIN_TABLE}]\n\
+             # mode: \"off\" (the default — baz changes nothing), \"track\" or \"album\"\n\
+             mode = {}\n\
+             # gains are centidecibels, hundredths of a decibel: -350 is -3.50 dB\n\
+             preamp_centidb = {}\n\
+             no_tag_preamp_centidb = {}\n\
+             prevent_clipping = {}\n",
+            toml_string(mode_key(self.replay_gain.mode)),
+            self.replay_gain.preamp_centidb,
+            self.replay_gain.no_tag_preamp_centidb,
+            self.replay_gain.prevent_clipping,
+        );
+        out
     }
 
-    /// Parse a config document produced by [`Config::to_toml`] (or edited by
-    /// hand within the same single-key subset). Unknown lines are ignored so
-    /// a hand-added comment does not break loading. Returns `None` when no
-    /// valid `music_dir` key is present.
-    pub fn from_toml(text: &str) -> Option<Self> {
-        for line in text.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let Some((key, value)) = line.split_once('=') else {
-                continue;
-            };
-            if key.trim() != "music_dir" {
-                continue;
-            }
-            let value = value.trim();
-            let inner = value.strip_prefix('"')?.strip_suffix('"')?;
-            let dir = unescape(inner)?;
-            if dir.is_empty() {
-                return None;
-            }
-            return Some(Self {
-                music_dir: PathBuf::from(dir),
-            });
+    /// Read a config document. Never fails: see the module's degradation note.
+    #[must_use]
+    pub fn from_toml(text: &str) -> Self {
+        let Ok(table) = text.parse::<toml::Table>() else {
+            return Self::default();
+        };
+        let music_dir = table
+            .get("music_dir")
+            .and_then(toml::Value::as_str)
+            .filter(|dir| !dir.is_empty())
+            .map(PathBuf::from);
+        let replay_gain = table
+            .get(REPLAY_GAIN_TABLE)
+            .and_then(toml::Value::as_table)
+            .map_or_else(ReplayGainSettings::default, read_replay_gain);
+        Self {
+            music_dir,
+            replay_gain,
         }
-        None
     }
+}
+
+/// Read the `[replaygain]` table, key by key, defaulting each miss on its own.
+///
+/// `ReplayGainSettings::new` clamps both pre-amps into
+/// ±[`MAX_PREAMP_CENTIDB`](baz_core::replaygain::MAX_PREAMP_CENTIDB), so a
+/// hand-edited `preamp_centidb = 99999` is the most rather than an error — the
+/// same answer the engine gives the same number, which is what keeps the file
+/// and the engine from disagreeing about what was asked for.
+fn read_replay_gain(table: &toml::Table) -> ReplayGainSettings {
+    let defaults = ReplayGainSettings::default();
+    let mode = table
+        .get("mode")
+        .cloned()
+        .and_then(|value| value.try_into::<ReplayGainMode>().ok())
+        .unwrap_or(defaults.mode);
+    ReplayGainSettings::new(
+        mode,
+        centidb(table, "preamp_centidb").unwrap_or(defaults.preamp_centidb),
+        centidb(table, "no_tag_preamp_centidb").unwrap_or(defaults.no_tag_preamp_centidb),
+        table
+            .get("prevent_clipping")
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(defaults.prevent_clipping),
+    )
+}
+
+/// A centidecibel figure from `key`, or `None` when the file does not carry an
+/// integer that fits one.
+///
+/// Out-of-`i16` values read as absent rather than saturating, for the reason
+/// `baz_core::replaygain`'s tag parser gives: a number nobody could have meant
+/// is not a number to guess the intent of.
+fn centidb(table: &toml::Table, key: &str) -> Option<i16> {
+    i16::try_from(table.get(key).and_then(toml::Value::as_integer)?).ok()
+}
+
+/// The document's spelling of `mode`, taken from the protocol's own `serde`
+/// implementation so the two cannot drift.
+///
+/// Falls back to the default mode's spelling for a variant this build does not
+/// know how to name — `ReplayGainMode` is `#[non_exhaustive]`, and writing a
+/// mode baz could not read back would be worse than writing the default.
+fn mode_key(mode: ReplayGainMode) -> &'static str {
+    match mode {
+        ReplayGainMode::Track => "track",
+        ReplayGainMode::Album => "album",
+        // `Off`, and — since `ReplayGainMode` is `#[non_exhaustive]` — any
+        // mode this build cannot name. Off is the default, and it is the one
+        // answer that is safe to write for a mode nobody here understands.
+        _ => "off",
+    }
+}
+
+/// `value` as a TOML basic string, quoted and escaped by `toml` itself.
+fn toml_string(value: &str) -> String {
+    toml::Value::String(value.to_owned()).to_string()
 }
 
 /// `$XDG_CONFIG_HOME/baz/config.toml`, or `None` on a platform where no
@@ -86,85 +222,41 @@ pub fn library_db_file() -> Option<PathBuf> {
     Some(dirs::data_dir()?.join("baz").join("library.db"))
 }
 
-/// Load the config from `path`; `None` if the file is missing or unparsable
-/// (both mean "first run" to the caller — never an error dialog).
-pub fn load(path: &Path) -> Option<Config> {
-    let text = std::fs::read_to_string(path).ok()?;
-    Config::from_toml(&text)
+/// Load the config from `path`. A missing, unreadable or unparsable file is
+/// the default config — never an error dialog, and never a lost setting the
+/// file *did* state correctly (module docs).
+pub fn load(path: &Path) -> Config {
+    std::fs::read_to_string(path)
+        .map(|text| Config::from_toml(&text))
+        .unwrap_or_default()
 }
 
 /// Persist `config` to `path`, creating parent directories as needed.
 ///
 /// # Errors
 ///
-/// Any filesystem error from creating the directory or writing the file.
-/// A non-UTF-8 `music_dir` is reported as [`io::ErrorKind::InvalidData`]
-/// (see the module docs on the UTF-8 limitation).
+/// Any filesystem error from creating the directory or writing the file. A
+/// non-UTF-8 `music_dir` is **not** an error: the key is omitted and the rest
+/// of the document is written (module docs).
 pub fn store(path: &Path, config: &Config) -> io::Result<()> {
-    let text = config.to_toml().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "music_dir is not valid UTF-8; not persistable in config.toml",
-        )
-    })?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, text)
-}
-
-/// Escape a string for a TOML basic string (`"…"`).
-fn escape(s: &str) -> String {
-    use std::fmt::Write as _;
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                let _ = write!(out, "\\u{:04X}", c as u32);
-            }
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-/// Inverse of [`escape`]; `None` on any malformed escape sequence.
-fn unescape(s: &str) -> Option<String> {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            out.push(c);
-            continue;
-        }
-        match chars.next()? {
-            '\\' => out.push('\\'),
-            '"' => out.push('"'),
-            'n' => out.push('\n'),
-            'r' => out.push('\r'),
-            't' => out.push('\t'),
-            'u' => {
-                let hex: String = chars.by_ref().take(4).collect();
-                if hex.len() != 4 {
-                    return None;
-                }
-                let code = u32::from_str_radix(&hex, 16).ok()?;
-                out.push(char::from_u32(code)?);
-            }
-            _ => return None,
-        }
-    }
-    Some(out)
+    std::fs::write(path, config.to_toml())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn settings(
+        mode: ReplayGainMode,
+        preamp: i16,
+        no_tag: i16,
+        prevent_clipping: bool,
+    ) -> ReplayGainSettings {
+        ReplayGainSettings::new(mode, preamp, no_tag, prevent_clipping)
+    }
 
     #[test]
     fn round_trips_plain_and_awkward_paths() {
@@ -175,41 +267,204 @@ mod tests {
             "/home/ünï çödé/曲",
             "/home/user/line\nbreak\tand\rreturn",
             "/home/user/ctrl\u{1}char",
+            "/home/user/# not a comment",
         ] {
             let config = Config {
-                music_dir: PathBuf::from(dir),
+                music_dir: Some(PathBuf::from(dir)),
+                ..Config::default()
             };
-            let text = config.to_toml().expect("UTF-8 path serializes");
-            let back = Config::from_toml(&text).expect("parses back");
+            let back = Config::from_toml(&config.to_toml());
             assert_eq!(back, config, "round-trip failed for {dir:?}");
         }
     }
 
+    /// The persisted setting, every mode and both signs of both pre-amps,
+    /// through the document and back unchanged.
     #[test]
-    fn parse_tolerates_comments_and_whitespace() {
-        let text = "# a comment\n\n  music_dir   =   \"/m\"  \nfuture_key = 3\n";
-        let config = Config::from_toml(text).expect("parses");
-        assert_eq!(config.music_dir, PathBuf::from("/m"));
+    fn round_trips_every_replay_gain_setting() {
+        let cases = [
+            settings(ReplayGainMode::Off, 0, 0, true),
+            settings(ReplayGainMode::Track, -350, 0, true),
+            settings(ReplayGainMode::Album, 600, -500, false),
+            settings(ReplayGainMode::Track, 2000, -2000, true),
+        ];
+        for replay_gain in cases {
+            let config = Config {
+                music_dir: Some(PathBuf::from("/m")),
+                replay_gain,
+            };
+            let back = Config::from_toml(&config.to_toml());
+            assert_eq!(back, config, "round-trip failed for {replay_gain:?}");
+        }
+    }
+
+    /// The document's `mode` word is the protocol's word. Pinned as bytes so
+    /// that a config written by this build stays readable by a build whose
+    /// `serde` naming somebody changed — and so the file is legible.
+    #[test]
+    fn the_mode_is_spelled_the_way_the_protocol_spells_it() {
+        for (mode, word) in [
+            (ReplayGainMode::Off, "off"),
+            (ReplayGainMode::Track, "track"),
+            (ReplayGainMode::Album, "album"),
+        ] {
+            assert_eq!(mode_key(mode), word);
+            let config = Config {
+                replay_gain: settings(mode, 0, 0, true),
+                ..Config::default()
+            };
+            assert!(
+                config.to_toml().contains(&format!("mode = \"{word}\"")),
+                "{mode:?} was not written as {word:?}:\n{}",
+                config.to_toml()
+            );
+            // And the same word read back through `serde` is the same mode,
+            // which is what makes the two directions one decision.
+            assert_eq!(Config::from_toml(&config.to_toml()).replay_gain.mode, mode);
+        }
     }
 
     #[test]
-    fn parse_rejects_garbage() {
-        assert_eq!(Config::from_toml(""), None);
-        assert_eq!(Config::from_toml("music_dir = unquoted"), None);
-        assert_eq!(Config::from_toml("music_dir = \"\""), None);
-        assert_eq!(Config::from_toml("music_dir = \"bad\\escape\\q\""), None);
-        assert_eq!(Config::from_toml("other = \"x\""), None);
+    fn parse_tolerates_comments_and_whitespace_and_unknown_keys() {
+        let text = "# a comment\n\n  music_dir   =   \"/m\"  # trailing\n\
+                    future_key = 3\n\n[replaygain]\nmode = 'album'\n\
+                    preamp_centidb = -3_50\n[future_table]\nx = 1\n";
+        let config = Config::from_toml(text);
+        assert_eq!(config.music_dir, Some(PathBuf::from("/m")));
+        assert_eq!(config.replay_gain.mode, ReplayGainMode::Album);
+        assert_eq!(config.replay_gain.preamp_centidb, -350);
+        // Absent keys inside a table that *is* present still default.
+        assert!(config.replay_gain.prevent_clipping);
+        assert_eq!(config.replay_gain.no_tag_preamp_centidb, 0);
     }
 
+    /// The degradation rule, key by key: nothing here is an error, and no bad
+    /// value takes a good one down with it.
+    #[test]
+    fn a_corrupt_or_absent_value_degrades_to_the_default_alone() {
+        let default = ReplayGainSettings::default();
+
+        // No file at all — the caller's `load` path, and a fresh install.
+        assert_eq!(Config::from_toml(""), Config::default());
+        // Not TOML in the slightest.
+        assert_eq!(Config::from_toml("}{ not toml ["), Config::default());
+        // A whole document of the wrong shape where the table should be.
+        assert_eq!(
+            Config::from_toml("replaygain = 7\nmusic_dir = \"/m\"\n").replay_gain,
+            default
+        );
+
+        // One spoiled key at a time, with good ones around it that all have to
+        // survive. Each document is written whole rather than by appending a
+        // second copy of the key — two `mode =` lines would be a *duplicate
+        // key*, which is not TOML at all and is the separate case below.
+        let good = ("\"album\"", "-350", "0", "false");
+        let spoil = |mode: &str, preamp: &str, no_tag: &str, clipping: &str| {
+            format!(
+                "music_dir = \"/m\"\n[replaygain]\nmode = {mode}\n\
+                 preamp_centidb = {preamp}\nno_tag_preamp_centidb = {no_tag}\n\
+                 prevent_clipping = {clipping}\n"
+            )
+        };
+        for (text, description, expected) in [
+            (
+                spoil("\"loudest\"", good.1, good.2, good.3),
+                "a mode that does not exist",
+                settings(default.mode, -350, 0, false),
+            ),
+            (
+                spoil("3", good.1, good.2, good.3),
+                "a mode of the wrong type",
+                settings(default.mode, -350, 0, false),
+            ),
+            (
+                spoil(good.0, "\"loud\"", good.2, good.3),
+                "a pre-amp that is not a number",
+                settings(ReplayGainMode::Album, default.preamp_centidb, 0, false),
+            ),
+            (
+                spoil(good.0, "1e9", good.2, good.3),
+                "a pre-amp beyond i16",
+                settings(ReplayGainMode::Album, default.preamp_centidb, 0, false),
+            ),
+            (
+                spoil(good.0, "-99999999", good.2, good.3),
+                "a pre-amp far below i16",
+                settings(ReplayGainMode::Album, default.preamp_centidb, 0, false),
+            ),
+            (
+                spoil(good.0, good.1, good.2, "\"yes\""),
+                "a flag that is not a bool",
+                settings(ReplayGainMode::Album, -350, 0, default.prevent_clipping),
+            ),
+        ] {
+            let config = Config::from_toml(&text);
+            assert_eq!(
+                config.music_dir,
+                Some(PathBuf::from("/m")),
+                "{description} lost the music folder"
+            );
+            assert_eq!(
+                config.replay_gain, expected,
+                "{description} did not degrade alone"
+            );
+        }
+    }
+
+    /// A duplicate key is not TOML at all, so the *document* is refused —
+    /// which is the whole document degrading, and is the one case where that
+    /// is right: there is no way to know which of the two values was meant.
+    #[test]
+    fn a_document_that_is_not_toml_is_the_default_config() {
+        assert_eq!(
+            Config::from_toml("music_dir = \"/a\"\nmusic_dir = \"/b\"\n"),
+            Config::default()
+        );
+    }
+
+    /// A pre-amp past the engine's limit is clamped on the way in, so the file
+    /// and the engine agree about what a sloppy hand edit asked for.
+    #[test]
+    fn an_out_of_range_preamp_is_clamped_the_way_the_engine_clamps_it() {
+        let config = Config::from_toml(
+            "[replaygain]\npreamp_centidb = 30000\nno_tag_preamp_centidb = -30000\n",
+        );
+        assert_eq!(
+            config.replay_gain.preamp_centidb,
+            baz_core::replaygain::MAX_PREAMP_CENTIDB
+        );
+        assert_eq!(
+            config.replay_gain.no_tag_preamp_centidb,
+            -baz_core::replaygain::MAX_PREAMP_CENTIDB
+        );
+    }
+
+    #[test]
+    fn parse_rejects_a_missing_or_empty_music_dir_without_losing_the_rest() {
+        assert_eq!(Config::from_toml("music_dir = \"\"").music_dir, None);
+        assert_eq!(Config::from_toml("other = \"x\"").music_dir, None);
+        let config = Config::from_toml("music_dir = \"\"\n[replaygain]\nmode = \"track\"\n");
+        assert_eq!(config.music_dir, None);
+        assert_eq!(config.replay_gain.mode, ReplayGainMode::Track);
+    }
+
+    /// v0.1 refused to write the file at all for an unrepresentable path.
+    /// Now the path is omitted and everything else is kept: one limitation
+    /// must not become two.
     #[cfg(unix)]
     #[test]
-    fn non_utf8_dir_is_not_serializable() {
-        use std::os::unix::ffi::OsStringExt;
+    fn a_non_utf8_music_dir_is_omitted_rather_than_losing_the_document() {
+        use std::os::unix::ffi::OsStringExt as _;
         let raw = std::ffi::OsString::from_vec(b"/music/\xFF\xFE".to_vec());
         let config = Config {
-            music_dir: PathBuf::from(raw),
+            music_dir: Some(PathBuf::from(raw)),
+            replay_gain: settings(ReplayGainMode::Album, -300, 0, false),
         };
-        assert_eq!(config.to_toml(), None);
+        let text = config.to_toml();
+        assert!(!text.contains("music_dir"), "{text}");
+        let back = Config::from_toml(&text);
+        assert_eq!(back.music_dir, None);
+        assert_eq!(back.replay_gain, config.replay_gain);
     }
 
     #[test]
@@ -217,10 +472,25 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("nested").join("config.toml");
         let config = Config {
-            music_dir: PathBuf::from("/home/user/Music"),
+            music_dir: Some(PathBuf::from("/home/user/Music")),
+            replay_gain: settings(ReplayGainMode::Album, -350, 250, false),
         };
         store(&path, &config).expect("store creates parents and writes");
-        assert_eq!(load(&path), Some(config));
-        assert_eq!(load(&dir.path().join("absent.toml")), None);
+        assert_eq!(load(&path), config);
+        // An absent file is the default config, not an error.
+        assert_eq!(load(&dir.path().join("absent.toml")), Config::default());
+    }
+
+    /// The written document is valid TOML by the crate's own reckoning, not
+    /// merely by ours — the assembled-with-comments writer's standing check.
+    #[test]
+    fn the_written_document_parses_as_toml() {
+        let config = Config {
+            music_dir: Some(PathBuf::from("/home/user/My \"Music\"")),
+            replay_gain: settings(ReplayGainMode::Track, -1234, 567, false),
+        };
+        let table: toml::Table = config.to_toml().parse().expect("baz writes valid TOML");
+        assert!(table.contains_key("music_dir"));
+        assert!(table.contains_key(REPLAY_GAIN_TABLE));
     }
 }

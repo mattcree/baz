@@ -61,6 +61,15 @@ walkdir = "2"       # directory traversal (Unlicense OR MIT)
 # baz_core::playback.
 symphonia = { version = "0.5", default-features = false, features = ["wav", "pcm", "flac", "mp3", "isomp4", "aac", "alac", "ogg", "vorbis"] }  # demux/decode (MPL-2.0 — allowlisted in deny.toml)
 tokio = { version = "1", features = ["rt"] }  # async runtime for the iced shell only (MIT)
+# `config.toml` (MIT OR Apache-2.0). Adopted when ReplayGain's persisted
+# setting took the configuration from one key to five — the switch `config.rs`
+# and `docs/BACKLOG.md` both named as the plan of record for exactly that
+# growth. Measured cost: three crates (`toml`, `serde_spanned`, `toml_writer`);
+# the parser (`toml_parser`, `toml_datetime`, `winnow`) and `serde` were
+# already in the lock through zbus's macros. `preserve_order` is deliberately
+# off — the document is assembled with its comments rather than serialized, so
+# key order is ours already, and it would pull `indexmap` in for nothing.
+toml = { version = "1.1.4", default-features = false, features = ["parse", "display", "serde", "std"] }
 # D-Bus for MPRIS2 desktop integration on Linux (MIT). Pure Rust — no C, no
 # system library, no pkg-config — so the Linux build stays system-dep-free.
 # Deliberately major 4 rather than the current 5: zbus 4.4 is *already* linked

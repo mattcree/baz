@@ -92,13 +92,11 @@ pub(crate) fn view<'a>(
     } else {
         "Esc closes · double-click a tile to play"
     };
-    content = content
-        .push(scrollable(Column::with_children(rows).spacing(theme::GAP_XXS)).height(Length::Fill))
-        .push(
-            text(hint)
-                .size(theme::SIZE_CAPTION)
-                .color(theme::PAPER_FAINT),
-        );
+    content = content.push(track_list(rows)).push(
+        text(hint)
+            .size(theme::SIZE_CAPTION)
+            .color(theme::PAPER_FAINT),
+    );
 
     container(content)
         .width(Length::Fixed(theme::PANEL_W))
@@ -106,6 +104,31 @@ pub(crate) fn view<'a>(
         .padding(PANEL_PAD)
         .style(theme::panel)
         .into()
+}
+
+/// The scrolling track list, with the lane its scrollbar needs kept clear.
+///
+/// iced draws a `scrollable`'s bar **over** the right edge of its contents
+/// rather than beside them, so a list long enough to scroll was clipping the
+/// last character of every duration — `1:15` read as `1:1`. The rows stop at
+/// [`theme::scroll_gutter`] instead, which reserves exactly the width the bar
+/// occupies (the two are one token, see [`theme::SCROLLBAR_W`]).
+///
+/// The lane is reserved **whether or not the list currently overflows**, so a
+/// twelfth track arriving does not shunt eleven durations sideways; it is the
+/// same reserved-slot rule the bottom bar's timestamps and signal note follow.
+/// Nothing else about the panel moves: the padding, the number column, the
+/// gaps and the panel width are untouched.
+fn track_list(rows: Vec<Element<'_, Message>>) -> Element<'_, Message> {
+    scrollable(
+        Column::with_children(rows)
+            .spacing(theme::GAP_XXS)
+            .padding(theme::scroll_gutter()),
+    )
+    .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
+    .style(theme::scrollbar)
+    .height(Length::Fill)
+    .into()
 }
 
 /// The side panel's header: album title over artist over a quiet

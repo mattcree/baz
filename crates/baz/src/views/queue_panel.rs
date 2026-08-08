@@ -85,8 +85,20 @@ pub(crate) fn view(player: &PlayerState) -> Element<'static, Message> {
                 );
             column![
                 heading,
-                scrollable(Column::with_children(rows).spacing(theme::GAP_XXS))
-                    .height(Length::Fill),
+                // The same reserved scrollbar lane as the album panel's track
+                // list, and for the same reason: this list has a duration
+                // column against the same right edge, so a queue long enough
+                // to scroll would clip it in exactly the same way. One list
+                // fixed and the other not would be a bug waiting for a longer
+                // queue. (`side_panel::track_list` carries the argument.)
+                scrollable(
+                    Column::with_children(rows)
+                        .spacing(theme::GAP_XXS)
+                        .padding(theme::scroll_gutter())
+                )
+                .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
+                .style(theme::scrollbar)
+                .height(Length::Fill),
             ]
             .spacing(theme::GAP_MD)
             .into()

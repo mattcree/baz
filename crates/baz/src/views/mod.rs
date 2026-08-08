@@ -8,11 +8,13 @@
 //! - [`side_panel`] — the selected album: header, edition selector, Play,
 //!   track list.
 //! - [`queue_panel`] — what baz handed the engine, and where it is in it.
+//! - [`settings_panel`] — the standing decisions: today, ReplayGain.
 //! - [`bottom_bar`] — now-playing, transport, seek row.
 //!
-//! [`side_panel`] and [`queue_panel`] share one slot beside the shelf — the
-//! *rail* — and are therefore the same [`theme::PANEL_W`] wide; which of them
-//! is on screen is [`crate::panels`]'s decision, not theirs.
+//! [`side_panel`], [`queue_panel`] and [`settings_panel`] share one slot
+//! beside the shelf — the *rail* — and are therefore the same
+//! [`theme::PANEL_W`] wide; which of them is on screen is
+//! [`crate::panels`]'s decision, not theirs.
 //!
 //! Everything here is iced-specific and holds no state: each module exposes a
 //! `view` function that reads [`crate::app`]'s state (and [`crate::player`]'s
@@ -38,6 +40,7 @@
 
 pub(crate) mod bottom_bar;
 pub(crate) mod queue_panel;
+pub(crate) mod settings_panel;
 pub(crate) mod setup;
 pub(crate) mod shelf;
 pub(crate) mod side_panel;

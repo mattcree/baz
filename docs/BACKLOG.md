@@ -209,8 +209,15 @@
 - **AAC has no gapless trim** (symphonia limitation) — documented per format in
   `playback/mod.rs` rather than papered over. (Vorbis, added later, *is*
   exactly trimmed: Ogg granule positions are sample counts.)
-- **`config.rs` is a hand-rolled single-key TOML writer** — adopt the `toml`
-  crate when configuration grows beyond a couple of keys.
+- ~~**`config.rs` is a hand-rolled single-key TOML writer**~~ — **closed.**
+  ReplayGain's persisted setting took the configuration from one key to five,
+  which is the growth this entry was waiting for, so `config.rs` now reads and
+  writes with the `toml` crate. Three crates entered the lock file (`toml`,
+  `serde_spanned`, `toml_writer` — the parser and `serde` were already in the
+  graph), all on the existing licence allowlist. Reading stays defensive and
+  **per key**: a value baz cannot understand takes its own default and leaves
+  its neighbours alone, because a `#[derive(Deserialize)]` would fail the whole
+  document over a mistyped pre-amp and cost a listener their music folder.
 
 ## Interface
 
@@ -227,18 +234,34 @@
 - **Transport buttons take no keyboard focus and publish no accessibility tree**
   — iced 0.13 offers neither (no AccessKit). Tooltips and 32 px hit targets are
   the whole of what the toolkit currently allows.
+- ~~**No settings surface at all**~~ — **shipped, and it is now the pattern.**
+  The rail holds a third panel: one heading, one sentence per section, the
+  controls, and a readout where the engine has something to say about the here
+  and now. ReplayGain is the first section; the next setting is another block
+  in the same scroll rather than a new surface. Why a rail panel rather than a
+  gear popover — the progressive-disclosure layer already exists, it cannot
+  cover the covers or the transport, and it inherits three dismissals iced 0.13
+  gives no primitive for — is argued in `panels.rs`.
+- **Settings that are not yet settable.** The panel exists; the output device,
+  the exclusive-mode selection (`BAZ_OUTPUT`/`BAZ_OUTPUT_DEVICE` are still
+  environment variables, ADR-0012), the boundary policy, watch folders and the
+  enrichment toggles are all still off-screen. Each is now a section, not a
+  design question.
 - ~~**Panel hiding**~~ — **shipped.** The right-hand rail holds one panel at a
-  time (album or queue), both carry a ✕, Escape closes what is showing, `Q`
-  toggles the queue and <kbd>Ctrl</kbd>+<kbd>B</kbd> dismisses the rail and
+  time (album, queue or settings), each carries a ✕, Escape closes what is
+  showing, `Q` toggles the queue, <kbd>Ctrl</kbd>+<kbd>,</kbd> the settings,
+  and <kbd>Ctrl</kbd>+<kbd>B</kbd> dismisses the rail and
   brings back what it dismissed. The shelf reflows to the reclaimed width and
   re-virtualizes at it. The state machine is `crates/baz/src/panels.rs` — pure,
   iced-free and unit-tested, per ADR-0006 layer 1.
-  **Visibility is deliberately not persisted**: both panels are contents-driven
-  and neither's contents survive a restart (the album panel needs a selection,
-  which is session state; the queue lives in the engine process and is never
-  re-sent at launch), so a remembered "open" would cost the shelf 340 px on
-  every launch to display the words *Nothing queued*. Full argument in
-  `panels.rs`.
+  **Visibility is deliberately not persisted**: every panel is contents-driven
+  and none's contents survive a restart in a way that would make reopening it
+  useful (the album panel needs a selection, which is session state; the queue
+  lives in the engine process and is never re-sent at launch; the settings are
+  a place you go and then leave), so a remembered "open" would cost the shelf
+  340 px on every launch to display the words *Nothing queued*. That the
+  settings panel's *contents* are now persisted does not change this — full
+  argument in `panels.rs`.
 - **Layout flexibility beyond hiding** — panels can be dismissed, not moved,
   resized, or replaced. foobar-style layout editing is a later chapter by
   design (VISION pillar 6); a resizable rail is the plausible next step and
@@ -309,6 +332,11 @@
   baz honours the `REPLAYGAIN_*` figures files already carry, in off / track /
   album modes with a pre-amp and clipping prevention, applied through the same
   gain stage as the volume and reported through the same `VolumePath`.
+  ~~The controls are unbuilt~~ — **also closed**: the settings panel carries
+  the modes, both pre-amps and clipping prevention, and a readout that renders
+  `applied_centidb` and explains the `source` (`no_tag` reads as a fact about
+  the file, `disabled` states no figure at all). It is remembered across
+  restarts in `config.toml`'s `[replaygain]` table.
 - **No ReplayGain *scanning*.** baz cannot produce the tags, only read them, so
   a library that has never been through foobar2000, `rsgain`, `loudgain` or
   `metaflac` gets nothing from the feature — and is played exactly as stored

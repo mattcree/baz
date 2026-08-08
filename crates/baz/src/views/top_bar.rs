@@ -17,6 +17,14 @@ const SEARCH_W: f32 = 360.0;
 /// length once there is one: a control that grew from `Queue` to `Queue · 12`
 /// would drag the counts beside it sideways the moment somebody pressed play.
 const QUEUE_TOGGLE_W: f32 = 92.0;
+/// Width reserved for the settings toggle (logical px) — deliberately
+/// [`QUEUE_TOGGLE_W`], not a width fitted to `Settings`.
+///
+/// The two are a *pair* of view toggles sitting side by side, and a pair whose
+/// halves were sized differently would read as two unrelated controls. Equal
+/// widths also leave room for the longer word without it wrapping, which a
+/// snug fit does not.
+const SETTINGS_TOGGLE_W: f32 = QUEUE_TOGGLE_W;
 
 /// The slim top bar: the search well on the left, quiet status and the queue
 /// toggle on the right, a hairline rule below.
@@ -59,7 +67,9 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a,
                 .color(theme::ALERT),
         );
     }
-    status = status.push(queue_toggle(shelf, player));
+    status = status
+        .push(queue_toggle(shelf, player))
+        .push(settings_toggle(shelf));
     column![
         container(
             row![search, Space::with_width(Length::Fill), status]
@@ -107,6 +117,39 @@ fn queue_toggle<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a, Me
     .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
     .style(move |_theme, status| theme::panel_toggle(status, open))
     .on_press(Message::ToggleQueue)
+    .into()
+}
+
+/// The settings toggle: the one on-screen route to the settings panel, and
+/// the only place in the interface that says baz has settings at all.
+///
+/// It sits **beside the Queue toggle**, in the top bar, and that adjacency is
+/// the decision. Both are view controls — they say what the rail shows — and
+/// the top bar is where view controls live alongside search and the counts;
+/// the bottom bar is the transport, every pixel of it reserved so that nothing
+/// moves as the music does, and the same promise the queue toggle kept ("that
+/// row was not touched to add this feature") is kept again here.
+///
+/// A word rather than a gear. baz draws its glyphs itself
+/// ([`crate::icon`]) from a small, deliberate set, and a cog would be a new
+/// one for a control that has a short and unambiguous name — while "Settings"
+/// beside "Queue" reads immediately as one pair of things the rail can show.
+fn settings_toggle(shelf: &Shelf) -> Element<'_, Message> {
+    let open = shelf.panels.rail() == Some(Rail::Settings);
+    button(
+        container(
+            text("Settings")
+                .size(theme::SIZE_META)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None),
+        )
+        .width(Length::Fill)
+        .align_x(alignment::Horizontal::Center),
+    )
+    .width(Length::Fixed(SETTINGS_TOGGLE_W))
+    .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+    .style(move |_theme, status| theme::panel_toggle(status, open))
+    .on_press(Message::ToggleSettings)
     .into()
 }
 

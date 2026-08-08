@@ -91,6 +91,17 @@
 //! (see [`crate::panels`]), so the pair is a true toggle rather than a
 //! destructive close.
 //!
+//! <kbd>Ctrl</kbd>+<kbd>,</kbd> (<kbd>Cmd</kbd>+<kbd>,</kbd>) opens the
+//! settings, and takes a modifier where `Q` does not. The reasoning is `Q`'s
+//! in reverse: a preferences key is pressed a handful of times in a
+//! *lifetime*, not dozens of times a session, so the tax the modifier charges
+//! is never actually paid — and <kbd>Cmd</kbd>+<kbd>,</kbd> is a macOS system
+//! convention that every cross-platform application has adopted, which makes
+//! it the one binding here a listener is more likely to already know than to
+//! learn. A bare `,` would also be the first bare punctuation key baz binds,
+//! and punctuation is what people type when a field is not focused by
+//! accident.
+//!
 //! **The `XF86AudioRaiseVolume` family is deliberately not bound.** The
 //! transport media keys are bound (below) because `MediaPlayPause` means one
 //! thing everywhere; the volume keys do not. On every desktop they mean *the
@@ -168,9 +179,11 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Character("m" | "M") if bare || shift => Some(Message::ToggleMute),
 
         // Panels. `Q` shows what is playing next; Ctrl+B (Cmd+B) takes the
-        // whole rail away and gives it back (module docs).
+        // whole rail away and gives it back; Ctrl+`,` (Cmd+`,`) is the
+        // settings (module docs).
         Key::Character("q" | "Q") if bare || shift => Some(Message::ToggleQueue),
         Key::Character("b" | "B") if command => Some(Message::TogglePanels),
+        Key::Character(",") if command => Some(Message::ToggleSettings),
 
         // Search. `/` is the reflex from every pager and browser; Ctrl+F
         // (Cmd+F) is the reflex from every document. Shift is tolerated on
@@ -261,6 +274,7 @@ mod tests {
             (ch("m"), none()),
             (ch("q"), none()),
             (ch("b"), Modifiers::COMMAND),
+            (ch(","), Modifiers::COMMAND),
             (ch("/"), none()),
             (ch("f"), Modifiers::COMMAND),
             (named(key::Named::Escape), none()),
@@ -396,6 +410,18 @@ mod tests {
             Some("TogglePanels")
         );
         assert_eq!(bind(&ch("b"), none()), None);
+    }
+
+    /// Ctrl+`,` (Cmd+`,`) is the preferences reflex from every platform.
+    /// A bare comma types a comma — the modifier is the whole binding.
+    #[test]
+    fn ctrl_comma_opens_the_settings() {
+        assert_eq!(
+            bind(&ch(","), Modifiers::COMMAND).as_deref(),
+            Some("ToggleSettings")
+        );
+        assert_eq!(bind(&ch(","), none()), None);
+        assert_eq!(bind(&ch(","), Modifiers::SHIFT), None);
     }
 
     #[test]

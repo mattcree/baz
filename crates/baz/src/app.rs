@@ -38,7 +38,8 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 use baz_core::index::Library;
-use baz_core::protocol::{Command, Event, SignalChain};
+use baz_core::protocol::{self as protocol, Command, Event, SignalChain};
+use baz_core::replaygain::ReplayGainSettings;
 use iced::keyboard;
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
 use iced::widget::{column, image as iced_image, row, scrollable, text_input, vertical_rule};
@@ -127,6 +128,9 @@ pub(crate) enum Message {
     /// Top bar's Queue toggle, or `Q`: show the play queue, or put back
     /// whatever it was covering (see [`crate::panels`]).
     ToggleQueue,
+    /// Top bar's Settings toggle, or Ctrl+`,`: show the settings, or put back
+    /// whatever they were covering.
+    ToggleSettings,
     /// Ctrl+B: dismiss the right-hand rail and give the shelf its width back,
     /// or bring back the panel that was dismissed.
     TogglePanels,
@@ -209,6 +213,20 @@ pub(crate) enum Message {
     SetVolume(u16),
     /// MPRIS: mute or unmute outright, never a toggle.
     SetMute(bool),
+    /// Settings panel: put ReplayGain in this mode (ADR-0013).
+    ///
+    /// The four ReplayGain messages carry only what the *control* did. Each
+    /// resolves against the settings the engine last confirmed and goes out as
+    /// one absolute `SetReplayGain`, so a press cannot desynchronize from a
+    /// front end that missed an event, and nothing on screen moves until the
+    /// engine answers (see [`crate::replaygain`]).
+    ReplayGainMode(protocol::ReplayGainMode),
+    /// Settings panel: step the tagged-file pre-amp; negative goes down.
+    ReplayGainPreamp(i32),
+    /// Settings panel: step the untagged-file pre-amp; negative goes down.
+    ReplayGainNoTagPreamp(i32),
+    /// Settings panel: arm or disarm clipping prevention.
+    ReplayGainPreventClipping(bool),
     /// An engine event arrived over the bridge subscription.
     Playback(PlayerEvent),
     /// An off-thread thumbnail decode finished (`None` = no usable art).
@@ -235,6 +253,14 @@ struct App {
     /// was resolved for. Resolving it reads the album directory, so it is
     /// done once per track change rather than once per progress report.
     mpris_art: (u64, Option<String>),
+    /// The ReplayGain setting as it currently stands on disk.
+    ///
+    /// Kept so that persisting can be driven by the *engine's* confirmations
+    /// (the honesty rule again: what is written is what is in force, never
+    /// what was asked for) without reading the config file on every
+    /// `ReplayGainChanged` — the event also arrives at track boundaries, where
+    /// the settings have not moved at all and there is nothing to write.
+    saved_replay_gain: ReplayGainSettings,
 }
 
 enum Screen {
@@ -262,12 +288,34 @@ impl App {
         if let Some(state) = playback.volume() {
             player.seed_volume(state.volume, state.muted, state.path);
         }
+        // The same pull for ReplayGain (ADR-0013 provides it for the same
+        // moment), so the settings panel is right on the first frame rather
+        // than on the first change.
+        if let Some(state) = playback.replay_gain() {
+            player.seed_replay_gain(
+                state.settings,
+                state.applied.source,
+                state.applied.gain_centidb,
+                state.applied.clipping_prevented,
+            );
+        }
         // Desktop integration is an enhancement: this spawns a thread and
         // returns, and an absent session bus costs one stdout line (see
         // crate::mpris).
         let mpris = Mpris::start();
-        let stored = config::config_file().and_then(|path| config::load(&path));
-        let dir = cli_dir.or(stored.map(|c| c.music_dir));
+        let stored = config::config_file().map(|path| config::load(&path));
+        let saved_replay_gain = stored
+            .as_ref()
+            .map_or_else(ReplayGainSettings::default, |config| config.replay_gain);
+        // Restore the listener's standing ReplayGain decision. It is *sent*,
+        // not assumed: the engine is the source of truth, so this is a command
+        // like any other and the panel will show whatever the engine confirms
+        // in reply. A setting equal to the engine's own defaults emits nothing
+        // and costs nothing, which is the ordinary case.
+        if saved_replay_gain != ReplayGainSettings::default() {
+            playback.send(command_for(saved_replay_gain));
+        }
+        let dir = cli_dir.or_else(|| stored.and_then(|config| config.music_dir));
         let (screen, task) = match dir {
             None => (Screen::Setup(Setup::fresh(None)), Task::none()),
             Some(dir) => match Shelf::open(dir) {
@@ -283,6 +331,7 @@ impl App {
             player,
             mpris,
             mpris_art: (0, None),
+            saved_replay_gain,
         };
         // One publish before the first frame, so a desktop widget that asks
         // straight away gets the seeded volume and the real `Can*` flags
@@ -297,7 +346,7 @@ impl App {
         // resolves to "tell the state machine, maybe tell the engine", so it
         // is answered first and separately rather than as nine more arms
         // below.
-        if self.update_volume(&message) {
+        if self.update_volume(&message) || self.update_replay_gain(&message) {
             return Task::none();
         }
         match message {
@@ -483,6 +532,10 @@ impl App {
                 };
                 self.player.apply(&event, albums);
                 seek_confirmed = seek_pending && matches!(event, Event::Progress { .. });
+                // Persist off the confirmation, never off the request: what
+                // reaches config.toml is what the engine put in force,
+                // including a pre-amp it clamped on the way in.
+                self.persist_replay_gain();
             }
             PlayerEvent::Closed => {
                 println!("[playback] engine shut down");
@@ -490,6 +543,24 @@ impl App {
             }
         }
         self.publish_mpris(seek_confirmed);
+    }
+
+    /// Write the ReplayGain setting the engine has just confirmed, if it moved.
+    ///
+    /// A no-op in the ordinary case, which is the point: `ReplayGainChanged`
+    /// also arrives at track boundaries where the resolved *figure* changed
+    /// and the *settings* did not, and a config write per track boundary would
+    /// be a file system call in the middle of a gapless splice.
+    ///
+    /// Best-effort with a log, like the music folder beside it: a read-only
+    /// config directory must not stop anybody listening to music.
+    fn persist_replay_gain(&mut self) {
+        let settings = self.player.replay_gain().settings();
+        if settings == self.saved_replay_gain {
+            return;
+        }
+        self.saved_replay_gain = settings;
+        persist(|config| config.replay_gain = settings);
     }
 
     /// Hand the desktop integration the state the engine just confirmed.
@@ -586,6 +657,35 @@ impl App {
         {
             self.player.engine_closed();
         }
+    }
+
+    /// The settings panel's ReplayGain controls, answered here for
+    /// [`Self::update_volume`]'s reason: every one of them resolves to "ask
+    /// the engine for a complete setting", so they are four arms of one small
+    /// machine rather than four more in the shelf's update loop.
+    ///
+    /// Returns whether the message was one of them.
+    ///
+    /// Nothing on screen moves in any of these arms. The state machine keeps
+    /// following [`Event::ReplayGainChanged`] and nothing else, so a press
+    /// that the engine clamps, refuses, or answers differently from is
+    /// rendered as the engine's answer (ADR-0013, and `crate::replaygain`).
+    fn update_replay_gain(&mut self, message: &Message) -> bool {
+        let state = self.player.replay_gain();
+        let asked = match *message {
+            Message::ReplayGainMode(mode) => state.with_mode(mode),
+            Message::ReplayGainPreamp(steps) => state.stepped_preamp(steps),
+            Message::ReplayGainNoTagPreamp(steps) => state.stepped_no_tag_preamp(steps),
+            Message::ReplayGainPreventClipping(prevent) => state.with_prevent_clipping(prevent),
+            _ => return false,
+        };
+        // A redundant command emits nothing, so sending one is harmless; a
+        // failed send means the engine is gone and the state machine must
+        // stop claiming otherwise.
+        if !self.playback.send(command_for(asked)) {
+            self.player.engine_closed();
+        }
+        true
     }
 
     /// Queue an album (the selected edition's tracks, in the view model's
@@ -833,6 +933,7 @@ impl Shelf {
                 self.request_visible_thumbs()
             }
             Message::ToggleQueue => self.reflow(Panels::toggle_queue),
+            Message::ToggleSettings => self.reflow(Panels::toggle_settings),
             Message::TogglePanels => self.reflow(Panels::toggle_hidden),
             Message::ClosePanel => self.reflow(Panels::close),
             Message::AlbumClicked(id) => {
@@ -1041,13 +1142,14 @@ impl Shelf {
     /// beside it when one is showing. Composition only — the surfaces
     /// themselves are [`crate::views`].
     ///
-    /// One rail, one panel: the album panel and the queue occupy the same
-    /// slot, so this is a three-way choice rather than a stack of optional
-    /// columns, and the shelf's width has exactly two values.
+    /// One rail, one panel: the album panel, the queue and the settings occupy
+    /// the same slot, so this is a four-way choice rather than a stack of
+    /// optional columns, and the shelf's width still has exactly two values.
     fn view<'a>(&'a self, player: &'a PlayerState) -> Element<'a, Message> {
         let rail: Option<Element<'_, Message>> = match self.panels.rail() {
             None => None,
             Some(Rail::Queue) => Some(views::queue_panel::view(player)),
+            Some(Rail::Settings) => Some(views::settings_panel::view(player)),
             // A selection whose album vanished under a rescan renders no
             // panel rather than an empty one; the next scroll event squares
             // the grid estimate up.
@@ -1108,22 +1210,55 @@ fn message_for(request: mpris::Request) -> Message {
     }
 }
 
-/// Persist the chosen music dir (config module); best-effort with a log,
-/// never fatal — a read-only config dir must not block listening to music.
+/// Persist the chosen music dir; best-effort with a log, never fatal — a
+/// read-only config dir must not block listening to music.
 fn persist_music_dir(music_dir: &std::path::Path) {
+    if music_dir.to_str().is_none() {
+        println!(
+            "[config] music dir is not valid UTF-8; it cannot be written to config.toml \
+             (this session is unaffected)"
+        );
+    }
+    persist(|config| config.music_dir = Some(music_dir.to_path_buf()));
+}
+
+/// Read the config, apply `change`, and write it back if anything moved.
+///
+/// **Read–modify–write, not overwrite.** The config now carries more than one
+/// thing, and each is changed by a different part of the app at a different
+/// moment; a writer that built a whole `Config` from the one field it knew
+/// about would silently drop the others. Reading first also means a key added
+/// by a later version of baz, or by hand, survives a write by this one as far
+/// as [`config::Config`] can represent it.
+fn persist(change: impl FnOnce(&mut config::Config)) {
     let Some(path) = config::config_file() else {
-        println!("[config] no config directory on this system; not persisting music dir");
+        println!("[config] no config directory on this system; nothing is being remembered");
         return;
     };
-    let config = config::Config {
-        music_dir: music_dir.to_path_buf(),
-    };
-    if config::load(&path).as_ref() == Some(&config) {
+    let stored = config::load(&path);
+    let mut config = stored.clone();
+    change(&mut config);
+    if config == stored {
         return; // Unchanged.
     }
     match config::store(&path, &config) {
-        Ok(()) => println!("[config] music dir saved to {}", path.display()),
+        Ok(()) => println!("[config] saved to {}", path.display()),
         Err(error) => println!("[config] could not save {}: {error}", path.display()),
+    }
+}
+
+/// The absolute, idempotent command that asks the engine for `settings`.
+///
+/// One place, because ADR-0013's command carries the *whole* setting: every
+/// control in the settings panel resolves to a complete
+/// [`ReplayGainSettings`] and then comes through here, so no control can send
+/// a partial one.
+fn command_for(settings: ReplayGainSettings) -> Command {
+    Command::SetReplayGain {
+        mode: settings.mode,
+        preamp_centidb: settings.preamp_centidb,
+        no_tag_preamp_centidb: settings.no_tag_preamp_centidb,
+        prevent_clipping: settings.prevent_clipping,
     }
 }
 

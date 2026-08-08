@@ -216,6 +216,29 @@
 //! is two strings and the view has no decision left to make, which is what
 //! keeps the tone out of the view layer's hands.
 //!
+//! # ReplayGain
+//!
+//! The same honesty rule once more, and ADR-0013 states it in the same words
+//! ADR-0011 used: *observe `Event::ReplayGainChanged` and follow it rather
+//! than your own optimistic copy.* So [`PlayerState::apply`] is again the only
+//! place it moves, [`PlayerState::seed_replay_gain`] takes the engine's
+//! reading once at start-up, and a control press changes nothing until the
+//! engine confirms it. The state itself, the settings a control asks for, and
+//! the words the readout says all live in [`crate::replaygain`], which is pure
+//! and tested on its own; what is kept here is the fold site, so that there is
+//! exactly one.
+//!
+//! It survives [`PlayerState::engine_closed`] for [`PlayerState::volume`]'s reason:
+//! ReplayGain is engine state rather than session state, and the last reading
+//! stays the honest answer to "how is it set".
+//!
+//! **The fidelity readout does not change.** [`PlayerState::bit_exact`] is
+//! still `SignalChain::Direct` and [`VolumePath::is_transparent`], and it is
+//! still the whole question. An active ReplayGain moves the volume path to
+//! `SoftwareGain` with the fader at unity — that is correct, it is reported on
+//! the channel it has always been reported on, and nothing about ReplayGain
+//! adds a second answer to it (ADR-0013 §8).
+//!
 //! Engine availability ([`Availability`]) is seeded from the spawn result at
 //! startup — that is a returned fact, not an assumption — and downgrades to
 //! [`Availability::Closed`] when the event bridge reports the engine gone or
@@ -228,9 +251,11 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use baz_core::protocol::{ConversionReason, Event, SignalChain, VolumePath};
+use baz_core::protocol::{ConversionReason, Event, ReplayGainSource, SignalChain, VolumePath};
+use baz_core::replaygain::ReplayGainSettings;
 use baz_core::volume::{MAX_POSITION, Volume};
 
+use crate::replaygain::{ReplayGain, ReplayGainReadout};
 use crate::vm::{self, AlbumVm, QueueVm};
 
 /// Whether a playback engine exists to talk to.
@@ -711,6 +736,11 @@ pub struct PlayerState {
     /// A [`Command::SetMute`](baz_core::protocol::Command::SetMute) awaiting
     /// its confirming event.
     mute_pending: bool,
+    /// ReplayGain as the engine last reported it (ADR-0013). Engine state
+    /// beside the volume, and folded here for the volume's reason: this is
+    /// the one place engine events are allowed to change anything. The
+    /// vocabulary and the arithmetic live in [`crate::replaygain`].
+    replay_gain: ReplayGain,
 }
 
 impl PlayerState {
@@ -745,6 +775,11 @@ impl PlayerState {
             volume_hover: None,
             volume_pending: None,
             mute_pending: false,
+            // Off, no pre-amp, clipping prevention armed — what a freshly
+            // spawned engine is (ADR-0013 §2). `seed_replay_gain` replaces it
+            // with the engine's own reading at start-up, for `seed_volume`'s
+            // reason.
+            replay_gain: ReplayGain::default(),
         }
     }
 
@@ -765,6 +800,22 @@ impl PlayerState {
         self.volume = volume;
         self.muted = muted;
         self.volume_path = path;
+    }
+
+    /// Seed ReplayGain from
+    /// [`EngineHandle::replay_gain`](baz_core::engine::EngineHandle::replay_gain)
+    /// at start-up — the same pull, for the same reason, as
+    /// [`Self::seed_volume`], and the parts rather than the
+    /// `#[non_exhaustive]` state type for the same reason too.
+    pub fn seed_replay_gain(
+        &mut self,
+        settings: ReplayGainSettings,
+        source: ReplayGainSource,
+        applied_centidb: i16,
+        clipping_prevented: bool,
+    ) {
+        self.replay_gain
+            .seed(settings, source, applied_centidb, clipping_prevented);
     }
 
     /// Fold one engine event into the state. `albums` is the current shelf
@@ -839,6 +890,11 @@ impl PlayerState {
                 self.muted = *muted;
                 self.volume_path = *path;
             }
+            // ReplayGain's own account, folded by the module that owns its
+            // vocabulary. It arrives on an accepted `SetReplayGain` *and* at
+            // a track boundary where the resolved figure changes, and each
+            // arrival replaces the whole reading (ADR-0013).
+            Event::ReplayGainChanged { .. } => self.replay_gain.apply(event),
             // `Event` is #[non_exhaustive]: tolerate unknown messages.
             _ => {}
         }
@@ -1534,6 +1590,28 @@ impl PlayerState {
             label: format!("{} → {output}", strip_unit(&source)),
             detail: format!("Playing at {output} — {because}"),
         })
+    }
+
+    /// ReplayGain exactly as the engine last reported it — what the settings
+    /// panel's controls render themselves from, and what gets persisted.
+    ///
+    /// Copied out rather than borrowed: it is four small `Copy` fields, and
+    /// handing out a reference into the state machine is how a view ends up
+    /// holding one across an update.
+    #[must_use]
+    pub fn replay_gain(&self) -> ReplayGain {
+        self.replay_gain
+    }
+
+    /// The ReplayGain figure in force for the track playing now, or `None`
+    /// when there is nothing to report (ReplayGain off, or nothing playing).
+    ///
+    /// "Playing" is [`Self::now_playing`] — a track the engine has told us
+    /// about — rather than the phase, so a paused track still explains the
+    /// gain it is paused at.
+    #[must_use]
+    pub fn replay_gain_readout(&self) -> Option<ReplayGainReadout> {
+        self.replay_gain.readout(self.now_playing.is_some())
     }
 
     /// Unobtrusive skip note: `N track(s) skipped` once any track in the

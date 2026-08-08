@@ -24,7 +24,7 @@ use std::sync::LazyLock;
 use iced::font::Weight;
 use iced::widget::rule::FillMode;
 use iced::widget::slider::{Handle, HandleShape, Rail};
-use iced::widget::{button, container, rule, slider, text_input};
+use iced::widget::{button, checkbox, container, rule, scrollable, slider, text_input};
 use iced::{Background, Border, Color, Font, Padding, Shadow, Theme, Vector, mouse};
 
 // ---------------------------------------------------------------------------
@@ -282,6 +282,155 @@ pub const SEEK_ROW_W: f32 = SEEK_W + 2.0 * (STAMP_W + GAP_SM);
 /// `192 → 176.4 kHz`, fifteen monospace figures at [`SIZE_META`] — with room
 /// to spare.
 pub const SIGNAL_W: f32 = 120.0;
+
+/// Width of a vertical scrollbar, and of the lane a scrolling list keeps
+/// clear for it (logical px).
+///
+/// iced draws a `scrollable`'s bar **over** the content's right edge rather
+/// than beside it, which is what clipped the side panel's durations from
+/// `1:15` to `1:1` the moment a track list was long enough to scroll. The fix
+/// is a lane the content does not use, and the number has to be the bar's own
+/// width or the lane is a guess: [`list_scrollbar`] builds the bar from this
+/// token and [`scroll_gutter`] reserves the same token, so the two are one
+/// decision rather than two that have to agree.
+///
+/// Ten is iced 0.13's own default bar width, kept rather than changed — this
+/// is a layout defect, not a restyle.
+pub const SCROLLBAR_W: f32 = 10.0;
+/// Clearance on each side of the scrollbar within its lane. Zero: the bar sits
+/// in the lane's full width, so [`SCROLLBAR_LANE`] is [`SCROLLBAR_W`] and the
+/// arithmetic stays visible rather than folded into a constant.
+pub const SCROLLBAR_MARGIN: f32 = 0.0;
+/// Total width a vertical scrollbar occupies: the bar and its margins.
+pub const SCROLLBAR_LANE: f32 = SCROLLBAR_W + 2.0 * SCROLLBAR_MARGIN;
+
+/// Edge of a stepper button's square hit area — the `−`/`+` beside a numeric
+/// setting.
+///
+/// Smaller than [`TRANSPORT_HIT`] because these are not transport: a setting
+/// is adjusted deliberately and rarely, where play and pause are hit in a
+/// hurry. Still a square, and still fixed in both axes, so a value changing
+/// under them moves nothing.
+pub const STEPPER_HIT: f32 = 24.0;
+/// Width reserved for a setting's value readout: enough for `-20.00 dB` in
+/// [`MONO`] at [`SIZE_META`].
+///
+/// Fixed for the reason [`STAMP_W`] is: the digits change as the control is
+/// driven, and a row that re-flowed under a repeated press would make the
+/// button move away from the pointer holding it.
+pub const SETTING_VALUE_W: f32 = 68.0;
+/// iced 0.13's default relative line height (`LineHeight::Relative(1.3)`),
+/// named here because a reserved text slot has to be measured in it.
+pub const LINE_HEIGHT: f32 = 1.3;
+/// Height reserved for a setting's explanatory note: **two** lines at
+/// [`SIZE_META`].
+///
+/// Reserved rather than fitted, because the note changes with the setting: the
+/// ReplayGain modes' sentences are one line and two, so a slot that grew with
+/// the text would shunt the pre-amps and the checkbox down by a line the
+/// moment somebody pressed *Album* — a control moving out from under the
+/// pointer that just chose it. Two lines is the tallest note the panel's
+/// content width can produce (`a_setting_note_fits_the_slot_it_is_given`
+/// pins it), and the empty half-slot in the short cases costs nothing.
+pub const SETTING_NOTE_H: f32 = 2.0 * SIZE_META * LINE_HEIGHT;
+
+/// The lane a scrolling list keeps clear for its scrollbar: padding on the
+/// right of the list's contents and nowhere else.
+///
+/// Reserved **whether or not the list currently overflows**, on the same
+/// principle as [`SEEK_ROW_H`] and [`SIGNAL_W`]: a gutter that appeared with
+/// the scrollbar would shift every duration in the list sideways the moment
+/// one more track arrived, which is a jump where there is currently a
+/// clipped glyph. The cost when nothing is scrolling is ten invisible pixels.
+#[must_use]
+pub fn scroll_gutter() -> Padding {
+    Padding {
+        top: 0.0,
+        right: SCROLLBAR_LANE,
+        bottom: 0.0,
+        left: 0.0,
+    }
+}
+
+/// The scrollbar geometry a list uses, pinned to [`SCROLLBAR_W`] rather than
+/// left to the toolkit's default, so that the bar and the lane
+/// [`scroll_gutter`] reserves for it are the same number by construction.
+#[must_use]
+pub fn list_scrollbar() -> scrollable::Scrollbar {
+    scrollable::Scrollbar::new()
+        .width(SCROLLBAR_W)
+        .scroller_width(SCROLLBAR_W)
+        .margin(SCROLLBAR_MARGIN)
+}
+
+/// A list's scrollbar: no trough, and a scroller in the same hairline the room
+/// uses for every other edge, one step firmer while it is being driven.
+///
+/// Quiet on purpose. A scrollbar is a *readout* of how much list there is, and
+/// baz's chrome recedes so the covers and the type carry the interface; the
+/// stock blue-grey iced draws otherwise is the one thing on screen that is not
+/// from this palette.
+#[must_use]
+pub fn scrollbar(_theme: &Theme, status: scrollable::Status) -> scrollable::Style {
+    let active = matches!(
+        status,
+        scrollable::Status::Hovered {
+            is_vertical_scrollbar_hovered: true,
+            ..
+        } | scrollable::Status::Dragged {
+            is_vertical_scrollbar_dragged: true,
+            ..
+        }
+    );
+    let rail = scrollable::Rail {
+        background: None,
+        border: Border::default(),
+        scroller: scrollable::Scroller {
+            color: if active { HAIRLINE_STRONG } else { HAIRLINE },
+            border: Border {
+                color: Color::TRANSPARENT,
+                width: 0.0,
+                radius: (SCROLLBAR_W / 2.0).into(),
+            },
+        },
+    };
+    scrollable::Style {
+        container: container::Style::default(),
+        vertical_rail: rail,
+        horizontal_rail: rail,
+        gap: None,
+    }
+}
+
+/// A settings checkbox: the same quiet card as a resting control, with the
+/// tick in paper ink.
+///
+/// No accent. Arming clipping prevention is a *setting*, not playback truth,
+/// and the lamp is reserved (see [`panel_toggle`]); a checked box says so with
+/// the surface step and the hairline the room already uses for "selected".
+#[must_use]
+pub fn check(_theme: &Theme, status: checkbox::Status) -> checkbox::Style {
+    let (background, border_color) = match status {
+        checkbox::Status::Active { is_checked } => {
+            (if is_checked { CARD_HIGH } else { RECESS }, HAIRLINE_STRONG)
+        }
+        checkbox::Status::Hovered { .. } => (CARD_HIGH, HAIRLINE_STRONG),
+        checkbox::Status::Disabled { is_checked } => {
+            (if is_checked { CARD } else { RECESS }, HAIRLINE)
+        }
+    };
+    let disabled = matches!(status, checkbox::Status::Disabled { .. });
+    checkbox::Style {
+        background: Background::Color(background),
+        icon_color: if disabled { PAPER_MUTED } else { PAPER },
+        border: Border {
+            color: border_color,
+            width: 1.0,
+            radius: RADIUS_SEGMENT.into(),
+        },
+        text_color: Some(if disabled { PAPER_MUTED } else { PAPER }),
+    }
+}
 
 /// How strongly to ink a transport glyph.
 ///
@@ -786,6 +935,93 @@ mod tests {
         // `192 → 176.4 kHz`, fifteen monospace figures — so that a note
         // appearing there moves nothing beside it.
         const { assert!(SIGNAL_W > SIZE_META * 15.0 * 0.5) }
+    }
+
+    /// The duration-column defect, as arithmetic: the lane a list keeps clear
+    /// is exactly the lane its scrollbar occupies, and it is kept clear on the
+    /// right and nowhere else.
+    ///
+    /// This is the whole of the fix — the bar overlays the content, so the
+    /// content stops using the width the bar overlays — and the two numbers
+    /// being one token is what stops them drifting apart the next time either
+    /// is touched.
+    #[test]
+    fn a_list_reserves_exactly_the_lane_its_scrollbar_occupies() {
+        let gutter = scroll_gutter();
+        assert!(
+            (gutter.right - SCROLLBAR_LANE).abs() < f32::EPSILON,
+            "the reserved lane ({}) is not the scrollbar's lane ({SCROLLBAR_LANE})",
+            gutter.right
+        );
+        // Nothing else moves: this must not become a general list inset.
+        assert!((gutter.left).abs() < f32::EPSILON);
+        assert!((gutter.top).abs() < f32::EPSILON);
+        assert!((gutter.bottom).abs() < f32::EPSILON);
+        // The lane has to be wide enough to hide a bar, or it is decoration.
+        const { assert!(SCROLLBAR_LANE >= SCROLLBAR_W) }
+        // And the bar the list actually installs is built from the same
+        // token, so "the lane is the bar's width" is true by construction
+        // rather than by two literals happening to match.
+        assert_eq!(
+            list_scrollbar(),
+            scrollable::Scrollbar::new()
+                .width(SCROLLBAR_LANE - 2.0 * SCROLLBAR_MARGIN)
+                .scroller_width(SCROLLBAR_W)
+                .margin(SCROLLBAR_MARGIN)
+        );
+    }
+
+    /// A track row still has room for its title after the lane is taken, and
+    /// the value slot beside a setting still holds the widest figure it can
+    /// be asked to show.
+    #[test]
+    fn the_panel_still_fits_what_it_has_to_draw() {
+        // Panel width, less its inset on both sides, less the number column,
+        // the gaps, and the new lane — what is left is the title's.
+        let inner = PANEL_W - 2.0 * GAP_XL - SCROLLBAR_LANE - TRACK_NO_W - 2.0 * GAP_SM;
+        assert!(
+            inner > 200.0,
+            "the lane left only {inner} px for a track title"
+        );
+        // `-20.00 dB` is ten monospace figures at SIZE_META; the slot is
+        // fixed so a value changing cannot move the stepper beside it.
+        const { assert!(SETTING_VALUE_W > SIZE_META * 10.0 * 0.5) }
+        // A stepper is smaller than the transport but still a real target.
+        const { assert!(STEPPER_HIT < TRANSPORT_HIT && STEPPER_HIT >= ICON_PX) }
+    }
+
+    /// Every sentence the settings panel can put in its reserved note slot
+    /// fits it — otherwise the slot clips the words instead of the layout
+    /// moving, which is the worse of the two failures it was chosen over.
+    ///
+    /// Text measurement needs a renderer, so this is an arithmetic bound
+    /// rather than a shaping run: at [`SIZE_META`] the UI face averages well
+    /// under half an em per character, which is the same conservative figure
+    /// [`STAMP_W`] and [`SIGNAL_W`] are checked against above.
+    #[test]
+    fn a_setting_note_fits_the_slot_it_is_given() {
+        use crate::replaygain::{MODES, mode_note};
+
+        // The slot is exactly two lines — not "about two".
+        assert!((SETTING_NOTE_H - 2.0 * SIZE_META * LINE_HEIGHT).abs() < f32::EPSILON);
+        // The width a wrapped line actually has: the panel, less its inset on
+        // both sides, less the scrollbar lane.
+        let content_w = PANEL_W - 2.0 * GAP_XL - SCROLLBAR_LANE;
+        let per_line = content_w / (SIZE_META * 0.5);
+        let budget = 2.0 * per_line;
+        for mode in MODES {
+            let note = mode_note(mode);
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a sentence's length is far below f32's exact-integer range"
+            )]
+            let length = note.chars().count() as f32;
+            assert!(
+                length <= budget,
+                "{note:?} is {length} characters, past the {budget}-character \
+                 two-line budget the reserved slot can hold"
+            );
+        }
     }
 
     /// The rail's width is one number, and the shelf still virtualizes at both

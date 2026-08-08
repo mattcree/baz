@@ -134,10 +134,34 @@ next commit.
   queue and Ctrl+B dismisses the rail outright and brings back what was
   dismissed. The shelf reflows to the reclaimed width and re-virtualizes at it
   — five columns to three and back, in the shipped window.
+- **A settings panel, and baz's first settings surface.** It is a third panel
+  in the same right-hand rail as the album panel and the queue — not a popover
+  — so it cannot cover the covers or the transport, it inherits the ✕, Escape
+  and Ctrl+B that already dismiss a panel, and adding the next setting is a
+  section in one scroll rather than a second surface. The rail is the "one
+  deliberate layer down" the vision's progressive-disclosure pillar names, and
+  this is now the pattern every future setting follows.
+- **ReplayGain controls** in it: the three modes as a segmented control, a
+  pre-amp and a separate pre-amp for untagged files (half-decibel steps,
+  stopping exactly at the engine's ±20 dB), and clipping prevention. Every
+  press sends the whole absolute setting and changes nothing on screen until
+  `ReplayGainChanged` confirms it, so a clamp or a second front end is
+  rendered as the engine's answer rather than as the request. Underneath, what
+  the setting came to for the track playing: `-7.75 dB · from this track's
+  ReplayGain tag`, and for an unscanned file `0.00 dB · this file carries no
+  ReplayGain, so it plays exactly as stored` — a fact, said differently from
+  "off", which states no figure at all because the engine performs no
+  arithmetic in that mode. Clipping prevention says what it cut and why. No
+  alarm colours, no fault vocabulary, and no amber: the lamp stays reserved for
+  playback truth (ADR-0013 §8). **The fidelity indicator is unchanged** —
+  it is still `VolumePath` plus `SignalChain`, one gain stage and one answer.
+- **The ReplayGain setting is remembered** across restarts, in
+  `config.toml`'s new `[replaygain]` table. Written from what the engine
+  *confirmed*, never from what was asked for.
 - **Keyboard control**: space to play/pause, arrows to seek (shifted for 30 s),
   up/down for volume and `M` for mute, `N` or Ctrl+Right for next, `/` or
-  Ctrl+F for search, `Q` for the queue, Ctrl+B for the panels, Escape to back
-  out.
+  Ctrl+F for search, `Q` for the queue, Ctrl+`,` for the settings, Ctrl+B for
+  the panels, Escape to back out.
   While the search field has focus no binding is live — baz asks the toolkit
   whether the widget consumed the key and never second-guesses the answer.
 - Presentation split into a `views/` module tree, verified pixel-identical
@@ -167,6 +191,16 @@ next commit.
 
 ### Changed
 
+- **`config.toml` is now read and written with the `toml` crate**, replacing
+  the hand-rolled single-key writer whose own documentation named this as the
+  plan of record once the configuration grew past a couple of keys. It grew
+  today. Three crates enter the lock file (`toml`, `serde_spanned`,
+  `toml_writer`; the parser and `serde` were already there), all MIT OR
+  Apache-2.0. Reading is per-key and defensive rather than derived: a value
+  baz cannot understand takes its own default and its neighbours are
+  untouched, so a mistyped pre-amp cannot cost anybody their music folder.
+  A non-UTF-8 music directory now omits its key instead of preventing the
+  whole file from being written.
 - Application id is now the reverse-DNS `io.github.mattcree.baz` rather than
   the bare `baz`: the desktop entry's basename, the AppStream component id, the
   Flatpak id, the window's `app_id` and MPRIS's `DesktopEntry` property are one
@@ -183,6 +217,14 @@ next commit.
 
 ### Fixed
 
+- **The rail panels' scrollbar no longer covers the duration column.** iced
+  draws a `scrollable`'s bar over the right edge of its contents rather than
+  beside them, so a track list long enough to scroll clipped every duration by
+  its last character — `1:15` read as `1:1`. Both lists now keep a lane clear
+  for the bar, reserved whether or not the list currently overflows so that a
+  twelfth track does not shunt eleven durations sideways, and the lane and the
+  bar are one token so they cannot drift apart. Nothing else about either
+  panel moved.
 - `.m4a`/`.mp4` files the library listed but could not play.
 - `.ogg` files the library listed but could not play (Vorbis, above).
 - Format detection now probes file *content* rather than trusting the
