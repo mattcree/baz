@@ -33,6 +33,19 @@
 
 ## Known gaps in shipped features
 
+- **A rare flake in `a_rate_change_is_refused_by_the_bit_perfect_default`**
+  (`crates/baz-core/tests/playback.rs`). Observed **once in 13 runs** during a
+  full-workspace run with four test binaries competing, on a machine also
+  running three build agents. **Not reproduced since**: 12 loaded single-test
+  runs and 5 further full-workspace runs, all green. The test asserts the
+  *specific* refusal variant, so the likely shapes are a different error
+  surfacing first under load, or the session ending before track 1 is reached
+  — the 16-sample sink capacity makes producer/consumer ordering tight. Left
+  unfixed rather than papered over with a retry or a loosened assertion: CI
+  runs `--no-fail-fast`, so a recurrence turns main red with the actual error
+  in the log, which is the evidence needed to fix it properly. If it recurs,
+  fix the race — do not weaken the assertion.
+
 - **Opus is not played, and therefore not listed.** *(Decided 2026-08-07;
   `.ogg`/Vorbis shipped in the same commit and plays.)* `.opus` is out of
   `AUDIO_EXTENSIONS` and `AudioFormat::is_decodable` returns `false` for it,
