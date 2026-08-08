@@ -285,13 +285,19 @@ impl From<PlayPause> for Glyph {
 }
 
 /// The rasterized sheet, built once on first use: one sprite per glyph, all
-/// [`RASTER_PX`] square, inked in [`theme::GLYPH`].
+/// [`RASTER_PX`] square, inked in the standing room's glyph ink.
 ///
 /// Caching matters beyond the arithmetic — `image::Handle::from_rgba` mints
 /// a fresh id per call, and a fresh id per frame would churn the renderer's
 /// texture atlas. These ids live as long as the process.
+///
+/// **The room is baked in.** The sheet is rasterized on first use, which is
+/// during the first frame and therefore after `theme::install` has resolved
+/// the room; a room that could change while the process ran would have to
+/// invalidate this, and that is part of what step 20 buys when it makes the
+/// second room selectable.
 static SHEET: LazyLock<[image::Handle; 7]> = LazyLock::new(|| {
-    let ink = rgb(theme::GLYPH);
+    let ink = rgb(theme::active().glyph());
     Glyph::ALL.map(|glyph| image::Handle::from_rgba(RASTER_PX, RASTER_PX, rasterize(glyph, ink)))
 });
 
