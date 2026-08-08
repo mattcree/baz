@@ -617,6 +617,52 @@ pub const GAP_LG: f32 = 16.0;
 /// 24 px — screen-level breathing room.
 pub const GAP_XL: f32 = 24.0;
 
+/// **The grid's one number** (logical px): the distance from a work to its
+/// neighbour *and* from a work to the edge of the wall.
+///
+/// 40, and it is one token rather than two because it is one decision — a hang
+/// whose works sit 40 px apart and 24 px from the wall is a grid with a frame
+/// round it, which is the thing a gallery does not have. The arithmetic that
+/// spends it is [`crate::shelf::Grid`], and the property it buys is that
+/// **whenever the art is not capped the gutter is exactly `HANG`**, so there
+/// is no dead gutter at any width (`.interface-design/system.md` §7).
+///
+/// It replaces the shelf's `GRID_PADDING` of 24 and its 32 px art-to-art gap,
+/// both of which were constants a cell was measured against rather than a
+/// number the wall was hung by.
+pub const HANG: f32 = 40.0;
+/// Smallest edge a sleeve may be drawn at (logical px).
+///
+/// The column count's *ceiling* is whatever keeps the art at or above this, so
+/// a wide window gains a column only when the column it gains is still worth
+/// looking at.
+pub const ART_MIN: f32 = 240.0;
+/// The edge the column count aims for (logical px).
+///
+/// Not a size the art is ever drawn at — the art absorbs whatever the chosen
+/// column count leaves — but the size the *count* is chosen around, which is
+/// why it sits between [`ART_MIN`] and [`ART_MAX`] rather than at either end.
+pub const ART_TARGET: f32 = 272.0;
+/// Largest edge a sleeve may be drawn at (logical px).
+///
+/// `4/3 × ART_MIN` deliberately, so at every column-count change the art hands
+/// off from its largest to its smallest with no ambiguity: 320 → 240 at
+/// exactly one width per transition.
+///
+/// It is also **exactly [`crate::art::THUMB_PX`]**, which is the refusal *no
+/// artwork is ever drawn larger than its source* expressed as an equation
+/// rather than as a hope; `the_wall_never_draws_art_larger_than_its_source`
+/// asserts it.
+pub const ART_MAX: f32 = 320.0;
+/// Height of a wall label: two lines at [`SIZE_BODY`]'s leading, **36.4**.
+///
+/// The name `.interface-design/system.md` §8 gives [`CAPTION_H`], which is the
+/// same number in the module that draws it. Kept as an alias rather than
+/// collapsed, because the hang's row pitch is arithmetic about a *label* and
+/// the tile's reserved block is arithmetic about a *caption*, and they are the
+/// same 36.4 for a reason worth being able to state twice.
+pub const LABEL_H: f32 = CAPTION_H;
+
 // The radii come down across the board, because **an archive is rectilinear
 // and a sleeve has square corners** (`.interface-design/system.md` §6). Artwork
 // is radius 0 always, and every rule is too; what is left is barely rounded
@@ -1460,7 +1506,7 @@ pub fn tooltip(p: &Palette) -> container::Style {
 /// inside the depth strategy: no shadow (reserved for artwork), no accent (
 /// reserved for playback truth), no second surface step. It costs nothing in
 /// layout either — iced draws a border inside the widget's bounds, so the
-/// tile's [`crate::shelf::CELL_W`] pitch is untouched.
+/// hang's column pitch is untouched.
 pub const SELECTION_EDGE: f32 = 2.0;
 
 /// Height of a shelf tile's caption block: **exactly two lines** at
@@ -1473,8 +1519,8 @@ pub const SELECTION_EDGE: f32 = 2.0;
 /// most visible thing on screen after the art itself.
 ///
 /// Two lines is the budget the caption actually needs — a title (clipped at
-/// one line) over an `artist · year` line — and [`crate::shelf::CELL_H`]
-/// already has the room, so nothing about the tile pitch moves. It is the same
+/// one line) over an `artist · year` line — and [`crate::shelf::Grid`]'s row
+/// pitch already has the room, so nothing about the tile pitch moves. It is the same
 /// reserved-slot rule as [`SETTING_NOTE_H`], [`SIGNAL_W`] and [`STAMP_W`]:
 /// the space is always there and what varies is only what is in it.
 ///
@@ -2024,47 +2070,66 @@ mod tests {
     /// **The shelf virtualizes at every width the inspector can produce.**
     ///
     /// One of the four properties `docs/design/01-ux-audit-and-ia.md` §5 says
-    /// must not regress, and it is checked over the whole band rather than at
-    /// the two widths the shipped window happens to have: every window width
-    /// from the smallest iced will hand us to a wall-sized one, with the
-    /// inspector open and closed, must produce a real grid and a covered,
-    /// clamped visible range. The popover is deliberately absent from this
-    /// sweep — that is the *point* of it being an overlay: it produces no width
-    /// at all.
+    /// must not regress, and since ADR-0017 step 5 it is checked over the
+    /// **whole band at 1 px resolution** rather than at a 20 px stride: with a
+    /// fluid cell the column count and every sleeve's size change together,
+    /// the transitions are single-pixel events, and a coarse sweep can step
+    /// straight over one. Every window width from the smallest iced will hand
+    /// us to a wall-sized one, with the inspector open and closed, must
+    /// produce a real grid, a real hang, and a covered, clamped visible range.
+    ///
+    /// The popover is deliberately absent from this sweep — that is the
+    /// *point* of it being an overlay: it produces no width at all.
     #[test]
     fn the_shelf_virtualizes_at_every_width_the_inspector_can_produce() {
-        use crate::shelf as geometry;
+        use crate::shelf::Grid;
 
         const WINDOW_W: f32 = 1280.0;
-        assert_eq!(geometry::columns(WINDOW_W), 5, "the shipped shelf");
+        assert_eq!(Grid::new(WINDOW_W).columns, 4, "the shipped shelf");
         assert_eq!(
-            geometry::columns(WINDOW_W - PANEL_W),
+            Grid::new(WINDOW_W - PANEL_W).columns,
             3,
-            "the inspector open: (1280 - 340 - 48) / 240 = 3.7 -> 3"
+            "the inspector open: 940 px hangs three works of 254"
         );
 
-        // The band: every window width baz can be dragged to, both inspector
-        // states, both a full library and a single search result.
-        let mut window = 640.0_f32;
-        while window <= 2560.0 {
+        // The band: every window width baz can be dragged to, at 1 px, both
+        // inspector states, both a full library and a single search result.
+        for window in 640..=2560 {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a window width in pixels is far below f32's exact-integer range"
+            )]
+            let window = window as f32;
             for inspector in [0.0, PANEL_W] {
-                let width = window - inspector;
-                let cols = geometry::columns(width);
+                let hang = Grid::new(window - inspector);
                 assert!(
-                    cols >= 1,
+                    hang.columns >= 1,
                     "the grid collapsed at {window} px with {inspector} px of inspector"
                 );
+                assert!(
+                    hang.art > 0.0 && hang.art <= ART_MAX,
+                    "{window} px with {inspector} px of inspector: {} px of art",
+                    hang.art
+                );
+                assert!(
+                    hang.row_h > 0.0,
+                    "{window} px: a non-positive row pitch virtualizes nothing"
+                );
                 for albums in [1_usize, 97, 10_000] {
-                    let rows = geometry::total_rows(albums, cols);
-                    assert_eq!(rows, albums.div_ceil(cols));
-                    let (first, end) = geometry::visible_rows(0.0, 800.0, rows);
+                    let rows = hang.rows(albums);
+                    assert_eq!(rows, albums.div_ceil(hang.columns));
+                    let (first, end) = hang.visible_rows(0.0, 800.0, rows);
                     assert!(
                         first < end && end <= rows,
                         "empty or overrunning viewport at {window} px, {albums} albums"
                     );
+                    // A fling to the far end of a 10 000-album wall still
+                    // lands on a clamped range — the pitch is a float now, so
+                    // this is arithmetic worth checking rather than obvious.
+                    let (first, end) = hang.visible_rows(hang.spacer_height(rows), 800.0, rows);
+                    assert!(first <= end && end <= rows);
                 }
             }
-            window += 20.0;
         }
 
         // And the panel has to hold its own contents: the album panel insets

@@ -332,6 +332,25 @@ density step** (§7.1). The values below are `Balanced`, the default.
 puts every spare pixel into the artwork, so dead gutter is **0 px at every
 width**. That is the proportion fix, in one number.
 
+**Built** (ADR-0017 step 5). `crates/baz/src/shelf.rs`'s `Grid` is the
+arithmetic above; `theme.rs` carries `HANG` / `ART_MIN` / `ART_TARGET` /
+`ART_MAX`; the tile is sized by the grid it is handed and computes none of it.
+`the_hang_reproduces_the_specifications_table` asserts all nine rows of the
+table, and `the_gutter_is_the_hang_wherever_the_art_is_uncapped` asserts the
+0 px claim at **every width from 300 to 2560 at 1 px** — the transitions are
+single-pixel events, so a coarse sweep can step over one. The virtualization
+test moved to the same 1 px band. Measured on real pixels at 1280 the wall
+reads `40 | 270 | 40 | 270 | 40 | 270 | 40 | 270 | 40`, with **0 px
+unaccounted**. `ART_MAX` now equals `THUMB_PX`, which went 256 → 320 with the
+LRU re-derived to **384 entries** at the same ~150 MiB budget.
+
+Two things the shipped grid does that the table does not say. The art is
+**not** rounded to a whole pixel — at 1920 it is 273.33 and the rasterizer
+alternates 273/274 across the row — because rounding it is exactly what would
+put the difference back into the gutter. And the scrollbar now overlays the
+right *margin* rather than taking width from the block, which it can do
+without clipping anything: the margin is 40 and the bar's lane is 10.
+
 `ART_MAX = 4/3 × ART_MIN` deliberately, so at every column-count change the art
 hands off from its largest to its smallest with no ambiguity: 320 → 240 at
 exactly one width per transition.
