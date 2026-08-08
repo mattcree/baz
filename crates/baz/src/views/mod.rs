@@ -6,38 +6,41 @@
 //! - [`top_bar`] — the search well, the group-key row, and the quiet counts.
 //! - [`shelf`] — the wall: the shelved, virtualized album grid, its pinned
 //!   group headers, the index rail, its tiles and its empty states.
-//! - [`side_panel`] — the album inspector: header, edition selector, Play,
-//!   track list.
-//! - [`queue`] — the queue popover: what baz handed the engine, and where it
-//!   is in it.
+//! - [`album`] — the record's page: art, identity, `Play album`, the track
+//!   list and the condition report.
+//! - [`queue`] — the queue place: what baz handed the engine, and where it is
+//!   in it.
 //! - [`settings`] — the Settings place: the standing decisions, today
 //!   ReplayGain.
 //! - [`bottom_bar`] — now-playing, transport, the two timestamps, and the
 //!   needle flush on the window's bottom edge.
 //!
-//! They are the four kinds ADR-0016 names, and which kind a surface is decides
-//! what it may cost. [`top_bar`] and [`shelf`] compose the Library **place**,
-//! and [`settings`] is the other one — places fill the window and replace each
-//! other. [`side_panel`] is the Library's **inspector**, the sole tenant of the
-//! column beside the shelf at [`theme::PANEL_W`]; it is open exactly when an
-//! album is selected ([`crate::selection`]). [`queue`] is the **popover**,
-//! anchored to the bar, [`theme::POPOVER_W`] wide, taking no width from the
-//! shelf at all ([`crate::overlay`]). And [`bottom_bar`] is the **bar**, which
-//! is in every place and never moves.
+//! # There is one kind of surface now, and a bar
+//!
+//! ADR-0016 had four kinds — place, inspector, popover, bar. ADR-0022 deleted
+//! two of them: **every surface here except [`bottom_bar`] is a place, or part
+//! of one**. [`top_bar`] and [`shelf`] compose the Library; [`album`],
+//! [`queue`] and [`settings`] are the other three. Places fill the window and
+//! replace each other ([`crate::place`]), and [`bottom_bar`] is in every one of
+//! them and never moves.
+//!
+//! That is why [`place_header`] is shared rather than copied: three places draw
+//! the same strip, in the same geometry as the Library's [`top_bar`], because
+//! **the frame is the frame in every place** — navigating may not slide the
+//! content area by a pixel.
 //!
 //! Everything here is iced-specific and holds no state: each module exposes a
 //! `view` function that reads [`crate::app`]'s state (and [`crate::player`]'s
 //! render-ready readings) and returns an [`Element`]. Composition — which
-//! surfaces are on screen and in what arrangement — stays in `app.rs` with
-//! the state and the update loop; these modules only know how to draw one
-//! surface each. A layout or visual redesign rewrites these files and nothing
-//! else, which is the whole point of the split.
+//! surface is on screen — stays in `app.rs` with the state and the update loop;
+//! these modules only know how to draw one surface each. A layout or visual
+//! redesign rewrites these files and nothing else, which is the whole point of
+//! the split.
 //!
 //! Values, not layout, live in [`crate::theme`]: no view function here may
 //! carry a hardcoded color, size, or padding (ADR-0006 calls that a
 //! review-blocking defect). The few constants that *are* here are geometry a
-//! single surface owns — a fixed field width, a panel's inset — and each sits
-//! in the module that draws it.
+//! single surface owns, and each sits in the module that draws it.
 //!
 //! # `views::shelf` and `shelf`
 //!
@@ -47,27 +50,26 @@
 //! module keeps its place and its name; where a view file needs it, it is
 //! imported as `geometry` so the two never read as the same thing.
 
+pub(crate) mod album;
 pub(crate) mod bottom_bar;
 pub(crate) mod queue;
 pub(crate) mod settings;
 pub(crate) mod setup;
 pub(crate) mod shelf;
-pub(crate) mod side_panel;
 pub(crate) mod top_bar;
 
-use iced::widget::{Space, button, container, image as iced_image, mouse_area, text, tooltip};
+use iced::widget::{Space, button, column, container, horizontal_rule, row, text};
 use iced::{Color, Element, Length, alignment};
 
 use crate::app::Message;
-use crate::motion::{Control, Ink};
-use crate::{icon, theme, vm};
+use crate::{theme, vm};
 
 /// A `size`×`size` block filled with the album's deterministic two-color
 /// gradient (hash → HSL, see [`vm::gradient_colors`]) — a stand-in sleeve,
 /// square-cornered like the artwork it substitutes.
 ///
 /// Shared rather than owned by one surface: the same placeholder stands in
-/// for a missing sleeve on a tile and in the side panel, and a redesign that
+/// for a missing sleeve on a tile and on the record's page, and a redesign that
 /// changed one and not the other would be a bug.
 ///
 /// # It is quieter than a real cover, on purpose
@@ -109,72 +111,110 @@ pub(crate) fn gradient_block(album_id: u64, size: f32, shown: f32) -> Element<'s
         .into()
 }
 
-/// The ✕ that dismisses a layer: the close glyph in the same fixed square,
-/// and with the same chrome-free treatment, as the bottom bar's transport
-/// buttons ([`theme::transport`] — at rest, the glyph and nothing else).
+/// **The strip every place that is not the Library wears**: the way back, the
+/// place's name, and one quiet line saying what the place is or how to leave
+/// it.
 ///
-/// Shared by every surface that can be dismissed because a dismissal must look
-/// and land the same wherever it is — a close control that moved or changed
-/// size between the album inspector and the popover would be two controls, not
-/// one. `label` names what is being closed ("Close queue"), which is the
-/// tooltip and, iced 0.13 having no accessibility tree, the whole of the
-/// control's accessible name.
+/// It occupies the Library's top-bar geometry exactly — the same vertical
+/// padding, the same [`theme::HANG`] window gutter (law L1), the same hairline
+/// underneath — so that moving between places does not slide the content area
+/// by a pixel. **The frame is the frame in every place**, and with three places
+/// wearing it rather than one, that is a property worth having in one function
+/// instead of three copies that can drift.
 ///
-/// `message` is the layer's own dismissal, because there is one rule *per
-/// layer* rather than one rule: the inspector's ✕ closes the inspector, the
-/// popover's closes the popover, and neither can reach the other.
-///
-/// The tooltip opens *below* the button rather than above it: these sit in a
-/// surface's top row, where there is nothing above to open into.
-///
-/// `on` is the surface the ✕ stands on. An icon button's hover mark is an
-/// **opaque** pre-composite now rather than an alpha the renderer blends
-/// ([`theme::Palette::ink_over`]), so the one control that appears on two
-/// different planes — the inspector's panel and the popover's float — has to be
-/// told which one it is on.
-/// `control` is which ✕ this is, so the shell can tell the two apart and fade
-/// exactly the one under the pointer (ADR-0020 §2.1); `fade` is the layer's own
-/// arrival, 1 for a layer that is simply there.
-pub(crate) fn close_button(
-    on: iced::Color,
-    label: &'static str,
-    message: Message,
-    control: Control,
-    ink: Ink,
-    fade: f32,
-) -> Element<'static, Message> {
+/// **Back is a word, not a chevron.** baz draws its glyphs itself from a small
+/// deliberate set ([`crate::icon`]), and a back arrow would be a new one for a
+/// control that has a short and unambiguous name — the same argument that keeps
+/// `Settings` a word in the top bar it returns to. It sends
+/// [`Message::LeavePlace`], which is the message <kbd>Esc</kbd> sends, so the
+/// two are one press and the visible-control rule holds for every place.
+pub(crate) fn place_header(name: &'static str, note: &'static str) -> Element<'static, Message> {
     let room = theme::active();
-    let mark = container(
-        iced_image(icon::handle(icon::Glyph::Close))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(
-                theme::glyph_ink(true, false, ink.hover(control), ink.pressed(control)) * fade,
-            ),
+    let back = button(
+        // Centred in its own box, like `Settings` across the frame from it
+        // (law L3).
+        container(
+            text("‹ Library")
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
     )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(alignment::Horizontal::Center)
-    .align_y(alignment::Vertical::Center);
-    let named = tooltip(
-        button(mark)
-            .width(Length::Fixed(theme::TRANSPORT_HIT))
-            .height(Length::Fixed(theme::TRANSPORT_HIT))
-            .padding(0)
-            .style(move |_theme, status| {
-                theme::fade_button(&theme::transport(room, on, status), fade)
-            })
-            .on_press(message),
-        text(label)
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        tooltip::Position::Bottom,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room));
-    mouse_area(named)
-        .on_enter(Message::ControlEntered(control))
-        .on_exit(Message::ControlLeft(control))
-        .into()
+    // The same height as the top bar's `Settings`, which is the control this
+    // one swaps places with: the two strips are one frame, and a way-back that
+    // stood shorter than the control it replaced would make the header jump on
+    // every navigation.
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_SM))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press(Message::LeavePlace);
+    column![
+        container(
+            row![
+                back,
+                text(name)
+                    .size(theme::SIZE_EMPHASIS)
+                    .line_height(theme::LEADING_EMPHASIS)
+                    .font(theme::MEDIUM),
+                Space::with_width(Length::Fill),
+                text(note)
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper_faint)
+                    .wrapping(text::Wrapping::None),
+            ]
+            .spacing(theme::GAP_LG)
+            .align_y(iced::Alignment::Center),
+        )
+        .padding(theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)),
+        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
+    ]
+    .into()
+}
+
+/// **The one gutter a place's body hangs from** (law L1): [`theme::HANG`] on
+/// every edge, with the scrollbar's declared lane added to the right.
+///
+/// A place fills the window, so its content hangs from the same two lines the
+/// wall and both bars do — `x = HANG` and `x = W − HANG` — and from `y = HANG`,
+/// which is the free top a place has and a panel never did. `GAP_XL` is padding
+/// *inside* a panel and was never a window margin; spending it as one is how
+/// baz ended up with three of them.
+///
+/// The right edge carries [`theme::SCROLLBAR_LANE`] as well, and that is the
+/// one inset the law permits there: it is *declared* rather than absorbed, so a
+/// page long enough to scroll does not put its bar over the last character of
+/// every duration.
+pub(crate) fn place_pad() -> iced::Padding {
+    iced::Padding {
+        top: theme::HANG,
+        right: theme::HANG + theme::SCROLLBAR_LANE,
+        bottom: theme::HANG,
+        left: theme::HANG,
+    }
+}
+
+/// A block's name inside a place: a hairline, then the word in the room's
+/// quietest voice.
+///
+/// The one structural rule beyond the three `.interface-design/system.md` §2
+/// names, and it earns its place the way the Settings readout's does: it
+/// divides two kinds of content inside one column. Shared by the record page's
+/// `Tracks` and `Details` because a page whose two blocks named themselves
+/// differently would read as two surfaces.
+pub(crate) fn section_rule(name: &'static str) -> Element<'static, Message> {
+    let room = theme::active();
+    column![
+        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
+        text(theme::tracked(&name.to_uppercase()))
+            .size(theme::SIZE_HEADING)
+            .line_height(theme::LEADING_HEADING)
+            .font(theme::MEDIUM)
+            .color(room.paper_faint),
+    ]
+    .spacing(theme::GAP_SM)
+    .into()
 }

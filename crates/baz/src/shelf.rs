@@ -66,28 +66,16 @@
 //! to go and find the thing it just narrowed to. Reserving the full block
 //! leaves every result where its column is.
 //!
-//! # Holding the grid still under a double-click
+//! # What left with the inspector
 //!
-//! Clicking a tile opens the album inspector, which takes [`crate::theme::PANEL_W`]
-//! off the shelf and reflows the grid — four columns to three at the shipped
-//! window size, *and* every sleeve's size with them. Done immediately, that
-//! moves the tile out from under the pointer *between the two presses of a
-//! double-click*, and since the inspector's own footer advertises
-//! "double-click a tile to play", the gesture then fails silently: the second
-//! press lands on empty shelf, or on a different album.
-//!
-//! [`GridHold`] is the fix, and it is deliberately the smallest one that
-//! works: **the grid width in force** is pinned to what it was when the click
-//! landed, for [`DOUBLE_CLICK`] — the same window the double-click detector
-//! itself uses, because it is the same fact — and the reflow simply happens
-//! when the gesture can no longer be one. Every other reflow (a resize, a
-//! panel swap, closing the inspector from the keyboard) is untouched.
-//!
-//! It pins the *width* rather than the column count, which is what step 5
-//! changed about it and had to: with a fluid cell, holding five columns while
-//! the width moved would have held the count still and let every sleeve in
-//! those columns change size, which is the same tile moving under the same
-//! pointer by another route.
+//! `GridHold` used to live here: a tile click opened the album inspector, which
+//! took 340 px off the shelf and re-hung every sleeve *between the two presses
+//! of a double-click*, so the width in force was pinned for 400 ms while the
+//! gesture finished. ADR-0022 deleted the inspector, and with it the only thing
+//! in the product that could re-hang the wall in answer to a press — **the
+//! grid's width is a function of the window and nothing else now**. There is no
+//! reflow left to defer, so there is no hold, no `DOUBLE_CLICK` window and no
+//! clock ticking behind a gesture.
 //!
 //! # Density is the hang's four numbers, not a fifth number beside them
 //!
@@ -118,16 +106,6 @@ pub const OVERSCAN_ROWS: usize = 2;
 /// produces — it exists so the geometry is total rather than nearly total,
 /// and so a degenerate width yields a small wall instead of an inverted one.
 const ART_FLOOR: f32 = 1.0;
-
-/// Two presses on the same tile within this window play the album, and the
-/// grid holds its width for exactly as long (module docs).
-///
-/// One constant for both because they are one fact: the window in which a
-/// second press is still part of the first press's gesture. Two numbers here
-/// would be a bug waiting for somebody to change one of them — a hold shorter
-/// than the detector leaves the gap the reflow used to fall into, and a longer
-/// one delays a reflow nobody is still gesturing at.
-pub const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
 
 /// `floor(x + 0.5)` — half-up rounding, spelled out (module docs).
 fn round_half_up(value: f32) -> f32 {
@@ -704,70 +682,8 @@ impl Shelves {
     }
 }
 
-/// The grid width pinned across the reflow a tile click causes (module docs).
-///
-/// Pure state and pure arithmetic: it is *told* what time it is rather than
-/// asking, so the whole of the timing rule is unit-testable without a window
-/// and without a clock. The iced layer supplies the instant, ticks while a
-/// hold is live, and spends the answer on a layout.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct GridHold {
-    /// The width being held and the instant the hold expires. `None` is the
-    /// ordinary state: the grid follows its measured width.
-    held: Option<(f32, std::time::Instant)>,
-}
-
-impl GridHold {
-    /// Pin `width` until [`DOUBLE_CLICK`] after `now`.
-    ///
-    /// Re-holding replaces the window rather than extending a stale one, so a
-    /// second click's gesture gets a full window of its own — which is what
-    /// makes a *triple* click (play, then a third press) behave like the
-    /// double-click before it rather than like a reflow.
-    pub fn hold(&mut self, width: f32, now: std::time::Instant) {
-        self.held = Some((width, now + DOUBLE_CLICK));
-    }
-
-    /// Whether a hold is still recorded. The app ticks only while one is, so
-    /// this is what keeps a subscription alive for exactly as long as it has
-    /// something to do.
-    #[must_use]
-    pub fn holding(self) -> bool {
-        self.held.is_some()
-    }
-
-    /// Drop the hold if its window has passed, reporting whether anything
-    /// changed — the caller re-lays the grid out only when it did.
-    pub fn expire(&mut self, now: std::time::Instant) -> bool {
-        if self.held.is_some_and(|(_, until)| now >= until) {
-            self.held = None;
-            return true;
-        }
-        false
-    }
-
-    /// Drop the hold outright: the gesture ended some other way, and the
-    /// grid's real width is the honest answer again.
-    pub fn release(&mut self) {
-        self.held = None;
-    }
-
-    /// The width to lay the grid out with: the held one while a hold stands,
-    /// else the `measured` one the viewport gives.
-    ///
-    /// Time-free by construction. A hold that has expired is removed by
-    /// [`Self::expire`], never silently ignored here, so there is exactly one
-    /// place the clock is consulted and the layout is not it.
-    #[must_use]
-    pub fn width(self, measured: f32) -> f32 {
-        self.held.map_or(measured, |(width, _)| width)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
     use super::*;
 
     /// Every grid width the shipped window and the inspector can produce
@@ -1125,11 +1041,13 @@ mod tests {
             );
             previous = columns;
         }
-        // The shipped window, with and without the inspector.
+        // The shipped window, and the wall with the index rail's lane off it —
+        // the two widths the collection is actually hung at (ADR-0022 left the
+        // wall's width a function of the window and the rail alone).
         assert_eq!(Grid::new(1280.0, Density::Balanced).columns, 4);
         assert_eq!(
-            Grid::new(1280.0 - crate::theme::PANEL_W, Density::Balanced).columns,
-            3
+            Grid::new(1280.0 - crate::theme::INDEX_LANE_W, Density::Balanced).columns,
+            4
         );
     }
 
@@ -1176,87 +1094,6 @@ mod tests {
                 grid.block_width()
             );
         }
-    }
-
-    /// The grid hold, as a timing rule: pinned for [`DOUBLE_CLICK`], and the
-    /// measured width again the moment the gesture can no longer be one.
-    #[test]
-    fn the_grid_width_is_held_for_exactly_the_double_click_window() {
-        let start = Instant::now();
-        let mut hold = GridHold::default();
-
-        // At rest the grid simply follows what it measured.
-        assert!(!hold.holding());
-        assert!((hold.width(940.0) - 940.0).abs() < f32::EPSILON);
-        assert!(!hold.expire(start), "nothing held, nothing to expire");
-
-        // A click on a four-column shelf that opens the inspector: the shelf
-        // now measures 940, and the grid must keep laying out 1280 — the same
-        // count *and* the same sleeve size.
-        hold.hold(1280.0, start);
-        assert!(hold.holding());
-        assert!(
-            (hold.width(940.0) - 1280.0).abs() < f32::EPSILON,
-            "the tile must not move under the pointer"
-        );
-        assert_eq!(Grid::new(hold.width(940.0), Density::Balanced).columns, 4);
-
-        // Still held one millisecond before the window closes…
-        let a_moment_early = DOUBLE_CLICK
-            .checked_sub(std::time::Duration::from_millis(1))
-            .expect("the hold window is longer than a millisecond");
-        assert!(!hold.expire(start + a_moment_early));
-        assert!((hold.width(940.0) - 1280.0).abs() < f32::EPSILON);
-
-        // …and released exactly at it, which is the first instant a second
-        // press could no longer be part of the same double-click.
-        assert!(hold.expire(start + DOUBLE_CLICK));
-        assert!(!hold.holding());
-        assert!(
-            (hold.width(940.0) - 940.0).abs() < f32::EPSILON,
-            "the reflow lands once the gesture ends"
-        );
-        assert_eq!(Grid::new(hold.width(940.0), Density::Balanced).columns, 3);
-        // Expiring an expired hold is a no-op, so the tick can be coarse.
-        assert!(!hold.expire(start + DOUBLE_CLICK));
-    }
-
-    /// The two ways a hold ends other than by timing out.
-    #[test]
-    fn a_hold_can_be_replaced_or_dropped_outright() {
-        let start = Instant::now();
-        let mut hold = GridHold::default();
-
-        // A second click re-holds: the window is the new click's, not the
-        // remains of the old one's.
-        hold.hold(1280.0, start);
-        hold.hold(1280.0, start + DOUBLE_CLICK);
-        assert!(
-            !hold.expire(start + DOUBLE_CLICK),
-            "re-holding starts a fresh window rather than inheriting a spent one"
-        );
-        assert!((hold.width(940.0) - 1280.0).abs() < f32::EPSILON);
-        assert!(hold.expire(start + DOUBLE_CLICK + DOUBLE_CLICK));
-
-        // Released outright: the measured width wins immediately.
-        hold.hold(1280.0, start);
-        hold.release();
-        assert!(!hold.holding());
-        assert!((hold.width(760.0) - 760.0).abs() < f32::EPSILON);
-    }
-
-    /// The hold window and the double-click window are the same number,
-    /// because they are the same fact (module docs).
-    #[test]
-    fn the_hold_window_is_the_double_click_window() {
-        assert_eq!(DOUBLE_CLICK, std::time::Duration::from_millis(400));
-        let start = Instant::now();
-        let mut hold = GridHold::default();
-        hold.hold(1280.0, start);
-        // Held for every instant a second press still counts as a double
-        // click, and for no instant after.
-        assert!(!hold.expire(start + DOUBLE_CLICK / 2));
-        assert!(hold.expire(start + DOUBLE_CLICK));
     }
 
     #[test]

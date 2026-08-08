@@ -37,6 +37,7 @@ use iced::{Color, Element, Length, alignment};
 
 use crate::app::Message;
 use crate::motion::{Control, Ink};
+use crate::place::Place;
 use crate::player::PlayerState;
 use crate::{groove, icon, needle, player, theme};
 
@@ -44,13 +45,20 @@ use crate::{groove, icon, needle, player, theme};
 /// timestamps on the left, the transport in the middle, quiet status and the
 /// volume on the right — with the needle under all three.
 ///
-/// **The bar is 57 px and the needle is 2** (ADR-0017 step 10), where the bar
-/// alone was 105. The seek row is not deleted so much as *moved*: its job is
-/// stated better by a line that also says what the queue is shaped like, and
-/// `docs/REFUSALS.md` permits exactly that one move on this bar — a slot may be
-/// replaced by a better statement of the same fact, and none may be removed for
-/// tidiness. Every other slot is still here, and the two timestamps came with
-/// it into the left zone.
+/// **The bar is 81 px and the needle is 2**, where the bar alone was 105 before
+/// the needle and 57 after it. The seek row is not deleted so much as *moved*:
+/// its job is stated better by a line that also says what the queue is shaped
+/// like, and `docs/REFUSALS.md` permits exactly that one move on this bar — a
+/// slot may be replaced by a better statement of the same fact, and none may be
+/// removed for tidiness.
+///
+/// The band went back up because 57 was correct in every part and wrong as a
+/// proportion: the left zone's three line boxes are 56 px and the band was 56,
+/// so the type touched both edges of the bar it sits in. [`theme::BAR_CONTENT_H`]
+/// carries the re-derivation — two [`theme::HANG`]s, led by
+/// [`theme::BAR_ZONE_LEAD`] above and below the type and by [`theme::BAR_LEAD`]
+/// above and below the transport, both of them named tokens rather than
+/// pixels chosen to look right.
 ///
 /// The two flanking zones are equal-weight fills, which is what keeps the
 /// centre column optically centred no matter how long a track title runs; both
@@ -76,7 +84,7 @@ use crate::{groove, icon, needle, player, theme};
 /// leftward into the gutter instead of shifting anything beside it. Every
 /// glyph, position, and enabled-state comes from [`PlayerState`] —
 /// event-derived, tested in `player.rs`.
-pub(crate) fn view(player: &PlayerState, queue_open: bool, ink: Ink) -> Element<'_, Message> {
+pub(crate) fn view(player: &PlayerState, place: Place, ink: Ink) -> Element<'_, Message> {
     let room = theme::active();
     let mut status = row![]
         .spacing(theme::GAP_SM)
@@ -91,7 +99,7 @@ pub(crate) fn view(player: &PlayerState, queue_open: bool, ink: Ink) -> Element<
     }
     status = status.push(signal_path(player)).push(volume(player, ink));
     let bar = row![
-        container(now_playing_block(player, queue_open))
+        container(now_playing_block(player, place))
             .width(Length::Fill)
             .clip(true),
         transport_row(player, ink),
@@ -211,16 +219,21 @@ fn tip_layer(preview: Option<player::Preview>) -> Element<'static, Message> {
 /// This is the *place* a listener looks for what is coming, which is the whole
 /// argument for moving the queue's door here from the top bar.
 ///
-/// **The now-playing text itself is deliberately not the control.** The design
-/// spec offered the whole block as a press target; the prior-art study then
-/// found that the most-supported affordance in the field — *get back to what is
-/// playing*, which scrolls the shelf to the sounding album — is the gesture
-/// every other product spends a click on the now-playing block for
-/// (`docs/design/03-interface-prior-art.md` R3). Two surfaces wanted one
-/// target, so the popover takes the labelled control beside the text and the
-/// text is left free for the one that has no other home. Resolved on purpose
-/// rather than by whichever landed first.
-fn now_playing_block(player: &PlayerState, open: bool) -> Element<'_, Message> {
+/// **The now-playing text is the control that takes you to the record**, and
+/// that is the reservation ADR-0016 made being spent.
+///
+/// The prior-art study's R3 is the most-supported affordance in the field —
+/// *get back to what is playing* — and every product it surveyed spends the
+/// now-playing block's press on it. baz had none. ADR-0016 left the text
+/// deliberately free for it and gave the queue the labelled control beside it;
+/// ADR-0022 removed the last persistent surface that knew which record was
+/// under the lamp, which turned R3 from missing into acute, so the text is now
+/// the door to the sounding record's page.
+///
+/// Two doors, side by side, both labelled, two subjects: **the text is the
+/// record, the word `Queue` is the queue.** Neither is a bare gesture and
+/// neither is an icon.
+fn now_playing_block(player: &PlayerState, place: Place) -> Element<'_, Message> {
     let stamps = player.stamps();
     // **The two timestamps moved here** (ADR-0017 §1.1), into the same
     // [`theme::STAMP_W`] slots they held when they flanked a groove — elapsed
@@ -236,7 +249,7 @@ fn now_playing_block(player: &PlayerState, open: bool) -> Element<'_, Message> {
         theme::active().paper_faint
     };
     row![
-        container(now_playing_line(player))
+        container(back_to_playing(player))
             .width(Length::Fill)
             .clip(true),
         stamp(
@@ -249,7 +262,7 @@ fn now_playing_block(player: &PlayerState, open: bool) -> Element<'_, Message> {
             theme::active().paper_faint,
             alignment::Horizontal::Left,
         ),
-        queue_button(player, open),
+        queue_button(player, place == Place::Queue),
     ]
     .spacing(theme::GAP_SM)
     .align_y(iced::Alignment::Center)
@@ -366,6 +379,59 @@ fn queue_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
     .into()
 }
 
+/// **The route back to what is playing**: the now-playing lines, wrapped in the
+/// press that opens the sounding record's page.
+///
+/// `docs/design/03-interface-prior-art.md` R3 — *get back to what is playing* —
+/// is band A in the study, every product surveyed spends an affordance on it,
+/// and baz had none. With no persistent inspector there is nothing else on
+/// screen that knows which record is under the lamp, so the block that names it
+/// is the control that takes you to it.
+///
+/// Three properties, each of them the accessibility refusal being honoured:
+///
+/// - **It is visible and it is labelled.** The label is the track title and the
+///   artist — the name of the thing the press leads to — and the tooltip is the
+///   verb, which is the whole of an accessible name in a toolkit that publishes
+///   no tree.
+/// - **It is offered only when it can act.** Nothing sounding means no press,
+///   for the reason `Play album` and the queue's rows are inert without an
+///   engine: a control that cannot act must not pretend it can. The lines are
+///   then returned bare, and because the button carries no padding and no
+///   border ([`theme::now_playing_text`]) the two states are the same pixels.
+/// - **It is bigger than the floor.** The block is [`theme::NOW_PLAYING_H`] 56
+///   tall against law L7's [`theme::TRANSPORT_HIT`] 32 — the law sets one
+///   height for a control that is a *box*, and a control that is a block of
+///   type is bounded below by the same number rather than exempt from it. The
+///   assertion is in this module's tests.
+fn back_to_playing(player: &PlayerState) -> Element<'_, Message> {
+    let room = theme::active();
+    let lines = now_playing_line(player);
+    if player.playing_album().is_none() {
+        return lines;
+    }
+    // There is no lit state, where the `Queue` door beside it has one: pressing
+    // this while already on that record's page is `Place::album`'s toggle
+    // taking you back to the wall, and a now-playing block that lit up would be
+    // the bar claiming a state about the *record* rather than about the door.
+    // The page's own `‹ Library` is the labelled way out.
+    tooltip(
+        button(lines)
+            .width(Length::Fill)
+            .padding(0)
+            .style(move |_theme, status| theme::now_playing_text(room, status))
+            .on_press(Message::ShowPlayingAlbum),
+        text("Go to the record that is playing")
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Top,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
+    .into()
+}
+
 /// The now-playing lines proper: the current track as a
 /// title-over-artist-over-continuation stack, or the engine's plainly-stated
 /// absence as quiet status text.
@@ -409,19 +475,18 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
             .wrapping(text::Wrapping::None)
             .into();
     };
-    // Three lanes — 20 · 16 · 20 — so the **artist's line box is the block's
-    // exact middle** and centring the block centres the zone's own line on the
-    // bar's (law L4). The artist's lane is reserved whether or not the tags
-    // carry one, for the same reason the continuation's is: a track without an
-    // artist must not shift the two lines around it.
+    // Three lanes — 20 · 16 · 20 = [`theme::NOW_PLAYING_H`] — so the **artist's
+    // line box is the block's exact middle** and centring the block centres the
+    // zone's own line on the bar's (law L4). The artist's lane is reserved
+    // whether or not the tags carry one, for the same reason the continuation's
+    // is: a track without an artist must not shift the two lines around it.
     //
-    // **And there is no gap between them any more.** 20 + 16 + 20 is exactly
-    // [`theme::BAR_CONTENT_H`] at 56, so the `GAP_XXS` that used to sit between
-    // the lanes has nowhere to go — and it was never buying anything a line box
-    // does not already carry: `LINE_BODY` 20 around a 13 px face is 7 px of
-    // leading, which puts the block's first ink ~3.5 px below the hairline and
-    // its last ~4.5 px above the needle. One fewer user of the lattice's one
-    // named exception (law L2).
+    // **And there is no gap between them**, which is not tightness: `LINE_BODY`
+    // 20 around a 13 px face already carries 3.5 px of leading a side, and a
+    // `GAP_XXS` here would be a fourth user of the lattice's one named
+    // exception (law L2) buying what the line boxes carry. The air the block
+    // needs is taken *outside* it, by [`theme::BAR_ZONE_LEAD`] — which is the
+    // whole of what the bar's re-derivation from 56 to 80 changed.
     let lines = column![
         container(
             text(now.title.as_str())
@@ -444,7 +509,12 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
         .height(Length::Fixed(theme::LINE_META)),
         continuation_lane(player),
     ];
-    lines.into()
+    // The block is [`theme::NOW_PLAYING_H`] in every state, which is the number
+    // the whole band is derived from — say so here rather than letting it fall
+    // out of three line boxes that a future edit could change one of.
+    container(lines)
+        .height(Length::Fixed(theme::NOW_PLAYING_H))
+        .into()
 }
 
 /// The ambient continuation's lane: `then 2 albums · 1:58:00 left` in the
@@ -568,9 +638,17 @@ fn transport_row(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
         ),
     ]
     .spacing(theme::GAP_SM);
+    // **The zone states the band's lead rather than borrowing the row's
+    // centring** (law L4). `BAR_LEAD` is derived — whatever is left of
+    // [`theme::BAR_CONTENT_H`] once the transport has taken its 32, halved — so
+    // this padding cannot drift from the band, and the transport's centre line
+    // *is* the band's mid-line by construction rather than by an assertion
+    // somebody has to keep re-checking.
     container(transport)
         .width(Length::Fixed(theme::TRANSPORT_W))
+        .padding(theme::pad(theme::BAR_LEAD, 0.0))
         .align_x(alignment::Horizontal::Center)
+        .align_y(alignment::Vertical::Center)
         .into()
 }
 
@@ -798,24 +876,23 @@ mod tests {
         const { assert!(theme::TRANSPORT_W + theme::VOLUME_BLOCK_W + theme::SIGNAL_W < 760.0) }
     }
 
-    /// **Law L4 — one centre line per bar**, re-derived at 58 px rather than
+    /// **Law L4 — one centre line per bar**, re-derived at 80 px rather than
     /// nudged, and asserted off the geometry the view composes rather than off
     /// a screenshot.
     ///
     /// The audit measured seven mark-lines spanning 787 → 837 in a 102 px band
     /// whose own mid-line at 809.5 carried nothing: the zones were centred as
-    /// *blocks*, and the blocks are different heights. Step 10 re-lays the bar
-    /// around the needle's absence of a seek row, so every one of these numbers
-    /// is derived again from the band rather than carried over — and the band
-    /// went from 96 to **56**, which is the change that could most easily have
-    /// put the line back where the audit found it.
+    /// *blocks*, and the blocks are different heights. The band has been
+    /// re-derived twice since — down to 56 when the needle took the seek row's
+    /// job, and back up to **80** when 56 turned out to be the same number as
+    /// the left zone's own height, so the type touched both edges of the bar —
+    /// and every number below is derived again from the band each time rather
+    /// than carried over.
     ///
-    /// Every claim below is the arithmetic that stops that, and each one names
-    /// the mark it is about. The spread is **0**, against the law's ceiling
-    /// of 2.
+    /// The spread is **0**, against the law's ceiling of 2.
     #[test]
     fn every_mark_in_the_bar_sits_on_the_bars_one_centre_line() {
-        /// The band's own mid-line — 28.
+        /// The band's own mid-line — 40.
         const MID: f32 = theme::BAR_CONTENT_H / 2.0;
         /// The transport's glyph centres, from the top of the band.
         const TRANSPORT_CENTRE: f32 = theme::BAR_LEAD + theme::TRANSPORT_HIT / 2.0;
@@ -823,18 +900,18 @@ mod tests {
         /// itself centred in the band.
         const VOLUME_RAIL_CENTRE: f32 = theme::VOLUME_ROW_H / 2.0;
         /// The left zone's middle lane — the artist's line box — from the top
-        /// of a zone that fills the band exactly.
-        const ARTIST_CENTRE: f32 = theme::LINE_BODY + theme::LINE_META / 2.0;
+        /// of the band: the zone's lead, then the title's lane, then half the
+        /// artist's.
+        const ARTIST_CENTRE: f32 = theme::BAR_ZONE_LEAD + theme::LINE_BODY + theme::LINE_META / 2.0;
         /// A timestamp's ink centre: one line box, centred in the same band.
         const STAMP_CENTRE: f32 = MID;
-        /// The left zone's three stacked line boxes.
-        const LEFT_ZONE_H: f32 = theme::LINE_BODY + theme::LINE_META + theme::CONTINUATION_H;
 
-        // 1. The band's mid-line **is** the transport's centre line: the band
-        //    reserves `BAR_LEAD` above the row and the same below it, where it
-        //    used to spend that lane on a gap and a groove.
+        // 1. The band's mid-line **is** the transport's centre line. `BAR_LEAD`
+        //    is derived from the band rather than chosen, so this cannot drift:
+        //    it is (80 − 32) / 2 = `GAP_XL` 24, and the transport row states it
+        //    as padding rather than borrowing the row's centring.
         const { assert!(TRANSPORT_CENTRE == MID) }
-        const { assert!(theme::BAR_LEAD == theme::GAP_MD) }
+        const { assert!(theme::BAR_LEAD == theme::GAP_XL) }
         const { assert!(theme::BAR_CONTENT_H == 2.0 * theme::BAR_LEAD + theme::TRANSPORT_HIT) }
         // 2. The volume block is one control height with the fader's hit band
         //    centred in it, so centring the block centres the **rail** — the
@@ -843,12 +920,18 @@ mod tests {
         const { assert!(VOLUME_RAIL_CENTRE == theme::VOLUME_ROW_H / 2.0) }
         const { assert!(theme::VOLUME_ROW_H == theme::TRANSPORT_HIT) }
         const { assert!(theme::VOLUME_HIT < theme::VOLUME_ROW_H) }
-        // 3. The left zone's three lanes fill the band exactly, so its middle
-        //    lane's centre *is* the band's centre. This is the assertion that
-        //    survived the bar losing 48 px: 20 · 16 · 20 = 56, with the gaps
-        //    between the lanes deleted rather than the lanes.
+        // 3. The left zone's three lanes are symmetric about the middle one and
+        //    are led equally above and below, so its middle lane's centre *is*
+        //    the band's centre. This is the assertion the re-derivation to 80
+        //    turns on: the block is 56 and the lead is 12 a side, where at 56
+        //    the block filled the band and the two were the same number.
         const { assert!(ARTIST_CENTRE == MID) }
-        const { assert!(LEFT_ZONE_H == theme::BAR_CONTENT_H) }
+        const {
+            assert!(
+                theme::NOW_PLAYING_H == theme::LINE_BODY + theme::LINE_META + theme::CONTINUATION_H
+            );
+        }
+        const { assert!(theme::BAR_CONTENT_H == theme::NOW_PLAYING_H + 2.0 * theme::BAR_ZONE_LEAD) }
         const { assert!(theme::CONTINUATION_H == theme::LINE_BODY) }
         // 4. The two timestamps are one line box centred in the band, so their
         //    ink is on the line rather than hanging off a groove that no longer
@@ -858,40 +941,87 @@ mod tests {
         // 5. There is no vertical padding left to be asymmetric: the band is
         //    the whole bar, so the hairline is the only thing above the line's
         //    own arithmetic and it is 1 px on both readings.
-        const { assert!(theme::BAR_CONTENT_H == 56.0) }
-        // 6. Every zone fits inside the band, or the band would not be what
-        //    sets the line.
-        const { assert!(theme::VOLUME_ROW_H <= theme::BAR_CONTENT_H) }
-        const { assert!(theme::TRANSPORT_HIT <= theme::BAR_CONTENT_H) }
+        const { assert!(theme::BAR_CONTENT_H == 80.0) }
+        // 6. Every zone fits inside the band with air to spare, or the band
+        //    would not be what sets the line. **This is the proportion the
+        //    owner's "too short" was about**: at 56 the left zone's `<=` was an
+        //    equality and there was no air at all.
+        const { assert!(theme::NOW_PLAYING_H < theme::BAR_CONTENT_H) }
+        const { assert!(theme::VOLUME_ROW_H < theme::BAR_CONTENT_H) }
+        const { assert!(theme::TRANSPORT_HIT < theme::BAR_CONTENT_H) }
     }
 
-    /// **The needle costs the collection 2 px and takes its aim out of the
-    /// bar's own empty lane** — the whole bargain of ADR-0017 §1.1, as
-    /// arithmetic.
+    /// **The band is derived from what it must hold, plus a stated lead** —
+    /// the breathing rule, and where it lands against the window.
     ///
-    /// The bar gave up 48 px of band and the needle took 2 back, so the wall
-    /// gains **46**. The concession is the other direction: the critique's
-    /// bottom furniture is ~32 px and ours is 59, and the 27 px difference buys
-    /// Previous · Play/Pause · Next a pointer.
+    /// The owner's reading was *"proportion is becoming an issue e.g. bottom
+    /// bar is too short"*, and the arithmetic agreed: the left zone's three
+    /// line boxes are 56 px and the band was 56, so the type filled the bar
+    /// edge to edge.
+    ///
+    /// The lane count was re-argued before the height was. **Three lanes
+    /// stay**: the continuation (`then 2 albums · 1:58:00 left`) earns its rung
+    /// because ADR-0022 made the queue a *place* — reading what is next used to
+    /// cost a popover that reflowed nothing and now costs leaving the wall — so
+    /// the ambient line is the only free reading of the queue baz has, and it
+    /// became more valuable at exactly the moment the bar became shorter.
+    ///
+    /// Then the height follows from the content and a **named gap** on each
+    /// side. Not a ratio: a constant ink-to-band ratio is not reachable on the
+    /// 4 px lattice for two bands of different content heights, and a lead off
+    /// the lattice is law L2 broken to make a proportion true.
     #[test]
-    fn the_bottom_edge_costs_fifty_nine_pixels_and_the_wall_gets_forty_six_back() {
-        /// The bar as the composition audit measured it: `2 × (GAP_SM + 24) +
-        /// 32` of band, `2 × GAP_XS` of padding, and a hairline.
+    fn the_band_is_its_content_plus_a_stated_lead_and_lands_on_two_hangs() {
+        /// The bar as the composition audit measured it, before the needle.
         const WAS: f32 = 2.0 * (theme::GAP_SM + 24.0) + theme::TRANSPORT_HIT + 2.0 * 4.0 + 1.0;
-        /// What the window's bottom edge costs now.
+        /// What the window's bottom edge cost at the needle's 57 px bar.
+        const SHORT: f32 = 56.0 + 1.0 + theme::NEEDLE_H;
+        /// What it costs now.
         const NOW: f32 = theme::BAR_CONTENT_H + 1.0 + theme::NEEDLE_H;
 
         const { assert!(WAS == 105.0) }
-        const { assert!(NOW == 59.0) }
-        const { assert!(WAS - NOW == 46.0) }
-        // The critique's number, and the price of keeping skip reachable.
-        const { assert!(NOW - 32.0 == 27.0) }
-        // At 1280 × 860 the collection's share goes from 81.6 % to 86.9 %.
-        const { assert!(NOW < 0.07 * 860.0) }
-        // And the needle's aiming band is entirely inside the bar's bottom
-        // lane, which is empty recess — so claiming height out of layout can
-        // never take a press meant for a control.
+        const { assert!(SHORT == 59.0) }
+        const { assert!(NOW == 83.0) }
+
+        // **The band is two hangs**, which is why this height and not the 72
+        // one rung below it: `HANG` is the product's one structural unit — the
+        // window gutter, the wall label's height, the shelf header's band — so
+        // the bar is measured in the same unit as the collection above it
+        // rather than in a number of its own, and *both* of its leads come out
+        // as named tokens rather than as pixels chosen to look right.
+        const { assert!(theme::BAR_CONTENT_H == 2.0 * theme::HANG) }
+        const { assert!(theme::BAR_ZONE_LEAD == theme::GAP_MD) }
+        const { assert!(theme::BAR_LEAD == theme::GAP_XL) }
+        // The lead is a named gap, and it is one rung above the top bar's,
+        // because a hit box carries its own internal padding and a stack of
+        // line boxes carries only its leading.
+        const { assert!(theme::TOP_BAR_PAD_V == theme::GAP_SM) }
+        const { assert!(theme::BAR_ZONE_LEAD > theme::TOP_BAR_PAD_V) }
+
+        // Where it lands as a fraction of the window: 9.7 % at 860 and 7.7 % at
+        // 1080, against 12.2 % before the needle and 6.9 % at 57. The wall
+        // gained 46 px from the needle's work and gives 24 of them back — the
+        // minimum that buys real air on the lattice, since the next step down
+        // (72, an 8 px lead) is defensible and the one below it (64, a 4 px
+        // lead) is not air at all.
+        const { assert!(NOW < 0.10 * 860.0) }
+        const { assert!(NOW < 0.08 * 1080.0) }
+        const { assert!(WAS - NOW == 22.0) }
+        const { assert!(NOW - SHORT == 24.0) }
+        // The concession to the critique's ~32 px of bottom furniture, which is
+        // what keeps Previous · Play/Pause · Next pointer-reachable.
+        const { assert!(NOW - 32.0 == 51.0) }
+        // And the needle's aiming band is still entirely inside the bar's
+        // bottom lane, which is empty recess — so claiming height out of layout
+        // can never take a press meant for a control. The lane grew, so the
+        // bound got looser rather than tighter.
         const { assert!(theme::NEEDLE_HIT <= theme::BAR_LEAD) }
+        // **81 is reachable and 80 was never going to be**: a bar is
+        // `2ℓ + TRANSPORT_HIT + 1`, which is odd for every integer lead —
+        // the hairline is odd and everything else is doubled. Stated as the
+        // parity of the band rather than of the bar, so no cast is needed.
+        const { assert!(theme::BAR_CONTENT_H == 2.0 * theme::BAR_LEAD + theme::TRANSPORT_HIT) }
+        const { assert!(theme::BAR_LEAD + theme::BAR_LEAD == theme::BAR_CONTENT_H - 32.0) }
     }
 
     /// Every glyph the transport row can draw is the same sprite square in the
@@ -964,11 +1094,13 @@ mod tests {
         const LEFT_H: f32 = theme::LINE_BODY + theme::LINE_META + theme::CONTINUATION_H;
 
         const { assert!(TITLE_LANE > 200.0) }
-        // The zone is exactly the bar's content band *with the third line in
-        // it*, so neither the control's padding nor the continuation nor a
-        // stamp can be what sets the bar's height, and the zone's middle lane
-        // is the bar's centre line (law L4).
-        const { assert!(LEFT_H == theme::BAR_CONTENT_H) }
+        // The zone is the bar's content band **less one lead a side**, so
+        // neither the control's padding nor the continuation nor a stamp can be
+        // what sets the bar's height, and the zone's middle lane is the bar's
+        // centre line (law L4). It used to be *exactly* the band, which is the
+        // proportion this bar was re-derived to fix.
+        const { assert!(LEFT_H == theme::NOW_PLAYING_H) }
+        const { assert!(LEFT_H + 2.0 * theme::BAR_ZONE_LEAD == theme::BAR_CONTENT_H) }
         // **The stack is symmetric about its middle lane**: the title's lane
         // and the continuation's are the same height, so the artist's line box
         // is the block's exact centre. Without this the middle line sits low
@@ -980,6 +1112,13 @@ mod tests {
         // A stamp is one line box, so it centres on the band's line rather than
         // hanging below it the way it did beside the groove.
         const { assert!(theme::STAMP_W > 0.0 && theme::LINE_META <= theme::BAR_CONTENT_H) }
+        // **The now-playing block is a pointer target now** — the route back to
+        // the record that is sounding (R3) — and law L7's floor holds for it:
+        // the law sets one height for a control that is a *box*, and a control
+        // that is a block of type is bounded below by the same number rather
+        // than exempt from it. 56 against 32, with no padding and no border, so
+        // becoming a control moved nothing.
+        const { assert!(theme::NOW_PLAYING_H >= theme::TRANSPORT_HIT) }
 
         let mut player = PlayerState::new(Availability::Ready);
         // Nothing queued and nothing playing: neither the count nor the

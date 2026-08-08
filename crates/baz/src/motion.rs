@@ -2,8 +2,9 @@
 //! it (ADR-0020).
 //!
 //! ADR-0006 layer 1 — pure, iced-free, unit-tested — and shaped deliberately
-//! like [`crate::shelf::GridHold`], which is this codebase's existing answer to
-//! "a rule that needs a clock". The whole rule is arithmetic over an [`Instant`]
+//! like `shelf::GridHold` was — this codebase's first answer to "a rule that
+//! needs a clock", and one ADR-0022 deleted along with the reflow it deferred.
+//! The pattern outlived it. The whole rule is arithmetic over an [`Instant`]
 //! the caller supplies, so every one of it can be exercised without a window and
 //! without waiting.
 //!
@@ -17,7 +18,7 @@
 //!
 //! That sentence is true of an *unconditional* subscription and false of a
 //! **bounded** one, and the difference inverts the conclusion. baz already
-//! shipped the bounded pattern twice in `app.rs` — [`crate::shelf::GridHold`]'s
+//! shipped the bounded pattern twice in `app.rs` — the grid hold's
 //! `time::every` guard, and a `window::frames()` subscription dropped once
 //! startup is logged — so the mechanism was never missing; the specification
 //! mis-stated what it would cost and three documents inherited the error.
@@ -63,21 +64,23 @@ pub const TICK: Duration = Duration::from_millis(8);
 
 /// An icon button's ink fade: **90 ms** (ADR-0020 §2.1).
 pub const INK: Duration = Duration::from_millis(90);
-/// The queue popover's arrival — the fade and the 8 px slide together, one
-/// tween: **140 ms** (ADR-0020 §2.2).
-pub const POPOVER: Duration = Duration::from_millis(140);
-/// How far the queue popover rises as it arrives (logical px, ADR-0020 §2.2).
-///
-/// It rises *toward* its resting place from 8 px below it and stops there, so
-/// the popover's resting geometry is the geometry it settles at and no
-/// intermediate frame is above it. The slide is vertical only: the popover's
-/// right edge is [`crate::theme::GAP_LG`] from the window's in every frame of
-/// the flight, so nothing it is aligned with moves under it.
-pub const POPOVER_RISE: f32 = 8.0;
 /// A shelf tile's hover rule: **90 ms** (ADR-0020 §2.3).
+///
+/// # Two of ADR-0020's five have no subject any more
+///
+/// **§2.2, the queue popover's 140 ms fade and 8 px rise**, and **§2.4, the
+/// album inspector's 150 ms width**, are both deleted by ADR-0022 along with
+/// the surfaces they moved: there is no popover to arrive and no column to
+/// widen. Neither is *forbidden* — the ADR that permitted them is not
+/// reversed — they simply have nothing left to animate, and a `Duration`
+/// constant nothing reads is worse than a paragraph saying why.
+///
+/// A **place change is a hard cut**, and that is a decision rather than an
+/// omission: the surfaces either side of a navigation share no element to move,
+/// so any transition between them would be decoration, and ADR-0020 §3 forbids
+/// decoration. Three of the five ship: this one, the icon button's ink, and the
+/// lamp.
 pub const TILE: Duration = Duration::from_millis(90);
-/// The album inspector's width: **150 ms** (ADR-0020 §2.4).
-pub const PANEL: Duration = Duration::from_millis(150);
 /// The lamp warming when the light moves to another record: **200 ms**, and
 /// **linear** — the one transition of the five that is not eased (ADR-0020 §2.5,
 /// `docs/design/02-visual-language.md` §7 named it first).
@@ -128,7 +131,7 @@ struct Flight {
 /// Told the time rather than asking for it: [`Self::go`] and [`Self::tick`] take
 /// the [`Instant`], and [`Self::value`] — the one the view reads, every frame —
 /// touches no clock at all. That is what makes the whole rule testable, and it
-/// is the same division [`crate::shelf::GridHold`] makes for the same reason.
+/// was the same division the grid hold made, for the same reason.
 ///
 /// Small on purpose. `size_of::<Tween>()` is **48 bytes**
 /// (`a_tween_is_forty_eight_bytes`), so twenty animated scalars are under a
@@ -367,10 +370,6 @@ pub enum Control {
     Next,
     /// The bottom bar's speaker.
     Mute,
-    /// The queue popover's ✕.
-    CloseQueue,
-    /// The album inspector's ✕.
-    CloseInspector,
 }
 
 /// What every icon button needs to know to ink itself: which one the pointer is
@@ -428,17 +427,17 @@ mod tests {
         assert!(!tween.live(), "a settled tween asks for no clock");
         assert!(!tween.tick(start), "and ticking it changes nothing");
 
-        tween.go(1.0, PANEL, start);
+        tween.go(1.0, LAMP, start);
         assert!(tween.live());
-        assert!(tween.tick(start + PANEL / 2));
+        assert!(tween.tick(start + LAMP / 2));
         assert!(tween.value() > 0.0 && tween.value() < 1.0);
 
-        assert!(!tween.tick(start + PANEL), "it settles exactly at its end");
+        assert!(!tween.tick(start + LAMP), "it settles exactly at its end");
         assert!(!tween.live());
         assert!((tween.value() - 1.0).abs() < f32::EPSILON);
         // No later instant brings it back, which is what makes the subscription
         // go away and stay away.
-        for later in [PANEL, PANEL * 2, Duration::from_secs(60)] {
+        for later in [LAMP, LAMP * 2, Duration::from_secs(60)] {
             assert!(!tween.tick(start + later));
             assert!(!tween.live());
         }
@@ -512,7 +511,7 @@ mod tests {
     fn set_jumps_without_asking_for_a_clock() {
         let start = Instant::now();
         let mut tween = Tween::settled(0.0);
-        tween.go(1.0, PANEL, start);
+        tween.go(1.0, LAMP, start);
         assert!(tween.live());
         tween.set(0.0);
         assert!(!tween.live(), "a jump cancels the flight it interrupts");
@@ -532,10 +531,10 @@ mod tests {
     /// guessed, because "nine frames" is the whole of what motion costs in
     /// drawing terms.
     #[test]
-    fn a_150ms_transition_is_about_nine_frames_at_60hz() {
+    fn a_200ms_transition_is_about_twelve_frames_at_60hz() {
         let start = Instant::now();
         let mut tween = Tween::settled(0.0);
-        tween.go(1.0, PANEL, start);
+        tween.go(1.0, LAMP, start);
         let mut ticks = 0;
         let mut moved = 0;
         let mut at = start;
@@ -546,9 +545,9 @@ mod tests {
                 moved += 1;
             }
         }
-        // Nine frames: eight that moved it and the ninth that landed it.
-        assert_eq!(ticks, 9);
-        assert_eq!(moved, 8);
+        // Twelve frames: eleven that moved it and the twelfth that landed it.
+        assert_eq!(ticks, 12);
+        assert_eq!(moved, 11);
         assert!(!tween.live());
         assert!((tween.value() - 1.0).abs() < f32::EPSILON);
     }
@@ -559,7 +558,7 @@ mod tests {
     fn the_ease_out_curve_starts_fast_and_never_overshoots() {
         let start = Instant::now();
         let mut tween = Tween::settled(0.0);
-        tween.go(1.0, PANEL, start);
+        tween.go(1.0, LAMP, start);
         let mut previous = 0.0;
         for step in 1..=150 {
             let now = start + Duration::from_millis(step);
@@ -575,8 +574,8 @@ mod tests {
         // Half way through the *time*, an ease-out is well past half way
         // through the *distance*.
         let mut half = Tween::settled(0.0);
-        half.go(1.0, PANEL, start);
-        half.tick(start + PANEL / 2);
+        half.go(1.0, LAMP, start);
+        half.tick(start + LAMP / 2);
         assert!(half.value() > 0.5, "ease-out is front-loaded");
     }
 
@@ -662,20 +661,22 @@ mod tests {
         assert!(!hover.live());
     }
 
-    /// The five durations ADR-0020 §2 names, pinned so an edit has to argue
-    /// with the decision rather than with a number.
+    /// The durations ADR-0020 §2 names, pinned so an edit has to argue with the
+    /// decision rather than with a number.
+    ///
+    /// **Three of the five, and the other two are named as gone.** ADR-0022
+    /// deleted the queue popover and the album inspector, so §2.2's 140 ms
+    /// arrival and §2.4's 150 ms width have no surface to move; neither is
+    /// forbidden, and if either surface ever returns its number returns with
+    /// it. A place change is a hard cut.
     #[test]
-    fn the_five_transitions_run_for_the_times_the_decision_names() {
+    fn the_transitions_run_for_the_times_the_decision_names() {
         assert_eq!(INK, Duration::from_millis(90));
-        assert_eq!(POPOVER, Duration::from_millis(140));
         assert_eq!(TILE, Duration::from_millis(90));
-        assert_eq!(PANEL, Duration::from_millis(150));
         assert_eq!(LAMP, Duration::from_millis(200));
         // The tick is finer than half a frame at 60 Hz, so it never becomes the
         // thing that decides how smooth a transition looks.
         assert!(TICK * 2 <= FRAME);
-        // And the rise is the 8 px the decision specifies.
-        assert!((POPOVER_RISE - 8.0).abs() < f32::EPSILON);
     }
 
     /// Every icon button is in [`Control::ALL`], and each is its own identity —
@@ -687,8 +688,6 @@ mod tests {
             Control::PlayPause,
             Control::Next,
             Control::Mute,
-            Control::CloseQueue,
-            Control::CloseInspector,
         ];
         for (index, control) in all.iter().enumerate() {
             for other in &all[index + 1..] {

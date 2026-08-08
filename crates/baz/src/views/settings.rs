@@ -241,7 +241,7 @@ fn content_width(window_width: f32, beside_the_list: bool) -> f32 {
     };
     let measure =
         (0.5 * window_width).clamp(theme::SETTINGS_CONTENT_W, theme::SETTINGS_CONTENT_MAX);
-    (window_width - taken).clamp(theme::PANEL_W - 2.0 * theme::GAP_XL, measure)
+    (window_width - taken).clamp(theme::SETTINGS_CONTENT_MIN, measure)
 }
 
 /// The place's top strip: the way back, and the place's name.

@@ -1,44 +1,53 @@
-//! Which **place** the window is showing.
+//! Which **place** the window is showing — and there is nothing else.
 //!
-//! ADR-0006 layer 1 — pure, iced-free, unit-tested — and the smallest module in
-//! the crate, which is the point. ADR-0016's model is *the window holds one
-//! place at a time, one inspector attached to that place, one popover attached
-//! to the transport, and the now-playing bar always*; this is the first of the
-//! four kinds, and there is exactly one of it on screen.
+//! ADR-0006 layer 1 — pure, iced-free, unit-tested — and after ADR-0022 the
+//! *whole* of baz's surface model:
 //!
-//! # Why settings became a place
+//! > **The window holds one place at a time, and the now-playing bar is in
+//! > every one of them.**
 //!
-//! They used to be a panel in the right-hand rail, sharing 340 px with the
-//! album inspector and the queue. The argument that put them there was that the
-//! rail is "the one deliberate layer down" the vision's progressive-disclosure
-//! pillar names — which was true, and was the disease: when the only non-shelf
-//! surface in the product is the rail, every new surface becomes a rail panel
-//! and the rail becomes a junk drawer with a keyboard shortcut per item.
+//! One kind, four members, one rule. There is no inspector, no popover and no
+//! rail; a listener has one question to answer about anything on screen —
+//! *which place am I in* — and one key that answers it.
 //!
-//! Three things the audit found, in the settings' own case:
+//! # What this replaces
 //!
-//! - **They are not a glance.** The other two tenants were things you look at
-//!   *while* browsing; a preference is a standing decision you make and leave.
-//! - **The rail was simultaneously too narrow and too empty for them.** Five
-//!   controls, the steppers crushed against the right edge, and roughly 360 px
-//!   of nothing beneath them — two columns of covers spent on that.
-//! - **They do not fit what is coming.** The output device and exclusive mode,
-//!   a signal-path diagram, library roots and watch folders, per-feature
-//!   enrichment consent. None of those is a section in a 292 px column.
+//! ADR-0016 named four kinds — place, inspector, popover, bar — and reduced
+//! three rail tenants to one column plus a float. The owner rejected the
+//! survivors: *"I really hate the way queue and selected albums appear… I hate
+//! the sidebar."* ADR-0022 records the argument; what it costs this module is
+//! two new members and one deleted sibling apiece:
 //!
-//! The cost of a place is leaving the shelf, and that is the right cost: you
-//! are not browsing while you set a pre-amp. It is free to reverse, because the
-//! Library's whole state — scroll, query, selection — lives in one struct that
-//! nothing here touches.
+//! - **`Album(id)`** takes over from `selection.rs`, which held *which album
+//!   the inspector is showing, and whether it is showing*. Both facts collapse
+//!   into "is the place an `Album`, and which one" — one field where there were
+//!   two, and a `hidden` flag that no longer has anything to hide.
+//! - **`Queue`** takes over from `overlay.rs`, which held *which popover, if
+//!   any, is floating*. There is no float, so there is no layer to peel before
+//!   the place underneath it.
 //!
-//! # Why an enum rather than a stack
+//! # Why an enum and not a stack
 //!
-//! Because places **replace** each other; two are never on screen together, and
-//! there is no history to walk. That is what makes [`Place::back`] a total
-//! function with no argument and no `Option`, and what keeps <kbd>Esc</kbd>'s
-//! rule to one line per layer. A navigation stack would be the right shape for
-//! a product with drill-down; baz has one home and one deliberate layer beside
-//! it, and modelling more would be modelling something that cannot happen.
+//! Because places still **replace** each other; two are never on screen
+//! together, and there is no history to walk. [`Place::back`] is a total
+//! function with no argument and no `Option`, and <kbd>Esc</kbd>'s rule is one
+//! line rather than one line per layer.
+//!
+//! The one thing a stack would buy — *back to the album I was looking at
+//! before this one* — is deliberately not offered. Every route into an
+//! `Album` place starts on the wall (a tile) or from the bar (what is
+//! sounding), and the wall is what `back` returns to, with its scroll, its
+//! query and its arrangement untouched. A history that could land you
+//! somewhere you did not navigate from is the thing ADR-0016's rail was, in a
+//! different shape.
+//!
+//! # The cost this model has that the last one did not
+//!
+//! Comparing two records is a **round trip**: wall → album → wall → album,
+//! where the inspector made it two clicks and no navigation. ADR-0022 states
+//! it as the price rather than hiding it, and the mitigation lives on the
+//! shelf rather than here — the wall keeps its scroll and marks the record you
+//! last opened, so the return leg is *return* and not *re-find*.
 
 /// The place the window is showing.
 ///
@@ -46,10 +55,21 @@
 /// just been backed out of anywhere, is looking at the shelf.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Place {
-    /// The shelf, its search, its counts — and the album inspector attached to
-    /// it. The interface, per the vision's first pillar.
+    /// The shelf, its search, its arrangement, its counts. The interface, per
+    /// the vision's first pillar.
     #[default]
     Library,
+    /// **One record's page**: its art, its identity, the action, its tracks
+    /// and its condition report, at the width of the window.
+    ///
+    /// Carries the album id rather than pointing at a selection held
+    /// elsewhere, which is what deletes the class of bug `selection.rs`'s
+    /// exhaustive walk existed to catch: there is no reachable state that is
+    /// "showing an album page for no album".
+    Album(u64),
+    /// **The queue**: what the engine is holding and where it is in it, as a
+    /// place of its own rather than a card floating over the wall.
+    Queue,
     /// Everything that is a standing decision: today ReplayGain (ADR-0013),
     /// and the shape every setting after it takes.
     Settings,
@@ -59,26 +79,55 @@ impl Place {
     /// <kbd>Ctrl</kbd>+<kbd>,</kbd>, and the top bar's `Settings` control: go
     /// to the settings, or come back from them.
     ///
-    /// The same key it always was, now meaning *navigation* rather than
-    /// *show a panel* — which is what the macOS convention it borrows has
-    /// always meant, and what makes it the one binding here a listener is more
-    /// likely to already know than to learn.
+    /// A toggle only against itself. From an album's page or the queue this is
+    /// a *move* to the settings, not a swap — the key means "take me to the
+    /// preferences", and only the preferences answer it with "and back again".
     #[must_use]
-    pub fn toggled(self) -> Self {
+    pub fn settings(self) -> Self {
         match self {
-            Self::Library => Self::Settings,
             Self::Settings => Self::Library,
+            _ => Self::Settings,
         }
     }
 
-    /// <kbd>Esc</kbd>, and the Back affordance: return home.
+    /// <kbd>Q</kbd>, and the bar's labelled `Queue` control: go to the queue,
+    /// or come back from it.
     ///
-    /// Distinct from [`Self::toggled`] because a *back* that toggled would send
-    /// you into the settings from the Library, which is not what backing out
-    /// of somewhere means anywhere. Home is already home, so this is a no-op
-    /// there — and the shell's <kbd>Esc</kbd> asks [`Self::is_settings`] first,
-    /// so the key falls through to the layers underneath rather than being
-    /// silently eaten by a place that had nothing to leave.
+    /// The same shape as [`Self::settings`], and for the same reason: a door
+    /// that says *Queue* closes itself when you press it again, and does not
+    /// close anything else.
+    #[must_use]
+    pub fn queue(self) -> Self {
+        match self {
+            Self::Queue => Self::Library,
+            _ => Self::Queue,
+        }
+    }
+
+    /// A tile was pressed, or the bar's now-playing block was: show that
+    /// record's page — or come back from it, when it is the page already
+    /// showing.
+    ///
+    /// The toggle-off arm is what makes a tile press reversible with the same
+    /// press, which is the behaviour the inspector had and the one gesture of
+    /// it worth keeping.
+    #[must_use]
+    pub fn album(self, id: u64) -> Self {
+        if self == Self::Album(id) {
+            Self::Library
+        } else {
+            Self::Album(id)
+        }
+    }
+
+    /// <kbd>Esc</kbd>, and every place's `‹ Library`: return home.
+    ///
+    /// Distinct from the three toggles above because a *back* that toggled
+    /// would send you somewhere from the Library, which is not what backing
+    /// out of anywhere means. Home is already home, so this is a no-op there —
+    /// and the shell asks [`Self::is_home`] first, so the key falls through to
+    /// the layers underneath rather than being silently eaten by a place that
+    /// had nothing to leave.
     #[must_use]
     #[expect(
         clippy::unused_self,
@@ -92,10 +141,20 @@ impl Place {
         Self::Library
     }
 
-    /// Whether the settings are the place on screen.
+    /// Whether the shelf is the place on screen.
     #[must_use]
-    pub fn is_settings(self) -> bool {
-        self == Self::Settings
+    pub fn is_home(self) -> bool {
+        self == Self::Library
+    }
+
+    /// Which record's page is showing, if one is — the shell's one question
+    /// when it needs an album, and what replaces `Selection::inspecting`.
+    #[must_use]
+    pub fn showing_album(self) -> Option<u64> {
+        match self {
+            Self::Album(id) => Some(id),
+            _ => None,
+        }
     }
 }
 
@@ -106,35 +165,64 @@ mod tests {
     #[test]
     fn a_fresh_window_is_at_home() {
         assert_eq!(Place::default(), Place::Library);
-        assert!(!Place::default().is_settings());
+        assert!(Place::default().is_home());
+        assert_eq!(Place::default().showing_album(), None);
     }
 
     #[test]
-    fn the_settings_key_is_a_true_toggle() {
-        let place = Place::default();
-        assert_eq!(place.toggled(), Place::Settings);
-        assert_eq!(place.toggled().toggled(), Place::Library);
-        assert!(place.toggled().is_settings());
+    fn each_door_closes_itself_and_nothing_else() {
+        assert_eq!(Place::Library.settings(), Place::Settings);
+        assert_eq!(Place::Settings.settings(), Place::Library);
+        assert_eq!(Place::Library.queue(), Place::Queue);
+        assert_eq!(Place::Queue.queue(), Place::Library);
+        assert_eq!(Place::Library.album(7), Place::Album(7));
+        assert_eq!(Place::Album(7).album(7), Place::Library);
+
+        // …and a door pressed from *another* place is a move, not a swap back
+        // home. The key says where to go; only the place you are in says
+        // "and back".
+        assert_eq!(Place::Queue.settings(), Place::Settings);
+        assert_eq!(Place::Album(7).queue(), Place::Queue);
+        assert_eq!(Place::Settings.album(7), Place::Album(7));
+        assert_eq!(Place::Album(7).album(8), Place::Album(8));
     }
 
     /// Back means *home*, not *the other one*. Anywhere, any number of times.
     #[test]
     fn back_always_means_the_library() {
-        assert_eq!(Place::Settings.back(), Place::Library);
-        assert_eq!(Place::Library.back(), Place::Library);
-        assert_eq!(Place::Settings.back().back(), Place::Library);
+        for place in [
+            Place::Library,
+            Place::Album(7),
+            Place::Queue,
+            Place::Settings,
+        ] {
+            assert_eq!(place.back(), Place::Library);
+            assert_eq!(place.back().back(), Place::Library);
+        }
     }
 
-    /// Over every path of four moves: one place is on screen, it is always one
-    /// of the two, and `is_settings` never disagrees with the value it reads.
+    /// The property `selection.rs` walked exhaustively, restated for a model
+    /// that makes it structural: **no reachable state shows an album page
+    /// without an album**, and `showing_album` never disagrees with the value
+    /// it reads. It is now a property of one field rather than of two, which
+    /// is the point — but it is still walked, because "obviously true" is what
+    /// the rail's rule looked like from the inside as well.
     #[test]
     fn no_reachable_state_is_two_places_at_once() {
         #[derive(Debug, Clone, Copy)]
         enum Step {
-            Toggle,
+            Settings,
+            Queue,
+            Album(u64),
             Back,
         }
-        let steps = [Step::Toggle, Step::Back];
+        let steps = [
+            Step::Settings,
+            Step::Queue,
+            Step::Album(1),
+            Step::Album(2),
+            Step::Back,
+        ];
         for a in steps {
             for b in steps {
                 for c in steps {
@@ -142,14 +230,31 @@ mod tests {
                         let mut place = Place::default();
                         for step in [a, b, c, d] {
                             place = match step {
-                                Step::Toggle => place.toggled(),
+                                Step::Settings => place.settings(),
+                                Step::Queue => place.queue(),
+                                Step::Album(id) => place.album(id),
                                 Step::Back => place.back(),
                             };
                             assert_eq!(
-                                place.is_settings(),
-                                place == Place::Settings,
+                                place.is_home(),
+                                place == Place::Library,
                                 "{step:?} left the two readings disagreeing"
                             );
+                            assert_eq!(
+                                place.showing_album().is_some(),
+                                matches!(place, Place::Album(_)),
+                                "{step:?} left an album page with no album"
+                            );
+                            // Exactly one member is on screen: the enum makes
+                            // "two places at once" unrepresentable, and this
+                            // is that claim spelled out for a reader who is
+                            // looking for the rail's arbitration and will not
+                            // find it.
+                            let showing = usize::from(place.is_home())
+                                + usize::from(place == Place::Settings)
+                                + usize::from(place == Place::Queue)
+                                + usize::from(place.showing_album().is_some());
+                            assert_eq!(showing, 1, "{step:?}");
                         }
                     }
                 }

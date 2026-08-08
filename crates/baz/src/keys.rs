@@ -195,18 +195,22 @@
 //!
 //! # Layers
 //!
-//! Three keys move between what is on screen, and each one now names exactly
-//! one layer — which is the change the information-architecture move bought
-//! (ADR-0016, `docs/design/01-ux-audit-and-ia.md` §4.8).
+//! Two keys move between what is on screen, and each one names exactly one
+//! *place* — there being nothing else left to name (ADR-0022). There were
+//! three; the third is dealt with below.
 //!
-//! <kbd>Ctrl</kbd>+<kbd>U</kbd> shows and hides **Queue** — *up next*, which
-//! is what the bar's control is labelled. It was bare `Q` and ADR-0017 §1.2's
-//! table moves it, for the reason every letter moved: bare letters are the
-//! query now. The old argument for `Q` being bare — a view key you press dozens
-//! of times a session should not be taxed — is real and is simply outbid, and
-//! the tax it now pays is one modifier on a key that still resolves to
-//! [`Message::ToggleQueue`], the same message the bar's labelled control
-//! sends.
+//! <kbd>Ctrl</kbd>+<kbd>U</kbd> goes to the **queue** and comes back from it —
+//! *up next*, which is what the bar's control is labelled. It was bare `Q` and
+//! ADR-0017 §1.2's table moves it, for the reason every letter moved: bare
+//! letters are the query now. The old argument for `Q` being bare — a view key
+//! you press dozens of times a session should not be taxed — is real and is
+//! simply outbid, and the tax it now pays is one modifier on a key that still
+//! resolves to [`Message::ToggleQueue`], the same message the bar's labelled
+//! control sends.
+//!
+//! What it opens is its third home: a queue *panel* in the right-hand rail,
+//! then a popover anchored to the bar, and now a **place** of its own
+//! (ADR-0022). The key is navigation rather than a request to raise a layer.
 //!
 //! `U` rather than `Q` because the two are not interchangeable under Ctrl:
 //! <kbd>Ctrl</kbd>+<kbd>Q</kbd> is *quit* on every desktop baz runs on, and a
@@ -214,16 +218,13 @@
 //! worst possible mis-key. `U` is `Up next`, it is unclaimed, and it is what
 //! the ADR's table names.
 //!
-//! <kbd>Ctrl</kbd>+<kbd>B</kbd> (<kbd>Cmd</kbd>+<kbd>B</kbd>) hides the album
-//! inspector and brings it back. It is the sidebar reflex from every editor
-//! written this decade, and it was already modified when the letters around it
-//! were not: it is the *layout* key, the one that changes how much room the
-//! shelf gets, and those are conventionally modified. What comes back is what was
-//! dismissed (see [`crate::selection`]), so the pair is a true toggle rather
-//! than a destructive close — and it is an *honest* sidebar toggle now that
-//! there is exactly one sidebar. It no longer conjures a queue panel out of an
-//! empty rail, which was the audit's evidence that the rail had no model behind
-//! it.
+//! **<kbd>Ctrl</kbd>+<kbd>B</kbd> is gone.** It hid the album inspector and
+//! brought it back — the sidebar reflex from every editor written this decade —
+//! and it earned its modifier by being the *layout* key, the one that changed
+//! how much room the shelf got. ADR-0022 removed every side surface baz had, so
+//! there is no layout to change and no sidebar to toggle. The key is left
+//! **unbound** rather than given something else to do: a reflex that survives a
+//! redesign pointing at a new meaning is worse than one that simply stops.
 //!
 //! <kbd>Ctrl</kbd>+<kbd>,</kbd> (<kbd>Cmd</kbd>+<kbd>,</kbd>) goes to the
 //! **Settings place** and comes back ([`crate::place`]). Same key as before; it
@@ -388,11 +389,12 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Named(key::Named::ArrowDown) if bare => Some(Message::VolumeStep(-1)),
         Key::Character("m" | "M") if command => Some(Message::ToggleMute),
 
-        // Layers. Ctrl+U shows what is playing **up next**; Ctrl+B (Cmd+B)
-        // takes the right-hand column away and gives it back; Ctrl+`,`
-        // (Cmd+`,`) is the settings (module docs).
+        // Places. Ctrl+U goes to the queue — what is playing **up next** — and
+        // Ctrl+`,` (Cmd+`,`) to the settings; both are navigation rather than
+        // requests to raise a layer (module docs). **There is no `Ctrl+B`**:
+        // ADR-0022 left no sidebar to hide, and a layout key with no layout to
+        // change is a key that does nothing.
         Key::Character("u" | "U") if command => Some(Message::ToggleQueue),
-        Key::Character("b" | "B") if command => Some(Message::TogglePanels),
         Key::Character(",") if command => Some(Message::ToggleSettings),
 
         // The zoom. Ctrl+`-` tightens the hang, Ctrl+`=` loosens it, and the
@@ -592,7 +594,6 @@ mod tests {
             (named(key::Named::ArrowDown), none()),
             (ch("m"), Modifiers::COMMAND),
             (ch("u"), Modifiers::COMMAND),
-            (ch("b"), Modifiers::COMMAND),
             (ch(","), Modifiers::COMMAND),
             (ch("-"), Modifiers::COMMAND),
             (ch("="), Modifiers::COMMAND),
@@ -798,18 +799,22 @@ mod tests {
         );
     }
 
-    /// Ctrl+B (Cmd+B) is the layout key: it hides the inspector and brings it
-    /// back. Bare `b` is a letter of the query.
+    /// **`Ctrl+B` is unbound.** Bare `b` is a letter of the query, as every
+    /// bare letter now is.
+    ///
+    /// It hid the album inspector and brought it back, and it earned its
+    /// modifier by being *the layout key* — the one that changed how much room
+    /// the shelf got. ADR-0022 left no sidebar, so there is no layout to
+    /// change: the key does nothing rather than being given something else to
+    /// do, because a reflex that survives a redesign pointing at a new meaning
+    /// is worse than one that stops.
     #[test]
-    fn ctrl_b_hides_and_restores_the_inspector() {
-        assert_eq!(
-            bind(&ch("b"), Modifiers::COMMAND).as_deref(),
-            Some("TogglePanels")
-        );
-        assert_eq!(
-            bind(&ch("B"), Modifiers::COMMAND).as_deref(),
-            Some("TogglePanels")
-        );
+    fn ctrl_b_is_unbound_because_there_is_no_sidebar_left() {
+        for key in [ch("b"), ch("B")] {
+            for modifiers in [Modifiers::COMMAND, Modifiers::COMMAND | Modifiers::SHIFT] {
+                assert_eq!(bind(&key, modifiers), None, "{key:?} + {modifiers:?}");
+            }
+        }
         assert_eq!(bind(&ch("b"), none()).as_deref(), Some("QueryTyped(\"b\")"));
     }
 

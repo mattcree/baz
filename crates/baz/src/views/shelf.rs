@@ -108,13 +108,18 @@ pub(crate) fn view<'a>(
     )
     .id(scroll_id())
     .on_scroll(Message::Scrolled)
-    // **The wall's own scrollbar.** This `scrollable` carried no style at all,
-    // so the one down the side of the collection — the longest, most-seen piece
-    // of chrome in the product — was iced's stock light-grey bar with a rail
-    // behind it, drawn in no palette baz owns
-    // (`docs/design/05-toolkit-and-visual-gap.md` D6). `theme::scrollbar` has
-    // existed the whole time, draws no rail, and its own doc comment names this
-    // exact failure.
+    // **The wall has no scrollbar** ([`theme::wall_scrollbar`]). The rail two
+    // pixels to its right is already the wall's scroll affordance — it says
+    // where you are, it jumps, and it names what it jumps to — so a bar beside
+    // it was two vertical strips doing one job, which is the third of the
+    // owner's three complaints in ADR-0022.
+    //
+    // The *scrolling* is untouched: a zero-width `Scrollbar` is a bar iced
+    // draws nothing for, not a `scrollable` that stopped scrolling, so the
+    // wheel, the touchpad, the drag and every programmatic `scroll_to` behave
+    // exactly as before. The style is still handed over because a zero-width
+    // bar is still asked for one.
+    .direction(scrollable::Direction::Vertical(theme::wall_scrollbar()))
     .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
     .width(Length::Fill)
     .height(Length::Fill);
@@ -334,8 +339,17 @@ fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
 /// alignment edge the `Settings` word above already established. An entry
 /// wider than [`theme::INDEX_W`] grows *leftwards* to that cap and then clips,
 /// which is why the lane keeps [`theme::INDEX_CLEARANCE`] between itself and
-/// the scrollbar. The full value is never lost: it is set in the shelf header
-/// one `HANG` to the left, at the same moment, in the same voice.
+/// the last column of covers. The full value is never lost: it is set in the
+/// shelf header one `HANG` to the left, at the same moment, in the same voice.
+///
+/// # It is the wall's scroll affordance, and now it is the only one
+///
+/// ADR-0022 deleted the wall's scrollbar. The rail already did every job a bar
+/// does — it says where you are (the current shelf in [`theme::MEDIUM`] at full
+/// paper), it jumps (a press), and it does the one thing a bar cannot: it names
+/// the place it is taking you to. Two vertical strips against the same edge,
+/// one of them saying `ARTIST → S` and the other saying nothing, is one strip
+/// too many.
 fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
     let room = theme::active();
     let runs = shelves.runs();
@@ -618,13 +632,13 @@ fn tile<'a>(
             .color(room.paper)
             .wrapping(text::Wrapping::None),
     );
-    // **Selected, full stop** — not "selected and the inspector happens to be
-    // showing it". The audit's defect 14: with `Ctrl+B` the column hides and the
-    // selected tile's 2 px rule vanished with it, so the wall carried no mark at
-    // all for a selection that `Enter` would still play. The rule is drawn from
-    // the selection because that is what it is a mark of; whether a panel is
-    // open beside it is a fact about the panel.
-    let selected = shelf.selection.selected() == Some(album.id);
+    // **The record you last opened** ([`Shelf::opened`]), which is what the
+    // 2 px rule marks now that there is no selection to mark. ADR-0022 made a
+    // tile press *navigation*: the wall is replaced by the record's page, and
+    // when `Esc` brings you back this rule is how you find your place again.
+    // That is the whole of the mitigation for the round trip a page costs that
+    // a column did not, and it is one rule under one label.
+    let selected = shelf.opened == Some(album.id);
     // Two one-line lanes, not one two-line box: a title iced lays out over two
     // lines despite `Wrapping::None` clips at its own lane's edge instead of
     // pushing the artist out of the block that was reserved to hold it still

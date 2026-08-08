@@ -75,6 +75,36 @@ reversed; what was lost was always position, provenance and skip.) Replacing a
 slot with a *better statement of the same fact* is the one permitted move — it
 is how the seek row became the needle.
 
+**A band's content may not touch the band's edges.** Every bar leads its tallest
+zone by a **named gap** on each side — never a ratio, because a constant
+ink-to-band ratio is not reachable on the 4 px lattice for two bands of
+different content heights, and a lead off the lattice is law L2 broken to make a
+proportion true. The top bar leads its 32 px control row by `GAP_SM` 8; the
+bottom bar leads its 56 px type block by `GAP_MD` 12 (a hit box carries its own
+internal padding, a stack of line boxes carries only its leading). Added by
+ADR-0022, on the owner's *"proportion is becoming an issue e.g. bottom bar is
+too short"* — the needle's bar was correct in every token and had no air at all.
+
+---
+
+## Surfaces
+
+**baz has no side surfaces.** No sidebar, no inspector, no rail, no drawer, no
+popover, no float. **The window holds one place at a time and the now-playing
+bar is in every one of them** (ADR-0022).
+
+Rejected twice by the owner before this was written down — *"an example of a
+strange UI is the two side panels we have now"*, and then *"I really hate the
+way queue and selected albums appear… I hate the sidebar"*. The prior-art study
+supports a right-hand inspector for cataloguer audiences and that evidence is
+not overturned; it is relocated. It argues for the album having a rich resident
+surface, and the record's page is three and a half times wider than the column
+was.
+
+**Two vertical strips may not do one job.** The wall draws no scrollbar, because
+the index rail beside it already says where you are, jumps, drags — and names
+the shelf it will take you to, which a scroller cannot.
+
 ---
 
 ## Accessibility
@@ -84,8 +114,10 @@ keyboard-only, and no control's only affordance is hover.**
 
 This is the mitigation for a toolkit that publishes no accessibility tree and
 gives buttons no keyboard focus (ADR-0017 §4). It is why the transport buttons,
-the search field and the labelled `Up next` door survive designs that wanted
-them gone.
+the search field and the labelled `Queue` door survive designs that wanted them
+gone — and why, when ADR-0022 removed the last surface that knew which record
+was under the lamp, *get back to what is playing* got a labelled control (the
+bar's now-playing text) rather than a gesture.
 
 **No state is signalled by colour alone.** The lamp dot *replaces* the track
 number rather than tinting it; the halo is accompanied by a dot; the shuffle
@@ -127,6 +159,14 @@ the shelf tile's hover rule (90 ms), the album inspector's width (150 ms), and
 the lamp warming when the light moves to another record (200 ms). Each degrades
 to a hard cut by passing a zero duration, which is how a *reduce motion* setting
 will be implemented.
+
+**Three of the five ship.** ADR-0022 deleted the queue popover and the album
+inspector, so §2.2's arrival and §2.4's width have no surface left to move.
+Neither is *forbidden* — if either surface ever returns, its number returns with
+it — but a `Duration` nothing reads is worse than a sentence saying why. **A
+place change is a hard cut**, and that is a decision rather than an omission:
+the surfaces either side of a navigation share no element to move, so any
+transition between them would be decoration, which this entry forbids.
 
 **Still refused, and these are refusals rather than omissions**: shelf-grid
 stagger or pop-in; any fade as a thumbnail decodes (a thumbnail replacing its
