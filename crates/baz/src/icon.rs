@@ -105,6 +105,8 @@ pub enum Glyph {
     Speaker,
     /// Speaker, muted: the same cone with a cross where the waves were.
     SpeakerMuted,
+    /// Close: the dismissal cross, for the panels in the right-hand rail.
+    Close,
 }
 
 /// Play — one triangle, sitting a touch right of the box's centre so the
@@ -185,14 +187,27 @@ const SPEAKER_MUTED: &[Outline] = &[
     ],
 ];
 
+/// Close — two bars crossing at the centre of the box.
+///
+/// The same construction as the mute cross and drawn the same way, by the
+/// union rule in [`Glyph::covers`]: an even-odd test over the pair would punch
+/// a diamond-shaped hole exactly where the two bars overlap. Symmetric about
+/// both axes, so the mark reads as centred in its button whichever panel it
+/// dismisses.
+const CLOSE: &[Outline] = &[
+    &[(0.16, 0.26), (0.26, 0.16), (0.84, 0.74), (0.74, 0.84)],
+    &[(0.16, 0.74), (0.26, 0.84), (0.84, 0.26), (0.74, 0.16)],
+];
+
 impl Glyph {
     /// Every glyph, in sprite-sheet order.
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Play,
         Self::Pause,
         Self::Next,
         Self::Speaker,
         Self::SpeakerMuted,
+        Self::Close,
     ];
 
     /// The glyph's outlines in the unit square.
@@ -204,6 +219,7 @@ impl Glyph {
             Self::Next => NEXT,
             Self::Speaker => SPEAKER,
             Self::SpeakerMuted => SPEAKER_MUTED,
+            Self::Close => CLOSE,
         }
     }
 
@@ -215,6 +231,7 @@ impl Glyph {
             Self::Next => 2,
             Self::Speaker => 3,
             Self::SpeakerMuted => 4,
+            Self::Close => 5,
         }
     }
 
@@ -254,7 +271,7 @@ impl From<PlayPause> for Glyph {
 /// Caching matters beyond the arithmetic — `image::Handle::from_rgba` mints
 /// a fresh id per call, and a fresh id per frame would churn the renderer's
 /// texture atlas. These ids live as long as the process.
-static SHEET: LazyLock<[image::Handle; 5]> = LazyLock::new(|| {
+static SHEET: LazyLock<[image::Handle; 6]> = LazyLock::new(|| {
     let ink = rgb(theme::GLYPH);
     Glyph::ALL.map(|glyph| image::Handle::from_rgba(RASTER_PX, RASTER_PX, rasterize(glyph, ink)))
 });
@@ -542,6 +559,33 @@ mod tests {
                     alpha(&muted, column, row),
                     alpha(&muted, column, RASTER_PX - 1 - row),
                     "the muted speaker is not symmetric at {column},{row}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn close_is_a_solid_cross_centred_in_its_box() {
+        let pixels = rasterize(Glyph::Close, [255, 255, 255]);
+        let mid = RASTER_PX / 2;
+        // The bars overlap at the centre, and the union rule must fill it —
+        // the same property the mute cross needs, for the same reason.
+        assert_eq!(alpha(&pixels, mid, mid), u8::MAX);
+        // Nothing in the middle of any edge: a cross, not a box or a plus.
+        assert_eq!(alpha(&pixels, mid, 1), 0);
+        assert_eq!(alpha(&pixels, 1, mid), 0);
+        // Symmetric about both axes, so the mark reads as centred.
+        for row in 0..RASTER_PX {
+            for column in 0..RASTER_PX / 2 {
+                assert_eq!(
+                    alpha(&pixels, column, row),
+                    alpha(&pixels, RASTER_PX - 1 - column, row),
+                    "close is not left-right symmetric at {column},{row}"
+                );
+                assert_eq!(
+                    alpha(&pixels, row, column),
+                    alpha(&pixels, row, RASTER_PX - 1 - column),
+                    "close is not top-bottom symmetric at {row},{column}"
                 );
             }
         }

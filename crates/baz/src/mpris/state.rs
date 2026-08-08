@@ -383,7 +383,7 @@ mod tests {
     fn playing(elapsed_ms: u64, track_ms: Option<u64>) -> PlayerState {
         let albums = albums();
         let mut player = PlayerState::new(Availability::Ready);
-        player.note_queue_sent(1);
+        player.note_queue_sent(crate::vm::album_queue(&albums[0], None));
         player.apply(
             &Event::TrackStarted {
                 path: PathBuf::from("/music/eden/01.flac"),

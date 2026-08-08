@@ -108,9 +108,24 @@ next commit.
   the conjunction ADR-0011 made of ADR-0009's guarantee — and nothing at all in
   between. Same faint ink as the rest of the secondary text, no icon, no fault
   vocabulary, and no layout shift when it appears (ADR-0009 §5).
+- **A visible play queue.** What baz handed the engine, in play order, with the
+  playing track marked by the same amber lamp dot the shelf gives the playing
+  album, the tracks behind it dimmed, and a `3 of 12 · 51:20` count. It shares
+  the right-hand rail with the album panel rather than adding a second one —
+  the shelf is the interface, and one panel width is the whole budget for
+  chrome beside it — so switching between the two reflows nothing.
+  Deliberately a *view*: reordering, removal and click-to-jump each need an
+  engine command that does not exist, and `player.rs` names exactly which
+  rather than faking any of them.
+- **Hideable panels**, the half of the v0.1 sketch that was never built. Both
+  rail panels carry a ✕, Escape closes whichever is showing, `Q` toggles the
+  queue and Ctrl+B dismisses the rail outright and brings back what was
+  dismissed. The shelf reflows to the reclaimed width and re-virtualizes at it
+  — five columns to three and back, in the shipped window.
 - **Keyboard control**: space to play/pause, arrows to seek (shifted for 30 s),
   up/down for volume and `M` for mute, `N` or Ctrl+Right for next, `/` or
-  Ctrl+F for search, Escape to back out.
+  Ctrl+F for search, `Q` for the queue, Ctrl+B for the panels, Escape to back
+  out.
   While the search field has focus no binding is live — baz asks the toolkit
   whether the widget consumed the key and never second-guesses the answer.
 - Presentation split into a `views/` module tree, verified pixel-identical

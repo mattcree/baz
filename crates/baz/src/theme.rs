@@ -133,6 +133,20 @@ pub const RADIUS_SEGMENT: f32 = 4.0;
 pub const SEGMENT_INSET: f32 = 2.0;
 /// Corner radius for the tile's hover/selection card.
 pub const RADIUS_TILE: f32 = 10.0;
+/// Width of the right-hand rail — the album panel and the queue panel both
+/// (logical px).
+///
+/// **One number for both**, and that is the property the layout rests on: the
+/// rail is either showing a panel or it is not, and *which* panel is showing
+/// can never change how much room the shelf has. Switching between them
+/// reflows nothing; only opening or closing the rail does, by exactly this
+/// much. `app.rs`'s grid estimate is kept in step with it (see
+/// [`crate::panels`]).
+pub const PANEL_W: f32 = 340.0;
+/// Width of the number column in a track or queue list (logical px). Enough
+/// for three monospace figures at [`SIZE_META`], so a long queue's positions
+/// stay in their column.
+pub const TRACK_NO_W: f32 = 24.0;
 /// Corner radius for small floating chips (the seek preview tip).
 pub const RADIUS_CHIP: f32 = 4.0;
 /// Edge of the playing-album lamp dot (a [`RADIUS_CTRL`]-free circle).
@@ -653,6 +667,42 @@ pub fn panel(_theme: &Theme) -> container::Style {
     }
 }
 
+/// A panel toggle in the top bar (today: Queue): label-only until the pointer
+/// finds it, a raised card with a hairline edge while its panel is open.
+///
+/// The same treatment as [`segment`], and for the same reason: opening a panel
+/// is a *view* choice, not a claim about what is playing, so the lamp stays
+/// where it belongs. What "on" looks like is therefore a surface step and an
+/// edge — the room's own way of saying a thing is selected — rather than a
+/// second accent competing with the playing album's dot.
+#[must_use]
+pub fn panel_toggle(status: button::Status, active: bool) -> button::Style {
+    segment(status, active)
+}
+
+/// One row of the queue list. The playing row is a raised card with a
+/// hairline edge; every other row is the panel it sits on.
+///
+/// The amber is spent on the lamp dot in the row's number column and nowhere
+/// else — a whole row washed in accent would shout, and the dot is already the
+/// mark the shelf uses to say "this one". This style only lifts the row far
+/// enough to find it while scrolling a long queue.
+#[must_use]
+pub fn queue_row(playing: bool) -> container::Style {
+    if !playing {
+        return container::Style::default();
+    }
+    container::Style {
+        background: Some(Background::Color(CARD_HIGH)),
+        border: Border {
+            color: HAIRLINE_STRONG,
+            width: 1.0,
+            radius: RADIUS_SEGMENT.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
 /// The now-playing bar: recessed below the wall, like the amp under the
 /// shelf.
 #[must_use]
@@ -736,6 +786,44 @@ mod tests {
         // `192 → 176.4 kHz`, fifteen monospace figures — so that a note
         // appearing there moves nothing beside it.
         const { assert!(SIGNAL_W > SIZE_META * 15.0 * 0.5) }
+    }
+
+    /// The rail's width is one number, and the shelf still virtualizes at both
+    /// of the two widths it can therefore have.
+    ///
+    /// The geometry helpers themselves are unchanged by the queue panel — that
+    /// is the point of the panels sharing a slot — and this is what pins the
+    /// claim: at the shipped window size the shelf goes from five columns to
+    /// three when the rail opens, and both are real, non-degenerate grids.
+    #[test]
+    fn the_shelf_virtualizes_at_both_of_the_rails_two_widths() {
+        use crate::shelf as geometry;
+
+        const WINDOW_W: f32 = 1280.0;
+        assert_eq!(geometry::columns(WINDOW_W), 5, "the shipped shelf");
+        assert_eq!(
+            geometry::columns(WINDOW_W - PANEL_W),
+            3,
+            "one panel open: (1280 - 340 - 48) / 240 = 3.7 -> 3"
+        );
+        // The rail must leave a usable shelf on the smallest window iced will
+        // hand us as well, or opening a panel would collapse the grid.
+        assert!(geometry::columns(640.0 - PANEL_W) >= 1);
+
+        // Virtualization is width-independent, but the row count is not: the
+        // same albums over fewer columns must still produce a covered,
+        // clamped range rather than an empty or overrunning one.
+        for width in [WINDOW_W, WINDOW_W - PANEL_W] {
+            let cols = geometry::columns(width);
+            let rows = geometry::total_rows(97, cols);
+            assert_eq!(rows, 97_usize.div_ceil(cols));
+            let (first, end) = geometry::visible_rows(0.0, 800.0, rows);
+            assert!(first < end && end <= rows, "empty viewport at {width} px");
+        }
+
+        // And the panel has to hold its own contents: the album panel insets
+        // the artwork by its padding on both sides and must not go negative.
+        const { assert!(PANEL_W > 2.0 * GAP_XL) }
     }
 
     #[test]

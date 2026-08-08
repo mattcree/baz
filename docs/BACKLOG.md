@@ -214,8 +214,40 @@
 - **Transport buttons take no keyboard focus and publish no accessibility tree**
   — iced 0.13 offers neither (no AccessKit). Tooltips and 32 px hit targets are
   the whole of what the toolkit currently allows.
-- **Panel hiding / layout flexibility** — the v0.1 sketch promised a fixed
-  layout *with hideable panels*; hiding is unwritten.
+- ~~**Panel hiding**~~ — **shipped.** The right-hand rail holds one panel at a
+  time (album or queue), both carry a ✕, Escape closes what is showing, `Q`
+  toggles the queue and <kbd>Ctrl</kbd>+<kbd>B</kbd> dismisses the rail and
+  brings back what it dismissed. The shelf reflows to the reclaimed width and
+  re-virtualizes at it. The state machine is `crates/baz/src/panels.rs` — pure,
+  iced-free and unit-tested, per ADR-0006 layer 1.
+  **Visibility is deliberately not persisted**: both panels are contents-driven
+  and neither's contents survive a restart (the album panel needs a selection,
+  which is session state; the queue lives in the engine process and is never
+  re-sent at launch), so a remembered "open" would cost the shelf 340 px on
+  every launch to display the words *Nothing queued*. Full argument in
+  `panels.rs`.
+- **Layout flexibility beyond hiding** — panels can be dismissed, not moved,
+  resized, or replaced. foobar-style layout editing is a later chapter by
+  design (VISION pillar 6); a resizable rail is the plausible next step and
+  wants the config-file question answered first.
+- **The queue is a view, not a control.** The panel lists what was queued and
+  marks what is playing; it cannot reorder, remove, or jump. Each needs an
+  engine command `baz-core` does not have:
+  - **Click a row to jump to it** wants `Command::JumpTo { position: usize }` —
+    the queue-relative sibling of `Seek`, which is track-relative. `Next` and
+    `Previous` are all there is, so reaching row 9 today means eight skips,
+    eight starts and eight bursts of audio.
+  - **Remove a track** and **reorder** want a `SetQueue` that keeps playing.
+    Today's is documented to stop ("any playback in progress stops"), so the
+    obvious implementation would silence the music to delete a track nobody was
+    listening to.
+
+  With either command the panel change is small and local: rows already carry
+  their queue position, and `PlayerState::queue_list` is the one place that
+  would gain a message.
+- **The queue cannot be built.** There is one way to queue anything — play an
+  album, which replaces the queue wholesale. "Add to queue" / "play next" need
+  the same non-destructive `SetQueue` (or an append command) as removal does.
 - **No keyboard route out of the search field.** Transport keys are bound
   (`crates/baz/src/keys.rs`), but iced 0.13's `text_input` captures every key
   press while focused except Tab and the vertical arrows, so while the search

@@ -3,24 +3,18 @@
 
 use std::time::Duration;
 
-use iced::widget::{Column, button, column, container, image as iced_image, row, scrollable, text};
+use iced::widget::{
+    Column, Space, button, column, container, image as iced_image, row, scrollable, text,
+};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
 use crate::player::{Availability, PlayerState};
-use crate::views::gradient_block;
+use crate::views::{close_button, gradient_block};
 use crate::{theme, vm};
 
-/// Side-panel width (logical px).
-///
-/// Public to the crate because the shelf's *geometry estimate* depends on
-/// it: opening the panel narrows the grid viewport, and `app.rs` has to know
-/// by how much before the next scroll event reports real bounds.
-pub(crate) const PANEL_W: f32 = 340.0;
 /// Side-panel inner padding (logical px).
 const PANEL_PAD: f32 = theme::GAP_XL;
-/// Width of the track-number column in the side panel (logical px).
-const TRACK_NO_W: f32 = 24.0;
 
 /// The album side panel: large art, a title/artist/meta header, the
 /// edition selector when the album is owned in more than one format, the
@@ -34,7 +28,7 @@ pub(crate) fn view<'a>(
     player: &'a PlayerState,
 ) -> Element<'a, Message> {
     let playing = player.playing_album() == Some(album.id);
-    let art_edge = PANEL_W - 2.0 * PANEL_PAD;
+    let art_edge = theme::PANEL_W - 2.0 * PANEL_PAD;
     let art: Element<'_, Message> = match shelf.thumbs.peek(&album.id) {
         Some(handle) => iced_image(handle.clone())
             .width(Length::Fixed(art_edge))
@@ -57,7 +51,16 @@ pub(crate) fn view<'a>(
         })
         .unwrap_or_default();
 
-    let mut content = column![sleeve, album_header(album, edition)].spacing(theme::GAP_MD);
+    // The dismissal ✕ sits in a row of its own above the sleeve — the same
+    // slot, in the same panel width, as the queue's, so closing a panel is one
+    // control in one place whichever is on screen.
+    let header_row = row![
+        Space::with_width(Length::Fill),
+        close_button("Close the album panel"),
+    ]
+    .align_y(iced::Alignment::Center);
+    let mut content =
+        column![header_row, sleeve, album_header(album, edition)].spacing(theme::GAP_MD);
     // Only a genuinely multi-format album gets a control; a single-format
     // album must look exactly as it always did.
     if album.editions.len() > 1 {
@@ -98,7 +101,7 @@ pub(crate) fn view<'a>(
         );
 
     container(content)
-        .width(Length::Fixed(PANEL_W))
+        .width(Length::Fixed(theme::PANEL_W))
         .height(Length::Fill)
         .padding(PANEL_PAD)
         .style(theme::panel)
@@ -229,7 +232,7 @@ fn track_row(track: &vm::TrackVm, show_artist: bool) -> Element<'_, Message> {
                     .font(theme::MONO)
                     .color(theme::PAPER_FAINT)
             )
-            .width(Length::Fixed(TRACK_NO_W))
+            .width(Length::Fixed(theme::TRACK_NO_W))
             .align_x(alignment::Horizontal::Right),
             container(title).width(Length::Fill),
             text(duration)

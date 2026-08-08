@@ -7,7 +7,12 @@
 //! - [`shelf`] — the virtualized album grid, its tiles, and its empty states.
 //! - [`side_panel`] — the selected album: header, edition selector, Play,
 //!   track list.
+//! - [`queue_panel`] — what baz handed the engine, and where it is in it.
 //! - [`bottom_bar`] — now-playing, transport, seek row.
+//!
+//! [`side_panel`] and [`queue_panel`] share one slot beside the shelf — the
+//! *rail* — and are therefore the same [`theme::PANEL_W`] wide; which of them
+//! is on screen is [`crate::panels`]'s decision, not theirs.
 //!
 //! Everything here is iced-specific and holds no state: each module exposes a
 //! `view` function that reads [`crate::app`]'s state (and [`crate::player`]'s
@@ -32,16 +37,17 @@
 //! imported as `geometry` so the two never read as the same thing.
 
 pub(crate) mod bottom_bar;
+pub(crate) mod queue_panel;
 pub(crate) mod setup;
 pub(crate) mod shelf;
 pub(crate) mod side_panel;
 pub(crate) mod top_bar;
 
-use iced::widget::{Space, container};
-use iced::{Color, Element, Length};
+use iced::widget::{Space, button, container, image as iced_image, text, tooltip};
+use iced::{Color, Element, Length, alignment};
 
 use crate::app::Message;
-use crate::vm;
+use crate::{icon, theme, vm};
 
 /// A `size`×`size` block filled with the album's deterministic two-color
 /// gradient (hash → HSL, see [`vm::gradient_colors`]) — a stand-in sleeve,
@@ -62,4 +68,43 @@ pub(crate) fn gradient_block(album_id: u64, size: f32) -> Element<'static, Messa
             ..container::Style::default()
         })
         .into()
+}
+
+/// The ✕ that dismisses a rail panel: the close glyph in the same fixed
+/// square, and with the same quiet card, as the bottom bar's transport
+/// buttons.
+///
+/// Shared by both rail panels because a dismissal must look and land the same
+/// wherever it is — a close control that moved or changed size between the
+/// album panel and the queue would be two controls, not one. `label` names the
+/// panel being closed ("Close the queue"), which is the tooltip and, iced 0.13
+/// having no accessibility tree, the whole of the control's accessible name.
+///
+/// The tooltip opens *below* the button rather than above it: these sit in a
+/// panel's top row, where there is nothing above to open into.
+pub(crate) fn close_button(label: &'static str) -> Element<'static, Message> {
+    let mark = container(
+        iced_image(icon::handle(icon::Glyph::Close))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(theme::GLYPH_OPACITY),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    tooltip(
+        button(mark)
+            .width(Length::Fixed(theme::TRANSPORT_HIT))
+            .height(Length::Fixed(theme::TRANSPORT_HIT))
+            .padding(0)
+            .style(theme::transport)
+            .on_press(Message::ClosePanel),
+        text(label).size(theme::SIZE_CAPTION),
+        tooltip::Position::Bottom,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(theme::tooltip)
+    .into()
 }
