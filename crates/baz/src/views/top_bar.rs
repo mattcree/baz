@@ -99,7 +99,7 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
                 // The well and the keys are one cluster — both are about the
                 // library — held apart by the ladder's largest gap so they
                 // read as two groups on one line rather than as six controls.
-                row![search, keys]
+                row![search, keys, draws()]
                     .spacing(theme::GAP_XL)
                     .align_y(iced::Alignment::Center),
                 Space::with_width(Length::Fill),
@@ -118,6 +118,75 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
         .padding(theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)),
         horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
     ]
+    .into()
+}
+
+/// **The two draws**: `Shuffle` and `Pull`, as words, beside the arrangement.
+///
+/// # Why they are here and not in the transport
+///
+/// Both are questions asked *of the collection* — "play what I am looking at",
+/// "suggest something I have not heard" — and the answer to each is decided
+/// entirely by what the wall is showing. That is this bar's subject. The
+/// now-playing bar's subject is the record that is sounding, and neither of
+/// these is about that record; putting them there would also mean moving the
+/// transport, which `docs/REFUSALS.md` does not permit for tidiness and would
+/// not be tidy anyway.
+///
+/// They sit *after* the group keys, in the same cluster, because the cluster
+/// reads left to right as **narrow, then arrange, then draw** — the order the
+/// gestures actually happen in.
+///
+/// # They are controls, and that is not optional
+///
+/// `docs/REFUSALS.md`: *"Every action in baz has a visible, pointer-reachable
+/// control. No action is keyboard-only, and no control's only affordance is
+/// hover."* The pull has a key (<kbd>Ctrl</kbd>+<kbd>R</kbd>) and shuffle has
+/// none; both have this. Each sends the identical message its keyboard route
+/// sends, which is the same discipline the group keys and the transport already
+/// keep.
+///
+/// # And they are words
+///
+/// No dice glyph. `crate::icon` draws one small deliberate sprite sheet and a
+/// die would be a new mark for a thing with a short unambiguous name — and, more
+/// to the point, a dice icon is exactly the costume the refusals ledger says a
+/// recommendation engine wears. baz's shuffle can afford to be spelled out
+/// because it can say what it is drawing from.
+///
+/// Sentence case in the Medium face, like `Settings` at the other end of the
+/// bar: these are **actions**, where the caps-and-tracked row beside them is a
+/// set of *states* one of which is current. Two vocabularies for two kinds of
+/// thing, and no third.
+fn draws() -> Element<'static, Message> {
+    row![
+        draw_word("Shuffle", Message::Shuffle),
+        draw_word("Pull", Message::Pull),
+    ]
+    .spacing(theme::GAP_XS)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// One of the two draw words: [`theme::TRANSPORT_HIT`] tall like every control
+/// in the product (law L7), centred in its box by the box (law L3).
+fn draw_word(label: &'static str, message: Message) -> Element<'static, Message> {
+    let room = theme::active();
+    button(
+        container(
+            text(label)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_SM))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press(message)
     .into()
 }
 

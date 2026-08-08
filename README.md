@@ -45,7 +45,12 @@ The full vision, competitive analysis, and staged scope live in
 | <kbd>Q</kbd> | show / hide the **queue**, over the now-playing bar |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | go to the settings, or come back |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> | hide the album inspector, or bring it back — the selection is kept |
-| <kbd>Esc</kbd> | peel one layer: the queue, else the settings, else the search, else the inspector |
+| <kbd>Ctrl</kbd>+<kbd>R</kbd> | **the pull**: one record, weighted toward what you have not heard in a long time. Nothing plays — it is offered, and pressing again offers a different one |
+| <kbd>Esc</kbd> | peel one layer: the queue, else the settings, else the pull, else the shuffle's marks, else the search, else the inspector |
+
+**Shuffle** has no key, only the word in the top bar. The rule runs one way —
+every action needs a visible control, not every control needs a key — and a
+shuffle is a decision made once an evening, not a reflex.
 
 Media keys (play/pause, previous, next, stop) work too — on Linux they usually arrive
 over MPRIS rather than as key presses, which is the same thing by a different

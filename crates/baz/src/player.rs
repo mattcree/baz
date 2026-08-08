@@ -620,6 +620,29 @@ pub struct QueueRow {
     pub duration: String,
     /// Where this row sits relative to what is playing.
     pub state: QueueRowState,
+    /// The record this row **opens**, when it is the first row of one.
+    ///
+    /// `None` for every row that continues the record above it, and `None` for
+    /// the queue's *first* record too — that one is named by
+    /// [`QueueList::album`] and [`QueueList::artist`], which the popover already
+    /// draws at the head of the list.
+    ///
+    /// This is what keeps ADR-0014's *"albums are listed as albums, never
+    /// flattened"* true of a queue holding more than one of them. A shuffle
+    /// draws eight sleeves (`crate::shuffle`); without a break per record the
+    /// popover would print forty titles under one album's name, which is a
+    /// flattening the data had not done.
+    pub head: Option<QueueHead>,
+}
+
+/// The name of a record where it begins in the queue.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueHead {
+    /// Its title, when it has one. `None` is an unknown-album group, headed by
+    /// its artist exactly as the wall's own label is.
+    pub album: Option<String>,
+    /// Who it is filed under, as the shelf labels it.
+    pub artist: String,
 }
 
 /// The queue panel's render-ready state: what was queued, where the engine is
@@ -1413,6 +1436,21 @@ impl PlayerState {
                     Some(current) if index < current => QueueRowState::Played,
                     _ => QueueRowState::Upcoming,
                 },
+                // A record's name where the record begins — and never on the
+                // first row, whose record the list's own header already names.
+                head: index
+                    .checked_sub(1)
+                    .and_then(|before| queue.items.get(before))
+                    .filter(|previous| {
+                        previous.album != item.album || previous.album_artist != item.album_artist
+                    })
+                    .map(|_| QueueHead {
+                        album: item.album.clone(),
+                        artist: item
+                            .album_artist
+                            .clone()
+                            .unwrap_or_else(|| queue.artist.clone()),
+                    }),
             })
             .collect();
         Some(QueueList {
@@ -2256,6 +2294,7 @@ mod tests {
                     title: track.title.clone(),
                     artist: track.artist.clone(),
                     album: album.title.clone(),
+                    album_artist: None,
                     duration: track.duration,
                     path: track.path.clone(),
                 })
@@ -2266,6 +2305,7 @@ mod tests {
                 title: format!("Filler {extra}"),
                 artist: None,
                 album: Some("Filler".to_owned()),
+                album_artist: None,
                 duration: Some(Duration::from_secs(100)),
                 path: PathBuf::from(format!("/m/filler/{extra}.flac")),
             });
@@ -4155,6 +4195,67 @@ mod tests {
         );
         assert_eq!(player.queued(), 2);
         assert!(player.play_pause_enabled(), "a queue makes Play meaningful");
+        assert!(
+            list.rows.iter().all(|row| row.head.is_none()),
+            "one record is one record: the list's own header names it and no \
+             row breaks the run"
+        );
+    }
+
+    /// **A queue holding several records lists them as records** — one name
+    /// where each begins, and none where a record simply continues.
+    ///
+    /// The state a shuffle puts this surface in (`crate::shuffle` draws eight
+    /// sleeves), and the thing ADR-0014's *"albums are listed as albums, never
+    /// flattened"* actually costs: without a break per record the popover would
+    /// print forty titles under one album's name.
+    #[test]
+    fn a_queue_of_several_records_names_each_one_where_it_begins() {
+        let queue = QueueVm {
+            album: Some("Laughing Stock".to_owned()),
+            artist: "Talk Talk".to_owned(),
+            items: vec![
+                item("Myrrhman", "Laughing Stock", "Talk Talk"),
+                item("Ascension Day", "Laughing Stock", "Talk Talk"),
+                item("Ready Lets Go", "Geogaddi", "Boards of Canada"),
+                item("Music Is Math", "Geogaddi", "Boards of Canada"),
+                item("Sundown", "Sundown", "Gordon Lightfoot"),
+            ],
+        };
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(queue);
+        let list = player.queue_list().expect("a queue was sent");
+
+        // The first record is the list's own header, so its rows carry none.
+        assert_eq!(list.album.as_deref(), Some("Laughing Stock"));
+        assert_eq!(list.artist, "Talk Talk");
+        assert!(list.rows[0].head.is_none());
+        assert!(list.rows[1].head.is_none(), "a continuation is not a break");
+
+        // The second and third are named where they begin, by their own
+        // artists — the fact the queue's single header could never carry.
+        let head = list.rows[2].head.clone().expect("a new record starts here");
+        assert_eq!(head.album.as_deref(), Some("Geogaddi"));
+        assert_eq!(head.artist, "Boards of Canada");
+        assert!(list.rows[3].head.is_none());
+        let head = list.rows[4].head.clone().expect("and another");
+        assert_eq!(head.album.as_deref(), Some("Sundown"));
+        assert_eq!(head.artist, "Gordon Lightfoot");
+
+        // Exactly one break per record after the first — never one per track.
+        assert_eq!(list.rows.iter().filter(|r| r.head.is_some()).count(), 2);
+    }
+
+    /// One queue item of `album`, filed under `artist`.
+    fn item(title: &str, album: &str, artist: &str) -> vm::QueueItemVm {
+        vm::QueueItemVm {
+            title: title.to_owned(),
+            artist: None,
+            album: Some(album.to_owned()),
+            album_artist: Some(artist.to_owned()),
+            duration: Some(Duration::from_secs(200)),
+            path: PathBuf::from(format!("/m/{artist}/{album}/{title}.flac")),
+        }
     }
 
     /// The marking comes from `TrackStarted` and moves with it: everything
@@ -4330,6 +4431,7 @@ mod tests {
                     title: (*title).to_owned(),
                     artist: None,
                     album: album.map(ToOwned::to_owned),
+                    album_artist: album.map(|_| "Various".to_owned()),
                     duration: Some(Duration::from_secs(*secs)),
                     path: PathBuf::from(format!("/m/stack/{index}.flac")),
                 })
@@ -4633,6 +4735,7 @@ mod tests {
                     title: "Ready Lets Go".to_owned(),
                     artist: None,
                     album: Some("Geogaddi".to_owned()),
+                    album_artist: None,
                     duration: None,
                     path: PathBuf::from("/m/stack/0.flac"),
                 },
@@ -4640,6 +4743,7 @@ mod tests {
                     title: "Kid A".to_owned(),
                     artist: None,
                     album: Some("Kid A".to_owned()),
+                    album_artist: None,
                     duration: None,
                     path: PathBuf::from("/m/stack/1.flac"),
                 },
@@ -4877,6 +4981,7 @@ mod tests {
                 title: "stream.mp3".to_owned(),
                 artist: None,
                 album: None,
+                album_artist: None,
                 duration: None,
                 path: PathBuf::from("/m/stream.mp3"),
             }],

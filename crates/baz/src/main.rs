@@ -47,6 +47,7 @@ mod replaygain;
 mod scan;
 mod selection;
 mod shelf;
+mod shuffle;
 mod theme;
 mod views;
 mod vm;

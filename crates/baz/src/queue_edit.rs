@@ -67,6 +67,7 @@ mod tests {
             title: name.to_owned(),
             artist: None,
             album: Some("A Record".to_owned()),
+            album_artist: None,
             duration: Some(Duration::from_secs(200)),
             path: PathBuf::from(format!("/m/{name}.flac")),
         }

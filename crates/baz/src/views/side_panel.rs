@@ -100,7 +100,7 @@ pub(crate) fn view<'a>(
             .width(Length::Fixed(art_edge))
             .height(Length::Fixed(art_edge))
             .into(),
-        None => gradient_block(album.id, art_edge),
+        None => gradient_block(album.id, art_edge, 1.0),
     };
     // Left-aligned on the panel's content spine rather than centred in the
     // column: 964 is the one edge seven elements already share, and a centred
@@ -161,8 +161,18 @@ pub(crate) fn view<'a>(
         ),
     ]
     .align_y(iced::Alignment::Center);
+    // Is this record the one the pull is offering? The offer is about *a*
+    // record, so it is drawn only in the column that record is in.
+    let pulled = shelf
+        .pull
+        .as_ref()
+        .filter(|pull| pull.album == album.id)
+        .map(|pull| pull.note.as_str());
     let mut content =
         column![header_row, sleeve, album_header(album, edition)].spacing(theme::GAP_MD);
+    if let Some(note) = pulled {
+        content = content.push(pull_note(note));
+    }
     // Only a genuinely multi-format album gets a control; a single-format
     // album must look exactly as it always did.
     if album.editions.len() > 1 {
@@ -173,6 +183,12 @@ pub(crate) fn view<'a>(
     }
     let hint = if *player.availability() == Availability::NotBuilt {
         "Esc closes · built without audio output"
+    } else if pulled.is_some() {
+        // What the two keys do *to the offer*, said where the offer is. It
+        // replaces the browsing hint rather than joining it: a listener being
+        // shown a suggestion is being asked one question, and the answer to it
+        // is above this line.
+        "Ctrl+R pulls another · Esc puts it back"
     } else {
         "Esc closes · double-click a tile to play"
     };
@@ -191,6 +207,59 @@ pub(crate) fn view<'a>(
         .padding(PANEL_PAD)
         .style(move |_theme| theme::panel(room))
         .into()
+}
+
+/// **The pull's line**: `The pull · Last played 3 years ago`.
+///
+/// Two facts and no third. The first says *this record was suggested, it is not
+/// one you went looking for* — without which the inspector opening on its own
+/// would read as a fault. The second is the ledger's own reading
+/// ([`crate::shuffle::pull_note`]): a date band, never a score, never a reason,
+/// never a "because you liked". History records; it never performs
+/// (`docs/REFUSALS.md`).
+///
+/// # It offers, and it cannot start anything
+///
+/// There is no button here. The control that accepts the suggestion is the
+/// panel's own `Play album`, sitting directly below in the place it always
+/// sits — so accepting the pull is the *same act*, sending the same commands,
+/// as playing a record you found yourself. That is what
+/// `docs/design/critique/02-surfaces.md`'s *"nothing plays until…"* is made of
+/// in code: the pull writes a note and selects a sleeve, and there is no path
+/// from here to the engine at all.
+///
+/// # This is the seam Marquee takes over (ADR-0017 step 18)
+///
+/// The pull's designed home is the Marquee lens — the sleeve at half-window,
+/// full-bleed, this note as poster type over it. Marquee is not built. Rather
+/// than invent a lens for one feature, the pull borrows the surface that exists,
+/// and the borrowing is deliberately shallow: one line of type, in the ordinary
+/// panel voice, above a control that was already there. When Marquee lands it
+/// reads [`crate::app::Pull`]'s two fields and states them as its subject; this
+/// function is what it replaces, and nothing about the draw itself moves.
+///
+/// The line is set at the caption size in [`theme::Palette::paper_dim`] — one
+/// rung under the album's own title, which stays the loudest thing in the
+/// column. A suggestion that shouted louder than the record it was suggesting
+/// would have the hierarchy backwards.
+fn pull_note(note: &str) -> Element<'static, Message> {
+    let room = theme::active();
+    row![
+        text("The pull")
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION)
+            .font(theme::MEDIUM)
+            .color(room.paper_dim)
+            .wrapping(text::Wrapping::None),
+        text(note.to_owned())
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION)
+            .color(room.paper_faint)
+            .wrapping(text::Wrapping::None),
+    ]
+    .spacing(theme::GAP_SM)
+    .align_y(iced::Alignment::Center)
+    .into()
 }
 
 /// The scrolling track list, with the lane its scrollbar needs kept clear.

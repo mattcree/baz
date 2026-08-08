@@ -145,6 +145,27 @@
 //! `app.rs`, where the layers do; this module only says that the key means
 //! "peel".
 //!
+//! # The pull — <kbd>Ctrl</kbd>+<kbd>R</kbd>
+//!
+//! The one binding ADR-0017 §1.2's key table spends on a *draw*, and it earns
+//! its modifier twice over. It is the letter every application spells *refresh*
+//! or *random* with, so the reflex is already there; and unlike `Q` or `1`–`5`
+//! it is not a view key — it moves the wall, opens the column and replaces
+//! whatever suggestion was standing. A bare `r` would also be the first letter
+//! a listener types into the well when they mean *Radiohead*.
+//!
+//! It resolves to [`Message::Pull`], which is the message the top bar's `Pull`
+//! word sends, so the visible-control rule holds. What it does **not** do is
+//! start anything: the pull selects a record and prints when it was last heard,
+//! and the control that accepts it is the inspector's own `Play album`. Pressing
+//! this key again pulls a different record; <kbd>Esc</kbd> puts the offer back.
+//!
+//! Shuffle gets **no** key at all, deliberately. The rule is one-directional —
+//! every action needs a visible control, not every control needs a key — and
+//! the shortcuts baz spends are for the things a hand does dozens of times a
+//! session. Starting a shuffle is a decision made once an evening, from a word
+//! that is already on screen.
+//!
 //! # The arrangement — `1` … `5`
 //!
 //! The five group keys (ADR-0019) select from the number row: `1` ARTIST,
@@ -256,6 +277,10 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Character("q" | "Q") if bare || shift => Some(Message::ToggleQueue),
         Key::Character("b" | "B") if command => Some(Message::TogglePanels),
         Key::Character(",") if command => Some(Message::ToggleSettings),
+
+        // The pull: one record, weighted toward the long unplayed, offered
+        // rather than started (module docs).
+        Key::Character("r" | "R") if command => Some(Message::Pull),
 
         // Arrangement. `1`–`5` are the five group keys, in the order the top
         // bar's row of words states them (module docs).

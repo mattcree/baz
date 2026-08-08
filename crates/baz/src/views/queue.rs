@@ -106,14 +106,32 @@ pub(crate) fn view(
     let content = match player.queue_list() {
         None => empty_state(arriving),
         Some(list) => {
-            let rows: Vec<Element<'static, Message>> = list
-                .rows
-                .into_iter()
-                .enumerate()
-                .map(|(index, row_state)| {
-                    queue_row(row_state, index, live, hovered == Some(index), arriving)
-                })
-                .collect();
+            // A record's name where the record begins, then its tracks —
+            // **albums listed as albums, never flattened** (ADR-0014). The
+            // queue's first record is named by the header above the list, so
+            // only the second and later carry one of their own; see
+            // [`crate::player::QueueRow::head`].
+            let mut rows: Vec<Element<'static, Message>> = Vec::new();
+            for (index, row_state) in list.rows.into_iter().enumerate() {
+                if let Some(head) = row_state.head.clone() {
+                    rows.push(album_group(
+                        head.album.as_deref(),
+                        &head.artist,
+                        arriving,
+                        // One `GAP_MD` of air before a new record, taken above
+                        // the name rather than below it, so the break belongs
+                        // to the record it opens.
+                        theme::GAP_MD,
+                    ));
+                }
+                rows.push(queue_row(
+                    row_state,
+                    index,
+                    live,
+                    hovered == Some(index),
+                    arriving,
+                ));
+            }
             column![
                 text(list.summary)
                     .size(theme::SIZE_META)
@@ -127,7 +145,7 @@ pub(crate) fn view(
                 // (`side_panel::track_list` carries the argument.)
                 scrollable(
                     column![
-                        album_group(list.album.as_deref(), &list.artist, arriving),
+                        album_group(list.album.as_deref(), &list.artist, arriving, 0.0),
                         Column::with_children(rows).spacing(theme::GAP_XS),
                     ]
                     .spacing(theme::GAP_XS)
@@ -200,7 +218,12 @@ fn header_row(fade: f32, ink: Ink) -> Element<'static, Message> {
 ///
 /// It is inside the scroll for the same reason. A group header scrolls with
 /// its group.
-fn album_group(album: Option<&str>, artist: &str, fade: f32) -> Element<'static, Message> {
+fn album_group(
+    album: Option<&str>,
+    artist: &str,
+    fade: f32,
+    air: f32,
+) -> Element<'static, Message> {
     let room = theme::active();
     let title = album.unwrap_or(artist);
     let mut block = column![
@@ -227,7 +250,7 @@ fn album_group(album: Option<&str>, artist: &str, fade: f32) -> Element<'static,
     // and a 5 px row padding on this one block gave the popover *four* left
     // edges in 358 px — 920, 924, 925, 941 — where two are a composition and
     // four are a leak (the audit's defect 11).
-    container(block).into()
+    container(block).padding(theme::pad(air, 0.0)).into()
 }
 
 /// Nothing queued yet: said plainly, with the gesture that fills it.
