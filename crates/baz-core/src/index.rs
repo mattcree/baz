@@ -35,13 +35,21 @@
 //! equivalence is out of scope for now). The album artist is included only
 //! when it differs from the artist, so the ordinary album adds nothing to
 //! the corpus a keystroke scans while the name on a soundtrack's tile stays
-//! findable. Results come back in library order — album artist, album, disc,
-//! track, title, path — so repeated queries are deterministic. An
-//! **empty query returns nothing**: every haystack contains the empty
-//! string, so the only honest answer would be the entire library truncated
-//! at `limit`, which would misrepresent a 100k-track library as `limit`
-//! tracks. "No query yet" is the shelf's state ([`Library::albums`]), not a
-//! search result.
+//! findable. An **empty query returns nothing**: every haystack contains the
+//! empty string, so the only honest answer would be the entire library
+//! truncated at `limit`, which would misrepresent a 100k-track library as
+//! `limit` tracks. "No query yet" is the shelf's state
+//! ([`Library::albums`]), not a search result.
+//!
+//! Results come back **ranked, best match first**
+//! (`docs/adr/0021-search-ranking.md`) rather than in library order, because
+//! the design's type-anywhere find plays the first match on `Enter`
+//! (`docs/design/critique/02-surfaces.md`) — so what ranks first is what
+//! plays. The ranking is three signals compared in order: how well the query
+//! fits the field it matched, which field that was, and library order as the
+//! final tiebreak. It is a *total* order, so the same query over the same
+//! library always returns the same list. [`Library::search_albums`] is the
+//! same ranking projected onto albums, which is the unit the wall draws.
 //!
 //! # Schema versioning
 //!
@@ -374,6 +382,37 @@ pub struct Library {
 }
 
 impl Library {
+    /// How many matching tracks [`Library::search`] ranks: the first this many
+    /// in library order, not every match in the library.
+    ///
+    /// Ranking has to see a match before it can call it first, so it cannot
+    /// stop early the way the old unranked filter could. Over a 100k-track
+    /// library that is measured, not guessed: ranking every match of a
+    /// one-character query — which is what the *first* keystroke of a
+    /// type-anywhere find always is — cost **11.6 ms**, most of a 60 Hz frame,
+    /// against a friction budget of "keystroke → filtered wall = next frame"
+    /// (`docs/design/critique/02-surfaces.md`). Capping the candidate set puts
+    /// the worst case back under half a millisecond
+    /// (`docs/adr/0021-search-ranking.md` records both).
+    ///
+    /// **What it costs, stated plainly**: for a query matching more than this
+    /// many tracks, an excellent match beyond the cap is not seen. Three things
+    /// make that the right trade rather than a reintroduction of the bug
+    /// ranking exists to fix:
+    ///
+    /// - It is **eight to eighty times** the working set the old code ranked
+    ///   nothing within (it took the first `limit` matches in corpus order and
+    ///   called the first one the answer), and far more than any wall shows.
+    /// - It binds only on queries that have **not narrowed anything yet**. A
+    ///   query matching 4 % of a library is one or two characters in; the match
+    ///   set shrinks roughly geometrically per keystroke, and by the time a
+    ///   query is specific enough for `Enter` to mean something, every match
+    ///   fits inside the cap and the ranking is exact.
+    /// - It is **deterministic**: a prefix of library order is a stable,
+    ///   reproducible set, so the same query still always returns the same
+    ///   list.
+    pub const RANKED_CANDIDATES: usize = 4096;
+
     /// Open the library database at `db_path`, creating and initializing it
     /// on first run, then hydrate the full in-RAM index from it.
     ///
@@ -714,9 +753,45 @@ impl Library {
     }
 
     /// Search the library: literal, case-insensitive substring match over
-    /// artist + album artist + album + title, capped at `limit` results, in
-    /// library order (album artist, album, disc, track, title — see the
-    /// [module docs](self)).
+    /// artist + album artist + album + title, **ranked best match first** and
+    /// capped at `limit` results.
+    ///
+    /// # The ranking
+    ///
+    /// Three signals, compared in that order and no others
+    /// (`docs/adr/0021-search-ranking.md`). There is no scoring formula and no
+    /// weights: the comparison is lexicographic over three small ordered
+    /// values, so any two results can be explained by naming the first signal
+    /// that separates them.
+    ///
+    /// 1. **How well the query fits the field it landed in.** In order: the
+    ///    query *is* the whole field; it starts the field and ends on a word
+    ///    boundary; it starts the field mid-word; it starts a later word and
+    ///    ends on a word boundary; it starts a later word mid-word; it starts
+    ///    mid-word. Position dominates completeness because a listener types
+    ///    the *beginning* of the name they are thinking of.
+    /// 2. **Which field it landed in**: artist (track or album artist), then
+    ///    album title, then track title. Only ever a tiebreak between matches
+    ///    that fit equally well — which is why an exactly-matching song title
+    ///    still beats an artist whose name merely contains the query.
+    /// 3. **Library order** — album artist, album, disc, track, title, path
+    ///    ([`Library::tracks`]). Total and stable, so the same query over the
+    ///    same library always returns the same list in the same order.
+    ///
+    /// A track matching in several places is ranked by its **best** match.
+    /// Matching tracks are kept **together by album**, an album taking the rank
+    /// of its best-matching track: the wall draws albums, and a record whose
+    /// tracks were scattered through the results would read as several weak
+    /// hits instead of one strong one. Nothing is scored by *how many* tracks
+    /// matched — that would rank a long compilation above a short record for a
+    /// reason the query never asked about.
+    ///
+    /// # What it costs
+    ///
+    /// Ranking needs every match, so this cannot stop early the way an
+    /// unranked filter could; a query matching a third of the library scans and
+    /// scores all of it. That is measured rather than assumed —
+    /// `benches/search.rs`, and ADR-0021 records the numbers.
     ///
     /// An empty `query` returns no results, deliberately (module docs), and
     /// so does a query containing `\n` — that is the field/record separator
@@ -724,32 +799,98 @@ impl Library {
     /// cross-field match, which search does not offer.
     #[must_use]
     pub fn search(&self, query: &str, limit: usize) -> Vec<&TrackMeta> {
-        if query.is_empty() || query.contains('\n') || limit == 0 {
+        if limit == 0 {
             return Vec::new();
         }
+        let ranked = self.ranked(query);
+        ranked
+            .tracks()
+            .take(limit)
+            .filter_map(|index| self.index.tracks.get(index))
+            .map(|track| &track.meta)
+            .collect()
+    }
+
+    /// The same search and the same ranking as [`Library::search`], projected
+    /// onto **albums** — the unit the wall actually draws — capped at `limit`
+    /// albums.
+    ///
+    /// An album's rank is its best-matching track's, and it appears exactly
+    /// once however many of its tracks matched.
+    ///
+    /// This exists so the ranking survives the mapping. A front end that calls
+    /// `search(query, n)` and folds the resulting tracks onto their albums
+    /// applies a *track* cap to an *album* question: an album whose only
+    /// matching track fell outside the cap disappears from the wall, and which
+    /// albums survive depends on how many tracks the ones before them happened
+    /// to match. Here the cap is applied to the answer, not to the working set.
+    ///
+    /// Empty and separator-bearing queries return nothing, exactly as
+    /// [`Library::search`] does.
+    #[must_use]
+    pub fn search_albums(&self, query: &str, limit: usize) -> Vec<Album<'_>> {
+        if limit == 0 {
+            return Vec::new();
+        }
+        let ranked = self.ranked(query);
+        ranked
+            .albums()
+            .take(limit)
+            .filter_map(|album| self.album_at(album))
+            .collect()
+    }
+
+    /// Every match for `query`, ranked — the one implementation both
+    /// [`Library::search`] and [`Library::search_albums`] project.
+    ///
+    /// One SIMD scan (`memmem`) over the whole corpus; byte-wise matching is
+    /// sound because UTF-8 is self-synchronizing — a valid-UTF-8 needle can
+    /// only match at character boundaries. Positions come back in ascending
+    /// order, which is library order, which is why the track cursor can walk
+    /// forward instead of binary-searching, why the several matches inside one
+    /// track arrive consecutively, and why an album's matching tracks are
+    /// already contiguous by the time they are grouped.
+    fn ranked(&self, query: &str) -> RankedHits {
+        let mut ranked = RankedHits::default();
+        if query.is_empty() || query.contains('\n') {
+            return ranked;
+        }
         let needle = query.to_lowercase();
-        let mut results: Vec<&TrackMeta> = Vec::new();
-        let mut last_index = usize::MAX;
-        // One SIMD scan (memmem) over the whole corpus; byte-wise matching
-        // is sound because UTF-8 is self-synchronizing — a valid-UTF-8
-        // needle can only match at character boundaries. Positions come
-        // back in ascending order, which is library order, so results need
-        // no re-sorting. Multiple matches inside one track arrive
-        // consecutively and are deduplicated against the previous hit.
-        for position in memchr::memmem::find_iter(self.index.corpus.as_bytes(), needle.as_bytes()) {
-            let index = self.index.track_index_at_offset(position);
-            if index == last_index {
-                continue;
+        let corpus = self.index.corpus.as_bytes();
+        let mut track = 0usize;
+        let mut cursor: Option<Field> = None;
+        for position in memchr::memmem::find_iter(corpus, needle.as_bytes()) {
+            while self
+                .index
+                .starts
+                .get(track + 1)
+                .is_some_and(|&start| start <= position)
+            {
+                track += 1;
             }
-            last_index = index;
-            if let Some(track) = self.index.tracks.get(index) {
-                results.push(&track.meta);
-                if results.len() == limit {
+            let known = ranked.hits.last().is_some_and(|last| last.track == track);
+            if !known {
+                if ranked.hits.len() >= Self::RANKED_CANDIDATES {
                     break;
                 }
+                // A new track is a new haystack, so the field walk restarts.
+                cursor = None;
+            }
+            let Some(haystack) = self.index.haystack_at(track) else {
+                continue;
+            };
+            let Some(&start) = self.index.starts.get(track) else {
+                continue;
+            };
+            let (relevance, field) = classify(haystack, position - start, needle.len(), cursor);
+            cursor = Some(field);
+            match ranked.hits.last_mut() {
+                Some(last) if last.track == track => last.relevance = last.relevance.min(relevance),
+                _ => ranked.hits.push(Hit { track, relevance }),
             }
         }
-        results
+        ranked.group(&self.index.album_of);
+        ranked
     }
 
     /// All tracks in library order (artist, album, disc, track, title, path).
@@ -795,41 +936,53 @@ impl Library {
     /// stated (`the_artist_key_is_the_flat_shelf_with_its_breaks_named`).
     #[must_use]
     pub fn albums(&self) -> Vec<Album<'_>> {
-        let mut albums: Vec<Album<'_>> = Vec::new();
-        let mut current_key: Option<(&ArtistKey, &Option<String>)> = None;
-        // Library order sorts by folded (album artist, album, ...) first, so
-        // each album is one consecutive run, already in in-album track order.
-        for track in self.index.in_order() {
-            let key = (&track.key.artist, &track.key.album);
-            if current_key != Some(key) {
-                current_key = Some(key);
-                albums.push(Album {
-                    artist: AlbumArtist::of(&track.meta),
-                    title: track.meta.album.as_deref(),
-                    year: None,
-                    genre: None,
-                    first_seen_ns: None,
-                    editions: Vec::new(),
-                });
+        (0..self.index.album_starts.len())
+            .filter_map(|album| self.album_at(album))
+            .collect()
+    }
+
+    /// Build one album from its run of tracks.
+    ///
+    /// Library order sorts by folded (album artist, album, ...) first, so each
+    /// album is one consecutive run of `tracks`, already in in-album track
+    /// order — [`SearchIndex::album_starts`] records where each run begins.
+    /// That is what lets a *search* build only the albums it matched instead of
+    /// building the whole shelf and filtering it.
+    ///
+    /// `None` for a run index the library does not have.
+    fn album_at(&self, album: usize) -> Option<Album<'_>> {
+        let start = *self.index.album_starts.get(album)?;
+        let end = self
+            .index
+            .album_starts
+            .get(album + 1)
+            .copied()
+            .unwrap_or(self.index.tracks.len());
+        let tracks = self.index.tracks.get(start..end)?;
+        let first = tracks.first()?;
+        let mut built = Album {
+            artist: AlbumArtist::of(&first.meta),
+            title: first.meta.album.as_deref(),
+            year: None,
+            genre: None,
+            first_seen_ns: None,
+            editions: Vec::new(),
+        };
+        for track in tracks {
+            if built.year.is_none() {
+                built.year = track.meta.year;
             }
-            if let Some(album) = albums.last_mut() {
-                if album.year.is_none() {
-                    album.year = track.meta.year;
-                }
-                if album.genre.is_none() {
-                    album.genre = track.meta.genre.as_deref();
-                }
-                album.first_seen_ns = match (album.first_seen_ns, track.first_seen) {
-                    (Some(a), Some(b)) => Some(a.min(b)),
-                    (seen, None) | (None, seen) => seen,
-                };
-                album.push_track(&track.meta);
+            if built.genre.is_none() {
+                built.genre = track.meta.genre.as_deref();
             }
+            built.first_seen_ns = match (built.first_seen_ns, track.first_seen) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (seen, None) | (None, seen) => seen,
+            };
+            built.push_track(&track.meta);
         }
-        for album in &mut albums {
-            album.editions.sort_by(rank_editions);
-        }
-        albums
+        built.editions.sort_by(rank_editions);
+        Some(built)
     }
 
     /// The shelf view **arranged into the shelves the wall draws**, under one
@@ -1460,6 +1613,373 @@ fn uniform<T: Copy + PartialEq>(mut values: impl Iterator<Item = Option<T>>) -> 
     values.all(|value| value == Some(first)).then_some(first)
 }
 
+/// How well a query fits the field it matched — the **first** signal in the
+/// search ranking (`docs/adr/0021-search-ranking.md`).
+///
+/// Variant order *is* rank order, and the whole model is in it: **position
+/// first, completeness second**, under one exact-match tier that is both.
+/// Position dominates because a listener types the beginning of the name they
+/// are thinking of — typing `kid` and being shown `Kids`, a record whose name
+/// starts with what was typed, is the behaviour every incremental find in every
+/// other program has; being shown `The Kid` instead is not.
+///
+/// "Word" means a boundary in the case-folded field: the neighbouring character
+/// is not alphanumeric, or there is no neighbouring character. Scripts that do
+/// not space their words — the CJK case the corpus tests pin — therefore reach
+/// [`MatchTier::Fragment`] for an interior substring and [`MatchTier::Exact`]
+/// for a whole field, which is the honest reading: there is no word boundary
+/// evidence to use, so none is claimed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum MatchTier {
+    /// The query is the entire field: `kid a` in `kid a`.
+    Exact,
+    /// The query starts the field and ends on a word boundary: `kid` in
+    /// `kid a`.
+    PrefixWord,
+    /// The query starts the field but ends inside a word: `kid` in `kids`.
+    Prefix,
+    /// The query starts a later word and ends on a word boundary: `road` in
+    /// `abbey road`.
+    Word,
+    /// The query starts a later word but ends inside it: `roa` in `abbey road`.
+    WordStart,
+    /// The query starts inside a word: `bbey` in `abbey road`.
+    Fragment,
+}
+
+impl MatchTier {
+    /// How many tiers there are — the height of the ranking's first signal.
+    const COUNT: usize = 6;
+
+    /// Position in the variant order, which *is* the rank.
+    fn rank(self) -> usize {
+        match self {
+            Self::Exact => 0,
+            Self::PrefixWord => 1,
+            Self::Prefix => 2,
+            Self::Word => 3,
+            Self::WordStart => 4,
+            Self::Fragment => 5,
+        }
+    }
+}
+
+/// Which field a query matched — the **second** signal in the search ranking,
+/// consulted only when two matches fit their fields equally well.
+///
+/// Variant order *is* rank order: who made it, then what record it is on, then
+/// which song. It is second rather than first deliberately. Ranking by field
+/// first would put every track by *Yesterdays New Quintet* above the Beatles'
+/// `Yesterday` for the query `yesterday`, because an artist match would outrank
+/// an exact title match — the fit of the match is the evidence about what the
+/// listener meant, and the field is only a way of breaking a tie between two
+/// equally good fits.
+///
+/// The tie it breaks it breaks upwards: at equal fit, the artist names a whole
+/// body of work and the album names a record, so preferring them puts the
+/// broadest true answer first and keeps a discography together at the top
+/// rather than interleaved with songs that happen to share a word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum SearchField {
+    /// The track artist or the album artist — both answer "who made this",
+    /// and the haystack only carries the second when it differs from the
+    /// first.
+    Artist,
+    /// The album title.
+    Album,
+    /// The track title.
+    Title,
+}
+
+impl SearchField {
+    /// How many fields there are — the height of the ranking's second signal.
+    const COUNT: usize = 3;
+
+    /// The field a haystack slot belongs to. The slots are artist, album
+    /// artist, album, title (see [`IndexedTrack::haystack`]); the first two are
+    /// one field for ranking.
+    fn of_slot(slot: usize) -> Self {
+        match slot {
+            0 | 1 => Self::Artist,
+            2 => Self::Album,
+            _ => Self::Title,
+        }
+    }
+
+    /// Position in the variant order, which *is* the rank.
+    fn rank(self) -> usize {
+        match self {
+            Self::Artist => 0,
+            Self::Album => 1,
+            Self::Title => 2,
+        }
+    }
+}
+
+/// One match's rank: the ranking's first two signals, compared in order.
+///
+/// The derived [`Ord`] is lexicographic in declaration order — tier, then field
+/// — which is precisely the model. The third signal (library order) is not in
+/// here because it is not a property of the match: it is the position the
+/// matching track already sits at, and it is applied by *stable* sorting rather
+/// than by comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Relevance {
+    tier: MatchTier,
+    field: SearchField,
+}
+
+impl Relevance {
+    /// How many distinct ranks exist: six tiers times three fields.
+    ///
+    /// This being a small constant is what makes ranking a **counting sort**
+    /// rather than a comparison sort — the difference between O(n) and
+    /// O(n log n) on the per-keystroke path, for a query that matches a large
+    /// part of the library.
+    const COUNT: usize = MatchTier::COUNT * SearchField::COUNT;
+
+    /// This rank as an index in `0..COUNT`, ordered identically to [`Ord`]
+    /// (tier major, field minor). The counting sort's correctness rests on
+    /// that agreement, and `relevance_codes_are_ordered_like_the_comparison`
+    /// asserts it over every value rather than trusting the arithmetic.
+    fn code(self) -> usize {
+        self.tier.rank() * SearchField::COUNT + self.field.rank()
+    }
+}
+
+/// Which field of a track's haystack a match landed in: its byte range and its
+/// slot number.
+///
+/// Carried between matches as a **cursor**. A haystack is four
+/// `\n`-terminated fields and `memmem` reports matches at ascending offsets,
+/// so the fields of one track can be walked forward once in total instead of
+/// being re-derived from the start of the haystack for every match — which is
+/// the difference between one pass per *track* and one pass per *match* on the
+/// per-keystroke path. A one-character query matches every field of every
+/// track several times over, so that difference is the whole cost of the first
+/// keystroke.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Field {
+    /// Byte where the field starts in the haystack.
+    start: usize,
+    /// Byte where it ends — the position of its terminating `\n`.
+    end: usize,
+    /// Which of the four slots it is (see [`IndexedTrack::haystack`]).
+    slot: usize,
+}
+
+impl Field {
+    /// The field of `haystack` containing byte `offset`, resuming from `from`
+    /// when that cursor belongs to the same haystack and starts at or before
+    /// the offset.
+    ///
+    /// A query cannot contain `\n` (it is refused before it reaches here), so a
+    /// match lies wholly inside the field its first byte is in and the offset
+    /// alone settles it.
+    fn containing(haystack: &str, offset: usize, from: Option<Self>) -> Self {
+        let bytes = haystack.as_bytes();
+        let mut field = from.filter(|field| field.start <= offset).unwrap_or(Self {
+            start: 0,
+            end: 0,
+            slot: 0,
+        });
+        loop {
+            field.end = bytes
+                .get(field.start..)
+                .and_then(|rest| memchr::memchr(b'\n', rest))
+                .map_or(bytes.len(), |newline| field.start + newline);
+            if offset < field.end || field.end >= bytes.len() {
+                return field;
+            }
+            field.start = field.end + 1;
+            field.slot += 1;
+        }
+    }
+}
+
+/// How well a match at `start..start + needle_len` fits `field` — the ranking's
+/// first signal, and the whole of the word-boundary rule.
+fn tier_of(field: &str, start: usize, needle_len: usize) -> MatchTier {
+    let end = start + needle_len;
+    let at_start = start == 0;
+    let at_end = end == field.len();
+    let opens_word = at_start
+        || !field
+            .get(..start)
+            .and_then(|before| before.chars().next_back())
+            .is_some_and(char::is_alphanumeric);
+    let closes_word = at_end
+        || !field
+            .get(end..)
+            .and_then(|after| after.chars().next())
+            .is_some_and(char::is_alphanumeric);
+    match (at_start, at_end, opens_word, closes_word) {
+        (true, true, _, _) => MatchTier::Exact,
+        (true, _, _, true) => MatchTier::PrefixWord,
+        (true, _, _, false) => MatchTier::Prefix,
+        (_, _, true, true) => MatchTier::Word,
+        (_, _, true, false) => MatchTier::WordStart,
+        (_, _, false, _) => MatchTier::Fragment,
+    }
+}
+
+/// Classify one match inside one track's `haystack`, at byte `offset` for
+/// `needle_len` bytes, resuming the field walk from `from`.
+///
+/// Returns the rank and the cursor to hand back for this track's next match.
+fn classify(
+    haystack: &str,
+    offset: usize,
+    needle_len: usize,
+    from: Option<Field>,
+) -> (Relevance, Field) {
+    let field = Field::containing(haystack, offset, from);
+    let tier = haystack
+        .get(field.start..field.end)
+        .map_or(MatchTier::Fragment, |text| {
+            tier_of(text, offset - field.start, needle_len)
+        });
+    (
+        Relevance {
+            tier,
+            field: SearchField::of_slot(field.slot),
+        },
+        field,
+    )
+}
+
+/// One matching track and how well it matched (its **best** match, when it
+/// matched in several places).
+#[derive(Debug, Clone, Copy)]
+struct Hit {
+    /// Position in [`SearchIndex::tracks`], which is library order.
+    track: usize,
+    relevance: Relevance,
+}
+
+/// One album's share of a result set: a contiguous slice of [`RankedHits::hits`]
+/// and the best rank anything in it achieved.
+#[derive(Debug, Clone, Copy)]
+struct AlbumHits {
+    /// Position in [`SearchIndex::album_starts`].
+    album: usize,
+    /// Where this album's hits start in [`RankedHits::hits`].
+    first: usize,
+    /// How many of them there are — never zero.
+    len: usize,
+    /// The best rank among them, which is the album's own rank.
+    best: Relevance,
+}
+
+/// Every match for one query, ranked.
+///
+/// Built by [`Library::ranked`] and read two ways: as tracks
+/// ([`Library::search`]) and as albums ([`Library::search_albums`]). Both are
+/// projections of the *same* order, so a front end cannot get one ranking from
+/// one call and a different one from the other.
+#[derive(Debug, Default)]
+struct RankedHits {
+    /// Matching tracks. Filled in library order by the corpus scan, then
+    /// re-ordered within each album by [`RankedHits::group`].
+    hits: Vec<Hit>,
+    /// The albums those hits belong to, in library order.
+    albums: Vec<AlbumHits>,
+    /// Positions in `albums`, in rank order.
+    order: Vec<usize>,
+}
+
+impl RankedHits {
+    /// Group the hits by album and rank them — the whole of the ranking's
+    /// third signal and its album coherence rule.
+    ///
+    /// Hits arrive in library order and an album is one contiguous run of
+    /// library order, so an album's hits are *already* adjacent: grouping is
+    /// one linear pass and needs no map. Within an album the hits are then
+    /// **stably** sorted by rank, and the albums are counting-sorted by their
+    /// best rank. Stability is what makes library order the final tiebreak
+    /// without ever being compared: equal ranks keep the order the scan
+    /// produced, which is library order.
+    fn group(&mut self, album_of: &[usize]) {
+        for (position, hit) in self.hits.iter().enumerate() {
+            let Some(&album) = album_of.get(hit.track) else {
+                continue;
+            };
+            match self.albums.last_mut() {
+                Some(last) if last.album == album => {
+                    last.len += 1;
+                    last.best = last.best.min(hit.relevance);
+                }
+                _ => self.albums.push(AlbumHits {
+                    album,
+                    first: position,
+                    len: 1,
+                    best: hit.relevance,
+                }),
+            }
+        }
+        for album in &self.albums {
+            if let Some(slice) = self.hits.get_mut(album.first..album.first + album.len) {
+                slice.sort_by_key(|hit| hit.relevance);
+            }
+        }
+        self.order = counting_sort(&self.albums);
+    }
+
+    /// The matching tracks, best first — positions in [`SearchIndex::tracks`].
+    fn tracks(&self) -> impl Iterator<Item = usize> + '_ {
+        self.order
+            .iter()
+            .filter_map(|&album| self.albums.get(album))
+            .flat_map(|album| {
+                self.hits
+                    .get(album.first..album.first + album.len)
+                    .unwrap_or_default()
+            })
+            .map(|hit| hit.track)
+    }
+
+    /// The matching albums, best first, each once — positions in
+    /// [`SearchIndex::album_starts`].
+    fn albums(&self) -> impl Iterator<Item = usize> + '_ {
+        self.order
+            .iter()
+            .filter_map(|&album| self.albums.get(album))
+            .map(|album| album.album)
+    }
+}
+
+/// Order `albums` by rank, best first, as a permutation of their positions.
+///
+/// A counting sort over [`Relevance::COUNT`] buckets rather than a comparison
+/// sort: there are eighteen possible ranks whatever the library's size, so this
+/// is linear in the number of matching albums and does no comparisons at all.
+/// It is stable — each bucket is filled in the order it is walked — which is
+/// how library order survives as the final tiebreak.
+fn counting_sort(albums: &[AlbumHits]) -> Vec<usize> {
+    let mut slots = [0usize; Relevance::COUNT];
+    for album in albums {
+        if let Some(count) = slots.get_mut(album.best.code()) {
+            *count += 1;
+        }
+    }
+    let mut offset = 0;
+    for count in &mut slots {
+        let start = offset;
+        offset += *count;
+        *count = start;
+    }
+    let mut order = vec![0usize; albums.len()];
+    for (position, album) in albums.iter().enumerate() {
+        if let Some(slot) = slots.get_mut(album.best.code())
+            && let Some(target) = order.get_mut(*slot)
+        {
+            *target = position;
+            *slot += 1;
+        }
+    }
+    order
+}
+
 /// The in-RAM half of [`Library`]: every track with a precomputed
 /// case-folded haystack and sort key.
 ///
@@ -1486,6 +2006,17 @@ struct SearchIndex {
     /// match position back to a track via binary search. Always starts with
     /// 0 and is strictly increasing (every haystack is non-empty).
     starts: Vec<usize>,
+    /// Which album run each track belongs to — an index into `album_starts`,
+    /// one entry per track. Search needs a matching track's album before it
+    /// can rank it, on the per-keystroke path; recomputing the grouping there
+    /// would mean re-deriving the whole shelf per keystroke.
+    album_of: Vec<usize>,
+    /// Position in `tracks` where each album's run of tracks begins. Library
+    /// order groups an album into one consecutive run, so run `a` is
+    /// `tracks[album_starts[a]..album_starts[a + 1]]` — this vector *is* the
+    /// shelf, and both [`Library::albums`] and [`Library::search_albums`] build
+    /// their [`Album`]s from it.
+    album_starts: Vec<usize>,
 }
 
 impl SearchIndex {
@@ -1541,6 +2072,10 @@ impl SearchIndex {
     /// the order is total and deterministic — and re-map paths to their new
     /// positions. Unknowns sort before known values, so they group at the
     /// front.
+    ///
+    /// The album runs are derived in the same pass, on the same key
+    /// [`Library::albums`] has always grouped on, so the shelf and the search's
+    /// notion of "one album" cannot drift apart.
     fn rebuild_order(&mut self) {
         self.tracks.sort_unstable_by(|a, b| {
             a.key
@@ -1550,21 +2085,32 @@ impl SearchIndex {
         self.by_path.clear();
         self.corpus.clear();
         self.starts.clear();
+        self.album_of.clear();
+        self.album_starts.clear();
+        let mut current: Option<(&ArtistKey, &Option<String>)> = None;
         for (index, track) in self.tracks.iter().enumerate() {
             self.by_path.insert(track.meta.path.clone(), index);
             self.starts.push(self.corpus.len());
             self.corpus.push_str(&track.haystack);
+            let key = (&track.key.artist, &track.key.album);
+            if current != Some(key) {
+                current = Some(key);
+                self.album_starts.push(index);
+            }
+            self.album_of
+                .push(self.album_starts.len().saturating_sub(1));
         }
     }
 
-    /// Position in `tracks` of the track containing byte offset `position`
-    /// of the corpus.
-    fn track_index_at_offset(&self, position: usize) -> usize {
-        // `starts[0] == 0`, so partition_point is always >= 1 for any
-        // position; saturation is belt-and-braces, not a reachable case.
-        self.starts
-            .partition_point(|&start| start <= position)
-            .saturating_sub(1)
+    /// One track's haystack, as a slice of the corpus.
+    fn haystack_at(&self, track: usize) -> Option<&str> {
+        let start = *self.starts.get(track)?;
+        let end = self
+            .starts
+            .get(track + 1)
+            .copied()
+            .unwrap_or(self.corpus.len());
+        self.corpus.get(start..end)
     }
 
     /// Tracks in library order.
@@ -2365,6 +2911,151 @@ mod tests {
                 None,
                 "{ambiguous} must not be guessed at"
             );
+        }
+    }
+
+    /// Every rank there is, in the order the model states them.
+    fn every_relevance() -> Vec<Relevance> {
+        let tiers = [
+            MatchTier::Exact,
+            MatchTier::PrefixWord,
+            MatchTier::Prefix,
+            MatchTier::Word,
+            MatchTier::WordStart,
+            MatchTier::Fragment,
+        ];
+        let fields = [SearchField::Artist, SearchField::Album, SearchField::Title];
+        assert_eq!(tiers.len(), MatchTier::COUNT, "a tier was added unlisted");
+        assert_eq!(
+            fields.len(),
+            SearchField::COUNT,
+            "a field was added unlisted"
+        );
+        tiers
+            .into_iter()
+            .flat_map(|tier| {
+                fields
+                    .into_iter()
+                    .map(move |field| Relevance { tier, field })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn relevance_codes_are_ordered_like_the_comparison() {
+        // The counting sort ranks by `code()` and the rest of the model
+        // compares by `Ord`. If those two ever disagreed the ranking would be
+        // silently wrong rather than loudly broken, so they are checked
+        // against each other over every value that exists.
+        let all = every_relevance();
+        assert_eq!(all.len(), Relevance::COUNT);
+        for (position, relevance) in all.iter().enumerate() {
+            assert_eq!(relevance.code(), position, "{relevance:?} is out of place");
+        }
+        for pair in all.windows(2) {
+            let [earlier, later] = pair else { continue };
+            assert!(earlier < later, "{earlier:?} must outrank {later:?}");
+            assert!(earlier.code() < later.code());
+        }
+    }
+
+    #[test]
+    fn match_tiers_read_the_word_boundaries_they_claim_to() {
+        // The model, field by field, at the level the doc comment states it.
+        let cases = [
+            ("kid a", "kid a", MatchTier::Exact),
+            ("kid a", "kid", MatchTier::PrefixWord),
+            ("kids", "kid", MatchTier::Prefix),
+            ("abbey road", "road", MatchTier::Word),
+            ("abbey road", "roa", MatchTier::WordStart),
+            ("abbey road", "bbey", MatchTier::Fragment),
+            // Punctuation is a boundary, so a hyphenated name reads as words.
+            ("post-rock", "rock", MatchTier::Word),
+            ("post-rock", "roc", MatchTier::WordStart),
+            // A name that is all punctuation still has both its ends.
+            ("!!! live", "!!!", MatchTier::PrefixWord),
+            // No word boundaries to read: an interior CJK substring claims
+            // nothing it cannot show, and a whole field is still exact.
+            ("東京事変", "東京事変", MatchTier::Exact),
+            ("東京事変", "京事", MatchTier::Fragment),
+            ("東京事変", "東京", MatchTier::Prefix),
+            // Multi-byte characters at the boundaries, so the char walk is
+            // exercised rather than a byte one.
+            ("größenwahn sinn", "größenwahn", MatchTier::PrefixWord),
+            ("ein größenwahn", "größenwahn", MatchTier::Word),
+        ];
+        for (field, needle, expected) in cases {
+            let start = field.find(needle).expect("fixture must contain its needle");
+            assert_eq!(
+                tier_of(field, start, needle.len()),
+                expected,
+                "{needle:?} in {field:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_field_cursor_lands_where_a_walk_from_the_start_would() {
+        // The cursor is a speed trick on the per-keystroke path; it is only
+        // allowed to be one. Resuming from *any* earlier field must give the
+        // answer a fresh walk gives, for every byte of a real haystack.
+        let haystack = "größenwahn\nrodik\n東京事変\nkid a\n";
+        for offset in 0..haystack.len() {
+            if !haystack.is_char_boundary(offset) {
+                continue;
+            }
+            let fresh = Field::containing(haystack, offset, None);
+            for resume in 0..=offset {
+                if !haystack.is_char_boundary(resume) {
+                    continue;
+                }
+                let from = Field::containing(haystack, resume, None);
+                assert_eq!(
+                    Field::containing(haystack, offset, Some(from)),
+                    fresh,
+                    "resuming at {resume} broke the field at {offset}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_album_runs_are_the_shelf() {
+        // Search ranks by album, and it does so from `album_starts` rather
+        // than from `albums()`. The two must be the same grouping or the wall
+        // and the ranking would disagree about what one record is.
+        let mut library = Library::open_in_memory().expect("open");
+        let track = |path: &str, artist: &str, album: &str| TrackMeta {
+            path: PathBuf::from(path),
+            artist: Some(artist.to_owned()),
+            album: Some(album.to_owned()),
+            ..bare_meta()
+        };
+        library
+            .add_tracks(vec![
+                track("/m/1.flac", "Aa", "One"),
+                track("/m/2.flac", "Aa", "One"),
+                track("/m/3.flac", "Aa", "Two"),
+                track("/m/4.flac", "Bb", "One"),
+                TrackMeta {
+                    path: PathBuf::from("/m/5.flac"),
+                    ..bare_meta()
+                },
+            ])
+            .expect("add");
+
+        assert_eq!(library.index.album_starts.len(), library.albums().len());
+        assert_eq!(library.index.album_of.len(), library.len());
+        for (position, &album) in library.index.album_of.iter().enumerate() {
+            let start = library.index.album_starts[album];
+            assert!(start <= position, "a track precedes its own album's run");
+            let end = library
+                .index
+                .album_starts
+                .get(album + 1)
+                .copied()
+                .unwrap_or(library.len());
+            assert!(position < end, "a track falls outside its own album's run");
         }
     }
 
