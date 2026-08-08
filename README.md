@@ -42,9 +42,9 @@ The full vision, competitive analysis, and staged scope live in
 | <kbd>M</kbd> | mute / unmute |
 | <kbd>/</kbd>, or <kbd>Ctrl</kbd>+<kbd>F</kbd> | focus the search field |
 | <kbd>Q</kbd> | show / hide **Up next** — the queue, over the now-playing bar |
-| <kbd>Ctrl</kbd>+<kbd>,</kbd> | show / hide the settings |
+| <kbd>Ctrl</kbd>+<kbd>,</kbd> | go to the settings, or come back |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> | hide the album inspector, or bring it back — the selection is kept |
-| <kbd>Esc</kbd> | peel one layer: **Up next**, else the search, else the inspector |
+| <kbd>Esc</kbd> | peel one layer: **Up next**, else the settings, else the search, else the inspector |
 
 Media keys (play/pause, previous, next, stop) work too — on Linux they usually arrive
 over MPRIS rather than as key presses, which is the same thing by a different

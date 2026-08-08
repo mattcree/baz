@@ -455,6 +455,19 @@ mod tests {
             "UP_NEXT_W",
         );
 
+        // The Settings place's section list: the longest name any of the
+        // sections §4.5 plans can have, in the face and size the list draws
+        // them at, inside the padding the entry carries.
+        for section in ["Playback", "Appearance", "Library", "About"] {
+            fits(
+                &Face::parse(SANS_MEDIUM),
+                section,
+                theme::SIZE_BODY,
+                theme::SETTINGS_NAV_W - 2.0 * theme::GAP_MD,
+                "SETTINGS_NAV_W",
+            );
+        }
+
         // The top bar's one remaining control, in the Medium face it is set in
         // and inside the padding it carries. It used to be sized to the *queue*
         // toggle beside it, and wrapped to two lines at a 760 px window

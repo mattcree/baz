@@ -215,15 +215,16 @@ pub const RADIUS_SEGMENT: f32 = 4.0;
 pub const SEGMENT_INSET: f32 = 2.0;
 /// Corner radius for the tile's hover/selection card.
 pub const RADIUS_TILE: f32 = 10.0;
-/// Width of the right-hand rail — the album panel and the queue panel both
-/// (logical px).
+/// Width of the album inspector, the column beside the shelf (logical px).
 ///
-/// **One number for both**, and that is the property the layout rests on: the
-/// rail is either showing a panel or it is not, and *which* panel is showing
-/// can never change how much room the shelf has. Switching between them
-/// reflows nothing; only opening or closing the rail does, by exactly this
-/// much. `app.rs`'s grid estimate is kept in step with it (see
-/// [`crate::panels`]).
+/// **One number, and now for one surface.** It was one number for three — the
+/// album, the queue and the settings took turns in this width — and that shared
+/// width was the only thing they had in common, which is what ADR-0015 is
+/// about. What survives the move is the property the layout actually rests on:
+/// the column is either showing an album or it is not, and swapping which album
+/// can never change how much room the shelf has. Only opening and closing
+/// reflow the grid, by exactly this much, and `app.rs`'s estimate is kept in
+/// step with it (see [`crate::selection`]).
 pub const PANEL_W: f32 = 340.0;
 /// Width of the number column in a track or queue list (logical px). Enough
 /// for three monospace figures at [`SIZE_META`], so a long queue's positions
@@ -1173,6 +1174,35 @@ pub const UP_NEXT_W: f32 = 152.0;
 /// that draws it against this number less its padding.
 pub const SETTINGS_TOGGLE_W: f32 = 84.0;
 
+/// Width of the Settings place's section list (logical px).
+///
+/// A place needs a spine, and 200 px is what a list of one-word section names
+/// wants: wide enough that *Appearance* and *Playback* never wrap, narrow
+/// enough that it reads as navigation rather than as content. It is the one
+/// piece of chrome the settings gain by becoming a place, and it is what makes
+/// the next section an entry rather than a layout decision.
+pub const SETTINGS_NAV_W: f32 = 200.0;
+
+/// Greatest width the Settings place gives its content (logical px).
+///
+/// A settings form is a column of short labelled controls, and a control row
+/// stretched across a 1600 px window is a line the eye has to travel twice to
+/// read. 640 is roughly 55 characters at [`SIZE_BODY`] — the top of the
+/// comfortable measure — and the content sits **left-aligned** in whatever
+/// space is left rather than centred in it, so the form stays anchored to the
+/// section list that names it.
+pub const SETTINGS_CONTENT_W: f32 = 640.0;
+
+/// Window width below which the Settings place stacks into one column
+/// (logical px).
+///
+/// Under a thousand pixels the section list and a 640 px form cannot both have
+/// their width, and of the two the *form* is the one being used. The list
+/// becomes a heading above the content instead of a column beside it. One
+/// branch, and it is the same branch the album inspector will need at its own
+/// breakpoint (§4.3).
+pub const SETTINGS_BREAKPOINT: f32 = 1000.0;
+
 /// The **Up next** popover's surface: one step above the panel, a hairline
 /// edge, and the room's one soft shadow.
 ///
@@ -1325,6 +1355,35 @@ mod tests {
         const { assert!(POPOVER_MAX_H > 0.0 && POPOVER_MAX_H < 1.0) }
         // Its anchor inset is a rung of the spacing ladder, not a number.
         assert!((GAP_LG - 16.0).abs() < f32::EPSILON);
+    }
+
+    /// The Settings place's two columns fit the window they claim to, and the
+    /// form is a readable measure rather than whatever is left over.
+    ///
+    /// The breakpoint is the load-bearing number: below it the section list and
+    /// a full-width form cannot both have their width, so they stack. This is
+    /// the arithmetic that says *where* that is true.
+    #[test]
+    fn the_settings_place_fits_both_of_its_arrangements() {
+        // Above the breakpoint, the list, the gap between the columns and the
+        // place's padding all come out before the form does — and what is left
+        // at the breakpoint *itself* is already more than the cap. So in the
+        // two-column arrangement the form is exactly `SETTINGS_CONTENT_W`, at
+        // every window width it can be in, and the cap is the whole rule rather
+        // than a limit that sometimes applies.
+        const AT_BREAKPOINT: f32 = SETTINGS_BREAKPOINT - 2.0 * GAP_XL - SETTINGS_NAV_W - GAP_XL;
+        const { assert!(AT_BREAKPOINT >= SETTINGS_CONTENT_W) }
+        // The form is a readable measure: roughly 55 characters of body text at
+        // half an em apiece, which is the top of the comfortable range and well
+        // under the 60-em line the rail could never have produced anyway.
+        const { assert!(SETTINGS_CONTENT_W / (SIZE_BODY * 0.5) < 100.0) }
+        // Every control the section holds still fits it. These were fitted to a
+        // 292 px column and are unchanged by the move, which is the claim
+        // "verbatim" is making.
+        const { assert!(SETTINGS_CONTENT_W > SETTING_VALUE_W + 2.0 * STEPPER_HIT + 3.0 * GAP_SM) }
+        // The place's spine is narrower than its content, or it would read as a
+        // second column of content rather than as navigation.
+        const { assert!(SETTINGS_NAV_W < SETTINGS_CONTENT_W) }
     }
 
     /// The bar's now-playing affordance changes colour and **nothing else**.

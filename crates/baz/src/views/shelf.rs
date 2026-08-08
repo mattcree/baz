@@ -161,7 +161,7 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
     // Selected *and on screen*: a tile whose panel is hidden behind the queue,
     // or dismissed outright, must not keep claiming the selection styling —
     // the highlight says "that panel is showing this album".
-    let selected = shelf.panels.showing_album(album.id);
+    let selected = shelf.selection.showing_album(album.id);
     // Two one-line lanes, not one two-line box: a title iced lays out over two
     // lines despite `Wrapping::None` clips at its own lane's edge instead of
     // pushing the artist out of the block that was reserved to hold it still

@@ -18,7 +18,7 @@ use iced::widget::{Space, button, column, container, horizontal_rule, row, text,
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf, search_id};
-use crate::panels::Rail;
+
 use crate::theme;
 
 /// The search field's width in the top bar (logical px).
@@ -70,7 +70,7 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
                 .color(theme::ALERT),
         );
     }
-    status = status.push(settings_toggle(shelf));
+    status = status.push(settings_toggle());
     column![
         container(
             row![search, Space::with_width(Length::Fill), status]
@@ -83,19 +83,24 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
     .into()
 }
 
-/// The settings toggle: the one on-screen route to the settings, and the only
-/// place in the interface that says baz has settings at all.
+/// The route to the Settings **place**, and the only place in the interface
+/// that says baz has settings at all.
 ///
 /// It sits at the far right of the top bar, which is where an application's own
 /// affairs belong: the bottom bar is the transport, every pixel of it reserved
 /// so that nothing moves as the music does, and it was not touched to put this
 /// here.
 ///
+/// It is **navigation** now, not a panel toggle, and it is drawn as such: no
+/// "open" state, because the place it leads to fills the window and takes this
+/// bar with it, so there is no frame in which the control could be lit and
+/// visible at once. The same message <kbd>Ctrl</kbd>+<kbd>,</kbd> sends, and
+/// the same one the Settings place's own Back sends.
+///
 /// A word rather than a gear. baz draws its glyphs itself ([`crate::icon`])
 /// from a small, deliberate set, and a cog would be a new one for a control
 /// that has a short and unambiguous name.
-fn settings_toggle(shelf: &Shelf) -> Element<'_, Message> {
-    let open = shelf.panels.rail() == Some(Rail::Settings);
+fn settings_toggle() -> Element<'static, Message> {
     button(
         container(
             text("Settings")
@@ -108,7 +113,7 @@ fn settings_toggle(shelf: &Shelf) -> Element<'_, Message> {
     )
     .width(Length::Fixed(theme::SETTINGS_TOGGLE_W))
     .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-    .style(move |_theme, status| theme::panel_toggle(status, open))
+    .style(|_theme, status| theme::panel_toggle(status, false))
     .on_press(Message::ToggleSettings)
     .into()
 }

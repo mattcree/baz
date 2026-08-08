@@ -236,6 +236,60 @@ than by watching a ✕ flicker, and the message's own doc comment says so.
 
 ---
 
+# Increment 8 — Settings becomes a place, and the rail ceases to exist
+
+The move completed. The settings leave the right-hand column for a place of
+their own, the column's last roommate goes with them, and `panels.rs` — the
+state machine that arbitrated three tenants — becomes `selection.rs`, which
+answers one question with two fields.
+
+| Image | What it shows |
+|---|---|
+| [`23-settings-place-1280.png`](23-settings-place-1280.png) | **The Settings place** at the shipped window. A section list on the left (`SETTINGS_NAV_W` 200), the form beside it capped at `SETTINGS_CONTENT_W` 640 and left-aligned, and a header carrying the way back. The ReplayGain content is the rail panel's, moved **verbatim** — the same segmented control, the same reserved note slot, the same `SETTING_VALUE_W` steppers, all of which were built for a 292 px column and are still fine at 640. And the now-playing bar is underneath, unchanged, still playing: **the bar is in every place**. |
+| [`24-settings-place-960.png`](24-settings-place-960.png) | The same place below `SETTINGS_BREAKPOINT`. One column, the section name as a heading over its content. One branch, and it is the branch the album inspector will need at its own breakpoint. |
+| [`25-library-restored-by-esc.png`](25-library-restored-by-esc.png) | <kbd>Esc</kbd> from the Settings, and the Library is **exactly as it was left** — same scroll offset, same selection, same inspector, same playing row, same paused position. That is what "a place is free to reverse" means: the Library's state lives in one struct that the Settings place does not touch. |
+| [`26-library-1280-inspector.png`](26-library-1280-inspector.png) · [`27-library-960-inspector.png`](27-library-960-inspector.png) | The Library with the inspector at two window widths — three columns at 1280, two at 960. The column is the same 340 px in both, and it is the only thing that can be there now. |
+
+## What the rail cost, and what replaced it
+
+`panels.rs` carried three fields and a four-way question. `selection.rs`
+carries two fields and a one-line answer:
+
+```rust
+pub fn inspecting(self) -> Option<u64> {
+    if self.hidden { None } else { self.selected }
+}
+```
+
+`showing_album` is now literally that expression compared to an id, which is
+why the exhaustive walk over every path of four moves — *no reachable state
+shows an inspector without an album* — got shorter rather than being deleted.
+It is still walked, because "obviously true" is exactly what the rail's rule
+looked like from the inside as well.
+
+Two rules died with it, and both were symptoms rather than bugs:
+
+- **Un-hiding an empty rail opened the queue.** A key whose entire job is to
+  give the shelf its width back was creating a panel, because it had to invent
+  content and the queue was the one tenant always meaningful to ask for.
+  <kbd>Ctrl</kbd>+<kbd>B</kbd> now offers the album that is *playing* — a fact
+  rather than an invention — and otherwise does nothing.
+- **`Esc` had to choose between unrelated things.** It now peels one layer, top
+  down: popover, then a place that is not home, then the search query, then the
+  inspector. Four `if`s, in the order the layers stack.
+
+## One thing the pixels caught that the code did not
+
+The form's 640 px cap was first written as `container(...).max_width(640)`, and
+the render shows what that produced: a segmented control **998 px** wide. A
+`max_width` bounds the *limits* a child is laid out in, and a `Fill` child
+inside a `Shrink` container resolves against what the row actually handed it.
+The width is now arithmetic the view does from the window's own width, and the
+measurement that caught it is in the function's doc comment so the next person
+does not re-derive it.
+
+---
+
 # Visual language — implementation evidence, pass 1
 
 > The three foundation items of `docs/design/02-visual-language.md`: the

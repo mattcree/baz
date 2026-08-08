@@ -9,14 +9,19 @@
 //!   track list.
 //! - [`up_next`] — the queue popover: what baz handed the engine, and where it
 //!   is in it.
-//! - [`settings_panel`] — the standing decisions: today, ReplayGain.
+//! - [`settings`] — the Settings place: the standing decisions, today
+//!   ReplayGain.
 //! - [`bottom_bar`] — now-playing, transport, seek row.
 //!
-//! [`side_panel`] and [`settings_panel`] share one slot beside the shelf — the
-//! *rail* — and are therefore the same [`theme::PANEL_W`] wide; which of them
-//! is on screen is [`crate::panels`]'s decision, not theirs. [`up_next`] is
-//! neither: it is an **overlay** ([`crate::overlay`]), anchored to the bar,
-//! [`theme::POPOVER_W`] wide, and it takes no width from the shelf at all.
+//! They are the four kinds ADR-0015 names, and which kind a surface is decides
+//! what it may cost. [`top_bar`] and [`shelf`] compose the Library **place**,
+//! and [`settings`] is the other one — places fill the window and replace each
+//! other. [`side_panel`] is the Library's **inspector**, the sole tenant of the
+//! column beside the shelf at [`theme::PANEL_W`]; it is open exactly when an
+//! album is selected ([`crate::selection`]). [`up_next`] is the **popover**,
+//! anchored to the bar, [`theme::POPOVER_W`] wide, taking no width from the
+//! shelf at all ([`crate::overlay`]). And [`bottom_bar`] is the **bar**, which
+//! is in every place and never moves.
 //!
 //! Everything here is iced-specific and holds no state: each module exposes a
 //! `view` function that reads [`crate::app`]'s state (and [`crate::player`]'s
@@ -41,7 +46,7 @@
 //! imported as `geometry` so the two never read as the same thing.
 
 pub(crate) mod bottom_bar;
-pub(crate) mod settings_panel;
+pub(crate) mod settings;
 pub(crate) mod setup;
 pub(crate) mod shelf;
 pub(crate) mod side_panel;
