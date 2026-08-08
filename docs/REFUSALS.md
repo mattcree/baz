@@ -1,7 +1,7 @@
 # baz — the refusals ledger
 
 > Things considered and rejected **on principle**. Adopted by
-> [ADR-0016](adr/0016-design-direction.md) §6 from
+> [ADR-0017](adr/0017-design-direction.md) §6 from
 > `docs/design/critique/01-foundations.md`, extended with ours.
 >
 > **The editing rule.** Adding an entry needs a pull request. **Removing one
@@ -21,7 +21,7 @@ a feature.**
 
 Shuffle is a thing you *start*, never a thing that starts itself. `VISION.md`
 pillar 4's steered shuffle survives as an explicit gesture. This answers the
-open decision ADR-0015 recorded and refused to answer silently: *what happens
+open decision ADR-0016 recorded and refused to answer silently: *what happens
 when an album ends.* Nothing happens.
 
 **No invisible shuffle pools.** Shuffle draws only from what the wall currently
@@ -83,7 +83,7 @@ is how the seek row became the needle.
 keyboard-only, and no control's only affordance is hover.**
 
 This is the mitigation for a toolkit that publishes no accessibility tree and
-gives buttons no keyboard focus (ADR-0016 §4). It is why the transport buttons,
+gives buttons no keyboard focus (ADR-0017 §4). It is why the transport buttons,
 the search field and the labelled `Up next` door survive designs that wanted
 them gone.
 
@@ -148,11 +148,11 @@ Recorded so the ledger is honest about what it declined to adopt, and so that
 re-proposing either of these is met with an argument rather than a shrug.
 
 **Captions at rest on the wall.** `docs/design/critique/01-foundations.md`
-refuses them. ADR-0016 §1.4 overrules: without labels the grid has no structure,
+refuses them. ADR-0017 §1.4 overrules: without labels the grid has no structure,
 a near-black sleeve on a near-black wall has no anchor at all, and the claim
 that "the shelf contains exactly two kinds of thing, artwork and type" becomes
 false at rest. Every tile keeps its two-line wall label.
 
-**Radii.** The critique bans them outright. ADR-0016 §3 declines on churn rather
+**Radii.** The critique bans them outright. ADR-0017 §3 declines on churn rather
 than principle: artwork and the wall are already at 0; controls keep
 `RADIUS_CTRL` 4 and `RADIUS_SEGMENT` 3.

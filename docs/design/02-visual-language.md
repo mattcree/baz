@@ -1,23 +1,23 @@
 # baz — Visual Language
 
-> **Partly superseded by [ADR-0016](../adr/0016-design-direction.md).** The
+> **Partly superseded by [ADR-0017](../adr/0017-design-direction.md).** The
 > direction, the palette, the type system, the hang arithmetic, the accent law
 > and the reserved slots all still govern, and Phase A of §11 has shipped. Five
 > things no longer do:
 >
 > | No longer governs | Now |
 > |---|---|
-> | §2.7 — density placed in **Settings → Appearance** | **Superseded.** The three named steps survive as data; the control is a zoom gesture (`Ctrl+-` / `Ctrl+=` / `Ctrl+scroll`) with the step persisted as state. Settings is never the answer to a view question. ADR-0016 §1.3 |
-> | §2.8 — the `#`+A–Z spine index at `INDEX_W` 20 | **Superseded** by the critique's index rail: a pure projection of the active group key (ARTIST → A–Z, YEAR → decades, GENRE → names, ADDED/PLAYED → recency buckets), `INDEX_W` 36. ADR-0016 §1.7 |
-> | §6.5 — the bar's 102 px geometry, seek row and preview lane | **Superseded.** The needle takes the seek row's job; the bar drops to 58 px keeping Previous · Play/Pause · Next, the wall label, `3 / 12`, the signal note and volume. §6.5's *invariants* survive intact — nothing in the bar is sized to its content, slots exist whether or not they have anything to say, state changes touch ink not geometry, and the slots are a ratchet. ADR-0016 §1.1 |
-> | §10 — *"a light variant: still defer"* | **Superseded.** The four-room model is adopted; the `Palette` indirection lands early (step 2) because every per-surface style below is written against it. Closing Time ships; Reading Room ships only with an answer to the pale-sleeve question that is not a border on artwork; Stone and Plaster are deferred. ADR-0016 §1.5 |
-> | §11 — Phases A / B / C | **Superseded** by ADR-0016 §7's single sequence. Phase A is done; B and C are folded into it. |
+> | §2.7 — density placed in **Settings → Appearance** | **Superseded.** The three named steps survive as data; the control is a zoom gesture (`Ctrl+-` / `Ctrl+=` / `Ctrl+scroll`) with the step persisted as state. Settings is never the answer to a view question. ADR-0017 §1.3 |
+> | §2.8 — the `#`+A–Z spine index at `INDEX_W` 20 | **Superseded** by the critique's index rail: a pure projection of the active group key (ARTIST → A–Z, YEAR → decades, GENRE → names, ADDED/PLAYED → recency buckets), `INDEX_W` 36. ADR-0017 §1.7 |
+> | §6.5 — the bar's 102 px geometry, seek row and preview lane | **Superseded.** The needle takes the seek row's job; the bar drops to 58 px keeping Previous · Play/Pause · Next, the wall label, `3 / 12`, the signal note and volume. §6.5's *invariants* survive intact — nothing in the bar is sized to its content, slots exist whether or not they have anything to say, state changes touch ink not geometry, and the slots are a ratchet. ADR-0017 §1.1 |
+> | §10 — *"a light variant: still defer"* | **Superseded.** The four-room model is adopted; the `Palette` indirection lands early (step 2) because every per-surface style below is written against it. Closing Time ships; Reading Room ships only with an answer to the pale-sleeve question that is not a border on artwork; Stone and Plaster are deferred. ADR-0017 §1.5 |
+> | §11 — Phases A / B / C | **Superseded** by ADR-0017 §7's single sequence. Phase A is done; B and C are folded into it. |
 >
 > §5.2's contrast work is **upheld and extended**, not superseded: the WCAG
 > floors stay and govern ink-on-surface, the critique's ≥ 0.03 oklch-L step law
 > is adopted alongside them and governs surface-on-surface, the ink ramp is
 > composited before it is measured, and the exemptions are named rather than
-> waived. The argument is in ADR-0016 §1.6.
+> waived. The argument is in ADR-0017 §1.6.
 
 > The definitive specification for how baz looks. **Revision 2, 2026-08-08**,
 > under the **gallery / archive** direction, superseding the "listening room"

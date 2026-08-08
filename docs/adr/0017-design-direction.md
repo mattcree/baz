@@ -1,8 +1,8 @@
-# ADR-0016: One design direction — resolving the audit, the visual language and the critique
+# ADR-0017: One design direction — resolving the audit, the visual language and the critique
 
 **Status**: accepted (2026-08-08) · supersedes parts of `docs/design/01-ux-audit-and-ia.md`
 and `docs/design/02-visual-language.md` named item by item below · adopts most of
-`docs/design/critique/` · answers ADR-0015's open decision *"what happens when an
+`docs/design/critique/` · answers ADR-0016's open decision *"what happens when an
 album ends"* · amends ADR-0006's cost claim and ADR-0008's grouping key · is the
 build order for everything that follows
 
@@ -13,7 +13,7 @@ build order for everything that follows
 Three specifications exist and they contradict each other.
 
 1. **`docs/design/01-ux-audit-and-ia.md`** — our UX audit and information
-   architecture. Increments 1–8 have **shipped** (ADR-0015): the queue is a
+   architecture. Increments 1–8 have **shipped** (ADR-0016): the queue is a
    popover from a labelled `Up next 3 / 12` control in the bar, Settings is a
    *place*, `panels.rs` became `selection.rs`, Previous exists, a track row plays
    from there, the playing track is dotted in the inspector.
@@ -72,7 +72,7 @@ the window's bottom edge.
 ```
 
 Generalise the needle past the critique's framing while building it: baz's queue
-is **one list with a cursor** (ADR-0015), not always an album, so the segments
+is **one list with a cursor** (ADR-0016), not always an album, so the segments
 are *queue entries*, the 6 px gap falls at an **album boundary** rather than a
 side break, and click-to-jump is ADR-0014's `JumpTo` at a segment index. The
 critique's spec is the album case of this one. Elapsed and total move into the
@@ -438,7 +438,7 @@ is ours restated and it is enforced in code already.
 
 ## 2. What this answers that was left open
 
-**ADR-0015's open decision — "what happens when an album ends".** It is
+**ADR-0016's open decision — "what happens when an album ends".** It is
 answered by the refusals ledger: **the queue empties and there is silence.**
 Silence is a feature. No autoplay, no radio, no continuation rule.
 
@@ -448,9 +448,9 @@ take the other side, and here is why the reversal does not bind us: Longplay had
 no *stack*. In baz, continuing past an album is a thing you can ask for before
 it happens (shift-click stacks the next sleeve) and a thing you can ask for
 after (shuffle from what the wall shows). The refusal is not "you may not
-continue"; it is "the software will not decide to continue for you". ADR-0015
+continue"; it is "the software will not decide to continue for you". ADR-0016
 suggested that if the maximalist position were ever taken it should ship as an
-opt-in setting; this ADR declines to take it, and the seam ADR-0015 left is
+opt-in setting; this ADR declines to take it, and the seam ADR-0016 left is
 simply not spent.
 
 ---
@@ -472,7 +472,7 @@ Every superseded decision, the code that must change, and the honest cost.
 
 **Not superseded**, and defended above: Settings as a place (§1.3); captions at
 rest (§1.4); Previous and Next as buttons (§1.1); the search field (§1.2); the
-places/inspector/popover/bar model of ADR-0015 in full; the accent law; the
+places/inspector/popover/bar model of ADR-0016 in full; the accent law; the
 four surface values; `02`'s hang arithmetic, reserved slots, three-face bundle
 and 0 ms motion.
 
@@ -546,7 +546,7 @@ it, and we decline to make it worse for visual purity.
 ## 5. ADR-0006, tested honestly
 
 ADR-0006 promised that a redesign costs **layer 3 and nothing else** — view
-composition, plus tokens in `theme.rs`. ADR-0015 reported that it very nearly
+composition, plus tokens in `theme.rs`. ADR-0016 reported that it very nearly
 held: four small pure modules and everything else in `views/`. Tested against
 *this* plan, it holds for restyles and relayouts and **fails for everything the
 critique adds that is a product feature**.
@@ -679,7 +679,7 @@ A/B/C. Ordered so nothing is built on a foundation about to be replaced.
 
 - **D1.** Places / album inspector / Up next popover / persistent bar; Previous;
   click-a-row-plays-from-there; the playing track dotted in the inspector
-  (ADR-0015, `01` increments 1–8).
+  (ADR-0016, `01` increments 1–8).
 - **D2.** `02` Phase A: `MONO` and `SERIF` deleted; the gallery surfaces and
   inks; radii and per-token leadings; reserved slots re-derived in the Sans;
   `format_centidb` emits U+2212.
@@ -703,7 +703,7 @@ A/B/C. Ordered so nothing is built on a foundation about to be replaced.
 | **13** | **The stack.** Shift-click appends a sleeve; shift-click a track row appends a track; numeral chip in the wall label's first line, never on the art; ephemeral — clears when it ends; albums listed as albums in the popover. | `vm` + 3 | After 11 (shift-click is a modifier gesture in the new layer). |
 | **14** | **The tile in the new vocabulary.** (`02` B1/B2.) Delete the tile's background and border, `SHADOW` and `SELECTION_EDGE`; hover = 1 px `HAIRLINE_STRONG` rule under the label + artist ink lift; selected = 2 px `PAPER_FAINT` rule; playing = halo (blur 24) + dot. | 2 + 3 | After 2 (palette) and 5 (the cell). |
 | **15** | **The inspector in the new vocabulary.** (`02` C2/C2b.) Flush-left sleeve capped at `ART_MAX`; catalogue and condition lines; two-line title cap; the `Details` block (13 fields, present only when the scan read one); SIDE A/B headers when rip metadata carries them; **the PLAYED card** — "N times since YYYY" plus date stamps, no charts. | 3 | After 2 and 14; the card needs step 1. |
-| **16** | **Inspector responsiveness.** The width band `clamp(0.28 × W, 340, 420)`; below 940 px the inspector takes the content area and a shelf *strip* remains (`02` §6.9); whole-panel scroll below 700 px of height. | 2 + 3 | ADR-0015 deferred it; it is also the prototype of the eventual full-window Album place. |
+| **16** | **Inspector responsiveness.** The width band `clamp(0.28 × W, 340, 420)`; below 940 px the inspector takes the content area and a shelf *strip* remains (`02` §6.9); whole-panel scroll below 700 px of height. | 2 + 3 | ADR-0016 deferred it; it is also the prototype of the eventual full-window Album place. |
 | **17** | **Shuffle from what the wall shows.** Pool = `vm::matching_album_ids()`; non-pool covers dim to 35 %; the next two draws carry faint ink rings. No invisible pool, ever. | `vm` + 3 | After 8 (the wall's contents are now a function of the group key and the filter). |
 | **18** | **The Marquee lens.** `WALL · MARQUEE` type switcher, keys `1` / `2`; playing sleeve at half-window full-bleed, poster type over a vertex-alpha scrim, wall dims to 35 %. **No idle auto-switch** (§1.7). | 3 | After 10; it hosts the pull. |
 | **19** | **The pull** (`Ctrl+R`). One sleeve weighted toward long-unplayed, presented in Marquee with "last played N years ago". Nothing plays until `Space`; `Ctrl+R` re-pulls; `Esc` returns. | `vm` + 3 | Needs step 1's weights and step 18's surface. |
@@ -741,6 +741,6 @@ the product has a visible, pointer-reachable control.**
   1.0, published where users will see it; the visible-control rule as the
   mitigation; AccessKit as the named fix; no further drift away from a tree.
 - **The refusals ledger becomes a standing document with an editing rule**, and
-  it immediately answers ADR-0015's open decision.
+  it immediately answers ADR-0016's open decision.
 - **`docs/NEXT-STEPS.md` and `docs/BACKLOG.md` are superseded for UI work** by
   §7's sequence. Engine and library work continues to be ordered by them.

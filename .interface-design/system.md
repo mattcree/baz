@@ -1,6 +1,6 @@
 # baz — design system
 
-> **Read [ADR-0016](../docs/adr/0016-design-direction.md) first.** It resolves
+> **Read [ADR-0017](../docs/adr/0017-design-direction.md) first.** It resolves
 > this system against an independent design critique
 > (`docs/design/critique/`) and supersedes five things below: density moves
 > from a Settings row to a zoom gesture; the `#`+A–Z spine index becomes an

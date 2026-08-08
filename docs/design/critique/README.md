@@ -1,6 +1,6 @@
 # Handoff: baz — desktop music player (Rust + iced 0.13)
 
-> **Adopted, with six named exceptions, by [ADR-0016](../../adr/0016-design-direction.md).**
+> **Adopted, with six named exceptions, by [ADR-0017](../../adr/0017-design-direction.md).**
 > Read the ADR before implementing anything here. It supersedes this package on:
 > the transport (the needle is adopted; **prev/next buttons stay** and the bar
 > survives at 58 px — §1.1); the search field (type-anywhere is adopted, **the

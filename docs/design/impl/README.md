@@ -102,7 +102,7 @@ bar-1-stopped            4 241 px  title, timestamps and groove appear at all
 
 # Increment 6 — Up next becomes a popover
 
-The first surface to leave the rail (ADR-0015). Captured the same way as
+The first surface to leave the rail (ADR-0016). Captured the same way as
 everything above — a private `Xvfb :147` at 1400×1000, scratch `HOME` **and**
 scratch `XDG_*` (including `XDG_RUNTIME_DIR`, so the maintainer's session bus
 was never joined: the log reads `[mpris] no session bus`), an 18-album /
