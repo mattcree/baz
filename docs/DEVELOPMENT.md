@@ -47,6 +47,31 @@ but prints `built without audio output — see docs/DEVELOPMENT.md` and hides
 the playback UI. With the feature but no usable output device, the app still
 runs and the bottom bar reports "no audio device".
 
+### Audible tests are opt-in: `BAZ_DEVICE_TESTS=1`
+
+A routine `cargo test --workspace --all-features` **makes no sound**, and that
+is a rule rather than an accident. The device-gated tests still open the real
+default output, write to it, reopen it at another rate, discard its ring and
+tear it down — they just write silence while doing it, because every assertion
+they make is about the transport (frames moved, ring emptied, stream still
+alive, no xruns) and a driver clocks out silence exactly as it clocks out a
+tone. Silence costs the coverage nothing and buys back a quiet machine.
+
+What silence *cannot* stand in for is a human hearing that baz plays music, so
+the tests that drive a full engine session through real hardware — the
+`device_engine_*` tests in `crates/baz-core/tests/engine.rs` — are behind a
+variable and skip with a notice when it is unset:
+
+```sh
+toolbox run -c baz-dev env BAZ_DEVICE_TESTS=1 \
+  cargo test -p baz-core --all-features -- --nocapture
+```
+
+Set it to any non-empty value except `0`. It changes nothing else: the same
+tests, the same assertions, run on demand instead of on every build. CI leaves
+it unset, so CI is silent too — which costs nothing there, since no runner has
+an audio device in the first place.
+
 ### Exclusive-mode output (Linux, ADR-0012)
 
 Shared mode is the default. To have baz hold an ALSA `hw:` device outright —
@@ -77,8 +102,8 @@ toolbox run -c baz-dev env BAZ_OUTPUT_DEVICE=hw:3,0 \
   cargo test -p baz-core --features exclusive-output --test playback exclusive -- --nocapture
 ```
 
-They play short tones on real hardware, so they are audible; they skip with a
-notice when every device is busy.
+They write silence rather than tones (see above), so they are quiet; they skip
+with a notice when every device is busy.
 
 ## Headless UI verification
 

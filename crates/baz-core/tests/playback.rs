@@ -78,6 +78,29 @@ fn sine_stereo(rate: u32, frames: usize, t0: f64) -> Vec<f32> {
     v
 }
 
+/// Interleaved stereo silence — **the block every test that feeds real
+/// hardware writes.**
+///
+/// A device test's assertions are about the *transport*: that a stream opened,
+/// that the ring drained, that a reopen left something that still takes
+/// samples, that the driver reported no xruns. None of them is an assertion
+/// about what the samples were, and a driver moves silence exactly as it moves
+/// a tone — same frame counts, same callbacks, same buffer arithmetic. So the
+/// tone bought nothing except a 440 Hz beep out of the developer's speakers on
+/// every `cargo test --all-features`, several times a run.
+///
+/// Audible verification has not gone away; it has moved to where hearing it is
+/// the point. The `device_engine_*` tests in `tests/engine.rs` play real
+/// decoded fixture audio through the real output, and they are opt-in behind
+/// `BAZ_DEVICE_TESTS=1` (`docs/DEVELOPMENT.md`).
+///
+/// Only the tests that touch hardware use it, and those exist only in a
+/// `device-output` build (which `exclusive-output` implies).
+#[cfg(feature = "device-output")]
+fn silence_stereo(frames: usize) -> Vec<f32> {
+    vec![0.0; frames * CHANNELS]
+}
+
 /// The ideal test-sine value at frame `n` of a stream at `rate`, offset by
 /// `t0` seconds.
 #[allow(clippy::cast_precision_loss)] // frame indices are far below 2^52
@@ -2251,9 +2274,9 @@ fn device_sink_opens_or_reports_cleanly() {
     use baz_core::playback::device::DeviceSink;
     match DeviceSink::open(RATE, 8192) {
         Ok(mut sink) => {
-            // Play 50 ms of the fixture tone for a smoke check.
-            let samples = sine_stereo(RATE, 2205, 0.0);
-            baz_core::playback::Sink::write(&mut sink, &samples);
+            // 50 ms of silence: the smoke check is that the stream takes
+            // samples and does not fault, which is true of any samples.
+            baz_core::playback::Sink::write(&mut sink, &silence_stereo(2205));
             assert!(!sink.failed(), "stream reported an error during smoke run");
             println!("[device] opened default output device and wrote 50 ms");
         }
@@ -2264,26 +2287,30 @@ fn device_sink_opens_or_reports_cleanly() {
     }
 }
 
-/// **Device output (feature `device-output`): a 48 kHz stream really opens and
-/// plays on this machine's hardware.**
+/// **Device output (feature `device-output`): a 48 kHz stream really opens on
+/// this machine's hardware and carries samples.**
 ///
 /// ADR-0009's whole premise is that the owner's 24-bit/48 kHz album can be
 /// played at 48 kHz instead of converted to 44.1 kHz. That premise is a claim
-/// about hardware, so it is tested against hardware: open at 48 kHz, play a
-/// tone, and check the stream neither refused nor faulted. A device with no
+/// about hardware, so it is tested against hardware: open at 48 kHz, hand it
+/// samples, and check the stream neither refused nor faulted. A device with no
 /// 48 kHz mode is a documented outcome, not a failure — it is exactly the
 /// fallback case — so it skips with a notice.
+///
+/// The samples are silence ([`silence_stereo`]): a 48 kHz stream carries them
+/// exactly as it would carry a tone, and the audible version of this claim is
+/// `device_engine_follows_the_source_rate` in `tests/engine.rs`, which plays a
+/// real 48 kHz file and is opt-in.
 #[cfg(feature = "device-output")]
 #[test]
-fn device_sink_opens_at_48k_and_plays() {
+fn device_sink_opens_at_48k_and_accepts_audio() {
     use baz_core::playback::device::DeviceSink;
     const HI_RATE: u32 = 48_000;
     match DeviceSink::open(HI_RATE, 8192) {
         Ok(mut sink) => {
             assert_eq!(sink.sample_rate(), HI_RATE);
-            // 50 ms of tone generated at the stream's own rate.
-            let samples = sine_stereo(HI_RATE, HI_RATE as usize / 20, 0.0);
-            baz_core::playback::Sink::write(&mut sink, &samples);
+            // 50 ms at the stream's own rate.
+            baz_core::playback::Sink::write(&mut sink, &silence_stereo(HI_RATE as usize / 20));
             assert!(!sink.failed(), "stream reported an error during smoke run");
             println!("[device] opened the default output device at {HI_RATE} Hz and wrote 50 ms");
         }
@@ -2347,8 +2374,7 @@ fn device_sink_reopens_at_the_requested_rate() {
     );
 
     // The new stream is alive and takes audio at the new rate.
-    let samples = sine_stereo(HI_RATE, HI_RATE as usize / 20, 0.0);
-    sink.write(&samples);
+    sink.write(&silence_stereo(HI_RATE as usize / 20));
     assert!(!sink.failed(), "the reopened stream reported an error");
 
     // Asking for the rate it is already at must cost nothing at all — that is
@@ -2414,8 +2440,9 @@ fn discard_buffered_empties_the_device_ring() {
         Err(other) => panic!("unexpected error opening device: {other}"),
     };
 
-    // Fill the ring with a full second of audio.
-    let stale = sine_stereo(RATE, RING_FRAMES, 0.0);
+    // Fill the ring with a full second of audio. What the audio *is* does not
+    // enter into it: the measurement is how fast the ring empties.
+    let stale = silence_stereo(RING_FRAMES);
     sink.write(&stale);
     let buffered = sink.buffered_samples();
     assert!(
@@ -2456,7 +2483,7 @@ fn discard_buffered_empties_the_device_ring() {
 
     // Nothing stale is lurking behind the new audio: the ring now holds
     // exactly what was written after the discard.
-    let fresh = sine_stereo(RATE, 1024, 0.0);
+    let fresh = silence_stereo(1024);
     sink.write(&fresh);
     let after = sink.buffered_samples();
     assert!(
@@ -2473,6 +2500,143 @@ fn discard_buffered_empties_the_device_ring() {
         "[device] discarded {buffered} buffered samples ({:.0} ms of audio) in {settled:?}",
         audio_ms(buffered)
     );
+}
+
+/// **Opening the output from a thread that then exits must not poison the next
+/// open.** This is the regression test for the Windows
+/// `STATUS_ACCESS_VIOLATION` of CI run 31227392558.
+///
+/// baz opens its device on the engine thread — cpal streams are not `Send` —
+/// and that thread exits when the engine shuts down. cpal's WASAPI backend
+/// caches a process-global `IMMDeviceEnumerator` created inside the *apartment*
+/// of whichever thread touched cpal first, while its COM initialisation is
+/// thread-local and calls `CoUninitialize()` from a thread-local destructor. So
+/// the first engine thread to exit tore down the apartment underneath the
+/// global, and the next `spawn_device` in the same process — an output-mode
+/// change, a retry, a front end restarting playback, or the next test —
+/// dereferenced freed COM state and took the whole process down. See
+/// `playback::device`'s "Why cpal is first touched from a thread that never
+/// exits".
+///
+/// The shape here is therefore the essential one: **open from a fresh thread,
+/// join it so it has genuinely exited (thread-local destructors and all), then
+/// open again.** `join` cannot catch an access violation — the point is that a
+/// process which still has this bug does not survive the loop, so the failure
+/// is the test binary dying rather than an assertion.
+///
+/// It is deliberately meaningful **without** an audio device, because that is
+/// the configuration it was found in: the enumerator is built, and the stale
+/// pointer is dereferenced, on the "no default output device" path too. A
+/// machine with hardware exercises the same loop with real streams opened and
+/// closed on top.
+#[cfg(feature = "device-output")]
+#[test]
+fn opening_the_output_from_threads_that_exit_never_faults() {
+    use baz_core::playback::device::DeviceSink;
+
+    /// Enough that the "first toucher exits, next caller faults" ordering has
+    /// happened several times over, and still under a second either way.
+    const ROUNDS: usize = 8;
+
+    let mut opened = 0usize;
+    for round in 0..ROUNDS {
+        let outcome = std::thread::Builder::new()
+            .name(format!("device-open-{round}"))
+            .spawn(|| match DeviceSink::open(RATE, 1024) {
+                // Drop inside the thread: closing the stream is as much part
+                // of the sequence as opening it.
+                Ok(sink) => {
+                    drop(sink);
+                    Ok(true)
+                }
+                Err(PlaybackError::Device(_)) => Ok(false),
+                Err(other) => Err(other.to_string()),
+            })
+            .expect("spawn an opening thread")
+            .join()
+            .expect("the opening thread must not take the process with it");
+        match outcome {
+            Ok(true) => opened += 1,
+            Ok(false) => {}
+            Err(other) => panic!("unexpected error opening device: {other}"),
+        }
+    }
+    assert!(
+        opened == 0 || opened == ROUNDS,
+        "the device opened on {opened} of {ROUNDS} rounds — opening from a fresh \
+         thread must not depend on which thread went first"
+    );
+    if opened == 0 {
+        eprintln!(
+            "NOTE: no usable output device — the loop still covers the enumeration path, \
+             which is where this bug lived"
+        );
+    }
+    println!(
+        "[device] {ROUNDS} open/close rounds from short-lived threads ({opened} with hardware)"
+    );
+}
+
+/// **Reopening the stream over and over must not fault, and every reopen must
+/// leave a stream that still takes audio.**
+///
+/// ADR-0009's rate negotiation tears one cpal stream down and builds another
+/// while a callback is live on the old one. `device_sink_reopens_at_the_
+/// requested_rate` measures a single reopen; this one flaps between two rates
+/// as fast as the host will allow, which is where a teardown that did not
+/// actually stop the old callback before releasing its state would show up.
+/// Writing audio after each reopen is what makes it more than a smoke test:
+/// the ring being fed has to be the *new* stream's.
+///
+/// Needs hardware, and skips with a notice without it — unlike the test above,
+/// there is nothing to reopen when there is no device.
+#[cfg(feature = "device-output")]
+#[test]
+fn rapid_reopens_never_fault_and_always_leave_a_live_stream() {
+    use baz_core::playback::Sink as _;
+    use baz_core::playback::device::DeviceSink;
+
+    /// Each round is two reopens, so this is 16 stream teardowns.
+    const ROUNDS: usize = 8;
+
+    let mut sink = match DeviceSink::open(RATE, 2048) {
+        Ok(sink) => sink,
+        Err(PlaybackError::Device(msg)) => {
+            eprintln!("SKIP: no usable output device ({msg})");
+            return;
+        }
+        Err(other) => panic!("unexpected error opening device: {other}"),
+    };
+
+    let mut reopens = 0usize;
+    for _ in 0..ROUNDS {
+        for asked in [RATE_HI, RATE] {
+            let granted = sink
+                .negotiate_rate(asked)
+                .expect("a device sink always has a rate");
+            assert_eq!(
+                sink.sample_rate(),
+                granted,
+                "the sink must report the rate it actually ended up at"
+            );
+            if granted == asked {
+                reopens += 1;
+            }
+            // A short block at whatever rate we landed on: the stream has to
+            // still be taking audio, and `write` would spin forever on a dead
+            // one if `failed` were not being set.
+            sink.write(&silence_stereo(granted as usize / 200));
+            assert!(
+                !sink.failed(),
+                "the stream faulted after a reopen to {granted} Hz"
+            );
+        }
+    }
+    if reopens == 0 {
+        eprintln!("SKIP: this device offers no {RATE_HI} Hz mode, so nothing reopened");
+        return;
+    }
+    println!("[device] {reopens} reopens across {ROUNDS} rounds, stream alive throughout");
 }
 
 // ---------------------------------------------------------------------------
@@ -2587,9 +2751,12 @@ fn exclusive_enumeration_offers_hardware_and_never_the_sound_server() {
 ///    module docs, whose arithmetic is asserted exhaustively in that module's
 ///    unit tests) — so no conversion is hiding in the last hop either.
 ///
-/// Then it plays half a second of tone, because a claim about a device that
-/// was never fed is a claim about nothing. The tone is audible on whatever the
-/// chosen output drives; that is expected.
+/// Then it plays half a second, because a claim about a device that was never
+/// fed is a claim about nothing — and the xrun count printed below is only
+/// meaningful over audio the card actually clocked out. It is half a second of
+/// silence ([`silence_stereo`]): the driver moves it frame for frame exactly as
+/// it would a tone, so nothing measured here changes, and the developer's
+/// speakers stay quiet.
 #[cfg(all(target_os = "linux", feature = "exclusive-output"))]
 #[test]
 fn an_exclusive_device_plays_at_the_requested_rate_in_an_exact_format() {
@@ -2615,8 +2782,7 @@ fn an_exclusive_device_plays_at_the_requested_rate_in_an_exact_format() {
         sink.format()
     );
 
-    let samples = sine_stereo(RATE, RATE as usize / 2, 0.0);
-    sink.write(&samples);
+    sink.write(&silence_stereo(RATE as usize / 2));
     assert!(!sink.failed(), "{device}: the stream faulted while playing");
     sink.drain_buffered();
     println!(
@@ -2697,7 +2863,7 @@ fn an_exclusive_discard_empties_the_device_immediately() {
     // played. At the size the app uses that is ~186 ms of audio standing
     // between the write and the speaker.
     let frames = sink.buffer_frames();
-    sink.write(&sine_stereo(RATE, frames, 0.0));
+    sink.write(&silence_stereo(frames));
     let queued = sink.queued_frames();
     assert!(
         queued > frames as u64 / 2,
@@ -2905,7 +3071,10 @@ fn an_exclusive_engine_plays_and_reports_an_exclusive_chain() {
 
     let dir = tempfile::tempdir().expect("temp dir");
     let track = dir.path().join("half_second.wav");
-    write_wav_f32(&track, RATE, &sine_stereo(RATE, RATE as usize / 2, 0.0));
+    // Silent fixture: what is asserted is the event stream and the reported
+    // chain, not the audio, and the engine plays whatever the file holds
+    // straight out of the card ([`silence_stereo`]).
+    write_wav_f32(&track, RATE, &silence_stereo(RATE as usize / 2));
 
     let spawned = spawn_device_with(
         EngineConfig::default(),

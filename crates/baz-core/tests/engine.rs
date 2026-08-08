@@ -1249,9 +1249,48 @@ fn a_fixed_output_rate_reports_a_converting_chain() {
     engine.shutdown();
 }
 
+/// The environment variable that turns the **audible** device tests on.
+///
+/// Everything in this section drives a real engine through a real output
+/// device, which means real decoded fixture audio comes out of whatever the
+/// machine is plugged into — several seconds of 440 Hz tone and a chirp, on
+/// every `cargo test --all-features`. That is intolerable as a default on a
+/// developer's machine, and it is not what most runs of this suite are for.
+///
+/// So these are opt-in, and the rest of the device coverage was made silent
+/// rather than moved behind this flag: `tests/playback.rs` exercises opening,
+/// reopening, rate negotiation, ring discard, teardown and the
+/// short-lived-thread ordering that the Windows access violation lived in, all
+/// by writing silence to a real device. That is what keeps running everywhere,
+/// including in CI. What is behind this variable is the part that can only be
+/// judged by *hearing* it: a queue, played end to end, through the hardware.
+///
+/// See `docs/DEVELOPMENT.md`.
+#[cfg(feature = "device-output")]
+const AUDIBLE_TESTS_VAR: &str = "BAZ_DEVICE_TESTS";
+
+/// Whether the audible device tests were asked for, printing the notice that
+/// says how to ask when they were not.
+///
+/// Any non-empty value other than `0` counts, so `BAZ_DEVICE_TESTS=1` and
+/// `BAZ_DEVICE_TESTS=yes` both work and `BAZ_DEVICE_TESTS=0` reads as "no".
+#[cfg(feature = "device-output")]
+fn audible_device_tests_requested() -> bool {
+    let asked = std::env::var(AUDIBLE_TESTS_VAR).is_ok_and(|v| !v.is_empty() && v != "0");
+    if !asked {
+        eprintln!(
+            "SKIP: this test plays audible audio through the real output device. \
+             Set {AUDIBLE_TESTS_VAR}=1 to run it (docs/DEVELOPMENT.md)."
+        );
+    }
+    asked
+}
+
 /// Device output (feature `device-output`): the engine spawns against the
 /// default device — or reports the documented `Device` error on headless
 /// machines — and shuts down cleanly either way. Never a panic.
+///
+/// **Audible, therefore opt-in** ([`AUDIBLE_TESTS_VAR`]).
 ///
 /// The second half seeks into a 48 kHz track on an engine that was *spawned*
 /// at 44.1 kHz, so it also covers the interaction of rate negotiation with
@@ -1261,6 +1300,9 @@ fn a_fixed_output_rate_reports_a_converting_chain() {
 #[cfg(feature = "device-output")]
 #[test]
 fn device_engine_spawns_or_reports_cleanly() {
+    if !audible_device_tests_requested() {
+        return;
+    }
     let f = fixtures();
     match baz_core::engine::spawn_device(paced_config(), RATE, 8192) {
         Ok((engine, events)) => {
@@ -1328,9 +1370,14 @@ fn device_engine_spawns_or_reports_cleanly() {
 /// handshake would produce if it were wrong. That the ring is genuinely
 /// *emptied* is measured in `tests/playback.rs`; this is the integration-level
 /// companion to it.
+///
+/// **Audible, therefore opt-in** ([`AUDIBLE_TESTS_VAR`]).
 #[cfg(feature = "device-output")]
 #[test]
 fn device_engine_transport_survives_repeated_session_abandonment() {
+    if !audible_device_tests_requested() {
+        return;
+    }
     let f = fixtures();
     // Exactly what crates/baz/src/playback.rs spawns.
     let spawned = baz_core::engine::spawn_device(EngineConfig::default(), RATE, 8192);
@@ -1407,9 +1454,18 @@ fn device_engine_transport_survives_repeated_session_abandonment() {
 /// either way is the invariant that matters — **the readout and the counters
 /// agree with each other**, so the chain is never described as direct while a
 /// resampler is running, nor the reverse.
+///
+/// **Audible, therefore opt-in** ([`AUDIBLE_TESTS_VAR`]). The silent half of
+/// the same claim — that a 48 kHz stream opens and that a reopen lands on the
+/// rate asked for — is `device_sink_opens_at_48k_and_accepts_audio` and
+/// `device_sink_reopens_at_the_requested_rate` in `tests/playback.rs`, which
+/// run unconditionally.
 #[cfg(feature = "device-output")]
 #[test]
 fn device_engine_follows_the_source_rate() {
+    if !audible_device_tests_requested() {
+        return;
+    }
     let f = fixtures();
     let spawned = baz_core::engine::spawn_device(EngineConfig::default(), RATE, 8192);
     let (engine, events) = match spawned {

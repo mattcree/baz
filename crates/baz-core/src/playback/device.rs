@@ -115,13 +115,60 @@
 //! exclusive, `CoreAudio` hog) are for, and they remain a later phase; ADR-0009
 //! states the boundary of the claim in the same terms.
 //!
+//! # Why cpal is first touched from a thread that never exits
+//!
+//! Every call into cpal made anywhere in baz goes through one private
+//! `default_output_device` funnel in this module, and the first one blocks until a
+//! dedicated, permanently parked thread — `baz-cpal-anchor` — has made that
+//! call *first*. That is not a nicety; without it, baz corrupts its own
+//! process on Windows.
+//!
+//! cpal's WASAPI backend keeps a **process-global** `IMMDeviceEnumerator` in a
+//! `static ENUMERATOR: OnceLock<Enumerator>` (`cpal-0.16.0`,
+//! `src/host/wasapi/device.rs`) and hands it to every thread through
+//! `unsafe impl Send + Sync`. COM initialisation, however, is **thread-local**:
+//! `src/host/wasapi/com.rs` puts each calling thread into an apartment with
+//! `CoInitializeEx(COINIT_APARTMENTTHREADED)` from a `thread_local!` whose
+//! destructor calls `CoUninitialize()` when that thread exits. So the global
+//! enumerator is created inside the apartment of whichever thread happened to
+//! touch cpal first, and when *that* thread exits its apartment is torn down
+//! underneath the still-published static. The next thread to ask for a device
+//! gets the stale pointer back out of the `OnceLock` and calls through a vtable
+//! that no longer belongs to anything: `STATUS_ACCESS_VIOLATION`.
+//!
+//! baz walks straight into this, because the sink is deliberately opened on the
+//! engine thread ([`crate::engine::spawn_device_with`] — cpal streams are not
+//! `Send`) and the engine thread exits at shutdown. One engine per process is
+//! fine; a *second* [`crate::engine::spawn_device`] in the same process — an
+//! output-mode change, a retry after a device error, a front end that stops and
+//! restarts playback, or the test suite doing any of those — is a use of freed
+//! COM state. It is also how this was found: the `device-output` integration
+//! tests spawn one engine per test, and the Windows CI job died with
+//! `0xc0000005` the moment a third device test started after an earlier engine
+//! thread had exited.
+//!
+//! The anchor thread is the fix that is available from outside cpal: it makes
+//! the first cpal call of the process, so the global enumerator is built in
+//! *its* apartment, and then it parks forever. A thread that never exits never
+//! runs its thread-local destructors, so `CoUninitialize()` is never called for
+//! the apartment that owns cpal's global state and the static stays valid for
+//! as long as the process does. (Not calling `CoUninitialize` at all is the
+//! documented advice for exactly this situation; the apartment is reclaimed by
+//! process teardown either way.)
+//!
+//! It is deliberately **not** `#[cfg(windows)]`. Backends are where this class
+//! of bug hides precisely because the other platforms never exercise the
+//! ordering, and a Linux or macOS test run that does not open the code path
+//! Windows depends on is not evidence about it. One parked thread and one
+//! device enumeration, once per process, is the whole cost.
+//!
 //! [`EngineConfig::consumer_pace`]: super::EngineConfig
 //! [`Sink::negotiate_rate`]: super::Sink::negotiate_rate
 //! [`Sink::drain_buffered`]: super::Sink::drain_buffered
 //! [`Sink::discard_buffered`]: super::Sink::discard_buffered
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock, mpsc};
 use std::thread;
 use std::time::Duration;
 
@@ -153,6 +200,81 @@ const DRAIN_POLL: Duration = Duration::from_millis(1);
 /// [`negotiated_rate`] from selecting a rate that is only available in a
 /// narrower integer format.
 const SAMPLE_FORMAT: cpal::SampleFormat = cpal::SampleFormat::F32;
+
+/// Which thread made the process's first cpal call, set once that call has
+/// returned. [`OnceLock::get_or_init`] blocks every other caller until it has,
+/// so "the anchor goes first" is enforced rather than hoped for.
+///
+/// `Some` is the `baz-cpal-anchor` thread, which by construction never exits;
+/// `None` is the degraded inline fallback taken when no thread could be
+/// spawned at all. Recording it is what lets the invariant be *asserted* (see
+/// this module's tests) rather than merely intended.
+static HOST_ANCHORED: OnceLock<Option<thread::ThreadId>> = OnceLock::new();
+
+/// The default output device, and the **only** door into cpal in this crate.
+///
+/// Anchors the host on the first call (see the module docs' "Why cpal is first
+/// touched from a thread that never exits") and is a plain lookup on every call
+/// after that. Everything that needs a device goes through here so that no
+/// future path can reintroduce a first-touch on a thread that will exit.
+fn default_output_device() -> Option<cpal::Device> {
+    anchor_cpal_host();
+    cpal::default_host().default_output_device()
+}
+
+/// Make the process's first cpal call on a thread that will never exit, and
+/// wait for it to finish.
+///
+/// Idempotent and cheap after the first call — an already-initialised
+/// [`OnceLock`] read. The wait matters only the first time, and it is bounded
+/// by one device enumeration.
+///
+/// If the thread cannot be spawned at all, the touch is made inline instead:
+/// that is exactly the behaviour this function exists to replace, but it is
+/// still better than refusing to open a device because a thread was
+/// unavailable, and a process that cannot spawn a thread has a larger problem
+/// than its audio backend. If cpal itself
+/// panics during the touch the anchor thread dies with it and the readiness
+/// channel closes; the caller stops waiting and goes on to make its own call,
+/// which will fail or panic in the ordinary way rather than hanging here.
+fn anchor_cpal_host() {
+    HOST_ANCHORED.get_or_init(|| {
+        let (ready_tx, ready_rx) = mpsc::channel::<thread::ThreadId>();
+        let spawned = thread::Builder::new()
+            .name("baz-cpal-anchor".into())
+            .spawn(move || {
+                touch_cpal_host();
+                let _ = ready_tx.send(thread::current().id());
+                // Never return: a thread that returns runs its thread-local
+                // destructors, and one of cpal's is `CoUninitialize()`.
+                loop {
+                    thread::park();
+                }
+            });
+        // The handle is dropped rather than kept: the anchor is detached on
+        // purpose and there is nothing to join it for — joining it is the one
+        // thing that must never happen.
+        let Ok(_anchor) = spawned else {
+            touch_cpal_host();
+            return None;
+        };
+        // A closed channel means the anchor died during the touch — cpal
+        // panicked — so there is nothing to wait for and nothing anchored.
+        ready_rx.recv().ok()
+    });
+}
+
+/// The smallest call that forces a cpal host backend to build whatever
+/// process-global state it keeps: enumerate, then let the device go.
+///
+/// Nothing is held afterwards — no stream, no PCM, no exclusive claim — so
+/// this cannot take a device away from anyone. On Windows it is what creates
+/// the global `IMMDeviceEnumerator`, which is the whole point; on ALSA and
+/// `CoreAudio` it is a cheap lookup that keeps the anchoring path identical
+/// across platforms, and therefore testable on the ones baz is developed on.
+fn touch_cpal_host() {
+    drop(cpal::default_host().default_output_device());
+}
 
 /// The rate the default output device will actually run at if asked for
 /// `desired` Hz, according to its own advertised capabilities.
@@ -197,9 +319,20 @@ fn negotiated_rate(device: &cpal::Device, desired: u32) -> Option<u32> {
 /// what a seek, skip, or stop needs — use [`Sink::discard_buffered`], whose
 /// lock-free mechanism the module docs describe in full.
 pub struct DeviceSink {
-    producer: Producer<f32>,
     /// Keeps the stream alive; playback stops when this is dropped.
+    ///
+    /// **Declared first on purpose.** Fields drop in declaration order, and
+    /// this is the field whose destructor stops the thing that is still
+    /// reading the ring: every cpal backend baz builds against joins its
+    /// callback thread inside `Stream::drop` (WASAPI signals `Terminate` and
+    /// `join()`s; ALSA sets `dropping`, wakes the poll and `join()`s), so once
+    /// this field is gone the callback provably cannot run again. Releasing
+    /// the producer end of the ring first would not be *unsound* — `rtrb`
+    /// keeps the allocation alive from either end — but it would leave a live
+    /// callback reading state its counterpart had already let go of, which is
+    /// not a thing this file should have to argue about.
     _stream: cpal::Stream,
+    producer: Producer<f32>,
     failed: Arc<AtomicBool>,
     /// Engine → callback: discard ring content until the callback's own
     /// take-count reaches this running total. Monotonically increasing.
@@ -231,9 +364,7 @@ impl DeviceSink {
     /// [`PlaybackError::Device`] if there is no output device or the stream
     /// cannot be built/started (e.g. headless CI, unsupported rate).
     pub fn open(sample_rate: u32, ring_frames: usize) -> Result<Self, PlaybackError> {
-        let host = cpal::default_host();
-        let device = host
-            .default_output_device()
+        let device = default_output_device()
             .ok_or_else(|| PlaybackError::Device("no default output device".into()))?;
         let config = cpal::StreamConfig {
             channels: u16::try_from(CHANNELS)
@@ -301,8 +432,8 @@ impl DeviceSink {
             .play()
             .map_err(|e| PlaybackError::Device(e.to_string()))?;
         Ok(Self {
-            producer,
             _stream: stream,
+            producer,
             failed,
             discard_before,
             consumed: taken_total,
@@ -420,10 +551,9 @@ impl Sink for DeviceSink {
         if desired == self.sample_rate {
             return Some(self.sample_rate);
         }
-        let host = cpal::default_host();
         // A device that has vanished since we opened is not something a rate
         // request can fix; keep the stream we have and let `write` report.
-        let Some(device) = host.default_output_device() else {
+        let Some(device) = default_output_device() else {
             return Some(self.sample_rate);
         };
         // Ask the device what it can do rather than guessing. `None` means it
@@ -433,11 +563,20 @@ impl Sink for DeviceSink {
             return Some(self.sample_rate);
         }
         match Self::open(target, self.ring_frames) {
-            // Build first, swap second: assigning drops the old stream, so a
-            // failed open leaves the working one in place rather than a
-            // silent device. Shared mode permits the moment both exist.
+            // Build first, swap second, and only then let the old one go: a
+            // failed open must leave the working stream in place rather than a
+            // silent device, so the new stream has to exist before the old one
+            // can be released. Shared mode permits the moment both exist.
             Ok(fresh) => {
-                *self = fresh;
+                let stale = std::mem::replace(self, fresh);
+                // Named rather than left to the end of the statement, because
+                // this is the moment the old device stops: `Stream::drop` on
+                // every backend baz builds against stops the stream and joins
+                // its callback thread before returning, so nothing is still
+                // reading the old ring once this line has run. The field order
+                // above is what makes that the *first* thing `stale`'s
+                // destructor does.
+                drop(stale);
                 Some(target)
             }
             Err(_) => Some(self.sample_rate),
@@ -459,6 +598,65 @@ impl Sink for DeviceSink {
                 return;
             }
             thread::sleep(DRAIN_POLL);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **The process's first cpal call is made on a thread that is not the
+    /// caller's** — the structural half of the Windows access-violation fix
+    /// (module docs, "Why cpal is first touched from a thread that never
+    /// exits").
+    ///
+    /// The property that matters is unobservable from outside: it is that the
+    /// thread which built cpal's process-global state never exits, so its
+    /// thread-local `CoUninitialize()` never runs. What *can* be asserted is
+    /// the thing that guarantees it — that the first call came from neither
+    /// the test thread nor the short-lived thread that asked for a device, but
+    /// from a third one this module owns and never joins. A regression that
+    /// removed the anchor and called cpal inline would fail here on every
+    /// platform, which is the point: Linux and macOS must be able to police an
+    /// invariant only Windows punishes.
+    #[test]
+    fn the_first_cpal_call_is_made_on_a_thread_of_our_own() {
+        let caller = thread::current().id();
+        // A thread that asks for a device and then exits: exactly the shape
+        // that used to poison the next caller.
+        let short_lived = thread::spawn(|| {
+            drop(default_output_device());
+            thread::current().id()
+        })
+        .join()
+        .expect("the asking thread must not take the process with it");
+
+        let anchor = HOST_ANCHORED
+            .get()
+            .copied()
+            .expect("asking for a device must have anchored the host")
+            .expect("the anchor thread must have been spawned");
+        assert_ne!(
+            anchor, caller,
+            "cpal must not be first touched on a caller's thread"
+        );
+        assert_ne!(
+            anchor, short_lived,
+            "cpal must not be first touched on a thread that then exits"
+        );
+    }
+
+    /// Anchoring happens once and never moves: further device lookups must not
+    /// re-anchor or spawn a second anchor, because the invariant is about the
+    /// *first* call and there is only one global to protect.
+    #[test]
+    fn anchoring_happens_once_and_never_moves() {
+        drop(default_output_device());
+        let first = HOST_ANCHORED.get().copied().expect("anchored");
+        for _ in 0..4 {
+            drop(default_output_device());
+            assert_eq!(HOST_ANCHORED.get().copied(), Some(first));
         }
     }
 }

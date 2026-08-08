@@ -170,6 +170,25 @@ next commit.
   above).
 - The device ring buffer is discarded when a playback session is abandoned,
   instead of leaking the previous session's audio into the next.
+- `cargo test --workspace --all-features` no longer plays tones out of the
+  developer's speakers. The device-gated tests still open, feed, reopen and
+  tear down the real output — they write silence, which every assertion they
+  make is indifferent to. The tests that can only be judged by ear (a full
+  engine session through real hardware) are now opt-in behind
+  `BAZ_DEVICE_TESTS=1`; see `docs/DEVELOPMENT.md`.
+- **Windows: opening the audio output a second time in one process no longer
+  crashes it** (`STATUS_ACCESS_VIOLATION`). cpal's WASAPI backend caches a
+  process-global device enumerator inside the COM apartment of whichever thread
+  touched it first, but initialises COM per-thread and calls `CoUninitialize()`
+  from a thread-local destructor — so the first thread to exit tore the
+  apartment down underneath the still-published global, and the next device
+  open dereferenced freed state. baz opens its device on the engine thread
+  (cpal streams are not `Send`), so anything that spawns a second engine — an
+  output-mode change, a retry after a device error, a front end restarting
+  playback — was affected. baz now makes the process's first cpal call from a
+  dedicated thread that never exits; see `playback::device`'s "Why cpal is
+  first touched from a thread that never exits". This is what had the Windows
+  CI job dying part-way through the `baz-core` integration suite.
 - The seek bar and the volume fader no longer stay stuck to the pointer after
   a drag that ends outside the window. If the pointer leaves the window, or
   the window loses focus, mid-drag, the gesture now ends there and commits at
