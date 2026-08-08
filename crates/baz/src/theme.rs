@@ -2906,6 +2906,91 @@ pub const DETAIL_ROW_H: f32 = LINE_META;
 /// [`Palette::placeholder_ink`], where the argument is.
 pub const PLACEHOLDER_MIX: f32 = 0.62;
 
+// ===========================================================================
+// The shuffle pool's two marks (ADR-0017 step 17)
+// ===========================================================================
+
+/// **What a sleeve outside the shuffle's pool is drawn at**: 35 % opacity.
+///
+/// The number is `docs/design/critique/02-surfaces.md`'s — *"non-pool covers dim
+/// to 35 %"* — and it is applied to the **artwork itself**, through iced's own
+/// image opacity, rather than by putting anything over it. That distinction is
+/// the whole of why this mark is permitted at all:
+///
+/// - `docs/REFUSALS.md`, *nothing is ever drawn on top of a sleeve* — nothing
+///   is. The image is composited against the wall at 35 %; there is no scrim,
+///   no tint, no veil widget, and the wall behind it is the wall.
+/// - `docs/REFUSALS.md`, *no scrim, ever* — that refusal is about *"dimming ten
+///   thousand covers to show twelve rows"*, a layer over the collection to
+///   privilege a panel. This is the opposite operation: it dims the records the
+///   running shuffle **cannot play**, and it exists so the pool is legible
+///   rather than to make room for something else. At rest — no shuffle running
+///   — nothing on the wall is dimmed at all, which is the test of the
+///   difference.
+///
+/// It is a **state, not a transition** (ADR-0020 permits five transitions and
+/// this is not one of them): the pool changes when a listener presses `Shuffle`,
+/// which is a decision, and a decision's mark arrives with it.
+///
+/// # What 35 % measures out at
+///
+/// The number is an **opacity**, and wgpu composites in linear light, so the
+/// step a viewer sees is smaller than the arithmetic suggests. Measured off the
+/// render harness (`docs/design/impl/shuffle-and-pull/`), a sleeve pixel of
+/// `#6A5C2D` on the wall draws at `#41381B` — 0.61 of its sRGB value, which is
+/// 0.35 of its **linear** one. Recorded rather than corrected: 0.35 is the
+/// number the design names, the mark reads plainly against the sleeves beside
+/// it in the captures, and the ledger requires a ring as well as the dimming
+/// precisely so that no state rests on one channel.
+pub const POOL_DIM: f32 = 0.35;
+
+/// Width of the ring around one of the shuffle's **next draws** (logical px).
+///
+/// Two, the same as [`SELECTION_EDGE`], because it is the same weight of
+/// statement about a record — *this one is spoken for* — made in the one place
+/// a rule under the label cannot make it. There is no third mark thickness in
+/// the product.
+///
+/// # Why this is not a border on artwork
+///
+/// `docs/REFUSALS.md` refuses borders on artwork, and refuses them specifically
+/// *"as the remedy for a sleeve that melts into its room"*. It also — in the
+/// same document, adopted from the same critique — requires that *"the next
+/// draws carry faint rings"*, and ADR-0017 §4 names dimming **and** rings as the
+/// pair that keeps the pool from being signalled by one channel alone. So the
+/// ring is permitted by name, and what is left is to draw it without drawing on
+/// the work:
+///
+/// **The lane is reserved on every tile, in every state.** A sleeve's box is the
+/// grid's art edge; the artwork inside it is that edge less two of these, always
+/// — ringed or not, playing or not, on a wall with no shuffle running at all.
+/// The lane is painted [`Palette::wall`] at rest, which is the wall, which is
+/// nothing; a ring is that same lane painted [`Palette::paper_faint`]. So the
+/// mark costs no geometry, moves no cover by a pixel when it arrives, and is
+/// **beside** the artwork rather than over or around it — the same reserved-slot
+/// rule the tile's state rule already follows, applied on the other axis.
+pub const POOL_RING: f32 = 2.0;
+
+/// The lane around a sleeve: the wall, or — for one of the shuffle's next draws
+/// — a faint ink ring ([`POOL_RING`]).
+///
+/// [`Palette::paper_faint`] is the ink the tile's *selected* rule is drawn in,
+/// deliberately: both say "this record, specifically", and a third ink for a
+/// third kind of pointing-at would be a third vocabulary. It is never the
+/// accent — what is *queued* is not what is *sounding*, and the accent
+/// discipline (§5) reserves amber for the second.
+#[must_use]
+pub fn pool_ring(p: &Palette, ringed: bool) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(if ringed {
+            p.paper_faint
+        } else {
+            p.wall
+        })),
+        ..container::Style::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5227,10 +5312,13 @@ mod tests {
             );
         }
         // The popover's album group sits on the header lane rather than 4 and
-        // 5 px inside it.
+        // 5 px inside it. It gained a *vertical* inset when a queue could hold
+        // more than one record — the air above a new record's name — and that is
+        // a different axis: this law is about x-edges, and the assertion is that
+        // the horizontal half of the pad is literally zero.
         assert!(
-            read("queue.rs").contains("container(block).into()"),
-            "the popover's album group has an inset again"
+            read("queue.rs").contains("container(block).padding(theme::pad(air, 0.0))"),
+            "the popover's album group has a horizontal inset again"
         );
         // The scrollbar's lane is *declared* rather than absorbed: it is the one
         // inset the right-hand edge is allowed, and it is a token both the bar

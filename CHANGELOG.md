@@ -160,6 +160,30 @@ next commit.
 
 **Interface**
 
+- **Shuffle, drawing only from what the wall shows** (ADR-0017 step 17). One
+  rule and no options: the pool is whatever the active group key, the current
+  search query and the current shelf leave visible, and it is **visible** —
+  while a shuffle is running, sleeves outside its pool are drawn at 35 % and its
+  next two draws carry a faint ink ring. The ring's lane is reserved on every
+  tile in every state, so the mark costs no geometry and moves no cover when it
+  arrives. What shuffle produces is an ordinary queue of **whole records**,
+  eight of them, sent with the same `SetQueue` a double-clicked sleeve sends —
+  inspectable and editable in the popover, which now names each record where it
+  begins rather than printing forty titles under one album's name. It **ends**,
+  in silence, because a shuffle that refilled itself would be the radio
+  `docs/REFUSALS.md` rules out. There is no shuffle *mode*, nothing to turn off,
+  and no "vibe shuffle": a mood is a group key or a query, so a future `MOOD`
+  key needs no new code here and no new control.
+- **The pull** (ADR-0017 step 19) — `Ctrl+R`, or the word in the top bar. One
+  record from the same pool, weighted by the ledger's own
+  `History::pull_weight` (one per day since it was last heard, capped at a
+  year, heaviest for one never played, never zero), offered with `Last played
+  3 years ago` beside it. **Nothing plays**: the pull selects a sleeve, opens
+  its inspector and prints one line; accepting it is pressing the same `Play
+  album` any record gets. Pressing again offers a different one; `Esc` puts it
+  back. It is presented in the album inspector because the Marquee lens
+  (step 18) is not built yet, and the seam it will take over is one struct and
+  one function.
 - **Motion — five bounded transitions, and a clock that stops** (ADR-0020).
   Every design document baz had written specified hard cuts everywhere, on a
   premise that did not survive measurement: a transition was said to need a

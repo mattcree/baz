@@ -80,10 +80,23 @@ use crate::{icon, theme, vm};
 ///
 /// The hues survive the mix, which is the whole reason the gradient exists:
 /// two albums with no art must still look like two different albums.
-pub(crate) fn gradient_block(album_id: u64, size: f32) -> Element<'static, Message> {
+///
+/// # `shown`
+///
+/// How strongly the placeholder is drawn, 0…1 — the gradient's own answer to
+/// the opacity a real thumbnail is composited at when its record is **outside a
+/// running shuffle's pool** ([`theme::POOL_DIM`]). A gradient background is
+/// painted rather than sampled, so there is nothing to set an opacity on; it is
+/// mixed toward the wall instead, which is what compositing it at that opacity
+/// against the wall would have produced. Ordinary tiles pass 1.0 and the mix is
+/// the identity.
+pub(crate) fn gradient_block(album_id: u64, size: f32, shown: f32) -> Element<'static, Message> {
     let room = theme::active();
     let (c1, c2) = vm::gradient_colors(album_id);
-    let to_color = |c: [u8; 3]| room.placeholder_ink(Color::from_rgb8(c[0], c[1], c[2]));
+    let to_color = |c: [u8; 3]| {
+        let ink = room.placeholder_ink(Color::from_rgb8(c[0], c[1], c[2]));
+        theme::Palette::mix(room.wall, ink, shown.clamp(0.0, 1.0))
+    };
     let gradient = iced::gradient::Linear::new(iced::Radians(2.4))
         .add_stop(0.0, to_color(c1))
         .add_stop(1.0, to_color(c2));

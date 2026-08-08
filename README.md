@@ -40,7 +40,7 @@ modifier: the letters belong to the query now.
 |---|---|
 | any printable character | filter the wall by it, from wherever you are — the search well takes the caret with the first keystroke |
 | <kbd>Enter</kbd> | play the best match for what you typed; with no query, play the selected album |
-| <kbd>Esc</kbd> | leave the search field, then clear the query, then peel one layer: the queue, else the settings, else the inspector |
+| <kbd>Esc</kbd> | leave the search field, then peel one layer: the queue, else the settings, else the pull, else the query, else the inspector, else the shuffle's marks |
 | <kbd>Space</kbd> | play / pause |
 | <kbd>←</kbd> <kbd>→</kbd> | seek 5 s back / forward |
 | <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> | seek 30 s back / forward |
@@ -54,6 +54,11 @@ modifier: the letters belong to the query now.
 | <kbd>Ctrl</kbd>+<kbd>U</kbd> | show / hide what is playing **up next**, over the now-playing bar |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | go to the settings, or come back |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> | hide the album inspector, or bring it back — the selection is kept |
+| <kbd>Ctrl</kbd>+<kbd>R</kbd> | **the pull**: one record, weighted toward what you have not heard in a long time. Nothing plays — it is offered, and pressing again offers a different one |
+
+**Shuffle** has no key, only the word in the top bar. The rule runs one way —
+every action needs a visible control, not every control needs a key — and a
+shuffle is a decision made once an evening, not a reflex.
 
 Media keys (play/pause, previous, next, stop) work too — on Linux they usually arrive
 over MPRIS rather than as key presses, which is the same thing by a different

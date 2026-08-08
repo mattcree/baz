@@ -162,12 +162,24 @@ fn shelf_row<'a>(
             break;
         };
         if let Some(album) = shelf.albums.get(album_index) {
+            // **The two marks the pool makes**, decided here rather than in the
+            // tile so that a wall with no shuffle running asks the pool nothing
+            // at all: `None` is the ordinary state and it costs one branch per
+            // row, not one per cover.
+            let (dimmed, ringed) = shelf.pool.as_ref().map_or((false, false), |pool| {
+                (
+                    !pool.holds(album.id),
+                    pool.ringed(album.id, player.playing_album()),
+                )
+            });
             cells = cells.push(tile(
                 shelf,
                 hang,
                 album,
                 player.playing_album() == Some(album.id),
                 lamp,
+                dimmed,
+                ringed,
             ));
         }
     }
@@ -546,22 +558,43 @@ fn tile<'a>(
     album: &'a vm::AlbumVm,
     playing: bool,
     lamp: f32,
+    dimmed: bool,
+    ringed: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let edge = hang.art;
+    // **The work, inside its reserved ring lane.** Every sleeve on the wall is
+    // drawn at the grid's art edge less two [`theme::POOL_RING`]s, in every
+    // state, so that the ring a shuffle's next draw carries costs no geometry
+    // and moves no cover when it arrives. See [`theme::POOL_RING`].
+    let work = (edge - 2.0 * theme::POOL_RING).max(0.0);
+    // Outside the pool of a shuffle that is running: the artwork itself is
+    // composited at [`theme::POOL_DIM`], which is not a scrim and not a layer —
+    // nothing is drawn on top of the sleeve.
+    let shown = if dimmed { theme::POOL_DIM } else { 1.0 };
     let art: Element<'_, Message> = match shelf.thumbs.peek(&album.id) {
         Some(handle) => iced_image(handle.clone())
-            .width(Length::Fixed(edge))
-            .height(Length::Fixed(edge))
+            .width(Length::Fixed(work))
+            .height(Length::Fixed(work))
+            .opacity(shown)
             .into(),
-        None => gradient_block(album.id, edge),
+        None => gradient_block(album.id, work, shown),
     };
     // The halo warms over 200 ms when the light moves to this record, and is
     // simply absent on every other tile (ADR-0020 §2.5). The **dot** does not
     // fade: the halo is the light and the dot is the statement, and a statement
     // that arrives gradually is a statement you are not sure was made.
     let warmth = if playing { lamp } else { 0.0 };
-    let sleeve = container(art).style(move |_theme| theme::sleeve(room, warmth));
+    let sleeve = container(
+        container(art)
+            .width(Length::Fixed(work))
+            .height(Length::Fixed(work))
+            .style(move |_theme| theme::sleeve(room, warmth)),
+    )
+    .width(Length::Fixed(edge))
+    .height(Length::Fixed(edge))
+    .padding(theme::POOL_RING)
+    .style(move |_theme| theme::pool_ring(room, ringed));
     let title = album.title.as_deref().unwrap_or("Unknown Album");
     // The *album* artist: one tile per album, captioned by whoever the
     // album is filed under, not by whichever composer happened to be

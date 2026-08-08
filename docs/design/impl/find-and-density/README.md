@@ -15,7 +15,9 @@ scenarios `E` and `F` — the fixed harness, with the six-variable isolation of
 ```
 
 The fixture is the generated, digitally silent 25-album / 206-track set from
-`mkfixture.sh`, never `~/Music`.
+`mkfixture.sh`, never `~/Music`. The binary is the `--all-features` build, so
+the transport is on screen; the scratch `HOME` carries an `.asoundrc` routing
+ALSA's default PCM to `null`, and every sample in the fixture is a zero.
 
 **Every density frame was reached by the real gesture**, not by a seeded
 config: `Ctrl+-`, `Ctrl+=`, `Ctrl+wheel`. So the frames are evidence about the
@@ -31,14 +33,20 @@ loop. `capture.sh` now takes `BIN` and reports `APP EXITED` instead of hanging.
 `bands.py x` over a row of covers, both window sizes. Grid width is the window
 less `INDEX_LANE_W` 108 — 1172 and 1812.
 
-| Step | window | measured cover runs | art | gutter | margin | spec |
+**What the ruler sees is the *sleeve*, not the cell.** Step 17 reserves a
+`POOL_RING` 2 px lane inside every cell so that the ring a shuffle's next draw
+carries costs no geometry, so the ink run is `art − 4` and the gap between two
+ink runs is `hang + 4`, in every state and at every step. The cell is what the
+hang is about, and it is the ink run plus its two ring lanes.
+
+| Step | window | measured ink runs | ⇒ art | ⇒ gutter | ⇒ margin | spec |
 |---|---|---|---|---|---|---|
-| Spacious | 1280 | `48..368`, `426..746` | 320 | **58** | **48** | 3 × 320 |
-| Balanced | 1280 | `40..283`, `323..566` | 243 | **40** | **40** | 4 × 243 |
-| Dense | 1280 | `28..229`, `257..458` | 201 | **28** | **28** | 5 × 200.8 |
-| Spacious | 1920 | `48..353`, `401..706` | 305 | **48** | **48** | 5 × 304.8 |
-| Balanced | 1920 | `40..295`, `335..591` | 255/256 | **40** | **40** | 6 × 255.3 |
-| Dense | 1920 | `28..223`, `251..446` | 195 | **28** | **28** | 8 × 195 |
+| Spacious | 1280 | `50..366`, `428..744` | 320 | **58** | **48** | 3 × 320 |
+| Balanced | 1280 | `42..281`, `325..564` | 243 | **40** | **40** | 4 × 243 |
+| Dense | 1280 | `30..227`, `259..456` | 201 | **28** | **28** | 5 × 200.8 |
+| Spacious | 1920 | `50..351`, `403..704` | 305 | **48** | **48** | 5 × 304.8 |
+| Balanced | 1920 | `42..293`, `337..589` | 255/256 | **40** | **40** | 6 × 255.3 |
+| Dense | 1920 | `30..221`, `253..444` | 195 | **28** | **28** | 8 × 195 |
 
 `gutter == margin == HANG` at every step, on real pixels, with the index rail's
 lane off the wall. The alternating 255/256 at Balanced/1920 is the rasterizer
@@ -53,7 +61,7 @@ art is exactly what would put the difference back into the gutter
 | [`density-spacious-1280x860.png`](density-spacious-1280x860.png) | **Spacious at 1280.** Art pinned at `ART_MAX` 320, so the margins take the slack — the one case `gutter > hang`, at 58. |
 | [`density-balanced-1280x860.png`](density-balanced-1280x860.png) | **Balanced**, the default and `theme.rs`'s tokens exactly. 40 · 243 · 40 · 243 · 40. |
 | [`density-dense-1280x860.png`](density-dense-1280x860.png) | **Dense** — today's shelf. Five columns of 200.8 where baz drew 5 × 208 before the hang landed, so nobody loses what they had. |
-| [`density-spacious-again-1280x860.png`](density-spacious-again-1280x860.png) | A fourth `Ctrl+=` at the top of the ladder. `magick compare -metric AE` against the frame before it: **0**. The zoom saturates rather than wrapping. |
+| [`density-spacious-again-1280x860.png`](density-spacious-again-1280x860.png) | A fourth `Ctrl+=` at the top of the ladder. `magick compare -metric AE` against the frame before it: **0**, at both window sizes. The zoom saturates rather than wrapping. |
 | [`density-wheeled-1280x860.png`](density-wheeled-1280x860.png) | Two `Ctrl`+wheel-down notches from Spacious: the pointer half of the same gesture lands on Dense, and the wall is re-anchored rather than left where the `scrollable` also scrolled it. |
 | the same five at `1920x1080` | the second width, measured above. |
 | [`find-typed-1280x860.png`](find-typed-1280x860.png) | **Type anywhere.** `co` typed from a cold wall — no click, no `/`, nothing focused. The well fills, takes the focus ring, and the count reads `18 of 25 albums`. |

@@ -616,6 +616,17 @@ pub struct QueueItemVm {
     /// [`PlayerState::continuation_note`](crate::player::PlayerState::continuation_note)
     /// counts rather than counting tracks.
     pub album: Option<String>,
+    /// Who the record this track was queued as part of is **filed under**, as
+    /// the shelf labels it ([`AlbumArtistVm::label`]).
+    ///
+    /// `None` means "as the queue's own header already says" — the ordinary
+    /// case, where a queue is one album and [`QueueVm::artist`] covers every
+    /// row of it. It is carried per item for the same reason [`Self::album`]
+    /// is: a queue may hold several records (a shuffle draws eight of them,
+    /// `crate::shuffle`), and the second one is by somebody else. Without it the
+    /// popover could name the second record but not who made it, which is
+    /// exactly the half-fact a catalogue must not print.
+    pub album_artist: Option<String>,
     /// Playing time, when the scan read one.
     pub duration: Option<Duration>,
     /// The file. The identity the engine addresses this track by, and what
@@ -720,8 +731,19 @@ impl QueueVm {
 /// queue can never contain a format the user was not looking at.
 #[must_use]
 pub fn album_queue(album: &AlbumVm, chosen: Option<EditionKey>) -> QueueVm {
+    QueueVm {
+        album: album.title.clone(),
+        artist: album.artist.label().to_owned(),
+        items: album_items(album, chosen),
+    }
+}
+
+/// One record's tracks as queue items — the body [`album_queue`] and
+/// [`stacked_queue`] share, so a record queued alone and the same record queued
+/// third in a shuffle are byte-for-byte the same rows.
+fn album_items(album: &AlbumVm, chosen: Option<EditionKey>) -> Vec<QueueItemVm> {
     let per_track_artists = album.track_artists_vary;
-    let items = selected_edition(album, chosen).map_or_else(Vec::new, |edition| {
+    selected_edition(album, chosen).map_or_else(Vec::new, |edition| {
         edition
             .tracks
             .iter()
@@ -729,14 +751,41 @@ pub fn album_queue(album: &AlbumVm, chosen: Option<EditionKey>) -> QueueVm {
                 title: track.title.clone(),
                 artist: track.artist.clone().filter(|_| per_track_artists),
                 album: album.title.clone(),
+                album_artist: Some(album.artist.label().to_owned()),
                 duration: track.duration,
                 path: track.path.clone(),
             })
             .collect()
-    });
+    })
+}
+
+/// **A queue of whole records**, in the order given — what a shuffle sends
+/// (`crate::shuffle`).
+///
+/// The one thing this must not do is flatten. ADR-0014 §"albums are listed as
+/// albums, never flattened" is a promise about the *queue*, not only about the
+/// popover that draws it: each record's tracks arrive in the edition's own
+/// disc/track order, contiguous, carrying the album title and the album artist
+/// that say which record they belong to. Sorting the whole list, interleaving
+/// two records, or dropping the album title would each turn eight sleeves into
+/// forty loose songs, and no later surface could put them back together.
+///
+/// The queue's own header names the **first** record, because that is the one
+/// it opens on; every record after it is named by its own run in the list
+/// ([`QueueItemVm::album_artist`]).
+///
+/// An empty `picks`, or picks whose editions hold no tracks, gives an empty
+/// queue — which the caller must not send. Silence is not started by accident.
+#[must_use]
+pub fn stacked_queue(picks: &[(&AlbumVm, Option<EditionKey>)]) -> QueueVm {
+    let mut items = Vec::new();
+    for (album, chosen) in picks {
+        items.extend(album_items(album, *chosen));
+    }
+    let first = picks.first().map(|(album, _)| *album);
     QueueVm {
-        album: album.title.clone(),
-        artist: album.artist.label().to_owned(),
+        album: first.and_then(|album| album.title.clone()),
+        artist: first.map_or_else(String::new, |album| album.artist.label().to_owned()),
         items,
     }
 }
@@ -1909,6 +1958,7 @@ mod tests {
             title: title.to_owned(),
             artist: None,
             album: Some("Loop".to_owned()),
+            album_artist: None,
             duration: Some(Duration::from_secs(60)),
             path: path.clone(),
         };
@@ -1988,6 +2038,7 @@ mod tests {
             title: "Loop".to_owned(),
             artist: None,
             album: Some("Loop".to_owned()),
+            album_artist: None,
             duration: Some(Duration::from_secs(60)),
             path: PathBuf::from(path),
         };
@@ -2012,6 +2063,91 @@ mod tests {
         assert_ne!(gradient_colors(id_a), gradient_colors(id_b));
         let (c1, c2) = gradient_colors(id_a);
         assert_ne!(c1, c2, "the two gradient stops should differ");
+    }
+
+    /// **A shuffle's queue is whole records, in the order drawn** — the promise
+    /// ADR-0014 makes about the queue itself, not only about the popover that
+    /// draws it.
+    ///
+    /// Three things are pinned, and each one is a way the queue could be
+    /// flattened without anybody noticing until a listener opened it:
+    ///
+    /// - every record's tracks are **contiguous and in the edition's own
+    ///   order** — no interleaving, no global sort;
+    /// - every item names the record it belongs to *and* who that record is
+    ///   filed under, so a second record can be headed by its own name;
+    /// - the paths the engine is sent are exactly the paths the rows list, in
+    ///   the same order, which is what [`QueueVm`] exists to guarantee.
+    #[test]
+    fn a_shuffle_queues_whole_records_and_never_flattens_them() {
+        let library = library_with(vec![
+            meta("Boards of Canada", "Geogaddi", "Music Is Math", 2),
+            meta("Boards of Canada", "Geogaddi", "Ready Lets Go", 1),
+            meta("Talk Talk", "Laughing Stock", "Myrrhman", 1),
+            meta("Talk Talk", "Laughing Stock", "Ascension Day", 2),
+        ]);
+        let albums = build_albums(&library);
+        assert_eq!(albums.len(), 2);
+        // Drawn in the order the shuffle picked them: the *second* album first,
+        // so a queue that quietly re-sorted would be visible here.
+        let picks = [(&albums[1], None), (&albums[0], None)];
+        let queue = stacked_queue(&picks);
+
+        assert_eq!(queue.len(), 4);
+        let titles: Vec<&str> = queue.items.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            [
+                "Myrrhman",
+                "Ascension Day",
+                "Ready Lets Go",
+                "Music Is Math"
+            ],
+            "each record arrives whole, in its own track order, in the drawn order"
+        );
+        let records: Vec<Option<&str>> = queue.items.iter().map(|i| i.album.as_deref()).collect();
+        assert_eq!(
+            records,
+            [
+                Some("Laughing Stock"),
+                Some("Laughing Stock"),
+                Some("Geogaddi"),
+                Some("Geogaddi")
+            ],
+            "consecutive items sharing a title are one record — the run is unbroken"
+        );
+        let filed: Vec<Option<&str>> = queue
+            .items
+            .iter()
+            .map(|i| i.album_artist.as_deref())
+            .collect();
+        assert_eq!(
+            filed,
+            [
+                Some("Talk Talk"),
+                Some("Talk Talk"),
+                Some("Boards of Canada"),
+                Some("Boards of Canada")
+            ],
+            "the second record can be headed by its own artist, not the first's"
+        );
+        // The queue's own header names the record it opens on.
+        assert_eq!(queue.album.as_deref(), Some("Laughing Stock"));
+        assert_eq!(queue.artist, "Talk Talk");
+        // What is sent is what is listed.
+        let paths = queue.paths();
+        assert_eq!(paths.len(), queue.items.len());
+        assert!(
+            paths
+                .iter()
+                .zip(&queue.items)
+                .all(|(path, item)| *path == item.path)
+        );
+        // One record stacked alone is byte-for-byte the ordinary album queue.
+        let alone = stacked_queue(&[(&albums[0], None)]);
+        assert_eq!(alone.items, album_queue(&albums[0], None).items);
+        // Nothing drawn is an empty queue, which the caller must not send.
+        assert!(stacked_queue(&[]).is_empty());
     }
 
     #[test]
