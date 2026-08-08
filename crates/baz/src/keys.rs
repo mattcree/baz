@@ -91,13 +91,19 @@
 //! goes out is the idempotent `SetMute { muted }` the protocol asks for
 //! rather than a toggle two front ends could disagree about.
 //!
-//! # Panels
+//! # Layers
 //!
-//! `Q` shows and hides the play queue, and <kbd>Ctrl</kbd>+<kbd>B</kbd>
-//! (<kbd>Cmd</kbd>+<kbd>B</kbd>) hides the right-hand rail outright and brings
-//! it back. Both resolve to the same messages the on-screen affordances send —
-//! the top bar's Queue toggle and each panel's ✕ — so there is no keyboard-only
-//! capability here, exactly as with the transport.
+//! Three keys move between what is on screen, and each one now names exactly
+//! one layer — which is the change the information-architecture move bought
+//! (ADR-0015, `docs/design/01-ux-audit-and-ia.md` §4.8).
+//!
+//! `Q` shows and hides **Up next**. Same key, same meaning, better place: it
+//! used to raise a queue *panel* in the right-hand rail, costing the shelf two
+//! columns of covers for a glance; it now raises the popover anchored to the
+//! bar that describes it, which costs the shelf nothing. It resolves to
+//! [`Message::ToggleUpNext`] — the same message the bar's now-playing block
+//! sends — so there is no keyboard-only capability here, exactly as with the
+//! transport.
 //!
 //! `Q` is bare because it is a *view* key like `/`: it interrupts nothing, it
 //! is reversible by pressing it again, and a modifier on a key you will press
@@ -105,12 +111,22 @@
 //! foobar2000 and `MusicBee` both put queue-adjacent commands on it, and nothing
 //! in baz wanted `q`.
 //!
-//! <kbd>Ctrl</kbd>+<kbd>B</kbd> is the sidebar reflex from every editor
-//! written this decade, and it earns its modifier for the opposite reason: it
-//! is the *layout* key, the one that changes how much room the shelf gets, and
-//! those are conventionally modified. What comes back is what was dismissed
-//! (see [`crate::panels`]), so the pair is a true toggle rather than a
-//! destructive close.
+//! <kbd>Ctrl</kbd>+<kbd>B</kbd> (<kbd>Cmd</kbd>+<kbd>B</kbd>) hides the
+//! right-hand column and brings it back. It is the sidebar reflex from every
+//! editor written this decade, and it earns its modifier for the opposite
+//! reason to `Q`'s: it is the *layout* key, the one that changes how much room
+//! the shelf gets, and those are conventionally modified. What comes back is
+//! what was dismissed (see [`crate::panels`]), so the pair is a true toggle
+//! rather than a destructive close — and it is an *honest* sidebar toggle now
+//! that there is exactly one sidebar. It no longer conjures a queue panel out
+//! of an empty rail, which was the audit's evidence that the rail had no model
+//! behind it.
+//!
+//! <kbd>Esc</kbd> peels **one layer, top down**: the popover first, then — in
+//! the search well — the query, then the inspector. It never has to choose
+//! between unrelated things, because at each press exactly one layer is the
+//! top one. The layering itself lives in `app.rs`, where the layers do; this
+//! module only says that the key means "peel".
 //!
 //! <kbd>Ctrl</kbd>+<kbd>,</kbd> (<kbd>Cmd</kbd>+<kbd>,</kbd>) opens the
 //! settings, and takes a modifier where `Q` does not. The reasoning is `Q`'s
@@ -201,10 +217,10 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Named(key::Named::ArrowDown) if bare => Some(Message::VolumeStep(-1)),
         Key::Character("m" | "M") if bare || shift => Some(Message::ToggleMute),
 
-        // Panels. `Q` shows what is playing next; Ctrl+B (Cmd+B) takes the
-        // whole rail away and gives it back; Ctrl+`,` (Cmd+`,`) is the
+        // Layers. `Q` shows what is playing next; Ctrl+B (Cmd+B) takes the
+        // right-hand column away and gives it back; Ctrl+`,` (Cmd+`,`) is the
         // settings (module docs).
-        Key::Character("q" | "Q") if bare || shift => Some(Message::ToggleQueue),
+        Key::Character("q" | "Q") if bare || shift => Some(Message::ToggleUpNext),
         Key::Character("b" | "B") if command => Some(Message::TogglePanels),
         Key::Character(",") if command => Some(Message::ToggleSettings),
 
@@ -214,8 +230,7 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Character("/") if bare || shift => Some(Message::FocusSearch),
         Key::Character("f" | "F") if command => Some(Message::FocusSearch),
 
-        // Unchanged from the first keyboard pass: clear the search, else
-        // close what the rail is showing.
+        // Peel one layer, top down (module docs; `app.rs` holds the order).
         Key::Named(key::Named::Escape) if bare => Some(Message::EscapePressed),
 
         // Media keys, for the machines that deliver them to the focused
@@ -456,14 +471,14 @@ mod tests {
         );
     }
 
-    /// `Q` shows and hides the queue, in either case, with no modifier — a
-    /// view key, like `/`.
+    /// `Q` shows and hides **Up next**, in either case, with no modifier — a
+    /// view key, like `/`. The key did not move; what it raises did.
     #[test]
-    fn q_toggles_the_queue_panel() {
-        assert_eq!(bind(&ch("q"), none()).as_deref(), Some("ToggleQueue"));
+    fn q_toggles_the_up_next_popover() {
+        assert_eq!(bind(&ch("q"), none()).as_deref(), Some("ToggleUpNext"));
         assert_eq!(
             bind(&ch("Q"), Modifiers::SHIFT).as_deref(),
-            Some("ToggleQueue")
+            Some("ToggleUpNext")
         );
     }
 

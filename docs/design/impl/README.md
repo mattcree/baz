@@ -100,6 +100,89 @@ bar-1-stopped            4 241 px  title, timestamps and groove appear at all
 
 ---
 
+# Increment 6 — Up next becomes a popover
+
+The first surface to leave the rail (ADR-0015). Captured the same way as
+everything above — a private `Xvfb :147` at 1400×1000, scratch `HOME` **and**
+scratch `XDG_*` (including `XDG_RUNTIME_DIR`, so the maintainer's session bus
+was never joined: the log reads `[mpris] no session bus`), an 18-album /
+183-track fixture of generated covers and digitally silent FLAC, and a
+`--features device-output` release build whose scratch `HOME` carries an
+`.asoundrc` routing ALSA's default PCM to `null`. `BAZ_DEVICE_TESTS` was never
+set. Captures are targeted at this process's window by pid.
+
+| Image | What it shows |
+|---|---|
+| [`15-up-next-popover.png`](15-up-next-popover.png) | **Up next**, open. 360 px, anchored 16 px above the bar and 16 px in from the right edge, over the shelf and over the album inspector — **and not over the transport**, which keeps every reserved pixel and stays live. No scrim: the covers behind it are at full brightness. The playing row is carded and dotted, `2 of 12 · 43:54 left` summarises what is *ahead*, and the bar's `Up next  2 / 12` control is in its raised "open" state — the anchor the toolkit will not let the popover draw as a notch. |
+| [`19-up-next-affordance-at-rest.png`](19-up-next-affordance-at-rest.png) | The same control with the popover shut, at 250%: **a labelled, always-visible door**, and no chrome at all until you reach for it. This is the prior-art study's R1 — *transient must not mean unverifiable* — and it is the one place this increment departs from the design spec, which offered only `Q` and an unlabelled press on the now-playing block. |
+| [`16-up-next-esc-peels-one-layer.png`](16-up-next-esc-peels-one-layer.png) | **One <kbd>Esc</kbd>, one layer.** The popover is gone and the album inspector beside it is untouched — still open, still marking the playing track. A second press would take the inspector. Verified with an instrumented build that counted the messages: one key press, one `EscapePressed`. |
+| [`17-up-next-click-outside.png`](17-up-next-click-outside.png) | **Click-outside, and only that.** The press landed on a shelf tile: the popover closed and the tile did not change selection, because the `mouse_area` layer captured the press before the place underneath could see it. This is the dismissal iced 0.13 gives no other route to, working. |
+| [`18-bar-diff-popover-open-vs-closed.png`](18-bar-diff-popover-open-vs-closed.png) | The bottom bar, popover-closed against popover-open, auto-levelled. Everything that changed is inside the 152 px control. |
+
+## The bar did not move
+
+The bar gained a control, so its promise — *nothing moves as the music moves* —
+was re-measured rather than assumed. The transport was **paused** first, so the
+only variable across the three captures is the popover's state.
+
+**Closed, then open, then closed again is pixel-identical to the first frame:**
+
+```
+magick compare -metric AE  crop-bar-a-closed.png  crop-bar-c-closed-again.png
+0
+```
+
+**Nothing outside the control changed at all.** The bounding box of every
+differing pixel between closed and open, in a 1280 × 104 bar:
+
+```
+152x25+282+41         the Up next control, and nothing else
+                      (3 696 differing pixels, every one of them its card)
+```
+
+152 is `UP_NEXT_W` exactly.
+
+**The three things that must not move, in all three states:**
+
+```
+                        transport row     label + readout ink   title+artist ink
+bar-a-closed            110x28+45+0       119x11+0+3            94x28+1+1
+bar-b-open              110x28+45+0       119x11+0+3            94x28+1+1
+bar-c-closed-again      110x28+45+0       119x11+0+3            94x28+1+1
+```
+
+110 = 3 × `TRANSPORT_HIT` 32 + 2 × `GAP_SM` 8, less the two glyph boxes' own
+transparent margins — the same measurement increments 1–5 made, unchanged. The
+`Up next` label and its `2 / 12` readout occupy the same 119 × 11 px of ink
+whether the popover is open or shut, inside the control's 152 px slot; and the
+track title beside them is identical to the pixel, which is the thing a border
+appearing on hover would have broken.
+
+**And the bar's top edge is where it was.** Sampled at x = 470, a column with no
+content in any state:
+
+```
+y0=srgb(124,51,34)  y1=srgb(19,17,16)  y2=srgb(77,73,70)  y3=srgb(13,11,10)
+```
+
+— identical in all three. The hairline is at row 2 and `RECESS` begins at row 3,
+so the bar's 102 px height did not change when the popover opened.
+
+## What the captures also settle
+
+Two behaviours were driven rather than argued, because both depend on
+`iced_widget` primitives the design spec verified by reading:
+
+- **`opaque` really does capture presses inside its bounds.** The popover's ✕
+  and its rows take clicks; the press that lands beside it does not reach the
+  shelf ([`17`](17-up-next-click-outside.png)).
+- **The popover really is not modal.** With it open, the transport below is
+  uncovered and clickable, the shelf still scrolls, and every keyboard binding
+  still fires — <kbd>Q</kbd> closed it in one run, <kbd>Esc</kbd> in another,
+  and a press on the shelf in a third.
+
+---
+
 # Visual language — implementation evidence, pass 1
 
 > The three foundation items of `docs/design/02-visual-language.md`: the

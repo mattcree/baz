@@ -92,7 +92,7 @@ pub(crate) fn view(player: &PlayerState) -> Element<'_, Message> {
 fn header_row() -> Element<'static, Message> {
     row![
         Space::with_width(Length::Fill),
-        close_button("Close the settings"),
+        close_button("Close the settings", Message::ClosePanel),
     ]
     .align_y(iced::Alignment::Center)
     .into()

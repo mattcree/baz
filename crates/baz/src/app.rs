@@ -42,11 +42,15 @@ use baz_core::protocol::{self as protocol, Command, Event, SignalChain};
 use baz_core::replaygain::ReplayGainSettings;
 use iced::keyboard;
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
-use iced::widget::{column, image as iced_image, row, scrollable, text_input, vertical_rule};
-use iced::{Element, Size, Subscription, Task, window};
+use iced::widget::{
+    Space, column, container, image as iced_image, mouse_area, opaque, row, scrollable, stack,
+    text_input, vertical_rule,
+};
+use iced::{Element, Length, Size, Subscription, Task, alignment, window};
 use lru::LruCache;
 
 use crate::mpris::Mpris;
+use crate::overlay::{Overlay, Popover};
 use crate::panels::{Panels, Rail};
 use crate::playback::{Playback, PlayerEvent};
 use crate::player::{Availability, PlayerState};
@@ -141,11 +145,18 @@ pub(crate) enum Message {
     SetupSubmit,
     /// Shelf: search text changed.
     SearchChanged(String),
-    /// Esc anywhere: clear the search, else close what the rail is showing.
+    /// Esc anywhere: peel one layer, top down — the popover, then the search
+    /// query, then the album inspector (see [`App::escape`]).
     EscapePressed,
-    /// Top bar's Queue toggle, or `Q`: show the play queue, or put back
-    /// whatever it was covering (see [`crate::panels`]).
-    ToggleQueue,
+    /// The bar's now-playing block, or `Q`: show what is playing next, or put
+    /// it away (see [`crate::overlay`]).
+    ToggleUpNext,
+    /// The popover's ✕, or a press anywhere outside it: close **Up next**.
+    ///
+    /// Distinct from [`Self::ToggleUpNext`] because click-outside must not be
+    /// a toggle — the press that dismisses a popover cannot be the press that
+    /// re-opens it.
+    CloseUpNext,
     /// Top bar's Settings toggle, or Ctrl+`,`: show the settings, or put back
     /// whatever they were covering.
     ToggleSettings,
@@ -272,6 +283,20 @@ struct App {
     started: Instant,
     first_frame_logged: bool,
     screen: Screen,
+    /// The overlay layer: which popover, if any, is floating over the place.
+    ///
+    /// It lives on the shell rather than on the shelf because a popover
+    /// anchored to the *bar* belongs to every place the bar is in, which is all
+    /// of them (see [`crate::overlay`]).
+    overlay: Overlay,
+    /// The window's size, as the last resize event reported it.
+    ///
+    /// Held for one job: an overlay has no parent to be a fraction of, so the
+    /// popover's height ceiling ([`theme::POPOVER_MAX_H`]) has to be computed
+    /// against the window itself. The shelf keeps its own, separately measured
+    /// geometry — that one is the *viewport's*, which is not the window's once
+    /// the bars and the rail have taken their share.
+    window: Size,
     /// The engine connection (or its documented absence) — spawned once at
     /// app start, before the first screen.
     playback: Playback,
@@ -358,6 +383,8 @@ impl App {
             started,
             first_frame_logged: false,
             screen,
+            overlay: Overlay::new(),
+            window: WINDOW,
             playback,
             player,
             mpris,
@@ -384,6 +411,22 @@ impl App {
             return Task::none();
         }
         match message {
+            Message::ToggleUpNext => {
+                self.overlay.toggle_up_next();
+                Task::none()
+            }
+            Message::CloseUpNext => {
+                self.overlay.close();
+                Task::none()
+            }
+            Message::EscapePressed => self.escape(),
+            Message::WindowResized(size) => {
+                self.window = size;
+                match &mut self.screen {
+                    Screen::Shelf(state) => state.update(Message::WindowResized(size)),
+                    Screen::Setup(_) => Task::none(),
+                }
+            }
             Message::FirstFrame => {
                 if !self.first_frame_logged {
                     self.first_frame_logged = true;
@@ -455,6 +498,38 @@ impl App {
                 }
                 Screen::Shelf(state) => state.update(message),
             },
+        }
+    }
+
+    /// <kbd>Esc</kbd>: **peel one layer, top down.**
+    ///
+    /// The whole of the rule the redesign bought, and the reason it is short:
+    /// the window holds one place, one inspector attached to it, and one
+    /// popover attached to the bar, so at any moment exactly one of them is the
+    /// top layer and the key has nothing to arbitrate (ADR-0015 §2.2 rule 5).
+    /// It used to mean "clear the search, else close whichever of three
+    /// unrelated panels the rail happened to be showing".
+    ///
+    /// The order is the stacking order, outermost first:
+    ///
+    /// 1. **The popover**, when one is floating. [`Overlay::close`] reports
+    ///    whether it had anything to close, so an empty overlay does not eat
+    ///    the press.
+    /// 2. **The search query**, when the well is not empty — the layer the
+    ///    README documents, and the one press that keeps focus where it is.
+    /// 3. **The album inspector**, which is the last thing left to peel.
+    ///
+    /// (In the search field itself iced 0.13's `text_input` consumes
+    /// <kbd>Esc</kbd> to blur before this is reached at all; that is the
+    /// documented two-press behaviour, and §4.6 of the design spec owns the
+    /// fix.)
+    fn escape(&mut self) -> Task<Message> {
+        if self.overlay.close() {
+            return Task::none();
+        }
+        match &mut self.screen {
+            Screen::Setup(_) => Task::none(),
+            Screen::Shelf(state) => state.update(Message::EscapePressed),
         }
     }
 
@@ -831,9 +906,9 @@ impl App {
         }
     }
 
-    /// The whole window: the current screen, with the persistent bottom bar
-    /// under it. Composition only — every surface is drawn by
-    /// [`crate::views`].
+    /// The whole window: the current place, whatever is floating over it, and
+    /// the persistent bottom bar under both. Composition only — every surface
+    /// is drawn by [`crate::views`].
     fn view(&self) -> Element<'_, Message> {
         let screen: Element<'_, Message> = match &self.screen {
             Screen::Setup(setup) => return views::setup::view(setup),
@@ -841,11 +916,61 @@ impl App {
         };
         // The persistent bottom bar lives under the shelf — unless this
         // build has no audio output at all, in which case playback UI is
-        // hidden entirely.
+        // hidden entirely. With no bar there is nothing to anchor a popover
+        // to and no queue to put in one, so the overlay goes with it.
         if *self.player.availability() == Availability::NotBuilt {
             return screen;
         }
-        column![screen, views::bottom_bar::view(&self.player)].into()
+        column![
+            self.floating_over(screen),
+            views::bottom_bar::view(&self.player, self.overlay.is_open()),
+        ]
+        .into()
+    }
+
+    /// Put the overlay layer over `place`, if anything is floating.
+    ///
+    /// Three stacked layers and each one is load-bearing (§2.4, §4.6 — the
+    /// primitives were verified against `iced_widget` 0.13.4 before the
+    /// surface was specified):
+    ///
+    /// 1. **the place**, untouched — it does not reflow, it does not dim, and
+    ///    it goes on scrolling under the popover, because a `mouse_area` that
+    ///    handles only presses passes a wheel event straight through;
+    /// 2. **a full-bleed `mouse_area`** whose press is the popover's
+    ///    dismissal. This is the click-outside iced 0.13 gives no other route
+    ///    to, and it is the layer that makes the overlay feel like an overlay;
+    /// 3. **the popover**, wrapped in `opaque`, which is documented to capture
+    ///    mouse presses inside its own bounds precisely so that events do not
+    ///    fall through a stack. It is aligned bottom-right inside a plain
+    ///    container that fills the layer, so the *container* passes presses on
+    ///    to layer 2 while the popover itself keeps them.
+    ///
+    /// Note what the stack sits inside: only the place, never the bar. The
+    /// popover is anchored above the transport and cannot cover a pixel of it,
+    /// which is the one promise the rail's defenders were right to extract
+    /// (§2.4) — and it means the transport stays live and clickable while the
+    /// queue is open, which is what "explicitly non-modal" means in practice.
+    fn floating_over<'a>(&self, place: Element<'a, Message>) -> Element<'a, Message> {
+        let Some(popover) = self.overlay.showing() else {
+            return place;
+        };
+        let content = match popover {
+            Popover::UpNext => {
+                views::up_next::view(&self.player, self.window.height * theme::POPOVER_MAX_H)
+            }
+        };
+        stack![
+            place,
+            mouse_area(Space::new(Length::Fill, Length::Fill)).on_press(Message::CloseUpNext),
+            container(opaque(content))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(alignment::Horizontal::Right)
+                .align_y(alignment::Vertical::Bottom)
+                .padding(theme::GAP_LG),
+        ]
+        .into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -1052,7 +1177,6 @@ impl Shelf {
                 self.column_hold.release();
                 self.request_visible_thumbs()
             }
-            Message::ToggleQueue => self.reflow(Panels::toggle_queue),
             Message::ToggleSettings => self.reflow(Panels::toggle_settings),
             Message::TogglePanels => self.reflow(Panels::toggle_hidden),
             Message::ClosePanel => self.reflow(Panels::close),
@@ -1322,13 +1446,12 @@ impl Shelf {
     /// beside it when one is showing. Composition only — the surfaces
     /// themselves are [`crate::views`].
     ///
-    /// One rail, one panel: the album panel, the queue and the settings occupy
-    /// the same slot, so this is a four-way choice rather than a stack of
-    /// optional columns, and the shelf's width still has exactly two values.
+    /// One rail, one panel: the album inspector and the settings occupy the
+    /// same slot, so this is a three-way choice rather than a stack of optional
+    /// columns, and the shelf's width still has exactly two values.
     fn view<'a>(&'a self, player: &'a PlayerState) -> Element<'a, Message> {
         let rail: Option<Element<'_, Message>> = match self.panels.rail() {
             None => None,
-            Some(Rail::Queue) => Some(views::queue_panel::view(player)),
             Some(Rail::Settings) => Some(views::settings_panel::view(player)),
             // A selection whose album vanished under a rescan renders no
             // panel rather than an empty one; the next scroll event squares
@@ -1346,7 +1469,7 @@ impl Shelf {
             .into(),
             None => views::shelf::view(self, player),
         };
-        column![views::top_bar::view(self, player), body].into()
+        column![views::top_bar::view(self), body].into()
     }
 
     fn selected_album(&self) -> Option<&vm::AlbumVm> {
@@ -1508,10 +1631,10 @@ mod tests {
         panels.select(1);
         assert!((rail_width(&panels) - PANEL_W).abs() < f32::EPSILON);
 
-        panels.toggle_queue();
+        panels.toggle_settings();
         assert!(
             (rail_width(&panels) - PANEL_W).abs() < f32::EPSILON,
-            "album -> queue is a swap, not a second panel"
+            "inspector -> settings is a swap, not a second panel"
         );
         panels.select(2);
         assert!((rail_width(&panels) - PANEL_W).abs() < f32::EPSILON);
@@ -1527,11 +1650,128 @@ mod tests {
         assert!(rail_width(&panels).abs() < f32::EPSILON);
     }
 
-    /// Every panel affordance the interface offers resolves to the same
-    /// message the keyboard sends — the transport's "one path per intention"
-    /// rule, applied to the rail.
+    /// **Every keyboard binding resolves to a message an on-screen control
+    /// also sends.**
+    ///
+    /// One of the four properties `docs/design/01-ux-audit-and-ia.md` §5 says
+    /// must not regress, and it is checked *exhaustively* rather than by
+    /// sampling: the sweep below produces every message [`keys::binding_for`]
+    /// can produce, and each one has to appear in the table with the control
+    /// that sends it named. A new keyboard shortcut therefore cannot be added
+    /// without either pointing at a control or declaring itself an exception
+    /// here, in writing.
+    ///
+    /// There is exactly one exception and it predates the redesign:
+    /// <kbd>Ctrl</kbd>+<kbd>B</kbd> *hides* the right-hand column while
+    /// remembering the selection, and the inspector's ✕ *closes* it — those are
+    /// different messages because they are different intentions, and no control
+    /// on screen sends the first. It is recorded rather than papered over.
     #[test]
-    fn the_panel_controls_and_their_keys_are_the_same_press() {
+    fn every_keyboard_binding_is_a_press_some_control_also_makes() {
+        use iced::keyboard::{Key, Modifiers, key};
+
+        /// Message tag → the on-screen control that sends the same message,
+        /// or the reason there is none.
+        const CONTROLS: [(&str, &str); 15] = [
+            ("PlayPause", "the bottom bar's play/pause button"),
+            ("NextTrack", "the bottom bar's Next button"),
+            ("PreviousTrack", "the bottom bar's Previous button"),
+            (
+                "Play",
+                "MPRIS only; the bar's toggle covers both directions",
+            ),
+            (
+                "Pause",
+                "MPRIS only; the bar's toggle covers both directions",
+            ),
+            ("Stop", "MPRIS only; there is no on-screen Stop"),
+            ("SeekBy", "the bottom bar's seek groove"),
+            ("VolumeStep", "the bottom bar's volume fader"),
+            ("ToggleMute", "the bottom bar's speaker button"),
+            ("ToggleUpNext", "the bottom bar's now-playing block"),
+            ("ToggleSettings", "the top bar's Settings control"),
+            ("FocusSearch", "the top bar's search well"),
+            ("EscapePressed", "each layer's own ✕"),
+            (
+                "TogglePanels",
+                "no control: hiding the column is not closing it (see the doc \
+                 comment)",
+            ),
+            (
+                "SetVolume",
+                "MPRIS only; the fader sends its own pointer messages",
+            ),
+        ];
+
+        // Every key the binding table can be handed, in every modifier
+        // combination it distinguishes.
+        let keys_to_sweep = [
+            Key::Named(key::Named::Space),
+            Key::Named(key::Named::ArrowLeft),
+            Key::Named(key::Named::ArrowRight),
+            Key::Named(key::Named::ArrowUp),
+            Key::Named(key::Named::ArrowDown),
+            Key::Named(key::Named::Escape),
+            Key::Named(key::Named::Enter),
+            Key::Named(key::Named::MediaPlayPause),
+            Key::Named(key::Named::MediaTrackNext),
+            Key::Named(key::Named::MediaTrackPrevious),
+            Key::Named(key::Named::MediaStop),
+            Key::Named(key::Named::Play),
+            Key::Named(key::Named::Pause),
+            Key::Character(" ".into()),
+            Key::Character("n".into()),
+            Key::Character("m".into()),
+            Key::Character("q".into()),
+            Key::Character("b".into()),
+            Key::Character(",".into()),
+            Key::Character("/".into()),
+            Key::Character("f".into()),
+        ];
+        let modifier_sets = [
+            Modifiers::empty(),
+            Modifiers::SHIFT,
+            Modifiers::COMMAND,
+            Modifiers::ALT,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+        ];
+        let mut produced: Vec<String> = Vec::new();
+        for key in &keys_to_sweep {
+            for modifiers in modifier_sets {
+                if let Some(message) = keys::binding_for(key, modifiers, keys::Focus::Elsewhere) {
+                    // The payload is not the point; the intention is.
+                    let debug = format!("{message:?}");
+                    let tag = debug
+                        .split_once('(')
+                        .map_or(debug.as_str(), |(head, _)| head)
+                        .to_owned();
+                    assert!(
+                        CONTROLS.iter().any(|(name, _)| *name == tag),
+                        "{key:?} + {modifiers:?} binds to `{tag}`, which no entry in \
+                         CONTROLS accounts for — name the control that sends it, or \
+                         record why there is none"
+                    );
+                    produced.push(tag);
+                }
+            }
+        }
+        // …and the table has no stale entries either, except the three that
+        // exist for the desktop rather than for the keyboard.
+        for (tag, _) in CONTROLS {
+            let desktop_only = matches!(tag, "Play" | "Pause" | "SetVolume");
+            assert!(
+                desktop_only || produced.contains(&tag.to_owned()),
+                "CONTROLS still names `{tag}`, which no key produces any more"
+            );
+        }
+        assert!(produced.len() > 20, "the sweep stopped covering the table");
+    }
+
+    /// The two layer keys, spelled out: `Q` is the same press as the bar's
+    /// now-playing block, and Ctrl+`,` the same press as the top bar's
+    /// Settings control.
+    #[test]
+    fn the_layer_controls_and_their_keys_are_the_same_press() {
         use iced::keyboard::{Key, Modifiers};
 
         let from_key = keys::binding_for(
@@ -1541,7 +1781,17 @@ mod tests {
         );
         assert_eq!(
             format!("{from_key:?}"),
-            format!("{:?}", Some(Message::ToggleQueue))
+            format!("{:?}", Some(Message::ToggleUpNext))
+        );
+
+        let from_key = keys::binding_for(
+            &Key::Character(",".into()),
+            Modifiers::COMMAND,
+            keys::Focus::Elsewhere,
+        );
+        assert_eq!(
+            format!("{from_key:?}"),
+            format!("{:?}", Some(Message::ToggleSettings))
         );
 
         let from_key = keys::binding_for(
@@ -1552,6 +1802,29 @@ mod tests {
         assert_eq!(
             format!("{from_key:?}"),
             format!("{:?}", Some(Message::TogglePanels))
+        );
+    }
+
+    /// **Escape peels one layer, top down**, and peels exactly one per press.
+    ///
+    /// The rule the redesign is actually for: with the popover floating, the
+    /// key is the popover's and nothing underneath hears it; with nothing
+    /// floating, it reaches the layer below. Exercised through
+    /// [`Overlay`] itself, which is where the arbitration lives.
+    #[test]
+    fn escape_peels_the_popover_before_anything_under_it() {
+        let mut overlay = Overlay::new();
+        assert!(
+            !overlay.close(),
+            "with nothing floating the press must fall through"
+        );
+
+        overlay.toggle_up_next();
+        assert!(overlay.close(), "the popover answers the press itself");
+        assert!(!overlay.is_open());
+        assert!(
+            !overlay.close(),
+            "and the next press falls through to the layer below"
         );
     }
 
@@ -1642,16 +1915,16 @@ mod tests {
         assert!(!hold.holding(), "and the tick subscription goes away");
     }
 
-    /// A swap costs no reflow, so it takes no hold: the album panel giving way
-    /// to the queue moves nothing, and holding there would delay a layout
-    /// change that never happens.
+    /// A swap costs no reflow, so it takes no hold: the album inspector giving
+    /// way to the settings moves nothing, and holding there would delay a
+    /// layout change that never happens.
     #[test]
     fn a_panel_swap_moves_no_tile_and_so_holds_nothing() {
         let mut panels = Panels::new();
         panels.select(1);
         let before = rail_width(&panels);
         let occupied = panels.rail().is_some();
-        panels.toggle_queue();
+        panels.toggle_settings();
         assert!((rail_width(&panels) - before).abs() < f32::EPSILON);
         assert_eq!(
             panels.rail().is_some(),

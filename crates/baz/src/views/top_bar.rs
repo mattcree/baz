@@ -1,34 +1,31 @@
-//! The slim top bar: the search well on the left, quiet status and the queue
-//! toggle on the right.
+//! The slim top bar: the search well on the left, quiet status and the route
+//! to the settings on the right.
+//!
+//! # The bar has a subject again
+//!
+//! It used to carry four things and only two of them were about the library:
+//! search and the counts *are*, `Queue` was about the engine, and `Settings` is
+//! about the application. The audit's finding was that the bar therefore had no
+//! subject (§1.4).
+//!
+//! `Queue` has gone. Its count now sits in the now-playing bar beside the track
+//! it counts, and the queue itself opens from there
+//! ([`crate::views::up_next`]) — closer to its subject, and no longer stale:
+//! the toggle went on saying `Queue · 13` after the run had ended, because it
+//! reported the length of the last queue rather than what was next.
 
 use iced::widget::{Space, button, column, container, horizontal_rule, row, text, text_input};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf, search_id};
 use crate::panels::Rail;
-use crate::player::PlayerState;
 use crate::theme;
 
 /// The search field's width in the top bar (logical px).
 const SEARCH_W: f32 = 360.0;
-/// Width reserved for the queue toggle (logical px).
-///
-/// Fixed rather than sized to its label, because the label carries the queue's
-/// length once there is one: a control that grew from `Queue` to `Queue · 12`
-/// would drag the counts beside it sideways the moment somebody pressed play.
-const QUEUE_TOGGLE_W: f32 = 92.0;
-/// Width reserved for the settings toggle (logical px) — deliberately
-/// [`QUEUE_TOGGLE_W`], not a width fitted to `Settings`.
-///
-/// The two are a *pair* of view toggles sitting side by side, and a pair whose
-/// halves were sized differently would read as two unrelated controls. Equal
-/// widths also leave room for the longer word without it wrapping, which a
-/// snug fit does not.
-const SETTINGS_TOGGLE_W: f32 = QUEUE_TOGGLE_W;
-
-/// The slim top bar: the search well on the left, quiet status and the queue
-/// toggle on the right, a hairline rule below.
-pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a, Message> {
+/// The slim top bar: the search well on the left, quiet status and the route
+/// to the settings on the right, a hairline rule below.
+pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
     let search = text_input("Search artists, albums, tracks…", &shelf.query)
         .id(search_id())
         .on_input(Message::SearchChanged)
@@ -73,9 +70,7 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a,
                 .color(theme::ALERT),
         );
     }
-    status = status
-        .push(queue_toggle(shelf, player))
-        .push(settings_toggle(shelf));
+    status = status.push(settings_toggle(shelf));
     column![
         container(
             row![search, Space::with_width(Length::Fill), status]
@@ -88,58 +83,17 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a,
     .into()
 }
 
-/// The queue toggle: the one on-screen route to the queue panel, and the only
-/// place in the interface that says a queue exists at all.
+/// The settings toggle: the one on-screen route to the settings, and the only
+/// place in the interface that says baz has settings at all.
 ///
-/// It lives in the **top bar**, not the bottom one. The bottom bar is the
-/// transport — what is playing, where in it, how loud — and every pixel of it
-/// is reserved so that nothing moves as the music does; a panel toggle is a
-/// view control, which is the top bar's whole subject alongside search and the
-/// counts. Putting it here also keeps the promise the bottom bar makes: that
-/// row was not touched to add this feature.
+/// It sits at the far right of the top bar, which is where an application's own
+/// affairs belong: the bottom bar is the transport, every pixel of it reserved
+/// so that nothing moves as the music does, and it was not touched to put this
+/// here.
 ///
-/// The label carries the queue's length once there is one, so the count a
-/// listener wants is legible without opening anything — and the control is
-/// [`QUEUE_TOGGLE_W`] wide either way, so gaining it moves nothing.
-fn queue_toggle<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a, Message> {
-    let open = shelf.panels.rail() == Some(Rail::Queue);
-    let queued = player.queued();
-    let label = if queued > 0 {
-        format!("Queue · {queued}")
-    } else {
-        "Queue".to_owned()
-    };
-    button(
-        container(
-            text(label)
-                .size(theme::SIZE_META)
-                .font(theme::MEDIUM)
-                .wrapping(text::Wrapping::None),
-        )
-        .width(Length::Fill)
-        .align_x(alignment::Horizontal::Center),
-    )
-    .width(Length::Fixed(QUEUE_TOGGLE_W))
-    .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-    .style(move |_theme, status| theme::panel_toggle(status, open))
-    .on_press(Message::ToggleQueue)
-    .into()
-}
-
-/// The settings toggle: the one on-screen route to the settings panel, and
-/// the only place in the interface that says baz has settings at all.
-///
-/// It sits **beside the Queue toggle**, in the top bar, and that adjacency is
-/// the decision. Both are view controls — they say what the rail shows — and
-/// the top bar is where view controls live alongside search and the counts;
-/// the bottom bar is the transport, every pixel of it reserved so that nothing
-/// moves as the music does, and the same promise the queue toggle kept ("that
-/// row was not touched to add this feature") is kept again here.
-///
-/// A word rather than a gear. baz draws its glyphs itself
-/// ([`crate::icon`]) from a small, deliberate set, and a cog would be a new
-/// one for a control that has a short and unambiguous name — while "Settings"
-/// beside "Queue" reads immediately as one pair of things the rail can show.
+/// A word rather than a gear. baz draws its glyphs itself ([`crate::icon`])
+/// from a small, deliberate set, and a cog would be a new one for a control
+/// that has a short and unambiguous name.
 fn settings_toggle(shelf: &Shelf) -> Element<'_, Message> {
     let open = shelf.panels.rail() == Some(Rail::Settings);
     button(
@@ -152,7 +106,7 @@ fn settings_toggle(shelf: &Shelf) -> Element<'_, Message> {
         .width(Length::Fill)
         .align_x(alignment::Horizontal::Center),
     )
-    .width(Length::Fixed(SETTINGS_TOGGLE_W))
+    .width(Length::Fixed(theme::SETTINGS_TOGGLE_W))
     .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
     .style(move |_theme, status| theme::panel_toggle(status, open))
     .on_press(Message::ToggleSettings)

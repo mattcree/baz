@@ -630,9 +630,9 @@ pub struct QueueList {
     pub album: Option<String>,
     /// Who that album is filed under.
     pub artist: String,
-    /// The one-line reading: `3 of 12 · 51:20` while something is playing,
+    /// The one-line reading: `3 of 12 · 38:12 left` while something is playing,
     /// `12 tracks · 51:20` otherwise, with the time dropped when the scan read
-    /// no durations to add up.
+    /// no durations to add up (see [`queue_summary`]).
     pub summary: String,
     /// The rows, in play order.
     pub rows: Vec<QueueRow>,
@@ -1383,9 +1383,33 @@ impl PlayerState {
         Some(QueueList {
             album: queue.album.clone(),
             artist: queue.artist.clone(),
-            summary: queue_summary(queue, playing),
+            summary: queue_summary(queue, playing, self.elapsed_ms),
             rows,
         })
+    }
+
+    /// The now-playing bar's queue-position readout — `3 / 12`, or `None`
+    /// when there is nothing honest to say.
+    ///
+    /// The audit's finding was that a listener has to *open* something to learn
+    /// where in the queue the music is; this is the glance that answers it
+    /// without opening anything, and it is the same reading the popover's
+    /// `3 of 12 · 38:12 left` summary opens with.
+    ///
+    /// `None` in exactly two cases, and neither is a zero: with no queue there
+    /// is nothing to be a position in, and with a queue that has not started
+    /// (or that has ended) there is no position — `0 / 12` would be a claim
+    /// about music that is not playing. The bar reserves the slot either way,
+    /// so the absence costs no movement.
+    ///
+    /// Both figures come from the same record and the same reconciliation the
+    /// popover's rows use ([`Self::playing_row`]), so the bar and the list can
+    /// never disagree about which track of how many is sounding.
+    #[must_use]
+    pub fn queue_position_note(&self) -> Option<String> {
+        let total = self.queue.as_ref()?.len();
+        let row = self.playing_row()?;
+        Some(format!("{} / {total}", row + 1))
     }
 
     /// Which row of the recorded queue the engine is playing, reconciled
@@ -1743,28 +1767,57 @@ impl PlayerState {
     }
 }
 
-/// The queue panel's one-line reading.
+/// The **Up next** popover's one-line reading.
 ///
-/// While something is playing it counts: `3 of 12` — the position the listener
-/// wants at a glance, and the one number the panel adds to what the bottom bar
-/// already says. Otherwise it states the size, because "0 of 12" would be a
-/// position that does not exist.
+/// While something is playing it counts and then says **what is left**:
+/// `3 of 12 · 38:12 left`. Otherwise it states the size and the whole running
+/// time, because "0 of 12" would be a position that does not exist and
+/// "remaining" is the same number as "total" before anything has started.
 ///
-/// The total time is appended when there is one to state. A queue of tracks
-/// the scan read no duration for says nothing rather than `0:00`, on the same
+/// *Remaining*, not total, and that is a correction taken from prior art
+/// (`docs/design/03-interface-prior-art.md` §5.3(3), R5). `MusicBee`'s queue
+/// header and Elisa's *"%1/%2 tracks remaining"* both report what is ahead,
+/// because a queue is a thing you are partway through: `51:20` describes a list,
+/// where `38:12 left` answers the question the listener actually opened the
+/// popover with. The figure is the rest of the playing track plus every track
+/// after it, so it is a clock reading rather than a property of the list.
+///
+/// The time is appended only when there is one to state. A queue of tracks the
+/// scan read no duration for says nothing rather than `0:00`, on the same
 /// principle as the `--:--` the seek bar shows for an undeclared length: an
 /// unknown is not a zero.
-fn queue_summary(queue: &QueueVm, playing: Option<usize>) -> String {
-    let count = match playing {
-        Some(index) => format!("{} of {}", index + 1, queue.len()),
-        None if queue.len() == 1 => "1 track".to_owned(),
-        None => format!("{} tracks", queue.len()),
+fn queue_summary(queue: &QueueVm, playing: Option<usize>, elapsed_ms: u64) -> String {
+    let Some(index) = playing else {
+        let count = match queue.len() {
+            1 => "1 track".to_owned(),
+            n => format!("{n} tracks"),
+        };
+        let total = queue.total_time();
+        if total == Duration::ZERO {
+            return count;
+        }
+        return format!("{count} · {}", vm::format_duration(total));
     };
-    let total = queue.total_time();
-    if total == Duration::ZERO {
+    let count = format!("{} of {}", index + 1, queue.len());
+    let ahead: Duration = queue
+        .items
+        .iter()
+        .skip(index + 1)
+        .filter_map(|item| item.duration)
+        .sum();
+    // The playing track counts only for what is left *of it*. The engine's
+    // last confirmed position is the only honest source for that, and it is
+    // clamped so a report that arrives a beat past the end cannot go negative.
+    let current = queue.items.get(index).and_then(|item| item.duration);
+    let remaining = match current {
+        Some(track) => ahead + track.saturating_sub(Duration::from_millis(elapsed_ms)),
+        None if ahead == Duration::ZERO => return count,
+        None => ahead,
+    };
+    if remaining == Duration::ZERO {
         return count;
     }
-    format!("{count} · {}", vm::format_duration(total))
+    format!("{count} · {} left", vm::format_duration(remaining))
 }
 
 /// A position in `0..=total` from a `0.0..=1.0` fraction, clamped at both
@@ -3865,7 +3918,8 @@ mod tests {
             states(&list),
             vec![QueueRowState::Playing, QueueRowState::Upcoming]
         );
-        assert_eq!(list.summary, "1 of 2 · 6:40");
+        // Nothing has elapsed yet, so what is left is the whole queue.
+        assert_eq!(list.summary, "1 of 2 · 6:40 left");
 
         player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
         let list = player.queue_list().expect("a queue");
@@ -3873,7 +3927,91 @@ mod tests {
             states(&list),
             vec![QueueRowState::Played, QueueRowState::Playing]
         );
-        assert_eq!(list.summary, "2 of 2 · 6:40");
+        assert_eq!(
+            list.summary, "2 of 2 · 3:20 left",
+            "the first track is behind us and must not count towards what is left"
+        );
+    }
+
+    /// **What is left, not what exists.** The summary is a clock reading: the
+    /// rest of the playing track plus every track after it, so it falls as the
+    /// music plays rather than restating a property of the list.
+    ///
+    /// Taken from prior art rather than invented — `MusicBee`'s queue header and
+    /// Elisa's *"tracks remaining"* both report what is ahead
+    /// (`docs/design/03-interface-prior-art.md` §5.3(3)).
+    #[test]
+    fn the_summary_counts_down_what_is_left_rather_than_up_what_exists() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(geogaddi_queue());
+
+        // Before a run starts there is no position, so the reading is the
+        // list's own size and its whole running time — "remaining" and "total"
+        // are the same number, and the plainer of the two words is right.
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "2 tracks · 6:40"
+        );
+
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "1 of 2 · 6:40 left"
+        );
+        player.apply(&progress(60_000, Some(200_000)), &albums);
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "1 of 2 · 5:40 left",
+            "a minute into the first track, a minute has come off the reading"
+        );
+
+        // A progress report that lands past the track's own declared length —
+        // a rate change hands over, a container lied — must not produce a
+        // negative remainder.
+        player.apply(&progress(999_000, Some(200_000)), &albums);
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "1 of 2 · 3:20 left"
+        );
+    }
+
+    /// The bar's `3 / 12` readout: present exactly when there is a position to
+    /// report, absent — never zero — whenever there is not, and always the same
+    /// row the popover's list marks.
+    #[test]
+    fn the_bars_queue_position_reads_out_only_when_there_is_a_position() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        assert_eq!(
+            player.queue_position_note(),
+            None,
+            "no queue is not position zero"
+        );
+
+        player.note_queue_sent(geogaddi_queue());
+        assert_eq!(
+            player.queue_position_note(),
+            None,
+            "a queue that has not started has no position in it"
+        );
+
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        assert_eq!(player.queue_position_note().as_deref(), Some("1 / 2"));
+        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+        assert_eq!(player.queue_position_note().as_deref(), Some("2 / 2"));
+
+        // …and it is the same reading the list makes, or the bar and the
+        // popover would be able to disagree about where the music is.
+        let list = player.queue_list().expect("a queue");
+        assert_eq!(list.summary, "2 of 2 · 3:20 left");
+
+        player.apply(&Event::QueueEnded, &albums);
+        assert_eq!(
+            player.queue_position_note(),
+            None,
+            "an ended run is not still at its last track"
+        );
     }
 
     /// The engine's position is believed only when the path at it agrees. A

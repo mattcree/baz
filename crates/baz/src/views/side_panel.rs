@@ -110,7 +110,7 @@ pub(crate) fn view<'a>(
     // control in one place whichever is on screen.
     let header_row = row![
         Space::with_width(Length::Fill),
-        close_button("Close the album panel"),
+        close_button("Close the album panel", Message::ClosePanel),
     ]
     .align_y(iced::Alignment::Center);
     let mut content =

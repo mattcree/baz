@@ -1,5 +1,25 @@
 //! The persistent now-playing bar: current track, transport, seek row,
-//! volume.
+//! volume — and, now, the door to what is next.
+//!
+//! # The left zone gained a door
+//!
+//! The audit's finding was that there was no route to "what is next" from the
+//! transport, which is where a listener looks for it: the only door was a
+//! toggle in the *top* bar, two hundred pixels from the thing it described. So
+//! the bar now carries an **Up next** control beside the track title, with a
+//! `3 / 12` readout in it that answers the question outright for the listener
+//! who does not want to open anything at all.
+//!
+//! It is a **labelled** control rather than a gesture on the now-playing block,
+//! and that is the one place this module departs from the design spec as
+//! written — on evidence the spec did not have. See [`up_next_button`].
+//!
+//! Every addition is a **reserved slot**, which is the promise this module is
+//! built on: [`theme::UP_NEXT_W`] and [`theme::QUEUE_POS_W`] are that wide
+//! whether or not anything is playing, and [`theme::now_playing`]'s border is
+//! 1 px in all four states so that finding the control with the pointer does
+//! not move the title under it. The bar gained a route to a new surface and did
+//! not move a pixel.
 
 use iced::widget::{
     Space, button, column, container, horizontal_rule, image as iced_image, row, text, tooltip,
@@ -40,7 +60,7 @@ use crate::{groove, icon, player, theme};
 /// leftward into the gutter instead of shifting anything beside it. Every
 /// glyph, position, and enabled-state comes from [`PlayerState`] —
 /// event-derived, tested in `player.rs`.
-pub(crate) fn view(player: &PlayerState) -> Element<'_, Message> {
+pub(crate) fn view(player: &PlayerState, up_next_open: bool) -> Element<'_, Message> {
     let mut status = row![]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center);
@@ -54,7 +74,7 @@ pub(crate) fn view(player: &PlayerState) -> Element<'_, Message> {
     }
     status = status.push(signal_path(player)).push(volume(player));
     let bar = row![
-        container(now_playing_line(player))
+        container(now_playing_block(player, up_next_open))
             .width(Length::Fill)
             .clip(true),
         transport_stack(player),
@@ -75,8 +95,89 @@ pub(crate) fn view(player: &PlayerState) -> Element<'_, Message> {
     .into()
 }
 
-/// The bar's left zone: the current track as a title-over-artist stack, or
-/// the engine's plainly-stated absence as quiet status text.
+/// The bar's left zone: the now-playing lines, and the **Up next** control
+/// beside them.
+///
+/// This is the *place* a listener looks for what is coming, which is the whole
+/// argument for moving the queue's door here from the top bar.
+///
+/// **The now-playing text itself is deliberately not the control.** The design
+/// spec offered the whole block as a press target; the prior-art study then
+/// found that the most-supported affordance in the field — *get back to what is
+/// playing*, which scrolls the shelf to the sounding album — is the gesture
+/// every other product spends a click on the now-playing block for
+/// (`docs/design/03-interface-prior-art.md` R3). Two surfaces wanted one
+/// target, so the popover takes the labelled control beside the text and the
+/// text is left free for the one that has no other home. Resolved on purpose
+/// rather than by whichever landed first.
+fn now_playing_block(player: &PlayerState, open: bool) -> Element<'_, Message> {
+    row![
+        container(now_playing_line(player))
+            .width(Length::Fill)
+            .clip(true),
+        up_next_button(player, open),
+    ]
+    .spacing(theme::GAP_SM)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// The **Up next** control: the word, the `3 / 12` readout, and the press that
+/// opens the popover.
+///
+/// Three properties, each of them load-bearing:
+///
+/// - **It is labelled, and it is always there.** Not a gesture, not a bare
+///   figure, not an icon — the word says what the press opens. The study behind
+///   this (`docs/design/03-interface-prior-art.md` §5.3(1)) is unambiguous: an
+///   unlabelled route to a transient surface produces users who cannot tell
+///   what they just did. It is offered with nothing queued too, because the
+///   popover has an honest empty state and a control that came and went with
+///   the music would be a moving target in the one row that does not move.
+/// - **The readout is a reserved slot.** [`theme::QUEUE_POS_W`] wide whether or
+///   not there is a position to report, so a queue starting moves no title;
+///   and `None` rather than `0 / 12`, because a queue that has not started has
+///   no position in it.
+/// - **The whole control is a reserved slot too** ([`theme::UP_NEXT_W`]), and
+///   [`theme::now_playing`] varies only colour, never geometry — so hovering it
+///   and opening the popover both leave every pixel where it was. The lit state
+///   is the anchor the toolkit will not let the popover draw as a notch.
+///
+/// It is the same message <kbd>Q</kbd> sends.
+fn up_next_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
+    let readout: Element<'_, Message> = match player.queue_position_note() {
+        None => Space::with_width(Length::Fixed(theme::QUEUE_POS_W)).into(),
+        Some(note) => container(
+            text(note)
+                .size(theme::SIZE_META)
+                .font(theme::MONO)
+                .color(theme::PAPER_FAINT)
+                .wrapping(text::Wrapping::None),
+        )
+        .width(Length::Fixed(theme::QUEUE_POS_W))
+        .align_x(alignment::Horizontal::Right)
+        .into(),
+    };
+    button(
+        row![
+            text("Up next")
+                .size(theme::SIZE_META)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None),
+            readout,
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center),
+    )
+    .width(Length::Fixed(theme::UP_NEXT_W))
+    .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+    .style(move |_theme, status| theme::now_playing(status, open))
+    .on_press(Message::ToggleUpNext)
+    .into()
+}
+
+/// The now-playing lines proper: the current track as a title-over-artist
+/// stack, or the engine's plainly-stated absence as quiet status text.
 ///
 /// Neither line wraps. A bar that grew a second row under a long album title
 /// would shove the shelf up by a line, which is exactly the kind of movement
@@ -505,6 +606,63 @@ mod tests {
             icon::handle(icon::Glyph::Previous).id(),
             icon::handle(icon::Glyph::Next).id()
         );
+    }
+
+    /// **The bar reserves every slot it can be in** — re-checked for the zone
+    /// that just became a control.
+    ///
+    /// One of the four properties `docs/design/01-ux-audit-and-ia.md` §5 says
+    /// must not regress. The left zone gained a labelled control carrying a
+    /// readout that comes and goes with the music. Both are reservations rather
+    /// than additions — the control is [`theme::UP_NEXT_W`] and the readout
+    /// inside it [`theme::QUEUE_POS_W`], whether either says anything or not,
+    /// and the control's border is present in every state — so the bar carries
+    /// a route to a whole new surface and still cannot move.
+    #[test]
+    fn the_left_zone_reserves_the_queue_position_in_every_state_it_has() {
+        use baz_core::protocol::Event;
+
+        // The zone's own budget at the shipped window: the readout, the gap to
+        // it, and the button's horizontal padding all come out of the fill
+        // zone, and what is left has to be a real title lane. (The *narrow*
+        // window is a different question, and a known one — §1.5 of the audit
+        // caught the left zone wrapping to three lines below ~900 px, and the
+        // fix is a maximum width on the zone, which is step 10 of the plan.
+        // Nothing here makes that worse: the readout is 72 px in a zone that
+        // already clips.)
+        const SHIPPED: f32 = 1280.0;
+        const ZONE: f32 = SHIPPED
+            - 2.0 * theme::GAP_LG // the bar's own padding
+            - 2.0 * theme::GAP_LG // the gaps between its three zones
+            - theme::SEEK_ROW_W
+            - theme::SIGNAL_W
+            - theme::GAP_SM
+            - theme::VOLUME_BLOCK_W;
+        const TITLE_LANE: f32 = ZONE - theme::UP_NEXT_W - theme::GAP_SM;
+        // The zone is also shorter than the centre column, so the control's
+        // padding cannot be what sets the bar's height.
+        const LEFT_H: f32 = theme::SIZE_BODY * theme::LINE_HEIGHT
+            + theme::GAP_XXS
+            + theme::SIZE_META * theme::LINE_HEIGHT
+            + 2.0 * theme::GAP_XS;
+        const CENTRE_H: f32 = theme::TRANSPORT_HIT + theme::GAP_SM + theme::SEEK_ROW_H;
+        const { assert!(TITLE_LANE > 200.0) }
+        const { assert!(LEFT_H < CENTRE_H) }
+
+        let mut player = PlayerState::new(Availability::Ready);
+        // Nothing playing: no readout, and the slot is still that wide.
+        assert_eq!(player.queue_position_note(), None);
+
+        player.apply(
+            &Event::TrackStarted {
+                path: std::path::PathBuf::from("/music/a/01.flac"),
+                position: 0,
+            },
+            &[],
+        );
+        // Without a recorded queue there is still nothing to be a position in;
+        // the front end never invents one (see `player.rs`'s honesty rule).
+        assert_eq!(player.queue_position_note(), None);
     }
 
     /// Previous is offered exactly when it can act, and its enabled-ness is a

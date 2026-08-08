@@ -434,6 +434,39 @@ mod tests {
             theme::TRACK_NO_W,
             "TRACK_NO_W",
         );
+
+        // The bar's queue-position readout, which reserves for a queue nobody
+        // bounded: `999 / 999` is the widest it can be asked to draw.
+        fits(
+            &mono,
+            "999 / 999",
+            theme::SIZE_META,
+            theme::QUEUE_POS_W,
+            "QUEUE_POS_W",
+        );
+
+        // The bar's Up next control: its label in the Medium face it is set
+        // in, inside what the slot has left after the readout and the padding.
+        fits(
+            &Face::parse(SANS_MEDIUM),
+            "Up next",
+            theme::SIZE_META,
+            theme::UP_NEXT_W - theme::QUEUE_POS_W - 3.0 * theme::GAP_SM,
+            "UP_NEXT_W",
+        );
+
+        // The top bar's one remaining control, in the Medium face it is set in
+        // and inside the padding it carries. It used to be sized to the *queue*
+        // toggle beside it, and wrapped to two lines at a 760 px window
+        // because of it; now it is sized to its own word, which only means
+        // anything if the word is measured.
+        fits(
+            &Face::parse(SANS_MEDIUM),
+            "Settings",
+            theme::SIZE_META,
+            theme::SETTINGS_TOGGLE_W - 2.0 * theme::GAP_SM,
+            "SETTINGS_TOGGLE_W",
+        );
     }
 
     /// The settings panel's reserved note slot still holds every sentence it

@@ -5,81 +5,48 @@
 //! layer 1), that the shell asks one question of per frame: what, if anything,
 //! is the rail showing.
 //!
-//! # One rail, one width
+//! # One rail, two tenants — and, next, one
 //!
-//! baz has three things worth putting beside the shelf — the selected album,
-//! the play queue and the settings — and they share **one** slot,
-//! [`theme::PANEL_W`](crate::theme::PANEL_W)
-//! wide. That is a product decision before it is a layout one. The vision's
-//! first pillar is that *the library is the interface*: the shelf is the app,
-//! and everything else is something you glance at and dismiss. A queue that
-//! could sit alongside the album panel would take a second 340 px bite out of
-//! the shelf — on the 1280 px default window, five columns of covers become
-//! two — and a surface that can occupy half the window on its own is no longer
-//! a glance. Sharing the slot bounds the cost of *all* the chrome baz has at
-//! the cost of the chrome it already had, and the fifth pillar's "queues are
-//! transient" is the same idea from the other end.
+//! baz used to have *three* things worth putting beside the shelf: the
+//! selected album, the play queue and the settings. The audit's finding was
+//! that they share nothing except a width — an album is a thing you pointed
+//! at, the queue is a live readout of the engine, and settings are application
+//! preferences — and that the rail was therefore a **slot rather than a
+//! place** (`docs/design/01-ux-audit-and-ia.md` §2.1, ADR-0015).
 //!
-//! It also makes the layout property the shell needs almost free: since every
-//! panel is the same width, **switching between them reflows nothing**. Only
-//! opening or closing the rail moves the shelf, by exactly one panel width,
-//! which is the reflow that was asked for. [`Panels::rail`] answering
-//! `Some`/`None` is therefore the whole of what the grid geometry has to
-//! track.
+//! The queue has left: it is now the **Up next** popover, anchored to the bar
+//! it describes ([`crate::overlay`]). The settings leave next, for a place of
+//! their own. What remains here is the transitional two-tenant machine, and
+//! the direction of travel is one tenant — the album inspector — at which
+//! point the rule collapses from a paragraph to a sentence and this module
+//! becomes `selection.rs`.
 //!
-//! # Why settings are a rail panel, and not a popover
-//!
-//! baz had no settings surface at all before ReplayGain needed one (ADR-0013),
-//! so whatever went in became the pattern for every setting that follows —
-//! the output device, exclusive mode, watch folders, the enrichment toggles
-//! the vision's fifth pillar promises are off by default. That is the decision
-//! being made here, and the rail wins it on four counts:
-//!
-//! - **It is the layer the sixth pillar already describes.** *Progressive
-//!   disclosure*: a Devon-simple surface, with Karl's output chain and Sam's
-//!   server settings "one deliberate layer down". The rail *is* that layer —
-//!   it is where baz already puts everything that is not the shelf — and a
-//!   settings surface that invented a second one would make the interface two
-//!   layers deep to save a panel.
-//! - **It cannot cover the music or the transport.** A floating popover sits
-//!   *on* the shelf; the rail sits beside it, and the bottom bar keeps every
-//!   pixel it reserves. A settings sheet that hid the covers would contradict
-//!   the pillar it is supposed to serve.
-//! - **It inherits every dismissal baz already has** — the ✕, Escape, and
-//!   <kbd>Ctrl</kbd>+<kbd>B</kbd> — rather than hand-rolling click-outside
-//!   dismissal, focus containment and placement, which iced 0.13 gives no
-//!   primitive for. That machinery would live in the *disposable* view layer
-//!   (ADR-0006 layer 3), which is precisely where a redesign should find the
-//!   least invention.
-//! - **It scales the way settings actually grow.** The next setting is a
-//!   section in this panel, not a second popover; the panel scrolls, and the
-//!   rail's width never changes, so nothing about the layout has to be
-//!   revisited to add one.
-//!
-//! What it costs is honest and is the same cost the queue pays: opening the
-//! rail when it is empty takes [`theme::PANEL_W`](crate::theme::PANEL_W) from
-//! the shelf. Opening the settings over a panel that is *already* up — which
-//! is the ordinary case, since selecting an album is how anyone reaches the
-//! music — moves nothing at all.
+//! Both remaining panels are [`theme::PANEL_W`](crate::theme::PANEL_W) wide, so
+//! **switching between them reflows nothing**. Only opening or closing the rail
+//! moves the shelf, by exactly one panel width, which is the reflow that was
+//! asked for. [`Panels::rail`] answering `Some`/`None` is therefore the whole
+//! of what the grid geometry has to track.
 //!
 //! # The rule
 //!
 //! **The rail shows the last panel that was asked for.** Clicking an album
-//! asks for the album panel; the queue toggle asks for the queue, and the
-//! settings toggle for the settings. Asking for one puts it up over the others
-//! rather than beside them, and the album selection survives underneath — so
-//! pressing a toggle twice returns you exactly where you were, and the album
-//! panel is never lost to a glance at what is next.
+//! asks for the album panel; the settings toggle asks for the settings. Asking
+//! for one puts it up over the other rather than beside it, and the album
+//! selection survives underneath — so pressing the toggle twice returns you
+//! exactly where you were, and the album panel is never lost to a glance at a
+//! preference.
 //!
 //! Dismissal has two spellings and they mean different things:
 //!
 //! - [`Panels::close`] — the panel's own ✕, and Escape — closes *what is
-//!   showing*. Closing the queue reveals the album panel again when one is
-//!   selected: you closed the queue, not the rail.
+//!   showing*. Closing the settings reveals the album panel again when one is
+//!   selected: you closed the settings, not the rail.
 //! - [`Panels::toggle_hidden`] — the keyboard's hide binding — dismisses the
 //!   **rail**, whatever is in it, and brings the same thing back on the next
 //!   press. This is the "hideable panels" affordance proper: reclaim the width
-//!   without losing your place.
+//!   without losing your place. It no longer conjures a panel out of an empty
+//!   rail: that rule existed only because the queue was always meaningful to
+//!   ask for, and the queue is not here any more (§4.8 deletes it by name).
 //!
 //! # Why none of this is persisted
 //!
@@ -113,10 +80,8 @@
 pub enum Rail {
     /// The selected album: art, header, edition selector, Play, track list.
     Album,
-    /// The play queue: what baz handed the engine, and where it is in it.
-    Queue,
-    /// The settings: today, ReplayGain (ADR-0013). See the module's note on
-    /// why this is a rail panel and not a popover.
+    /// The settings: today, ReplayGain (ADR-0013). The last of the album
+    /// inspector's roommates, and on its way to a place of its own.
     Settings,
 }
 
@@ -124,21 +89,21 @@ pub enum Rail {
 ///
 /// The album *selection* is kept here rather than beside it because selection
 /// and visibility are one question in practice — "is the album panel up" is
-/// "is an album selected, is the queue not covering it, and is the rail not
+/// "is an album selected, is nothing raised over it, and is the rail not
 /// hidden" — and splitting them is how the three get out of step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Panels {
     /// The album whose panel is (or would be) showing. Survives another panel
     /// covering it and the rail being hidden, so both are reversible.
     selected: Option<u64>,
-    /// The panel asked for over the album — the queue or the settings, never
+    /// The panel asked for over the album — the settings, never
     /// [`Rail::Album`], which is asked for by selecting an album instead. It
     /// wins the rail while set, because it is the more recent request by
     /// construction: asking for an album clears it.
     ///
     /// One slot rather than a flag per panel, so "two are open at once" is not
     /// a state that exists to be got into.
-    overlay: Option<Rail>,
+    raised: Option<Rail>,
     /// Whether the rail is dismissed outright. Cleared by any request for a
     /// panel, so hiding is never a state a click gets stuck behind.
     hidden: bool,
@@ -159,8 +124,8 @@ impl Panels {
     pub fn rail(self) -> Option<Rail> {
         if self.hidden {
             None
-        } else if self.overlay.is_some() {
-            self.overlay
+        } else if self.raised.is_some() {
+            self.raised
         } else if self.selected.is_some() {
             Some(Rail::Album)
         } else {
@@ -170,7 +135,7 @@ impl Panels {
 
     /// The album the panel is for, whether or not it is currently on screen.
     ///
-    /// Kept through a hide and through the queue covering it — that is what
+    /// Kept through a hide and through the settings covering it — that is what
     /// makes both reversible — so a caller that wants "is the album panel
     /// showing" must ask [`Self::rail`], not this.
     #[must_use]
@@ -189,31 +154,25 @@ impl Panels {
     /// is the one already showing.
     ///
     /// Asking for an album is an unambiguous request to *see* it, so it also
-    /// clears the queue and un-hides the rail. The toggle-off arm is
-    /// deliberately conditioned on the panel being on screen: clicking the
-    /// selected album while the queue covers it brings the album back, which
-    /// is what the click was asking for, rather than deselecting something the
-    /// user cannot currently see.
+    /// lowers whatever was raised over it and un-hides the rail. The toggle-off
+    /// arm is deliberately conditioned on the panel being on screen: clicking
+    /// the selected album while the settings cover it brings the album back,
+    /// which is what the click was asking for, rather than deselecting
+    /// something the user cannot currently see.
     pub fn select(&mut self, id: u64) {
         if self.showing_album(id) {
             self.selected = None;
             return;
         }
         self.selected = Some(id);
-        self.overlay = None;
+        self.raised = None;
         self.hidden = false;
     }
 
-    /// The queue toggle: show the queue, or put back whatever it covered.
-    pub fn toggle_queue(&mut self) {
-        self.toggle_overlay(Rail::Queue);
-    }
-
     /// The settings toggle: show the settings, or put back whatever they
-    /// covered. The queue's behaviour exactly — one control, one panel, one
-    /// slot — because a listener should not have to learn two dismissal rules.
+    /// covered.
     pub fn toggle_settings(&mut self) {
-        self.toggle_overlay(Rail::Settings);
+        self.raise(Rail::Settings);
     }
 
     /// Show `panel` over whatever the rail holds, or put that back if `panel`
@@ -222,26 +181,26 @@ impl Panels {
     /// `panel` is never [`Rail::Album`]: the album panel is asked for by
     /// selecting an album, which is [`Self::select`]'s job, and routing it
     /// through here would let a toggle raise a panel with no album in it.
-    fn toggle_overlay(&mut self, panel: Rail) {
+    fn raise(&mut self, panel: Rail) {
         debug_assert_ne!(panel, Rail::Album, "the album panel is raised by select");
         if self.rail() == Some(panel) {
-            self.overlay = None;
+            self.raised = None;
         } else {
-            self.overlay = Some(panel);
+            self.raised = Some(panel);
             self.hidden = false;
         }
     }
 
     /// Close what the rail is showing — the panel's ✕, and Escape.
     ///
-    /// One step, not a clean sweep: closing the queue or the settings reveals
-    /// the album panel again when an album is selected, and a second press
-    /// closes that. A rail that is already empty (or hidden) has nothing to
-    /// close and this does nothing.
+    /// One step, not a clean sweep: closing the settings reveals the album
+    /// panel again when an album is selected, and a second press closes that. A
+    /// rail that is already empty (or hidden) has nothing to close and this
+    /// does nothing.
     pub fn close(&mut self) {
         match self.rail() {
             Some(Rail::Album) => self.selected = None,
-            Some(_) => self.overlay = None,
+            Some(_) => self.raised = None,
             None => {}
         }
     }
@@ -250,19 +209,18 @@ impl Panels {
     /// binding, and the whole of "hideable panels".
     ///
     /// Hiding keeps every other flag, so the next press restores exactly the
-    /// panel that was dismissed. Un-hiding a rail that had nothing in it shows
-    /// the queue: the alternative is a key that visibly does nothing, and the
-    /// queue is the one panel that is always meaningful to ask for (the album
-    /// panel needs a selection this state does not have).
+    /// panel that was dismissed.
+    ///
+    /// Un-hiding a rail that had nothing in it now does **nothing**, and that
+    /// deletion is the point. The old rule — un-hiding an empty rail opened the
+    /// *queue* — was the audit's smoking gun: a key whose entire job is "give
+    /// the shelf its width back" was creating a panel, because the layout key
+    /// had to invent content from somewhere and the queue was the one tenant
+    /// that was always meaningful to ask for. With the queue gone to a layer of
+    /// its own there is nothing to invent, so the key now means what it says
+    /// (§4.8 deletes the rule by name).
     pub fn toggle_hidden(&mut self) {
-        if self.rail().is_some() {
-            self.hidden = true;
-            return;
-        }
-        self.hidden = false;
-        if self.overlay.is_none() && self.selected.is_none() {
-            self.overlay = Some(Rail::Queue);
-        }
+        self.hidden = self.rail().is_some();
     }
 }
 
@@ -299,11 +257,11 @@ mod tests {
     }
 
     #[test]
-    fn the_queue_toggle_covers_the_album_panel_and_gives_it_back() {
+    fn the_settings_toggle_covers_the_album_panel_and_gives_it_back() {
         let mut panels = Panels::new();
         panels.select(7);
-        panels.toggle_queue();
-        assert_eq!(panels.rail(), Some(Rail::Queue));
+        panels.toggle_settings();
+        assert_eq!(panels.rail(), Some(Rail::Settings));
         assert_eq!(
             panels.selected(),
             Some(7),
@@ -311,44 +269,44 @@ mod tests {
         );
         assert!(!panels.showing_album(7), "the album panel is covered");
 
-        panels.toggle_queue();
+        panels.toggle_settings();
         assert_eq!(panels.rail(), Some(Rail::Album));
         assert!(panels.showing_album(7));
     }
 
     #[test]
-    fn the_queue_opens_over_nothing_and_closes_to_nothing() {
+    fn the_settings_open_over_nothing_and_close_to_nothing() {
         let mut panels = Panels::new();
-        panels.toggle_queue();
-        assert_eq!(panels.rail(), Some(Rail::Queue));
-        panels.toggle_queue();
+        panels.toggle_settings();
+        assert_eq!(panels.rail(), Some(Rail::Settings));
+        panels.toggle_settings();
         assert_eq!(panels.rail(), None);
     }
 
     /// Clicking a tile is a request to see that album, whatever is in the way.
     #[test]
-    fn clicking_a_tile_while_the_queue_shows_brings_the_album_up() {
+    fn clicking_a_tile_while_the_settings_show_brings_the_album_up() {
         let mut panels = Panels::new();
         panels.select(7);
-        panels.toggle_queue();
+        panels.toggle_settings();
         // The *selected* album, the one whose panel is hidden behind the
-        // queue: this must show it, not deselect it.
+        // settings: this must show it, not deselect it.
         panels.select(7);
         assert_eq!(panels.rail(), Some(Rail::Album));
         assert!(panels.showing_album(7));
 
         // And another album likewise.
-        panels.toggle_queue();
+        panels.toggle_settings();
         panels.select(9);
         assert_eq!(panels.rail(), Some(Rail::Album));
         assert_eq!(panels.selected(), Some(9));
     }
 
     #[test]
-    fn close_peels_the_queue_then_the_album() {
+    fn close_peels_the_settings_then_the_album() {
         let mut panels = Panels::new();
         panels.select(7);
-        panels.toggle_queue();
+        panels.toggle_settings();
 
         panels.close();
         assert_eq!(panels.rail(), Some(Rail::Album));
@@ -371,19 +329,25 @@ mod tests {
         panels.toggle_hidden();
         assert_eq!(panels.rail(), Some(Rail::Album));
 
-        // The same for the queue.
-        panels.toggle_queue();
+        // The same for the settings.
+        panels.toggle_settings();
         panels.toggle_hidden();
         assert_eq!(panels.rail(), None);
         panels.toggle_hidden();
-        assert_eq!(panels.rail(), Some(Rail::Queue));
+        assert_eq!(panels.rail(), Some(Rail::Settings));
     }
 
+    /// The rule the audit named and §4.8 deletes: the hide key gives the shelf
+    /// its width back, and it does not invent a panel to bring back when there
+    /// was none.
     #[test]
-    fn un_hiding_an_empty_rail_shows_the_queue() {
+    fn un_hiding_an_empty_rail_conjures_nothing() {
         let mut panels = Panels::new();
         panels.toggle_hidden();
-        assert_eq!(panels.rail(), Some(Rail::Queue));
+        assert_eq!(panels.rail(), None);
+        assert_eq!(panels.selected(), None);
+        panels.toggle_hidden();
+        assert_eq!(panels.rail(), None, "a layout key must not create content");
     }
 
     /// Hiding must never be a state a click gets stuck behind.
@@ -398,8 +362,8 @@ mod tests {
         let mut panels = Panels::new();
         panels.select(7);
         panels.toggle_hidden();
-        panels.toggle_queue();
-        assert_eq!(panels.rail(), Some(Rail::Queue));
+        panels.toggle_settings();
+        assert_eq!(panels.rail(), Some(Rail::Settings));
     }
 
     /// The reflow claim, stated directly: swapping which panel is up never
@@ -407,89 +371,26 @@ mod tests {
     /// switch. Only opening and closing move it.
     #[test]
     fn switching_panels_never_changes_whether_the_rail_is_occupied() {
-        // Album → queue.
+        // Album → settings.
         let mut panels = Panels::new();
         panels.select(7);
         assert!(panels.rail().is_some());
-        panels.toggle_queue();
+        panels.toggle_settings();
         assert!(panels.rail().is_some());
-        // Queue → album, by the toggle and by a tile click.
-        panels.toggle_queue();
+        // Settings → album, by the toggle and by a tile click.
+        panels.toggle_settings();
         assert!(panels.rail().is_some());
-        panels.toggle_queue();
+        panels.toggle_settings();
         panels.select(9);
         assert!(panels.rail().is_some());
         // Album → a different album.
         panels.select(11);
         assert!(panels.rail().is_some());
-        // Closing the queue over a selection reveals the album panel, which is
-        // a switch and not a close: the width must not come back yet.
-        panels.toggle_queue();
-        panels.close();
-        assert_eq!(panels.rail(), Some(Rail::Album));
-        // The settings arrive on the same terms: raising them over a panel
-        // that is already up, and dismissing them again, is a switch.
-        panels.toggle_settings();
-        assert!(panels.rail().is_some());
-        panels.toggle_queue();
-        assert!(panels.rail().is_some());
-        panels.toggle_settings();
-        assert!(panels.rail().is_some());
-        panels.close();
-        assert_eq!(panels.rail(), Some(Rail::Album));
-    }
-
-    /// The settings toggle behaves exactly as the queue's does — one control,
-    /// one panel, one slot — so a listener learns the rule once.
-    #[test]
-    fn the_settings_toggle_covers_and_uncovers_like_the_queue() {
-        let mut panels = Panels::new();
-        panels.toggle_settings();
-        assert_eq!(panels.rail(), Some(Rail::Settings));
-        panels.toggle_settings();
-        assert_eq!(panels.rail(), None);
-
-        // Over an album panel: covers it, gives it back, never loses it.
-        panels.select(7);
-        panels.toggle_settings();
-        assert_eq!(panels.rail(), Some(Rail::Settings));
-        assert_eq!(panels.selected(), Some(7));
-        assert!(!panels.showing_album(7));
-        panels.toggle_settings();
-        assert_eq!(panels.rail(), Some(Rail::Album));
-
-        // And the ✕ peels it the same way it peels the queue.
+        // Closing the settings over a selection reveals the album panel, which
+        // is a switch and not a close: the width must not come back yet.
         panels.toggle_settings();
         panels.close();
         assert_eq!(panels.rail(), Some(Rail::Album));
-    }
-
-    /// The queue and the settings share the one slot: asking for either puts
-    /// it up over the other, and neither can be open twice or both at once.
-    #[test]
-    fn the_queue_and_the_settings_share_the_slot() {
-        let mut panels = Panels::new();
-        panels.toggle_queue();
-        panels.toggle_settings();
-        assert_eq!(panels.rail(), Some(Rail::Settings));
-        panels.toggle_queue();
-        assert_eq!(panels.rail(), Some(Rail::Queue));
-        // Closing the newer one does not reveal the older one — there is one
-        // slot, and it was overwritten, not stacked.
-        panels.close();
-        assert_eq!(panels.rail(), None);
-    }
-
-    /// Hiding restores the settings, not the queue: the un-hide default is
-    /// only for a rail that had nothing in it.
-    #[test]
-    fn hiding_restores_the_settings_rather_than_defaulting_to_the_queue() {
-        let mut panels = Panels::new();
-        panels.toggle_settings();
-        panels.toggle_hidden();
-        assert_eq!(panels.rail(), None);
-        panels.toggle_hidden();
-        assert_eq!(panels.rail(), Some(Rail::Settings));
     }
 
     /// The invariants a rendering bug would hide behind, checked over every
@@ -500,7 +401,6 @@ mod tests {
         #[derive(Debug, Clone, Copy)]
         enum Step {
             Select(u64),
-            Queue,
             Settings,
             Close,
             Hide,
@@ -508,7 +408,6 @@ mod tests {
         let steps = [
             Step::Select(1),
             Step::Select(2),
-            Step::Queue,
             Step::Settings,
             Step::Close,
             Step::Hide,
@@ -521,7 +420,6 @@ mod tests {
                         for step in [a, b, c, d] {
                             match step {
                                 Step::Select(id) => panels.select(id),
-                                Step::Queue => panels.toggle_queue(),
                                 Step::Settings => panels.toggle_settings(),
                                 Step::Close => panels.close(),
                                 Step::Hide => panels.toggle_hidden(),

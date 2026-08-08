@@ -2,15 +2,15 @@
 //!
 //! v0.1 scope: pick (or remember) a music folder, scan it live onto a
 //! virtualized album shelf with lazy artwork, search-as-you-type, a dismissible
-//! rail holding the album panel, the play queue or the settings, and — with
-//! the `device-output` feature — album playback
+//! album inspector beside it, an **Up next** popover anchored to the
+//! now-playing bar, and — with the `device-output` feature — album playback
 //! through `baz-core`'s engine (see `playback.rs` and `player.rs`; without
 //! the feature the app builds everywhere with playback UI hidden).
 //!
 //! The modules follow ADR-0006's three layers: pure state and logic
-//! (`vm`, `player`, `panels`, `replaygain`, `shelf`, `config`, `scan`, `art`,
-//! `mpris::state` — no iced imports), design tokens (`theme`, over the
-//! typeface `font` bundles), and view
+//! (`vm`, `player`, `panels`, `overlay`, `replaygain`, `shelf`, `config`,
+//! `scan`, `art`, `mpris::state` — no iced imports), design tokens (`theme`,
+//! over the typeface `font` bundles), and view
 //! composition (`views/`,
 //! one module per surface) with the application shell that drives it
 //! (`app`, and beside it `keys` and `mpris`, which produce the shell's
@@ -30,6 +30,7 @@ mod groove;
 mod icon;
 mod keys;
 mod mpris;
+mod overlay;
 mod panels;
 mod playback;
 mod player;
