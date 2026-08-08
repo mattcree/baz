@@ -279,21 +279,22 @@ pub(crate) enum Message {
     Raise,
     /// MPRIS `Quit`: close baz.
     Quit,
-    /// Bottom bar: the pointer went down on the seek bar, this far along it.
+    /// The needle: the pointer went down on it, this far along the window.
     /// Nothing is requested and nothing moves yet — the gesture is a click
     /// until it travels [`player::DRAG_THRESHOLD_PX`].
-    SeekPressed(player::Pointer),
-    /// Bottom bar: the pointer moved with the seek bar held. Past the
-    /// threshold this is the scrub, and the bar follows the pointer.
-    SeekDragged(player::Pointer),
-    /// Bottom bar: the pointer moved over the seek bar with nothing held —
-    /// the hover preview follows it.
-    SeekHovered(player::Pointer),
-    /// Bottom bar: the pointer left the seek bar; the preview goes with it.
-    SeekLeft,
-    /// Bottom bar: the seek bar was released — the moment the request
-    /// actually goes to the engine.
-    SeekReleased,
+    NeedlePressed(player::Pointer),
+    /// The needle: the pointer moved with it held. Past the threshold the
+    /// release lands where the pointer is rather than where it went down.
+    NeedleDragged(player::Pointer),
+    /// The needle: the pointer moved over it with nothing held — the hover tip
+    /// follows it, naming what a click there would ask for.
+    NeedleHovered(player::Pointer),
+    /// The needle: the pointer left it; the tip goes with it.
+    NeedleLeft,
+    /// The needle was released — the moment the request actually goes to the
+    /// engine, as a `Seek` inside the sounding entry or a `JumpTo` outside it
+    /// ([`player::NeedleTarget`]).
+    NeedleReleased,
     /// Bottom bar: the pointer went down on the volume fader. Unlike the
     /// seek bar this *is* the request — a fader answers at once (see
     /// `player.rs`).
@@ -585,7 +586,8 @@ impl App {
         if let Some(task) = self.update_motion(&message) {
             return task;
         }
-        if self.update_volume(&message)
+        if self.update_needle(&message)
+            || self.update_volume(&message)
             || self.update_replay_gain(&message)
             || self.update_transport(&message)
             || self.update_overlay(&message)
@@ -652,27 +654,6 @@ impl App {
             // Best effort by nature: a Wayland compositor is entitled to
             // refuse a focus request, and refusing is not an error here.
             Message::Raise => window::get_latest().and_then(window::gain_focus),
-            Message::SeekPressed(pointer) => {
-                self.player.press(pointer);
-                Task::none()
-            }
-            Message::SeekDragged(pointer) => {
-                self.player.drag_to(pointer);
-                Task::none()
-            }
-            Message::SeekHovered(pointer) => {
-                self.player.hover_to(pointer);
-                Task::none()
-            }
-            Message::SeekLeft => {
-                self.player.hover_left();
-                Task::none()
-            }
-            Message::SeekReleased => {
-                let target = self.player.release_drag();
-                self.send_seek(target);
-                Task::none()
-            }
             message => match &mut self.screen {
                 Screen::Setup(setup) => {
                     if let Message::SetupInput(value) = message {
@@ -1064,6 +1045,39 @@ impl App {
     /// decides what — if anything — to ask for from event-derived state, and
     /// the answer goes to the engine. Nothing here writes the volume the
     /// interface displays; only `Event::VolumeChanged` does (see `player.rs`).
+    /// The needle's five pointer messages, answered together for the same
+    /// reason the volume's nine are: every one of them resolves to "tell the
+    /// state machine, maybe tell the engine".
+    ///
+    /// **One gesture, two commands, and the segment decides which.**
+    /// [`player::PlayerState::release_drag`] resolves the release into a
+    /// [`player::NeedleTarget`]; this only dispatches, so "is this a move
+    /// within the record or a choice of record" has exactly one answer in
+    /// exactly one place — and neither command is invented here (ADR-0014:
+    /// seeking is `Seek`, jumping is `JumpTo`, and the UI state comes back from
+    /// the engine's events either way).
+    fn update_needle(&mut self, message: &Message) -> bool {
+        match *message {
+            Message::NeedlePressed(pointer) => self.player.press(pointer),
+            Message::NeedleDragged(pointer) => self.player.drag_to(pointer),
+            Message::NeedleHovered(pointer) => self.player.hover_to(pointer),
+            Message::NeedleLeft => self.player.hover_left(),
+            Message::NeedleReleased => match self.player.release_drag() {
+                Some(player::NeedleTarget::Seek { position_ms }) => {
+                    self.send_seek(Some(position_ms));
+                }
+                Some(player::NeedleTarget::Jump { position }) => {
+                    self.jump_to_queued(position);
+                    // A jump moves what is playing, which MPRIS publishes.
+                    self.publish_mpris(false);
+                }
+                None => {}
+            },
+            _ => return false,
+        }
+        true
+    }
+
     fn update_volume(&mut self, message: &Message) -> bool {
         match *message {
             Message::VolumePressed(pointer) => {
@@ -2584,7 +2598,11 @@ mod tests {
                 "MPRIS only; the bar's toggle covers both directions",
             ),
             ("Stop", "MPRIS only; there is no on-screen Stop"),
-            ("SeekBy", "the bottom bar's seek groove"),
+            (
+                "SeekBy",
+                "the needle, pressed inside the entry that is sounding \
+                 (ADR-0017 §1.1: the groove's job, at the window's edge)",
+            ),
             ("VolumeStep", "the bottom bar's volume fader"),
             ("ToggleMute", "the bottom bar's speaker button"),
             ("ToggleQueue", "the bottom bar's now-playing block"),

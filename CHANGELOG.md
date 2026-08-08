@@ -233,8 +233,9 @@ next commit.
   to the four things that are the playhead plus the one control that creates it.
   A test asserts the accent appears in no other style.
 - A **volume control** in the bottom bar: a mute affordance and a fader on the
-  same custom groove widget as the seek bar, so it inherits that bar's cursor,
-  its hover preview (in dB) and its click-versus-drag threshold. Unity — the
+  same custom groove widget the seek bar was built on, so it inherits that bar's
+  cursor, its hover preview (in dB) and its click-versus-drag threshold — and
+  the needle that replaced the seek bar inherits all three from the same place. Unity — the
   position at which baz touches not one sample — is reachable by a four-pixel
   snap at the top of the travel and marked by a detent that lights when the
   handle is on it. Drawn in paper ink rather than the accent, because a volume
@@ -245,6 +246,31 @@ next commit.
   the conjunction ADR-0011 made of ADR-0009's guarantee — and nothing at all in
   between. Same faint ink as the rest of the secondary text, no icon, no fault
   vocabulary, and no layout shift when it appears (ADR-0009 §5).
+- **The needle.** A 2 px seek line flush on the window's bottom edge,
+  **segmented by the queue's real entry lengths** — so it states position *and*
+  structure in the same two pixels: you can see that you are three minutes into
+  a nine-minute closer, and where the record you are on ends. The fill is the
+  lamp, the unplayed track the room's faintest mark, 2 px of gap between two
+  tracks and 8 px where one record ends and the next begins. **Clicking a
+  segment plays it** (`JumpTo`); clicking *inside* the entry that is already
+  sounding moves the playhead within it (`Seek`) — one gesture, two commands,
+  and the segment you pointed at is what says which you meant. Hovering names
+  what a click would ask for: a record's title, or a timestamp. A 2 px mark
+  would be a 2 px target, so the needle claims its aiming band upward out of
+  layout, bounded by the empty lane the bar keeps under its transport, and
+  asserted never to reach a control.
+- **The now-playing bar is 57 px, where it was 105**, and the collection gets
+  **46 px** back — its share of an 860 px window goes from 82.1 % to 87.4 %.
+  The needle took the seek row's whole job, so the 260 px groove and its hit
+  band are gone; the two timestamps are not, and moved into the bar's left zone
+  beside the wall label. **Nothing else was removed.** Previous · Play/Pause ·
+  Next stay, on evidence rather than taste: three vendors in baz's own prior-art
+  study bought "visual calm" by removing skip and all three reversed inside two
+  years, and the hover-reveal that would have replaced them needs the playing
+  cover to be on screen, which after a filter or a long scroll it is not. The
+  bar's one centre line survived the re-lay — every mark in it now sits within
+  1.93 px of the band's mid-line, where the composition audit measured seven
+  lines spanning 50 px, and five of them are on it exactly.
 - **What is coming next, without opening anything.** The now-playing bar states
   the queue's continuation on a third line under the artist: `then 19 more ·
   57:38 left` while a record is still running, `then Kid A` when one is stacked
@@ -396,7 +422,7 @@ next commit.
   dedicated thread that never exits; see `playback::device`'s "Why cpal is
   first touched from a thread that never exits". This is what had the Windows
   CI job dying part-way through the `baz-core` integration suite.
-- The seek bar and the volume fader no longer stay stuck to the pointer after
+- The seek bar (now the needle) and the volume fader no longer stay stuck to the pointer after
   a drag that ends outside the window. If the pointer leaves the window, or
   the window loses focus, mid-drag, the gesture now ends there and commits at
   the last position it saw — the release that would normally end it is being

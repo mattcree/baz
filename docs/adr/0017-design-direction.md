@@ -128,6 +128,46 @@ concede 28 px (3.3 % of an 860 px window) to keep skip pointer-reachable. Agains
 today we recover 44 px, and the collection's share at 1280 × 860 with no
 inspector goes from 81.6 % to **86.5 %**.
 
+#### Amendment — the three numbers step 9/10 could not hold, and why
+
+Recorded here in the shape §1.7's `INDEX_W` amendment set: the decision stands,
+three of its literals do not, and each was corrected by measurement rather than
+by taste. Evidence in [`docs/design/impl/needle/`](../design/impl/needle/).
+
+**The bar is 57 px, not 58** — and 58 was never reachable. The column above is
+right in its parts and one out in its total: 1 + 12 + 32 + 12 = **57**. More
+usefully, a bar of `2a + 2ℓ + TRANSPORT_HIT + 1` for a symmetric padding `a` and
+lead `ℓ` is **odd** for every integer pair, because the hairline is odd and
+everything else is doubled, so no arrangement of these parts produces 58. The
+parts are held. Two figures move with the total, both in our favour: the 44 px
+this predicted recovering was measured against a 102 px bar it inherited from
+before `06-composition-audit.md` re-derived the band, and against the 105 that
+is actually there the wall gets **46**; and the 28 px conceded to the critique's
+~32 px of bottom furniture is **27**, since ours is 59 rather than 60.
+
+**`NEEDLE_HIT` is 12, not 22.** A 2 px mark needs a band to be aimed at, and 22
+would reach 8 px into the transport row's own boxes — a needle that swallows a
+press aimed at Next is a worse bargain than a smaller band. 12 is `GAP_MD`, on
+law L2's lattice, and it is **exactly the bar's bottom lead**, which is empty
+recess: `NEEDLE_HIT <= BAR_LEAD` is asserted, so the band can never reach a
+control. It is a third pointer height beside law L7's 32 and 24 and it is named
+there rather than smuggled.
+
+**`ALBUM_GAP` is 8, not 6.** Six is off the 4 px lattice law L2 puts every gap
+on. Eight is the lattice's neighbour in the direction that makes the break
+*more* legible on a 2 px line — four times the track gap rather than three.
+`SEGMENT_GAP` stays 2, which is `GAP_XXS`, the lattice's one named exception,
+and the segments are one line rather than a row of slots, so it is that
+exception rather than a second one.
+
+**And one thing the plan did not say, which the visible-control rule required.**
+§4's rule — *no action is keyboard-only* — would have been broken by deleting
+the groove, because seeking would have lost its only pointer route. It does not,
+because the needle resolves a press by **which segment it landed in**: inside
+the entry that is sounding a press is `Command::Seek`, anywhere else it is
+`Command::JumpTo`. One gesture, two commands, no mode, and nothing on screen has
+to say which you meant — both are "put the needle here".
+
 ---
 
 ### 1.2 Find — keep the field, adopt type-anywhere, move the bare letters
