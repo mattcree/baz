@@ -117,6 +117,28 @@ next commit.
   selector, and a bottom bar with transport, seek groove and now-playing.
 - A visual design pass — the "listening room" theme — and a seek groove with a
   click-versus-drag threshold, hover preview and an honest cursor.
+- **baz has a typeface.** The IBM Plex superfamily — Sans at Regular, Medium and
+  SemiBold, Mono, and Serif — ships inside the binary and is installed as the
+  application default. Previously baz asked the *generic* `sans-serif` for
+  weights it might not have, and the platform's fallback answered with whatever
+  it liked: on one machine every tile title and the first-run question rendered
+  in a monospace. The faces are unmodified upstream files under the OFL, with
+  provenance and hashes in `crates/baz/assets/fonts/README.md`, and the mono's
+  advance width is measured against every reserved slot in the bottom bar so a
+  font change can never silently clip a duration.
+- **Two inks that failed contrast were corrected.** `PAPER_FAINT`, which carries
+  every duration, count, hint and signal note, was 3.4 : 1 on the panel — below
+  the WCAG AA floor; `PAPER_MUTED`, the muted fader, was 1.9 : 1, which made the
+  position mute exists to restore effectively invisible. Both now clear their
+  floors on every surface, and a test computes every ink-on-surface pairing the room can produce, so
+  neither can drift back.
+- **The lamp is reserved again.** The amber accent means playback truth and was
+  being spent on input focus — and the search field takes focus at launch, so
+  baz's first frame was an amber ring with no music — on the scanning note, and
+  on the first-run wordmark. Focus and text selection are now paper, the scanning
+  note is a dim sans sentence rather than an amber figure, and the accent is left
+  to the four things that are the playhead plus the one control that creates it.
+  A test asserts the accent appears in no other style.
 - A **volume control** in the bottom bar: a mute affordance and a fader on the
   same custom groove widget as the seek bar, so it inherits that bar's cursor,
   its hover preview (in dB) and its click-versus-drag threshold. Unity — the

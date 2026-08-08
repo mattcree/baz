@@ -17,10 +17,14 @@ const SETUP_INPUT_W: f32 = 460.0;
 /// attempt failed, and the footnote that explains what Enter does.
 pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
     let heading = column![
+        // The wordmark, deliberately unlit. This screen is the first frame baz
+        // ever draws and there is nothing playing on it, so the one accent the
+        // room reserves for playback truth has no business here (`theme`'s
+        // accent-discipline note).
         text("baz")
             .size(theme::SIZE_EMPHASIS)
             .font(theme::MONO)
-            .color(theme::LAMP),
+            .color(theme::PAPER_FAINT),
         text("Where's your music?")
             .size(theme::SIZE_HERO)
             .font(theme::SEMIBOLD),

@@ -45,6 +45,15 @@ ignore = [
 [licenses]
 version = 2
 # GPL-3.0-compatible allowlist. Extending it is a reviewed decision.
+#
+# Note on the bundled typeface: `crates/baz/assets/fonts/` ships IBM Plex under
+# OFL-1.1, and **`OFL-1.1` is deliberately absent from this list**. cargo-deny
+# walks the Cargo dependency graph; a checked-in asset is not a crate, so it is
+# outside this file's remit entirely and adding the licence here would imply a
+# dependency that does not exist. The obligations OFL does impose — ship the
+# licence text, do not rename a modified copy — are met and argued in
+# `crates/baz/assets/fonts/README.md`, and the faces are unmodified upstream
+# files with hashes recorded there.
 allow = [
   "GPL-3.0-or-later",   # our own crates
   "MIT",
