@@ -18,7 +18,11 @@ load = lambda n: Img(f"{SHOTS}/{n}-{TAG}.png")  # noqa: E731
 im = load("wall-rest")
 BAR = next(y + 1 for y in range(H - 1, H - 200, -1) if dist(im.rgb(5, y), RECESS) > 2)
 RULE2 = BAR - 1
-print(f"############ {TAG}")
+# The two chrome bands, found rather than assumed — their heights are tokens
+# now, so the ruler reads them off the frame instead of remembering 53 and 102.
+TOPB = next(y for y in range(12, 120) if dist(im.rgb(5, y), (0x0C, 0x0D, 0x0E)) > 2)
+BODY = TOPB + 1
+print(f"############ {TAG}   top bar h {TOPB + 1}   bar h {H - BAR + 1}")
 
 
 def yedges(imx, x0, x1, y0, y1, g):
@@ -44,16 +48,20 @@ panel_x = next(x for x in range(W - 1, 0, -1) if dist(imi.rgb(x, RULE2 - 6), PLI
 imp = load("wall-playing")
 ims = load("settings")
 imq = load("queue-playing")
-xs = [x for x in range(W) if dist(imq.rgb(x, RULE2 - 20), LIT) <= 3]
+# The popover's surface, found over the whole body rather than at a row a
+# fixed bar height used to put it at.
+_qy = [y for y in range(BODY, RULE2) if dist(imq.rgb(W - 60, y), LIT) <= 3]
+_qm = (min(_qy) + max(_qy)) // 2 if _qy else RULE2 - 40
+xs = [x for x in range(W) if dist(imq.rgb(x, _qm), LIT) <= 3]
 
 SETS = {
-    "top bar": yedges(im, 0, W, 0, 52, WALL),
+    "top bar": yedges(im, 0, W, 0, TOPB, WALL),
     "bottom bar (idle)": yedges(im, 0, W, BAR, H, RECESS),
     "bottom bar (playing)": yedges(imp, 0, W, BAR, H, RECESS),
-    "inspector": yedges(imi, panel_x, W, 53, RULE2, PLINTH),
-    "settings": yedges(ims, 0, W, 53, RULE2, WALL),
-    "queue popover": yedges(imq, min(xs), max(xs) + 1, 53, RULE2, LIT),
-    "tile column": yedges(im, 40, 310 if W < 1600 else 313, 53, RULE2, WALL),
+    "inspector": yedges(imi, panel_x, W, BODY, RULE2, PLINTH),
+    "settings": yedges(ims, 0, W, BODY, RULE2, WALL),
+    "queue popover": yedges(imq, min(xs), max(xs) + 1, BODY, RULE2, LIT),
+    "tile column": yedges(im, 40, 310 if W < 1600 else 313, BODY, RULE2, WALL),
 }
 pooled = sorted(set().union(*SETS.values()))
 

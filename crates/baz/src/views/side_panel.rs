@@ -89,14 +89,27 @@ pub(crate) fn view<'a>(
     // The same 200 ms warm the wall gives the sounding record, on the same
     // tween — the inspector and the tile are two views of one lamp.
     let warmth = if playing { lamp } else { 0.0 };
-    let art_edge = theme::PANEL_W - 2.0 * PANEL_PAD;
+    // **The sleeve is capped**, where it used to be *the panel minus its two
+    // paddings* — 292 px, and 93.6 % of the panel's contrast-weighted ink for a
+    // second, larger copy of a work already on the wall 24 px to the left. The
+    // album's own name came fifth of eight in its own inspector. See
+    // [`theme::INSPECTOR_SLEEVE`] for the measured arithmetic of the fix.
+    let art_edge = theme::INSPECTOR_SLEEVE;
     let art: Element<'_, Message> = match shelf.thumbs.peek(&album.id) {
         Some(handle) => iced_image(handle.clone())
             .width(Length::Fixed(art_edge))
+            .height(Length::Fixed(art_edge))
             .into(),
         None => gradient_block(album.id, art_edge),
     };
-    let sleeve = container(art).style(move |_theme| theme::sleeve(room, warmth));
+    // Left-aligned on the panel's content spine rather than centred in the
+    // column: 964 is the one edge seven elements already share, and a centred
+    // thumbnail would have introduced two more that nothing else sits on
+    // (law L5).
+    let sleeve = container(art)
+        .width(Length::Fixed(art_edge))
+        .height(Length::Fixed(art_edge))
+        .style(move |_theme| theme::sleeve(room, warmth));
     let chosen = shelf.edition_choice.get(&album.id).copied();
     let edition = vm::selected_edition(album, chosen);
     // A soundtrack grouped under one album artist keeps its per-cue
@@ -208,7 +221,12 @@ fn track_list<'a>(
 ) -> Element<'a, Message> {
     let room = theme::active();
     scrollable(
-        column![Column::with_children(rows).spacing(theme::GAP_XXS), details]
+        // [`theme::GAP_XS`] between rows, not `GAP_XXS`: a row is
+        // `GAP_XS + CAPTION_LINE_H + GAP_XS` = 28, so the pitch is **32** and
+        // the list lands on the same 4 px lattice as everything else (law L2).
+        // It was 28.6 px of pitch accumulating ±1.4 px of error down a
+        // thirteen-track record.
+        column![Column::with_children(rows).spacing(theme::GAP_XS), details]
             .spacing(theme::GAP_XL)
             .padding(theme::scroll_gutter()),
     )
@@ -241,19 +259,31 @@ fn track_list<'a>(
 fn play_album(album: u64, live: bool) -> Element<'static, Message> {
     let room = theme::active();
     button(
-        row![
-            iced_image(icon::handle(icon::Glyph::Play))
-                .width(Length::Fixed(theme::ICON_PX))
-                .height(Length::Fixed(theme::ICON_PX))
-                .opacity(theme::glyph_opacity(live, false)),
-            text("Play album")
-                .size(theme::SIZE_BODY)
-                .line_height(theme::LEADING_BODY)
-                .font(theme::SEMIBOLD)
-                .wrapping(text::Wrapping::None),
-        ]
-        .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Center),
+        // **The box centres the ink, in both axes** (law L3). This was the
+        // second of the audit's two identical failures: a `button` with a fixed
+        // height and no alignment on its content lays that content out at the
+        // top *and* at the left, so the label sat 6.0 px above its own centre
+        // and **86.5 px** left of it. The mark of a primary action is the thing
+        // itself, centred in the one commitment the panel makes.
+        container(
+            row![
+                iced_image(icon::handle(icon::Glyph::Play))
+                    .width(Length::Fixed(theme::ICON_PX))
+                    .height(Length::Fixed(theme::ICON_PX))
+                    .opacity(theme::glyph_opacity(live, false)),
+                text("Play album")
+                    .size(theme::SIZE_BODY)
+                    .line_height(theme::LEADING_BODY)
+                    .font(theme::SEMIBOLD)
+                    .wrapping(text::Wrapping::None),
+            ]
+            .spacing(theme::GAP_SM)
+            .align_y(iced::Alignment::Center),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(alignment::Horizontal::Center)
+        .align_y(alignment::Vertical::Center),
     )
     .width(Length::Fill)
     .height(Length::Fixed(theme::TRANSPORT_HIT))
@@ -289,7 +319,7 @@ fn disc_header(disc: u32) -> Element<'static, Message> {
             .color(room.heading())
             .wrapping(text::Wrapping::None),
     )
-    .padding(theme::pad(theme::GAP_SM, theme::GAP_XS))
+    .padding(theme::pad(theme::GAP_SM, 0.0))
     .into()
 }
 
@@ -567,7 +597,12 @@ fn track_row(
         .align_y(iced::Alignment::Start),
     )
     .width(Length::Fill)
-    .padding(theme::pad(theme::GAP_XS, theme::GAP_XS))
+    // **No horizontal inset.** The number column now starts on the panel's own
+    // content spine and the duration lane ends on the scrollbar's declared one,
+    // so the block a listener actually reads down shares its edges with the
+    // panel that holds it — the audit's defect 10, which measured the list inset
+    // 21 px left and 14 px right, asymmetrically, inside a 340 px column.
+    .padding(theme::pad(theme::GAP_XS, 0.0))
     .style(move |_theme, status| theme::track_row(room, status, playing))
     .on_press_maybe(press)
     .into()

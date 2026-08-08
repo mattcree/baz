@@ -65,7 +65,14 @@ use crate::replaygain::{self, MODES};
 use crate::theme;
 
 /// Inner padding of the place's content area (logical px).
-const PLACE_PAD: f32 = theme::GAP_XL;
+///
+/// [`theme::HANG`], not `GAP_XL`: a place fills the window, so its content hangs
+/// from the **one window gutter** every other window-edge surface hangs from
+/// (law L1). `GAP_XL` is padding *inside* a panel and was never a window margin;
+/// spending it as one is how baz ended up with three of them — 16 for the
+/// chrome, 24 here, 40 on the wall — and nothing in either bar aligned with
+/// anything in the collection.
+const PLACE_PAD: f32 = theme::HANG;
 
 /// The sections this place holds, in the order they are listed.
 ///
@@ -139,16 +146,26 @@ pub(crate) fn view(player: &PlayerState, window_width: f32) -> Element<'_, Messa
 /// The floor matters as much as the cap: at a small window the form gets
 /// whatever there is, because a stepper row that will not fit is worse than a
 /// long one.
+///
+/// # It answers the window now
+///
+/// The cap used to be the constant [`theme::SETTINGS_CONTENT_W`], so the form's
+/// right edge landed on **878 at a 1280 px window and 878 at a 1920 px one** —
+/// 0.686 W and then 0.457 W, with a thousand pixels of empty wall beside it and
+/// one right-aligned line of type stranded in it (the audit's defect 9). A
+/// measure has a comfortable range rather than a single right answer, so the
+/// target is half the window, clamped into
+/// `[SETTINGS_CONTENT_W, SETTINGS_CONTENT_MAX]` — 55 to 75 characters of body
+/// text — and bounded by what the window actually has left.
 fn content_width(window_width: f32, beside_the_list: bool) -> f32 {
     let taken = if beside_the_list {
         2.0f32.mul_add(PLACE_PAD, theme::SETTINGS_NAV_W) + theme::GAP_XL
     } else {
         2.0 * PLACE_PAD
     };
-    (window_width - taken).clamp(
-        theme::PANEL_W - 2.0 * theme::GAP_XL,
-        theme::SETTINGS_CONTENT_W,
-    )
+    let measure =
+        (0.5 * window_width).clamp(theme::SETTINGS_CONTENT_W, theme::SETTINGS_CONTENT_MAX);
+    (window_width - taken).clamp(theme::PANEL_W - 2.0 * theme::GAP_XL, measure)
 }
 
 /// The place's top strip: the way back, and the place's name.
@@ -167,11 +184,17 @@ fn content_width(window_width: f32, beside_the_list: bool) -> f32 {
 fn header() -> Element<'static, Message> {
     let room = theme::active();
     let back = button(
-        text("‹ Library")
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .font(theme::MEDIUM)
-            .wrapping(text::Wrapping::None),
+        // Centred in its own box, like `Settings` across the frame from it
+        // (law L3).
+        container(
+            text("‹ Library")
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
     )
     // The same height as the top bar's `Settings`, which is the control this
     // one swaps places with: the two strips are one frame, and a way-back that
@@ -199,7 +222,10 @@ fn header() -> Element<'static, Message> {
             .spacing(theme::GAP_LG)
             .align_y(iced::Alignment::Center),
         )
-        .padding(theme::pad(theme::GAP_SM + 2.0, theme::GAP_LG)),
+        // The Library's top bar's geometry, exactly — the same padding, the same
+        // one window gutter, the same hairline — because the two strips are one
+        // frame and navigating between the places may not slide it.
+        .padding(theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)),
         horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
     ]
     .into()
@@ -227,7 +253,11 @@ fn section_list() -> Element<'static, Message> {
                     .wrapping(text::Wrapping::None),
             )
             .width(Length::Fill)
-            .padding(theme::pad(theme::GAP_SM, theme::GAP_MD))
+            // One control height (law L7): the entry is a nav target and stands
+            // `TRANSPORT_HIT`, not the 36 px its own padding used to make it.
+            .height(Length::Fixed(theme::TRANSPORT_HIT))
+            .align_y(alignment::Vertical::Center)
+            .padding(theme::pad(0.0, theme::GAP_MD))
             .style(move |_theme| {
                 let style = theme::segment(room, iced::widget::button::Status::Active, current);
                 container::Style {
@@ -296,13 +326,23 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
             Message::ReplayGainNoTagPreamp(1),
         ))
         .push(
-            checkbox("Keep peaks below full scale", state.prevent_clipping())
-                .size(theme::SIZE_BODY)
-                .text_size(theme::SIZE_META)
-                .text_line_height(theme::LEADING_META)
-                .spacing(theme::GAP_SM)
-                .style(move |_theme, status| theme::check(room, status))
-                .on_toggle_maybe(live.then_some(Message::ReplayGainPreventClipping)),
+            // **A checkbox is a pointer target too** (law L7). It was
+            // `SIZE_BODY` — a **13 px** box, the smallest control in the product
+            // by a factor of two and the only one with no floor at all. It takes
+            // [`theme::STEPPER_HIT`], the named secondary target, and its row
+            // stands the full `TRANSPORT_HIT` so the tick sits on the same line
+            // rhythm as the stepper rows above it.
+            container(
+                checkbox("Keep peaks below full scale", state.prevent_clipping())
+                    .size(theme::STEPPER_HIT)
+                    .text_size(theme::SIZE_META)
+                    .text_line_height(theme::LEADING_META)
+                    .spacing(theme::GAP_SM)
+                    .style(move |_theme, status| theme::check(room, status))
+                    .on_toggle_maybe(live.then_some(Message::ReplayGainPreventClipping)),
+            )
+            .height(Length::Fixed(theme::TRANSPORT_HIT))
+            .align_y(alignment::Vertical::Center),
         );
 
     // What is in force right now — present only while a track is playing and
@@ -436,27 +476,34 @@ fn stepper_row(
     increase: Message,
 ) -> Element<'static, Message> {
     let room = theme::active();
-    row![
-        text(label)
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(room.paper_dim)
-            .wrapping(text::Wrapping::None),
-        Space::with_width(Length::Fill),
-        container(
-            text(value)
+    container(
+        row![
+            text(label)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(room.paper)
-                .wrapping(text::Wrapping::None)
-        )
-        .width(Length::Fixed(theme::SETTING_VALUE_W))
-        .align_x(alignment::Horizontal::Right),
-        stepper("\u{2212}", can_decrease, decrease),
-        stepper("+", can_increase, increase),
-    ]
-    .spacing(theme::GAP_SM)
-    .align_y(iced::Alignment::Center)
+                .color(room.paper_dim)
+                .wrapping(text::Wrapping::None),
+            Space::with_width(Length::Fill),
+            container(
+                text(value)
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper)
+                    .wrapping(text::Wrapping::None)
+            )
+            .width(Length::Fixed(theme::SETTING_VALUE_W))
+            .align_x(alignment::Horizontal::Right),
+            stepper("\u{2212}", can_decrease, decrease),
+            stepper("+", can_increase, increase),
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center),
+    )
+    // One row pitch, and it is the product's one control height: the row is
+    // `TRANSPORT_HIT` tall around a `STEPPER_HIT` pair, so two stepper rows are
+    // 32 apart on the 4 px lattice rather than 24 apart on nothing.
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .align_y(alignment::Vertical::Center)
     .into()
 }
 

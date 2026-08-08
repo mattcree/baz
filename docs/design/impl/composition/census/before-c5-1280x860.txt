@@ -1,0 +1,95 @@
+############ 1280x860   top bar h 53   bar h 102
+
+### RHYTHM — share of chrome y-edges within +-1 px of a u-lattice
+   surface                n   u=4   u=6   u=8   u=12  u=16
+   top bar                  2   100%   100%   100%    50%   100% 
+   bottom bar (idle)        4   100%   100%    75%    75%    50% 
+   bottom bar (playing)     6    83%   100%    50%    50%    33% 
+   inspector               26    88%    58%    50%    38%    35% 
+   settings                12    92%    58%    50%    42%    33% 
+   queue popover           30    87%    63%    47%    43%    30% 
+   tile column             12    92%    67%    50%    42%    42% 
+   POOLED                  87    78%    57%    41%    30%    30% 
+
+   (a lattice of unit u catches a random set at about 3/u; u=4 -> 75%,
+    u=6 -> 50%, u=8 -> 38%, u=12 -> 25%, u=16 -> 19%)
+
+### RHYTHM — the y-edges themselves
+   top bar                [11, 41]
+   bottom bar (idle)      [781, 793, 804, 822]
+   bottom bar (playing)   [781, 799, 804, 822, 824, 842]
+   inspector              [87, 99, 121, 413, 430, 444, 456, 469, 480, 489, 500, 509, 524, 557, 568, 600, 604, 617, 632, 645, 662, 671, 689, 701, 722, 732]
+   settings               [77, 114, 123, 152, 163, 174, 207, 218, 239, 250, 265, 279]
+   queue popover          [53, 355, 378, 391, 415, 424, 440, 451, 458, 466, 474, 501, 510, 520, 538, 551, 566, 576, 595, 608, 623, 633, 651, 661, 679, 692, 707, 720, 739, 758]
+   tile column            [97, 104, 133, 388, 408, 418, 426, 437, 484, 491, 520, 758]
+
+### HIERARCHY — weighted ink mass per element (area x contrast)
+   -- wall (rest) --
+      whole wall body mass 1.782e+07
+      one sleeve  6.694e+06  (37.57% of the wall)
+      its label   1.081e+06  ( 6.06%)  ratio sleeve:label 6.2 : 1
+   -- top bar --
+      search well    1.395e+05  47.15% of the bar
+      counts         4.102e+04  13.87% of the bar
+      Settings       2.606e+04   8.81% of the bar
+   -- bottom bar (playing) --
+      left zone      1.658e+05  46.34% of the bar
+      Queue control  3.088e+04   8.63% of the bar
+      transport      6.403e+04  17.90% of the bar
+      seek row       1.016e+04   2.84% of the bar
+      signal note    2.187e+04   6.11% of the bar
+      volume block   4.815e+04  13.46% of the bar
+   -- inspector --
+      close          1.035e+04   0.07% of the panel
+      sleeve         1.507e+07  95.00% of the panel
+      title          1.374e+05   0.87% of the panel
+      artist         7.024e+04   0.44% of the panel
+      catalogue+cond 6.992e+04   0.44% of the panel
+      Play album     1.759e+05   1.11% of the panel
+      track list     2.758e+05   1.74% of the panel
+      footnote       5.340e+04   0.34% of the panel
+
+### SELECTED tile's rule (measured in the inspector frame)
+      y=400  #6A5C2D
+      y=401  #6A5C2D
+      y=402  #6A5C2D
+      y=403  #6A5C2D
+      y=404  #6A5C2D
+      y=405  #6A5C2D
+      y=406  #6A5C2D
+      y=407  #6A5C2D
+      y=408  #6A5C2D
+      y=409  #6A5C2D
+      y=410  #6A5C2D
+      y=411  #6A5C2D
+      y=412  #6A5C2D
+      y=413  #6A5C2D
+      y=414  #6A5C2D
+      y=415  #6A5C2D
+      y=416  #6A5C2D
+      y=417  #6A5C2D
+      y=418  #6A5C2D
+      y=419  #6A5C2D
+      y=420  #6A5C2D
+      y=421  #6A5C2D
+      y=422  #6A5C2D
+      y=423  #6A5C2D
+      y=424  #6A5C2D
+      y=425  #6A5C2D
+      y=426  #6A5C2D
+      y=427  #6B5C2D
+      y=428  #6C5D2D
+      y=429  #6B5D2D
+
+### PLAY ALBUM — the primary control's internal composition
+      bands: [(500, 509), (524, 557), (568, 570)]
+      button y[500,509) h 9;  inner ink (966, 502, 1093, 507)
+      button box x[964,1256) w 292; inner ink centred? ink cx 1029.5 vs box cx 1110.0
+      inner ink cy 504.5 vs box cy 504.5
+
+### SETTINGS controls
+      segmented control box (248, 124, 878, 152)
+      segment Off    label ink (250, 126, 362, 147)
+      segment Track  label ink (547, 133, 578, 142)
+      segment Album  label ink (754, 133, 790, 142)
+      checkbox box (248, 265, 261, 279)

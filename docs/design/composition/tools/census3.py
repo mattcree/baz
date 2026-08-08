@@ -30,7 +30,10 @@ def yr(im, x0, x1, y0, y1, g, thr=3, gap=1):
 im = load("wall-rest")
 BAR = next(y + 1 for y in range(H - 1, H - 200, -1) if dist(im.rgb(5, y), RECESS) > 2)
 RULE2 = BAR - 1
-print(f"############ {TAG}  body y[53,{RULE2})  bar y[{BAR},{H})")
+# The top strip's own hairline, found rather than assumed (see census2).
+TOPB = next(y for y in range(12, 120) if dist(im.rgb(5, y), WALL) > 2)
+BODY = TOPB + 1
+print(f"############ {TAG}  top bar h {TOPB + 1}  body y[{BODY},{RULE2})  bar y[{BAR},{H})")
 
 # ---------------------------------------------------------- the search well
 print("\n### search well, exact")
@@ -76,11 +79,11 @@ for x in range(W - 1, 0, -1):
 print(f"   panel x {panel_x}..{W}  w {W - panel_x}  (probe row {probe_y})")
 print("   seam colours:", " ".join(f"{x}:{hexs(imi.rgb(x, probe_y))}" for x in range(panel_x - 4, panel_x + 2)))
 print("   panel rows:")
-for s, e in yr(imi, panel_x, W, 53, RULE2, PLINTH, thr=3, gap=1):
+for s, e in yr(imi, panel_x, W, BODY, RULE2, PLINTH, thr=3, gap=1):
     rs = xr(imi, s, e, panel_x, W, PLINTH, thr=3, gap=10)
     print(f"      y[{s:4d},{e:4d}) h{e - s:4d} -> " + ", ".join(f"{a}..{b}" for a, b in rs))
 # Play album internals
-pa = [(s, e) for s, e in yr(imi, panel_x, W, 53, RULE2, PLINTH, thr=3, gap=1) if e - s > 25 and s > 450]
+pa = [(s, e) for s, e in yr(imi, panel_x, W, BODY, RULE2, PLINTH, thr=3, gap=1) if e - s > 25 and s > 450]
 if pa:
     s, e = pa[0]
     print(f"   Play album band y[{s},{e})")
@@ -100,8 +103,12 @@ for s, e in yr(ims, 0, W, 0, RULE2, WALL, thr=3, gap=1):
 # ---------------------------------------------------------- QUEUE
 print("\n### QUEUE popover")
 imq = load("queue-playing")
-xs = [x for x in range(W) if dist(imq.rgb(x, RULE2 - 20), LIT) <= 3]
-ys = [y for y in range(53, RULE2) if dist(imq.rgb(int((min(xs) + max(xs)) / 2), y), LIT) <= 3]
+# The popover's surface, found over the whole body rather than at a row a
+# fixed bar height used to put it at.
+_qy = [y for y in range(BODY, RULE2) if dist(imq.rgb(W - 60, y), LIT) <= 3]
+_qm = (min(_qy) + max(_qy)) // 2 if _qy else RULE2 - 40
+xs = [x for x in range(W) if dist(imq.rgb(x, _qm), LIT) <= 3]
+ys = [y for y in range(BODY, RULE2) if dist(imq.rgb(int((min(xs) + max(xs)) / 2), y), LIT) <= 3]
 px0, px1, py0, py1 = min(xs), max(xs) + 1, min(ys), max(ys) + 1
 print(f"   popover x {px0}..{px1} (w {px1 - px0})  y {py0}..{py1} (h {py1 - py0})")
 print(f"   gap to window right {W - px1}, gap to bar {BAR - py1}")

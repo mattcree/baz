@@ -733,34 +733,68 @@ pub fn active() -> &'static Palette {
 // are the type scale of `.interface-design/system.md` §8, and a `text` widget
 // that sets a size without its leading is a review-blocking defect for the same
 // reason a hardcoded colour is (ADR-0006).
+//
+// # The leading is derived from the line box, not the other way round
+//
+// `docs/design/06-composition-audit.md` §2 measured the consequence of choosing
+// the factors first: the six line boxes came to 15.95, 16.20, 18.20, 20.25,
+// 22.80 and 32.20, **none of them a multiple of the spacing unit**, so every
+// stack of type in the product accumulated a different fractional error the
+// moment it had more than one line. Pooled over the whole application a 4 px
+// lattice caught 77–80 % of the drawn edges against a 75 % null — chance. There
+// was no vertical rhythm and there could not be one, because the type was not
+// in it.
+//
+// So the **line box** is the token now (law L2, `.interface-design/system.md`
+// §13), each an exact multiple of 4, and the leading is `LINE / SIZE`. The
+// quantisation cost at most 1.8 px on one token and it hands the system two
+// numbers it already wanted: `SIZE_BODY`'s box becomes 20, so [`LABEL_H`] is
+// **40 = [`HANG`]** and a wall label is exactly one hang tall; and caption and
+// meta collapse onto one 16 px box, so the bar's left zone is stacked out of two
+// numbers instead of five.
 
 /// Hints and footnotes (11 px).
 pub const SIZE_CAPTION: f32 = 11.0;
-/// Leading for [`SIZE_CAPTION`]: the loosest in the scale, because the smallest
-/// type is the type that needs the air.
-pub const LEADING_CAPTION: f32 = 1.45;
+/// Line box of [`SIZE_CAPTION`]: **16** — the loosest ratio in the scale,
+/// because the smallest type is the type that needs the air.
+pub const LINE_CAPTION: f32 = 16.0;
+/// Leading for [`SIZE_CAPTION`], derived from [`LINE_CAPTION`].
+pub const LEADING_CAPTION: f32 = LINE_CAPTION / SIZE_CAPTION;
 /// Metadata: captions, durations, status counts (12 px).
 pub const SIZE_META: f32 = 12.0;
-/// Leading for [`SIZE_META`].
-pub const LEADING_META: f32 = 1.35;
+/// Line box of [`SIZE_META`]: **16**, the same box the caption takes — one lane
+/// serves both of the room's two quiet voices.
+pub const LINE_META: f32 = 16.0;
+/// Leading for [`SIZE_META`], derived from [`LINE_META`].
+pub const LEADING_META: f32 = LINE_META / SIZE_META;
 /// Body: tile titles, track titles, control labels (13 px).
 pub const SIZE_BODY: f32 = 13.0;
+/// Line box of [`SIZE_BODY`]: **20**, and the largest single correction the
+/// quantisation made (from 18.2). Two of them are [`LABEL_H`] 40 = [`HANG`].
+pub const LINE_BODY: f32 = 20.0;
 /// Leading for [`SIZE_BODY`] — and, through [`CAPTION_LINE_H`], the height of
 /// a wall label's line.
-pub const LEADING_BODY: f32 = 1.40;
+pub const LEADING_BODY: f32 = LINE_BODY / SIZE_BODY;
 /// Emphasis: search text, panel artist, empty-state lines (15 px).
 pub const SIZE_EMPHASIS: f32 = 15.0;
-/// Leading for [`SIZE_EMPHASIS`].
-pub const LEADING_EMPHASIS: f32 = 1.35;
+/// Line box of [`SIZE_EMPHASIS`]: **20**, the same lane the body takes, so a
+/// heading and the line under it share a rhythm.
+pub const LINE_EMPHASIS: f32 = 20.0;
+/// Leading for [`SIZE_EMPHASIS`], derived from [`LINE_EMPHASIS`].
+pub const LEADING_EMPHASIS: f32 = LINE_EMPHASIS / SIZE_EMPHASIS;
 /// Titles: the side panel's album title (19 px).
 pub const SIZE_TITLE: f32 = 19.0;
-/// Leading for [`SIZE_TITLE`]: tight, because a two-line album title is one
-/// object and should look like one.
-pub const LEADING_TITLE: f32 = 1.20;
+/// Line box of [`SIZE_TITLE`]: **24** — tight, because a two-line album title
+/// is one object and should look like one.
+pub const LINE_TITLE: f32 = 24.0;
+/// Leading for [`SIZE_TITLE`], derived from [`LINE_TITLE`].
+pub const LEADING_TITLE: f32 = LINE_TITLE / SIZE_TITLE;
 /// Hero: the first-run question (28 px).
 pub const SIZE_HERO: f32 = 28.0;
-/// Leading for [`SIZE_HERO`]: the tightest in the scale.
-pub const LEADING_HERO: f32 = 1.15;
+/// Line box of [`SIZE_HERO`]: **32**, the tightest ratio in the scale.
+pub const LINE_HERO: f32 = 32.0;
+/// Leading for [`SIZE_HERO`], derived from [`LINE_HERO`].
+pub const LEADING_HERO: f32 = LINE_HERO / SIZE_HERO;
 
 /// The UI face at Regular: baz's default font, and the family every weight
 /// below is a member of.
@@ -848,13 +882,19 @@ pub const ART_TARGET: f32 = 272.0;
 /// rather than as a hope; `the_wall_never_draws_art_larger_than_its_source`
 /// asserts it.
 pub const ART_MAX: f32 = 320.0;
-/// Height of a wall label: two lines at [`SIZE_BODY`]'s leading, **36.4**.
+/// Height of a wall label: two lines at [`SIZE_BODY`]'s line box — **40**,
+/// which is exactly [`HANG`].
 ///
 /// The name `.interface-design/system.md` §8 gives [`CAPTION_H`], which is the
 /// same number in the module that draws it. Kept as an alias rather than
 /// collapsed, because the hang's row pitch is arithmetic about a *label* and
 /// the tile's reserved block is arithmetic about a *caption*, and they are the
-/// same 36.4 for a reason worth being able to state twice.
+/// same 40 for a reason worth being able to state twice.
+///
+/// It was **36.4**, and the change is the composition audit's §2.1 falling out
+/// rather than a number being retuned: quantising [`LINE_BODY`] to 20 makes a
+/// wall label exactly one hang tall, so the tile's pitch becomes `art + 96` and
+/// the label's block is on the same lattice as the wall it hangs on.
 pub const LABEL_H: f32 = CAPTION_H;
 
 // ---------------------------------------------------------------------------
@@ -874,14 +914,15 @@ pub const LABEL_H: f32 = CAPTION_H;
 /// ```text
 /// HANG                    40   the trailing hang of the row above (or the
 ///                              wall's own top hang, for the first shelf)
-/// HEADING_LINE_H          14   the header's line box
-/// SHELF_HEADER_H - line   26   clear wall, then the shelf's first row
+/// HEADING_LINE_H          12   the header's line box
+/// SHELF_HEADER_H - line   28   clear wall, then the shelf's first row
 /// ```
 ///
-/// Air above the ink is 40 and air below it is 26 — **20 : 13** — so a header
+/// Air above the ink is 40 and air below it is 28 — **10 : 7** — so a header
 /// sits nearer the shelf it names than the shelf it follows, which is the one
 /// thing a section heading has to say with position. Neither number was
-/// chosen: 40 is `HANG` and 26 is `HANG − HEADING_LINE_H`.
+/// chosen: 40 is `HANG` and 28 is `HANG − HEADING_LINE_H`, and both are now on
+/// the 4 px lattice because the header's line box is (law L2).
 ///
 /// It is also what makes the sticky header exact. The band is `HANG`, the
 /// trailing hang of the row above is `HANG`, so the scroll offset at which a
@@ -895,7 +936,18 @@ pub const SHELF_HEADER_H: f32 = HANG;
 ///
 /// The rail is **type, not chrome**: no ground, no edge, no chips. This is the
 /// width its type is laid out in, not the width of a widget with a background.
-pub const INDEX_W: f32 = 36.0;
+///
+/// **60, where ADR-0017 §1.7 first said 36** — an amendment recorded on that
+/// ADR, and it is a correction rather than a preference. At 36 the lane clipped
+/// `Unknown`, every recency bucket (`This month`, `This year`, `Earlier`) and
+/// most genre names: it held the letters of the ARTIST key and failed for three
+/// of the five keys the wall can be arranged by, which is a rail that only
+/// works in one arrangement. 60 holds every label the keys can *produce* except
+/// arbitrary genre names — and those still elide, with the full value set in the
+/// shelf header one gutter to the left, in the same voice, at the same moment.
+/// `crate::font`'s `the_index_rail_holds_the_labels_its_keys_produce` measures
+/// the whole set against this number.
+pub const INDEX_W: f32 = 60.0;
 
 /// Clearance between the wall's scrollbar and the rail's ink.
 ///
@@ -906,27 +958,29 @@ pub const INDEX_W: f32 = 36.0;
 pub const INDEX_CLEARANCE: f32 = GAP_SM;
 
 /// What the rail costs the wall: the scrollbar's clearance, the rail's ink
-/// lane, and the gutter between the lane and the window's edge — **60**.
+/// lane, and the gutter between the lane and the window's edge — **108**.
 ///
 /// Three tokens and no new number:
 ///
 /// ```text
 ///  8  INDEX_CLEARANCE   the wall's scrollbar is on the other side of this
-/// 36  INDEX_W           the rail's type
-/// 16  GAP_LG            the gutter to the window's edge
+/// 60  INDEX_W           the rail's type
+/// 40  HANG              the gutter to the window's edge
 /// ```
 ///
-/// The right gutter is [`GAP_LG`] because that is the top bar's own horizontal
-/// padding, so **the rail's right edge is the same x as the `Settings` word
-/// above it**: the rail borrows an alignment edge the bar already established
-/// rather than introducing one.
+/// The right gutter is [`HANG`] because **there is one window gutter**
+/// (law L1): every surface that touches a window edge hangs from `x = HANG` and
+/// `x = W − HANG`, and the rail's right edge is therefore the same x as the
+/// `Settings` word above it and the same x as the last column of covers. It was
+/// [`GAP_LG`], which put it on the *old* chrome gutter of 16 and made the rail
+/// the only thing on the wall that did not line up with the wall.
 ///
 /// With the grid resolved for `width − INDEX_LANE_W`, the hang then leaves
 /// exactly [`HANG`] between the last column of covers and the start of the
 /// rail's lane — the rail hangs off the wall at the same distance as every
 /// work hangs off its neighbour. That is asserted over the whole width band by
 /// `the_rail_lane_hangs_at_exactly_one_hang_from_the_last_column`.
-pub const INDEX_LANE_W: f32 = INDEX_CLEARANCE + INDEX_W + GAP_LG;
+pub const INDEX_LANE_W: f32 = INDEX_CLEARANCE + INDEX_W + HANG;
 
 /// Group heading type: **10 px**, the caps size the critique names ("9–10 px
 /// caps at ink 40 %, the only chrome voice").
@@ -935,25 +989,26 @@ pub const INDEX_LANE_W: f32 = INDEX_CLEARANCE + INDEX_W + GAP_LG;
 /// because a heading in this direction is the quietest thing on the wall
 /// rather than the loudest.
 pub const SIZE_HEADING: f32 = 10.0;
-/// Leading for [`SIZE_HEADING`] — [`LEADING_BODY`]'s, so the band's arithmetic
-/// lands on a whole pixel (10 × 1.40 = 14.0) rather than on 14.5.
-pub const LEADING_HEADING: f32 = 1.40;
-/// A heading's line box: **14.0** (module docs on [`SHELF_HEADER_H`]).
-pub const HEADING_LINE_H: f32 = SIZE_HEADING * LEADING_HEADING;
+/// Line box of [`SIZE_HEADING`]: **12** — the tightest lane in the scale, and a
+/// multiple of 4 like every other (law L2). It was 14, which is the one number
+/// in the type scale that the audit's six-token table did not reach and the one
+/// that kept the shelf break's arithmetic off the lattice.
+pub const LINE_HEADING: f32 = 12.0;
+/// Leading for [`SIZE_HEADING`], derived from [`LINE_HEADING`].
+pub const LEADING_HEADING: f32 = LINE_HEADING / SIZE_HEADING;
+/// A heading's line box: **12** (module docs on [`SHELF_HEADER_H`]).
+pub const HEADING_LINE_H: f32 = LINE_HEADING;
 
-/// One rail entry's line box.
+/// One rail entry's line box — the heading's, because the rail speaks the
+/// shelf header's voice in a column instead of a line.
+pub const RAIL_LINE_H: f32 = LINE_HEADING;
+/// Rail entry pitch: the line box and the gap to the next entry — **20**.
 ///
-/// [`LEADING_CAPTION`] rather than [`LEADING_HEADING`], because the rail is a
-/// *column* of small type where the shelf header is a single line of it, and
-/// §7.2 sets the spine index at 1.45 for exactly that reason: the smallest
-/// type is the type that needs the air.
-pub const RAIL_LINE_H: f32 = SIZE_HEADING * LEADING_CAPTION;
-/// Rail entry pitch: the line box and the gap to the next entry.
-///
-/// [`GAP_XS`] is the smallest gap in the ladder, which is what a ruler wants —
-/// the entries have to read as one run of type rather than as a list of
-/// separate labels.
-pub const RAIL_PITCH: f32 = RAIL_LINE_H + GAP_XS;
+/// [`GAP_SM`] rather than [`GAP_XS`], because the lane's own line box came down
+/// to 12 and §7.2's *the smallest type is the type that needs the air* has to be
+/// spent somewhere: it is now spent on the gap rather than on the leading, which
+/// keeps the pitch on the 4 px lattice where a 14.5 px line box never could be.
+pub const RAIL_PITCH: f32 = RAIL_LINE_H + GAP_SM;
 
 /// The letter-spacing baz applies to a heading, as the string it is spelled
 /// with: U+2009 THIN SPACE, one fifth of an em.
@@ -1035,7 +1090,12 @@ pub const RAIL: f32 = 4.0;
 /// seek bar. A 4 px groove is a 4 px target, which is a miss waiting to
 /// happen (Fitts); the pointer gets a band an order of magnitude taller to
 /// aim at, and the cursor changes across the whole of it.
-pub const HIT_SLOP: f32 = 9.0;
+///
+/// **10, where it was 9**: [`RAIL_HIT`] is a reserved slot height and law L2
+/// puts every reserved slot on the 4 px lattice, so the band is 24 rather than
+/// 22. The target got larger, which is the only direction a hit band is allowed
+/// to move.
+pub const HIT_SLOP: f32 = 10.0;
 /// Hit height of the seek bar: the groove plus [`HIT_SLOP`] on each side.
 /// The widget draws the rail centered in it.
 pub const RAIL_HIT: f32 = RAIL + 2.0 * HIT_SLOP;
@@ -1057,10 +1117,20 @@ pub const SEEK_W: f32 = 260.0;
 /// 50.21 px in Plex Sans, which it holds with 1.79 px to spare. `crate::font`
 /// measures both.
 pub const STAMP_W: f32 = 52.0;
-/// Height of the lane the hover preview floats in, directly above the
-/// groove. Reserved whether or not anything is hovering, so the bottom bar
-/// never changes height under the pointer.
-pub const PREVIEW_H: f32 = 15.0;
+/// Height of the lane the hover preview floats in, directly above the groove.
+///
+/// **16, where it was 15**, and — for the *seek* groove — it is no longer a row
+/// in the bar's centre column. The audit's defect 2 is that the bar centres its
+/// zones as blocks, so the transport ends up 22.5 px above the bar's own
+/// mid-line; the arithmetic of putting it back is unforgiving (see
+/// [`BAR_LEAD`]), and 40 px of reserved lane below the transport is what made it
+/// impossible. The tip is drawn as a **layer over the [`BAR_LEAD`] gap** it
+/// already floated in instead — the same pixels, the same distance above the
+/// rail, and no height at all.
+///
+/// It is still a reserved *lane* in the volume block, which is symmetric about
+/// its own rail ([`VOLUME_ROW_H`]) and needs no such trick.
+pub const PREVIEW_H: f32 = 16.0;
 /// Width of the hover-preview tip: enough for `h:mm:ss` at [`SIZE_CAPTION`]
 /// plus its padding, fixed so the tip can be centered on the pointer without
 /// measuring text.
@@ -1102,32 +1172,21 @@ pub const DETENT_GAP: f32 = 2.0;
 /// the knob and the detent mark above it. Taller than [`RAIL_HIT`] because
 /// the mark has to live somewhere the handle is not.
 pub const VOLUME_HIT: f32 = RAIL + 2.0 * (KNOB + DETENT_GAP + DETENT_H);
-/// Distance from the top of the volume block to the top of the mute button
-/// (logical px) — the lift that puts the mute glyph **on the fader's rail**.
+/// Height of the volume block: a level-preview lane, the groove's hit band, and
+/// **an empty lane of the same height under it** — 16 + 28 + 16 = **60**.
 ///
-/// The one alignment defect a listener named unprompted, measured
-/// (`docs/design/04-fluidity.md`): the block's fader column is the preview lane
-/// over the groove's hit band, so its rail runs at `PREVIEW_H + VOLUME_HIT / 2`
-/// = 29 px from the top. Centred in the row, a [`TRANSPORT_HIT`] button put its
-/// glyph at 21.5 — **7.5 px**, exactly half the preview lane, above the line it
-/// is supposed to be a pair with. Confirmed on the render at 809.0 against
-/// 816.5.
+/// The empty lane is the whole point and it is law L4 made structural: the block
+/// is *symmetric about its own rail*, so centring the block in the bar centres
+/// the **rail**, not the block. It was `PREVIEW_H + VOLUME_HIT` = 45 with a
+/// preview lane on top and nothing below, which put the rail 6.5 px below the
+/// bar's mid-line and made the mute glyph — lifted to meet it by a `MUTE_TOP`
+/// constant that no longer exists — 6.5 px low with it.
 ///
-/// So the button is placed rather than centred: half a hit target above the
-/// rail, which is the definition of *on* it. It is the same fix `seek_stamp`
-/// already makes for the timestamps flanking the seek groove, and the same
-/// argument.
-pub const MUTE_TOP: f32 = PREVIEW_H + VOLUME_HIT / 2.0 - TRANSPORT_HIT / 2.0;
-/// Height of the volume block: the level-preview lane over the groove, and
-/// enough room under it for the mute button to sit on the rail.
-///
-/// **45, where it was 43** ([`PREVIEW_H`] + [`VOLUME_HIT`]). Lifting the mute
-/// button onto the rail ([`MUTE_TOP`]) puts its bottom edge 2 px past the
-/// groove's band; the row grows to meet it rather than the target shrinking to
-/// fit, because [`TRANSPORT_HIT`] 32 is the accessibility floor and it is
-/// asserted. The bar's height is set by its centre column, which is 77 px, so
-/// those two pixels reach nothing.
-pub const VOLUME_ROW_H: f32 = MUTE_TOP + TRANSPORT_HIT;
+/// The lift is gone because the asymmetry that needed it is gone: the mute
+/// button is simply centred beside the fader, and both centres land on the
+/// bar's one line. One fewer constant, and one fewer number that had to be
+/// re-derived every time the block's contents changed.
+pub const VOLUME_ROW_H: f32 = 2.0 * PREVIEW_H + VOLUME_HIT;
 /// Width of the whole volume block — the mute affordance, a gap, the
 /// groove. Fixed, so neither a volume change, a mute, nor the fader's own
 /// hover can move anything beside it.
@@ -1233,10 +1292,89 @@ pub const GLYPH_OPACITY_PENDING: f32 = 0.42;
 /// readings.
 pub const GLYPH_OPACITY_DISABLED: f32 = 0.28;
 
-/// Height of the bottom bar's seek row: the hover-preview lane plus the
-/// groove's hit band. Reserved whether or not there is anything to seek, so
-/// the bar keeps its height from launch through play to stop.
-pub const SEEK_ROW_H: f32 = PREVIEW_H + RAIL_HIT;
+/// Height of the bottom bar's seek row: the groove's hit band, and nothing
+/// else. Reserved whether or not there is anything to seek, so the bar keeps its
+/// height from launch through play to stop.
+///
+/// **24, where it was `PREVIEW_H + RAIL_HIT` = 37.** The preview lane left the
+/// column and became a layer over the [`BAR_LEAD`] gap above the groove
+/// ([`PREVIEW_H`]); what is left is the band a pointer aims at.
+pub const SEEK_ROW_H: f32 = RAIL_HIT;
+
+/// The lane the bottom bar keeps **above and below** its transport row
+/// (logical px) — `GAP_SM` of clear recess and then the seek row, mirrored.
+///
+/// This is the composition audit's defect 2, expressed as one number. The bar
+/// used to be a row of three zones each `align_y(Center)`, which centres them as
+/// *blocks*: the centre column is `TRANSPORT_HIT + GAP_SM + SEEK_ROW_H`, so it
+/// set the bar's height and hung the transport at the **top** of it — 22.5 px
+/// above the bar's own mid-line, with the seek groove 27.5 px below it and the
+/// volume rail 6.5 px below that. Seven mark-lines in a 102 px band, and the
+/// mid-line carried nothing.
+///
+/// The fix is to make the centre column symmetric about the transport rather
+/// than to nudge anything: reserve `BAR_LEAD` above the transport row and spend
+/// `BAR_LEAD` below it on the gap and the groove. The transport's centre is then
+/// the band's centre by construction, at every width and in every state, and the
+/// flanking zones — which are centred in the same band — put their own marks on
+/// the same line.
+pub const BAR_LEAD: f32 = GAP_SM + SEEK_ROW_H;
+
+/// Height of the bottom bar's content band — **96**; the bar is this, a
+/// [`GAP_XS`] of padding on each side, and its hairline: **105**.
+///
+/// `2 × BAR_LEAD + TRANSPORT_HIT`, so **the band's mid-line is the transport's
+/// centre line** (law L4). It was 77 px of centre column inside 12 px of
+/// vertical padding, which came to the same 101 px of bar and put the transport
+/// nowhere near the middle of it.
+pub const BAR_CONTENT_H: f32 = 2.0 * BAR_LEAD + TRANSPORT_HIT;
+
+/// The bar's own vertical padding (logical px) — [`GAP_XS`], and **symmetric**.
+///
+/// Symmetry is the whole requirement: the band's mid-line is the transport's
+/// centre, and equal padding above and below moves both by the same amount, so
+/// the centring survives. Unequal padding would undo it, which is exactly how
+/// the bar came to hang its transport 22.5 px high in the first place.
+///
+/// It exists so the seek groove does not run into the window's bottom edge:
+/// with the seek row hanging below the centre line, zero padding put the
+/// groove's hit band flush against it.
+pub const BAR_PAD_V: f32 = GAP_XS;
+
+/// The bar's drawn height, hairline excluded — **104**.
+///
+/// The content band and its symmetric padding. Fixed rather than derived from
+/// whichever zone happens to be tallest, so no state of any zone can change how
+/// tall the bar is (the reserved-slot rule, applied to the bar itself).
+pub const BAR_BAND_H: f32 = BAR_CONTENT_H + 2.0 * BAR_PAD_V;
+
+/// Vertical padding of the top bar and of the Settings place's header strip
+/// (logical px) — the two strips that have to be one frame.
+pub const TOP_BAR_PAD_V: f32 = GAP_SM;
+
+/// Height of the top bar, hairline included — **49**.
+///
+/// `2 × TOP_BAR_PAD_V + TRANSPORT_HIT + 1`. It is stated here rather than
+/// estimated in `app.rs`, which is what the audit's §2.1 aside asked for: that
+/// constant was 56 against a drawn 53, and it is the virtualizer's pre-first-
+/// resize viewport estimate, so an estimate that disagreed with the drawing by
+/// three pixels was three pixels of shelf mis-virtualized on the first frame.
+pub const TOP_BAR_H: f32 = 2.0 * TOP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
+
+/// Vertical padding that makes a text well exactly [`TRANSPORT_HIT`] tall.
+///
+/// iced lays a `text_input` out as its padding plus one line box — the 1 px
+/// border is drawn *inside* those bounds and adds nothing — so the padding is
+/// the control height minus the line box, halved. **6.**
+///
+/// The `− 2.0` for the border is the mistake the shipped build made and the
+/// reason the well stood 30 px against a published floor of 32; it is measured
+/// off the render rather than reasoned about, in
+/// `docs/design/impl/composition/`. Both wells baz draws — the search field at
+/// [`LINE_BODY`] and the first-run folder field at [`LINE_EMPHASIS`] — take a
+/// 20 px line box, so there is **one** number rather than two that would drift:
+/// the search well used to stand 30 px and the first-run well 40 (law L7).
+pub const WELL_PAD_V: f32 = (TRANSPORT_HIT - LINE_BODY) / 2.0;
 /// Width of the bottom bar's centre column: a timestamp, the groove, a
 /// timestamp, and the gaps between them. The transport row centres itself
 /// over this, and the column is fixed so the whole block stays put.
@@ -1317,7 +1455,7 @@ pub const SETTING_VALUE_W: f32 = 60.0;
 /// pointer that just chose it. Two lines is the tallest note the panel's
 /// content width can produce (`a_setting_note_fits_the_slot_it_is_given`
 /// pins it), and the empty half-slot in the short cases costs nothing.
-pub const SETTING_NOTE_H: f32 = 2.0 * SIZE_META * LEADING_META;
+pub const SETTING_NOTE_H: f32 = 2.0 * LINE_META;
 
 /// The lane a scrolling list keeps clear for its scrollbar: padding on the
 /// right of the list's contents and nowhere else.
@@ -2034,7 +2172,14 @@ pub fn input(p: &Palette, status: text_input::Status) -> text_input::Style {
     let border_color = match status {
         text_input::Status::Focused => p.paper_ring(p.recess),
         text_input::Status::Hovered => p.hairline_strong(p.recess),
-        text_input::Status::Active | text_input::Status::Disabled => p.hairline(p.recess),
+        // **No ring at rest** — the composition audit's defect 6. A 360 × 30
+        // rectangle drawn around an empty field was 33.2 % of the whole top
+        // bar's contrast-weighted ink, which made the two loudest objects on the
+        // first frame baz draws a box around nothing and the grey instructions
+        // for it. The well is a *recess*: a surface step below the wall is what
+        // says "put something here", and it says it without a line. The edge
+        // comes back the moment the pointer or the keyboard arrives.
+        text_input::Status::Active | text_input::Status::Disabled => p.recess,
     };
     text_input::Style {
         background: Background::Color(p.recess),
@@ -2506,7 +2651,17 @@ pub const POSITION_W: f32 = 56.0;
 /// reading it. `views::bottom_bar` draws an empty strip in its place, and the
 /// zone's whole height stays under the centre column's, which is what keeps the
 /// bar's own height a property of the transport (asserted in both modules).
-pub const CONTINUATION_H: f32 = SIZE_CAPTION * LEADING_CAPTION;
+///
+/// # It is [`LINE_BODY`], not [`LINE_CAPTION`], and that is what centres the
+/// zone
+///
+/// The lane is 20 px for a 16 px line, and the four spare pixels buy law L4's
+/// second clause: *a zone taller than one line hangs its extra lines
+/// symmetrically about the bar's centre line*. The stack is title (20) · artist
+/// (16) · continuation (20) with [`GAP_XXS`] between, so the **artist's line box
+/// is exactly the block's middle** — centring the block therefore puts the
+/// zone's own centre line on the bar's, instead of 2 px off it.
+pub const CONTINUATION_H: f32 = LINE_BODY;
 
 /// Width of the bar's **Queue** control (logical px) — the label, the
 /// [`POSITION_W`] readout, and the padding around them.
@@ -2550,6 +2705,36 @@ pub const SETTINGS_NAV_W: f32 = 200.0;
 /// space is left rather than centred in it, so the form stays anchored to the
 /// section list that names it.
 pub const SETTINGS_CONTENT_W: f32 = 640.0;
+
+/// Greatest width the Settings place gives its content at a **wide** window
+/// (logical px) — the top of the comfortable measure, 880.
+///
+/// The audit's defect 9: [`SETTINGS_CONTENT_W`] was a constant, so the form's
+/// right edge was 878 at a 1280 px window *and* at a 1920 px one — 0.686 W and
+/// then **0.457 W**, with a thousand pixels of empty wall beside it. A measure
+/// should not grow without limit and it should not refuse to grow at all;
+/// [`crate::views::settings`] aims at half the window and clamps into
+/// `[SETTINGS_CONTENT_W, SETTINGS_CONTENT_MAX]`, which holds the form between
+/// 55 and 75 characters at [`SIZE_BODY`] across every shipped width.
+pub const SETTINGS_CONTENT_MAX: f32 = 880.0;
+
+/// Edge of the album inspector's sleeve (logical px) — **120**.
+///
+/// The audit's defect 5, and the clearest hierarchy inversion it measured: the
+/// sleeve was `PANEL_W − 2 × GAP_XL` = 292, which is **93.6 % of the panel's
+/// contrast-weighted ink**, and it is a second, larger copy of a work already on
+/// screen 24 px to the left. The album's own *name* came fifth of eight in its
+/// own inspector, at 1/164th of the picture's weight.
+///
+/// At 120 the sleeve's share falls to 71.2 % and the title, the artist and the
+/// track list together rise from 3.6 % to 21 % — which is the order the panel
+/// declares (law L6). The sleeve is not deleted, because *which record is this*
+/// is answered fastest by the cover; it stops being the answer to every other
+/// question as well.
+///
+/// A constant rather than a fraction of [`PANEL_W`]: it is a thumbnail of a
+/// known object at a known size, and it should not grow when the column does.
+pub const INSPECTOR_SLEEVE: f32 = 120.0;
 
 /// Window width below which the Settings place stacks into one column
 /// (logical px).
@@ -2697,9 +2882,13 @@ pub const FIELD_LABEL_W: f32 = 96.0;
 /// Tighter than the [`SIZE_META`] line box the block's type would otherwise
 /// take, deliberately: a dozen fields at a comfortable reading leading is a
 /// page, and this is a reference table you scan rather than prose you read —
-/// the back of the record's card. It is the same figure
-/// `.interface-design/system.md` §9 names.
-pub const DETAIL_ROW_H: f32 = 17.0;
+/// the back of the record's card.
+///
+/// **16, where it was 17.** A reserved slot height is a multiple of 4 (law L2),
+/// and 16 is [`LINE_META`] exactly — the row is one line of its own type and
+/// nothing more, which is a tighter statement of the same intent than a number
+/// a pixel above it.
+pub const DETAIL_ROW_H: f32 = LINE_META;
 
 /// How far a missing sleeve's placeholder gradient is pulled back toward the
 /// room's recess: **0.62 of the way**. Applied by
@@ -2794,8 +2983,13 @@ mod tests {
         // there is no expression anywhere above that could vary one of them.
         const { assert!(TRANSPORT_HIT == 32.0) }
         const { assert!(ICON_PX == 16.0) }
-        const { assert!(SEEK_ROW_H == PREVIEW_H + RAIL_HIT) }
-        const { assert!(VOLUME_ROW_H == MUTE_TOP + TRANSPORT_HIT) }
+        const { assert!(SEEK_ROW_H == RAIL_HIT) }
+        const { assert!(VOLUME_ROW_H == 2.0 * PREVIEW_H + VOLUME_HIT) }
+        // The band the bar draws in, and the lane that centres the transport in
+        // it — both constants, so no transition can move the one line every
+        // mark in the bar sits on (law L4).
+        const { assert!(BAR_CONTENT_H == 2.0 * BAR_LEAD + TRANSPORT_HIT) }
+        const { assert!(BAR_LEAD == GAP_SM + SEEK_ROW_H) }
         // …and the popover the bar anchors rises in a layer whose inner height
         // never changes, so the layer above the bar cannot push it either.
         for step in 0..=20_u8 {
@@ -3002,10 +3196,17 @@ mod tests {
     fn the_bottom_bar_reserves_the_seek_row_whether_or_not_it_has_one() {
         // The bar must not change height when a track starts or ends, so the
         // reserved strip has to be exactly what the real row occupies: the
-        // preview lane above the groove's hit band.
-        assert!((SEEK_ROW_H - (PREVIEW_H + RAIL_HIT)).abs() < f32::EPSILON);
-        // The lane is part of the row's height, not decoration on top of it.
-        const { assert!(SEEK_ROW_H > RAIL_HIT) }
+        // groove's hit band.
+        assert!((SEEK_ROW_H - RAIL_HIT).abs() < f32::EPSILON);
+        // The hover preview is a **layer** over the `GAP_MD` the row already
+        // keeps between the transport and the groove, so it costs the column no
+        // height at all — which is the whole reason the transport can sit on the
+        // bar's own centre line ([`BAR_LEAD`], law L4). The lane it floats in is
+        // still reserved; it is reserved by the gap rather than by a row.
+        const { assert!(PREVIEW_H <= GAP_SM + HIT_SLOP) }
+        // And the row plus that gap is exactly the lane mirrored above the
+        // transport, or the transport would not be centred.
+        const { assert!(GAP_SM + SEEK_ROW_H == BAR_LEAD) }
         // And its width is the groove plus a fixed stamp on each side, so
         // the centre column never resizes as the digits tick.
         assert!((SEEK_ROW_W - (SEEK_W + 2.0 * (STAMP_W + GAP_SM))).abs() < f32::EPSILON);
@@ -3045,36 +3246,34 @@ mod tests {
     #[test]
     fn the_left_zone_reserves_the_continuation_line_whether_or_not_it_has_one() {
         /// The zone's whole height with the third line in it: title, artist,
-        /// continuation, the gaps between them, and the Queue control's
-        /// vertical padding.
-        const LEFT_H: f32 = SIZE_BODY * LEADING_BODY
-            + GAP_XXS
-            + SIZE_META * LEADING_META
-            + GAP_XXS
-            + CONTINUATION_H
-            + 2.0 * GAP_XS;
-        /// The transport over its seek row — what the bar's height is a
-        /// property of, and must go on being.
-        const CENTRE_H: f32 = TRANSPORT_HIT + GAP_SM + SEEK_ROW_H;
+        /// continuation and the gaps between them. Every lane is reserved, so
+        /// this is the zone's height in *every* state rather than its tallest.
+        const LEFT_H: f32 = LINE_BODY + GAP_XXS + LINE_META + GAP_XXS + CONTINUATION_H;
 
-        // 1. The lane is exactly one line of the type that draws it, so the
-        //    strip reserved when there is nothing to say is the same height as
-        //    the line that says something.
-        assert!((CONTINUATION_H - SIZE_CAPTION * LEADING_CAPTION).abs() < f32::EPSILON);
+        // 1. The lane holds one line of the type that draws it with air to
+        //    spare, so the strip reserved when there is nothing to say is the
+        //    same height as the line that says something.
+        const { assert!(CONTINUATION_H >= LINE_CAPTION) }
         // 2. It is the quietest rung of the zone: smaller than the artist line
         //    under the title, which is itself smaller than the title. A
         //    continuation set as loud as the music playing would be a claim
-        //    about the wrong thing.
+        //    about the wrong thing. (The *lane* is `LINE_BODY`; the type in it
+        //    is `SIZE_CAPTION`, and the two are different claims.)
         const { assert!(SIZE_CAPTION < SIZE_META && SIZE_META < SIZE_BODY) }
-        // 3. The whole zone is still shorter than the centre column, so the
-        //    bar's height stays a property of the transport and the
+        // 3. The whole zone is still shorter than the bar's content band, so
+        //    the bar's height stays a property of the transport and the
         //    continuation appearing cannot grow it. This is the same claim
         //    `views::bottom_bar` asserts against the composed row; it is stated
         //    here too because the numbers are this module's.
-        const { assert!(LEFT_H < CENTRE_H) }
+        const { assert!(LEFT_H < BAR_CONTENT_H) }
         // And it fits with room to spare rather than by a rounding error — a
         // whole gap's worth, so the reading survives a leading being nudged.
-        const { assert!(LEFT_H + GAP_MD < CENTRE_H) }
+        const { assert!(LEFT_H + GAP_MD < BAR_CONTENT_H) }
+        // 4. **The stack is symmetric about its middle lane** (law L4): the
+        //    title's lane and the continuation's are the same height, so the
+        //    artist's line box is the block's exact centre and centring the
+        //    block puts the zone's line on the bar's.
+        const { assert!(CONTINUATION_H == LINE_BODY) }
     }
 
     /// The popover is an overlay, and an overlay's whole promise is that it
@@ -3367,20 +3566,22 @@ mod tests {
     ///
     /// The ratio is stated here as well as in the doc comment, because it is
     /// the thing a ruler held up to a screenshot measures: **40 px of air above
-    /// a header's ink and 26 below it**, which puts a header nearer the shelf
+    /// a header's ink and 28 below it**, which puts a header nearer the shelf
     /// it names than the shelf it follows.
     #[test]
     fn a_shelf_break_is_a_hang_and_the_type_inside_it() {
         // The band is the hang, exactly.
         const { assert!(SHELF_HEADER_H == HANG) }
-        // The line box is the heading size at its own leading, and it lands on
-        // a whole pixel — 10 × 1.40 — rather than on a half one.
-        assert!((HEADING_LINE_H - 14.0).abs() < f32::EPSILON);
-        assert!((HEADING_LINE_H - SIZE_HEADING * LEADING_HEADING).abs() < f32::EPSILON);
+        // The line box is the heading's own, and — like every line box in the
+        // scale — it is a multiple of the 4 px unit (law L2), so a shelf break
+        // is three numbers and all three are on the lattice.
+        assert!((HEADING_LINE_H - 12.0).abs() < f32::EPSILON);
+        assert!((HEADING_LINE_H - LINE_HEADING).abs() < f32::EPSILON);
+        assert!((HEADING_LINE_H - SIZE_HEADING * LEADING_HEADING).abs() < 1e-4);
         // Air above the ink is the row above's trailing hang; air below is
         // whatever the band has left. Both are derived, neither is chosen.
         let below = SHELF_HEADER_H - HEADING_LINE_H;
-        assert!((below - 26.0).abs() < f32::EPSILON);
+        assert!((below - 28.0).abs() < f32::EPSILON);
         assert!(
             HANG > below,
             "a header must sit nearer the shelf it names ({below}) than the \
@@ -3394,25 +3595,27 @@ mod tests {
     }
 
     /// **The index rail costs the wall three tokens and no new number**, and
-    /// its right edge is the top bar's own gutter.
+    /// its right edge is the window's one gutter.
     #[test]
     fn the_index_rail_borrows_every_edge_it_stands_on() {
         // What the wall gives up is the clearance, the lane and the gutter.
-        assert!((INDEX_LANE_W - (INDEX_CLEARANCE + INDEX_W + GAP_LG)).abs() < f32::EPSILON);
-        assert!((INDEX_LANE_W - 60.0).abs() < f32::EPSILON);
-        // The lane is the width ADR-0017 §1.7 gives it, and the gutter to the
-        // window's edge is the top bar's own horizontal padding — the `Settings`
-        // word above the rail is set against the same x.
-        assert!((INDEX_W - 36.0).abs() < f32::EPSILON);
+        assert!((INDEX_LANE_W - (INDEX_CLEARANCE + INDEX_W + HANG)).abs() < f32::EPSILON);
+        assert!((INDEX_LANE_W - 108.0).abs() < f32::EPSILON);
+        // The lane is the width ADR-0017 §1.7 gives it **as amended** — 60,
+        // where 36 clipped `Unknown`, every recency bucket and most genres — and
+        // the gutter to the window's edge is `HANG`, the one gutter every
+        // window-edge surface hangs from (law L1). The `Settings` word above the
+        // rail is set against the same x, and so is the last column of covers.
+        assert!((INDEX_W - 60.0).abs() < f32::EPSILON);
         const { assert!(INDEX_CLEARANCE == GAP_SM) }
         // The clearance really does clear the scrollbar, which sits in the
         // grid's right margin immediately left of the lane.
         const { assert!(INDEX_CLEARANCE > 0.0 && INDEX_CLEARANCE < SCROLLBAR_LANE) }
-        // A rail entry's pitch is its line box and the ladder's smallest gap,
-        // and 27 letters fit the shortest wall a window can produce (860 px of
-        // window less the two bars).
-        assert!((RAIL_LINE_H - SIZE_HEADING * LEADING_CAPTION).abs() < f32::EPSILON);
-        assert!((RAIL_PITCH - (RAIL_LINE_H + GAP_XS)).abs() < f32::EPSILON);
+        // A rail entry's pitch is its line box and a gap, both on the 4 px
+        // lattice, and 27 letters fit the shortest wall a window can produce
+        // (860 px of window less the two bars).
+        assert!((RAIL_LINE_H - LINE_HEADING).abs() < f32::EPSILON);
+        assert!((RAIL_PITCH - (RAIL_LINE_H + GAP_SM)).abs() < f32::EPSILON);
         const { assert!(27.0 * RAIL_PITCH < 640.0) }
     }
 
@@ -3451,22 +3654,21 @@ mod tests {
         // height is the level lane over the fader. Both fixed, in every
         // state, so no volume change and no mute can move a pixel beside it.
         assert!((VOLUME_BLOCK_W - (TRANSPORT_HIT + GAP_SM + VOLUME_W)).abs() < f32::EPSILON);
-        // The row holds the level lane over the fader **and** the mute button
-        // lifted onto the fader's rail, whichever is taller — which is the
-        // button, by two pixels.
-        const { assert!(VOLUME_ROW_H >= PREVIEW_H + VOLUME_HIT) }
-        assert!((VOLUME_ROW_H - (MUTE_TOP + TRANSPORT_HIT)).abs() < f32::EPSILON);
-        // **The mute glyph sits on the rail.** The button's centre and the
-        // groove's rail centre are the same pixel — this is the assertion that
-        // keeps them there, because both are derived numbers and either could
-        // drift without the other.
+        // The row holds a level lane, the fader, and a lane of the same height
+        // under it — and the mute target fits inside that.
+        const { assert!(VOLUME_ROW_H == 2.0 * PREVIEW_H + VOLUME_HIT) }
+        const { assert!(VOLUME_ROW_H >= TRANSPORT_HIT) }
+        // **The mute glyph sits on the rail, and now it does so by symmetry.**
+        // The block's centre *is* the fader's rail centre, so a mute button
+        // centred in the block lands on it — where the shipped build bought the
+        // same alignment with a `MUTE_TOP` offset that had to be re-derived
+        // whenever either lane changed. This is also law L4's right-hand mark:
+        // centring the block centres the rail, and the rail is what the bar's
+        // one line has to carry.
         assert!(
-            ((MUTE_TOP + TRANSPORT_HIT / 2.0) - (PREVIEW_H + VOLUME_HIT / 2.0)).abs()
-                < f32::EPSILON,
-            "the mute button is not centred on the fader's rail"
+            ((VOLUME_ROW_H / 2.0) - (PREVIEW_H + VOLUME_HIT / 2.0)).abs() < f32::EPSILON,
+            "the volume block is not symmetric about the fader's rail"
         );
-        // And the lift never pushes the button off the top of its own block.
-        const { assert!(MUTE_TOP >= 0.0) }
         // The level tip must hold `-18.1 dB` — four figures at caption size,
         // plus the proportional remainder `crate::font` measures — without
         // clipping.
@@ -4710,6 +4912,411 @@ mod tests {
             faces.len(),
             crate::font::FACES.len(),
             "the bundled faces and the shipped files disagree: {faces:?}"
+        );
+    }
+
+    // =======================================================================
+    // The seven composition laws (`.interface-design/system.md` §13)
+    //
+    // `docs/design/06-composition-audit.md` §9 proposes them and says why each
+    // has to be pinned: *a rule which is not pinned drifts*, which the accent
+    // discipline and the contrast floors have both already demonstrated from
+    // the other side. One test per law, named for it, and each one fails on the
+    // thing the audit actually measured rather than on a paraphrase of it.
+    //
+    // Three of the seven (L1, L3, L5) are read out of the view sources, in the
+    // shape `no_monospace_survives_anywhere_in_the_crate` established: they are
+    // claims about *composition*, and no style function is involved, so nothing
+    // else in the crate can see them.
+    // =======================================================================
+
+    /// **L1 — one gutter per window edge.**
+    ///
+    /// Every surface that touches a window edge hangs from `x = HANG` and
+    /// `x = W − HANG`. `GAP_LG` is a gap *between* things and `GAP_XL` is
+    /// padding *inside* a panel; neither is ever a window margin.
+    ///
+    /// The audit's defect 1, and the highest-yield measurement it made: the
+    /// chrome hung from 16, the panels from 24 and the collection from 40, so
+    /// **nothing in either bar was aligned with anything on the wall, at either
+    /// width, by exactly 24 px**. Six of the wall's sixteen x-edges were
+    /// singletons because of it.
+    ///
+    /// There are four such surfaces and this names all four, by the literal a
+    /// reviewer would have to change to break it.
+    #[test]
+    fn one_gutter_touches_every_window_edge() {
+        let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
+        let read = |name: &str| {
+            std::fs::read_to_string(views.join(name)).expect("a view module baz ships")
+        };
+        // The top strip, in both places — they are one frame and must hang from
+        // one line, or navigating between them would slide the content area.
+        let expected = "theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)";
+        for name in ["top_bar.rs", "settings.rs"] {
+            assert!(
+                read(name).contains(expected),
+                "{name} no longer hangs its window-edge strip from HANG"
+            );
+        }
+        // The now-playing bar. Its vertical padding is zero because the band is
+        // `BAR_CONTENT_H` and the lane that centres the transport is inside it.
+        assert!(
+            read("bottom_bar.rs").contains("theme::pad(theme::BAR_PAD_V, theme::HANG)"),
+            "the bottom bar no longer hangs from HANG"
+        );
+        // The Settings **place** — a place fills the window, so its content
+        // hangs from the window's gutter and not from a panel's padding.
+        assert!(
+            read("settings.rs").contains("const PLACE_PAD: f32 = theme::HANG;"),
+            "the Settings place no longer hangs from HANG"
+        );
+        // And the index rail, which is the wall's own right-hand edge.
+        assert!(
+            read("shelf.rs").contains("right: theme::HANG,"),
+            "the index rail no longer hangs from HANG"
+        );
+        // The lane arithmetic agrees: the rail's gutter is the same token.
+        const { assert!(INDEX_LANE_W == INDEX_CLEARANCE + INDEX_W + HANG) }
+        // A panel's *internal* padding is a different edge and stays `GAP_XL`:
+        // the law is about window edges, and collapsing the two would be the
+        // opposite error.
+        const { assert!(GAP_XL != HANG) }
+    }
+
+    /// **L2 — the vertical unit is 4, and the type is inside it.**
+    ///
+    /// Every gap, every reserved slot height, every control height **and every
+    /// line box** is an exact multiple of 4. A leading is chosen so that
+    /// `size × leading` is a multiple of 4, not the other way round.
+    ///
+    /// This is the audit's defect 3 and its cause in one test. Pooled over the
+    /// whole application a 4 px lattice caught 77–80 % of the drawn chrome edges
+    /// against a 75 % null — indistinguishable from chance — and the reason was
+    /// that the six line boxes were 15.95, 16.20, 18.20, 20.25, 22.80 and 32.20.
+    /// Compile-time, so it fails the build rather than the review.
+    #[test]
+    fn the_vertical_unit_is_four_and_the_type_is_in_it() {
+        /// Whether `value` is a whole multiple of the base unit.
+        ///
+        /// The round trip through `i32` is the whole test — a value on the
+        /// lattice survives it exactly, and one off it does not — so the three
+        /// pedantic lints it trips are the mechanism rather than a hazard. Every
+        /// input is a spacing token between 0 and a few hundred.
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_precision_loss,
+            clippy::float_cmp,
+            reason = "truncate-and-compare *is* the lattice test, over values \
+                      that are small non-negative token constants"
+        )]
+        const fn on_lattice(value: f32) -> bool {
+            value >= 0.0 && (value / 4.0) as i32 as f32 * 4.0 == value
+        }
+        // The six line boxes the audit tabulated, and the seventh the scale has
+        // below them.
+        const {
+            assert!(on_lattice(LINE_CAPTION));
+            assert!(on_lattice(LINE_META));
+            assert!(on_lattice(LINE_BODY));
+            assert!(on_lattice(LINE_EMPHASIS));
+            assert!(on_lattice(LINE_TITLE));
+            assert!(on_lattice(LINE_HERO));
+            assert!(on_lattice(LINE_HEADING));
+        }
+        // …and the leading really is derived from the box rather than beside it,
+        // which is the half of the law that stops the next size drifting off.
+        for (size, line, leading) in [
+            (SIZE_CAPTION, LINE_CAPTION, LEADING_CAPTION),
+            (SIZE_META, LINE_META, LEADING_META),
+            (SIZE_BODY, LINE_BODY, LEADING_BODY),
+            (SIZE_EMPHASIS, LINE_EMPHASIS, LEADING_EMPHASIS),
+            (SIZE_TITLE, LINE_TITLE, LEADING_TITLE),
+            (SIZE_HERO, LINE_HERO, LEADING_HERO),
+            (SIZE_HEADING, LINE_HEADING, LEADING_HEADING),
+        ] {
+            assert!(
+                (size * leading - line).abs() < 1e-3,
+                "{size} px at {leading} draws a {} px line box, not {line}",
+                size * leading
+            );
+        }
+        // Every spacing token.
+        const {
+            assert!(on_lattice(GAP_XS));
+            assert!(on_lattice(GAP_SM));
+            assert!(on_lattice(GAP_MD));
+            assert!(on_lattice(GAP_LG));
+            assert!(on_lattice(GAP_XL));
+            assert!(on_lattice(HANG));
+        }
+        // Every reserved slot height the interface draws into.
+        const {
+            assert!(on_lattice(LABEL_H));
+            assert!(on_lattice(CAPTION_H));
+            assert!(on_lattice(CAPTION_LINE_H));
+            assert!(on_lattice(CONTINUATION_H));
+            assert!(on_lattice(SETTING_NOTE_H));
+            assert!(on_lattice(DETAIL_ROW_H));
+            assert!(on_lattice(SEEK_ROW_H));
+            assert!(on_lattice(RAIL_HIT));
+            assert!(on_lattice(VOLUME_HIT));
+            assert!(on_lattice(VOLUME_ROW_H));
+            assert!(on_lattice(PREVIEW_H));
+            assert!(on_lattice(SHELF_HEADER_H));
+            assert!(on_lattice(RAIL_LINE_H));
+            assert!(on_lattice(RAIL_PITCH));
+            assert!(on_lattice(BAR_LEAD));
+            assert!(on_lattice(BAR_CONTENT_H));
+            assert!(on_lattice(BAR_BAND_H));
+            assert!(on_lattice(BAR_PAD_V));
+        }
+        // Every control height.
+        const {
+            assert!(on_lattice(TRANSPORT_HIT));
+            assert!(on_lattice(STEPPER_HIT));
+            assert!(on_lattice(ICON_PX));
+        }
+        // The two numbers the quantisation was *for*: a wall label is exactly
+        // one hang, and the tile's pitch is therefore `art + 96`.
+        const { assert!(LABEL_H == HANG) }
+        const { assert!(GAP_LG + LABEL_H + HANG == 96.0) }
+        // GAP_XXS is the one deliberate half-step in the ladder — an intra-block
+        // line gap, never a slot — and it is named rather than silently on the
+        // lattice, because a law with an unnamed exception is a habit.
+        const { assert!(GAP_XXS == 2.0 && !on_lattice(GAP_XXS)) }
+    }
+
+    /// **L3 — optical centring: the box centres the ink, not the line box.**
+    ///
+    /// Content shorter than the box that holds it is centred in **both** axes by
+    /// the box. A `button` with a fixed height always states its content's
+    /// vertical alignment.
+    ///
+    /// The audit's defect 4, and it found the same bug twice: `Settings` sat
+    /// **6.4 px** above its own centre (so its baseline was 8 px off the counts
+    /// line it shares a row with) and `Play album` **6.0 px** above and
+    /// **86.5 px** left of its. Both were a `button` with a fixed `height` and
+    /// no vertical alignment on its content, which iced 0.13 lays out at the
+    /// top. Every glyph in a hit box was already centred to a pixel, which is
+    /// what makes these two a locatable mistake rather than a habit.
+    ///
+    /// Read from the sources: a fixed control height is a layout decision, and
+    /// no style function can see whether the thing inside it was aligned.
+    #[test]
+    fn a_fixed_box_states_how_its_content_is_centred() {
+        let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
+        let mut offenders: Vec<String> = Vec::new();
+        for path in rust_sources(&views) {
+            let source = std::fs::read_to_string(&path).expect("a view module baz ships");
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            for (at, _) in source.match_indices(".height(Length::Fixed(theme::TRANSPORT_HIT))") {
+                // The alignment may be stated on the content (composed *above*
+                // the call that fixes the box) or on the box itself (chained
+                // after it), so the window is the whole element expression —
+                // from the previous blank line to the next one.
+                let head = source[..at].rfind("\n\n").map_or(0, |index| index + 2);
+                let tail = source[at..]
+                    .find("\n\n")
+                    .map_or(source.len(), |index| at + index);
+                let block = &source[head..tail];
+                let centred =
+                    block.contains("Vertical::Center") || block.contains("Alignment::Center");
+                if !centred {
+                    let line = source[..at].matches('\n').count() + 1;
+                    offenders.push(format!("{name}:{line}"));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "a control fixes its height and does not say where its content \
+             sits in it: {offenders:?}\niced 0.13 lays unaligned content out at \
+             the *top* of a fixed box — which is how `Settings` ended up 6.4 px \
+             and `Play album` 6.0 px above their own centres."
+        );
+    }
+
+    /// **L4 — one centre line per bar.**
+    ///
+    /// A bar has one horizontal centre line and every *mark* in it sits on that
+    /// line. Zones are centred by their marks, never by their blocks.
+    ///
+    /// The geometry is asserted where the bar is composed —
+    /// `views::bottom_bar::every_mark_in_the_bar_sits_on_the_bars_one_centre_line`
+    /// — because the composition is what the law is about. What belongs here is
+    /// the token arithmetic that composition rests on, so the two cannot drift:
+    /// if either the band or the lane stops being derived, both tests fail.
+    #[test]
+    fn the_bar_has_one_centre_line_and_every_mark_is_on_it() {
+        // The band's mid-line is the transport's centre line.
+        const { assert!(BAR_CONTENT_H / 2.0 == BAR_LEAD + TRANSPORT_HIT / 2.0) }
+        // What hangs below the transport is exactly what is reserved above it.
+        const { assert!(BAR_LEAD == GAP_SM + SEEK_ROW_H) }
+        // The right zone's block is symmetric about its own rail, so centring
+        // the block centres the rail.
+        const { assert!(VOLUME_ROW_H / 2.0 == PREVIEW_H + VOLUME_HIT / 2.0) }
+        // The left zone's stack is symmetric about its middle lane, so centring
+        // the block centres the zone's own line.
+        const { assert!(CONTINUATION_H == LINE_BODY) }
+        // Every zone fits the band; none of them can be what sets the line.
+        const { assert!(VOLUME_ROW_H < BAR_CONTENT_H) }
+        // The padding is symmetric, so it moves the band without moving the line.
+        const { assert!(BAR_BAND_H == BAR_CONTENT_H + 2.0 * BAR_PAD_V) }
+        const { assert!(LINE_BODY + GAP_XXS + LINE_META + GAP_XXS + CONTINUATION_H < BAR_CONTENT_H) }
+        // The audit measured a **50 px** spread across seven mark-lines in a
+        // 102 px band. The law's ceiling is 2 px; what the tokens prove is that
+        // the three primary marks are on one line *exactly*, and the render pass
+        // (`composition/tools/census2.py`, "the marks") measures the rest.
+    }
+
+    /// **L5 — the permitted alignment edges, per surface.**
+    ///
+    /// Each surface declares its alignment edges; an element that introduces an
+    /// edge outside the list is a defect. This is the same discipline the
+    /// contrast exemption list already uses, and it is the measurement that
+    /// catches the next regression before a human sees it.
+    ///
+    /// The audit counted **8 distinct x-edges in the inspector's 340 px column,
+    /// 5 of them singletons**, and **four left edges in the popover's 358 px** —
+    /// 920, 924, 925, 941 — where two are a composition and four are a leak. In
+    /// both cases the extra edges came from one thing: a *row's own horizontal
+    /// padding*, applied inside a surface that had already stated its lane.
+    ///
+    /// So what is pinned here is that no list row inside a panel or a popover
+    /// carries a horizontal inset of its own. The full edge census is the render
+    /// pass (`docs/design/composition/tools/census2.py`), which is where the
+    /// counts in the table are read.
+    #[test]
+    fn every_surface_declares_the_edges_it_permits() {
+        let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
+        let read = |name: &str| {
+            std::fs::read_to_string(views.join(name)).expect("a view module baz ships")
+        };
+        // The two lists are the same twelve rows in two surfaces, and both hang
+        // from their surface's own content lane.
+        for name in ["side_panel.rs", "queue.rs"] {
+            let source = read(name);
+            assert!(
+                source.contains("theme::pad(theme::GAP_XS, 0.0)"),
+                "{name}'s rows carry a horizontal inset of their own"
+            );
+            assert!(
+                !source.contains("theme::pad(theme::GAP_XS, theme::GAP_XS)"),
+                "{name} still insets a row by GAP_XS, which is the 21-left / \
+                 14-right asymmetry the audit measured"
+            );
+        }
+        // The popover's album group sits on the header lane rather than 4 and
+        // 5 px inside it.
+        assert!(
+            read("queue.rs").contains("container(block).into()"),
+            "the popover's album group has an inset again"
+        );
+        // The scrollbar's lane is *declared* rather than absorbed: it is the one
+        // inset the right-hand edge is allowed, and it is a token both the bar
+        // and the gutter are built from.
+        const { assert!(SCROLLBAR_LANE == SCROLLBAR_W) }
+    }
+
+    /// **L6 — hierarchy is declared and then measured.**
+    ///
+    /// Each surface declares what a listener should notice first, second and
+    /// third; the measured order — contrast-weighted ink mass over the named
+    /// regions — must agree.
+    ///
+    /// The audit's defect 5 is what this exists for: **the album's name came
+    /// fifth of eight in its own inspector**, at 1/164th of the weight of a
+    /// picture already on the wall 24 px away, because the sleeve was *the panel
+    /// minus its two paddings* and nothing else. The declarations live in
+    /// `.interface-design/system.md` §13 and the measurement is the render pass
+    /// (`composition/tools/census5.py::ink_mass`), which is a slow test and does
+    /// not belong in the unit suite.
+    ///
+    /// What belongs here is the geometry that *decides* the measurement, stated
+    /// as the audit's own arithmetic: the sleeve's share of the panel's ink is a
+    /// function of one number, and this is that number held down.
+    #[test]
+    fn the_declared_hierarchy_is_the_geometry_that_produces_it() {
+        // The audit's table: sleeve edge against its share of the panel's ink.
+        // 292 → 93.6 %, 200 → 87.3 %, 160 → 81.5 %, 120 → 71.2 %, 84 → 54.8 %.
+        const { assert!(INSPECTOR_SLEEVE == 120.0) }
+        // It is a cap, not a fraction: the sleeve does not grow with the column,
+        // because it is a thumbnail of a known object at a known size.
+        const { assert!(INSPECTOR_SLEEVE < PANEL_W - 2.0 * GAP_XL) }
+        // And it leaves the panel's declared first item — the title — a lane
+        // more than twice the sleeve's own height to be read in.
+        const { assert!(PANEL_W - 2.0 * GAP_XL > INSPECTOR_SLEEVE) }
+        // The wall's inversion is deliberate and is declared as such: one sleeve
+        // is ~135× its label, and the label is not competing with it. The
+        // geometry that says so is the art-to-block ratio, which is stable.
+        const { assert!(ART_MIN > 4.0 * LABEL_H) }
+    }
+
+    /// **L7 — one control height.**
+    ///
+    /// Every pointer target is [`TRANSPORT_HIT`] 32 tall. The only exception is
+    /// [`STEPPER_HIT`] 24, and it is named.
+    ///
+    /// The audit's defect 7: the product stood at **five** heights — transport
+    /// 32, first-run input 40, search well 30, steppers 24, checkbox 13 — while
+    /// publishing a floor of 32, and `theme` asserted `TRANSPORT_HIT >= 32` and
+    /// `STEPPER_HIT < TRANSPORT_HIT` and nothing at all about the other three.
+    #[test]
+    fn the_product_stands_at_one_control_height() {
+        // The two heights, and the fact that there are two.
+        const { assert!(TRANSPORT_HIT == 32.0) }
+        const { assert!(STEPPER_HIT == 24.0) }
+        const { assert!(STEPPER_HIT < TRANSPORT_HIT) }
+        // A text well is a control: its padding is derived from the height it
+        // has to stand at, rather than the height falling out of its padding.
+        // 6 + a 20 px line box + 6 = 32, and iced draws the 1 px border inside
+        // those bounds rather than outside them — which is the half of the
+        // model the shipped build got wrong, and is measured off the render.
+        assert!(
+            (2.0f32.mul_add(WELL_PAD_V, LINE_BODY) - TRANSPORT_HIT).abs() < f32::EPSILON,
+            "a text well no longer stands at the product's one control height"
+        );
+        // Both wells take the same line box, which is why there is one number
+        // and not two — the search field at `SIZE_BODY` and the first-run folder
+        // field at `SIZE_EMPHASIS`.
+        const { assert!(LINE_BODY == LINE_EMPHASIS) }
+        // A checkbox is a pointer target too, and it takes the named secondary
+        // square rather than the 13 px box it had.
+        let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
+        let settings = std::fs::read_to_string(views.join("settings.rs"))
+            .expect("the Settings place baz ships");
+        assert!(
+            settings.contains(".size(theme::STEPPER_HIT)"),
+            "the checkbox has left the two published control sizes"
+        );
+        // The one control in baz that is a rail rather than a box takes the same
+        // named secondary square: the groove's hit band is `RAIL_HIT`, and it is
+        // 24 — so the product really does stand at two heights and not at three
+        // with a rail-shaped excuse.
+        const { assert!(RAIL_HIT == STEPPER_HIT) }
+        // And no view sets a fixed control height that is none of them. The
+        // scan is over `Length::Fixed(theme::…_HIT)`, which is how every control
+        // in the product states its box.
+        let mut offenders: Vec<String> = Vec::new();
+        for path in rust_sources(&views) {
+            let source = std::fs::read_to_string(&path).expect("a view module baz ships");
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            for (at, _) in source.match_indices("_HIT))") {
+                let head = at.saturating_sub(48);
+                let window = &source[head..at + 6];
+                if window.contains("TRANSPORT_HIT")
+                    || window.contains("STEPPER_HIT")
+                    || window.contains("RAIL_HIT")
+                {
+                    continue;
+                }
+                offenders.push(format!("{name}: …{window}"));
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "a control stands at a third height: {offenders:#?}"
         );
     }
 

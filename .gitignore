@@ -9,3 +9,4 @@ fuzz/corpus/
 fuzz/artifacts/
 coverage-html/
 .claude/
+__pycache__/

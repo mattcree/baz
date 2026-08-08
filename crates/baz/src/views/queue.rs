@@ -128,7 +128,7 @@ pub(crate) fn view(
                 scrollable(
                     column![
                         album_group(list.album.as_deref(), &list.artist, arriving),
-                        Column::with_children(rows).spacing(theme::GAP_XXS),
+                        Column::with_children(rows).spacing(theme::GAP_XS),
                     ]
                     .spacing(theme::GAP_XS)
                     .padding(theme::scroll_gutter())
@@ -223,9 +223,11 @@ fn album_group(album: Option<&str>, artist: &str, fade: f32) -> Element<'static,
                 .wrapping(text::Wrapping::None),
         );
     }
-    container(block)
-        .padding(theme::pad(0.0, theme::GAP_XS))
-        .into()
+    // **On the popover's own heading lane**, with no inset of its own. A 4 px
+    // and a 5 px row padding on this one block gave the popover *four* left
+    // edges in 358 px — 920, 924, 925, 941 — where two are a composition and
+    // four are a leak (the audit's defect 11).
+    container(block).into()
 }
 
 /// Nothing queued yet: said plainly, with the gesture that fills it.
@@ -258,7 +260,7 @@ fn empty_state(fade: f32) -> Element<'static, Message> {
         .align_x(iced::Alignment::Start),
     )
     .width(Length::Fill)
-    .padding(theme::pad(theme::GAP_XL, theme::GAP_XS))
+    .padding(theme::pad(theme::GAP_XL, 0.0))
     .align_x(alignment::Horizontal::Left)
     .into()
 }
@@ -368,7 +370,10 @@ fn queue_row(
         .align_y(iced::Alignment::Start),
     )
     .width(Length::Fill)
-    .padding(theme::pad(theme::GAP_XS, theme::GAP_XS))
+    // One indent lane for rows and one heading lane above them — no third edge
+    // introduced by a row's own padding (law L5, and the same change the
+    // inspector's rows take).
+    .padding(theme::pad(theme::GAP_XS, 0.0))
     .style(move |_theme, status| theme::fade_button(&theme::track_row(room, status, playing), fade))
     .on_press_maybe(live.then_some(Message::JumpToQueued(index)));
     mouse_area(

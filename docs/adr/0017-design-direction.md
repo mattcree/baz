@@ -426,13 +426,36 @@ is ours restated and it is enforced in code already.
 | **History ledger** — append-only plain local file, one line per play, written from the first beta with zero UI | **Adopt, first.** Its sequencing claim is the strongest in any of the three documents and it is correct: `baz-core` has *no* history of any kind today (no play counts, no `last_played`, no timestamps), so it cannot be backfilled. PLAYED, the inspector card, the pull and shuffle weighting all feed on it. In flight in a parallel agent. |
 | **Shuffle draws only from what the wall shows; pool visible (non-pool covers dim to 35 %, next two draws carry faint ink rings)** | **Adopt.** A strictly better specification of `VISION.md` pillar 4, and it is nearly free: `vm::matching_album_ids()` already computes "what the wall shows". The code for the critique's rule exists under another name. |
 | **Group keys** — ARTIST / YEAR / GENRE / ADDED / PLAYED as one row of words, genre verbatim from tags | **Adopt.** It replaces "the shelf has one sort and no facets", which our own audit called an IA problem. **This is the largest breach of ADR-0006 in the plan** — see §5. |
-| **Index rail** — 36 px type-only lane, a pure projection of the active group key, no state of its own | **Adopt, and it supersedes `02` §2.8's spine index.** Ours was `#`+A–Z at `INDEX_W` 20 and had to be re-specified for every future grouping. The critique's derives from the key and therefore never needs re-specifying: ARTIST → A–Z, YEAR → decades, GENRE → names, ADDED/PLAYED → recency buckets. `INDEX_W` becomes 36. |
+| **Index rail** — type-only lane, a pure projection of the active group key, no state of its own | **Adopt, and it supersedes `02` §2.8's spine index.** Ours was `#`+A–Z at `INDEX_W` 20 and had to be re-specified for every future grouping. The critique's derives from the key and therefore never needs re-specifying: ARTIST → A–Z, YEAR → decades, GENRE → names, ADDED/PLAYED → recency buckets. `INDEX_W` becomes 36 — **amended to 60**, see below. |
 | **The stack** — shift-click queues a sleeve or a track; ephemeral; clears when it ends; albums listed as albums | **Adopt**, with the numeral chip moved off the artwork into the wall label's first line (§1.4). Our queue is already one-list-with-a-cursor and `UpdateQueue` exists, so this is a view + `vm` change. |
 | **Lenses — Wall / Marquee**, keys 1/2 | **Adopt the lens. Reject the idle auto-switch.** The critique makes Marquee *"default after ~30 s idle while playing"*. Nothing in baz may change what is on screen without being asked — it is the "lobby" failure mode the critique itself names, arriving by itself, and it contradicts the refusal that nothing begins that the user did not begin. Marquee is a lens you press `2` for. |
 | **The pull** (`Ctrl+R`) — one sleeve weighted toward long-unplayed, in Marquee, nothing plays until Space | **Adopt**, after history and Marquee. Distinctive, cheap once the ledger exists, and it respects the friction budget by not playing anything. |
 | **Refusals ledger** | **Adopt.** See §6. |
 | **Crate lens, mixtapes, crates, overview zoom stop** | **Defer**, as the critique does. Each slots into machinery this plan builds: a crate is a group key, a lens is a word, a mixtape is the stack's save path. |
 | **Art-derived accent hue** | **Defer**, as both documents already do (`02` Phase C7, critique "labelled experiment only"). It is the last item, because everything else must be true before it means anything. |
+
+
+#### Amendment — `INDEX_W` 36 → 60 (composition audit)
+
+The 36 above was taken from the critique and never measured. It is wrong, and
+`docs/design/06-composition-audit.md` is what caught it: at 36 the lane **clips
+`Unknown`, every recency bucket and most genre names**, so the rail holds the
+labels of ARTIST and YEAR and fails for three of the five keys this very row
+adopts it for — a lane specified as *a pure projection of the active group key*
+that only works in two projections.
+
+**60**, measured against the whole label set in the face that draws them
+(`crate::font::the_index_rail_holds_the_labels_its_keys_produce`): the widest a
+key can produce is `Never played` at **59.14 px**. Arbitrary genre names still
+elide, and always will — a genre tag is free text — with the full value set in
+the shelf header one gutter to the left, in the same voice, at the same moment.
+
+The lane's *right gutter* changes with it, from `GAP_LG` to `HANG`: composition
+law L1 (`.interface-design/system.md` §13) gives every window-edge surface one
+gutter, and the rail is the wall's own right-hand edge. `INDEX_LANE_W` is
+therefore **108** = `INDEX_CLEARANCE` 8 + `INDEX_W` 60 + `HANG` 40, where it was
+60. That is 48 px more off the wall, and it is the price of a rail that works
+for every arrangement rather than for two.
 
 ---
 
@@ -464,7 +487,7 @@ Every superseded decision, the code that must change, and the honest cost.
 | `01` §4.8 *"type-ahead search cannot coexist with bare-letter transport"* | §1.2 | `keys.rs` (645 lines, ~400 of doc + exhaustive tests) rewritten; a text-vs-chord branch in `app.rs` | High — the largest test rewrite in the plan; the logic is small |
 | `01` §4.2 / `02` §6.5 the 102 px bar with a seek row | §1.1 | new `needle.rs` (~400); `views/bottom_bar.rs` −250; `theme.rs` slot tokens; `player.rs` gains a segment list; the `CENTRE_H` test rewritten | High — and one of the two ADR-0006 breaches |
 | `02` §2.7 density placed in Settings → Appearance | §1.3 | `shelf.rs` (pure) takes the step; `keys.rs`; `config.rs` gains one key; **no** Settings row | Low |
-| `02` §2.8 the `#`+A–Z spine index at `INDEX_W` 20 | §1.7 | `shelf.rs`, `views/shelf.rs`; `INDEX_W` 20 → 36; the rail reads the active group key | Medium, and it replaces work not yet built |
+| `02` §2.8 the `#`+A–Z spine index at `INDEX_W` 20 | §1.7 | `shelf.rs`, `views/shelf.rs`; `INDEX_W` 20 → 36 → **60** (§1.7's amendment); the rail reads the active group key | Medium, and it replaces work not yet built |
 | `02` §10 *"a light variant: still defer"* | §1.5 | `theme.rs` `pub const Color` → `Palette`; ~30 style fns; ~10 tests | Medium — half a day of mechanism, then a design question per room |
 | `02` §5.2's implicit claim that WCAG alone governs | §1.6 | `theme.rs` test module: oklab conversion, composited ink ramp, named exemption list, room sweep | Low |
 | ADR-0008's grouping as the only grouping | §1.7 | `baz-core/src/index.rs:702–748` (`Library::albums`) takes a key; schema gains genre and first-seen columns | **High, and in `baz-core`** |

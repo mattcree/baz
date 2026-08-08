@@ -359,7 +359,10 @@ fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
         .height(Length::Fill)
         .padding(iced::Padding {
             top: 0.0,
-            right: theme::GAP_LG,
+            // The one window gutter (law L1): the rail's right edge is the same
+            // x as `Settings` above it and as the last column of covers beside
+            // it. It was `GAP_LG`, the old chrome gutter.
+            right: theme::HANG,
             bottom: 0.0,
             left: theme::INDEX_CLEARANCE,
         })
@@ -400,7 +403,7 @@ fn rail_text(label: String, ink: iced::Color, current: bool) -> Element<'static,
     container(
         text(label)
             .size(theme::SIZE_HEADING)
-            .line_height(theme::LEADING_CAPTION)
+            .line_height(theme::LEADING_HEADING)
             .font(if current { theme::MEDIUM } else { theme::SANS })
             .color(ink)
             .wrapping(text::Wrapping::None),
@@ -575,10 +578,13 @@ fn tile<'a>(
             .color(room.paper)
             .wrapping(text::Wrapping::None),
     );
-    // Selected *and on screen*: a tile whose panel is hidden behind the queue,
-    // or dismissed outright, must not keep claiming the selection styling —
-    // the highlight says "that panel is showing this album".
-    let selected = shelf.selection.showing_album(album.id);
+    // **Selected, full stop** — not "selected and the inspector happens to be
+    // showing it". The audit's defect 14: with `Ctrl+B` the column hides and the
+    // selected tile's 2 px rule vanished with it, so the wall carried no mark at
+    // all for a selection that `Enter` would still play. The rule is drawn from
+    // the selection because that is what it is a mark of; whether a panel is
+    // open beside it is a fact about the panel.
+    let selected = shelf.selection.selected() == Some(album.id);
     // Two one-line lanes, not one two-line box: a title iced lays out over two
     // lines despite `Wrapping::None` clips at its own lane's edge instead of
     // pushing the artist out of the block that was reserved to hold it still

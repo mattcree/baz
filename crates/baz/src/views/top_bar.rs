@@ -34,16 +34,6 @@ use crate::theme;
 /// The search field's width in the top bar (logical px).
 pub(crate) const SEARCH_W: f32 = 360.0;
 
-/// The search well's vertical padding (logical px), derived so the well is
-/// exactly [`theme::TRANSPORT_HIT`] tall.
-///
-/// iced lays a `text_input` out as its padding plus one line box plus its 1 px
-/// border on each side, so the padding is the height minus the parts that are
-/// not it, halved. It came to 8, which made the well 34 px against a 32 px
-/// control everywhere else in the product — two pixels, on the one row where
-/// the app's two clusters have to look like they were placed by the same hand.
-const SEARCH_PAD_V: f32 =
-    (theme::TRANSPORT_HIT - theme::SIZE_BODY * theme::LEADING_BODY - 2.0) / 2.0;
 /// The slim top bar: the search well on the left, quiet status and the route
 /// to the settings on the right, a hairline rule below.
 pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
@@ -56,7 +46,7 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
     let search = text_input("Search artists, albums, tracks…", &shelf.query)
         .id(search_id())
         .on_input(Message::SearchChanged)
-        .padding(theme::pad(SEARCH_PAD_V, theme::GAP_MD))
+        .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
         .size(theme::SIZE_BODY)
         .line_height(theme::LEADING_BODY)
         .width(Length::Fixed(SEARCH_W))
@@ -118,7 +108,14 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
             .spacing(theme::GAP_LG)
             .align_y(iced::Alignment::Center),
         )
-        .padding(theme::pad(theme::GAP_SM + 2.0, theme::GAP_LG)),
+        // **One window gutter.** The bar hung from `GAP_LG` while the wall under
+        // it hung from `HANG`, so nothing in the chrome lined up with anything
+        // in the collection — the composition audit's defect 1, and the single
+        // highest-yield line in this file. The vertical padding is
+        // [`theme::TOP_BAR_PAD_V`], which makes the strip
+        // [`theme::TOP_BAR_H`] and puts `app.rs`'s virtualizer estimate on the
+        // same number the bar is actually drawn at.
+        .padding(theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)),
         horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
     ]
     .into()
@@ -151,8 +148,16 @@ fn settings_toggle() -> Element<'static, Message> {
                 .font(theme::MEDIUM)
                 .wrapping(text::Wrapping::None),
         )
+        // **Both axes, from the box** (law L3). A `button` with a fixed height
+        // and no vertical alignment on its content lays that content out at the
+        // *top*: the audit measured this word's ink centre at y 19.5 against a
+        // box centre of 25.9 — 6.4 px high — which put its baseline 8 px above
+        // the counts line it shares a row with, visible without a ruler. The
+        // horizontal centring was already stated; the vertical one was not.
         .width(Length::Fill)
-        .align_x(alignment::Horizontal::Center),
+        .height(Length::Fill)
+        .align_x(alignment::Horizontal::Center)
+        .align_y(alignment::Vertical::Center),
     )
     .width(Length::Fixed(theme::SETTINGS_TOGGLE_W))
     // The same 32 px as the search well beside it and as every control in the
@@ -220,11 +225,19 @@ fn counts_line(shelf: &Shelf) -> String {
 fn group_key(key: GroupKey, active: bool) -> Element<'static, Message> {
     let room = theme::active();
     button(
-        text(theme::tracked(&key.label().to_uppercase()))
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .font(if active { theme::MEDIUM } else { theme::SANS })
-            .wrapping(text::Wrapping::None),
+        // Centred in the box by the box, like every other word that is a
+        // control (law L3) — a fixed height with top-aligned content is what put
+        // `Settings` 6.4 px above its own centre, and five keys doing it beside
+        // the well would have been five more.
+        container(
+            text(theme::tracked(&key.label().to_uppercase()))
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(if active { theme::MEDIUM } else { theme::SANS })
+                .wrapping(text::Wrapping::None),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
     )
     // The same 32 px as the well beside it and every other control in the
     // product, so the bar's clusters sit on one grid rather than on one centre

@@ -18,7 +18,11 @@ load = lambda n: Img(f"{SHOTS}/{n}-{TAG}.png")  # noqa: E731
 im = load("wall-rest")
 BAR = next(y + 1 for y in range(H - 1, H - 200, -1) if dist(im.rgb(5, y), RECESS) > 2)
 RULE2 = BAR - 1
-print(f"############ {TAG}")
+# The two chrome bands, found rather than assumed — their heights are tokens
+# now, so the ruler reads them off the frame instead of remembering 53 and 102.
+TOPB = next(y for y in range(12, 120) if dist(im.rgb(5, y), (0x0C, 0x0D, 0x0E)) > 2)
+BODY = TOPB + 1
+print(f"############ {TAG}   top bar h {TOPB + 1}   bar h {H - BAR + 1}")
 
 # ------------------------------------------------------------- TILE geometry
 print("\n### TILE — one column's vertical structure (rest / hover / selected / playing)")
@@ -32,7 +36,7 @@ for nm, shot, col in (
     # find column-1 art extent on the top row
     x0 = 40
     x1 = next(x for x in range(41, W) if dist(imx.rgb(x, 200), WALL) <= 2)
-    rs = yruns(imx, x0, x1, 53, RULE2, thr=3, gap=0, ground=WALL)[1]
+    rs = yruns(imx, x0, x1, BODY, RULE2, thr=3, gap=0, ground=WALL)[1]
     print(f"   {nm:9s} art x {x0}..{x1} (w {x1 - x0}) ->")
     for s, e in rs[:8]:
         print(f"        y {s:5d}..{e:5d}  h {e - s:4d}")
@@ -61,7 +65,7 @@ def chrome_yedges(imx, x0, x1, y0, y1, g):
 
 edges = set()
 edges |= chrome_yedges(im, 0, W, 0, 53, WALL)  # top bar
-edges |= {52, 53, RULE2, BAR}
+edges |= {52, BODY, RULE2, BAR}
 edges |= chrome_yedges(im, 0, W, BAR, H, RECESS)  # bar idle
 imp = load("wall-playing")
 edges |= chrome_yedges(imp, 0, W, BAR, H, RECESS)
@@ -73,20 +77,24 @@ for r, u, ph in fits[:8]:
 
 imi = load("inspector")
 panel_x = next(x for x in range(W - 1, 0, -1) if dist(imi.rgb(x, RULE2 - 6), PLINTH) > 2) + 1
-ie = chrome_yedges(imi, panel_x, W, 53, RULE2, PLINTH)
+ie = chrome_yedges(imi, panel_x, W, BODY, RULE2, PLINTH)
 print("\n   inspector y-edges:", sorted(ie))
 for r, u, ph in best_unit(sorted(ie), 2, 24)[:6]:
     print(f"      {r:6.3f}  unit {u:3d}  phase {ph:3d}")
 
 ims = load("settings")
-se = chrome_yedges(ims, 0, W, 53, RULE2, WALL)
+se = chrome_yedges(ims, 0, W, BODY, RULE2, WALL)
 print("\n   settings y-edges:", sorted(se))
 for r, u, ph in best_unit(sorted(se), 2, 24)[:6]:
     print(f"      {r:6.3f}  unit {u:3d}  phase {ph:3d}")
 
 imq = load("queue-playing")
-xs = [x for x in range(W) if dist(imq.rgb(x, RULE2 - 20), LIT) <= 3]
-qe = chrome_yedges(imq, min(xs), max(xs) + 1, 53, RULE2, LIT)
+# The popover's surface, found over the whole body rather than at a row a
+# fixed bar height used to put it at.
+_qy = [y for y in range(BODY, RULE2) if dist(imq.rgb(W - 60, y), LIT) <= 3]
+_qm = (min(_qy) + max(_qy)) // 2 if _qy else RULE2 - 40
+xs = [x for x in range(W) if dist(imq.rgb(x, _qm), LIT) <= 3]
+qe = chrome_yedges(imq, min(xs), max(xs) + 1, BODY, RULE2, LIT)
 print("\n   queue popover y-edges:", sorted(qe))
 for r, u, ph in best_unit(sorted(qe), 2, 24)[:6]:
     print(f"      {r:6.3f}  unit {u:3d}  phase {ph:3d}")
@@ -99,26 +107,57 @@ for r, u, ph in best_unit(allx, 2, 24)[:8]:
 # ------------------------------------------------------------- PROPORTION
 print("\n### PROPORTION")
 print(f"   window {W}x{H}")
-print(f"   top bar 53 / H = {53 / H:.4f}")
+print(f"   top bar {TOPB + 1} / H = {(TOPB + 1) / H:.4f}")
 print(f"   bottom bar {H - RULE2} / H = {(H - RULE2) / H:.4f}")
-print(f"   body {RULE2 - 53} / H = {(RULE2 - 53) / H:.4f}")
-print(f"   collection share (body) = {(RULE2 - 53) / H:.4f}")
+print(f"   body {RULE2 - BODY} / H = {(RULE2 - BODY) / H:.4f}")
+print(f"   collection share (body) = {(RULE2 - BODY) / H:.4f}")
 print(f"   inspector {W - panel_x} / W = {(W - panel_x) / W:.4f}   "
       f"shelf {panel_x} / W = {panel_x / W:.4f}")
-art = 292
+# The sleeve, measured: it is the tallest recess band in the panel's upper
+# half, and it is square. It was a hardcoded 292 — the panel minus its two
+# paddings — which is precisely the number the audit's defect 5 is about.
+_sb = [(a, b) for a, b in yruns(imi, panel_x, W, BODY, RULE2, thr=3, gap=1, ground=PLINTH)[1]
+       if b - a > 40]
+art = (_sb[0][1] - _sb[0][0]) if _sb else 0
 print(f"   inspector: sleeve {art} / panel {W - panel_x} = {art / (W - panel_x):.4f}")
-print(f"   tile: art / (art + GAP_LG + LABEL_H) = ", end="")
 imx = load("wall-rest")
 x1 = next(x for x in range(41, W) if dist(imx.rgb(x, 200), WALL) <= 2)
 a = x1 - 40
-print(f"{a / (a + 16 + 36.4):.4f}  (art {a})")
-print(f"   settings content right edge 878 / W = {878 / W:.4f}")
-print(f"   queue popover 358x388;  388 / body {RULE2 - 53} = {388 / (RULE2 - 53):.4f}")
+# The label block, measured: the tile's row pitch, less its art, less the gap
+# above the label and the row's trailing hang. It was a hardcoded 36.4 and it is
+# 40 now — one `HANG` — because the body's line box is on the lattice (§2.1).
+_tb = yruns(imx, 40, x1, BODY, RULE2, thr=3, gap=0, ground=WALL)[1]
+_arts = [(s0, e0) for s0, e0 in _tb if e0 - s0 > a - 8]
+_pitch = (_arts[1][0] - _arts[0][0]) if len(_arts) > 1 else 0
+LABEL_H = _pitch - a - 16 - 40 if _pitch else 0
+# The fixture's first two rows can straddle a shelf break, in which case the
+# pitch carries the header's band as well. One `HANG` of it, and it is the only
+# thing that can sit between two rows of covers.
+_broke = LABEL_H > 60
+if _broke:
+    LABEL_H -= 40
+print("   tile: art / (art + GAP_LG + LABEL_H) = ", end="")
+print(f"{a / (a + 16 + LABEL_H):.4f}  (art {a}, row pitch {_pitch}"
+      f"{' incl. a shelf break' if _broke else ''}, label block {LABEL_H})")
+# The form's right edge, measured off the widest control in the place rather
+# than remembered as 878 — which was the whole of the audit's defect 9.
+_bands = yruns(ims, 0, W, BODY, RULE2, thr=3, gap=1, ground=WALL)[1]
+_edges = []
+for _s, _e in _bands:
+    for _a, _b in xruns(ims, _s, _e, 0, W, thr=3, gap=8, ground=WALL)[1]:
+        _edges.append(_b)
+_right = max(_edges) if _edges else 0
+print(f"   settings content right edge {_right} / W = {_right / W:.4f}")
+_pys = [y for y in range(BODY, RULE2) if dist(imq.rgb(W - 60, y), LIT) <= 3]
+_pw = max(xs) + 1 - min(xs) if xs else 0
+_ph = max(_pys) + 1 - min(_pys) if _pys else 0
+print(f"   queue popover {_pw}x{_ph};  {_ph} / body {RULE2 - BODY} = "
+      f"{_ph / max(RULE2 - BODY, 1):.4f}")
 
 # ------------------------------------------------------------- SYMMETRY
 print("\n### SYMMETRY — bottom bar zone widths (playing)")
 # zones: left fill | centre SEEK_ROW_W | right fill, GAP_LG apart, pad GAP_LG
-inner_l, inner_r = 16, W - 16
+inner_l, inner_r = 40, W - 40  # the one window gutter (law L1)
 centre_w = 380
 fill = (inner_r - inner_l - centre_w - 2 * 16) / 2
 print(f"   content x[{inner_l},{inner_r}) w {inner_r - inner_l}")

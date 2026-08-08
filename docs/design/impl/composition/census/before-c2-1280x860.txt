@@ -1,0 +1,169 @@
+############ 1280x860   top bar y[0,52] h 53   body y[53,758)   bar y[759,860)  bar h 102
+
+### TOP BAR — element boxes (surface + ink), rows 0..52, ground wall
+   x    16..  376 (w  360)   ink-y [(11, 41)]   box (16, 11, 376, 41)
+   x   404..  453 (w   49)   ink-y [(15, 23)]   box (404, 15, 453, 23)
+   x   473..  506 (w   33)   ink-y [(15, 23)]   box (473, 15, 506, 23)
+   x   527..  570 (w   43)   ink-y [(15, 23)]   box (527, 15, 570, 23)
+   x   591..  635 (w   44)   ink-y [(15, 23)]   box (591, 15, 635, 23)
+   x   656..  705 (w   49)   ink-y [(15, 23)]   box (656, 15, 705, 23)
+   x  1048.. 1172 (w  124)   ink-y [(21, 30)]   box (1048, 21, 1172, 30)
+   x  1200.. 1245 (w   45)   ink-y [(14, 25)]   box (1200, 14, 1245, 25)
+
+### TOP BAR — the two right-hand labels, ink boxes
+   counts    ink box (1048, 21, 1150, 30)   ink-y centre 25.5
+   Settings  ink box (1152, 14, 1245, 30)   ink-y centre 22.0
+
+### TOP BAR — search well surface extent (recess against wall)
+   well rows 12..40  h 28
+   well cols 17..375  w 358
+   placeholder ink box (17, 12, 375, 40)  (well interior)
+
+### BOTTOM BAR — idle (nothing playing)
+   x    17..  100 (w   83)  ink-y [(805, 816)]
+   x   290..  326 (w   36)  ink-y [(806, 816)]
+   x   595..  605 (w   10)  ink-y [(781, 793)]
+   x   636..  646 (w   10)  ink-y [(781, 793)]
+   x   675..  685 (w   10)  ink-y [(781, 793)]
+   x  1136.. 1151 (w   15)  ink-y [(810, 822)]
+   x  1168.. 1264 (w   96)  ink-y [(804, 809), (811, 821)]
+   bar mid-line y = 809.5
+   left zone  ink box (17, 805, 100, 816)  ink-y centre   810.5  delta from bar mid   +1.0
+   queue ctl  ink box (290, 806, 326, 816)  ink-y centre   811.0  delta from bar mid   +1.5
+   transport  ink box (595, 781, 685, 793)  ink-y centre   787.0  delta from bar mid  -22.5
+   seek row   ink box (595, 781, 685, 793)  ink-y centre   787.0  delta from bar mid  -22.5
+   right zone ink box (1136, 804, 1264, 822)  ink-y centre   813.0  delta from bar mid   +3.5
+
+### BOTTOM BAR — playing
+   x    16..  143 (w  127)  ink-y [(786, 799), (806, 815), (824, 832)]
+   x   290..  326 (w   36)  ink-y [(806, 816)]
+   x   383..  389 (w    6)  ink-y [(806, 814)]
+   x   477..  502 (w   25)  ink-y [(833, 841)]
+   x   510..  770 (w  260)  ink-y [(781, 793), (832, 842)]
+   x   778..  821 (w   43)  ink-y [(833, 841)]
+   x  1063.. 1120 (w   57)  ink-y [(805, 816)]
+   x  1136.. 1151 (w   15)  ink-y [(810, 822)]
+   x  1168.. 1264 (w   96)  ink-y [(804, 809), (811, 821)]
+   bar mid-line y = 809.5
+   left zone  ink box (16, 786, 143, 832)  ink-y centre   809.0  delta from bar mid   -0.5
+   queue ctl  ink box (290, 806, 389, 816)  ink-y centre   811.0  delta from bar mid   +1.5
+   transport  ink box (520, 781, 760, 842)  ink-y centre   811.5  delta from bar mid   +2.0
+   seek row   ink box (477, 781, 821, 842)  ink-y centre   811.5  delta from bar mid   +2.0
+   right zone ink box (1063, 804, 1264, 822)  ink-y centre   813.0  delta from bar mid   +3.5
+
+### BOTTOM BAR — the marks, against the bar's own centre line (idle)
+   transport glyphs  y 781..793   centre   787.0   delta from bar mid  -22.5
+   seek groove       —
+   volume rail       y 814..818   centre   816.0   delta from bar mid   +6.5
+   mute glyph        —
+   now-playing line 2 —
+   queue label       y 806..816   centre   811.0   delta from bar mid   +1.5
+   signal note       —
+
+### BOTTOM BAR — the marks, against the bar's own centre line (playing)
+   transport glyphs  y 781..793   centre   787.0   delta from bar mid  -22.5
+   seek groove       y 832..842   centre   837.0   delta from bar mid  +27.5
+   volume rail       y 814..818   centre   816.0   delta from bar mid   +6.5
+   mute glyph        y 806..814   centre   810.0   delta from bar mid   +0.5
+   now-playing line 2 y 806..815   centre   810.5   delta from bar mid   +1.0
+   queue label       y 806..816   centre   811.0   delta from bar mid   +1.5
+   signal note       y 805..816   centre   810.5   delta from bar mid   +1.0
+
+### transport glyph optical centring (16 px icon in a 32 px hit box)
+   glyph x 510..770  ink box (498, 781, 782, 842)
+
+### WALL — the hang, scanline
+   y=200: wall:40 | art:255 | wall:40 | art:255 | wall:668 | art:2 | wall:1 | art:3 | wall:16
+   y=250: wall:40 | art:255 | wall:40 | art:255 | wall:690
+
+### WALL — one tile's vertical structure (column 1, x 40..)
+   y    97..  104  h    7
+   y   133..  388  h  255
+   y   408..  418  h   10
+   y   426..  437  h   11
+   y   484..  491  h    7
+   y   520..  758  h  238
+
+### INSPECTOR
+   panel surface x 940..1280  (w 340)
+   last wall pixel before the panel: x=938  ->  gap 1 px
+   colour at the seam: #0C0D0E #0C0D0E #1B1C1C #141517 #141517
+   panel content, row bands:
+      y    87..   99  h   12   x-extent 1234..1246
+      y   121..  413  h  292   x-extent 964..1256
+      y   430..  444  h   14   x-extent 965..1078
+      y   456..  469  h   13   x-extent 965..1103
+      y   480..  489  h    9   x-extent 964..1094
+      y   500..  509  h    9   x-extent 965..1093
+      y   524..  557  h   33   x-extent 964..1256
+      y   568..  600  h   32   x-extent 985..1256
+      y   604..  617  h   13   x-extent 985..1242
+      y   632..  645  h   13   x-extent 985..1242
+      y   662..  671  h    9   x-extent 985..1242
+      y   689..  701  h   12   x-extent 985..1242
+      y   722..  732  h   10   x-extent 965..1148
+   panel elements, x edges by band:
+      y[87,99) -> 1234..1246
+      y[121,413) -> 964..1256
+      y[430,444) -> 965..1078
+      y[456,469) -> 965..1103
+      y[480,489) -> 964..1094
+      y[500,509) -> 965..1093
+      y[524,557) -> 964..1256
+      y[568,600) -> 985..992, 1001..1069, 1217..1256
+      y[604,617) -> 985..992, 1001..1050, 1218..1242
+      y[632,645) -> 985..991, 1000..1070, 1217..1242
+      y[662,671) -> 985..992, 1001..1056, 1217..1242
+      y[689,701) -> 985..1101, 1217..1242
+      y[722,732) -> 965..1148
+
+### SETTINGS place
+   ground probe: #0C0D0E #0C0D0E #0C0D0E
+   y[  77, 114) h 37 -> 24..224, 249..503
+   y[ 123, 152) h 29 -> 248..878
+   y[ 163, 174) h 11 -> 249..517
+   y[ 207, 218) h 11 -> 249..295, 772..814, 830..837, 862..869
+   y[ 239, 250) h 11 -> 249..325, 772..814, 830..837, 862..869
+   y[ 265, 279) h 14 -> 248..261, 270..418
+   top bar:
+   y[  14,  34) -> 24..69, 93..149, 1007..1264
+
+### QUEUE popover (playing)
+   popover surface x 905..1263 (w 358), y 353..741 (h 388)
+   y[ 353, 355) h  2 -> 905..907, 1261..1263
+   y[ 378, 391) h 13 -> 920..965, 1226..1238
+   y[ 415, 424) h  9 -> 920..1024
+   y[ 440, 451) h 11 -> 924..994
+   y[ 458, 466) h  8 -> 925..987
+   y[ 474, 501) h 27 -> 920..1210
+   y[ 510, 520) h 10 -> 941..1070, 1181..1206
+   y[ 538, 551) h 13 -> 941..947, 957..1024, 1181..1206
+   y[ 566, 576) h 10 -> 941..948, 957..1024, 1181..1205
+   y[ 595, 608) h 13 -> 941..948, 957..1027, 1181..1206
+   y[ 623, 633) h 10 -> 941..1035, 1181..1206
+   y[ 651, 661) h 10 -> 941..948, 957..1025, 1182..1206
+   y[ 679, 692) h 13 -> 941..948, 957..1007, 1181..1206
+   y[ 707, 720) h 13 -> 941..1026, 1181..1206
+   y[ 739, 741) h  2 -> 905..907, 1261..1263
+
+### FIRST RUN
+   x runs: [(410, 870)]
+   y[ 341, 350) h  9  x 410..430
+   y[ 367, 394) h 27  x 410..678
+   y[ 418, 458) h 40  x 410..870
+   y[ 470, 481) h 11  x 410..773
+   y[ 510, 520) h 10  x 411..694
+   block box (410, 341, 870, 520)   block centre (640.0, 430.5)   window centre (640.0, 430.0)
+   ink coverage 0.5763%   ink centroid (547.3, 417.6)
+
+### EMPTY LIBRARY
+   block box (519, 388, 762, 426)  centre (640.5,407.0)   shelf area centre (640.0,405.5)
+
+### INK DENSITY (share of pixels differing from the region's ground by >8)
+   top bar              coverage   4.85%   centroid (  495.2,   23.4)  area 66560
+   bottom bar idle      coverage   1.06%   centroid (  622.4,  808.1)  area 129280
+   bottom bar playing   coverage   2.74%   centroid (  450.2,  810.2)  area 129280
+   wall (whole body)    coverage  28.26%   centroid (  310.0,  355.9)  area 902400
+   inspector panel      coverage  38.70%   centroid ( 1107.3,  281.3)  area 239700
+   settings body        coverage   1.89%   centroid (  346.9,  155.5)  area 902400
+   first run            coverage   0.58%   centroid (  547.3,  417.6)  area 1100800

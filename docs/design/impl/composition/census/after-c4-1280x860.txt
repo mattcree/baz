@@ -1,0 +1,109 @@
+############ 1280x860   top bar h 49   bar h 105
+
+### TILE — one column's vertical structure (rest / hover / selected / playing)
+   rest      art x 40..283 (w 243) ->
+        y    92..   99  h    7
+        y   129..  372  h  243
+        y   393..  403  h   10
+        y   412..  423  h   11
+        y   471..  478  h    7
+        y   508..  751  h  243
+   hover     art x 40..283 (w 243) ->
+        y    92..   99  h    7
+        y   129..  372  h  243
+        y   393..  403  h   10
+        y   412..  423  h   11
+        y   432..  433  h    1
+        y   471..  478  h    7
+        y   508..  751  h  243
+   selected  art x 40..283 (w 243) ->
+        y    92..   99  h    7
+        y   129..  372  h  243
+        y   393..  403  h   10
+        y   412..  423  h   11
+        y   471..  478  h    7
+        y   508..  751  h  243
+   playing   art x 40..41 (w 1) ->
+
+### TILE — hover / selected rule, measured
+   rest      rule rows [(415, '#7D7B75'), (416, '#3C3C39'), (417, '#888680'), (419, '#474643'), (420, '#7D7B76')]
+   hover     rule rows [(415, '#9D9A94'), (416, '#4D4B48'), (417, '#ABA8A1'), (419, '#5A5855'), (420, '#9E9B94')]
+   selected  rule rows [(415, '#7D7B75'), (416, '#3C3C39'), (417, '#888680'), (419, '#474643'), (420, '#7D7B76')]
+
+### VERTICAL RHYTHM — every chrome y-edge in the frame (artwork excluded)
+   top bar + bottom bar y-edges: [8, 40, 48, 49, 52, 53, 755, 756, 783, 796, 801, 802, 815, 822, 830, 839, 849]
+   best-fit vertical units (mean |residual| px, unit, phase):
+       0.471  unit   2  phase   0
+       0.529  unit   2  phase   1
+       0.647  unit   3  phase   0
+       0.647  unit   3  phase   2
+       0.706  unit   3  phase   1
+       0.824  unit   4  phase   0
+       1.000  unit   4  phase   1
+       1.000  unit   4  phase   3
+
+   inspector y-edges: [83, 95, 117, 237, 254, 268, 282, 295, 305, 314, 325, 334, 349, 381, 393, 546, 562, 572, 594, 607, 626, 639, 658, 671, 690, 703, 719, 729]
+       0.429  unit   2  phase   1
+       0.571  unit   2  phase   0
+       0.643  unit   3  phase   0
+       0.679  unit   3  phase   1
+       0.679  unit   3  phase   2
+       0.714  unit   4  phase   2
+
+   settings y-edges: [89, 126, 135, 163, 175, 186, 223, 234, 263, 274, 295, 319]
+       0.333  unit   2  phase   1
+       0.500  unit   3  phase   1
+       0.500  unit   4  phase   3
+       0.667  unit   2  phase   0
+       0.667  unit   3  phase   0
+       0.667  unit   4  phase   2
+
+   queue popover y-edges: [49, 320, 343, 357, 381, 390, 405, 416, 423, 431, 439, 467, 480, 490, 512, 525, 544, 554, 576, 589, 608, 618, 640, 650, 672, 685, 704, 717, 736, 755]
+       0.467  unit   2  phase   0
+       0.533  unit   2  phase   1
+       0.633  unit   3  phase   0
+       0.667  unit   3  phase   2
+       0.700  unit   3  phase   1
+       0.800  unit   4  phase   0
+
+   ALL chrome y-edges pooled: 83
+       0.494  unit   2  phase   1
+       0.506  unit   2  phase   0
+       0.639  unit   3  phase   0
+       0.675  unit   3  phase   1
+       0.687  unit   3  phase   2
+       0.952  unit   4  phase   3
+       0.964  unit   4  phase   2
+       1.036  unit   4  phase   0
+
+### PROPORTION
+   window 1280x860
+   top bar 49 / H = 0.0570
+   bottom bar 105 / H = 0.1221
+   body 706 / H = 0.8209
+   collection share (body) = 0.8209
+   inspector 340 / W = 0.2656   shelf 940 / W = 0.7344
+   inspector: sleeve 120 / panel 340 = 0.3529
+   tile: art / (art + GAP_LG + LABEL_H) = 0.8127  (art 243, row pitch 379 incl. a shelf break, label block 40)
+   settings content right edge 894 / W = 0.6984
+   queue popover 358x420;  420 / body 706 = 0.5949
+
+### SYMMETRY — bottom bar zone widths (playing)
+   content x[40,1240) w 1200
+   left fill 394.0, centre 380, right fill 394.0
+   idle     left ink (41, 804, 326, 815)  centre ink (595, 802, 685, 814)  right ink (1112, 796, 1240, 814)
+            left  ink starts   +1 from the inner edge, right ink ends   +0 from it
+   playing  left ink (40, 783, 426, 830)  centre ink (477, 802, 821, 849)  right ink (1039, 796, 1240, 815)
+            left  ink starts   +0 from the inner edge, right ink ends   +0 from it
+
+### DENSITY
+   top bar                  coverage   6.81%  centroid (516.1,26.4)
+   bottom bar idle          coverage   1.03%  centroid (620.1,808.7)
+   bottom bar playing       coverage   2.65%  centroid (457.3,811.0)
+   wall body                coverage  26.68%  centroid (298.8,348.1)
+   wall body, chrome only   coverage  26.68%  centroid (298.8,348.1)
+   inspector panel          coverage  10.66%  centroid (1036.6,269.0)
+   settings body            coverage   2.00%  centroid (367.4,174.8)
+   queue popover            coverage   5.35%  centroid (1013.8,545.7)
+   first run                coverage   0.53%  centroid (591.1,346.1)
+   empty library            coverage   0.20%  centroid (615.4,404.6)

@@ -1,0 +1,6 @@
+############ 1920x1080   top bar h 53   bar h 102
+Traceback (most recent call last):
+  File "/tmp/baz-rulers/census5.py", line 63, in <module>
+    "queue popover": yedges(imq, min(xs), max(xs) + 1, BODY, RULE2, LIT),
+                                 ~~~^^^^
+ValueError: min() iterable argument is empty

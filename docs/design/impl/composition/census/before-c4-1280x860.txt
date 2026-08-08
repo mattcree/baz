@@ -1,0 +1,109 @@
+############ 1280x860   top bar h 53   bar h 102
+
+### TILE — one column's vertical structure (rest / hover / selected / playing)
+   rest      art x 40..295 (w 255) ->
+        y    97..  104  h    7
+        y   133..  388  h  255
+        y   408..  418  h   10
+        y   426..  437  h   11
+        y   484..  491  h    7
+        y   520..  758  h  238
+   hover     art x 40..295 (w 255) ->
+        y    97..  104  h    7
+        y   133..  388  h  255
+        y   408..  418  h   10
+        y   426..  437  h   11
+        y   444..  445  h    1
+        y   484..  491  h    7
+        y   520..  758  h  238
+   selected  art x 40..295 (w 255) ->
+        y    97..  104  h    7
+        y   133..  388  h  255
+        y   408..  418  h   10
+        y   426..  437  h   11
+        y   484..  491  h    7
+        y   520..  758  h  238
+   playing   art x 40..41 (w 1) ->
+
+### TILE — hover / selected rule, measured
+   rest      rule rows [(429, '#7D7B75')]
+   hover     rule rows [(429, '#9D9A94')]
+   selected  rule rows [(429, '#7D7B75')]
+
+### VERTICAL RHYTHM — every chrome y-edge in the frame (artwork excluded)
+   top bar + bottom bar y-edges: [11, 41, 52, 53, 758, 759, 781, 793, 799, 804, 822, 824, 842]
+   best-fit vertical units (mean |residual| px, unit, phase):
+       0.462  unit   2  phase   1
+       0.538  unit   2  phase   0
+       0.538  unit   3  phase   2
+       0.692  unit   3  phase   1
+       0.769  unit   3  phase   0
+       0.923  unit   4  phase   1
+       1.000  unit   4  phase   0
+       1.000  unit   4  phase   2
+
+   inspector y-edges: [87, 99, 121, 413, 430, 444, 456, 469, 480, 489, 500, 509, 524, 557, 568, 600, 604, 617, 632, 645, 662, 671, 689, 701, 722, 732]
+       0.500  unit   2  phase   0
+       0.500  unit   2  phase   1
+       0.538  unit   3  phase   2
+       0.654  unit   3  phase   0
+       0.731  unit   4  phase   0
+       0.731  unit   4  phase   1
+
+   settings y-edges: [77, 114, 123, 152, 163, 174, 207, 218, 239, 250, 265, 279]
+       0.417  unit   2  phase   1
+       0.583  unit   2  phase   0
+       0.583  unit   3  phase   0
+       0.667  unit   3  phase   2
+       0.750  unit   3  phase   1
+       0.750  unit   4  phase   2
+
+   queue popover y-edges: [53, 355, 378, 391, 415, 424, 440, 451, 458, 466, 474, 501, 510, 520, 538, 551, 566, 576, 595, 608, 623, 633, 651, 661, 679, 692, 707, 720, 739, 758]
+       0.500  unit   2  phase   0
+       0.500  unit   2  phase   1
+       0.600  unit   3  phase   1
+       0.667  unit   3  phase   2
+       0.733  unit   3  phase   0
+       0.767  unit   4  phase   3
+
+   ALL chrome y-edges pooled: 79
+       0.481  unit   2  phase   1
+       0.519  unit   2  phase   0
+       0.620  unit   3  phase   2
+       0.684  unit   3  phase   0
+       0.696  unit   3  phase   1
+       0.949  unit   4  phase   0
+       0.962  unit   4  phase   3
+       1.038  unit   4  phase   1
+
+### PROPORTION
+   window 1280x860
+   top bar 53 / H = 0.0616
+   bottom bar 102 / H = 0.1186
+   body 705 / H = 0.8198
+   collection share (body) = 0.8198
+   inspector 340 / W = 0.2656   shelf 940 / W = 0.7344
+   inspector: sleeve 292 / panel 340 = 0.8588
+   tile: art / (art + GAP_LG + LABEL_H) = 0.9410  (art 255, row pitch 0, label block 0)
+   settings content right edge 878 / W = 0.6859
+   queue popover 358x388;  388 / body 705 = 0.5504
+
+### SYMMETRY — bottom bar zone widths (playing)
+   content x[40,1240) w 1200
+   left fill 394.0, centre 380, right fill 394.0
+   idle     left ink (40, 805, 326, 816)  centre ink (595, 781, 685, 793)  right ink (1136, 810, 1240, 822)
+            left  ink starts   +0 from the inner edge, right ink ends   +0 from it
+   playing  left ink (40, 786, 389, 832)  centre ink (477, 781, 821, 842)  right ink (1063, 805, 1240, 822)
+            left  ink starts   +0 from the inner edge, right ink ends   +0 from it
+
+### DENSITY
+   top bar                  coverage   4.85%  centroid (495.2,23.4)
+   bottom bar idle          coverage   1.06%  centroid (622.4,808.1)
+   bottom bar playing       coverage   2.74%  centroid (450.2,810.2)
+   wall body                coverage  28.26%  centroid (310.0,355.9)
+   wall body, chrome only   coverage  28.26%  centroid (310.0,355.9)
+   inspector panel          coverage  38.70%  centroid (1107.3,281.3)
+   settings body            coverage   1.89%  centroid (346.9,155.5)
+   queue popover            coverage   4.99%  centroid (1014.9,553.9)
+   first run                coverage   0.58%  centroid (547.3,417.6)
+   empty library            coverage   0.20%  centroid (615.4,407.6)

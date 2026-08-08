@@ -1,0 +1,57 @@
+############ 1920x1080  top bar h 53  body y[53,978)  bar y[979,1080)
+
+### search well, exact
+   recess rows 11..41  h 30
+   column 200 colours: 8:#0C0D0E 9:#0C0D0E 10:#0C0D0E 11:#6C6A67 12:#060708 13:#060708 14:#060708 15:#060708 16:#060708 17:#060708 18:#060708 19:#060708 20:#060708 21:#060708 22:#060708 23:#060708 24:#060708 25:#060708 26:#060708 27:#060708 28:#090A0B 29:#090A0B 30:#060708 31:#060708 32:#060708 33:#060708 34:#060708 35:#060708 36:#060708 37:#060708 38:#060708 39:#060708 40:#6C6A67 41:#0C0D0E 42:#0C0D0E 43:#0C0D0E 44:#0C0D0E 45:#0C0D0E
+
+### transport glyphs — ink centroid against the hit box
+   glyph 0 idle     hitbox x[904,936) ink box (915, 1001, 925, 1013)  bbox-cx   920.0 centroid-cx   920.0  box-cx   920.0  d_bbox  +0.0 d_centroid  +0.0
+   glyph 0 playing  hitbox x[904,936) ink box (904, 1001, 936, 1059)  bbox-cx   920.0 centroid-cx   920.0  box-cx   920.0  d_bbox  +0.0 d_centroid  -0.0
+   glyph 1 idle     hitbox x[944,976) ink box (956, 1001, 966, 1013)  bbox-cx   961.0 centroid-cx   959.3  box-cx   960.0  d_bbox  +1.0 d_centroid  -0.7
+   glyph 1 playing  hitbox x[944,976) ink box (944, 1001, 976, 1059)  bbox-cx   960.0 centroid-cx   960.0  box-cx   960.0  d_bbox  +0.0 d_centroid  -0.0
+   glyph 2 idle     hitbox x[984,1016) ink box (995, 1001, 1005, 1013)  bbox-cx  1000.0 centroid-cx  1000.0  box-cx  1000.0  d_bbox  +0.0 d_centroid  -0.0
+   glyph 2 playing  hitbox x[984,1016) ink box (984, 1001, 1016, 1059)  bbox-cx  1000.0 centroid-cx  1000.0  box-cx  1000.0  d_bbox  +0.0 d_centroid  +0.0
+
+### top-bar right cluster: the two labels on one row
+   counts    ink box (1688, 21, 1812, 30)  ink-y centre 25.5
+   Settings  ink box (1840, 14, 1885, 25)  ink-y centre 19.5
+   (the row's controls are TRANSPORT_HIT 32 tall, top-padded 10 -> y 10..42,
+    so a centred 12/1.35 line box has its ink centre at y ~25.9)
+
+### INSPECTOR
+   panel x 1580..1920  w 340  (probe row 972)
+   seam colours: 1576:#0C0D0E 1577:#0C0D0E 1578:#0C0D0E 1579:#1B1C1C 1580:#141517 1581:#141517
+   panel rows:
+      y[  87,  99) h  12 -> 1874..1886
+      y[ 121, 413) h 292 -> 1604..1896
+      y[ 430, 444) h  14 -> 1605..1718
+      y[ 456, 469) h  13 -> 1605..1743
+      y[ 480, 489) h   9 -> 1604..1734
+      y[ 500, 509) h   9 -> 1605..1733
+      y[ 524, 557) h  33 -> 1604..1896
+      y[ 568, 786) h 218 -> 1625..1741, 1857..1896
+      y[ 802, 815) h  13 -> 1625..1717, 1857..1882
+      y[ 830, 843) h  13 -> 1618..1768, 1857..1882
+      y[ 858, 868) h  10 -> 1618..1762, 1857..1881
+      y[ 886, 899) h  13 -> 1618..1716, 1857..1882
+      y[ 942, 952) h  10 -> 1605..1788
+   Play album band y[524,557)
+      label+triangle ink box (1604, 527, 1896, 554)
+      inner ink centroid (1666.7,534.1)  button centre (1750.0,540.5)
+
+### SETTINGS
+   y[  14,  34) h  20 -> 24..69, 93..149, 1647..1904
+   y[  52,  53) h   1 -> 0..1920
+   y[  77, 114) h  37 -> 24..224, 249..503
+   y[ 123, 152) h  29 -> 248..878
+   y[ 163, 174) h  11 -> 249..517
+   y[ 207, 218) h  11 -> 249..295, 772..814, 830..837, 862..869
+   y[ 239, 250) h  11 -> 249..325, 772..814, 830..837, 862..869
+   y[ 265, 279) h  14 -> 248..418
+
+### QUEUE popover
+Traceback (most recent call last):
+  File "/tmp/baz-rulers/census3.py", line 111, in <module>
+    ys = [y for y in range(BODY, RULE2) if dist(imq.rgb(int((min(xs) + max(xs)) / 2), y), LIT) <= 3]
+                                                             ~~~^^^^
+ValueError: min() iterable argument is empty

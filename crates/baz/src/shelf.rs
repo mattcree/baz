@@ -680,17 +680,22 @@ mod tests {
     /// table publishes.
     #[test]
     fn the_hang_reproduces_the_specifications_table() {
-        // width, columns, art, gutter, margin, row pitch
+        // width, columns, art, gutter, margin, row pitch.
+        //
+        // The pitch is `art + 96` at every width now — `GAP_LG` to the label,
+        // `LABEL_H` 40, `HANG` 40 — because quantising the body's line box to 20
+        // makes a wall label exactly one hang tall (composition audit §2.1). It
+        // was `art + 92.4`, which is the same table with a fraction in it.
         let table = [
-            (640.0_f32, 2_usize, 260.0_f32, 40.0_f32, 40.0_f32, 352.0_f32),
-            (760.0, 2, 320.0, 40.0, 40.0, 412.0),
-            (860.0, 2, 320.0, 80.0, 70.0, 412.0),
-            (922.0, 3, 254.0, 40.0, 40.0, 346.0),
-            (1120.0, 3, 320.0, 40.0, 40.0, 412.0),
-            (1280.0, 4, 270.0, 40.0, 40.0, 362.0),
-            (1500.0, 5, 252.0, 40.0, 40.0, 344.0),
-            (1920.0, 6, 273.0, 40.0, 40.0, 365.0),
-            (2560.0, 8, 275.0, 40.0, 40.0, 367.0),
+            (640.0_f32, 2_usize, 260.0_f32, 40.0_f32, 40.0_f32, 356.0_f32),
+            (760.0, 2, 320.0, 40.0, 40.0, 416.0),
+            (860.0, 2, 320.0, 80.0, 70.0, 416.0),
+            (922.0, 3, 254.0, 40.0, 40.0, 350.0),
+            (1120.0, 3, 320.0, 40.0, 40.0, 416.0),
+            (1280.0, 4, 270.0, 40.0, 40.0, 366.0),
+            (1500.0, 5, 252.0, 40.0, 40.0, 348.0),
+            (1920.0, 6, 273.0, 40.0, 40.0, 369.0),
+            (2560.0, 8, 275.0, 40.0, 40.0, 371.0),
         ];
         for (width, columns, art, gutter, margin, pitch) in table {
             let grid = Grid::new(width);

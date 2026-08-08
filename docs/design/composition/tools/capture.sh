@@ -71,6 +71,12 @@ A)
   klick 180 260;                            shot inspector
   key ctrl+b;  mv $PARK_X $PARK_Y;          shot wall-selected
   key ctrl+b; sleep 0.4
+  # **Blur the search well first.** iced 0.13's `text_input` keeps focus until a
+  # click lands elsewhere, and the well takes focus at launch — so `q` went into
+  # the *field* and every "queue" frame in the set was a search result with a
+  # one-letter query. The click lands on empty top-bar wall, which is a place
+  # nothing is at either window size.
+  klick $((W / 2 + 150)) 24
   key q; mv $PARK_X $PARK_Y;                shot queue-empty
   key Escape
   key ctrl+comma; mv $PARK_X $PARK_Y;       shot settings
@@ -79,16 +85,29 @@ A)
   key Escape; key Escape
   ;;
 B)
-  # The seventh album, "Closing Time", whose first track is one hour of
-  # digital silence — long enough that the null sink cannot burn through it
-  # while the frames are taken.
-  if [[ $W -ge 1600 ]]; then TX=176; TY=599; else TX=795; TY=590; fi
-  xdotool mousemove $TX $TY; sleep 0.3
-  xdotool click --repeat 2 --delay 120 1; sleep 0.9
+  # "Closing Time", whose first track is one hour of digital silence — long
+  # enough that the null sink cannot burn through it while the frames are taken.
+  #
+  # **Found by name, not by pixel.** It used to be two hardcoded coordinates per
+  # window size, which is a fixture of the layout in a script whose whole job is
+  # to measure the layout: the moment the hang, the rail lane or the group keys
+  # moved, the click landed on wall and every "playing" frame in the set was
+  # silently an idle one. Searching narrows the wall to one work, which is
+  # always the first cell of the first shelf.
+  # No `/` first: the search well takes focus at launch, so the key would be
+  # typed *into* the field and the query would be `/Closing Time`, which matches
+  # nothing. (It did, and every B frame in the set was silently an idle bar.)
+  typ "Closing Time"; sleep 0.6
+  xdotool mousemove $((40 + 60)) $((H / 3)); sleep 0.3
+  xdotool click --repeat 2 --delay 120 1; sleep 1.2
+  key Escape; sleep 0.6
   key ctrl+b
   mv $PARK_X $PARK_Y;                       shot wall-playing
-  mv $((W / 2)) $((H - 34));                shot bar-seek-hover
-  mv $((W - 150)) $((H - 34));              shot bar-volume-hover
+  # The groove hangs one `BAR_LEAD` below the bar's centre line and the fader
+  # sits on it, so the two hover targets are no longer the same row.
+  mv $((W / 2)) $((H - 24));                shot bar-seek-hover
+  mv $((W - 80)) $((H - 52));               shot bar-volume-hover
+  klick $((W / 2 + 150)) 24
   key q; mv $PARK_X $PARK_Y;                shot queue-playing
   key Escape; sleep 0.4
   key ctrl+b;                               shot inspector-playing

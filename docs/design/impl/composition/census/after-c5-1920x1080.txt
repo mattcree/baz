@@ -1,0 +1,70 @@
+############ 1920x1080   top bar h 49   bar h 105
+
+### RHYTHM — share of chrome y-edges within +-1 px of a u-lattice
+   surface                n   u=4   u=6   u=8   u=12  u=16
+   top bar                  2   100%   100%   100%    50%   100% 
+   bottom bar (idle)        4    75%   100%    50%    75%    50% 
+   bottom bar (playing)     8   100%    75%    62%    62%    50% 
+   inspector               28    96%    57%    57%    39%    39% 
+   settings                12   100%    83%    58%    75%    33% 
+   queue popover            2   100%   100%   100%   100%   100% 
+   tile column             20    85%    75%    55%    40%    35% 
+   POOLED                  71    86%    59%    49%    31%    25% 
+
+   (a lattice of unit u catches a random set at about 3/u; u=4 -> 75%,
+    u=6 -> 50%, u=8 -> 38%, u=12 -> 25%, u=16 -> 19%)
+
+### RHYTHM — the y-edges themselves
+   top bar                [8, 40]
+   bottom bar (idle)      [1016, 1021, 1022, 1035]
+   bottom bar (playing)   [1003, 1021, 1022, 1035, 1042, 1050, 1059, 1069]
+   inspector              [83, 95, 117, 237, 254, 268, 282, 295, 305, 314, 325, 334, 349, 381, 393, 845, 850, 859, 866, 875, 882, 891, 899, 907, 914, 923, 939, 949]
+   settings               [89, 126, 135, 163, 175, 186, 223, 234, 263, 274, 295, 319]
+   queue popover          [49, 975]
+   tile column            [92, 99, 129, 385, 405, 415, 424, 435, 483, 490, 520, 776, 796, 806, 815, 824, 874, 881, 911, 975]
+
+### HIERARCHY — weighted ink mass per element (area x contrast)
+   -- wall (rest) --
+      whole wall body mass 2.493e+07
+      one sleeve  6.906e+06  (27.71% of the wall)
+      its label   8.603e+05  ( 3.45%)  ratio sleeve:label 8.0 : 1
+   -- top bar --
+      search well    1.392e+05  42.79% of the bar
+      counts         5.343e+04  16.42% of the bar
+      Settings       2.480e+04   7.62% of the bar
+   -- bottom bar (playing) --
+      left zone      1.664e+05  46.39% of the bar
+      Queue control  0.000e+00   0.00% of the bar
+      transport      6.465e+04  18.03% of the bar
+      seek row       1.248e+04   3.48% of the bar
+      signal note    3.307e+04   9.22% of the bar
+      volume block   3.694e+04  10.30% of the bar
+   -- inspector --
+      close          1.035e+04   0.25% of the panel
+      sleeve         2.940e+06  71.90% of the panel
+      title          4.961e+04   1.21% of the panel
+      artist         4.264e+04   1.04% of the panel
+      catalogue+cond 6.690e+04   1.64% of the panel
+      Play album     8.000e+04   1.96% of the panel
+      track list     3.803e+05   9.30% of the panel
+      footnote       9.724e+04   2.38% of the panel
+
+### SELECTED tile's rule (measured in the inspector frame)
+      y=418  #9D9A94
+      y=419  #4D4B48
+      y=420  #ABA8A1
+      y=422  #5A5855
+      y=423  #9E9B94
+
+### PLAY ALBUM — the primary control's internal composition
+      bands: [(500, 570)]
+      button y[500,570) h 70;  inner ink (1621, 502, 1886, 568)
+      button box x[1604,1896) w 292; inner ink centred? ink cx 1753.5 vs box cx 1750.0
+      inner ink cy 535.0 vs box cy 535.0
+
+### SETTINGS controls
+      segmented control box (264, 120, 890, 155)
+      segment Off    label ink (266, 137, 460, 152)
+      segment Track  label ink (460, 137, 551, 138)
+      segment Album  label ink (683, 145, 714, 152)
+      checkbox box (265, 264, 268, 272)

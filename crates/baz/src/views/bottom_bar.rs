@@ -29,8 +29,8 @@
 //! surface and a running commentary on the queue, and did not move a pixel.
 
 use iced::widget::{
-    Space, button, column, container, horizontal_rule, image as iced_image, mouse_area, row, text,
-    tooltip,
+    Space, button, column, container, horizontal_rule, image as iced_image, mouse_area, row, stack,
+    text, tooltip,
 };
 use iced::{Color, Element, Length, alignment};
 
@@ -97,9 +97,18 @@ pub(crate) fn view(player: &PlayerState, queue_open: bool, ink: Ink) -> Element<
     .align_y(iced::Alignment::Center);
     column![
         horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
+        // **One centre line, one window gutter.** The band is
+        // [`theme::BAR_CONTENT_H`] and its mid-line is the transport's centre
+        // line by construction ([`theme::BAR_LEAD`]), so every zone centred in
+        // it puts its own mark on that line rather than centring its block
+        // around it. The horizontal padding is [`theme::HANG`], the one gutter
+        // every surface that touches a window edge hangs from — it was
+        // `GAP_LG`, which is why nothing in this bar lined up with the wall
+        // above it.
         container(bar)
             .width(Length::Fill)
-            .padding(theme::pad(theme::GAP_MD, theme::GAP_LG))
+            .height(Length::Fixed(theme::BAR_BAND_H))
+            .padding(theme::pad(theme::BAR_PAD_V, theme::HANG))
             .style(move |_theme| theme::bar(room)),
     ]
     .into()
@@ -186,13 +195,22 @@ fn queue_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
                 .line_height(theme::LEADING_META)
                 .font(theme::MEDIUM)
                 .wrapping(text::Wrapping::None),
+            // **The figure sits on the control's own inner edge**, not 36 px
+            // inside it (the audit's defect 13). The readout keeps its reserved
+            // [`theme::POSITION_W`] slot — the bar may not move when a queue
+            // arrives — and the slack between the word and the slot is taken by
+            // a fill rather than left at the right-hand end, so the number lands
+            // on an edge something else shares.
+            Space::with_width(Length::Fill),
             readout,
         ]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center),
     )
     .width(Length::Fixed(theme::UP_NEXT_W))
-    .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+    // 8 + a 16 px line box + 8 = `TRANSPORT_HIT`: one control height (law L7).
+    // It stood 24 px tall in a bar whose published floor is 32.
+    .padding(theme::pad(theme::GAP_SM, theme::GAP_SM))
     .style(move |_theme, status| theme::now_playing(room, status, open))
     .on_press(Message::ToggleQueue)
     .into()
@@ -241,24 +259,35 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
             .wrapping(text::Wrapping::None)
             .into();
     };
-    let mut stack = column![
-        text(now.title.as_str())
-            .size(theme::SIZE_BODY)
-            .line_height(theme::LEADING_BODY)
-            .font(theme::MEDIUM)
-            .wrapping(text::Wrapping::None)
+    // Three lanes — 20 · 16 · 20 — so the **artist's line box is the block's
+    // exact middle** and centring the block centres the zone's own line on the
+    // bar's (law L4). The artist's lane is reserved whether or not the tags
+    // carry one, for the same reason the continuation's is: a track without an
+    // artist must not shift the two lines around it.
+    let lines = column![
+        container(
+            text(now.title.as_str())
+                .size(theme::SIZE_BODY)
+                .line_height(theme::LEADING_BODY)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None)
+        )
+        .height(Length::Fixed(theme::LINE_BODY)),
+        container(match &now.artist {
+            Some(artist) => Element::from(
+                text(artist.as_str())
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper_dim)
+                    .wrapping(text::Wrapping::None),
+            ),
+            None => Space::with_height(Length::Fixed(theme::LINE_META)).into(),
+        })
+        .height(Length::Fixed(theme::LINE_META)),
+        continuation_lane(player),
     ]
     .spacing(theme::GAP_XXS);
-    if let Some(artist) = &now.artist {
-        stack = stack.push(
-            text(artist.as_str())
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_dim)
-                .wrapping(text::Wrapping::None),
-        );
-    }
-    stack.push(continuation_lane(player)).into()
+    lines.into()
 }
 
 /// The ambient continuation's lane: `then 2 albums · 1:58:00 left` in the
@@ -383,15 +412,23 @@ fn transport_stack(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
         Some(state) => seek_bar(state),
         None => Space::new(
             Length::Fixed(theme::SEEK_ROW_W),
-            Length::Fixed(theme::SEEK_ROW_H),
+            Length::Fixed(theme::BAR_LEAD),
         )
         .into(),
     };
-    column![transport, seek]
-        .spacing(theme::GAP_SM)
-        .width(Length::Fixed(theme::SEEK_ROW_W))
-        .align_x(iced::Alignment::Center)
-        .into()
+    // **The column is symmetric about the transport row.** `BAR_LEAD` of clear
+    // recess above it, and the same below spent on the gap and the groove — so
+    // the transport's centre *is* the bar's mid-line, in every state and at
+    // every width, rather than sitting 22.5 px above it because the seek row
+    // pushed it there (the audit's defect 2).
+    column![
+        Space::with_height(Length::Fixed(theme::BAR_LEAD)),
+        transport,
+        seek,
+    ]
+    .width(Length::Fixed(theme::SEEK_ROW_W))
+    .align_x(iced::Alignment::Center)
+    .into()
 }
 
 /// One icon-only control: a glyph in a fixed square, named by a tooltip.
@@ -516,12 +553,19 @@ fn seek_bar(state: player::SeekBar) -> Element<'static, Message> {
             .height(theme::RAIL_HIT)
             .into()
     };
+    // The groove's whole lane is [`theme::BAR_LEAD`]: `GAP_SM` of clear recess
+    // under the transport, then the hit band. The hover preview is a **layer
+    // over that gap** rather than a row above the groove — it floats in exactly
+    // the pixels it always floated in, and costs the column no height, which is
+    // what lets the transport sit on the bar's centre line at all
+    // ([`theme::PREVIEW_H`]).
+    let groove_column = stack![
+        column![Space::with_height(Length::Fixed(theme::GAP_SM)), rail,],
+        preview_lane(state.preview, theme::SEEK_W, theme::PREVIEW_W),
+    ];
     row![
         seek_stamp(state.elapsed, elapsed_color, alignment::Horizontal::Right),
-        column![
-            preview_lane(state.preview, theme::SEEK_W, theme::PREVIEW_W),
-            rail
-        ],
+        groove_column,
         seek_stamp(state.total, room.paper_faint, alignment::Horizontal::Left),
     ]
     .spacing(theme::GAP_SM)
@@ -574,32 +618,31 @@ fn volume(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
         fader.into()
     };
     row![
-        // **The mute glyph sits on the fader's rail**, not on the centre of the
-        // block the fader is in — the one alignment defect a listener named
-        // unprompted, and it was 7.5 px. The button is *placed* rather than
-        // centred: [`theme::MUTE_TOP`] above it, which is half a hit target
-        // above the rail. The argument and the measurement are on that token;
-        // `seek_stamp` below makes the same move for the seek groove's
-        // timestamps, which is where the pattern comes from.
-        column![
-            Space::with_height(Length::Fixed(theme::MUTE_TOP)),
-            glyph_button(
-                icon::Glyph::speaker(state.muted),
-                state.mute_label,
-                state.interactive,
-                state.mute_pending,
-                Message::ToggleMute,
-                Control::Mute,
-                ink,
-            ),
-        ],
+        // **The mute glyph sits on the fader's rail**, and it no longer needs a
+        // lift to get there. The block is symmetric about its own rail — a
+        // preview lane above, an empty lane of the same height below
+        // ([`theme::VOLUME_ROW_H`]) — so centring the block centres the *rail*,
+        // and a centred mute button lands its glyph on the same line. The
+        // `MUTE_TOP` constant that used to buy this by hand is deleted: an
+        // asymmetric block plus a compensating offset is two decisions where a
+        // symmetric block is none.
+        glyph_button(
+            icon::Glyph::speaker(state.muted),
+            state.mute_label,
+            state.interactive,
+            state.mute_pending,
+            Message::ToggleMute,
+            Control::Mute,
+            ink,
+        ),
         column![
             preview_lane(state.preview, theme::VOLUME_W, theme::LEVEL_W),
-            fader
+            fader,
+            Space::with_height(Length::Fixed(theme::PREVIEW_H)),
         ],
     ]
     .spacing(theme::GAP_SM)
-    .align_y(iced::Alignment::Start)
+    .align_y(iced::Alignment::Center)
     .width(Length::Fixed(theme::VOLUME_BLOCK_W))
     .height(Length::Fixed(theme::VOLUME_ROW_H))
     .into()
@@ -620,7 +663,7 @@ fn seek_stamp(
     align: alignment::Horizontal,
 ) -> Element<'static, Message> {
     column![
-        Space::with_height(Length::Fixed(theme::PREVIEW_H)),
+        Space::with_height(Length::Fixed(theme::GAP_SM)),
         container(
             text(value)
                 .size(theme::SIZE_META)
@@ -705,6 +748,53 @@ mod tests {
         const { assert!(theme::SEEK_ROW_W + theme::VOLUME_BLOCK_W + theme::SIGNAL_W < 760.0) }
     }
 
+    /// **Law L4 — one centre line per bar**, asserted off the geometry the view
+    /// composes rather than off a screenshot.
+    ///
+    /// The audit measured seven mark-lines spanning 787 → 837 in a 102 px band
+    /// whose own mid-line at 809.5 carried nothing: the zones were centred as
+    /// *blocks*, and the blocks are different heights. Every claim below is the
+    /// arithmetic that stops that happening again, and each one names the mark
+    /// it is about.
+    #[test]
+    fn every_mark_in_the_bar_sits_on_the_bars_one_centre_line() {
+        /// The band's own mid-line.
+        const MID: f32 = theme::BAR_CONTENT_H / 2.0;
+        /// The transport's glyph centres, from the top of the band.
+        const TRANSPORT_CENTRE: f32 = theme::BAR_LEAD + theme::TRANSPORT_HIT / 2.0;
+        /// The fader's rail centre, from the top of the volume block.
+        const VOLUME_RAIL_CENTRE: f32 = theme::PREVIEW_H + theme::VOLUME_HIT / 2.0;
+        /// A seek stamp's ink centre, from the top of the seek lane.
+        const STAMP_CENTRE: f32 = theme::GAP_SM + theme::RAIL_HIT / 2.0;
+        /// The groove's rail centre, from the same place.
+        const RAIL_CENTRE: f32 = theme::GAP_SM + theme::RAIL_HIT / 2.0;
+
+        // The band's mid-line **is** the transport's centre line: the column
+        // reserves `BAR_LEAD` above the transport row and spends `BAR_LEAD`
+        // below it on the gap and the groove.
+        const { assert!(TRANSPORT_CENTRE == MID) }
+        // The seek row hangs below that line rather than pushing it up, and the
+        // whole of what is below is what is reserved above.
+        const { assert!(theme::BAR_LEAD == theme::GAP_SM + theme::SEEK_ROW_H) }
+        const { assert!(theme::BAR_CONTENT_H == 2.0 * theme::BAR_LEAD + theme::TRANSPORT_HIT) }
+        // The volume block is symmetric about its own rail, so centring the
+        // block centres the **rail** — the audit's 816 against 809.5.
+        const { assert!(VOLUME_RAIL_CENTRE == theme::VOLUME_ROW_H / 2.0) }
+        // The mute glyph is centred in the same block, so it is on the rail
+        // without a lift — the `MUTE_TOP` constant is deleted, not retuned.
+        const { assert!(theme::VOLUME_ROW_H >= theme::TRANSPORT_HIT) }
+        // The seek stamps hang off the same `GAP_SM` the groove does, so their
+        // ink centres are the groove's rail centre and not the block's.
+        const { assert!(STAMP_CENTRE == RAIL_CENTRE) }
+        // The bar's padding is symmetric, so it moves the band without moving
+        // the line inside it.
+        const { assert!(theme::BAR_BAND_H == theme::BAR_CONTENT_H + 2.0 * theme::BAR_PAD_V) }
+        // Every zone fits inside the band, or the band would not be what sets
+        // the line.
+        const { assert!(theme::VOLUME_ROW_H <= theme::BAR_CONTENT_H) }
+        const { assert!(theme::TRANSPORT_HIT <= theme::BAR_CONTENT_H) }
+    }
+
     /// Every glyph the transport row can draw is the same sprite square in the
     /// same fixed box, Previous included — so no transport state moves a pixel
     /// of the bar.
@@ -762,37 +852,38 @@ mod tests {
         // by the same zone, and it never wraps.)
         const SHIPPED: f32 = 1280.0;
         const ZONE: f32 = SHIPPED
-            - 2.0 * theme::GAP_LG // the bar's own padding
+            - 2.0 * theme::HANG // the bar's own padding: the one window gutter
             - 2.0 * theme::GAP_LG // the gaps between its three zones
             - theme::SEEK_ROW_W
             - theme::SIGNAL_W
             - theme::GAP_SM
             - theme::VOLUME_BLOCK_W;
         const TITLE_LANE: f32 = ZONE - theme::UP_NEXT_W - theme::GAP_SM;
-        // The zone is also shorter than the centre column *with the third line
-        // in it*, so neither the control's padding nor the continuation can be
-        // what sets the bar's height. This is the assertion the ambient line
+        // The zone is also shorter than the bar's content band *with the third
+        // line in it*, so neither the control's padding nor the continuation can
+        // be what sets the bar's height. This is the assertion the ambient line
         // had to survive: it is the only reason a line appearing under the
         // artist does not push the transport down.
-        const LEFT_H: f32 = theme::SIZE_BODY * theme::LEADING_BODY
+        const LEFT_H: f32 = theme::LINE_BODY
             + theme::GAP_XXS
-            + theme::SIZE_META * theme::LEADING_META
+            + theme::LINE_META
             + theme::GAP_XXS
-            + theme::CONTINUATION_H
-            + 2.0 * theme::GAP_XS;
-        const CENTRE_H: f32 = theme::TRANSPORT_HIT + theme::GAP_SM + theme::SEEK_ROW_H;
+            + theme::CONTINUATION_H;
         const { assert!(TITLE_LANE > 200.0) }
-        const { assert!(LEFT_H < CENTRE_H) }
+        const { assert!(LEFT_H < theme::BAR_CONTENT_H) }
         // The continuation is what grew the zone, so state what it cost: the
         // whole line, and the bar still has a gap of headroom over it.
-        const { assert!(LEFT_H - theme::CONTINUATION_H - theme::GAP_XXS < CENTRE_H) }
-        const { assert!(LEFT_H + theme::GAP_MD < CENTRE_H) }
-        // The line is one line. Nothing in this zone may wrap, so the lane
-        // reserved for it is exactly what one line of its type occupies.
-        assert!(
-            (theme::CONTINUATION_H - theme::SIZE_CAPTION * theme::LEADING_CAPTION).abs()
-                < f32::EPSILON
-        );
+        const { assert!(LEFT_H - theme::CONTINUATION_H - theme::GAP_XXS < theme::BAR_CONTENT_H) }
+        const { assert!(LEFT_H + theme::GAP_MD < theme::BAR_CONTENT_H) }
+        // **The stack is symmetric about its middle lane** (law L4): the title's
+        // lane and the continuation's are the same height, so the artist's line
+        // box is the block's exact centre and centring the block puts the zone's
+        // own line on the bar's. Without this the middle line sits 2 px low and
+        // the whole zone reads as one notch off.
+        const { assert!(theme::CONTINUATION_H == theme::LINE_BODY) }
+        // The lane still holds the line it is reserved for, with air to spare —
+        // it is one line of caption type, and nothing here may wrap.
+        const { assert!(theme::CONTINUATION_H >= theme::LINE_CAPTION) }
 
         let mut player = PlayerState::new(Availability::Ready);
         // Nothing queued and nothing playing: neither the count nor the

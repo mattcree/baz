@@ -64,9 +64,16 @@ use crate::{
     art, config, font, keys, motion, mpris, player, queue_edit, scan, shelf, theme, views, vm,
 };
 
-/// Approximate top-bar height, used only for the pre-first-scroll estimate
-/// of the grid viewport (real bounds arrive with every scroll event).
-const TOP_BAR_H: f32 = 56.0;
+/// The top bar's height, used for the pre-first-scroll estimate of the grid
+/// viewport (real bounds arrive with every scroll event).
+///
+/// It was a local `56.0` against a bar that drew **53**, which the composition
+/// audit caught: nothing was drawn wrong, because the first layout replaces the
+/// estimate with a measurement, but a virtualizer whose first frame is three
+/// pixels out is three pixels of shelf resolved against a viewport that does not
+/// exist. The number is [`theme::TOP_BAR_H`] now — the same arithmetic the bar
+/// is composed from — so the estimate cannot drift from the drawing again.
+const TOP_BAR_H: f32 = theme::TOP_BAR_H;
 /// Initial window size.
 const WINDOW: Size = Size::new(1280.0, 860.0);
 

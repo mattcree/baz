@@ -1,0 +1,77 @@
+############ 1920x1080   top bar h 53   bar h 102
+
+### TILE — one column's vertical structure (rest / hover / selected / playing)
+   rest      art x 40..304 (w 264) ->
+        y    97..  104  h    7
+        y   133..  397  h  264
+        y   416..  426  h   10
+        y   434..  445  h   11
+        y   492..  499  h    7
+        y   529..  792  h  263
+        y   812..  822  h   10
+        y   830..  839  h    9
+   hover     art x 40..304 (w 264) ->
+        y    97..  104  h    7
+        y   133..  397  h  264
+        y   416..  426  h   10
+        y   434..  445  h   11
+        y   453..  454  h    1
+        y   492..  499  h    7
+        y   529..  792  h  263
+        y   812..  822  h   10
+   selected  art x 40..304 (w 264) ->
+        y    97..  104  h    7
+        y   133..  397  h  264
+        y   416..  426  h   10
+        y   434..  445  h   11
+        y   492..  499  h    7
+        y   529..  792  h  263
+        y   812..  822  h   10
+        y   830..  839  h    9
+   playing   art x 40..296 (w 256) ->
+        y    97..  104  h    7
+        y   133..  389  h  256
+        y   408..  418  h   10
+        y   427..  438  h   11
+        y   485..  492  h    7
+        y   521..  777  h  256
+        y   796..  806  h   10
+        y   815..  824  h    9
+
+### TILE — hover / selected rule, measured
+   rest      rule rows []
+   hover     rule rows []
+   selected  rule rows []
+
+### VERTICAL RHYTHM — every chrome y-edge in the frame (artwork excluded)
+   top bar + bottom bar y-edges: [11, 41, 52, 53, 978, 979, 1001, 1013, 1019, 1024, 1042, 1044, 1062]
+   best-fit vertical units (mean |residual| px, unit, phase):
+       0.462  unit   2  phase   1
+       0.538  unit   2  phase   0
+       0.538  unit   3  phase   2
+       0.615  unit   6  phase   5
+       0.692  unit   3  phase   1
+       0.769  unit   3  phase   0
+       0.923  unit   4  phase   1
+       1.000  unit   4  phase   0
+
+   inspector y-edges: [87, 99, 121, 413, 430, 444, 456, 469, 480, 489, 500, 509, 524, 557, 568, 786, 802, 815, 830, 843, 858, 868, 886, 899, 942, 952]
+       0.423  unit   2  phase   0
+       0.577  unit   2  phase   1
+       0.615  unit   3  phase   0
+       0.692  unit   3  phase   1
+       0.692  unit   3  phase   2
+       0.962  unit   4  phase   0
+
+   settings y-edges: [77, 114, 123, 152, 163, 174, 207, 218, 239, 250, 265, 279]
+       0.417  unit   2  phase   1
+       0.583  unit   2  phase   0
+       0.583  unit   3  phase   0
+       0.667  unit   3  phase   2
+       0.750  unit   3  phase   1
+       0.750  unit   4  phase   2
+Traceback (most recent call last):
+  File "/tmp/baz-rulers/census4.py", line 97, in <module>
+    qe = chrome_yedges(imq, min(xs), max(xs) + 1, BODY, RULE2, LIT)
+                            ~~~^^^^
+ValueError: min() iterable argument is empty

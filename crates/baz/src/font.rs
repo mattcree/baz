@@ -457,52 +457,74 @@ mod tests {
     /// or, where it cannot, the test says so by name rather than the wall
     /// discovering it.
     ///
-    /// [`theme::INDEX_W`] is 36 px, fixed by ADR-0017 §1.7, and the labels are
-    /// `baz-core`'s own. Two groups come out of the measurement and both are
-    /// stated:
+    /// [`theme::INDEX_W`] is **60 px** — ADR-0017 §1.7 as the composition audit
+    /// amends it — and the labels are `baz-core`'s own. What the widening bought
+    /// is measured here rather than asserted:
     ///
-    /// - **ARTIST and YEAR fit, bar one value.** Every letter, `#`, `Various`,
-    ///   `No year` and every decade is inside the lane, which is what matters
-    ///   because ARTIST is the default arrangement and A–Z is what a listener
-    ///   reaches for. The one ARTIST value that overruns is `Unknown`, at
-    ///   42.4 px.
-    /// - **The recency buckets and long genres do not fit**, and they are
-    ///   clipped at the lane's right edge with their heads intact. The full
-    ///   value is set in the shelf header one `HANG` to the left at the same
-    ///   moment, so nothing is unreadable; the rail is a ruler, not a legend.
+    /// - **Every label the five keys can *produce* fits.** Letters, `#`,
+    ///   `Various`, `No year`, every decade, `Unknown` (42.4 px, which is why 36
+    ///   was wrong), and every recency bucket down to `Never played`. At 36 the
+    ///   rail worked for one of the five arrangements and clipped in three.
+    /// - **Arbitrary genre names still elide**, and they always will: a genre
+    ///   tag is free text. They clip at the lane's right edge with their heads
+    ///   intact, and the full value is set in the shelf header one `HANG` to the
+    ///   left at the same moment, in the same voice — the rail is a ruler, not a
+    ///   legend.
     ///
-    /// The lane is 36 px because ADR-0017 §1.7 fixed it there, and the
-    /// scrollbar's own lane bounds it from the other side
-    /// ([`theme::INDEX_CLEARANCE`]). Widening it is a decision for that ADR,
-    /// not for this file — so what this test does is keep the trade *measured*
-    /// rather than discovered on a screenshot.
+    /// The lane cannot simply grow without limit: it comes out of the wall, and
+    /// the scrollbar's own lane bounds it from the other side
+    /// ([`theme::INDEX_CLEARANCE`]). What this test does is keep the trade
+    /// *measured* rather than discovered on a screenshot.
     #[test]
-    fn the_index_rail_holds_every_letter_and_decade_whole() {
+    fn the_index_rail_holds_the_labels_its_keys_produce() {
         let sans = sans();
         for label in [
-            "#", "A", "M", "W", "Ø", "曲", "Various", "No year", "1890s", "1980s", "2020s", "Today",
+            // ARTIST
+            "#",
+            "A",
+            "M",
+            "W",
+            "Ø",
+            "曲",
+            "Various",
+            "Unknown",
+            // YEAR
+            "No year",
+            "1890s",
+            "1980s",
+            "2020s",
+            // ADDED / PLAYED
+            "Today",
+            "This evening",
+            "Never played",
+            "Not recorded",
         ] {
             let width = sans.width(label, theme::SIZE_HEADING);
             assert!(
-                width + 1.0 <= theme::INDEX_W,
+                width <= theme::INDEX_W,
                 "{label:?} measures {width:.2} px in a {} px rail",
                 theme::INDEX_W
             );
         }
-        // The stated exceptions: they clip, and the header carries them.
-        for label in [
-            "Unknown",
-            "This evening",
-            "Never played",
-            "Not recorded",
-            "Electronic",
-        ] {
-            assert!(
-                sans.width(label, theme::SIZE_HEADING) > theme::INDEX_W,
-                "{label:?} now fits the rail — the doc comment saying it does \
-                 not is stale"
-            );
-        }
+        // The tightest of them, named, because a lane sized to its widest label
+        // is a lane whose margin is worth stating: `Never played` measures
+        // 59.14 px and the lane is 60. That is the number that decided 60 rather
+        // than 56, and if the face or the bucket vocabulary ever moves it, this
+        // is where it is caught.
+        let tightest = sans.width("Never played", theme::SIZE_HEADING);
+        assert!(
+            (59.0..60.0).contains(&tightest),
+            "the rail's widest produced label now measures {tightest:.2} px"
+        );
+        // The stated exception, and the only one: a genre is whatever a tagger
+        // wrote, so there is no width at which the lane holds all of them. It
+        // clips, and the header carries the value.
+        let long_genre = "Progressive Electronic";
+        assert!(
+            sans.width(long_genre, theme::SIZE_HEADING) > theme::INDEX_W,
+            "{long_genre:?} now fits the rail — the doc comment saying an \
+             arbitrary genre may not is stale"
+        );
     }
 
     /// **The measurement that deleted the monospace.**

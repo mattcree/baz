@@ -4,14 +4,32 @@
 //! screen that exists before there is a library to draw, so it carries no
 //! chrome of its own.
 
-use iced::widget::{column, container, text, text_input};
+use iced::widget::{Space, column, container, text, text_input};
 use iced::{Element, Length};
 
 use crate::app::{Message, Setup};
 use crate::theme;
 
 /// The first-run screen's folder input width (logical px).
-const SETUP_INPUT_W: f32 = 460.0;
+///
+/// **360, where it was 460**, and the hundred pixels are the audit's defect 12.
+/// The block is centred to the pixel and its ink is not: the lines are
+/// left-aligned and ragged-right, so the longest of them reached 773 of 870 and
+/// **93 px of the block's right half was the outline of an empty field**. The
+/// well is the width of the copy it stands under now, which is the width the
+/// block always optically had.
+const SETUP_INPUT_W: f32 = 360.0;
+
+/// How much of the window's slack sits above the first-run block, as a portion
+/// against [`BELOW`].
+///
+/// A single question on an empty wall belongs above the middle — the optical
+/// convention and the rule of thirds agree, and the audit measured the block's
+/// centre at 0.501 H, which is the one place it should not be. Two parts above
+/// to three below puts it near 0.42 H at the shipped window.
+const ABOVE: u16 = 2;
+/// The portion of the window's slack below the block. See [`ABOVE`].
+const BELOW: u16 = 3;
 
 /// The first-run screen: **one question, one input, one line of copy.**
 ///
@@ -53,7 +71,10 @@ pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
             text_input("/path/to/your/music", &setup.input)
                 .on_input(Message::SetupInput)
                 .on_submit(Message::SetupSubmit)
-                .padding(theme::pad(theme::GAP_SM + 2.0, theme::GAP_MD))
+                // The product's one control height, like the search well it is
+                // the first-run cousin of (law L7): this field stood **40 px**
+                // against a published floor of 32.
+                .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
                 .size(theme::SIZE_EMPHASIS)
                 .line_height(theme::LEADING_EMPHASIS)
                 .width(Length::Fixed(SETUP_INPUT_W))
@@ -86,9 +107,23 @@ pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
             .color(room.heading()),
     );
     // The block is exactly as wide as the field it is built around, and that
-    // block is centred in the window — so the copy wraps against the same right
-    // edge the input has, and every line starts on the input's left edge.
-    container(content.width(Length::Fixed(SETUP_INPUT_W)))
-        .center(Length::Fill)
-        .into()
+    // block is centred *horizontally* in the window — so the copy wraps against
+    // the same right edge the input has, and every line starts on the input's
+    // left edge.
+    //
+    // Vertically it is **not** centred, and that is the correction: the slack is
+    // split [`ABOVE`] : [`BELOW`], which lands the block's centre near 0.42 H
+    // instead of 0.501 H. A hero block on an empty screen sits above the middle
+    // or it reads as having sunk.
+    container(
+        column![
+            Space::with_height(Length::FillPortion(ABOVE)),
+            content.width(Length::Fixed(SETUP_INPUT_W)),
+            Space::with_height(Length::FillPortion(BELOW)),
+        ]
+        .align_x(iced::Alignment::Center),
+    )
+    .center_x(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }

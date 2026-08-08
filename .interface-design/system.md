@@ -397,8 +397,14 @@ concrete regression Sonos users named. **A wall of covers is beautiful at 200
 albums and unusable at 5 000 without an index** — and a gallery direction makes
 scrolling *longer*, so this gets worse under this design, not better.
 
-`INDEX_W` **20 px**, a lane the shelf keeps clear on its right, outside the
-scrollbar's. A–Z plus `#`, `SIZE_CAPTION` at 1.45. Letters the collection has an
+`INDEX_W` **60 px**, a lane the shelf keeps clear on its right, outside the
+scrollbar's, with `HANG` between the lane and the window's edge (§13, L1). It
+was 20 in this document and 36 in ADR-0017 §1.7, and both were measured wrong:
+at 36 the lane clips `Unknown`, every recency bucket and most genre names, so it
+worked for one of the five group keys and failed for three. 60 holds every label
+the keys can *produce* — the widest, `Never played`, measures 59.14 px — and only
+arbitrary genre names elide, with the full value one gutter to the left in the
+shelf header. A–Z plus `#`, `SIZE_HEADING` at its own 12 px line box. Letters the collection has an
 album under are `PAPER_FAINT`; letters it does not are `PAPER_MUTED` — an index
 that hides its gaps lies about the collection. The key under the pointer or at
 the current scroll position is `PAPER` Medium. **Never the accent**: an index is
@@ -429,19 +435,35 @@ Bundle: **three faces** (Sans Regular / Medium / SemiBold), 605 592 bytes —
 down 395 928 bytes from the five that ship today. OFL-1.1, verbatim upstream,
 hashes in `crates/baz/assets/fonts/README.md`.
 
-| Token | px | line-height | weight | Used for |
-|---|---|---|---|---|
-| `SIZE_CAPTION` | 11 | 1.45 | Regular | tooltips, hover tips, footnotes |
-| `SIZE_META` | 12 | 1.35 | Regular | label line 2, durations, counts, notes, control labels |
-| `SIZE_BODY` | 13 | 1.40 | Regular / Medium | label line 1, track titles, button labels |
-| `SIZE_EMPHASIS` | 15 | 1.35 | Regular / Medium | section headings, empty-state lines, inspector artist |
-| `SIZE_TITLE` | 22 | 1.20 | SemiBold | the album's title |
-| `SIZE_HERO` | 32 | 1.15 | SemiBold | the first-run question |
+**The line box is the token; the leading is derived.** This table used to give
+the leading and let the box fall out, and the six boxes came to 15.95, 16.20,
+18.20, 20.25, 22.80 and 32.20 — **not one of them a multiple of the spacing
+unit**. `06-composition-audit.md` §2 measured the consequence: pooled over the
+whole application a 4 px lattice caught 77–80 % of the drawn chrome edges
+against a 75 % null, which is chance. There was no vertical rhythm and there
+could not be one, because the type was not in it. Quantising the boxes cost at
+most 1.8 px on one token (§13, L2).
 
-`LABEL_LINE_H` = `SIZE_BODY × 1.40` = 18.2; `LABEL_H` = 2 × that = **36.4**.
-Two independent one-line lanes, not one two-line box, so a long title clips at
-one line instead of pushing the artist line out of the slot reserved to keep it
-still.
+| Token | px | line box | leading | weight | Used for |
+|---|---|---|---|---|---|
+| `SIZE_HEADING` | 10 | **12** | 1.200 | Medium | shelf breaks, the index rail, group keys |
+| `SIZE_CAPTION` | 11 | **16** | 1.455 | Regular | tooltips, hover tips, footnotes |
+| `SIZE_META` | 12 | **16** | 1.333 | Regular | label line 2, durations, counts, notes, control labels |
+| `SIZE_BODY` | 13 | **20** | 1.538 | Regular / Medium | label line 1, track titles, button labels |
+| `SIZE_EMPHASIS` | 15 | **20** | 1.333 | Regular / Medium | section headings, empty-state lines, inspector artist |
+| `SIZE_TITLE` | 19 | **24** | 1.263 | SemiBold | the album's title |
+| `SIZE_HERO` | 28 | **32** | 1.143 | SemiBold | the first-run question |
+
+`LABEL_LINE_H` = `LINE_BODY` = 20; `LABEL_H` = 2 × that = **40 = `HANG`** — a
+wall label is exactly one hang tall, and the tile's row pitch is therefore
+`art + 96`. Two independent one-line lanes, not one two-line box, so a long
+title clips at one line instead of pushing the artist line out of the slot
+reserved to keep it still.
+
+Two further numbers fall out rather than being chosen: caption and meta collapse
+onto one 16 px lane, so the bar's left zone is stacked out of two heights instead
+of five; and a text well's vertical padding is one number, `(32 − 20 − 2) / 2`,
+because both wells baz draws take the same 20 px box (§13, L7).
 
 Emphasis comes from **weight, ink and size only** — iced 0.13 exposes no
 letter-spacing, no small caps and no OpenType features, so nothing in this
@@ -614,3 +636,142 @@ gradients; shadows on anything that is not the playing halo.
 | text ellipsis | `Wrapping::None` clips; every clipping slot has a fixed width |
 | shadow spread | tuned via blur (`LAMP_GLOW` only) |
 | an accessibility tree | contrast floors and hit targets are the guarantees baz *can* make, so honour them exactly |
+
+---
+
+## 13. Composition laws
+
+Ten tokens can all be right and the frame still read as subtly off, because
+**tokens are not composition**. `docs/design/06-composition-audit.md` measured
+where, off real pixels, with the rulers committed at
+`docs/design/composition/tools/`: three window gutters in one application, a bar
+whose seven mark-lines spanned 50 px inside a 102 px band, and a type scale
+whose line boxes were not multiples of its own spacing unit.
+
+The seven laws below close that. Each one is **assertable**, and each carries
+the test that pins it — because the project's own history is that a rule which
+is not pinned drifts, and the accent discipline (§5) and the contrast floors
+(§4.1) are the two that prove the habit works.
+
+| Law | Pinned by |
+|---|---|
+| L1 one gutter per window edge | `theme::one_gutter_touches_every_window_edge` |
+| L2 the unit is 4, and the type is in it | `theme::the_vertical_unit_is_four_and_the_type_is_in_it` |
+| L3 optical centring | `theme::a_fixed_box_states_how_its_content_is_centred` |
+| L4 one centre line per bar | `theme::the_bar_has_one_centre_line_and_every_mark_is_on_it`, `views::bottom_bar::every_mark_in_the_bar_sits_on_the_bars_one_centre_line` |
+| L5 the permitted alignment edges, per surface | `theme::every_surface_declares_the_edges_it_permits` |
+| L6 hierarchy is declared and then measured | `theme::the_declared_hierarchy_is_the_geometry_that_produces_it`, plus the render pass |
+| L7 one control height | `theme::the_product_stands_at_one_control_height` |
+
+### L1 — One gutter per window edge
+
+> Every surface that touches a window edge hangs from the same two lines:
+> `x = HANG` and `x = W − HANG`, and `y = HANG` where a surface has a free top.
+> `GAP_LG` is a gap *between* things and `GAP_XL` is padding *inside* a panel;
+> **neither is ever a window margin**. A panel's own content keeps `GAP_XL` from
+> the panel's edge, which is a different edge.
+
+baz drew its chrome on 16, its panels on 24 and its collection on 40, so nothing
+in either bar was aligned with anything on the wall, at either width, by exactly
+24 px. Six of the wall's sixteen x-edges were singletons because of it. There
+are four window-edge surfaces — the top strip (in both places), the now-playing
+bar, the Settings place and the index rail — and the test names all four by the
+literal a reviewer would have to change to break it.
+
+### L2 — The vertical unit is 4, and the type is inside it
+
+> Base unit **4**. Every gap, every reserved slot height, every control height
+> **and every line box** is an exact multiple of 4. A leading is chosen so that
+> `size × leading` is a multiple of 4, not the other way round.
+
+The one named exception is `GAP_XXS` 2 — an intra-block line gap, never a slot —
+and the test asserts both that it is 2 *and* that it is off the lattice, so the
+exception cannot quietly become a habit. Compile-time: it fails the build rather
+than the review.
+
+### L3 — Optical centring: the box centres the ink, not the line box
+
+> Content shorter than the box that holds it is centred in **both** axes by the
+> box. A `button` with a fixed height always states its content's vertical
+> alignment; a `container` with a fixed width always states its horizontal one.
+> Where a mark's optical centre differs from its bounding box — the play
+> triangle is the only one in the product — the *mass centroid* is what is
+> centred.
+
+Every glyph in a hit box was already centred to a pixel, which is what made the
+two failures a locatable mistake rather than a habit: `Settings` sat 6.4 px above
+its own centre and `Play album` 6.0 px above and **86.5 px left** of its, both
+because iced 0.13 lays unaligned content out at the top-left of a fixed box.
+
+### L4 — One centre line per bar
+
+> A bar has one horizontal centre line and every *mark* in it sits on that line:
+> glyph centres, rail centres, and the baseline of any single-line label. A zone
+> taller than one line hangs its extra lines **symmetrically** about that line.
+> Zones are centred by their marks, never by their blocks.
+
+Structural rather than nudged. The bar's band is
+`2 × BAR_LEAD + TRANSPORT_HIT`, so its mid-line *is* the transport's centre;
+the volume block reserves an empty lane below its fader equal to the preview
+lane above it, so centring the block centres the **rail** (and the `MUTE_TOP`
+offset that used to buy the same alignment by hand is deleted); and the left
+zone's stack is 20 · 16 · 20, so its middle lane is the block's exact centre.
+The seek row hangs below the line rather than pushing it up. Measured spread
+before: **50 px**. Ceiling: 2 px.
+
+### L5 — The permitted alignment edges, per surface
+
+> Each surface declares its alignment edges. An element that introduces an edge
+> outside the list is a defect, and adding an edge means arguing for it in the
+> list — the same rule the contrast exemption list already uses.
+
+| surface | permitted x-edges |
+|---|---|
+| the wall | `HANG` and the hang's derived column edges; nothing else |
+| the top bar | `HANG`, `W − HANG`, and the search well's right edge |
+| the bottom bar | `HANG`, `W − HANG`, the zone boundaries, and the reserved slots' own edges |
+| the album inspector | panel edge, panel + `GAP_XL`, panel width − `GAP_XL` — **one content lane**, less the declared `SCROLLBAR_LANE` |
+| the queue popover | popover + `GAP_LG` and one indent lane for rows |
+| the Settings place | `HANG`, nav right edge, content left edge, content right edge |
+
+In both lists the extra edges came from one thing — a *row's own horizontal
+padding*, applied inside a surface that had already stated its lane — so that is
+what the test forbids. The full edge census is the render pass
+(`composition/tools/census2.py`).
+
+### L6 — Hierarchy is declared and then measured
+
+> Each surface declares what a listener should notice first, second and third.
+> The measured order — contrast-weighted ink mass over the named regions — must
+> agree. Where it cannot (the wall, where one sleeve is ~135× its label, and
+> deliberately so), the declaration says by how much.
+
+| surface | declared order |
+|---|---|
+| the wall | the works ≫ their labels ≫ the playing mark ≫ the counts |
+| the top bar | the counts → the well → `Settings` |
+| the bottom bar | what is sounding → the transport → the position → what is next |
+| the album inspector | the title → `Play album` → the track list → the sleeve → the condition |
+| the Settings place | the section → its controls → their current values |
+| first run | the question → the field → the hint |
+
+The inspector was the inversion: its sleeve was *the panel minus its two
+paddings*, 93.6 % of the panel's ink, and the album's own **name came fifth of
+eight** at 1/164th of the weight of a picture already on the wall 24 px away.
+`INSPECTOR_SLEEVE` is a cap now — 120, share 71.2 % — and the unit test holds the
+one number the whole ranking is a function of. The ranking itself is measured by
+`ink_mass` over a rendered frame, which is a slow test and belongs behind the
+render harness's gate.
+
+### L7 — One control height
+
+> Every pointer target is `TRANSPORT_HIT` **32** tall. The only exception is
+> `STEPPER_HIT` **24**, and it is named. A control that is neither is a defect,
+> including a checkbox, a text well and the first-run input.
+
+The product drew **five** heights — 40, 32, 30, 24, 13 — while publishing a
+floor of 32, and asserted `TRANSPORT_HIT >= 32` and `STEPPER_HIT <
+TRANSPORT_HIT` and nothing about the other three. The groove's own hit band
+`RAIL_HIT` is 24, i.e. the named secondary square, so the one control in baz
+that is a rail rather than a box is still one of the two heights and not a
+third with a rail-shaped excuse.

@@ -1,0 +1,86 @@
+############ 1280x860  top bar h 53  body y[53,758)  bar y[759,860)
+
+### search well, exact
+   recess rows 11..41  h 30
+   column 200 colours: 8:#0C0D0E 9:#0C0D0E 10:#0C0D0E 11:#6C6A67 12:#060708 13:#060708 14:#060708 15:#060708 16:#060708 17:#060708 18:#060708 19:#060708 20:#060708 21:#060708 22:#060708 23:#060708 24:#060708 25:#060708 26:#060708 27:#060708 28:#090A0B 29:#090A0B 30:#060708 31:#060708 32:#060708 33:#060708 34:#060708 35:#060708 36:#060708 37:#060708 38:#060708 39:#060708 40:#6C6A67 41:#0C0D0E 42:#0C0D0E 43:#0C0D0E 44:#0C0D0E 45:#0C0D0E
+
+### transport glyphs — ink centroid against the hit box
+   glyph 0 idle     hitbox x[584,616) ink box (595, 781, 605, 793)  bbox-cx   600.0 centroid-cx   600.0  box-cx   600.0  d_bbox  +0.0 d_centroid  +0.0
+   glyph 0 playing  hitbox x[584,616) ink box (584, 781, 616, 839)  bbox-cx   600.0 centroid-cx   600.0  box-cx   600.0  d_bbox  +0.0 d_centroid  -0.0
+   glyph 1 idle     hitbox x[624,656) ink box (636, 781, 646, 793)  bbox-cx   641.0 centroid-cx   639.3  box-cx   640.0  d_bbox  +1.0 d_centroid  -0.7
+   glyph 1 playing  hitbox x[624,656) ink box (624, 781, 656, 839)  bbox-cx   640.0 centroid-cx   640.0  box-cx   640.0  d_bbox  +0.0 d_centroid  -0.0
+   glyph 2 idle     hitbox x[664,696) ink box (675, 781, 685, 793)  bbox-cx   680.0 centroid-cx   680.0  box-cx   680.0  d_bbox  +0.0 d_centroid  -0.0
+   glyph 2 playing  hitbox x[664,696) ink box (664, 781, 696, 839)  bbox-cx   680.0 centroid-cx   680.0  box-cx   680.0  d_bbox  +0.0 d_centroid  +0.0
+
+### top-bar right cluster: the two labels on one row
+   counts    ink box (1048, 21, 1172, 30)  ink-y centre 25.5
+   Settings  ink box (1200, 14, 1245, 25)  ink-y centre 19.5
+   (the row's controls are TRANSPORT_HIT 32 tall, top-padded 10 -> y 10..42,
+    so a centred 12/1.35 line box has its ink centre at y ~25.9)
+
+### INSPECTOR
+   panel x 940..1280  w 340  (probe row 752)
+   seam colours: 936:#0C0D0E 937:#0C0D0E 938:#0C0D0E 939:#1B1C1C 940:#141517 941:#141517
+   panel rows:
+      y[  87,  99) h  12 -> 1234..1246
+      y[ 121, 413) h 292 -> 964..1256
+      y[ 430, 444) h  14 -> 965..1078
+      y[ 456, 469) h  13 -> 965..1103
+      y[ 480, 489) h   9 -> 964..1094
+      y[ 500, 509) h   9 -> 965..1093
+      y[ 524, 557) h  33 -> 964..1256
+      y[ 568, 600) h  32 -> 985..1069, 1217..1256
+      y[ 604, 617) h  13 -> 985..1050, 1218..1242
+      y[ 632, 645) h  13 -> 985..1070, 1217..1242
+      y[ 662, 671) h   9 -> 985..1056, 1217..1242
+      y[ 689, 701) h  12 -> 985..1101, 1217..1242
+      y[ 722, 732) h  10 -> 965..1148
+   Play album band y[524,557)
+      label+triangle ink box (964, 527, 1256, 554)
+      inner ink centroid (1026.7,534.1)  button centre (1110.0,540.5)
+
+### SETTINGS
+   y[  14,  34) h  20 -> 24..69, 93..149, 1007..1264
+   y[  52,  53) h   1 -> 0..1280
+   y[  77, 114) h  37 -> 24..224, 249..503
+   y[ 123, 152) h  29 -> 248..878
+   y[ 163, 174) h  11 -> 249..517
+   y[ 207, 218) h  11 -> 249..295, 772..814, 830..837, 862..869
+   y[ 239, 250) h  11 -> 249..325, 772..814, 830..837, 862..869
+   y[ 265, 279) h  14 -> 248..418
+
+### QUEUE popover
+   popover x 905..1263 (w 358)  y 353..741 (h 388)
+   gap to window right 17, gap to bar 18
+   y[ 353, 355) h   2 -> 905..907, 1261..1263
+   y[ 378, 391) h  13 -> 920..965, 1226..1238
+   y[ 415, 424) h   9 -> 920..1024
+   y[ 440, 451) h  11 -> 924..994
+   y[ 458, 466) h   8 -> 925..987
+   y[ 474, 501) h  27 -> 920..1210
+   y[ 510, 520) h  10 -> 941..1070, 1181..1206
+   y[ 538, 551) h  13 -> 941..1024, 1181..1206
+   y[ 566, 576) h  10 -> 941..1024, 1181..1205
+   y[ 595, 608) h  13 -> 941..1027, 1181..1206
+   y[ 623, 633) h  10 -> 941..1035, 1181..1206
+   y[ 651, 661) h  10 -> 941..1025, 1182..1206
+   y[ 679, 692) h  13 -> 941..1007, 1181..1206
+   y[ 707, 720) h  13 -> 941..1026, 1181..1206
+   y[ 739, 741) h   2 -> 905..907, 1261..1263
+
+### FIRST RUN
+   y[ 341, 350) h  9   x 410..430  w 20
+   y[ 367, 394) h 27   x 410..678  w 268
+   y[ 418, 458) h 40   x 410..870  w 460
+   y[ 470, 481) h 11   x 410..773  w 363
+   y[ 510, 520) h 10   x 411..694  w 283
+   block box (410, 341, 870, 520)  block centre (640.0,430.5)
+   window centre (640.0,430.0)   ink centroid (547.3,417.6)
+   block top 341 = 0.397 H;  block centre = 0.501 H
+
+### empty-library: block (519, 388, 762, 426)  centre (640.5,407.0)  shelf centre (640.0,405.5)
+      y[388,402) x 519..673
+      y[415,426) x 519..762
+
+### search-no-match: block (387, 60, 1280, 753)  centre (833.5,406.5)  shelf centre (640.0,405.5)
+      y[60,753) x 387..1280

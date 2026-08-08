@@ -1,0 +1,138 @@
+############ 1920x1080   top bar y[0,52] h 53   body y[53,978)   bar y[979,1080)  bar h 102
+
+### TOP BAR — element boxes (surface + ink), rows 0..52, ground wall
+   x    16..  376 (w  360)   ink-y [(11, 41)]   box (16, 11, 376, 41)
+   x   404..  453 (w   49)   ink-y [(15, 23)]   box (404, 15, 453, 23)
+   x   473..  506 (w   33)   ink-y [(15, 23)]   box (473, 15, 506, 23)
+   x   527..  570 (w   43)   ink-y [(15, 23)]   box (527, 15, 570, 23)
+   x   591..  635 (w   44)   ink-y [(15, 23)]   box (591, 15, 635, 23)
+   x   656..  705 (w   49)   ink-y [(15, 23)]   box (656, 15, 705, 23)
+   x  1688.. 1812 (w  124)   ink-y [(21, 30)]   box (1688, 21, 1812, 30)
+   x  1840.. 1885 (w   45)   ink-y [(14, 25)]   box (1840, 14, 1885, 25)
+
+### TOP BAR — the two right-hand labels, ink boxes
+   counts    ink box (1688, 21, 1790, 30)   ink-y centre 25.5
+   Settings  ink box (1792, 14, 1885, 30)   ink-y centre 22.0
+
+### TOP BAR — search well surface extent (recess against wall)
+   well rows 12..40  h 28
+   well cols 17..375  w 358
+   placeholder ink box (17, 12, 375, 40)  (well interior)
+
+### BOTTOM BAR — idle (nothing playing)
+   x    17..  100 (w   83)  ink-y [(1025, 1036)]
+   x   610..  646 (w   36)  ink-y [(1026, 1036)]
+   x   915..  925 (w   10)  ink-y [(1001, 1013)]
+   x   956..  966 (w   10)  ink-y [(1001, 1013)]
+   x   995.. 1005 (w   10)  ink-y [(1001, 1013)]
+   x  1776.. 1791 (w   15)  ink-y [(1030, 1042)]
+   x  1808.. 1904 (w   96)  ink-y [(1024, 1029), (1031, 1041)]
+   bar mid-line y = 1029.5
+   left zone  ink box (17, 1025, 100, 1036)  ink-y centre  1030.5  delta from bar mid   +1.0
+   transport  ink box (915, 1001, 1005, 1013)  ink-y centre  1007.0  delta from bar mid  -22.5
+   seek row   ink box (915, 1001, 1005, 1013)  ink-y centre  1007.0  delta from bar mid  -22.5
+   right zone ink box (1776, 1024, 1904, 1042)  ink-y centre  1033.0  delta from bar mid   +3.5
+
+### BOTTOM BAR — playing
+   x    16..  143 (w  127)  ink-y [(1006, 1019), (1026, 1035), (1044, 1052)]
+   x   610..  646 (w   36)  ink-y [(1026, 1036)]
+   x   703..  709 (w    6)  ink-y [(1026, 1034)]
+   x   797..  822 (w   25)  ink-y [(1053, 1061)]
+   x   830.. 1090 (w  260)  ink-y [(1001, 1013), (1052, 1062)]
+   x  1098.. 1141 (w   43)  ink-y [(1053, 1061)]
+   x  1703.. 1760 (w   57)  ink-y [(1025, 1036)]
+   x  1776.. 1791 (w   15)  ink-y [(1030, 1042)]
+   x  1808.. 1904 (w   96)  ink-y [(1024, 1029), (1031, 1041)]
+   bar mid-line y = 1029.5
+   left zone  ink box (16, 1006, 143, 1052)  ink-y centre  1029.0  delta from bar mid   -0.5
+   transport  ink box (840, 1001, 1080, 1062)  ink-y centre  1031.5  delta from bar mid   +2.0
+   seek row   ink box (797, 1001, 1141, 1062)  ink-y centre  1031.5  delta from bar mid   +2.0
+   right zone ink box (1703, 1024, 1904, 1042)  ink-y centre  1033.0  delta from bar mid   +3.5
+
+### BOTTOM BAR — the marks, against the bar's own centre line (idle)
+   transport glyphs  y 1001..1013   centre  1007.0   delta from bar mid  -22.5
+   seek groove       —
+   volume rail       y 1034..1038   centre  1036.0   delta from bar mid   +6.5
+   mute glyph        —
+   now-playing line 2 —
+   queue label       —
+   signal note       —
+
+### BOTTOM BAR — the marks, against the bar's own centre line (playing)
+   transport glyphs  y 1001..1013   centre  1007.0   delta from bar mid  -22.5
+   seek groove       y 1052..1062   centre  1057.0   delta from bar mid  +27.5
+   volume rail       y 1034..1038   centre  1036.0   delta from bar mid   +6.5
+   mute glyph        y 1026..1034   centre  1030.0   delta from bar mid   +0.5
+   now-playing line 2 y 1026..1035   centre  1030.5   delta from bar mid   +1.0
+   queue label       —
+   signal note       y 1025..1036   centre  1030.5   delta from bar mid   +1.0
+
+### transport glyph optical centring (16 px icon in a 32 px hit box)
+   glyph x 830..1090  ink box (818, 1001, 1102, 1062)
+
+### WALL — the hang, scanline
+   y=200: wall:40 | art:264 | wall:39 | art:264 | wall:1243 | art:10 | wall:60
+   y=250: wall:40 | art:264 | wall:39 | art:264 | wall:1313
+
+### WALL — one tile's vertical structure (column 1, x 40..)
+   y    97..  104  h    7
+   y   133..  397  h  264
+   y   416..  426  h   10
+   y   434..  445  h   11
+   y   492..  499  h    7
+   y   529..  792  h  263
+   y   812..  822  h   10
+   y   830..  839  h    9
+   y   888..  895  h    7
+   y   924..  978  h   54
+
+### INSPECTOR
+   panel surface x 1580..1920  (w 340)
+   last wall pixel before the panel: x=1578  ->  gap 1 px
+   colour at the seam: #0C0D0E #0C0D0E #1B1C1C #141517 #141517
+   panel content, row bands:
+      y    87..   99  h   12   x-extent 1874..1886
+      y   121..  413  h  292   x-extent 1604..1896
+      y   430..  444  h   14   x-extent 1605..1718
+      y   456..  469  h   13   x-extent 1605..1743
+      y   480..  489  h    9   x-extent 1604..1734
+      y   500..  509  h    9   x-extent 1605..1733
+      y   524..  557  h   33   x-extent 1604..1896
+      y   568..  786  h  218   x-extent 1625..1896
+      y   802..  815  h   13   x-extent 1625..1882
+      y   830..  843  h   13   x-extent 1618..1882
+      y   858..  868  h   10   x-extent 1618..1881
+      y   886..  899  h   13   x-extent 1618..1882
+      y   942..  952  h   10   x-extent 1605..1788
+   panel elements, x edges by band:
+      y[87,99) -> 1874..1886
+      y[121,413) -> 1604..1896
+      y[430,444) -> 1605..1718
+      y[456,469) -> 1605..1743
+      y[480,489) -> 1604..1734
+      y[500,509) -> 1605..1733
+      y[524,557) -> 1604..1896
+      y[568,786) -> 1625..1741, 1857..1896
+      y[802,815) -> 1625..1632, 1641..1717, 1857..1882
+      y[830,843) -> 1618..1768, 1857..1882
+      y[858,868) -> 1618..1762, 1857..1881
+      y[886,899) -> 1618..1632, 1641..1716, 1857..1882
+      y[942,952) -> 1605..1788
+
+### SETTINGS place
+   ground probe: #0C0D0E #0C0D0E #0C0D0E
+   y[  77, 114) h 37 -> 24..224, 249..503
+   y[ 123, 152) h 29 -> 248..878
+   y[ 163, 174) h 11 -> 249..517
+   y[ 207, 218) h 11 -> 249..295, 772..814, 830..837, 862..869
+   y[ 239, 250) h 11 -> 249..325, 772..814, 830..837, 862..869
+   y[ 265, 279) h 14 -> 248..261, 270..418
+   top bar:
+   y[  14,  34) -> 24..69, 93..149, 1647..1904
+
+### QUEUE popover (playing)
+Traceback (most recent call last):
+  File "/tmp/baz-rulers/census2.py", line 224, in <module>
+    p(f"   popover surface x {min(xs)}..{max(xs) + 1} (w {max(xs) + 1 - min(xs)}), "
+                              ~~~^^^^
+ValueError: min() iterable argument is empty
