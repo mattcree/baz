@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2560" height="504" viewBox="0 0 1280 252">
+<defs>
+  <!-- Contact shadow: a cover stands ON the shelf, it does not float above it.
+       Tight, offset down, and darker than a card shadow. -->
+  <filter id="contact" x="-30%" y="-30%" width="160%" height="180%">
+    <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#000000"
+                  flood-opacity="0.55"/>
+  </filter>
+  <!-- The lamp halo: the accent, spent on the one true thing on screen. -->
+  <filter id="halo" x="-40%" y="-40%" width="180%" height="180%">
+    <feDropShadow dx="0" dy="0" stdDeviation="11" flood-color="#E3A14E"
+                  flood-opacity="0.45"/>
+  </filter>
+  <linearGradient id="placeholder" x1="0" y1="0" x2="0.75" y2="1">
+    <stop offset="0" stop-color="#3D3350"/>
+    <stop offset="1" stop-color="#1F3A38"/>
+  </linearGradient>
+  <!-- The shelf scrolls under the bar; it never draws over it. -->
+  <clipPath id="shelfarea">
+    <rect x="0" y="52" width="1280" height="706"/>
+  </clipPath>
+</defs>
+<rect x="0" y="0" width="1280" height="252" rx="0" fill="#131110" opacity="1.0"/>
+<text x="24" y="30" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="11" font-weight="400" fill="#726D66" text-anchor="start" letter-spacing="1.4" opacity="1.0">THE NOW-PLAYING BAR</text>
+<text x="24" y="50" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="12" font-weight="400" fill="#A8A29A" text-anchor="start" opacity="1.0">Three zones. Every slot is a fixed width, so nothing in it can move as the music does.</text>
+<rect x="0" y="70" width="1280" height="1" rx="0" fill="#EDE3D9" opacity="0.08"/>
+<rect x="0" y="71" width="1280" height="101" rx="0" fill="#0D0B0A" opacity="1.0"/>
+<text x="24" y="117.5" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="13" font-weight="500" fill="#EAE6E0" text-anchor="start" opacity="1.0">Slow Exposure (Reprise)</text>
+<text x="24" y="135.5" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="12" font-weight="400" fill="#A8A29A" text-anchor="start" opacity="1.0">Delta Nocturne</text>
+<rect x="604.0" y="83" width="32" height="32" rx="6" fill="#1B1816" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<rect x="644.0" y="83" width="32" height="32" rx="6" fill="#1B1816" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<path d="M 616.0 91 L 616.0 107 L 629.0 99 Z" fill="#EAE6E0"/>
+<path d="M 653.0 92 L 653.0 106 L 662.0 99 Z" fill="#EAE6E0"/>
+<rect x="663.0" y="92" width="3" height="14" rx="0" fill="#EAE6E0" opacity="1.0"/>
+<text x="502.0" y="153" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="end" opacity="1.0">3:41</text>
+<rect x="510.0" y="147" width="260" height="4" rx="2" fill="#0D0B0A" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<rect x="510.0" y="147" width="161.2" height="4" rx="2" fill="#E3A14E" opacity="1.0"/>
+<circle cx="671.2" cy="149" r="5" fill="#E3A14E"/>
+<text x="778.0" y="153" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">5:58</text>
+<text x="1112" y="125.5" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="end" opacity="1.0">48 → 44.1 kHz</text>
+<rect x="1120" y="105.5" width="32" height="32" rx="6" fill="#1B1816" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<path d="M 1127 117.5 L 1131 117.5 L 1136 112.5 L 1136 130.5 L 1131 125.5 L 1127 125.5 Z" fill="#EAE6E0"/>
+<rect x="1160" y="119.5" width="96" height="4" rx="2" fill="#0D0B0A" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<rect x="1160" y="119.5" width="74.88" height="4" rx="2" fill="#726D66" opacity="1.0"/>
+<circle cx="1234.88" cy="121.5" r="5" fill="#726D66"/>
+<rect x="1255" y="107.5" width="2" height="5" rx="0" fill="#EDE3D9" opacity="0.08"/>
+<rect x="24" y="182" width="1" height="10" rx="0" fill="#EDE3D9" opacity="0.17"/>
+<text x="24" y="198" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="11" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">left: title over artist, clipped never wrapped</text>
+<rect x="470" y="182" width="1" height="10" rx="0" fill="#EDE3D9" opacity="0.17"/>
+<text x="470" y="198" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="11" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">centre: transport over groove, fixed column</text>
+<rect x="980" y="182" width="1" height="10" rx="0" fill="#EDE3D9" opacity="0.17"/>
+<text x="980" y="198" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="11" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">right: signal note, then volume</text>
+<text x="24" y="224" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="11" font-weight="400" fill="#4A4743" text-anchor="start" opacity="1.0">Reserved whether or not it has anything to say:  the preview lane (15 px)  ·  the seek row (37 px)  ·  the signal slot (120 px)  ·  the volume block (136 px)</text>
+</svg>

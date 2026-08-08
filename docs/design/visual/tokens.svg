@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="560" viewBox="0 0 1280 560">
+<rect x="0" y="0" width="1280" height="560" rx="0" fill="#131110" opacity="1.0"/>
+<text x="40" y="52" font-family="'IBM Plex Serif','Source Serif 4','Liberation Serif',serif" font-size="28" font-weight="600" fill="#EAE6E0" text-anchor="start" opacity="1.0">baz — tokens</text>
+<text x="40" y="76" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="13" font-weight="400" fill="#A8A29A" text-anchor="start" opacity="1.0">The listening room, after dark, with the lamp on.</text>
+<rect x="40" y="104" width="40" height="20" rx="3" fill="#131110" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<text x="96" y="118" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="500" fill="#EAE6E0" text-anchor="start" opacity="1.0">WALL</text>
+<text x="232" y="118" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">#131110</text>
+<text x="320" y="118" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="12" font-weight="400" fill="#A8A29A" text-anchor="start" opacity="1.0">the room behind the covers</text>
+<rect x="40" y="134" width="40" height="20" rx="3" fill="#0D0B0A" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<text x="96" y="148" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="500" fill="#EAE6E0" text-anchor="start" opacity="1.0">RECESS</text>
+<text x="232" y="148" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">#0D0B0A</text>
+<text x="320" y="148" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="12" font-weight="400" fill="#A8A29A" text-anchor="start" opacity="1.0">inset chrome: the bar, input wells, groove troughs</text>
+<rect x="40" y="164" width="40" height="20" rx="3" fill="#1B1816" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<text x="96" y="178" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="500" fill="#EAE6E0" text-anchor="start" opacity="1.0">CARD</text>
+<text x="232" y="178" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">#1B1816</text>
+<text x="320" y="178" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="12" font-weight="400" fill="#A8A29A" text-anchor="start" opacity="1.0">raised surface: hovered tile, resting control, panel</text>
+<rect x="40" y="194" width="40" height="20" rx="3" fill="#221F1C" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<text x="96" y="208" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="500" fill="#EAE6E0" text-anchor="start" opacity="1.0">CARD_HIGH</text>
+<text x="232" y="208" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">#221F1C</text>
+<text x="320" y="208" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="12" font-weight="400" fill="#A8A29A" text-anchor="start" opacity="1.0">one step up: selected, hovered control</text>
+<rect x="40" y="224" width="40" height="20" rx="3" fill="#EAE6E0" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<text x="96" y="238" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="500" fill="#EAE6E0" text-anchor="start" opacity="1.0">PAPER</text>
+<text x="232" y="238" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">#EAE6E0</text>
+<text x="320" y="238" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="12" font-weight="400" fill="#A8A29A" text-anchor="start" opacity="1.0">primary text</text>
+<rect x="40" y="254" width="40" height="20" rx="3" fill="#A8A29A" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<text x="96" y="268" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="500" fill="#EAE6E0" text-anchor="start" opacity="1.0">PAPER_DIM</text>
+<text x="232" y="268" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">#A8A29A</text>
+<text x="320" y="268" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="12" font-weight="400" fill="#A8A29A" text-anchor="start" opacity="1.0">secondary: artists, sentences</text>
+<rect x="40" y="284" width="40" height="20" rx="3" fill="#726D66" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<text x="96" y="298" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="500" fill="#EAE6E0" text-anchor="start" opacity="1.0">PAPER_FAINT</text>
+<text x="232" y="298" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">#726D66</text>
+<text x="320" y="298" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="12" font-weight="400" fill="#A8A29A" text-anchor="start" opacity="1.0">tertiary: counts, durations, hints</text>
+<rect x="40" y="314" width="40" height="20" rx="3" fill="#4A4743" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<text x="96" y="328" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="500" fill="#EAE6E0" text-anchor="start" opacity="1.0">PAPER_MUTED</text>
+<text x="232" y="328" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">#4A4743</text>
+<text x="320" y="328" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="12" font-weight="400" fill="#A8A29A" text-anchor="start" opacity="1.0">set but not sounding: the muted fader</text>
+<rect x="40" y="344" width="40" height="20" rx="3" fill="#E3A14E" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<text x="96" y="358" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="500" fill="#EAE6E0" text-anchor="start" opacity="1.0">LAMP</text>
+<text x="232" y="358" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">#E3A14E</text>
+<text x="320" y="358" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="12" font-weight="400" fill="#A8A29A" text-anchor="start" opacity="1.0">THE ACCENT — playback truth and the play action only</text>
+<rect x="40" y="374" width="40" height="20" rx="3" fill="#D9776B" opacity="1.0" stroke="#EDE3D9" stroke-width="1" stroke-opacity="0.08"/>
+<text x="96" y="388" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="500" fill="#EAE6E0" text-anchor="start" opacity="1.0">ALERT</text>
+<text x="232" y="388" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">#D9776B</text>
+<text x="320" y="388" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="12" font-weight="400" fill="#A8A29A" text-anchor="start" opacity="1.0">problems, stated quietly</text>
+<text x="700" y="118" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="11" font-weight="400" fill="#726D66" text-anchor="start" letter-spacing="1.4" opacity="1.0">TYPE</text>
+<text x="700" y="176.96" font-family="'IBM Plex Serif','Source Serif 4','Liberation Serif',serif" font-size="32" font-weight="600" fill="#EAE6E0" text-anchor="start" opacity="1.0">Where's your music?</text>
+<text x="1160" y="176.96" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="11" font-weight="400" fill="#4A4743" text-anchor="end" opacity="1.0">HERO 32/37 serif</text>
+<text x="700" y="237.56" font-family="'IBM Plex Serif','Source Serif 4','Liberation Serif',serif" font-size="22" font-weight="600" fill="#EAE6E0" text-anchor="start" opacity="1.0">Night Ferry (Remastered)</text>
+<text x="1160" y="237.56" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="11" font-weight="400" fill="#4A4743" text-anchor="end" opacity="1.0">TITLE 22/26 serif</text>
+<text x="700" y="286.0" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="15" font-weight="400" fill="#EAE6E0" text-anchor="start" opacity="1.0">Delta Nocturne</text>
+<text x="1160" y="286.0" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="11" font-weight="400" fill="#4A4743" text-anchor="end" opacity="1.0">EMPHASIS 15/20</text>
+<text x="700" y="328.19" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="13" font-weight="500" fill="#EAE6E0" text-anchor="start" opacity="1.0">Slow Exposure (Reprise)</text>
+<text x="1160" y="328.19" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="11" font-weight="400" fill="#4A4743" text-anchor="end" opacity="1.0">BODY 13/18 medium</text>
+<text x="700" y="369.03999999999996" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="13" font-weight="400" fill="#EAE6E0" text-anchor="start" opacity="1.0">Play everything at the loudness its tags declare.</text>
+<text x="1160" y="369.03999999999996" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="11" font-weight="400" fill="#4A4743" text-anchor="end" opacity="1.0">BODY 13/18 regular</text>
+<text x="700" y="409.11" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#EAE6E0" text-anchor="start" opacity="1.0">2022 · 8 tracks · 47:21</text>
+<text x="1160" y="409.11" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="11" font-weight="400" fill="#4A4743" text-anchor="end" opacity="1.0">META 12/16 mono — figures</text>
+<text x="700" y="447.72999999999996" font-family="'IBM Plex Sans','Source Sans 3','Adwaita Sans','Noto Sans',sans-serif" font-size="11" font-weight="400" fill="#EAE6E0" text-anchor="start" opacity="1.0">Esc closes · Q toggles</text>
+<text x="1160" y="447.72999999999996" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="11" font-weight="400" fill="#4A4743" text-anchor="end" opacity="1.0">CAPTION 11/16</text>
+<text x="700" y="503.09999999999997" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">Spacing  4 · 8 · 12 · 16 · 24 · 32   (base 4)</text>
+<text x="700" y="523.0999999999999" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">Radii    4 segment · 6 control · 10 tile · 3 dot</text>
+<text x="700" y="543.0999999999999" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">Artwork  radius 0, always — iced cannot round it,</text>
+<text x="700" y="563.0999999999999" font-family="'IBM Plex Mono','Source Code Pro','JetBrains Mono',monospace" font-size="12" font-weight="400" fill="#726D66" text-anchor="start" opacity="1.0">         and a record sleeve has square corners</text>
+</svg>
