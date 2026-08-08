@@ -26,7 +26,8 @@
 //!
 //! # What is bundled, and what it costs
 //!
-//! Four faces, verbatim from upstream. They are **not subset**: OFL-1.1 §3
+//! **One family at three weights** — Sans Regular, Medium and `SemiBold`,
+//! 605 592 bytes — verbatim from upstream. They are **not subset**: OFL-1.1 §3
 //! forbids a modified copy from using the Reserved Font Name, a subset *is* a
 //! modified copy, and baz also renders other people's tags — the complete faces
 //! carry Greek and Cyrillic, which a Latin subset would push back onto whatever
@@ -36,6 +37,15 @@
 //! Codepoints Plex does not carry — CJK, Hebrew, Arabic, and the rest — still
 //! fall back to the platform's fonts, exactly as they do today. Bundling
 //! guarantees the glyphs baz itself draws, not every glyph a tag can hold.
+//!
+//! # There is no display face either
+//!
+//! Plex Serif `SemiBold` was bundled for two jobs — the album's title and the
+//! first-run question — and revision 1 of the spec nominated it, in the same
+//! paragraph that introduced it, as the first thing to cut if the design ever
+//! needed disciplining. The gallery direction is that moment: the room supplies
+//! nothing and the work supplies everything, and a display face is the room
+//! supplying personality. The album title is Sans `SemiBold` at 22.
 //!
 //! # There is no monospace, and there never needed to be one
 //!
@@ -73,9 +83,6 @@
 /// `Font::with_name` must be given for the Regular, Medium and `SemiBold` faces
 /// to resolve as one family at three weights.
 pub const SANS: &str = "IBM Plex Sans";
-/// The bundled serif family: the album title and the first-run question, and
-/// nothing else (`docs/design/02-visual-language.md` §2.2.3).
-pub const SERIF: &str = "IBM Plex Serif";
 
 /// IBM Plex Sans Regular — body text.
 pub const SANS_REGULAR: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf");
@@ -83,8 +90,6 @@ pub const SANS_REGULAR: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Regu
 pub const SANS_MEDIUM: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Medium.ttf");
 /// IBM Plex Sans `SemiBold` — headings, and the primary action's label.
 pub const SANS_SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-SemiBold.ttf");
-/// IBM Plex Serif `SemiBold` — the album title and the first-run question.
-pub const SERIF_SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexSerif-SemiBold.ttf");
 
 /// Every bundled face, in the order the application loads them.
 ///
@@ -92,7 +97,7 @@ pub const SERIF_SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexSerif-S
 /// entry, before the window exists. The bytes are `'static` slices of the
 /// binary's own rodata, so each `Cow` iced takes is borrowed and nothing is
 /// copied or read from disk.
-pub const FACES: [&[u8]; 4] = [SANS_REGULAR, SANS_MEDIUM, SANS_SEMIBOLD, SERIF_SEMIBOLD];
+pub const FACES: [&[u8]; 3] = [SANS_REGULAR, SANS_MEDIUM, SANS_SEMIBOLD];
 
 #[cfg(test)]
 mod tests {
@@ -308,7 +313,6 @@ mod tests {
             ("Sans Regular", SANS_REGULAR),
             ("Sans Medium", SANS_MEDIUM),
             ("Sans SemiBold", SANS_SEMIBOLD),
-            ("Serif SemiBold", SERIF_SEMIBOLD),
         ] {
             let face = Face::parse(bytes);
             assert!(
@@ -319,8 +323,9 @@ mod tests {
         }
         assert_eq!(
             FACES.len(),
-            4,
-            "the monospace is deleted (`.interface-design/system.md` §8)"
+            3,
+            "one family at three weights: the monospace and the serif are both \
+             deleted (`.interface-design/system.md` §8)"
         );
     }
 
@@ -343,13 +348,9 @@ mod tests {
                  back to a system font mid-readout"
             );
         }
-        // Every weight the readouts and their labels can be set in, and the
-        // serif that still carries the album title.
-        for face in [
-            Face::parse(SANS_MEDIUM),
-            Face::parse(SANS_SEMIBOLD),
-            Face::parse(SERIF_SEMIBOLD),
-        ] {
+        // Every weight the readouts, their labels and the album title can be
+        // set in — which, with the serif deleted, is the whole bundle.
+        for face in [Face::parse(SANS_MEDIUM), Face::parse(SANS_SEMIBOLD)] {
             for character in "…—·’“”→".chars() {
                 assert_ne!(face.glyph(character), 0, "no glyph for {character:?}");
             }

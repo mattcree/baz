@@ -1093,28 +1093,14 @@ pub fn track_row(status: button::Status, playing: bool) -> button::Style {
 // consumes it has shipped.
 // ---------------------------------------------------------------------------
 
-/// The serif, at `SemiBold` — the album's title and the first-run question, and
-/// **nothing else** (`docs/design/02-visual-language.md` §2.2.3).
-///
-/// Both are "the thing itself" rather than chrome: a record's name, and the
-/// product's single line of copy. Sleeve typography is overwhelmingly serif or
-/// display, where UI sans is what a settings dialog looks like. Everything baz
-/// says *about itself* — Settings, Queue, ReplayGain, Play album, every label,
-/// every note — stays [`SANS`]. No exceptions.
-///
-/// The face is bundled with the rest of the family ([`crate::font`]), so it
-/// resolves to a real drawn `SemiBold` rather than a synthesised one.
-#[expect(
-    dead_code,
-    reason = "the token lands with the typeface; the two surfaces that spend \
-              it — the album title and the first-run question — are step 7 of \
-              the redesign's adoption order and change no value here. Delete \
-              this attribute (the compiler will ask) when the first one ships."
-)]
-pub const SERIF: Font = Font {
-    weight: Weight::Semibold,
-    ..Font::with_name(crate::font::SERIF)
-};
+// There is no serif token either, and it never got a call site. Revision 1
+// nominated Plex Serif SemiBold for exactly two jobs — the album's title and
+// the first-run question — and said in the same paragraph that if one thing had
+// to be cut to keep the design disciplined, it was this. The gallery direction
+// is that moment: its whole thesis is that **the room supplies nothing and the
+// work supplies everything**, and a display face is the room supplying
+// personality. The album title is [`SEMIBOLD`] at [`SIZE_TITLE`]
+// (`.interface-design/system.md` §8).
 
 // ---------------------------------------------------------------------------
 // The information-architecture move: places, an inspector, a popover, the bar

@@ -21,19 +21,22 @@ family. No new crate, no runtime file lookup, no install step.
 | `IBMPlexSans-Regular.ttf` | IBM Plex Sans Regular | 3.005 | 200 500 | `975dcda37d80f038dcd143c22e33ca2d97a0cc5a929aace1c749153b0fe1afa5` |
 | `IBMPlexSans-Medium.ttf` | IBM Plex Sans Medium | 3.005 | 202 460 | `331c8639d7598b2cde62a911a71db195e30cb655cd6bdf2e324a7e984955f907` |
 | `IBMPlexSans-SemiBold.ttf` | IBM Plex Sans SemiBold | 3.005 | 202 632 | `a20caf8286023a6a7a85e40b1d2a4ae9fc3e3b1f9eda8f4c542dd4986af67bb1` |
-| `IBMPlexSerif-SemiBold.ttf` | IBM Plex Serif SemiBold | 3.006 | 222 876 | `857edeaaff0f3913f4dfaf6bc0e9c89ef73e475429cf63d6a3cb5d1022a213d5` |
 
-Total: **828 468 bytes**.
+Total: **605 592 bytes** — one family at three weights.
 
-**`IBMPlexMono-Regular.ttf` was deleted** (173 052 bytes) —
-`.interface-design/system.md` §8: baz has no monospace, because Plex Sans's
-figures are already tabular. See "The metrics this asset is accountable for"
-below.
+Two faces were deleted, taking **395 928 bytes (39.5 %)** with them
+(`.interface-design/system.md` §8):
+
+| File | Bytes | Why it went |
+|---|---|---|
+| `IBMPlexMono-Regular.ttf` | 173 052 | baz has no monospace: Plex Sans's figures are already tabular. See "The metrics this asset is accountable for" below. |
+| `IBMPlexSerif-SemiBold.ttf` | 222 876 | baz has no display face: the room supplies nothing and the work supplies everything. The album title is Sans SemiBold at 22. |
 
 Fetched 2026-08-08 from <https://github.com/IBM/plex>, branch `master` at commit
 `bf260093582f04622aacc1e9f9ca604d7ccd0c42`, from
-`packages/plex-{sans,mono,serif}/fonts/complete/ttf/`. `OFL.txt` is that
-repository's `LICENSE.txt`, unaltered.
+`packages/plex-sans/fonts/complete/ttf/` (the two deleted faces came from
+`plex-mono` and `plex-serif` beside it). `OFL.txt` is that repository's
+`LICENSE.txt`, unaltered.
 
 ## Subsetting: none, deliberately
 
@@ -54,8 +57,8 @@ saving ~666 KB. It was not taken, for two reasons.
    redistribution is unambiguously permitted and needs no argument.
 2. **baz renders other people's tags.** Album and artist strings come out of the
    user's files, not out of this repository. The complete faces carry Latin (incl.
-   Extended-A), Greek and Cyrillic — 1 019 glyphs in Sans, 1 207 in Mono, 1 054 in
-   Serif. A Latin-only subset would push a Cyrillic or Greek album title back onto
+   Extended-A), Greek and Cyrillic — 1 019 glyphs in Sans. A Latin-only subset
+   would push a Cyrillic or Greek album title back onto
    whatever the host machine happens to have, reintroducing for a real part of a
    real collection exactly the "different product on every machine" problem
    bundling is here to fix.
@@ -94,14 +97,13 @@ running `cargo deny check` with these files present.
 `.interface-design/system.md` §8 and `docs/design/02-visual-language.md` §3 ask
 for exactly:
 
-- **Sans Regular / Medium / SemiBold** — the interface voice, *and every figure
-  baz draws*. All three exist as real drawn faces, so nothing is synthesised and
-  nothing falls back.
-- **Serif SemiBold** — the album title and the first-run question, and nothing
-  else (§2.2.3 of revision 1; revision 2 deletes this face too, in A2).
+- **Sans Regular / Medium / SemiBold** — the interface voice, the album title,
+  *and every figure baz draws*. All three exist as real drawn faces, so nothing
+  is synthesised and nothing falls back.
 
-No italics: baz sets none. **No monospace**, and the reason is measured rather
-than tasteful — see below.
+That is the whole list. **No monospace**, for a reason that is measured rather
+than tasteful (below). **No serif**: a display face is the room supplying
+personality, and this room supplies nothing. No italics: baz sets none.
 
 ## The metrics this asset is accountable for
 
