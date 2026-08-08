@@ -2,7 +2,7 @@
 //! [`UpdateQueue`](baz_core::protocol::Command::UpdateQueue) wants.
 //!
 //! ADR-0006 layer 1 — pure, iced-free, unit-tested — and the only genuinely
-//! new logic the information-architecture move needs (ADR-0015; the design
+//! new logic the information-architecture move needs (ADR-0016; the design
 //! spec named this module in advance, `docs/design/01-ux-audit-and-ia.md` §5).
 //!
 //! # Why a whole list, and why that makes this module trivial

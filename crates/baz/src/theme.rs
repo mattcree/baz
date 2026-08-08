@@ -311,7 +311,7 @@ pub const SEGMENT_INSET: f32 = 2.0;
 ///
 /// **One number, and now for one surface.** It was one number for three — the
 /// album, the queue and the settings took turns in this width — and that shared
-/// width was the only thing they had in common, which is what ADR-0015 is
+/// width was the only thing they had in common, which is what ADR-0016 is
 /// about. What survives the move is the property the layout actually rests on:
 /// the column is either showing an album or it is not, and swapping which album
 /// can never change how much room the shelf has. Only opening and closing
@@ -1234,7 +1234,7 @@ pub fn track_row(status: button::Status, playing: bool) -> button::Style {
 
 // ---------------------------------------------------------------------------
 // The information-architecture move: places, an inspector, a popover, the bar
-// (docs/design/01-ux-audit-and-ia.md §2, ADR-0015)
+// (docs/design/01-ux-audit-and-ia.md §2, ADR-0016)
 // ---------------------------------------------------------------------------
 
 /// Width of the **Up next** popover (logical px).

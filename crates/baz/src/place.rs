@@ -1,7 +1,7 @@
 //! Which **place** the window is showing.
 //!
 //! ADR-0006 layer 1 — pure, iced-free, unit-tested — and the smallest module in
-//! the crate, which is the point. ADR-0015's model is *the window holds one
+//! the crate, which is the point. ADR-0016's model is *the window holds one
 //! place at a time, one inspector attached to that place, one popover attached
 //! to the transport, and the now-playing bar always*; this is the first of the
 //! four kinds, and there is exactly one of it on screen.

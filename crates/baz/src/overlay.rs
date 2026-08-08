@@ -1,7 +1,7 @@
 //! The one overlay layer: which popover, if any, is floating over the place.
 //!
 //! ADR-0006 layer 1 — pure, iced-free, unit-tested — and the smallest of the
-//! four kinds ADR-0015's model names. The window holds one *place* at a time,
+//! four kinds ADR-0016's model names. The window holds one *place* at a time,
 //! one *inspector* attached to that place, one *popover* attached to the
 //! transport, and the now-playing *bar* always; this module is the popover.
 //!

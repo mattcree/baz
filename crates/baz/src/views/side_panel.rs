@@ -4,7 +4,7 @@
 //! # The sole tenant of the column
 //!
 //! It shared the right-hand rail with the play queue and the settings; both
-//! have left (ADR-0015), and this is what remains — because it is the one
+//! have left (ADR-0016), and this is what remains — because it is the one
 //! surface that genuinely needs the shelf beside it. The browse loop is *click,
 //! read, click the next sleeve*, and a full-window album view would turn a
 //! one-click compare into a three-step round trip. Prior art agrees from a

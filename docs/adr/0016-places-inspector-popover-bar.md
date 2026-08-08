@@ -1,4 +1,4 @@
-# ADR-0015: Places, an inspector, a popover, and the bar — retiring the rail
+# ADR-0016: Places, an inspector, a popover, and the bar — retiring the rail
 
 **Status**: accepted (2026-08-08) · implements `docs/design/01-ux-audit-and-ia.md`
 §2, as amended by `docs/design/03-interface-prior-art.md` R1 / R3 / R5 ·
