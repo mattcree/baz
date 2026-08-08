@@ -200,6 +200,19 @@ next commit.
   the conjunction ADR-0011 made of ADR-0009's guarantee — and nothing at all in
   between. Same faint ink as the rest of the secondary text, no icon, no fault
   vocabulary, and no layout shift when it appears (ADR-0009 §5).
+- **What is coming next, without opening anything.** The now-playing bar states
+  the queue's continuation on a third line under the artist: `then 19 more ·
+  57:38 left` while a record is still running, `then Kid A` when one is stacked
+  behind it, `then 2 albums · 1:58:00 left` when several are, `then Windowlicker`
+  for a single loose song and `then 3 tracks` for a handful — records counted as
+  records, never flattened into their tracks. On the last track of a queue it
+  says **nothing at all**: silence after a queue is a feature, and announcing it
+  would be the announcement rather than the silence. The **Queue** control keeps
+  its label and its press and now reads the size of what it opens rather than
+  the position in it, because the ambient line states that better. The
+  remaining-time figure is the same computation the popover's summary uses, so
+  the two cannot disagree; the line's lane is reserved whether or not it says
+  anything, so nothing in the bar moves as the queue advances.
 - **A visible play queue.** What baz handed the engine, in play order, with the
   playing track marked by the same amber lamp dot the shelf gives the playing
   album, the tracks behind it dimmed, and a `3 of 12 · 51:20` count. It shares

@@ -403,7 +403,7 @@ pub struct QueueItemVm {
     ///
     /// Per item rather than per queue, because the queue is one list holding
     /// whole albums *and* loose songs and ADR-0017 §1.7 is explicit that
-    /// "albums [are] listed as albums, never flattened". A queue-wide title
+    /// "albums \[are\] listed as albums, never flattened". A queue-wide title
     /// could not say which of a mixture a given row belongs to, so the fact
     /// lives where the ambiguity is: consecutive items sharing a title are one
     /// album, and that is what

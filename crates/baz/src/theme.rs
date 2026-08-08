@@ -1672,7 +1672,8 @@ pub const POSITION_W: f32 = 56.0;
 ///
 /// The **third rung** of the zone's type hierarchy, and the quietest: the title
 /// is [`SIZE_BODY`] in the Medium face at full paper, the artist [`SIZE_META`]
-/// at [`PAPER_DIM`], and this is [`SIZE_CAPTION`] at [`PAPER_FAINT`] — the
+/// at [`Palette::paper_dim`], and this is [`SIZE_CAPTION`] at
+/// [`Palette::paper_faint`] — the
 /// metadata voice the rest of the bar already speaks in (the stamps, the
 /// signal note, the skipped-tracks note). It is a statement about music that is
 /// not playing yet, so it must not compete with the one that is.
