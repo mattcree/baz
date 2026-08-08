@@ -103,11 +103,12 @@ PARK_X=$((W - 6)); PARK_Y=$((H - 6))
 # The wall, holding two folders' worth of records.
 xdotool mousemove $PARK_X $PARK_Y;      shot 01-wall-two-folders
 
-# Settings → Library, by pointer throughout. Ctrl+`,` cannot be used from here:
-# the search well has focus at launch and iced 0.13's `text_input` swallows
-# every key press while focused (`docs/BACKLOG.md`), so the shortcut would type
-# a comma into the query instead.
-klick 1198 24                                   # the top bar's `Settings`
+# Settings → Library. Ctrl+`,` for the first step, deliberately: the well no
+# longer takes focus at launch (ADR-0017 §1.2's type-anywhere work removed it),
+# so the chord reaches the subscription instead of being typed into the query —
+# which it *was* before that landed. The second step is a pointer press because
+# the spine is a pointer target and has no binding.
+key ctrl+comma
 klick 140 139                                   # the spine's `Library`
 xdotool mousemove $PARK_X $PARK_Y;      shot 02-library-section
 

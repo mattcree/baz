@@ -110,6 +110,26 @@ pub(crate) fn search_id() -> text_input::Id {
     text_input::Id::new("baz-search")
 }
 
+/// An id no widget in the tree carries, used to **blur** the search well.
+///
+/// iced 0.13 publishes `text_input::focus` and no `unfocus`, but its focus
+/// operation is defined over the whole tree: it focuses the widget whose id
+/// matches and **unfocuses every other focusable it walks past**
+/// (`iced_core::widget::operation::focusable::focus`). Focusing an id nothing
+/// carries is therefore exactly "focus nothing", using the toolkit's own
+/// documented behaviour rather than a private field.
+///
+/// It is a named constant with a test holding it apart from [`search_id`],
+/// because the entire mechanism is that the two strings differ.
+fn nothing_id() -> text_input::Id {
+    text_input::Id::new("baz-nothing")
+}
+
+/// Take the caret out of the search well (see [`nothing_id`]).
+fn blur_search<T: Send + 'static>() -> Task<T> {
+    text_input::focus(nothing_id())
+}
+
 /// Run the application. `started` is process start, for the
 /// startup-to-interactive log; `cli_dir` is the optional `baz [DIR]` arg.
 ///
@@ -176,6 +196,39 @@ pub(crate) enum Message {
     SetupSubmit,
     /// Shelf: search text changed.
     SearchChanged(String),
+    /// **Type anywhere**: a bare printable character was pressed with nothing
+    /// focused, so it is the query's (ADR-0017 §1.2, [`crate::keys`]).
+    ///
+    /// One message for both halves of the gesture — append the text, and put
+    /// the caret in the well — because they are one act: the first keystroke
+    /// both filters the wall and lands somewhere visible, and a listener who
+    /// got one without the other would have typed into a place they cannot
+    /// see. Every keystroke *after* it is the field's by the ordinary focus
+    /// rule, so this arrives exactly once per query.
+    QueryTyped(String),
+    /// <kbd>Enter</kbd>, from the wall or from the well's own submit: play the
+    /// **top-ranked** match while a query narrows the wall, else the selected
+    /// album.
+    ///
+    /// Only defensible because the first match is the best match — ADR-0021
+    /// ranks `Library::search_albums` by fit, then field, then library order —
+    /// which is why step 12 had to land before step 11 could.
+    PlayFirstMatch,
+    /// <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd>, or
+    /// <kbd>Ctrl</kbd>+scroll on the wall: step the density. `+1` loosens the
+    /// hang and `-1` tightens it; both saturate (see
+    /// [`shelf::Density::step`]).
+    DensityStep(i32),
+    /// The modifier keys that are down, as iced last reported them.
+    ///
+    /// Held for one job, and it is [`Self::Wheel`]'s: iced 0.13's
+    /// `WheelScrolled` carries no modifier state, so <kbd>Ctrl</kbd>+scroll
+    /// cannot be recognised from the wheel event alone.
+    ModifiersChanged(keyboard::Modifiers),
+    /// A wheel notch, with its vertical travel. Answered against the modifiers
+    /// above by [`keys::wheel_binding`]; a plain scroll is the `scrollable`'s
+    /// own business and this arm does nothing with it.
+    Wheel(f32),
     /// Esc anywhere: peel one layer, top down — the popover, then the search
     /// query, then the album inspector (see [`App::escape`]).
     EscapePressed,
@@ -511,6 +564,19 @@ struct App {
     /// and for `crate::panels`' reason: which section you last read is not a
     /// standing decision, so it is not in `config.toml`.
     settings_section: usize,
+    /// The density the wall opens at, read from the config for the same reason
+    /// and handed to the shelf the same way (ADR-0017 step 6).
+    density: shelf::Density,
+    /// Which modifier keys are down, as iced last reported them.
+    ///
+    /// The one piece of input state baz tracks itself, and it is tracked for
+    /// exactly one reason: iced 0.13's `WheelScrolled` carries no modifiers,
+    /// so <kbd>Ctrl</kbd>+scroll cannot be told from a scroll without it. Key
+    /// *presses* never consult this — they carry their own modifiers, and
+    /// [`keys::binding_for`] reads those (see its focus-rule note on why a
+    /// hand-kept flag is the wrong instrument wherever the toolkit reports the
+    /// truth itself).
+    modifiers: keyboard::Modifiers,
 }
 
 enum Screen {
@@ -592,6 +658,9 @@ impl App {
         let group_key = stored
             .as_ref()
             .map_or(GroupKey::Artist, |config| config.group_key);
+        let density = stored
+            .as_ref()
+            .map_or(shelf::Density::Balanced, |config| config.density);
         // The folders baz holds this run (ADR-0022): what the config remembers,
         // with a `baz DIR` argument **added to the front** rather than replacing
         // them. Pointing baz at a folder for an afternoon must not silently
@@ -605,7 +674,7 @@ impl App {
         let (screen, task) = if dirs.is_empty() {
             (Screen::Setup(Setup::fresh(None)), Task::none())
         } else {
-            match Shelf::open(dirs, group_key) {
+            match Shelf::open(dirs, group_key, density) {
                 Ok((shelf, task)) => (Screen::Shelf(Box::new(shelf)), task),
                 Err(error) => (Screen::Setup(Setup::fresh(Some(error))), Task::none()),
             }
@@ -614,6 +683,8 @@ impl App {
             _history_ledger: history_ledger,
             group_key,
             settings_section: 0,
+            density,
+            modifiers: keyboard::Modifiers::empty(),
             started,
             first_frame_logged: false,
             screen,
@@ -644,8 +715,13 @@ impl App {
         // resolves to "tell the state machine, maybe tell the engine", so it
         // is answered first and separately rather than as nine more arms
         // below.
-        if let Some(task) = self.update_motion(&message) {
-            return task;
+        // The two machines that answer *before* anything else can: ink, which
+        // cannot move a pixel of layout, and the modifier layer, which decides
+        // whether a keystroke was even text.
+        for machine in [Self::update_motion, Self::update_modified_input] {
+            if let Some(task) = machine(self, &message) {
+                return task;
+            }
         }
         if self.update_needle(&message)
             || self.update_volume(&message)
@@ -657,15 +733,7 @@ impl App {
         }
         match message {
             Message::EscapePressed => self.escape(),
-            // Navigation, not a panel toggle: the same key, the top bar's
-            // control and the Settings place's own Back all send this, and it
-            // moves the window between the two places (ADR-0016).
-            Message::ToggleSettings => {
-                if matches!(self.screen, Screen::Shelf(_)) {
-                    self.place = self.place.toggled();
-                }
-                Task::none()
-            }
+            Message::ToggleSettings => self.go_to_settings(),
             // The Settings place's spine. Session state and deliberately not
             // persisted, on `crate::panels`' rule: which section you were last
             // reading is not a standing decision.
@@ -700,6 +768,8 @@ impl App {
                 self.play_album(id);
                 Task::none()
             }
+            // **Enter plays the top-ranked match** (ADR-0017 §1.2).
+            Message::PlayFirstMatch => self.play_first_match(),
             Message::PlayTrack(id, row) => {
                 self.play_track(id, row);
                 Task::none()
@@ -737,6 +807,99 @@ impl App {
                 Screen::Shelf(state) => state.update(message),
             },
         }
+    }
+
+    /// The Settings place, and back out of it.
+    ///
+    /// Navigation, not a panel toggle: the same key, the top bar's control and
+    /// the Settings place's own Back all send this, and it moves the window
+    /// between the two places (ADR-0016).
+    fn go_to_settings(&mut self) -> Task<Message> {
+        if matches!(self.screen, Screen::Shelf(_)) {
+            self.place = self.place.toggled();
+        }
+        Task::none()
+    }
+
+    /// <kbd>Enter</kbd>: play what the wall says is the best answer to the
+    /// query, or the album the inspector is showing (ADR-0017 §1.2).
+    ///
+    /// Resolved on the shell because playing is the shell's job and the answer
+    /// is the shelf's — the same split every other play route in this file
+    /// takes. [`Shelf::enter_plays`] holds the choice; this holds the sound.
+    fn play_first_match(&mut self) -> Task<Message> {
+        if let Screen::Shelf(state) = &self.screen
+            && let Some(id) = state.enter_plays()
+        {
+            self.play_album(id);
+        }
+        Task::none()
+    }
+
+    /// Everything that depends on **which modifiers are down**: the zoom, and
+    /// the one place a chord must be kept out of the search query.
+    ///
+    /// Its own small machine for the reason the volume's nine messages and
+    /// ReplayGain's four are: a few arms that belong to one fact, kept out of
+    /// the shell's match so that what remains there is the handful of messages
+    /// genuinely about the whole application.
+    ///
+    /// The density step is remembered on the shell rather than on the shelf
+    /// because the config is read before a shelf exists and the setup screen
+    /// has no wall to hang — the same split [`App::group_key`] takes.
+    ///
+    /// # Why a modified keystroke cannot become query text
+    ///
+    /// iced 0.13's `text_input` inserts whatever character a key press
+    /// *produced*, and it checks the command modifier for exactly four chords
+    /// (its own cut/copy/paste/select-all) and no others. On X11 a press of
+    /// <kbd>Ctrl</kbd>+<kbd>-</kbd> produces the text `-`, so with the well
+    /// focused the field swallowed the zoom **and typed a hyphen into the
+    /// query**. Measured, on a real frame: the well read `co-` and the wall
+    /// read *Nothing matches "co-"*. The same was already true of
+    /// <kbd>Ctrl</kbd>+<kbd>,</kbd> before any of this, and it shipped.
+    /// Letter chords are unaffected — <kbd>Ctrl</kbd>+<kbd>M</kbd> produces a
+    /// control character, which the field already filters.
+    ///
+    /// The fix is the rule `keys::is_query_text` already states on the other
+    /// path, applied to this one: **a keystroke made with the command modifier
+    /// is never query text.** The field's edit is discarded, the query is
+    /// whatever it was, and the widget re-reads it on the next frame.
+    ///
+    /// What it does **not** do is deliver the chord to the binding table —
+    /// that would break the focus rule, which is the one rule in `keys.rs`
+    /// that may not bend (see its focus-rule note). So while the well has
+    /// focus a punctuation chord now does *nothing* instead of corrupting the
+    /// query; <kbd>Esc</kbd> leaves the field and it works, and
+    /// <kbd>Ctrl</kbd>+scroll works either way. Recorded in
+    /// `.interface-design/system.md` §12 with the toolkit's other hard limits.
+    fn update_modified_input(&mut self, message: &Message) -> Option<Task<Message>> {
+        if matches!(message, Message::SearchChanged(_))
+            && !keys::field_edit_is_query(self.modifiers)
+        {
+            return Some(Task::none());
+        }
+        let delta = match *message {
+            // Tracked for the wheel's sake alone (see the field).
+            Message::ModifiersChanged(modifiers) => {
+                self.modifiers = modifiers;
+                return Some(Task::none());
+            }
+            // A notch of the wheel is a zoom only with the command modifier
+            // down; otherwise it is the wall scrolling, which the `scrollable`
+            // has already done for itself.
+            Message::Wheel(travel) => match keys::wheel_binding(travel, self.modifiers) {
+                Some(Message::DensityStep(delta)) => delta,
+                _ => return Some(Task::none()),
+            },
+            Message::DensityStep(delta) => delta,
+            _ => return None,
+        };
+        self.density = self.density.step(delta);
+        Some(match &mut self.screen {
+            Screen::Shelf(state) => state.set_density(self.density),
+            Screen::Setup(_) => Task::none(),
+        })
     }
 
     /// Answer a pointer message that only motion cares about, reporting whether
@@ -941,7 +1104,7 @@ impl App {
             setup.error = Some(format!("`{}` is not a directory", dir.display()));
             return Task::none();
         }
-        match Shelf::open(vec![dir], self.group_key) {
+        match Shelf::open(vec![dir], self.group_key, self.density) {
             Ok((state, task)) => {
                 self.screen = Screen::Shelf(Box::new(state));
                 task
@@ -1669,6 +1832,21 @@ impl App {
                 iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
                     iced::mouse::Button::Left,
                 )) => Some(Message::PointerReleased),
+                // The zoom's pointer half. iced 0.13 reports no modifiers on a
+                // wheel event and its `scrollable` does not consult them
+                // either, so both halves have to be assembled here: the
+                // modifier state is tracked from its own event, and the notch
+                // is answered against it in the update loop
+                // ([`keys::wheel_binding`]).
+                iced::Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+                    Some(Message::ModifiersChanged(modifiers))
+                }
+                iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
+                    Some(Message::Wheel(match delta {
+                        iced::mouse::ScrollDelta::Lines { y, .. }
+                        | iced::mouse::ScrollDelta::Pixels { y, .. } => y,
+                    }))
+                }
                 _ => None,
             }),
             window::resize_events().map(|(_, size)| Message::WindowResized(size)),
@@ -1754,6 +1932,11 @@ pub(crate) struct Shelf {
     /// How the wall is arranged (ADR-0019). Persisted in `config.toml`; the
     /// top bar's row of words and `1`–`5` are the two ways to change it.
     pub(crate) group_key: GroupKey,
+    /// How closely the wall hangs (ADR-0017 step 6). Persisted in
+    /// `config.toml`; <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd>
+    /// and <kbd>Ctrl</kbd>+scroll are the two ways to change it, and there is
+    /// no third way anywhere in the Settings place.
+    pub(crate) density: shelf::Density,
     /// The play ledger, read once at open — what [`GroupKey::Played`] shelves
     /// on and what the pull will weight on.
     ///
@@ -1937,7 +2120,11 @@ pub(crate) struct Pull {
 impl Shelf {
     /// Open the library DB, hydrate the shelf, persist the chosen folders, and
     /// kick off the scan worker. Errors are user-presentable strings.
-    fn open(roots: Vec<PathBuf>, group_key: GroupKey) -> Result<(Self, Task<Message>), String> {
+    fn open(
+        roots: Vec<PathBuf>,
+        group_key: GroupKey,
+        density: shelf::Density,
+    ) -> Result<(Self, Task<Message>), String> {
         let t0 = Instant::now();
         let db_path = config::library_db_file()
             .ok_or_else(|| "no usable data directory on this system".to_owned())?;
@@ -1970,6 +2157,7 @@ impl Shelf {
         let mut shelf = Self {
             library,
             group_key,
+            density,
             history,
             albums: Vec::new(),
             groups: Vec::new(),
@@ -2010,20 +2198,27 @@ impl Shelf {
             pull: None,
         };
         shelf.rebuild_shelves();
+        let shelf_task = shelf.request_visible_thumbs();
         println!(
-            "[startup] library open + hydrate: {:.1} ms ({} albums / {} shelves by {} / {} tracks) from {}",
+            "[startup] library open + hydrate: {:.1} ms ({} albums / {} shelves by {} at {} / {} tracks) from {}",
             t0.elapsed().as_secs_f64() * 1e3,
             shelf.albums.len(),
             shelf.groups.len(),
             group_key.code(),
+            density.label(),
             shelf.library.len(),
             db_path.display()
         );
-        let task = Task::batch([
-            text_input::focus(search_id()),
-            shelf.request_visible_thumbs(),
-        ]);
-        Ok((shelf, task))
+        // **The well does not take focus at startup any more**, and that is
+        // step 11's doing rather than a tidy-up. It used to, so that a listener
+        // could type immediately — which was the right trade while typing
+        // needed a focused field, and which cost <kbd>Space</kbd> its meaning
+        // until the first <kbd>Esc</kbd>, a wart the README had to document.
+        // Type-anywhere pays for the typing without the focus: the first letter
+        // reaches the query from the wall (`crate::keys`), so the caret can
+        // start where the transport is and the keyboard means what the key
+        // table says on the first frame.
+        Ok((shelf, shelf_task))
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -2044,6 +2239,9 @@ impl Shelf {
                     self.request_visible_thumbs(),
                 ])
             }
+            // **Type anywhere** (ADR-0017 §1.2). Both halves of the gesture,
+            // in one arm, because they are one act — see [`Message::QueryTyped`].
+            Message::QueryTyped(text) => self.type_into_query(&text),
             Message::EscapePressed => self.peel(),
             Message::GroupKeySelected(key) => self.arrange_by(key),
             Message::RailJumped(run) => self.jump_to_shelf(run),
@@ -2138,6 +2336,138 @@ impl Shelf {
         }
     }
 
+    /// **What <kbd>Enter</kbd> plays**: the top-ranked match while a query is
+    /// narrowing the wall, else the album the inspector is showing, else
+    /// nothing.
+    ///
+    /// The order is ADR-0017 §1.2's table read left to right — *play the
+    /// top-ranked match; play the selected album* — and the fall-through is
+    /// what makes it one key rather than two: with a query you are choosing
+    /// from what you typed, and without one you are choosing what you clicked.
+    ///
+    /// The ranked answer is [`vm::top_match`] (ADR-0021), **filtered through
+    /// the wall**: an album is only played if it is on screen. In practice the
+    /// two always agree — both come from the same query against the same
+    /// library — and the check is here so that "Enter plays the first match"
+    /// stays a statement about the wall a listener is looking at rather than
+    /// about a search index they cannot see. If the ranked album is somehow
+    /// not on the wall, the wall's own first survivor is played instead, which
+    /// is the record under the top-left corner of the collection.
+    fn enter_plays(&self) -> Option<u64> {
+        if self.query.trim().is_empty() {
+            return self.selection.selected();
+        }
+        let on_the_wall = |id: u64| {
+            self.visible
+                .iter()
+                .filter_map(|index| self.albums.get(*index))
+                .any(|album| album.id == id)
+        };
+        vm::top_match(&self.library, &self.query)
+            .filter(|id| on_the_wall(*id))
+            .or_else(|| {
+                self.visible
+                    .first()
+                    .and_then(|index| self.albums.get(*index))
+                    .map(|album| album.id)
+            })
+    }
+
+    /// **Type anywhere**: append what a key produced to the query, filter, and
+    /// put the caret in the well (ADR-0017 §1.2, [`Message::QueryTyped`]).
+    ///
+    /// The text is *appended*, never assigned: a listener who has already
+    /// typed and clicked away mid-query continues it rather than restarting
+    /// it, which is what the well itself would do if the caret were still in
+    /// it. In practice this runs once and then the well has focus, so it is
+    /// the empty-query case almost every time.
+    ///
+    /// The caret lands at the end of what was typed — `text_input`'s own
+    /// `focus` moves the cursor there — so the next keystroke, which the
+    /// *field* will handle, continues the word instead of inserting before it.
+    fn type_into_query(&mut self, text: &str) -> Task<Message> {
+        self.query.push_str(text);
+        self.refilter();
+        self.scroll_offset = 0.0;
+        Task::batch([
+            text_input::focus(search_id()),
+            scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
+            self.request_visible_thumbs(),
+        ])
+    }
+
+    /// <kbd>Esc</kbd> on a non-empty query: give the wall back.
+    ///
+    /// **Cleared *and* blurred**, which is new with type-anywhere and is the
+    /// point of it. Escape used to put the caret back in the well, because a
+    /// well you had clicked into was a place you meant to be. Now that any
+    /// letter reopens the query from anywhere, holding focus after a clear
+    /// would leave the keyboard in an empty field — where <kbd>Space</kbd>
+    /// types a space rather than pausing the music — and a listener who
+    /// abandoned a search wants the transport back.
+    fn clear_query(&mut self) -> Task<Message> {
+        self.query.clear();
+        self.refilter();
+        self.scroll_offset = 0.0;
+        Task::batch([
+            blur_search(),
+            scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
+            self.request_visible_thumbs(),
+        ])
+    }
+
+    /// **Hang the wall at `density`** — the zoom's one effect on the shelf
+    /// (ADR-0017 step 6).
+    ///
+    /// Everything except the geometry survives it, and for the same reason a
+    /// re-arrangement is cheap: the density changes how the works are *laid
+    /// out* and nothing about which works there are, so the query, the
+    /// selection, the edition choices, the thumbnail cache and what is playing
+    /// are all untouched. The shelves are not even rebuilt — [`Shelf::shelves`]
+    /// derives them from the grid on every call, so the next frame lays out at
+    /// the new step by itself.
+    ///
+    /// **The scroll is anchored rather than reset**, which is the one place
+    /// this differs from a key change. A zoom is a request to look at the same
+    /// part of the collection more or less closely, so the offset is scaled by
+    /// the wall's new height over its old: the record you were looking at is
+    /// still under the pointer. (A re-arrangement moves the records themselves
+    /// and therefore *must* go back to the top; see [`Self::arrange_by`].)
+    ///
+    /// The re-anchor is also what makes <kbd>Ctrl</kbd>+scroll behave: iced
+    /// 0.13's `scrollable` has no modifier awareness and scrolls whatever the
+    /// wheel says, so the notch that asked for a zoom also moves the wall.
+    /// Scrolling back to the anchor overrides it in the same frame.
+    fn set_density(&mut self, density: shelf::Density) -> Task<Message> {
+        if self.density == density {
+            return Task::none();
+        }
+        let was = self.shelves().height();
+        self.density = density;
+        // The hold pins a *width*, and the width has not changed — but the
+        // sleeve under the pointer has, which is the thing the hold exists to
+        // keep still. A zoom is a deliberate request to see the layout change.
+        self.grid_hold.release();
+        let now = self.shelves().height();
+        let anchored = if was > 0.0 {
+            (self.scroll_offset * now / was).max(0.0)
+        } else {
+            0.0
+        };
+        self.scroll_offset = anchored;
+        persist_density(density);
+        Task::batch([
+            scrollable::scroll_to(
+                scroll_id(),
+                AbsoluteOffset {
+                    x: 0.0,
+                    y: anchored,
+                },
+            ),
+            self.request_visible_thumbs(),
+        ])
+    }
+
     /// **Escape, on the wall: peel one layer, top down.**
     ///
     /// The tail of [`App::escape`]'s peel — everything under the popover and
@@ -2163,19 +2493,16 @@ impl Shelf {
     ///    It never stops the music. A shuffle's run is a queue like any other;
     ///    what Escape takes off the wall is the *drawing*, and the record goes
     ///    on playing.
+    ///
+    /// The query step **clears and blurs**, which is type-anywhere's doing
+    /// (ADR-0017 step 11) — see [`Self::clear_query`] for why holding the caret
+    /// stopped being right once any letter could reopen the query.
     fn peel(&mut self) -> Task<Message> {
         if self.pull.take().is_some() {
             return self.reflow(Selection::close);
         }
         if !self.query.is_empty() {
-            self.query.clear();
-            self.refilter();
-            self.scroll_offset = 0.0;
-            return Task::batch([
-                text_input::focus(search_id()),
-                scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
-                self.request_visible_thumbs(),
-            ]);
+            return self.clear_query();
         }
         if self.selection.selected().is_some() {
             return self.reflow(Selection::close);
@@ -2246,6 +2573,7 @@ impl Shelf {
         // lands where the record will be when the column has finished arriving.
         let settled = shelf::Grid::new(
             (self.window_w - inspector_width(&self.selection) - 1.0 - theme::INDEX_LANE_W).max(0.0),
+            self.density,
         );
         let Some(place) = self.album_top(id, settled) else {
             return reflow;
@@ -2279,7 +2607,7 @@ impl Shelf {
         Some(if row == 0 {
             run.top
         } else {
-            run.rows_top() + grid.spacer_height(row)
+            run.rows_top(grid) + grid.spacer_height(row)
         })
     }
 
@@ -2470,7 +2798,7 @@ impl Shelf {
     /// each reader. `the_hang_holds_with_the_index_rail_taken_off_the_wall`
     /// asserts the hang survives that subtraction at every width in the band.
     pub(crate) fn grid(&self) -> shelf::Grid {
-        shelf::Grid::new(self.grid_hold.width(self.grid_size.width))
+        shelf::Grid::new(self.grid_hold.width(self.grid_size.width), self.density)
     }
 
     /// How the wall is broken into shelves, for the current filter and grid.
@@ -3113,6 +3441,15 @@ fn persist_group_key(key: GroupKey) {
     persist(|config| config.group_key = key);
 }
 
+/// Remember how closely it hangs — the same terms exactly (ADR-0017 §1.3).
+///
+/// The zoom is a *gesture*; where it landed is state. A listener who pressed
+/// <kbd>Ctrl</kbd>+<kbd>-</kbd> twice expects that wall next time, and had to
+/// go nowhere to ask for it.
+fn persist_density(density: shelf::Density) {
+    persist(|config| config.density = density);
+}
+
 /// Read the play ledger's snapshot, or say why there is none.
 ///
 /// Every failure here is a note on stdout and a `None`, never a `problem` in
@@ -3331,13 +3668,26 @@ mod tests {
     /// remembering the selection, and the inspector's ✕ *closes* it — those are
     /// different messages because they are different intentions, and no control
     /// on screen sends the first. It is recorded rather than papered over.
+    ///
+    /// Type-anywhere (ADR-0017 §1.2) adds four messages to this table and none
+    /// of them is keyboard-only: the query has the search well ADR-0017 kept,
+    /// the top match has the tile a pointer double-clicks and the inspector's
+    /// `Play album`, the arrangement has the top bar's row of words, and the
+    /// zoom has <kbd>Ctrl</kbd>+scroll on the wall itself.
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the table of controls *is* the test, and splitting the sweep \
+                  away from the table it checks would let one of the two be \
+                  edited without the other — which is the failure this test \
+                  exists to make impossible"
+    )]
     fn every_keyboard_binding_is_a_press_some_control_also_makes() {
         use iced::keyboard::{Key, Modifiers, key};
 
         /// Message tag → the on-screen control that sends the same message,
         /// or the reason there is none.
-        const CONTROLS: [(&str, &str); 16] = [
+        const CONTROLS: [(&str, &str); 20] = [
             ("PlayPause", "the bottom bar's play/pause button"),
             ("NextTrack", "the bottom bar's Next button"),
             ("PreviousTrack", "the bottom bar's Previous button"),
@@ -3362,6 +3712,26 @@ mod tests {
             ("FocusSearch", "the top bar's search well"),
             ("Pull", "the top bar's Pull word"),
             ("EscapePressed", "each layer's own ✕"),
+            (
+                "QueryTyped",
+                "the top bar's search well — the field ADR-0017 §1.2 kept, \
+                 which a pointer clicks into to type the same query",
+            ),
+            (
+                "PlayFirstMatch",
+                "the wall's first tile (double-click) and the inspector's \
+                 `Play album`; the well's own Enter sends this too",
+            ),
+            (
+                "DensityStep",
+                "Ctrl+scroll on the wall — the gesture *is* the pointer \
+                 control (ADR-0017 §1.3), and `docs/REFUSALS.md` refuses the \
+                 view-options menu that would be the other way to spell it",
+            ),
+            (
+                "GroupKeySelected",
+                "the top bar's row of five words (ADR-0019)",
+            ),
             (
                 "TogglePanels",
                 "no control: hiding the column is not closing it (see the doc \
@@ -3393,11 +3763,18 @@ mod tests {
             Key::Character("n".into()),
             Key::Character("m".into()),
             Key::Character("q".into()),
+            Key::Character("u".into()),
             Key::Character("b".into()),
             Key::Character(",".into()),
             Key::Character("/".into()),
             Key::Character("f".into()),
             Key::Character("r".into()),
+            Key::Character("-".into()),
+            Key::Character("=".into()),
+            Key::Character("1".into()),
+            Key::Character("5".into()),
+            Key::Character("6".into()),
+            Key::Character("k".into()),
         ];
         let modifier_sets = [
             Modifiers::empty(),
@@ -3407,23 +3784,42 @@ mod tests {
             Modifiers::COMMAND | Modifiers::SHIFT,
         ];
         let mut produced: Vec<String> = Vec::new();
-        for key in &keys_to_sweep {
-            for modifiers in modifier_sets {
-                if let Some(message) = keys::binding_for(key, modifiers, keys::Focus::Elsewhere) {
-                    // The payload is not the point; the intention is.
-                    let debug = format!("{message:?}");
-                    let tag = debug
-                        .split_once('(')
-                        .map_or(debug.as_str(), |(head, _)| head)
-                        .to_owned();
-                    assert!(
-                        CONTROLS.iter().any(|(name, _)| *name == tag),
-                        "{key:?} + {modifiers:?} binds to `{tag}`, which no entry in \
-                         CONTROLS accounts for — name the control that sends it, or \
-                         record why there is none"
-                    );
-                    produced.push(tag);
-                }
+        // Both halves of the input surface: every key in every modifier state,
+        // and the wheel, which is the zoom's pointer half and binds through
+        // the same module.
+        let from_keys = keys_to_sweep.iter().flat_map(|key| {
+            modifier_sets.into_iter().map(move |modifiers| {
+                (
+                    format!("{key:?}"),
+                    modifiers,
+                    keys::binding_for(key, modifiers, keys::Focus::Elsewhere),
+                )
+            })
+        });
+        let from_wheel = modifier_sets.into_iter().flat_map(|modifiers| {
+            [-1.0_f32, 1.0].into_iter().map(move |delta| {
+                (
+                    format!("wheel {delta}"),
+                    modifiers,
+                    keys::wheel_binding(delta, modifiers),
+                )
+            })
+        });
+        for (key, modifiers, binding) in from_keys.chain(from_wheel) {
+            if let Some(message) = binding {
+                // The payload is not the point; the intention is.
+                let debug = format!("{message:?}");
+                let tag = debug
+                    .split_once('(')
+                    .map_or(debug.as_str(), |(head, _)| head)
+                    .to_owned();
+                assert!(
+                    CONTROLS.iter().any(|(name, _)| *name == tag),
+                    "{key} + {modifiers:?} binds to `{tag}`, which no entry in \
+                     CONTROLS accounts for — name the control that sends it, or \
+                     record why there is none"
+                );
+                produced.push(tag);
             }
         }
         // …and the table has no stale entries either, except the three that
@@ -3526,7 +3922,7 @@ mod tests {
         let arm = &arm[..arm.find("\n    }\n").expect("a function ends")];
         let peel = [
             "self.pull.take()",
-            "self.query.clear()",
+            "self.clear_query()",
             "self.selection.selected()",
             "self.pool.take()",
         ];
@@ -3537,18 +3933,37 @@ mod tests {
                 .unwrap_or_else(|| panic!("Escape no longer peels `{step}` in its turn"));
             at += found + step.len();
         }
+        // **And the query step blurs as well as clearing** (ADR-0017 step 11).
+        // Escape used to leave the caret in the well, which under type-anywhere
+        // would leave the keyboard in an empty field where Space types a space.
+        let clear = source
+            .split_once("fn clear_query(&mut self)")
+            .expect("the query's own peel")
+            .1;
+        let clear = &clear[..clear.find("\n    }\n").expect("a function ends")];
+        assert!(
+            clear.contains("blur_search()"),
+            "Escape clears the query but leaves the caret in the well"
+        );
+        assert!(
+            !clear.contains("text_input::focus(search_id())"),
+            "Escape re-focuses the well it just emptied"
+        );
     }
 
-    /// The two layer keys, spelled out: `Q` is the same press as the bar's
-    /// now-playing block, and Ctrl+`,` the same press as the top bar's
-    /// Settings control.
+    /// The three layer keys, spelled out: Ctrl+`U` is the same press as the
+    /// bar's now-playing block, Ctrl+`,` the same press as the top bar's
+    /// Settings control, and Ctrl+`B` the layout key.
+    ///
+    /// All three are modified now, and that is the shape of the modifier layer
+    /// ADR-0017 §1.2 asks for: bare `q` is a letter of the query.
     #[test]
     fn the_layer_controls_and_their_keys_are_the_same_press() {
         use iced::keyboard::{Key, Modifiers};
 
         let from_key = keys::binding_for(
-            &Key::Character("q".into()),
-            Modifiers::empty(),
+            &Key::Character("u".into()),
+            Modifiers::COMMAND,
             keys::Focus::Elsewhere,
         );
         assert_eq!(
@@ -3574,6 +3989,64 @@ mod tests {
         assert_eq!(
             format!("{from_key:?}"),
             format!("{:?}", Some(Message::TogglePanels))
+        );
+    }
+
+    /// **The blur is a different id, and that is the whole mechanism.**
+    ///
+    /// iced 0.13 has no `unfocus` task; its focus operation focuses the
+    /// matching id and unfocuses every other focusable it walks. Focusing an id
+    /// no widget carries is therefore "focus nothing" — and the entire
+    /// correctness of it is that the two strings differ, which is a thing a
+    /// rename could silently break and a test cannot.
+    #[test]
+    fn blurring_the_well_targets_an_id_no_widget_carries() {
+        assert_ne!(
+            format!("{:?}", search_id()),
+            format!("{:?}", nothing_id()),
+            "the blur would focus the search well instead of leaving it"
+        );
+        // And the well is the only `text_input::Id` the tree hands out, so
+        // there is nothing else the sentinel could collide with.
+        assert_eq!(format!("{:?}", search_id()), format!("{:?}", search_id()));
+    }
+
+    /// **The zoom is three steps of state and nothing else** — the shell's
+    /// half of ADR-0017 step 6, exercised as the update loop actually spends
+    /// it.
+    ///
+    /// The shelf's half (the hang's arithmetic) is `shelf::Density`'s and is
+    /// tested there; what is pinned here is that the message steps the step,
+    /// saturates rather than wrapping, and is produced by both halves of the
+    /// gesture.
+    #[test]
+    fn the_zoom_steps_the_wall_and_stops_at_both_ends() {
+        use iced::keyboard::{Key, Modifiers};
+
+        let step = |density: shelf::Density, delta: i32| density.step(delta);
+        let mut density = shelf::Density::Balanced;
+        density = step(density, -1);
+        assert_eq!(density, shelf::Density::Dense);
+        density = step(density, -1);
+        assert_eq!(density, shelf::Density::Dense, "the ladder has an end");
+        density = step(density, 1);
+        density = step(density, 1);
+        assert_eq!(density, shelf::Density::Spacious);
+        density = step(density, 1);
+        assert_eq!(density, shelf::Density::Spacious);
+
+        // Both halves of the gesture produce the same message, which is what
+        // makes the keyboard and the wheel one control rather than two.
+        let from_key = keys::binding_for(
+            &Key::Character("=".into()),
+            Modifiers::COMMAND,
+            keys::Focus::Elsewhere,
+        );
+        let from_wheel = keys::wheel_binding(1.0, Modifiers::COMMAND);
+        assert_eq!(format!("{from_key:?}"), format!("{from_wheel:?}"));
+        assert_eq!(
+            format!("{from_key:?}"),
+            format!("{:?}", Some(Message::DensityStep(1)))
         );
     }
 
@@ -3617,8 +4090,8 @@ mod tests {
         );
 
         let from_key = keys::binding_for(
-            &Key::Character("n".into()),
-            Modifiers::empty(),
+            &Key::Named(key::Named::ArrowRight),
+            Modifiers::COMMAND,
             keys::Focus::Elsewhere,
         );
         assert_eq!(
@@ -3660,7 +4133,9 @@ mod tests {
 
         // The shipped window with the inspector closed: four columns of 270.
         let mut width = WINDOW.width;
-        let hang = |hold: shelf::GridHold, width: f32| shelf::Grid::new(hold.width(width));
+        let hang = |hold: shelf::GridHold, width: f32| {
+            shelf::Grid::new(hold.width(width), shelf::Density::Balanced)
+        };
         assert_eq!(hang(hold, width).columns, 4);
         let before = hang(hold, width);
 
@@ -3672,7 +4147,7 @@ mod tests {
         selection.select(1);
         width -= inspector_width(&selection);
         assert_eq!(
-            shelf::Grid::new(width).columns,
+            shelf::Grid::new(width, shelf::Density::Balanced).columns,
             3,
             "the measured grid did reflow"
         );
@@ -3805,8 +4280,9 @@ mod tests {
         // What `Shelf::grid_width` computes, and what `Shelf::grid` lays out
         // with once the hold has had its say.
         let grid_width = |panel: Tween| window - panel.value() - 1.0 - theme::INDEX_LANE_W;
-        let hang =
-            |hold: shelf::GridHold, panel: Tween| shelf::Grid::new(hold.width(grid_width(panel)));
+        let hang = |hold: shelf::GridHold, panel: Tween| {
+            shelf::Grid::new(hold.width(grid_width(panel)), shelf::Density::Balanced)
+        };
 
         // The wall with nothing open, rail's lane included.
         let before = hang(hold, panel);
@@ -3815,7 +4291,10 @@ mod tests {
         // count is derived rather than written down: the rail's lane and the
         // hang's arithmetic both feed it, and a test that hard-coded the answer
         // would be asserting a number rather than the reflow.
-        let opened = shelf::Grid::new(window - PANEL_W - 1.0 - theme::INDEX_LANE_W);
+        let opened = shelf::Grid::new(
+            window - PANEL_W - 1.0 - theme::INDEX_LANE_W,
+            shelf::Density::Balanced,
+        );
         assert!(
             opened.columns < before.columns,
             "the inspector is supposed to cost the wall a column"

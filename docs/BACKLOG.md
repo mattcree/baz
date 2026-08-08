@@ -22,7 +22,8 @@
   fader in the bottom bar's right-hand end, driven by the same custom groove
   widget as the seek bar; unity is reachable by a 4 px snap at the top of the
   travel and shown by a detent mark that lights when the handle is on it;
-  <kbd>↑</kbd>/<kbd>↓</kbd>/<kbd>M</kbd> on the keyboard; MPRIS `Volume`
+  <kbd>↑</kbd>/<kbd>↓</kbd>/<kbd>Ctrl</kbd>+<kbd>M</kbd> on the keyboard (bare
+  `M` until type-anywhere took the letters, ADR-0017 §1.2); MPRIS `Volume`
   readable and writable through the same taper. The *device/hardware volume*
   half was investigated and deliberately not built — see below.
   The bit-exactness readout is now the conjunction ADR-0011 defines: the

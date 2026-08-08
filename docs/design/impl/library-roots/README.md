@@ -46,7 +46,7 @@ every folder in these frames is a genuinely separate tree.
 [index] 64 tracks forgotten with /tmp/baz-roots-a
 ```
 
-Four claims from ADR-0022, each visible in those lines:
+Five claims, each visible in those lines or in the frames:
 
 1. **Counts are per root.** Every pass reports each folder separately.
 2. **Adding a folder is incremental.** The two folders baz already held came
@@ -56,3 +56,15 @@ Four claims from ADR-0022, each visible in those lines:
 4. **An absent folder prunes nothing, anywhere.** `/tmp/baz-roots-b` was deleted
    from disk between the two passes: `0 removed`, and the library still held
    `206 tracks` afterwards — its 81 rows intact.
+5. **The status line stays on one line.** An unreachable folder is reported in
+   the top bar as a fixed-width count (`1 folder is not reachable`) rather than
+   by path: the strip is a single unwrapped row shared with the counts and
+   `Settings`, and a message carrying `/mnt/nas/Music/Archive` wrapped it to two
+   and pushed `Settings` off the frame. *Which* folder, and that nothing was
+   removed from it, is said per folder in the Settings place instead. Frame 07
+   is the check.
+
+The first step of the run is <kbd>Ctrl</kbd>+<kbd>,</kbd>, and that is also a
+check: before the type-anywhere work removed the launch focus, that chord was
+typed into the search well instead of reaching the subscription. It now opens
+the place.

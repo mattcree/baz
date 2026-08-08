@@ -165,6 +165,18 @@ error you were testing for. To check graceful degradation, unset
 `DBUS_SESSION_BUS_ADDRESS` and point `XDG_RUNTIME_DIR` at a directory with no
 `bus` socket: the app must print one `[mpris]` line and run normally.
 
+**Build the binary where you will run it.** The host toolchain links against
+the host's glibc, which is newer than the toolbox's, so a host-built
+`target/release/baz` dies inside the container with `GLIBC_… not found` — and a
+capture script waiting for a window will simply hang. Build with
+`CARGO_TARGET_DIR=target/tb` inside the toolbox and point the harness at it
+(`capture.sh` takes `BIN`).
+
+`toolbox run` does **not** forward your shell's environment: pass variables
+through `env`, as `toolbox run -c baz-dev env OUT=… SCEN=… bash …`. A run whose
+variables were silently dropped renders the default scenario at the default
+size, which looks like a successful capture of the wrong thing.
+
 Screenshot and diff with ImageMagick (`magick compare -metric AE`). Use the
 wgpu renderer, not tiny-skia: tiny-skia does damage-based partial repaints and
 is not run-to-run deterministic, so it cannot prove a refactor changed nothing.
