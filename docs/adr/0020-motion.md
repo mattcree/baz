@@ -1,6 +1,6 @@
 # ADR-0020: Motion — bounded transitions, because the premise was wrong
 
-**Status**: accepted (2026-08-08) · **amends [ADR-0017](0017-design-direction.md)** (whose "0 ms motion" row is reversed) and supersedes `docs/design/02-visual-language.md` §7's prohibition
+**Status**: accepted (2026-08-08), amended (2026-08-09: pointer-derived deformation) · **amends [ADR-0017](0017-design-direction.md)** (whose "0 ms motion" row is reversed) and supersedes `docs/design/02-visual-language.md` §7's prohibition
 
 ## Context
 
@@ -64,3 +64,45 @@ and `size_of::<Tween>()` is 48 bytes.
 - A transition that cannot be expressed as a bounded tween does not ship.
 - The idle-cost claim is a **test**, not a promise: the suite asserts the
   subscription is inactive when no tween is running.
+
+## Amendment (2026-08-09): pointer-derived deformation
+
+The index rail's fisheye — the owner's ask: *"magnification style … like mac OS
+dock. you move your mouse and it makes the hovered item bigger, and the
+surrounding ones"* — is continuous, pointer-tracked movement, which is on
+neither list above. It is also not a transition: nothing about it can be
+expressed as a bounded tween, because the letter sizes are a function of
+**where the pointer is**, not of how long anything has been true. Shipping it
+under §2's list silently would make the list a fiction, so the class is named
+here instead.
+
+5. **Pointer-derived deformation is permitted**, as a class distinct from the
+   bounded tween, under its own discipline:
+   - the deformed geometry is a **pure function of the current pointer
+     position** (`theme::magnify`, unit-tested: peak under the pointer,
+     monotone symmetric falloff, exact rest beyond its reach) — no clock, no
+     `Tween`, no subscription, no state, nothing to settle;
+   - it costs frames only while the pointer moves, **by construction rather
+     than by a guard**: iced 0.13 requests a redraw for every window event
+     (`iced_winit::program`, unconditionally after event processing), the
+     deformation is read at draw time from the live cursor, and there is no
+     clock to stop. The §Measurements idle claim is untouched — a resting
+     pointer is a resting rail;
+   - it may deform only the surface it magnifies: the lane's width, the wall's
+     grid and every layout outside the widget are invariant (the width-algebra
+     tests hold, unmodified), and within the lane the slots' centres are fixed
+     — the lens scales letters about rest positions it never moves, which is
+     also what makes it feedback-free.
+6. **The snap back to rest on pointer-exit is a hard cut**, not a sixth tween.
+   The deformation is the pointer's shadow on the strip; when the pointer
+   leaves, the input is gone and the next frame is the rest frame. A relaxation
+   tween here would attach a clock to the one motion class whose whole
+   argument is that it has none — and what the cut moves is small and local
+   (≤ 9 px of glyph growth, five letters, at the window's far edge, under the
+   hand that just left). The dock animates its own relaxation because its
+   icons *displace*; nothing in this rail moves, so there is no position to
+   ease home — only a size, and a size statement is exactly what this project's
+   hard cuts are for.
+
+One instance ships: the index rail (`spine.rs`). A second instance means
+re-arguing this amendment, not citing it.

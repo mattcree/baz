@@ -20,12 +20,13 @@
 //! composition (`views/`,
 //! one module per surface) with the application shell that drives it
 //! (`app`, and beside it `keys` and `mpris`, which produce the shell's
-//! messages from a keyboard and from the desktop respectively). Two controls
+//! messages from a keyboard and from the desktop respectively). Three controls
 //! are hand-built `Widget`s rather than view composition — `groove` (the
-//! volume fader) and `needle` (the queue's seek line) — over the pointer
-//! machinery they share (`pointer`); ADR-0017 §5 records why that is now the
-//! norm for anything with pointer semantics rather than the exception
-//! ADR-0005 treated it as.
+//! volume fader) and `needle` (the queue's seek line) over the pointer
+//! machinery they share (`pointer`), and `spine` (the index rail's fisheye
+//! lane), which reads the pointer's position rather than its gestures and so
+//! shares nothing; ADR-0017 §5 records why that is now the norm for anything
+//! with pointer semantics rather than the exception ADR-0005 treated it as.
 //!
 //! Usage: `baz [DIR]` — `DIR` overrides (and updates) the remembered
 //! music folder in `~/.config/baz/config.toml`.
@@ -53,6 +54,7 @@ mod replaygain;
 mod scan;
 mod shelf;
 mod shuffle;
+mod spine;
 mod theme;
 mod views;
 mod vm;

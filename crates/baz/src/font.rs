@@ -525,6 +525,25 @@ mod tests {
             "{long_genre:?} now fits the rail — the doc comment saying an \
              arbitrary genre may not is stale"
         );
+        // The fisheye's swollen letter still fits the ink's own lane: the
+        // widest glyph the ARTIST key draws, at the lens's peak, keeps inside
+        // INDEX_W — so a magnified *letter* never even needs the clearance the
+        // swell is allowed to borrow, let alone clips. (`W` is the widest; the
+        // margin is wide enough that the medium face's slightly broader letter
+        // changes nothing.)
+        let widest = ('A'..='Z')
+            .map(|letter| {
+                sans.width(
+                    &letter.to_string(),
+                    theme::SIZE_HEADING * theme::MAGNIFY_MAX,
+                )
+            })
+            .fold(0.0_f32, f32::max);
+        assert!(
+            widest < theme::INDEX_W / 2.0,
+            "a magnified letter measures {widest:.2} px in a {} px lane",
+            theme::INDEX_W
+        );
     }
 
     /// **The measurement that deleted the monospace.**
