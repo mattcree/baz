@@ -41,6 +41,7 @@ The full vision, competitive analysis, and staged scope live in
 | <kbd>M</kbd> | mute / unmute |
 | <kbd>/</kbd>, or <kbd>Ctrl</kbd>+<kbd>F</kbd> | focus the search field |
 | <kbd>Q</kbd> | show / hide the play queue |
+| <kbd>Ctrl</kbd>+<kbd>,</kbd> | show / hide the settings |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> | hide the side panel, or bring it back |
 | <kbd>Esc</kbd> | clear the search, else close the open panel |
 

@@ -99,6 +99,7 @@ mod imp {
     use baz_core::engine::EngineHandle;
     use baz_core::playback::EngineConfig;
     use baz_core::protocol::Command;
+    use baz_core::replaygain::ReplayGainState;
     use baz_core::volume::VolumeState;
     use iced::Subscription;
     use iced::futures::channel::mpsc::{UnboundedReceiver, unbounded};
@@ -194,6 +195,14 @@ mod imp {
             self.handle.as_ref().map(EngineHandle::volume)
         }
 
+        /// The engine's ReplayGain state right now — the same start-up pull as
+        /// [`Self::volume`], provided by ADR-0013 for the same moment, so the
+        /// settings panel is right on the first frame. `None` when there is no
+        /// engine to ask.
+        pub fn replay_gain(&self) -> Option<ReplayGainState> {
+            self.handle.as_ref().map(EngineHandle::replay_gain)
+        }
+
         /// Send a command; `false` means the engine is gone (the caller
         /// should downgrade the state machine, never assume success).
         pub fn send(&self, command: Command) -> bool {
@@ -224,6 +233,7 @@ mod imp {
 #[cfg(not(feature = "device-output"))]
 mod imp {
     use baz_core::protocol::Command;
+    use baz_core::replaygain::ReplayGainState;
     use baz_core::volume::VolumeState;
     use iced::Subscription;
 
@@ -251,6 +261,11 @@ mod imp {
 
         /// No engine, no volume to read.
         pub fn volume(&self) -> Option<VolumeState> {
+            None
+        }
+
+        /// No engine, no ReplayGain to read.
+        pub fn replay_gain(&self) -> Option<ReplayGainState> {
             None
         }
 
