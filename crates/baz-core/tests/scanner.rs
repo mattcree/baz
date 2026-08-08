@@ -1214,9 +1214,19 @@ fn system_time_to_ns(t: std::time::SystemTime) -> Option<i64> {
 
 #[test]
 fn a_stamp_survives_a_round_trip_through_system_time() {
-    // Our own conversion must be lossless in both directions. This is the
-    // part baz controls, so it is asserted exactly.
-    for mtime_ns in [0, 1, 1_700_000_000_123_456_789, -86_400_000_000_001] {
+    // Our own arithmetic must be lossless in both directions — in particular
+    // the pre-epoch branch, which negates rather than subtracting and is easy
+    // to get wrong by a tick.
+    //
+    // The values are multiples of 100 ns deliberately. `SystemTime` is
+    // `FILETIME`-backed on Windows and therefore cannot *hold* finer than a
+    // 100-nanosecond tick; asserting on `…789` would test that platform's
+    // clock resolution rather than baz's conversion, which is the mistake this
+    // test made before. Timestamps baz actually handles come from the
+    // filesystem, so they are already at whatever resolution the platform
+    // offers, and `a_stamp_read_from_the_filesystem_is_stable` covers that
+    // path end to end.
+    for mtime_ns in [0, 100, 1_700_000_000_123_456_700, -86_400_000_000_100] {
         let stamp = FileStamp {
             mtime_ns,
             size: 123,
@@ -1224,7 +1234,7 @@ fn a_stamp_survives_a_round_trip_through_system_time() {
         assert_eq!(
             system_time_to_ns(stamp.modified()),
             Some(mtime_ns),
-            "SystemTime conversion must not lose nanoseconds"
+            "conversion must round-trip a timestamp the platform can represent"
         );
     }
 }
@@ -1237,7 +1247,7 @@ fn a_stamp_read_from_the_filesystem_is_stable() {
     // 100-nanosecond ticks since 1601, HFS+ whole seconds, FAT two of them.
     // Asserting exact fidelity tested the filesystem's granularity, not baz,
     // and failed on Windows for a reason that says nothing about our code.
-    for mtime_ns in [0, 1, 1_700_000_000_123_456_789, -86_400_000_000_001] {
+    for mtime_ns in [0, 100, 1_700_000_000_123_456_700, -86_400_000_000_100] {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = write_wav(dir.path(), "a.wav");
         let requested = FileStamp {
