@@ -732,7 +732,7 @@ mod tests {
         );
     }
 
-    /// The settings panel's reserved note slot still holds every sentence it
+    /// The Settings place's reserved note slot still holds every sentence it
     /// can be asked to show — measured in the bundled Sans and wrapped the way
     /// the toolkit wraps, rather than bounded by an average character width.
     ///
@@ -745,9 +745,13 @@ mod tests {
         use crate::replaygain::{MODES, mode_note};
 
         let sans = sans();
-        // The width a wrapped line actually has: the panel, less its inset on
-        // both sides, less the scrollbar lane the list keeps clear.
-        let content_w = theme::PANEL_W - 2.0 * theme::GAP_XL - theme::SCROLLBAR_LANE;
+        // The width a wrapped line actually has, at the **narrowest** the
+        // place is ever set: the floor of `views::settings`'s clamp, less the
+        // scrollbar lane the list keeps clear. It read `PANEL_W − 2 × GAP_XL`
+        // when the settings were a panel in the rail and the floor was the
+        // inspector's content lane; ADR-0022 deleted the column and
+        // `SETTINGS_CONTENT_MIN` states the same number directly.
+        let content_w = theme::SETTINGS_CONTENT_MIN - theme::SCROLLBAR_LANE;
         let lines = theme::SETTING_NOTE_H / (theme::SIZE_META * theme::LEADING_META);
         for mode in MODES {
             let note = mode_note(mode);

@@ -1073,17 +1073,6 @@ pub const RADIUS_CTRL: f32 = 4.0;
 pub const RADIUS_SEGMENT: f32 = 3.0;
 /// Inset of the segmented control's well around its segments.
 pub const SEGMENT_INSET: f32 = 2.0;
-/// Width of the album inspector, the column beside the shelf (logical px).
-///
-/// **One number, and now for one surface.** It was one number for three — the
-/// album, the queue and the settings took turns in this width — and that shared
-/// width was the only thing they had in common, which is what ADR-0016 is
-/// about. What survives the move is the property the layout actually rests on:
-/// the column is either showing an album or it is not, and swapping which album
-/// can never change how much room the shelf has. Only opening and closing
-/// reflow the grid, by exactly this much, and `app.rs`'s estimate is kept in
-/// step with it (see [`crate::selection`]).
-pub const PANEL_W: f32 = 340.0;
 /// Width of the number column in a track or queue list (logical px). Enough
 /// for three figures at [`SIZE_META`], so a long queue's positions
 /// stay in their column.
@@ -1380,43 +1369,111 @@ pub const GLYPH_OPACITY_DISABLED: f32 = 0.28;
 /// mid-line carried nothing.
 ///
 /// The fix was to make the band symmetric about the transport rather than to
-/// nudge anything, and it survives step 10 unchanged in principle and changed
-/// in size: `BAR_LEAD` was `GAP_SM + SEEK_ROW_H` = 32 because a seek row hung
-/// below the line. Nothing hangs below it now — the needle took that job to the
-/// window's edge — so the lane is a *gap*, and the gap is `GAP_MD` 12: it is
-/// ADR-0017 §1.1's own sketch of this bar, and it is what [`NEEDLE_HIT`] is
-/// bounded by.
-pub const BAR_LEAD: f32 = GAP_MD;
+/// nudge anything, and it survives every re-derivation of the band unchanged in
+/// principle: the lead is whatever is left of the band once the transport has
+/// taken its 32, halved. It is **derived, never chosen** — which is what makes
+/// law L4 true by construction rather than by an assertion somebody has to keep
+/// re-checking — and it is what [`NEEDLE_HIT`] is bounded by.
+///
+/// At [`BAR_CONTENT_H`] 80 it is [`GAP_XL`] 24.
+pub const BAR_LEAD: f32 = (BAR_CONTENT_H - TRANSPORT_HIT) / 2.0;
 
-/// Height of the bottom bar's content band — **56**; the bar is this plus its
-/// hairline, **57**, and the needle takes 2 px more at the window's edge.
+/// The bar's tallest zone: the now-playing stack's three line boxes — 20 · 16 ·
+/// 20 = **56** (logical px).
 ///
-/// `2 × BAR_LEAD + TRANSPORT_HIT`, so **the band's mid-line is the transport's
-/// centre line** (law L4). It was 96, in a 105 px bar.
+/// Named because it is what the band is *derived from*. The title's line box,
+/// the artist's, and the ambient continuation's, all reserved whether or not
+/// they say anything, so the block is this tall in every state rather than in
+/// its tallest one.
+pub const NOW_PLAYING_H: f32 = LINE_BODY + LINE_META + CONTINUATION_H;
+
+/// **The lead a band keeps around its tallest zone** (logical px) — the
+/// breathing rule, stated once and applied to both bars.
 ///
-/// # The arithmetic of step 10, and where it lands
+/// > A band's content may not touch the band's edges. The lead is a **named
+/// > gap** on each side — never a ratio — because a ratio is not reachable on
+/// > the 4 px lattice for two bands of different content heights, and a lead
+/// > that is not on the lattice is law L2 broken to make law "proportion" true.
 ///
-/// ADR-0017 §1.1 wrote this column as `1 rule + 12 + 32 + 12` and totalled it
-/// **58**. The parts are right and the total is one out: 1 + 12 + 32 + 12 = 57,
-/// and 58 is not reachable at all — a bar is `2a + 2ℓ + TRANSPORT_HIT + 1` for a
-/// symmetric padding `a` and lead `ℓ`, which is **odd** for every integer `a`
-/// and `ℓ`, because the hairline is odd and everything else is doubled. So the
-/// parts are held and the total is corrected:
+/// The top bar leads its 32 px control row by [`TOP_BAR_PAD_V`] `GAP_SM` 8. The
+/// bottom bar leads its 56 px *type block* by [`GAP_MD`] 12, one rung more,
+/// because a hit box already carries its own internal padding and a stack of
+/// line boxes carries only its leading — 3.5 px above the title's ink and 2.5
+/// below the continuation's, which is what made the 56 px band read as cramped
+/// however correct each token in it was.
 ///
-/// | | today | step 10 |
-/// |---|---:|---:|
-/// | rule | 1 | 1 |
-/// | band | 104 | **56** |
-/// | needle | — | 2 |
-/// | **bottom furniture** | **105** | **59** |
+/// | | tallest zone | lead | band | ink-to-band |
+/// |---|---:|---:|---:|---:|
+/// | top bar | 32 | 8 | 48 | 0.67 |
+/// | bottom bar | 56 | 12 | 80 | 0.70 |
+pub const BAR_ZONE_LEAD: f32 = GAP_MD;
+
+/// Height of the bottom bar's content band — **80**; the bar is this plus its
+/// hairline, **81**, and the needle takes 2 px more at the window's edge.
 ///
-/// The ADR predicted "recover 44, concede 28" against a 102 px bar it inherited
-/// from before the composition audit re-derived the band. Measured against what
-/// is actually there: the collection gets **46 px** back, and we concede **27**
-/// against the critique's ~32 px of bottom furniture to keep skip
-/// pointer-reachable. Both numbers moved a pixel in our favour, and saying so is
-/// cheaper than quietly shipping 57 under a heading that says 58.
-pub const BAR_CONTENT_H: f32 = 2.0 * BAR_LEAD + TRANSPORT_HIT;
+/// # It is two hangs, and that is the whole argument
+///
+/// `2 × HANG`. [`HANG`] is the product's one structural unit — the window
+/// gutter, the wall label's height, the shelf header's band, the clear wall
+/// between two rows — so the bar is measured in the same unit as the collection
+/// it sits under rather than in a number of its own. Every other figure in the
+/// band falls out of it and every one of them is a token that already existed:
+///
+/// ```text
+///   1  hairline
+///  12  BAR_ZONE_LEAD (GAP_MD)   ─┐
+///  20  the title's line box      │ NOW_PLAYING_H 56 — the tallest zone
+///  16  the artist's line box     │
+///  20  the continuation's lane  ─┘
+///  12  BAR_ZONE_LEAD (GAP_MD)
+/// ---
+///  81   + 2 px needle, flush on the bottom edge  →  83 of bottom furniture
+/// ```
+///
+/// The transport's own lead is the same band read from the other side:
+/// [`BAR_LEAD`] = (80 − 32) / 2 = [`GAP_XL`] 24, so **the band's mid-line is
+/// the transport's centre line** (law L4) and the type block's middle lane is
+/// on the same line.
+///
+/// # Why it grew, having just shrunk
+///
+/// Step 10 took the band to **56** and the bar to 57, which was correct in
+/// every part and wrong as a proportion: `NOW_PLAYING_H` is *also* 56, so the
+/// three lines of type filled the band edge to edge with no air at all. The
+/// owner's reading — *"proportion is becoming an issue e.g. bottom bar is too
+/// short"* — is that arithmetic seen rather than computed.
+///
+/// The three lanes were re-argued before the band was: the continuation line
+/// (`then 2 albums · 1:58:00 left`) **earns its lane and keeps it**, because
+/// ADR-0022 made the queue a place — reading what is next used to cost a
+/// popover that reflowed nothing and now costs leaving the wall, so the ambient
+/// line is the only free reading of the queue baz has, and it got *more*
+/// valuable at exactly the moment the bar got shorter.
+///
+/// # What it costs, stated
+///
+/// | | before the needle | step 10 | now |
+/// |---|---:|---:|---:|
+/// | band | 104 | 56 | **80** |
+/// | bottom furniture | 105 | 59 | **83** |
+/// | of an 860 px window | 12.2 % | 6.9 % | **9.7 %** |
+/// | of a 1080 px window | 9.7 % | 5.5 % | **7.7 %** |
+/// | the collection's share at 1280 × 860 | 82.1 % | 87.4 % | **84.7 %** |
+///
+/// The needle's work bought the wall 46 px; this spends 24 of them and keeps
+/// 22. That is the minimum that buys real air on the 4 px lattice: the next
+/// step down, a band of 72, leads the type block by [`GAP_SM`] 8 and is
+/// defensible, and the step below *that* — 64, an [`GAP_XS`] 4 px lead — is not
+/// air at all. Two hangs is chosen over 72 because it is the only one of the
+/// three whose every figure is a token the composition already uses.
+///
+/// # 81 is reachable and 80 was never going to be
+///
+/// A bar is `2ℓ + TRANSPORT_HIT + 1` for a lead `ℓ`, which is **odd** for every
+/// integer `ℓ` — the hairline is odd and everything else is doubled. Step 10's
+/// heading said 58 and shipped 57 for exactly this reason; this one says 81 and
+/// means it.
+pub const BAR_CONTENT_H: f32 = NOW_PLAYING_H + 2.0 * BAR_ZONE_LEAD;
 
 /// Vertical padding of the top bar and of the Settings place's header strip
 /// (logical px) — the two strips that have to be one frame.
@@ -1562,6 +1619,43 @@ pub fn list_scrollbar() -> scrollable::Scrollbar {
         .margin(SCROLLBAR_MARGIN)
 }
 
+/// **The wall's scrollbar: none at all** — the geometry that draws nothing.
+///
+/// A `Scrollbar` at zero width and zero scroller width is a bar iced lays out
+/// and paints nothing for; the `scrollable` around it goes on handling the
+/// wheel, the touchpad, a drag and every programmatic `scroll_to` exactly as it
+/// did. That is the whole of the mechanism, and it is worth stating plainly
+/// because "suppress the bar, keep the scrolling" is the kind of thing a
+/// toolkit often will not do: **iced 0.13 does**, and it is the same primitive
+/// the album inspector's reveal viewport used, verified against
+/// `iced_widget` 0.13.4 before this was specified. No fallback is needed.
+///
+/// # Why the wall gets it and no other list does
+///
+/// The wall has the [index rail](crate::views::shelf) hard against the same
+/// edge, and the rail is a *better* scrollbar: it says where you are, it jumps,
+/// it drags, and it names the shelf it will take you to, which a scroller
+/// cannot. Two vertical strips doing one job is the owner's third complaint in
+/// ADR-0022 — *"the fact that the alphabet bar has a scroll to its left isn't
+/// nice either"* — and the one to delete is the one that says nothing.
+///
+/// Every other list in baz keeps [`list_scrollbar`], because none of them has a
+/// rail beside it and a page with no bar and no rail is a page with no readout
+/// of how much of it there is.
+#[must_use]
+pub fn wall_scrollbar() -> scrollable::Scrollbar {
+    scrollable::Scrollbar::new()
+        .width(WALL_SCROLLBAR_W)
+        .scroller_width(WALL_SCROLLBAR_W)
+        .margin(SCROLLBAR_MARGIN)
+}
+
+/// The width of the wall's scrollbar: **zero** ([`wall_scrollbar`]).
+///
+/// A token rather than a literal so that "the wall draws no bar" is a number a
+/// test can hold down beside [`SCROLLBAR_W`], which every other list keeps.
+pub const WALL_SCROLLBAR_W: f32 = 0.0;
+
 /// A list's scrollbar: no trough, and a scroller in the same hairline the room
 /// uses for every other edge, one step firmer while it is being driven.
 ///
@@ -1693,133 +1787,6 @@ pub fn glyph_ink(enabled: bool, pending: bool, hover: f32, pressed: bool) -> f32
         GLYPH_OPACITY_HOVER
     };
     hover.clamp(0.0, 1.0).mul_add(peak - resting, resting)
-}
-
-/// A colour at `fade` of its own opacity — the queue popover's arrival, and
-/// nothing else (ADR-0020 §2.2).
-///
-/// # The one place baz draws an alpha on purpose
-///
-/// Every *resting* mark in the room is an opaque pre-composite, because iced
-/// blends in linear light and the room's numbers were written for CSS's sRGB
-/// blend ([`Palette::ink_over`]). A popover arriving cannot be pre-composited:
-/// it floats over the wall, over ten thousand covers, over whatever the shelf is
-/// scrolled to, and there is no ground to composite against. So the arrival is
-/// an alpha, and the containment is that **`fade` 1 is the identity** — the
-/// popover baz ships is the popover this function returns once the tween
-/// settles, byte for byte (`the_popovers_arrival_lands_on_the_shipped_colours`).
-/// The two contrast laws govern what is at rest; a frame 70 ms into a 140 ms
-/// arrival is not at rest, and pretending to measure it against a ground nobody
-/// knows would be a false receipt rather than a stricter one.
-#[must_use]
-pub fn fade(color: Color, fade: f32) -> Color {
-    Color {
-        a: color.a * fade.clamp(0.0, 1.0),
-        ..color
-    }
-}
-
-/// A container style at `fade` of its opacity — its ground, its edge and its
-/// shadow together (see [`fade`]).
-#[must_use]
-pub fn fade_container(style: &container::Style, k: f32) -> container::Style {
-    container::Style {
-        background: style
-            .background
-            .map(|background| fade_background(background, k)),
-        border: Border {
-            color: fade(style.border.color, k),
-            ..style.border
-        },
-        shadow: Shadow {
-            color: fade(style.shadow.color, k),
-            ..style.shadow
-        },
-        text_color: style.text_color.map(|color| fade(color, k)),
-    }
-}
-
-/// A button style at `fade` of its opacity — the popover's rows and its ✕
-/// (see [`fade`]).
-#[must_use]
-pub fn fade_button(style: &button::Style, k: f32) -> button::Style {
-    button::Style {
-        background: style
-            .background
-            .map(|background| fade_background(background, k)),
-        text_color: fade(style.text_color, k),
-        border: Border {
-            color: fade(style.border.color, k),
-            ..style.border
-        },
-        shadow: Shadow {
-            color: fade(style.shadow.color, k),
-            ..style.shadow
-        },
-    }
-}
-
-/// A scrollbar at `fade` of its opacity — the popover's list arrives with the
-/// popover (see [`fade`]).
-#[must_use]
-pub fn fade_scrollable(style: &scrollable::Style, k: f32) -> scrollable::Style {
-    let rail = |rail: scrollable::Rail| scrollable::Rail {
-        background: rail
-            .background
-            .map(|background| fade_background(background, k)),
-        border: Border {
-            color: fade(rail.border.color, k),
-            ..rail.border
-        },
-        scroller: scrollable::Scroller {
-            color: fade(rail.scroller.color, k),
-            border: Border {
-                color: fade(rail.scroller.border.color, k),
-                ..rail.scroller.border
-            },
-        },
-    };
-    scrollable::Style {
-        container: fade_container(&style.container, k),
-        vertical_rail: rail(style.vertical_rail),
-        horizontal_rail: rail(style.horizontal_rail),
-        gap: style.gap.map(|background| fade_background(background, k)),
-    }
-}
-
-/// A ground at `k` of its opacity. A gradient is left alone: the one baz draws
-/// is a placeholder sleeve, and nothing in the arriving layer has one.
-fn fade_background(background: Background, k: f32) -> Background {
-    match background {
-        Background::Color(color) => Background::Color(fade(color, k)),
-        Background::Gradient(gradient) => Background::Gradient(gradient),
-    }
-}
-
-/// The inset the overlay layer keeps around the queue popover, with the
-/// popover `arriving` of the way in (ADR-0020 §2.2).
-///
-/// At rest — `arriving` 1 — this is [`GAP_LG`] on all four sides, which is what
-/// the popover has always had. During the arrival the popover sits up to
-/// [`crate::motion::POPOVER_RISE`] px lower, and the height that is taken off
-/// the bottom is **given back to the top**, so:
-///
-/// - the layer's inner height is [`GAP_LG`] × 2 less than its own in every
-///   frame, and a popover at its [`POPOVER_MAX_H`] ceiling cannot be squeezed
-///   into re-flowing its list as it rises;
-/// - the left and right insets never move, so the popover's right edge — the one
-///   it shares with the bar's right zone below it — is the same pixel throughout;
-/// - the popover only ever *approaches* its resting place from below. No frame
-///   of the flight is above where it lands, so nothing overshoots the bar.
-#[must_use]
-pub fn popover_pad(arriving: f32) -> Padding {
-    let rise = crate::motion::POPOVER_RISE * (1.0 - arriving.clamp(0.0, 1.0));
-    Padding {
-        top: GAP_LG + rise,
-        right: GAP_LG,
-        bottom: GAP_LG - rise,
-        left: GAP_LG,
-    }
 }
 
 /// The cursor over a live groove. `Pointer` — the pointing hand every
@@ -2485,15 +2452,6 @@ pub fn segment(p: &Palette, status: button::Status, selected: bool) -> button::S
     }
 }
 
-/// The album side panel: one quiet step above the wall.
-#[must_use]
-pub fn panel(p: &Palette) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(p.plinth)),
-        ..container::Style::default()
-    }
-}
-
 // `panel_toggle` is **deleted**. It was [`segment`] under another name — a
 // *selectable* control's paint, a raised `plinth_lit` card with a hairline edge
 // — worn by the two things in baz that are navigation rather than selection:
@@ -2692,27 +2650,57 @@ pub fn track_row(p: &Palette, status: button::Status, playing: bool) -> button::
 // (docs/design/01-ux-audit-and-ia.md §2, ADR-0016)
 // ---------------------------------------------------------------------------
 
-/// Width of the **Queue** popover (logical px).
+/// **The widest a column of list rows is ever set** (logical px) — the measure,
+/// 880.
 ///
-/// 360, where the rail it left was [`PANEL_W`] 340. The extra twenty go to the
-/// per-row ✕ the rows gained when they became interactive: the popover lists
-/// exactly what the rail's queue panel listed, in the same row geometry, and
-/// the removal target has to sit beside the duration column rather than on top
-/// of it.
+/// The record page's track list and the queue place's rows both take it, and it
+/// is the same number and the same argument as [`SETTINGS_CONTENT_MAX`]: 880 is
+/// roughly 75 characters at [`SIZE_BODY`], the top of the comfortable measure.
 ///
-/// Fixed rather than proportional, and fixed at *less than a quarter of the
-/// shipped window*: this is an overlay, and an overlay that grew with the
-/// window would eventually be a panel that forgot to reflow the shelf. It
-/// covers the bottom-right corner of the covers for a few seconds and no more.
-pub const POPOVER_W: f32 = 360.0;
+/// It exists because a place fills the window and a *list* must not. A row
+/// whose title is at one end of 1800 px and whose right-aligned duration is at
+/// the other is not a row; it is two words the eye has to travel between, and
+/// the ruled right edge [`DURATION_W`] buys stops meaning anything at that
+/// distance.
+///
+/// So a place's body grows with the window until it reaches this, and then
+/// stops and centres in what is left. Below it the body hangs from the window's
+/// two gutters (law L1); at and above it the body's own two edges are the ones
+/// the surface declares (law L5).
+pub const LIST_MEASURE: f32 = 880.0;
 
-/// The tallest a popover may grow, as a fraction of the window's height.
+/// Edge of the sleeve on a record's page (logical px) — **320**.
 ///
-/// A queue can be a box set, and a list that ran from the bar to the top bar
-/// would be a place with no name. Six tenths leaves the shelf legible above it,
-/// which is the whole argument for an overlay over a panel: glancing at what is
-/// next must not cost the covers.
-pub const POPOVER_MAX_H: f32 = 0.6;
+/// `ART_MAX`, which is `art::THUMB_PX`, so the decoded thumbnail is drawn at
+/// exactly 1 : 1 and the refusal *no artwork is ever drawn larger than its
+/// source* is satisfied at the boundary rather than approached.
+///
+/// The album inspector capped its sleeve at 120 because at 292 it was **93.6 %
+/// of the panel's ink** and a second, larger copy of a work already on the wall
+/// 24 px to the left (the audit's defect 5). A place has replaced the wall:
+/// there is no other copy, and the record is the subject. See
+/// [`crate::views::album`] for the declared hierarchy that follows, which puts
+/// the work first *by declaration* — as the wall's own does — and holds the
+/// title as the loudest type on the page.
+pub const ALBUM_SLEEVE: f32 = ART_MAX;
+
+/// Width of the record page's left column (logical px) — the sleeve, the one
+/// action, and the condition report, all on one lane.
+///
+/// It is the sleeve's own edge, so the column introduces no x-position the
+/// artwork does not already establish (law L5).
+pub const ALBUM_ASIDE_W: f32 = ALBUM_SLEEVE;
+
+/// Window width below which the record's page stacks into one column
+/// (logical px) — **760**.
+///
+/// It is the width at which the track list stops being wider than the sleeve
+/// beside it, which is the point at which two columns have stopped being two
+/// columns: `744 − 2 × HANG − SCROLLBAR_LANE − ALBUM_ASIDE_W − GAP_XL` = 310,
+/// against a 320 px sleeve. Below it the object goes above what is written
+/// about it, which is the same branch — and the same reasoning — as
+/// [`SETTINGS_BREAKPOINT`].
+pub const ALBUM_BREAKPOINT: f32 = 744.0;
 
 /// Width reserved in the now-playing bar for the **Queue** control's readout
 /// (logical px) — the count of what the door opens onto, beside its label.
@@ -2818,23 +2806,15 @@ pub const SETTINGS_CONTENT_W: f32 = 640.0;
 /// 55 and 75 characters at [`SIZE_BODY`] across every shipped width.
 pub const SETTINGS_CONTENT_MAX: f32 = 880.0;
 
-/// Edge of the album inspector's sleeve (logical px) — **120**.
+/// Narrowest width the Settings place gives its content (logical px) — **292**.
 ///
-/// The audit's defect 5, and the clearest hierarchy inversion it measured: the
-/// sleeve was `PANEL_W − 2 × GAP_XL` = 292, which is **93.6 % of the panel's
-/// contrast-weighted ink**, and it is a second, larger copy of a work already on
-/// screen 24 px to the left. The album's own *name* came fifth of eight in its
-/// own inspector, at 1/164th of the picture's weight.
-///
-/// At 120 the sleeve's share falls to 71.2 % and the title, the artist and the
-/// track list together rise from 3.6 % to 21 % — which is the order the panel
-/// declares (law L6). The sleeve is not deleted, because *which record is this*
-/// is answered fastest by the cover; it stops being the answer to every other
-/// question as well.
-///
-/// A constant rather than a fraction of [`PANEL_W`]: it is a thumbnail of a
-/// known object at a known size, and it should not grow when the column does.
-pub const INSPECTOR_SLEEVE: f32 = 120.0;
+/// The floor of [`crate::views::settings`]'s clamp: at a small window the form
+/// gets whatever there is, because a stepper row that will not fit is worse
+/// than a long one. It was spelled `PANEL_W − 2 × GAP_XL` — the album
+/// inspector's content lane — back when there was an inspector to borrow a
+/// number from. ADR-0022 deleted the column; the floor is stated directly
+/// rather than left pointing at a surface that no longer exists.
+pub const SETTINGS_CONTENT_MIN: f32 = 292.0;
 
 /// Window width below which the Settings place stacks into one column
 /// (logical px).
@@ -2861,36 +2841,54 @@ pub const SETTINGS_BREAKPOINT: f32 = 1000.0;
 ///   room already uses. Dimming ten thousand covers to show twelve rows would
 ///   contradict the palette rationale outright (§2.4).
 ///
-/// The shadow is the *sleeve's* shadow, offset and blur alike: artwork is the
-/// one thing in baz that casts one, and a floating layer is the one exception
-/// that has to — so it borrows rather than invents.
+/// **The now-playing text as a control** — the bar's route back to the record
+/// that is sounding (`docs/design/03-interface-prior-art.md` R3).
+///
+/// Invisible at rest, because the bar's left zone must go on reading as *what
+/// is playing* and not as a button, and a quiet ink wash under the pointer,
+/// which is the same mark [`word_button`] and [`transport`] make. It is the one
+/// place in the product where the mark is a wash and there is no box to put it
+/// in, so the wash is the whole affordance and the tooltip is the name.
+///
+/// **The border is 0 px in every state, which is a departure from every other
+/// button style here and the reason this function exists.** iced draws a border
+/// inside the widget's bounds, so every other control carries a transparent
+/// 1 px edge to keep its geometry constant across states. This control has no
+/// padding at all: its content is the left zone's three reserved line boxes,
+/// exactly [`NOW_PLAYING_H`], and a 1 px edge would make the block 58 px in a
+/// band derived from 56 — law L4's centre line, broken by a border nobody can
+/// see. The rule is kept by having no edge rather than by having a
+/// transparent one.
+///
+/// No accent: going to a record's page is a *view* choice, not a claim about
+/// what is playing.
 #[must_use]
-pub fn popover(p: &Palette) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(p.plinth_lit)),
+pub fn now_playing_text(p: &Palette, status: button::Status) -> button::Style {
+    let background = match status {
+        button::Status::Hovered => p.ink_wash(p.recess),
+        button::Status::Pressed => p.ink_wash_press(p.recess),
+        button::Status::Active | button::Status::Disabled => Color::TRANSPARENT,
+    };
+    button::Style {
+        background: Some(Background::Color(background)),
+        text_color: p.paper,
         border: Border {
-            color: p.hairline_strong(p.plinth_lit),
-            width: 1.0,
+            color: Color::TRANSPARENT,
+            width: 0.0,
             radius: RADIUS_CTRL.into(),
         },
-        // **No shadow.** It borrowed the sleeve's, and the sleeve's is deleted:
-        // 45 % black over the wall is a 1.04 : 1 step, so what looked like a
-        // float was a hairline doing all the work and a shadow taking the
-        // credit. `plinth_lit` is a full surface step above the panel and two
-        // above the wall — in linear light nearly 2× per step — which is what
-        // actually says *this is in front*.
         shadow: Shadow::default(),
-        ..container::Style::default()
     }
 }
 
-/// The now-playing block in the bar, once it became the door to **Queue**.
+/// The bar's labelled **Queue** control — the door to the queue place.
 ///
 /// Invisible at rest — the bar's left zone must go on reading as the track
-/// name, not as a button — a quiet card under the pointer, and the raised card
-/// with a hairline edge while the popover it opens is showing. That last state
-/// is the anchor: with no notch available, "this control opened that layer" is
-/// said by the control staying lit.
+/// name, not as a row of buttons — a quiet card under the pointer, and the
+/// raised card with a hairline edge while the place it opens **is** the place
+/// on screen. That last state is not decoration: it is the only thing that
+/// tells a listener standing in the queue which of the bar's two doors they
+/// came through.
 ///
 /// **The border width is 1 px in every state, including the invisible one.**
 /// iced draws a border inside the widget's bounds, so a border that appeared on
@@ -3181,7 +3179,7 @@ mod tests {
         // it — both constants, so no transition can move the one line every
         // mark in the bar sits on (law L4).
         const { assert!(BAR_CONTENT_H == 2.0 * BAR_LEAD + TRANSPORT_HIT) }
-        const { assert!(BAR_LEAD == GAP_MD) }
+        const { assert!(BAR_LEAD == GAP_XL) }
         // **And the needle's geometry is a constant too** — ADR-0020 forbids
         // animating bar geometry, and the needle is the one new surface a
         // transition could have been tempted onto. Its thickness, its aiming
@@ -3192,87 +3190,10 @@ mod tests {
         const { assert!(NEEDLE_H == 2.0) }
         const { assert!(NEEDLE_HIT == GAP_MD) }
         const { assert!(SEGMENT_GAP == GAP_XXS && ALBUM_GAP == 8.0) }
-        // …and the popover the bar anchors rises in a layer whose inner height
-        // never changes, so the layer above the bar cannot push it either.
-        for step in 0..=20_u8 {
-            let arriving = f32::from(step) / 20.0;
-            let pad = popover_pad(arriving);
-            assert!(
-                (pad.top + pad.bottom - 2.0 * GAP_LG).abs() < f32::EPSILON,
-                "{arriving}: the rise changed the layer's height by {}",
-                pad.top + pad.bottom - 2.0 * GAP_LG
-            );
-            assert!((pad.left - GAP_LG).abs() < f32::EPSILON);
-            assert!(
-                (pad.right - GAP_LG).abs() < f32::EPSILON,
-                "{arriving}: the popover's right edge moved"
-            );
-            // It only ever approaches its resting place from below.
-            assert!(pad.bottom <= GAP_LG + f32::EPSILON);
-            assert!(pad.bottom >= GAP_LG - crate::motion::POPOVER_RISE - f32::EPSILON);
-        }
-        // And the arrival ends exactly where the popover has always sat.
-        let settled = popover_pad(1.0);
-        assert!((settled.top - GAP_LG).abs() < f32::EPSILON);
-        assert!((settled.bottom - GAP_LG).abs() < f32::EPSILON);
-    }
-
-    /// **A settled arrival is the shipped popover, byte for byte.**
-    ///
-    /// The containment on the one alpha baz draws on purpose ([`fade`]): the
-    /// two contrast laws govern what is at rest, and this is what makes "at
-    /// rest" mean the values those laws were measured on. It also pins that a
-    /// fade moves *only* opacity — a transition that shifted a hue would be
-    /// repainting the room rather than revealing it.
-    #[test]
-    fn the_popovers_arrival_lands_on_the_shipped_colours() {
-        for room in Room::ALL {
-            let p = room.palette();
-            let marks = [
-                p.paper,
-                p.paper_dim,
-                p.paper_faint,
-                p.paper_muted,
-                p.plinth,
-                p.plinth_lit,
-                p.lamp,
-                p.hairline(p.plinth_lit),
-            ];
-            for mark in marks {
-                let settled = fade(mark, 1.0);
-                assert!(
-                    (settled.r - mark.r).abs() < f32::EPSILON
-                        && (settled.g - mark.g).abs() < f32::EPSILON
-                        && (settled.b - mark.b).abs() < f32::EPSILON
-                        && (settled.a - mark.a).abs() < f32::EPSILON,
-                    "{}: a settled arrival is not the shipped colour",
-                    p.name
-                );
-                // Mid-flight it is the same colour at less of it, never a
-                // different colour.
-                for step in 0..=10_u8 {
-                    let k = f32::from(step) / 10.0;
-                    let mid = fade(mark, k);
-                    assert!((mid.r - mark.r).abs() < f32::EPSILON);
-                    assert!((mid.g - mark.g).abs() < f32::EPSILON);
-                    assert!((mid.b - mark.b).abs() < f32::EPSILON);
-                    assert!((mid.a - mark.a * k).abs() < f32::EPSILON);
-                }
-            }
-            // The whole popover, not only its inks: at rest every style it
-            // paints is the style it always painted.
-            let settled = fade_container(&popover(p), 1.0);
-            assert_eq!(container_colors(&settled), container_colors(&popover(p)));
-            for status in [
-                button::Status::Active,
-                button::Status::Hovered,
-                button::Status::Pressed,
-                button::Status::Disabled,
-            ] {
-                let row = track_row(p, status, true);
-                assert_eq!(button_colors(&fade_button(&row, 1.0)), button_colors(&row));
-            }
-        }
+        // **And there is nothing left above the bar to be pushed by.** The
+        // queue popover's arrival was the one transition that flew over it;
+        // ADR-0022 made the queue a place, so a navigation is a hard cut and
+        // nothing floats.
     }
 
     /// **The tile's hover mark fades in ink and never in geometry**, and every
@@ -3398,10 +3319,12 @@ mod tests {
     fn the_bottom_bar_reserves_every_slot_whether_or_not_it_has_one() {
         // **The bar's whole height, stated once.** The seek row is gone and the
         // needle has it; what the window's bottom edge costs the collection is
-        // the band, the hairline and 2 px of line. 105 → 59.
-        const { assert!(BAR_CONTENT_H == 56.0) }
-        const { assert!(BAR_H == 57.0) }
-        const { assert!(BOTTOM_FURNITURE_H == 59.0) }
+        // the band, the hairline and 2 px of line. 105 → 59 → **83**, the last
+        // step being the band re-derived from the left zone plus a stated lead
+        // (see [`BAR_CONTENT_H`]).
+        const { assert!(BAR_CONTENT_H == 80.0) }
+        const { assert!(BAR_H == 81.0) }
+        const { assert!(BOTTOM_FURNITURE_H == 83.0) }
         // The needle's aiming band reaches into the bar's bottom lane and **no
         // further**: that lane is empty recess, so a press aimed at Next can
         // never be taken by a 2 px line at the window's edge. This is the whole
@@ -3471,20 +3394,21 @@ mod tests {
         //    about the wrong thing. (The *lane* is `LINE_BODY`; the type in it
         //    is `SIZE_CAPTION`, and the two are different claims.)
         const { assert!(SIZE_CAPTION < SIZE_META && SIZE_META < SIZE_BODY) }
-        // 3. The whole zone is exactly the bar's content band, so the bar's
-        //    height stays a property of the transport and the continuation
-        //    appearing cannot grow it. This is the same claim
-        //    `views::bottom_bar` asserts against the composed row; it is stated
-        //    here too because the numbers are this module's.
+        // 3. The whole zone is the bar's content band **less one
+        //    `BAR_ZONE_LEAD` a side**, so the bar's height stays a property of
+        //    what the bar holds and the continuation appearing cannot grow it.
+        //    This is the same claim `views::bottom_bar` asserts against the
+        //    composed row; it is stated here too because the numbers are this
+        //    module's.
         //
-        //    **Exactly**, not with room to spare: at 56 px the three lanes and
-        //    the transport's two leads are the same 56, which is what makes the
-        //    zone's middle lane the bar's centre line without a nudge. The air
-        //    the old `GAP_XXS` gaps bought is now inside the line boxes, where
-        //    it always was — `LINE_BODY` 20 around a 13 px face is 7 px of
-        //    leading, so the block's first ink sits ~3.5 px below the hairline
-        //    and its last ~4.5 px above the needle.
-        const { assert!(LEFT_H == BAR_CONTENT_H) }
+        //    It used to be *exactly* the band — 56 lanes in a 56 px band — and
+        //    that is the proportion the owner read as *"the bottom bar is too
+        //    short"*: correct in every part, and type touching both edges of
+        //    the bar it sits in. The lead is the fix, and it is a named gap
+        //    rather than a ratio, because a ratio is not reachable on the 4 px
+        //    lattice for two bands of different content heights.
+        const { assert!(LEFT_H == NOW_PLAYING_H) }
+        const { assert!(LEFT_H + 2.0 * BAR_ZONE_LEAD == BAR_CONTENT_H) }
         const { assert!(LINE_BODY > SIZE_BODY && LINE_CAPTION > SIZE_CAPTION) }
         // 4. **The stack is symmetric about its middle lane** (law L4): the
         //    title's lane and the continuation's are the same height, so the
@@ -3493,26 +3417,52 @@ mod tests {
         const { assert!(CONTINUATION_H == LINE_BODY) }
     }
 
-    /// The popover is an overlay, and an overlay's whole promise is that it
-    /// costs the surface underneath nothing. Both halves of that are geometry.
+    /// **A place's body is capped at a measure and centred; below the cap it
+    /// hangs from the window's two gutters.**
+    ///
+    /// The rule the record's page and the queue place share, and the reason
+    /// [`LIST_MEASURE`] is one token rather than two. A place fills the window
+    /// and a *list* must not: a row whose title is at one end of 1800 px and
+    /// whose right-aligned duration is at the other is two words the eye has to
+    /// travel between, and the ruled right edge [`DURATION_W`] buys stops
+    /// meaning anything at that distance.
+    ///
+    /// The popover this replaces made the opposite promise — it was 360 px
+    /// **fixed**, because an overlay that grew with the window would eventually
+    /// be a panel that forgot to reflow the shelf. A place has no shelf to
+    /// reflow, so it may grow; what it may not do is grow without limit.
     #[test]
-    fn the_popover_floats_rather_than_taking_the_shelfs_width() {
-        /// What a row has left for its title once the number column, the
-        /// reserved scrollbar lane, the removal target the rows gain in step 7
-        /// and the gaps between them have taken their share.
+    fn a_places_body_is_capped_at_a_measure_and_centred() {
+        /// What a queue row has left for its title once the number column, the
+        /// reserved scrollbar lane, the removal target, the duration lane and
+        /// the gaps between them have taken their share, at the measure.
         const ROW_TITLE_LANE: f32 =
-            POPOVER_W - 2.0 * GAP_LG - TRACK_NO_W - SCROLLBAR_LANE - STEPPER_HIT - 3.0 * GAP_SM;
+            LIST_MEASURE - TRACK_NO_W - SCROLLBAR_LANE - STEPPER_HIT - DURATION_W - 3.0 * GAP_SM;
 
-        // Narrower than a third of the shipped window: it covers the
-        // bottom-right corner of the covers, not a column of them.
-        const { assert!(POPOVER_W < 1280.0 / 3.0) }
-        // …and wide enough for the rows it inherited from the rail.
-        const { assert!(ROW_TITLE_LANE > 180.0) }
-        // It never grows into a place: six tenths of the window leaves the
-        // shelf legible above it, and the fraction is a fraction.
-        const { assert!(POPOVER_MAX_H > 0.0 && POPOVER_MAX_H < 1.0) }
-        // Its anchor inset is a rung of the spacing ladder, not a number.
-        assert!((GAP_LG - 16.0).abs() < f32::EPSILON);
+        // The measure is the top of the comfortable range and it is the same
+        // number the Settings place already caps its form at — one measure in
+        // the product, not two.
+        const { assert!(LIST_MEASURE == SETTINGS_CONTENT_MAX) }
+        // Wide enough for the rows it inherited from the popover, four times
+        // over: the lane was 180 px there.
+        const { assert!(ROW_TITLE_LANE > 4.0 * 180.0) }
+        // At the shipped window a place still hangs from both gutters, so the
+        // cap is a ceiling rather than a fixed width.
+        const { assert!(1280.0 - 2.0 * HANG > LIST_MEASURE) }
+        // The record's page: the aside is the sleeve's own edge, the sleeve is
+        // the source's own size, and the two columns plus the gutters more than
+        // fill the shipped window — so at 1280 the page hangs from both
+        // gutters and the list is under its cap.
+        const { assert!(ALBUM_ASIDE_W == ALBUM_SLEEVE && ALBUM_SLEEVE == ART_MAX) }
+        const { assert!(ALBUM_ASIDE_W + GAP_XL + LIST_MEASURE + 2.0 * HANG > 1280.0) }
+        // …and at the breakpoint the list would be narrower than the sleeve
+        // beside it, which is what the breakpoint *is*.
+        const {
+            assert!(
+                ALBUM_BREAKPOINT - 2.0 * HANG - SCROLLBAR_LANE - ALBUM_ASIDE_W - GAP_XL
+                    <= ALBUM_SLEEVE
+            );
+        }
     }
 
     /// The Settings place's two columns fit the window they claim to, and the
@@ -3651,10 +3601,12 @@ mod tests {
     /// the value slot beside a setting still holds the widest figure it can
     /// be asked to show.
     #[test]
-    fn the_panel_still_fits_what_it_has_to_draw() {
-        // Panel width, less its inset on both sides, less the number column,
-        // the gaps, and the new lane — what is left is the title's.
-        let inner = PANEL_W - 2.0 * GAP_XL - SCROLLBAR_LANE - TRACK_NO_W - 2.0 * GAP_SM;
+    fn a_list_still_fits_what_it_has_to_draw() {
+        // The narrowest a list is ever set — the record page's track lane at
+        // the stacking breakpoint — less the number column, the duration lane,
+        // the gaps and the scrollbar lane. What is left is the title's.
+        let inner =
+            ALBUM_BREAKPOINT - 2.0 * HANG - SCROLLBAR_LANE - TRACK_NO_W - DURATION_W - 2.0 * GAP_SM;
         assert!(
             inner > 200.0,
             "the lane left only {inner} px for a track title"
@@ -3683,9 +3635,10 @@ mod tests {
 
         // The slot is exactly two lines — not "about two".
         assert!((SETTING_NOTE_H - 2.0 * SIZE_META * LEADING_META).abs() < f32::EPSILON);
-        // The width a wrapped line actually has: the panel, less its inset on
-        // both sides, less the scrollbar lane.
-        let content_w = PANEL_W - 2.0 * GAP_XL - SCROLLBAR_LANE;
+        // The width a wrapped line actually has, at the narrowest the place is
+        // ever set: the floor of `views::settings`'s clamp, less the scrollbar
+        // lane.
+        let content_w = SETTINGS_CONTENT_MIN - SCROLLBAR_LANE;
         let per_line = content_w / (SIZE_META * 0.5);
         let budget = 2.0 * per_line;
         for mode in MODES {
@@ -3703,84 +3656,70 @@ mod tests {
         }
     }
 
-    /// **The shelf virtualizes at every width the inspector can produce.**
+    /// **The shelf virtualizes at every width the window can produce.**
     ///
     /// One of the four properties `docs/design/01-ux-audit-and-ia.md` §5 says
-    /// must not regress, and since ADR-0017 step 5 it is checked over the
-    /// **whole band at 1 px resolution** rather than at a 20 px stride: with a
-    /// fluid cell the column count and every sleeve's size change together,
-    /// the transitions are single-pixel events, and a coarse sweep can step
-    /// straight over one. Every window width from the smallest iced will hand
-    /// us to a wall-sized one, with the inspector open and closed, must
-    /// produce a real grid, a real hang, and a covered, clamped visible range.
+    /// must not regress, checked over the **whole band at 1 px resolution**
+    /// rather than at a stride: with a fluid cell the column count and every
+    /// sleeve's size change together, the transitions are single-pixel events,
+    /// and a coarse sweep can step straight over one.
     ///
-    /// The popover is deliberately absent from this sweep — that is the
-    /// *point* of it being an overlay: it produces no width at all.
+    /// **The inspector is gone from the sweep**, and that is the finding rather
+    /// than a simplification: it used to run over `[0, PANEL_W]` because a
+    /// press could take 340 px off the wall, and ADR-0022 left the wall's width
+    /// a function of the window and the index rail's lane. The band is the same
+    /// band; it is now reached only by dragging the window's edge.
     #[test]
-    fn the_shelf_virtualizes_at_every_width_the_inspector_can_produce() {
+    fn the_shelf_virtualizes_at_every_width_the_window_can_produce() {
         use crate::shelf::{Density, Grid};
 
         const WINDOW_W: f32 = 1280.0;
         assert_eq!(
-            Grid::new(WINDOW_W, Density::Balanced).columns,
+            Grid::new(WINDOW_W - INDEX_LANE_W, Density::Balanced).columns,
             4,
-            "the shipped shelf"
-        );
-        assert_eq!(
-            Grid::new(WINDOW_W - PANEL_W, Density::Balanced).columns,
-            3,
-            "the inspector open: 940 px hangs three works of 254"
+            "the shipped wall, with the rail's lane off it"
         );
 
-        // The band: every window width baz can be dragged to, at 1 px, both
-        // inspector states, both a full library and a single search result —
-        // and now every density step, since the step is what the grid's four
-        // numbers come from (ADR-0017 step 6).
+        // The band: every window width baz can be dragged to, at 1 px, with a
+        // full library and a single search result — and every density step,
+        // since the step is what the grid's four numbers come from (ADR-0017
+        // step 6).
         for window in 640..=2560 {
             #[expect(
                 clippy::cast_precision_loss,
                 reason = "a window width in pixels is far below f32's exact-integer range"
             )]
             let window = window as f32;
-            for inspector in [0.0, PANEL_W] {
-                for density in Density::ALL {
-                    // What the wall really measures now: the window, less the
-                    // inspector, less the index rail's lane (ADR-0017 step 8).
-                    let hang = Grid::new((window - inspector - INDEX_LANE_W).max(0.0), density);
+            for density in Density::ALL {
+                // What the wall really measures: the window, less the index
+                // rail's lane, and nothing else (ADR-0017 step 8, ADR-0022).
+                let hang = Grid::new((window - INDEX_LANE_W).max(0.0), density);
+                assert!(hang.columns >= 1, "the grid collapsed at {window} px");
+                assert!(
+                    hang.art > 0.0 && hang.art <= density.art_max(),
+                    "{window} px at {density:?}: {} px of art",
+                    hang.art
+                );
+                assert!(
+                    hang.row_h > 0.0,
+                    "{window} px: a non-positive row pitch virtualizes nothing"
+                );
+                for albums in [1_usize, 97, 10_000] {
+                    let rows = hang.rows(albums);
+                    assert_eq!(rows, albums.div_ceil(hang.columns));
+                    let (first, end) = hang.visible_rows(0.0, 800.0, rows);
                     assert!(
-                        hang.columns >= 1,
-                        "the grid collapsed at {window} px with {inspector} px of inspector"
+                        first < end && end <= rows,
+                        "empty or overrunning viewport at {window} px, {albums} albums"
                     );
-                    assert!(
-                        hang.art > 0.0 && hang.art <= density.art_max(),
-                        "{window} px with {inspector} px of inspector: {} px of art",
-                        hang.art
-                    );
-                    assert!(
-                        hang.row_h > 0.0,
-                        "{window} px: a non-positive row pitch virtualizes nothing"
-                    );
-                    for albums in [1_usize, 97, 10_000] {
-                        let rows = hang.rows(albums);
-                        assert_eq!(rows, albums.div_ceil(hang.columns));
-                        let (first, end) = hang.visible_rows(0.0, 800.0, rows);
-                        assert!(
-                            first < end && end <= rows,
-                            "empty or overrunning viewport at {window} px, {albums} albums"
-                        );
-                        // A fling to the far end of a 10 000-album wall still
-                        // lands on a clamped range — the pitch is a float now, so
-                        // this is arithmetic worth checking rather than obvious.
-                        let (first, end) = hang.visible_rows(hang.spacer_height(rows), 800.0, rows);
-                        assert!(first <= end && end <= rows);
-                    }
+                    // A fling to the far end of a 10 000-album wall still lands
+                    // on a clamped range — the pitch is a float, so this is
+                    // arithmetic worth checking rather than obvious.
+                    let (first, end) = hang.visible_rows(hang.spacer_height(rows), 800.0, rows);
+                    assert!(first <= end && end <= rows);
                 }
             }
         }
-
-        // And the panel has to hold its own contents: the album panel insets
-        // the artwork by its padding on both sides and must not go negative.
-        const { assert!(PANEL_W > 2.0 * GAP_XL) }
     }
 
     /// **The shelf break's vertical rhythm is `HANG` and arithmetic on it.**
@@ -4223,8 +4162,6 @@ mod tests {
         let p = active();
         let mut shadowed: Vec<&'static str> = Vec::new();
         for (name, style) in [
-            ("popover", popover(p)),
-            ("panel", panel(p)),
             ("bar", bar(p)),
             ("tooltip", tooltip(p)),
             ("preview_tip", preview_tip(p)),
@@ -4251,18 +4188,19 @@ mod tests {
         // Five figures at the face's real advance, plus the two colons between
         // them, is the worst honest case — `1:59:59`.
         const { assert!(DURATION_W > SIZE_META * 5.0 * DIGIT_EM) }
-        // It fits the inspector's row beside the number column and the
-        // reserved scrollbar lane…
+        // It fits the record page's row beside the number column and the
+        // reserved scrollbar lane, at the narrowest the page is ever set…
         const {
             assert!(
                 TRACK_NO_W + DURATION_W + SCROLLBAR_LANE + 3.0 * GAP_SM
-                    < PANEL_W - 2.0 * GAP_XL + GAP_SM
+                    < ALBUM_BREAKPOINT - 2.0 * HANG
             );
         }
-        // …and the popover's, which additionally carries a removal target.
+        // …and the queue place's, which additionally carries a removal target.
         const {
             assert!(
-                TRACK_NO_W + DURATION_W + SCROLLBAR_LANE + STEPPER_HIT + 4.0 * GAP_SM < POPOVER_W
+                TRACK_NO_W + DURATION_W + SCROLLBAR_LANE + STEPPER_HIT + 4.0 * GAP_SM
+                    < ALBUM_BREAKPOINT - 2.0 * HANG
             );
         }
         // The Details block's two columns are a table, not prose: the label
@@ -4815,9 +4753,7 @@ mod tests {
         painted.push(("lamp_dot", container_colors(&lamp_dot(p))));
         painted.push(("segmented", container_colors(&segmented(p))));
         painted.push(("preview_tip", container_colors(&preview_tip(p))));
-        painted.push(("panel", container_colors(&panel(p))));
         painted.push(("bar", container_colors(&bar(p))));
-        painted.push(("popover", container_colors(&popover(p))));
         painted.push(("tooltip", container_colors(&tooltip(p))));
         painted.push(("hairline", vec![hairline(p, p.wall).color]));
         painted.push((
@@ -5195,13 +5131,24 @@ mod tests {
                 .expect("a view module baz ships")
                 .replace("\r\n", "\n")
         };
-        // The top strip, in both places — they are one frame and must hang from
-        // one line, or navigating between them would slide the content area.
+        // The top strip, in **every** place — they are one frame and must hang
+        // from one line, or navigating between them would slide the content
+        // area. `views::mod.rs` carries the strip the record's page and the
+        // queue both wear ([`crate::views::place_header`]); `settings.rs` draws
+        // its own because it has a section spine beside it.
         let expected = "theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)";
-        for name in ["top_bar.rs", "settings.rs"] {
+        for name in ["top_bar.rs", "settings.rs", "mod.rs"] {
             assert!(
                 read(name).contains(expected),
                 "{name} no longer hangs its window-edge strip from HANG"
+            );
+        }
+        // …and the two places that share it really do use it, rather than
+        // reinventing a strip of their own.
+        for name in ["album.rs", "queue.rs"] {
+            assert!(
+                read(name).contains("place_header("),
+                "{name} draws a header of its own instead of the frame's"
             );
         }
         // The now-playing bar. Its vertical padding is zero because the band is
@@ -5221,6 +5168,20 @@ mod tests {
             read("shelf.rs").contains("right: theme::HANG,"),
             "the index rail no longer hangs from HANG"
         );
+        // **The rail is the only thing against that edge** (ADR-0022): the wall
+        // draws no scrollbar, so the collection's right-hand side is one
+        // vertical strip doing one job rather than two doing the same one. The
+        // scrolling is untouched — a zero-width bar is a bar iced paints
+        // nothing for — which is why this is asserted as *which geometry the
+        // wall asks for* rather than as the absence of a `scrollable`.
+        assert!(
+            read("shelf.rs").contains("theme::wall_scrollbar()"),
+            "the wall has a scrollbar again, two pixels from the index rail"
+        );
+        const {
+            assert!(WALL_SCROLLBAR_W == 0.0);
+            assert!(SCROLLBAR_W > 0.0);
+        }
         // The lane arithmetic agrees: the rail's gutter is the same token.
         const { assert!(INDEX_LANE_W == INDEX_CLEARANCE + INDEX_W + HANG) }
         // A panel's *internal* padding is a different edge and stays `GAP_XL`:
@@ -5407,7 +5368,7 @@ mod tests {
         const { assert!(BAR_CONTENT_H / 2.0 == BAR_LEAD + TRANSPORT_HIT / 2.0) }
         // What is below the transport is exactly what is above it — a gap
         // now, where it used to be a gap and a seek row.
-        const { assert!(BAR_LEAD == GAP_MD) }
+        const { assert!(BAR_LEAD == GAP_XL) }
         // The right zone's block is symmetric about its own rail, so centring
         // the block centres the rail. The fader's hit band is centred in a
         // block of one control height, which is the same claim with two fewer
@@ -5419,14 +5380,19 @@ mod tests {
         // the block centres the zone's own line: 20 · 16 · 20, and the artist's
         // line box is the block's exact centre.
         const { assert!(CONTINUATION_H == LINE_BODY) }
-        // Every zone fits the band; none of them can be what sets the line. The
-        // left zone now fits it **exactly** — three stacked line boxes and no
-        // gaps between them, because at 56 px there is no room for a gap and a
-        // line box already carries its own leading. `GAP_XXS` left this stack
-        // when the bar lost 48 px, which is one fewer user of the lattice's one
-        // exception.
+        // Every zone fits the band **with air to spare**, which is the whole of
+        // the breathing rule: the band is its tallest zone plus one named gap a
+        // side (`BAR_ZONE_LEAD` 12), and the tallest zone is the three stacked
+        // line boxes of the now-playing block. There are no gaps *between* the
+        // lanes — a line box already carries its own leading, and `GAP_XXS`
+        // between them would be a fourth user of the lattice's one exception —
+        // so all of the air is taken outside the block, where a lead belongs.
         const { assert!(VOLUME_ROW_H < BAR_CONTENT_H) }
-        const { assert!(LINE_BODY + LINE_META + CONTINUATION_H == BAR_CONTENT_H) }
+        const { assert!(LINE_BODY + LINE_META + CONTINUATION_H == NOW_PLAYING_H) }
+        const { assert!(NOW_PLAYING_H + 2.0 * BAR_ZONE_LEAD == BAR_CONTENT_H) }
+        // …and the band lands on two hangs, which is what relates the bar to
+        // the composition above it rather than leaving it floating free.
+        const { assert!(BAR_CONTENT_H == 2.0 * HANG) }
         // The bar is the band and its hairline; there is no padding left to be
         // asymmetric, which is the cheapest possible way to keep the centring.
         const { assert!(BAR_H == BAR_CONTENT_H + 1.0) }
@@ -5448,9 +5414,11 @@ mod tests {
     /// 920, 924, 925, 941 — where two are a composition and four are a leak. In
     /// both cases the extra edges came from one thing: a *row's own horizontal
     /// padding*, applied inside a surface that had already stated its lane.
+    /// Both surfaces are **places** now (ADR-0022) and both kept the fix, which
+    /// is the point of pinning it as a literal rather than as a count.
     ///
-    /// So what is pinned here is that no list row inside a panel or a popover
-    /// carries a horizontal inset of its own. The full edge census is the render
+    /// So what is pinned here is that no list row inside a place carries a
+    /// horizontal inset of its own. The full edge census is the render
     /// pass (`docs/design/composition/tools/census2.py`), which is where the
     /// counts in the table are read.
     #[test]
@@ -5463,7 +5431,7 @@ mod tests {
         };
         // The two lists are the same twelve rows in two surfaces, and both hang
         // from their surface's own content lane.
-        for name in ["side_panel.rs", "queue.rs"] {
+        for name in ["album.rs", "queue.rs"] {
             let source = read(name);
             assert!(
                 source.contains("theme::pad(theme::GAP_XS, 0.0)"),
@@ -5504,20 +5472,36 @@ mod tests {
     /// (`composition/tools/census5.py::ink_mass`), which is a slow test and does
     /// not belong in the unit suite.
     ///
-    /// What belongs here is the geometry that *decides* the measurement, stated
-    /// as the audit's own arithmetic: the sleeve's share of the panel's ink is a
-    /// function of one number, and this is that number held down.
+    /// # The inspector's cap is gone, and the defect it fixed is not back
+    ///
+    /// `INSPECTOR_SLEEVE` 120 held the sleeve down because the panel's sleeve
+    /// was **a second, larger copy of a work already on the wall 24 px to the
+    /// left**. ADR-0022 replaced the column with a place, so the wall is not on
+    /// screen and there is no other copy: the record *is* the subject, and the
+    /// record's page declares the work first the way the wall does, saying by
+    /// how much (law L6's own escape clause, and the wall is the precedent).
+    ///
+    /// What must not regress is the rest of the order, and that is what is
+    /// asserted here: **the title is the loudest type on the page by a clear
+    /// step**, which is the half of defect 5 that was actually about the album's
+    /// name. Three type sizes in a falling order, each a real step, with the
+    /// title at the top of the whole scale.
     #[test]
     fn the_declared_hierarchy_is_the_geometry_that_produces_it() {
-        // The audit's table: sleeve edge against its share of the panel's ink.
-        // 292 → 93.6 %, 200 → 87.3 %, 160 → 81.5 %, 120 → 71.2 %, 84 → 54.8 %.
-        const { assert!(INSPECTOR_SLEEVE == 120.0) }
-        // It is a cap, not a fraction: the sleeve does not grow with the column,
-        // because it is a thumbnail of a known object at a known size.
-        const { assert!(INSPECTOR_SLEEVE < PANEL_W - 2.0 * GAP_XL) }
-        // And it leaves the panel's declared first item — the title — a lane
-        // more than twice the sleeve's own height to be read in.
-        const { assert!(PANEL_W - 2.0 * GAP_XL > INSPECTOR_SLEEVE) }
+        // The record page's identity block: title ≫ artist ≫ catalogue line.
+        const { assert!(SIZE_HERO > SIZE_TITLE && SIZE_TITLE > SIZE_META) }
+        // Real steps, not nudges: each is at least a quarter again as large as
+        // the one under it, so the ranking survives being measured rather than
+        // being read off the source.
+        const { assert!(SIZE_HERO >= 1.25 * SIZE_TITLE) }
+        const { assert!(SIZE_TITLE >= 1.25 * SIZE_META) }
+        // And the title is the top of the scale — there is nothing louder in
+        // the product to be beaten by.
+        const { assert!(SIZE_HERO >= SIZE_TITLE && SIZE_HERO >= SIZE_EMPHASIS) }
+        // The sleeve is the source's own size and no larger, which is the one
+        // bound the page's work has (`docs/REFUSALS.md`: no artwork is ever
+        // drawn larger than its source).
+        const { assert!(ALBUM_SLEEVE == ART_MAX) }
         // The wall's inversion is deliberate and is declared as such: one sleeve
         // is ~135× its label, and the label is not competing with it. The
         // geometry that says so is the art-to-block ratio, which is stable.

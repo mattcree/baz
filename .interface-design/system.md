@@ -774,9 +774,14 @@ before: **50 px**. Ceiling: 2 px.
 | the wall | `HANG` and the hang's derived column edges; nothing else |
 | the top bar | `HANG`, `W − HANG`, and the search well's right edge |
 | the bottom bar | `HANG`, `W − HANG`, the zone boundaries, and the reserved slots' own edges |
-| the album inspector | panel edge, panel + `GAP_XL`, panel width − `GAP_XL` — **one content lane**, less the declared `SCROLLBAR_LANE` |
-| the queue popover | popover + `GAP_LG` and one indent lane for rows |
+| the record's page | the page block's two edges (`HANG` / `W − HANG` until the list reaches `LIST_MEASURE`, then centred), the aside's right edge, the main column's left edge — less the declared `SCROLLBAR_LANE` |
+| the queue place | the list block's two edges (same rule), and one indent lane for rows |
 | the Settings place | `HANG`, nav right edge, content left edge, content right edge |
+
+**Every place-edge surface follows one rule** (ADR-0022): a place's body grows
+with the window until its list reaches its measure and then stops and centres.
+Below the cap it hangs from the window's two gutters, which is law L1; at and
+above it the block's own two edges are what the surface declares.
 
 In both lists the extra edges came from one thing — a *row's own horizontal
 padding*, applied inside a surface that had already stated its lane — so that is
@@ -795,9 +800,19 @@ what the test forbids. The full edge census is the render pass
 | the wall | the works ≫ their labels ≫ the playing mark ≫ the counts |
 | the top bar | the counts → the well → `Settings` |
 | the bottom bar | what is sounding → the transport → the position → what is next |
-| the album inspector | the title → `Play album` → the track list → the sleeve → the condition |
+| the record's page | the work ≫ `Play album` → the title → the artist → the track list → the condition (the title is first among *type*) |
+| the queue place | the rows → the summary → each record's name |
 | the Settings place | the section → its controls → their current values |
 | first run | the question → the field → the hint |
+
+The record's page is the second surface after the wall whose declaration puts a
+**work** first, and for the same reason: it is the only image of the record on
+screen and the record is the subject (ADR-0022). The inspector's inversion was
+different in kind — its sleeve was a *second, larger copy of a work already on
+the wall 24 px to the left*, drowning the one thing the panel added. What the
+page must hold, and does, is the rest of the order: the title is the loudest
+**type** on it by a clear step (`SIZE_HERO` over `SIZE_TITLE` over `SIZE_META`),
+where in the column the album's own name came fifth of eight.
 
 The inspector was the inversion: its sleeve was *the panel minus its two
 paddings*, 93.6 % of the panel's ink, and the album's own **name came fifth of
@@ -821,8 +836,13 @@ TRANSPORT_HIT` and nothing about the other three. The groove's own hit band
 that is a rail rather than a box is still one of the two heights and not a
 third with a rail-shaped excuse.
 
-**`NEEDLE_HIT` 12 is the third, and it is the one exception this law grants a
-size it does not otherwise permit.** ADR-0017 §1.1's needle is 2 px flush on the
+**One control in baz is not a box, and the floor holds for it anyway.** The
+bar's now-playing block is the route back to the sounding record (ADR-0022) and
+it is a block of *type*, `NOW_PLAYING_H` 56 tall — larger than the floor, not
+exempt from it. A control that is not a box is bounded below by the same 32.
+
+**`NEEDLE_HIT` 12 is the third size, and it is the one exception this law grants
+a size it does not otherwise permit.** ADR-0017 §1.1's needle is 2 px flush on the
 window's bottom edge and its whole bargain is that it costs the collection 2 px
 rather than the 45 the seek row spent; reserving 24 or 32 of *layout* would undo
 that, and claiming 24 of *aim* would reach into the transport row's boxes and

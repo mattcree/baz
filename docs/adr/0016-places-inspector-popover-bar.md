@@ -1,6 +1,15 @@
 # ADR-0016: Places, an inspector, a popover, and the bar — retiring the rail
 
-**Status**: accepted (2026-08-08) · implements `docs/design/01-ux-audit-and-ia.md`
+> **Superseded in part by [ADR-0022](0022-places-and-nothing-else.md).** Its
+> four-kinds model is reduced to one: the inspector and the popover are removed,
+> the album and the queue become *places*, `Ctrl+B` is unbound, and `Esc` peels
+> one layer because there is one. What survives re-stated is everything this
+> record says about the **rail** — that argument was accepted and is not
+> reopened — plus the queue's vocabulary, its one-list-with-a-cursor model, and
+> the reservation this ADR made of the now-playing block for *get back to what
+> is playing*, which ADR-0022 spends.
+
+**Status**: accepted (2026-08-08), surface model superseded by ADR-0022 · implements `docs/design/01-ux-audit-and-ia.md`
 §2, as amended by `docs/design/03-interface-prior-art.md` R1 / R3 / R5 ·
 supersedes the "why settings are a rail panel" argument in `panels.rs`'s module
 docs · changes no engine command and no protocol message · spends ADR-0014's
