@@ -492,6 +492,18 @@ pub struct QueueItemVm {
     /// already cover it — the same rule, and the same field, the side panel's
     /// track list follows ([`AlbumVm::track_artists_vary`]).
     pub artist: Option<String>,
+    /// The record this track was queued **as part of**, when it was queued as
+    /// part of one — `None` for a loose track.
+    ///
+    /// Per item rather than per queue, because the queue is one list holding
+    /// whole albums *and* loose songs and ADR-0017 §1.7 is explicit that
+    /// "albums \[are\] listed as albums, never flattened". A queue-wide title
+    /// could not say which of a mixture a given row belongs to, so the fact
+    /// lives where the ambiguity is: consecutive items sharing a title are one
+    /// album, and that is what
+    /// [`PlayerState::continuation_note`](crate::player::PlayerState::continuation_note)
+    /// counts rather than counting tracks.
+    pub album: Option<String>,
     /// Playing time, when the scan read one.
     pub duration: Option<Duration>,
     /// The file. The identity the engine addresses this track by, and what
@@ -604,6 +616,7 @@ pub fn album_queue(album: &AlbumVm, chosen: Option<EditionKey>) -> QueueVm {
             .map(|track| QueueItemVm {
                 title: track.title.clone(),
                 artist: track.artist.clone().filter(|_| per_track_artists),
+                album: album.title.clone(),
                 duration: track.duration,
                 path: track.path.clone(),
             })
@@ -1595,6 +1608,7 @@ mod tests {
         let item = |title: &str| QueueItemVm {
             title: title.to_owned(),
             artist: None,
+            album: Some("Loop".to_owned()),
             duration: Some(Duration::from_secs(60)),
             path: path.clone(),
         };
@@ -1673,6 +1687,7 @@ mod tests {
         let item = |path: &str| QueueItemVm {
             title: "Loop".to_owned(),
             artist: None,
+            album: Some("Loop".to_owned()),
             duration: Some(Duration::from_secs(60)),
             path: PathBuf::from(path),
         };

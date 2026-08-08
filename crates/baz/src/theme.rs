@@ -1943,24 +1943,44 @@ pub const POPOVER_W: f32 = 360.0;
 /// next must not cost the covers.
 pub const POPOVER_MAX_H: f32 = 0.6;
 
-/// Width reserved in the now-playing bar for the queue-position readout
-/// (logical px) — the `3 / 12` beside the track title.
+/// Width reserved in the now-playing bar for the **Queue** control's readout
+/// (logical px) — the count of what the door opens onto, beside its label.
 ///
 /// A **reserved slot**, exactly like [`SIGNAL_W`] and [`STAMP_W`]: the readout
-/// is absent when nothing is playing and present when something is, and the bar
+/// is absent when nothing is queued and present when something is, and the bar
 /// must not move between those two states.
 ///
-/// **56, where it was 72 and was called `QUEUE_POS_W`.** The old number was 9
-/// glyphs at the monospace's flat 0.6 em; the same string measures 53.46 px in
-/// Plex Sans, because only the figures are 0.6 em and the space and the slash
-/// are not. The design system names this slot `POSITION_W` and bounds it at
-/// three figures a side (`199 / 240`), which is the same width as `999 / 999`
-/// — the digits are tabular, so the widest three-figure queue and the widest
-/// three-figure position measure identically. A four-figure queue
-/// (`9999 / 9999`, 67.86 px) would clip, and that is a deliberate bound: no
-/// album has 1000 tracks, and a whole-library shuffle queue is a different
-/// surface's problem.
+/// **56, and unchanged, though what it holds got shorter.** The number was
+/// derived for the `3 / 12` position this slot used to draw — bounded at three
+/// figures a side (`199 / 240`, the same width as `999 / 999`, because the
+/// digits are tabular). The position moved into the ambient continuation line
+/// beside it (`player::PlayerState::continuation_note`), which states what is
+/// left rather than where you are, so the slot now holds a bare `999` and holds
+/// it with room to spare. The width is kept rather than tightened because it is
+/// the one number in this zone's arithmetic that every other reservation is
+/// checked against, and narrowing it would buy 30 px of title lane at the cost
+/// of re-deriving the whole zone.
 pub const POSITION_W: f32 = 56.0;
+
+/// Height reserved in the bar's left zone for the ambient continuation line
+/// (logical px) — `then 2 albums · 1:58:00 left`, under the title and artist.
+///
+/// The **third rung** of the zone's type hierarchy, and the quietest: the title
+/// is [`SIZE_BODY`] in the Medium face at full paper, the artist [`SIZE_META`]
+/// at [`Palette::paper_dim`], and this is [`SIZE_CAPTION`] at
+/// [`Palette::paper_faint`] — the
+/// metadata voice the rest of the bar already speaks in (the stamps, the
+/// signal note, the skipped-tracks note). It is a statement about music that is
+/// not playing yet, so it must not compete with the one that is.
+///
+/// **Reserved, not added.** The lane is this tall whether or not there is a
+/// continuation to state, because the line comes and goes with the queue — it
+/// is absent on the last track of every queue — and a left zone that grew a
+/// line would push the title up under the pointer at the moment a listener was
+/// reading it. `views::bottom_bar` draws an empty strip in its place, and the
+/// zone's whole height stays under the centre column's, which is what keeps the
+/// bar's own height a property of the transport (asserted in both modules).
+pub const CONTINUATION_H: f32 = SIZE_CAPTION * LEADING_CAPTION;
 
 /// Width of the bar's **Queue** control (logical px) — the label, the
 /// [`POSITION_W`] readout, and the padding around them.
@@ -2207,15 +2227,59 @@ mod tests {
         // `192 → 176.4 kHz`, seven figures — so that a note appearing there
         // moves nothing beside it.
         const { assert!(SIGNAL_W > SIZE_META * 7.0 * DIGIT_EM) }
-        // And the queue-position readout the left zone gained with the popover
-        // is the same rule again: `999 / 999` is six figures, the slot holds
-        // them, and it is that wide whether or not anything is playing — so
-        // `3 / 12` appearing as a track starts moves no title.
+        // And the Queue control's readout is the same rule again: the widest
+        // count it can draw is three figures, the slot holds them, and it is
+        // that wide whether or not anything is queued — so a queue arriving
+        // moves no title. (It is still sized for the six-figure `999 / 999` it
+        // used to hold; see the token.)
         const { assert!(POSITION_W > SIZE_META * 6.0 * DIGIT_EM) }
         // …and the control that carries it holds the readout, its label and the
         // padding around both. The label itself is measured in the face that
         // draws it by `font.rs`; this is the arithmetic that leaves room.
         const { assert!(UP_NEXT_W > POSITION_W + 3.0 * GAP_SM) }
+    }
+
+    /// **The ambient continuation is a reservation, not an addition.**
+    ///
+    /// The left zone is the bar's most contested strip: it carries the one
+    /// string in the product that changes with the music, and it now carries a
+    /// second one that comes and goes independently — the continuation is
+    /// absent on the last track of every queue and present before it. Three
+    /// things have to be true for that to cost nothing, and all three are
+    /// arithmetic.
+    #[test]
+    fn the_left_zone_reserves_the_continuation_line_whether_or_not_it_has_one() {
+        /// The zone's whole height with the third line in it: title, artist,
+        /// continuation, the gaps between them, and the Queue control's
+        /// vertical padding.
+        const LEFT_H: f32 = SIZE_BODY * LEADING_BODY
+            + GAP_XXS
+            + SIZE_META * LEADING_META
+            + GAP_XXS
+            + CONTINUATION_H
+            + 2.0 * GAP_XS;
+        /// The transport over its seek row — what the bar's height is a
+        /// property of, and must go on being.
+        const CENTRE_H: f32 = TRANSPORT_HIT + GAP_SM + SEEK_ROW_H;
+
+        // 1. The lane is exactly one line of the type that draws it, so the
+        //    strip reserved when there is nothing to say is the same height as
+        //    the line that says something.
+        assert!((CONTINUATION_H - SIZE_CAPTION * LEADING_CAPTION).abs() < f32::EPSILON);
+        // 2. It is the quietest rung of the zone: smaller than the artist line
+        //    under the title, which is itself smaller than the title. A
+        //    continuation set as loud as the music playing would be a claim
+        //    about the wrong thing.
+        const { assert!(SIZE_CAPTION < SIZE_META && SIZE_META < SIZE_BODY) }
+        // 3. The whole zone is still shorter than the centre column, so the
+        //    bar's height stays a property of the transport and the
+        //    continuation appearing cannot grow it. This is the same claim
+        //    `views::bottom_bar` asserts against the composed row; it is stated
+        //    here too because the numbers are this module's.
+        const { assert!(LEFT_H < CENTRE_H) }
+        // And it fits with room to spare rather than by a rounding error — a
+        // whole gap's worth, so the reading survives a leading being nudged.
+        const { assert!(LEFT_H + GAP_MD < CENTRE_H) }
     }
 
     /// The popover is an overlay, and an overlay's whole promise is that it
