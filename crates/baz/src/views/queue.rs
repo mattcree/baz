@@ -91,6 +91,7 @@ pub(crate) fn view(
     max_height: f32,
     hovered: Option<usize>,
 ) -> Element<'static, Message> {
+    let room = theme::active();
     // A row is only a control when there is an engine to send its command to,
     // exactly as `Play album` and the inspector's rows are.
     let live = player.engine_ready();
@@ -107,7 +108,7 @@ pub(crate) fn view(
                 text(list.summary)
                     .size(theme::SIZE_META)
                     .line_height(theme::LEADING_META)
-                    .color(theme::PAPER_FAINT)
+                    .color(room.paper_faint)
                     .wrapping(text::Wrapping::None),
                 // The same reserved scrollbar lane the album inspector's track
                 // list keeps, and for the same reason: this list has a duration
@@ -123,7 +124,7 @@ pub(crate) fn view(
                     .padding(theme::scroll_gutter())
                 )
                 .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
-                .style(theme::scrollbar),
+                .style(move |_theme, status| theme::scrollbar(room, status)),
             ]
             .spacing(theme::GAP_SM)
             .into()
@@ -136,7 +137,7 @@ pub(crate) fn view(
         .width(Length::Fixed(theme::POPOVER_W))
         .max_height(max_height)
         .padding(POPOVER_PAD)
-        .style(theme::popover)
+        .style(move |_theme| theme::popover(room))
         .into()
 }
 
@@ -147,12 +148,13 @@ pub(crate) fn view(
 /// in the app's most contested column — for a control Escape already provided,
 /// and in a floating card 360 px wide those pixels are rows.
 fn header_row() -> Element<'static, Message> {
+    let room = theme::active();
     row![
         text("Queue")
             .size(theme::SIZE_EMPHASIS)
             .line_height(theme::LEADING_EMPHASIS)
             .font(theme::MEDIUM)
-            .color(theme::PAPER),
+            .color(room.paper),
         Space::with_width(Length::Fill),
         close_button("Close queue", Message::CloseQueue),
     ]
@@ -177,13 +179,14 @@ fn header_row() -> Element<'static, Message> {
 /// It is inside the scroll for the same reason. A group header scrolls with
 /// its group.
 fn album_group(album: Option<&str>, artist: &str) -> Element<'static, Message> {
+    let room = theme::active();
     let title = album.unwrap_or(artist);
     let mut block = column![
         text(title.to_owned())
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
             .font(theme::MEDIUM)
-            .color(theme::PAPER_DIM)
+            .color(room.paper_dim)
             .wrapping(text::Wrapping::None),
     ]
     .spacing(theme::GAP_XXS);
@@ -194,7 +197,7 @@ fn album_group(album: Option<&str>, artist: &str) -> Element<'static, Message> {
             text(artist.to_owned())
                 .size(theme::SIZE_CAPTION)
                 .line_height(theme::LEADING_CAPTION)
-                .color(theme::heading_ink())
+                .color(room.heading())
                 .wrapping(text::Wrapping::None),
         );
     }
@@ -209,16 +212,17 @@ fn album_group(album: Option<&str>, artist: &str) -> Element<'static, Message> {
 /// is the ordinary state of a player nobody has pressed play on, not a problem
 /// to solve.
 fn empty_state() -> Element<'static, Message> {
+    let room = theme::active();
     container(
         column![
             text("Nothing queued")
                 .size(theme::SIZE_EMPHASIS)
                 .line_height(theme::LEADING_EMPHASIS)
-                .color(theme::PAPER_DIM),
+                .color(room.paper_dim),
             text("Play an album and it appears here.")
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_FAINT),
+                .color(room.paper_faint),
             // Silence is a feature (`docs/REFUSALS.md`), and the empty queue is
             // the one surface where saying so costs nothing: this is what a
             // listener sees the moment a record ends, and it is the frame in
@@ -226,7 +230,7 @@ fn empty_state() -> Element<'static, Message> {
             text("When a queue ends, baz stops.")
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_MUTED),
+                .color(room.paper_muted),
         ]
         .spacing(theme::GAP_SM)
         .align_x(iced::Alignment::Start),
@@ -268,10 +272,11 @@ fn queue_row(
     live: bool,
     hovered: bool,
 ) -> Element<'static, Message> {
+    let room = theme::active();
     let playing = row_state.state == QueueRowState::Playing;
     let ink = match row_state.state {
-        QueueRowState::Played => theme::PAPER_FAINT,
-        QueueRowState::Playing | QueueRowState::Upcoming => theme::PAPER,
+        QueueRowState::Played => room.paper_faint,
+        QueueRowState::Playing | QueueRowState::Upcoming => room.paper,
     };
     let marker: Element<'static, Message> = if playing {
         lamp_dot()
@@ -279,7 +284,7 @@ fn queue_row(
         text(row_state.position.to_string())
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
-            .color(theme::PAPER_FAINT)
+            .color(room.paper_faint)
             .into()
     };
     // The playing row's title gains the medium weight the now-playing bar
@@ -301,7 +306,7 @@ fn queue_row(
             text(artist)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_DIM)
+                .color(room.paper_dim)
                 .wrapping(text::Wrapping::None),
         );
     }
@@ -325,7 +330,7 @@ fn queue_row(
                 text(row_state.duration)
                     .size(theme::SIZE_META)
                     .line_height(theme::LEADING_META)
-                    .color(theme::PAPER_FAINT)
+                    .color(room.paper_faint)
                     .wrapping(text::Wrapping::None)
             )
             .width(Length::Fixed(theme::DURATION_W))
@@ -338,7 +343,7 @@ fn queue_row(
     )
     .width(Length::Fill)
     .padding(theme::pad(theme::GAP_XS, theme::GAP_XS))
-    .style(move |_theme, status| theme::track_row(status, playing))
+    .style(move |_theme, status| theme::track_row(room, status, playing))
     .on_press_maybe(live.then_some(Message::JumpToQueued(index)));
     mouse_area(
         row![body, remove_slot(index, live && hovered)]
@@ -362,6 +367,7 @@ fn queue_row(
 /// sits in follows, and the same rule `Play album` follows: a control that
 /// cannot act must not pretend it can.
 fn remove_slot(index: usize, offered: bool) -> Element<'static, Message> {
+    let room = theme::active();
     if !offered {
         return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
     }
@@ -369,7 +375,10 @@ fn remove_slot(index: usize, offered: bool) -> Element<'static, Message> {
         iced_image(icon::handle(icon::Glyph::Close))
             .width(Length::Fixed(theme::ICON_PX))
             .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::GLYPH_OPACITY),
+            // The one glyph in baz drawn at its hovered weight: this control
+            // exists only while the pointer is on its row, so its resting
+            // reading and its hovered reading are the same reading.
+            .opacity(theme::GLYPH_OPACITY_HOVER),
     )
     .width(Length::Fill)
     .height(Length::Fill)
@@ -380,7 +389,7 @@ fn remove_slot(index: usize, offered: bool) -> Element<'static, Message> {
             .width(Length::Fixed(theme::STEPPER_HIT))
             .height(Length::Fixed(theme::STEPPER_HIT))
             .padding(0)
-            .style(theme::transport)
+            .style(move |_theme, status| theme::transport(room, status))
             .on_press(Message::RemoveQueued(index)),
         text("Remove from the queue")
             .size(theme::SIZE_CAPTION)
@@ -389,17 +398,18 @@ fn remove_slot(index: usize, offered: bool) -> Element<'static, Message> {
     )
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)
-    .style(theme::tooltip)
+    .style(move |_theme| theme::tooltip(room))
     .into()
 }
 
 /// The playing row's lamp dot — the same amber circle the shelf puts beside
 /// the playing album, and the same token behind it.
 fn lamp_dot() -> Element<'static, Message> {
+    let room = theme::active();
     container(Space::new(
         Length::Fixed(theme::DOT),
         Length::Fixed(theme::DOT),
     ))
-    .style(theme::lamp_dot)
+    .style(move |_theme| theme::lamp_dot(room))
     .into()
 }

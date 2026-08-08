@@ -61,6 +61,7 @@ use crate::{groove, icon, player, theme};
 /// glyph, position, and enabled-state comes from [`PlayerState`] —
 /// event-derived, tested in `player.rs`.
 pub(crate) fn view(player: &PlayerState, queue_open: bool) -> Element<'_, Message> {
+    let room = theme::active();
     let mut status = row![]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center);
@@ -69,7 +70,7 @@ pub(crate) fn view(player: &PlayerState, queue_open: bool) -> Element<'_, Messag
             text(skipped)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_FAINT),
+                .color(room.paper_faint),
         );
     }
     status = status.push(signal_path(player)).push(volume(player));
@@ -86,11 +87,11 @@ pub(crate) fn view(player: &PlayerState, queue_open: bool) -> Element<'_, Messag
     .spacing(theme::GAP_LG)
     .align_y(iced::Alignment::Center);
     column![
-        horizontal_rule(1).style(theme::hairline),
+        horizontal_rule(1).style(move |_theme| theme::hairline(room)),
         container(bar)
             .width(Length::Fill)
             .padding(theme::pad(theme::GAP_MD, theme::GAP_LG))
-            .style(theme::bar),
+            .style(move |_theme| theme::bar(room)),
     ]
     .into()
 }
@@ -145,13 +146,14 @@ fn now_playing_block(player: &PlayerState, open: bool) -> Element<'_, Message> {
 ///
 /// It is the same message <kbd>Q</kbd> sends.
 fn queue_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
+    let room = theme::active();
     let readout: Element<'_, Message> = match player.queue_position_note() {
         None => Space::with_width(Length::Fixed(theme::POSITION_W)).into(),
         Some(note) => container(
             text(note)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_FAINT)
+                .color(room.paper_faint)
                 .wrapping(text::Wrapping::None),
         )
         .width(Length::Fixed(theme::POSITION_W))
@@ -172,7 +174,7 @@ fn queue_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
     )
     .width(Length::Fixed(theme::UP_NEXT_W))
     .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-    .style(move |_theme, status| theme::now_playing(status, open))
+    .style(move |_theme, status| theme::now_playing(room, status, open))
     .on_press(Message::ToggleQueue)
     .into()
 }
@@ -184,11 +186,12 @@ fn queue_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
 /// would shove the shelf up by a line, which is exactly the kind of movement
 /// this bar is built not to make; the enclosing zone clips instead.
 fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
+    let room = theme::active();
     if let Some(note) = player.availability_note() {
         return text(note)
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
-            .color(theme::PAPER_FAINT)
+            .color(room.paper_faint)
             .wrapping(text::Wrapping::None)
             .into();
     }
@@ -196,7 +199,7 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
         return text("Nothing playing")
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
-            .color(theme::PAPER_FAINT)
+            .color(room.paper_faint)
             .wrapping(text::Wrapping::None)
             .into();
     };
@@ -213,7 +216,7 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
             text(artist.as_str())
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_DIM)
+                .color(room.paper_dim)
                 .wrapping(text::Wrapping::None),
         );
     }
@@ -239,6 +242,7 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
 /// [`theme::SIGNAL_W`] wide in every case, so the note *appearing* moves
 /// nothing: a listener who is not looking for it will never see it arrive.
 fn signal_path(player: &PlayerState) -> Element<'_, Message> {
+    let room = theme::active();
     let Some(note) = player.signal_note() else {
         return Space::with_width(Length::Fixed(theme::SIGNAL_W)).into();
     };
@@ -246,7 +250,7 @@ fn signal_path(player: &PlayerState) -> Element<'_, Message> {
         text(note.label)
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
-            .color(theme::PAPER_FAINT)
+            .color(room.paper_faint)
             .wrapping(text::Wrapping::None),
     )
     .width(Length::Fixed(theme::SIGNAL_W))
@@ -260,7 +264,7 @@ fn signal_path(player: &PlayerState) -> Element<'_, Message> {
     )
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)
-    .style(theme::tooltip)
+    .style(move |_theme| theme::tooltip(room))
     .into()
 }
 
@@ -340,6 +344,7 @@ fn glyph_button(
     pending: bool,
     message: Message,
 ) -> Element<'_, Message> {
+    let room = theme::active();
     let mark = container(
         iced_image(icon::handle(glyph))
             .width(Length::Fixed(theme::ICON_PX))
@@ -354,7 +359,7 @@ fn glyph_button(
         .width(Length::Fixed(theme::TRANSPORT_HIT))
         .height(Length::Fixed(theme::TRANSPORT_HIT))
         .padding(0)
-        .style(theme::transport)
+        .style(move |_theme, status| theme::transport(room, status))
         .on_press_maybe(enabled.then_some(message));
     tooltip(
         control,
@@ -365,7 +370,7 @@ fn glyph_button(
     )
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)
-    .style(theme::tooltip)
+    .style(move |_theme| theme::tooltip(room))
     .into()
 }
 
@@ -388,18 +393,19 @@ fn glyph_button(
 /// leaving the cursor alone — rather than by looking identical and doing
 /// nothing.
 fn seek_bar(state: player::SeekBar) -> Element<'static, Message> {
+    let room = theme::active();
     // While a position is being asked for rather than reported, the elapsed
     // timestamp warms to lamp amber — the same accent the rest of the room
     // reserves for playback truth, here saying "this is where you are asking
     // to be". It cools back to the quiet default the moment the engine
     // confirms.
     let elapsed_color = if state.pending {
-        theme::LAMP
+        room.lamp
     } else {
-        theme::PAPER_FAINT
+        room.paper_faint
     };
     let rail: Element<'static, Message> = if state.interactive {
-        groove::Groove::new(state.position, theme::seek)
+        groove::Groove::new(state.position, room, theme::seek)
             .width(Length::Fixed(theme::SEEK_W))
             .height(theme::RAIL_HIT)
             .on_pointer(
@@ -411,7 +417,7 @@ fn seek_bar(state: player::SeekBar) -> Element<'static, Message> {
             )
             .into()
     } else {
-        groove::Groove::new(state.position, theme::seek_inert)
+        groove::Groove::new(state.position, room, theme::seek_inert)
             .width(Length::Fixed(theme::SEEK_W))
             .height(theme::RAIL_HIT)
             .into()
@@ -422,7 +428,7 @@ fn seek_bar(state: player::SeekBar) -> Element<'static, Message> {
             preview_lane(state.preview, theme::SEEK_W, theme::PREVIEW_W),
             rail
         ],
-        seek_stamp(state.total, theme::PAPER_FAINT, alignment::Horizontal::Left),
+        seek_stamp(state.total, room.paper_faint, alignment::Horizontal::Left),
     ]
     .spacing(theme::GAP_SM)
     .into()
@@ -445,6 +451,7 @@ fn seek_bar(state: player::SeekBar) -> Element<'static, Message> {
 /// nothing at all — the block is [`theme::VOLUME_BLOCK_W`] × the sum of its
 /// reserved lanes in every state this control has.
 fn volume(player: &PlayerState) -> Element<'_, Message> {
+    let room = theme::active();
     let state = player.volume_bar();
     let detent = groove::Detent {
         at: 1.0,
@@ -455,7 +462,7 @@ fn volume(player: &PlayerState) -> Element<'_, Message> {
         (true, true) => theme::volume_muted,
         (true, false) => theme::volume,
     };
-    let fader = groove::Groove::new(state.position, style)
+    let fader = groove::Groove::new(state.position, room, style)
         .width(Length::Fixed(theme::VOLUME_W))
         .height(theme::VOLUME_HIT)
         .detent(detent);
@@ -474,34 +481,21 @@ fn volume(player: &PlayerState) -> Element<'_, Message> {
     };
     row![
         // **The mute glyph sits on the fader's rail**, not on the centre of the
-        // block the fader is in — the one alignment defect in the product a
-        // listener named unprompted.
-        //
-        // The fader's column is the preview lane ([`theme::PREVIEW_H`] 15) over
-        // the groove's hit band ([`theme::VOLUME_HIT`] 28), so its rail runs
-        // across the row at 29 px from the top. Centred in the row, a 32 px
-        // button puts its glyph at 21.5 — seven and a half pixels above the
-        // line it is supposed to be a pair with, which is exactly enough to
-        // read as two controls that were placed separately.
-        //
-        // So the button takes the same two-lane column the timestamps beside
-        // the seek groove already take (`seek_stamp`): the preview lane above,
-        // the groove's band below, glyph centred in the band. It overhangs that
-        // band by 2 px top and bottom, which is invisible and newly harmless —
-        // an icon button paints no ground and no edge any more, so the only
-        // thing drawn is the 16 px glyph, and that lands on the rail's centre
-        // line exactly. The 32 px target is untouched.
+        // block the fader is in — the one alignment defect a listener named
+        // unprompted, and it was 7.5 px. The button is *placed* rather than
+        // centred: [`theme::MUTE_TOP`] above it, which is half a hit target
+        // above the rail. The argument and the measurement are on that token;
+        // `seek_stamp` below makes the same move for the seek groove's
+        // timestamps, which is where the pattern comes from.
         column![
-            Space::with_height(Length::Fixed(theme::PREVIEW_H)),
-            container(glyph_button(
+            Space::with_height(Length::Fixed(theme::MUTE_TOP)),
+            glyph_button(
                 icon::Glyph::speaker(state.muted),
                 state.mute_label,
                 state.interactive,
                 state.mute_pending,
                 Message::ToggleMute,
-            ))
-            .height(Length::Fixed(theme::VOLUME_HIT))
-            .align_y(alignment::Vertical::Center),
+            ),
         ],
         column![
             preview_lane(state.preview, theme::VOLUME_W, theme::LEVEL_W),
@@ -509,7 +503,7 @@ fn volume(player: &PlayerState) -> Element<'_, Message> {
         ],
     ]
     .spacing(theme::GAP_SM)
-    .align_y(iced::Alignment::Center)
+    .align_y(iced::Alignment::Start)
     .width(Length::Fixed(theme::VOLUME_BLOCK_W))
     .height(Length::Fixed(theme::VOLUME_ROW_H))
     .into()
@@ -561,6 +555,7 @@ fn preview_lane(
     width: f32,
     tip_width: f32,
 ) -> Element<'static, Message> {
+    let room = theme::active();
     let mut lane = row![];
     if let Some(preview) = preview {
         let offset = player::preview_offset(&preview, tip_width);
@@ -574,7 +569,7 @@ fn preview_lane(
             .height(Length::Fill)
             .align_x(alignment::Horizontal::Center)
             .align_y(alignment::Vertical::Center)
-            .style(theme::preview_tip),
+            .style(move |_theme| theme::preview_tip(room)),
         );
     }
     container(lane)

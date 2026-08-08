@@ -83,6 +83,7 @@ const SECTIONS: [&str; 1] = ["Playback"];
 /// under a thousand pixels the list and a 640 px form cannot both have their
 /// width and the form is the one being used.
 pub(crate) fn view(player: &PlayerState, window_width: f32) -> Element<'_, Message> {
+    let room = theme::active();
     let beside_the_list = window_width >= theme::SETTINGS_BREAKPOINT;
     let content = container(
         scrollable(
@@ -91,7 +92,7 @@ pub(crate) fn view(player: &PlayerState, window_width: f32) -> Element<'_, Messa
                 .padding(theme::scroll_gutter()),
         )
         .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
-        .style(theme::scrollbar)
+        .style(move |_theme, status| theme::scrollbar(room, status))
         .height(Length::Fill),
     )
     .width(Length::Fixed(content_width(window_width, beside_the_list)))
@@ -164,6 +165,7 @@ fn content_width(window_width: f32, beside_the_list: bool) -> f32 {
 /// <kbd>Ctrl</kbd>+<kbd>,</kbd> sends and the message the top bar's control
 /// sends, so all three are one press.
 fn header() -> Element<'static, Message> {
+    let room = theme::active();
     let back = button(
         text("‹ Library")
             .size(theme::SIZE_META)
@@ -177,7 +179,7 @@ fn header() -> Element<'static, Message> {
     // every navigation.
     .height(Length::Fixed(theme::TRANSPORT_HIT))
     .padding(theme::pad(0.0, theme::GAP_SM))
-    .style(|_theme, status| theme::word_button(status))
+    .style(|_theme, status| theme::word_button(room, status))
     .on_press(Message::ToggleSettings);
     column![
         container(
@@ -191,14 +193,14 @@ fn header() -> Element<'static, Message> {
                 text("Kept in config.toml, and remembered next time.")
                     .size(theme::SIZE_META)
                     .line_height(theme::LEADING_META)
-                    .color(theme::PAPER_FAINT)
+                    .color(room.paper_faint)
                     .wrapping(text::Wrapping::None),
             ]
             .spacing(theme::GAP_LG)
             .align_y(iced::Alignment::Center),
         )
         .padding(theme::pad(theme::GAP_SM + 2.0, theme::GAP_LG)),
-        horizontal_rule(1).style(theme::hairline),
+        horizontal_rule(1).style(move |_theme| theme::hairline(room)),
     ]
     .into()
 }
@@ -212,6 +214,7 @@ fn header() -> Element<'static, Message> {
 /// do anything yet, which is why it is drawn as a selected segment rather than
 /// as a live button that would go nowhere.
 fn section_list() -> Element<'static, Message> {
+    let room = theme::active();
     let mut list = column![].spacing(theme::GAP_XXS);
     for (index, section) in SECTIONS.iter().enumerate() {
         let current = index == 0;
@@ -226,7 +229,7 @@ fn section_list() -> Element<'static, Message> {
             .width(Length::Fill)
             .padding(theme::pad(theme::GAP_SM, theme::GAP_MD))
             .style(move |_theme| {
-                let style = theme::segment(iced::widget::button::Status::Active, current);
+                let style = theme::segment(room, iced::widget::button::Status::Active, current);
                 container::Style {
                     background: style.background,
                     text_color: Some(style.text_color),
@@ -245,6 +248,7 @@ fn section_list() -> Element<'static, Message> {
 /// The ReplayGain section: the mode, what that mode does, the two pre-amps,
 /// clipping prevention, and what it all came to for the track playing now.
 fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
+    let room = theme::active();
     let state = player.replay_gain();
     // No engine, nothing to configure — the same rule the album panel's Play
     // button follows, and for the same reason: a control that cannot act must
@@ -268,7 +272,7 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
             text(state.mode_note())
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_FAINT),
+                .color(room.paper_faint),
         )
         .height(Length::Fixed(theme::SETTING_NOTE_H)),
     ]
@@ -297,7 +301,7 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
                 .text_size(theme::SIZE_META)
                 .text_line_height(theme::LEADING_META)
                 .spacing(theme::GAP_SM)
-                .style(theme::check)
+                .style(move |_theme, status| theme::check(room, status))
                 .on_toggle_maybe(live.then_some(Message::ReplayGainPreventClipping)),
         );
 
@@ -307,13 +311,13 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
     // arithmetic that is not happening (ADR-0013 §2).
     if let Some(readout) = player.replay_gain_readout() {
         section = section.push(readout_block(vec![
-            (readout.gain, theme::PAPER),
-            (readout.detail, theme::PAPER_FAINT),
+            (readout.gain, room.paper),
+            (readout.detail, room.paper_faint),
         ]));
     }
 
     if let Some(note) = player.availability_note() {
-        section = section.push(readout_block(vec![(note.clone(), theme::PAPER_FAINT)]));
+        section = section.push(readout_block(vec![(note.clone(), room.paper_faint)]));
     }
 
     section.into()
@@ -331,16 +335,17 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
 /// One sentence, present tense, about what the setting *does* rather than what
 /// it is — the vocabulary rule the whole product follows.
 fn section_heading(name: &'static str, sentence: &'static str) -> Element<'static, Message> {
+    let room = theme::active();
     column![
         text(name)
             .size(theme::SIZE_EMPHASIS)
             .line_height(theme::LEADING_EMPHASIS)
             .font(theme::MEDIUM)
-            .color(theme::PAPER),
+            .color(room.paper),
         text(sentence)
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
-            .color(theme::PAPER_DIM),
+            .color(room.paper_dim),
     ]
     .spacing(theme::GAP_XXS)
     .into()
@@ -361,7 +366,9 @@ fn section_heading(name: &'static str, sentence: &'static str) -> Element<'stati
 /// they do: it divides two kinds of content inside one column, which is exactly
 /// what the inspector's rule against the shelf does.
 fn readout_block(lines: Vec<(String, iced::Color)>) -> Element<'static, Message> {
-    let mut block = column![horizontal_rule(1).style(theme::hairline)].spacing(theme::GAP_SM);
+    let room = theme::active();
+    let mut block = column![horizontal_rule(1).style(move |_theme| theme::hairline(room))]
+        .spacing(theme::GAP_SM);
     let mut readings = column![].spacing(theme::GAP_XXS);
     for (line, ink) in lines {
         readings = readings.push(
@@ -383,6 +390,7 @@ fn readout_block(lines: Vec<(String, iced::Color)>) -> Element<'static, Message>
 /// order is [`MODES`]', which is Off first: it is the default and the one that
 /// changes nothing.
 fn mode_selector(state: replaygain::ReplayGain, live: bool) -> Element<'static, Message> {
+    let room = theme::active();
     let mut segments = row![].spacing(theme::GAP_XXS);
     for mode in MODES {
         let selected = state.mode() == mode;
@@ -400,14 +408,14 @@ fn mode_selector(state: replaygain::ReplayGain, live: bool) -> Element<'static, 
             )
             .width(Length::Fill)
             .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-            .style(move |_theme, status| theme::segment(status, selected))
+            .style(move |_theme, status| theme::segment(room, status, selected))
             .on_press_maybe(live.then_some(Message::ReplayGainMode(mode))),
         );
     }
     container(segments)
         .width(Length::Fill)
         .padding(theme::SEGMENT_INSET)
-        .style(theme::segmented)
+        .style(move |_theme| theme::segmented(room))
         .into()
 }
 
@@ -426,18 +434,19 @@ fn stepper_row(
     decrease: Message,
     increase: Message,
 ) -> Element<'static, Message> {
+    let room = theme::active();
     row![
         text(label)
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
-            .color(theme::PAPER_DIM)
+            .color(room.paper_dim)
             .wrapping(text::Wrapping::None),
         Space::with_width(Length::Fill),
         container(
             text(value)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER)
+                .color(room.paper)
                 .wrapping(text::Wrapping::None)
         )
         .width(Length::Fixed(theme::SETTING_VALUE_W))
@@ -455,15 +464,16 @@ fn stepper_row(
 /// A minus sign (U+2212), not a hyphen: it is the character that matches the
 /// `+` in width and in height, and these two sit side by side.
 fn stepper(glyph: &'static str, enabled: bool, message: Message) -> Element<'static, Message> {
+    let room = theme::active();
     button(
         container(
             text(glyph)
                 .size(theme::SIZE_BODY)
                 .line_height(theme::LEADING_BODY)
                 .color(if enabled {
-                    theme::PAPER
+                    room.paper
                 } else {
-                    theme::PAPER_MUTED
+                    room.paper_muted
                 }),
         )
         .width(Length::Fill)
@@ -474,7 +484,7 @@ fn stepper(glyph: &'static str, enabled: bool, message: Message) -> Element<'sta
     .width(Length::Fixed(theme::STEPPER_HIT))
     .height(Length::Fixed(theme::STEPPER_HIT))
     .padding(0)
-    .style(theme::transport)
+    .style(move |_theme, status| theme::transport(room, status))
     .on_press_maybe(enabled.then_some(message))
     .into()
 }

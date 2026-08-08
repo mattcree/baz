@@ -69,9 +69,9 @@ use crate::{icon, theme, vm};
 ///
 /// # It is quieter than a real cover, on purpose
 ///
-/// The stops are pulled back toward the sleeve's [`theme::RECESS`] backing by
-/// [`theme::placeholder_ink`], and that is the fix for something plainly wrong
-/// in every wide screenshot of the shelf: at full strength these gradients were
+/// The stops are pulled back toward the sleeve's recess backing by
+/// [`theme::Palette::placeholder_ink`], and that is the fix for something
+/// plainly wrong in every wide screenshot: at full strength these gradients were
 /// the *brightest* objects on a wall of mostly-dark real artwork, so the eye
 /// went first to the records baz knows least about. An album with no cover
 /// should be the quietest tile in its row.
@@ -79,8 +79,9 @@ use crate::{icon, theme, vm};
 /// The hues survive the mix, which is the whole reason the gradient exists:
 /// two albums with no art must still look like two different albums.
 pub(crate) fn gradient_block(album_id: u64, size: f32) -> Element<'static, Message> {
+    let room = theme::active();
     let (c1, c2) = vm::gradient_colors(album_id);
-    let to_color = |c: [u8; 3]| theme::placeholder_ink(Color::from_rgb8(c[0], c[1], c[2]));
+    let to_color = |c: [u8; 3]| room.placeholder_ink(Color::from_rgb8(c[0], c[1], c[2]));
     let gradient = iced::gradient::Linear::new(iced::Radians(2.4))
         .add_stop(0.0, to_color(c1))
         .add_stop(1.0, to_color(c2));
@@ -110,6 +111,7 @@ pub(crate) fn gradient_block(album_id: u64, size: f32) -> Element<'static, Messa
 /// The tooltip opens *below* the button rather than above it: these sit in a
 /// surface's top row, where there is nothing above to open into.
 pub(crate) fn close_button(label: &'static str, message: Message) -> Element<'static, Message> {
+    let room = theme::active();
     let mark = container(
         iced_image(icon::handle(icon::Glyph::Close))
             .width(Length::Fixed(theme::ICON_PX))
@@ -125,7 +127,7 @@ pub(crate) fn close_button(label: &'static str, message: Message) -> Element<'st
             .width(Length::Fixed(theme::TRANSPORT_HIT))
             .height(Length::Fixed(theme::TRANSPORT_HIT))
             .padding(0)
-            .style(theme::transport)
+            .style(move |_theme, status| theme::transport(room, status))
             .on_press(message),
         text(label)
             .size(theme::SIZE_CAPTION)
@@ -134,6 +136,6 @@ pub(crate) fn close_button(label: &'static str, message: Message) -> Element<'st
     )
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)
-    .style(theme::tooltip)
+    .style(move |_theme| theme::tooltip(room))
     .into()
 }

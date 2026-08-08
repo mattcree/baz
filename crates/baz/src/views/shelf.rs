@@ -1,9 +1,10 @@
 //! The album shelf: the virtualized grid, one tile, and the empty states.
 //!
-//! The *math* this surface spends — how many columns fit, which rows
-//! intersect the viewport, how tall the spacers standing in for the rest
-//! are — is [`crate::shelf`], imported here as `geometry` so the two shelves
-//! never read as one thing (see [`crate::views`]).
+//! The *math* this surface spends — how many columns fit, how large the works
+//! in them are, which rows intersect the viewport, how tall the spacers
+//! standing in for the rest are — is [`crate::shelf::Grid`], so the two
+//! shelves never read as one thing (see [`crate::views`]). This file draws a
+//! grid it is handed; it computes none of it.
 
 use iced::widget::{
     Space, button, column, container, image as iced_image, mouse_area, row, scrollable, text,
@@ -12,22 +13,17 @@ use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf, scroll_id};
 use crate::player::PlayerState;
-use crate::shelf::{self as geometry, ART_PX, CELL_H, CELL_W, GRID_PADDING};
+use crate::shelf::Grid;
 use crate::views::gradient_block;
 use crate::{theme, vm};
 
-/// Horizontal tile padding: centers [`ART_PX`] artwork inside [`CELL_W`].
-const TILE_PAD_H: f32 = (CELL_W - ART_PX) / 2.0;
-/// Vertical tile padding.
-const TILE_PAD_V: f32 = theme::GAP_MD;
-
 /// The virtualized grid: spacer, visible rows, spacer (see
-/// [`geometry`](crate::shelf)). The grid block is centered in the viewport;
+/// [`crate::shelf::Grid`]). The grid block is centred in the viewport;
 /// spacers are width-shrunk so the column keeps the rows' width and partial
 /// last rows stay left-aligned within the shelf.
 ///
-/// Each row is [`geometry::block_width`] wide — the width the *columns* take,
-/// not the width the items in that row happen to fill. That is what keeps a
+/// Each row is [`crate::shelf::Grid::block_width`] wide — the width the
+/// *columns* take, not the width the items in that row happen to fill. That is what keeps a
 /// filtered shelf anchored: narrowing 29 albums to 1 used to teleport the
 /// survivor from the first column position to the middle of the window,
 /// because the row it was in was only as wide as itself and the block was
@@ -35,41 +31,61 @@ const TILE_PAD_V: f32 = theme::GAP_MD;
 /// result stays where its column is. It is also what keeps a partial *last*
 /// row left-aligned with the full rows above it.
 ///
-/// The column count comes from [`Shelf::columns`], not from the viewport
-/// directly, so a tile click that opens the inspector does not reflow the grid
-/// out from under the double-click it might be the first half of.
+/// The grid comes from [`Shelf::grid`], not from the viewport directly, so a
+/// tile click that opens the inspector does not reflow the grid — nor resize
+/// every sleeve in it — out from under the double-click it might be the first
+/// half of.
 pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a, Message> {
     if shelf.visible.is_empty() {
         return empty_state(shelf);
     }
-    let cols = shelf.columns();
-    let total_rows = geometry::total_rows(shelf.visible.len(), cols);
+    let hang = shelf.grid();
+    let cols = hang.columns;
+    let total_rows = hang.rows(shelf.visible.len());
     let (first_row, end_row) =
-        geometry::visible_rows(shelf.scroll_offset, shelf.grid_size.height, total_rows);
+        hang.visible_rows(shelf.scroll_offset, shelf.grid_size.height, total_rows);
 
-    let mut grid = column![].padding(GRID_PADDING);
-    grid = grid.push(Space::with_height(Length::Fixed(geometry::spacer_height(
-        first_row,
-    ))));
+    // The wall's top edge is a HANG like every other edge; each row carries
+    // its own trailing HANG in `row_h`, so the bottom edge is one too. The
+    // horizontal margins are not padding at all — they are what centring a
+    // `block_width` block in the viewport leaves, which is how they come out
+    // at exactly HANG whenever the art is uncapped.
+    let mut grid = column![].padding(iced::Padding {
+        top: theme::HANG,
+        right: 0.0,
+        bottom: 0.0,
+        left: 0.0,
+    });
+    grid = grid.push(Space::with_height(Length::Fixed(
+        hang.spacer_height(first_row),
+    )));
     for r in first_row..end_row {
-        let mut cells = row![];
+        let mut cells = row![]
+            .spacing(hang.gutter)
+            .align_y(alignment::Vertical::Top);
         for c in 0..cols {
             let Some(&album_index) = shelf.visible.get(r * cols + c) else {
                 break;
             };
             if let Some(album) = shelf.albums.get(album_index) {
-                cells = cells.push(tile(shelf, album, player.playing_album() == Some(album.id)));
+                cells = cells.push(tile(
+                    shelf,
+                    hang,
+                    album,
+                    player.playing_album() == Some(album.id),
+                ));
             }
         }
         grid = grid.push(
             container(cells)
-                .width(Length::Fixed(geometry::block_width(cols)))
-                .height(Length::Fixed(CELL_H)),
+                .width(Length::Fixed(hang.block_width()))
+                .height(Length::Fixed(hang.row_h))
+                .align_y(alignment::Vertical::Top),
         );
     }
-    grid = grid.push(Space::with_height(Length::Fixed(geometry::spacer_height(
-        total_rows - end_row,
-    ))));
+    grid = grid.push(Space::with_height(Length::Fixed(
+        hang.spacer_height(total_rows - end_row),
+    )));
 
     scrollable(
         container(grid)
@@ -91,10 +107,9 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a,
 ///
 /// A heading at the emphasis size, one line of meta under it saying what to do
 /// about it, and — where the state is *temporary* — a third line naming the
-/// thing that is happening. The same shape every time,
-/// so the three read as one surface in three moods rather than as three
-/// screens; it is the section shape the Settings place uses, at the scale of a
-/// whole wall.
+/// thing that is happening. The same shape every time, so the three read as one
+/// surface in three moods rather than as three screens; it is the section shape
+/// the Settings place uses, at the scale of a whole wall.
 ///
 /// **No spinner and no progress bar** (`docs/REFUSALS.md`): the shelf filling
 /// with covers *is* the scan indicator, and this text exists only for the
@@ -107,6 +122,7 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a,
 /// different lengths make a diamond, which is the one shape a gallery label
 /// never is.
 fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
+    let room = theme::active();
     let query = shelf.query.trim();
     let (line, hint, note) = if query.is_empty() {
         if shelf.scanning {
@@ -133,7 +149,7 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
         text(line)
             .size(theme::SIZE_EMPHASIS)
             .line_height(theme::LEADING_EMPHASIS)
-            .color(theme::PAPER_DIM)
+            .color(room.paper_dim)
     ]
     .spacing(theme::GAP_SM)
     .align_x(iced::Alignment::Start);
@@ -142,7 +158,7 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
             text(hint)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_FAINT),
+                .color(room.paper_faint),
         );
     }
     if let Some(note) = note {
@@ -150,7 +166,7 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
             text(note)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_MUTED),
+                .color(room.heading()),
         );
     }
     container(content).center(Length::Fill).into()
@@ -166,26 +182,26 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
 ///
 /// # What left
 ///
-/// The card. Hover used to raise a [`theme::PLINTH`] rectangle behind the
-/// sleeve and selection raised a [`theme::PLINTH_LIT`] one with a 2 px
-/// hairline edge around it — a third kind of thing, drawn around a work, in a
-/// gallery that has no lines on its walls. The sleeve's contact shadow left
-/// with it (`SHADOW` measured 1.04 : 1 over the wall: a cost with no signal).
+/// The card. Hover used to raise a plinth rectangle behind the sleeve and
+/// selection raised a lit one with a 2 px hairline edge around it — a third
+/// kind of thing, drawn around a work, in a gallery that has no lines on its
+/// walls. The sleeve's contact shadow left with it (it measured 1.04 : 1 over
+/// the wall: a cost with no signal).
 ///
 /// # What states look like now
 ///
 /// | State | Mark |
 /// |---|---|
 /// | rest | none |
-/// | hover | 1 px [`theme::HAIRLINE_STRONG`] rule under the label |
-/// | selected | 2 px [`theme::PAPER_FAINT`] rule under the label |
+/// | hover | 1 px hairline-strong rule under the label, plus the artist line lifting one rung of the ink ramp |
+/// | selected | 2 px paper-faint rule under the label |
 /// | playing | composes with either: the lamp halo around the art, and the dot before the title |
 ///
 /// Hover against selection is a 2× thickness and a ~4× ink step, which is what
 /// the audit's *"hover and selection are nearly the same mark"* finding asked
-/// for; one surface step and a hairline never gave it that. Neither mark is
-/// the accent — selecting a record is not playing one — so the amber in this
-/// grid still means exactly one thing.
+/// for; one surface step and a hairline never gave it that. Neither mark is the
+/// accent — selecting a record is not playing one — so the amber in this grid
+/// still means exactly one thing.
 ///
 /// The rule's lane is reserved at [`theme::SELECTION_EDGE`] in every state, so
 /// a pointer crossing the wall moves nothing. Hover comes from the shelf's own
@@ -195,22 +211,29 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
 ///
 /// # The label
 ///
-/// [`theme::CAPTION_H`] tall — **two lines, always** — rather than as tall as
-/// its contents. Content-driven, a title that took two lines pushed its artist
-/// line down and broke the baseline every other caption in the row sat on; in
-/// a grid whose whole job is calm repetition that was the loudest thing on
-/// screen after the artwork. Reserving the block costs nothing ([`CELL_H`]
-/// already had the room) and the title clips at one line instead, which is the
-/// failure the shelf can afford.
-fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<'a, Message> {
+/// The caption block is [`theme::CAPTION_H`] tall — **two lines, always** —
+/// rather than as tall as its contents. Content-driven, a title that took two
+/// lines pushed its artist line down and broke the baseline every other
+/// caption in the row sat on; in a grid whose whole job is calm repetition
+/// that was the loudest thing on screen after the artwork. Reserving the block
+/// costs nothing (the row pitch already has the room) and the title clips at one
+/// line instead, which is the failure the shelf can afford.
+fn tile<'a>(
+    shelf: &'a Shelf,
+    hang: Grid,
+    album: &'a vm::AlbumVm,
+    playing: bool,
+) -> Element<'a, Message> {
+    let room = theme::active();
+    let edge = hang.art;
     let art: Element<'_, Message> = match shelf.thumbs.peek(&album.id) {
         Some(handle) => iced_image(handle.clone())
-            .width(Length::Fixed(ART_PX))
-            .height(Length::Fixed(ART_PX))
+            .width(Length::Fixed(edge))
+            .height(Length::Fixed(edge))
             .into(),
-        None => gradient_block(album.id, ART_PX),
+        None => gradient_block(album.id, edge),
     };
-    let sleeve = container(art).style(move |_theme| theme::sleeve(playing));
+    let sleeve = container(art).style(move |_theme| theme::sleeve(room, playing));
     let title = album.title.as_deref().unwrap_or("Unknown Album");
     // The *album* artist: one tile per album, captioned by whoever the
     // album is filed under, not by whichever composer happened to be
@@ -231,7 +254,7 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
             .size(theme::SIZE_BODY)
             .line_height(theme::LEADING_BODY)
             .font(theme::MEDIUM)
-            .color(theme::PAPER)
+            .color(room.paper)
             .wrapping(text::Wrapping::None),
     );
     // Selected *and on screen*: a tile whose panel is hidden behind the queue,
@@ -245,19 +268,19 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
     // survives a clip is the *first* line, not the middle of two.
     let caption_lane = |content: Element<'a, Message>| {
         container(content)
-            .width(Length::Fixed(ART_PX))
+            .width(Length::Fixed(edge))
             .height(Length::Fixed(theme::CAPTION_LINE_H))
             .align_y(alignment::Vertical::Top)
             .clip(true)
     };
     let hovered = shelf.hovered_album == Some(album.id);
     // The artist line lifts one rung of the ink ramp under the pointer — the
-    // other half of ADR-0017 step 14's hover state, and the half that works
-    // when the rule is off the bottom of a scrolled viewport.
+    // other half of ADR-0017 step 14's hover state, and the half that still
+    // reads when the rule is the thing your own hand is over.
     let caption_ink = if hovered {
-        theme::PAPER_DIM
+        room.paper_dim
     } else {
-        theme::PAPER_FAINT
+        room.paper_faint
     };
     let caption_block = column![
         caption_lane(title_row.into()),
@@ -270,21 +293,28 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
                 .into(),
         ),
     ]
-    .width(Length::Fixed(ART_PX))
+    .width(Length::Fixed(edge))
     .height(Length::Fixed(theme::CAPTION_H));
-    let label_block = column![caption_block, state_rule(hovered, selected)]
+    let label_block = column![caption_block, state_rule(hovered, selected, edge)]
         .spacing(theme::GAP_XS)
-        .width(Length::Fixed(ART_PX));
+        .width(Length::Fixed(edge));
     mouse_area(
         button(
             column![sleeve, label_block]
-                .spacing(theme::GAP_SM)
-                .width(Length::Fixed(ART_PX)),
+                .spacing(theme::GAP_LG)
+                .width(Length::Fixed(edge)),
         )
-        .width(Length::Fixed(CELL_W))
-        .height(Length::Fixed(CELL_H))
-        .padding(theme::pad(TILE_PAD_V, TILE_PAD_H))
-        .style(move |_theme, status| theme::tile(status, selected))
+        .width(Length::Fixed(edge))
+        // The work, its label and the label's rule — not the row. The row's
+        // remaining `HANG` is the gap to the row below, and a hit area that
+        // swallowed it would make the whole wall one contiguous target with no
+        // space between the works. `RULE_LANE_H` of that gap is spent on the
+        // state rule, which is part of the label rather than part of the gap;
+        // what is left between two works is still more than three quarters of a
+        // `HANG`.
+        .height(Length::Fixed(hang.row_h - theme::HANG + RULE_LANE_H))
+        .padding(0)
+        .style(move |_theme, status| theme::tile(room, status, selected))
         .on_press(Message::AlbumClicked(album.id)),
     )
     .on_enter(Message::TileEntered(album.id))
@@ -292,21 +322,32 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
     .into()
 }
 
+/// What the state rule costs the tile vertically: the gap under the label plus
+/// the lane the rule is drawn in (logical px).
+///
+/// Taken out of the row's trailing `HANG` rather than out of the work or the
+/// label, because it belongs to the label and the label's block is a reserved
+/// slot that may not shrink. At the `Balanced` step that leaves 34 px of clear
+/// wall between one row's rule and the next row's sleeve, which is still more
+/// space than any other product surveyed puts between two covers.
+const RULE_LANE_H: f32 = theme::GAP_XS + theme::SELECTION_EDGE;
+
 /// The tile's whole state vocabulary: a rule under the wall label, at art
 /// width, in a lane that is [`theme::SELECTION_EDGE`] tall whatever it holds.
 ///
 /// The lane is reserved rather than sized to the mark, which is the same
 /// fixed-slot rule the bottom bar's timestamps follow and the reason the mark
 /// can be 0, 1 or 2 px without a row of covers shifting under the pointer.
-fn state_rule(hovered: bool, selected: bool) -> Element<'static, Message> {
+fn state_rule(hovered: bool, selected: bool, edge: f32) -> Element<'static, Message> {
+    let room = theme::active();
     let thickness = theme::tile_rule_h(hovered, selected);
     container(
         container(Space::new(Length::Fill, Length::Fixed(thickness)))
             .width(Length::Fill)
             .height(Length::Fixed(thickness))
-            .style(move |_theme| theme::tile_rule(hovered, selected)),
+            .style(move |_theme| theme::tile_rule(room, hovered, selected)),
     )
-    .width(Length::Fixed(ART_PX))
+    .width(Length::Fixed(edge))
     .height(Length::Fixed(theme::SELECTION_EDGE))
     .align_y(alignment::Vertical::Top)
     .into()
@@ -315,10 +356,11 @@ fn state_rule(hovered: bool, selected: bool) -> Element<'static, Message> {
 /// The playing album's lamp dot: a small amber circle, the amplifier's
 /// power light.
 fn lamp_dot() -> Element<'static, Message> {
+    let room = theme::active();
     container(Space::new(
         Length::Fixed(theme::DOT),
         Length::Fixed(theme::DOT),
     ))
-    .style(theme::lamp_dot)
+    .style(move |_theme| theme::lamp_dot(room))
     .into()
 }

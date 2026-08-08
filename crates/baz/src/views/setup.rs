@@ -28,6 +28,7 @@ const SETUP_INPUT_W: f32 = 460.0;
 /// is not reserved, because this is the one screen in the product where nothing
 /// is playing and nothing may move under a pointer that is not there.
 pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
+    let room = theme::active();
     let heading = column![
         // The wordmark, deliberately unlit. This screen is the first frame baz
         // ever draws and there is nothing playing on it, so the one accent the
@@ -37,12 +38,12 @@ pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
             .font(theme::MEDIUM)
-            .color(theme::heading_ink()),
+            .color(room.heading()),
         text("Where's your music?")
             .size(theme::SIZE_HERO)
             .line_height(theme::LEADING_HERO)
             .font(theme::SEMIBOLD)
-            .color(theme::PAPER),
+            .color(room.paper),
     ]
     .spacing(theme::GAP_SM)
     .align_x(iced::Alignment::Start);
@@ -56,14 +57,14 @@ pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
                 .size(theme::SIZE_EMPHASIS)
                 .line_height(theme::LEADING_EMPHASIS)
                 .width(Length::Fixed(SETUP_INPUT_W))
-                .style(theme::input),
+                .style(move |_theme, status| theme::input(room, status)),
             // One line of copy, and it says what happens next rather than what
             // to do — the folder is the only instruction the screen needs and
             // the field already carries it.
             text("Covers land on the wall as they are read. Nothing waits for the scan.")
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_DIM),
+                .color(room.paper_dim),
         ]
         .spacing(theme::GAP_SM)
         .align_x(iced::Alignment::Start),
@@ -75,14 +76,14 @@ pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
             text(error.as_str())
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::ALERT),
+                .color(room.alert),
         );
     }
     content = content.push(
         text("Enter confirms · next time baz remembers, or run baz DIR")
             .size(theme::SIZE_CAPTION)
             .line_height(theme::LEADING_CAPTION)
-            .color(theme::heading_ink()),
+            .color(room.heading()),
     );
     // The block is exactly as wide as the field it is built around, and that
     // block is centred in the window — so the copy wraps against the same right

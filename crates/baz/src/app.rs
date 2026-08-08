@@ -67,7 +67,7 @@ const WINDOW: Size = Size::new(1280.0, 860.0);
 
 /// How often the grid checks whether its held column count has expired.
 ///
-/// Subscribed **only** while a hold stands (see [`shelf::ColumnHold`]), which
+/// Subscribed **only** while a hold stands (see [`shelf::GridHold`]), which
 /// is at most [`shelf::DOUBLE_CLICK`] after a tile click, so this is a handful
 /// of ticks per click and nothing at all the rest of the time. Coarse on
 /// purpose: the hold's job is to survive one gesture, and the reflow landing a
@@ -95,7 +95,14 @@ pub(crate) fn search_id() -> text_input::Id {
 /// and [`theme::SANS`] is named as the default so that a `text` widget with no
 /// font of its own gets a real face rather than the platform's guess at
 /// `Family::SansSerif` (see `font.rs` for what that guess used to cost).
+///
+/// **The room is resolved here too, and before anything draws** — the glyph
+/// sheet bakes the room's ink into a sprite on first use ([`crate::icon`]), so
+/// every read of `theme::active()` in the process has to see the same answer
+/// (ADR-0017 §1.5).
 pub fn run(started: Instant, cli_dir: Option<PathBuf>) -> iced::Result {
+    let room = theme::install();
+    println!("[startup] room: {}", room.name);
     let mut app = iced::application("baz", App::update, App::view)
         .subscription(App::subscription)
         .theme(|_| theme::theme())
@@ -211,7 +218,7 @@ pub(crate) enum Message {
     /// [`Self::QueueRowLeft`] carries which row.
     TileLeft(u64),
     /// The grid's held column count may have expired — ticked only while one
-    /// is held (see [`shelf::ColumnHold`]).
+    /// is held (see [`shelf::GridHold`]).
     ColumnHoldTick,
     /// Queue the album's tracks and play (side-panel Play, tile
     /// double-click).
@@ -1191,8 +1198,8 @@ impl App {
             // Only while a tile click is holding the grid's columns still, and
             // never otherwise: the hold's expiry is the one layout change with
             // no input behind it, so it is the one thing that needs a clock to
-            // notice it. (See [`shelf::ColumnHold`].)
-            if state.column_hold.holding() {
+            // notice it. (See [`shelf::GridHold`].)
+            if state.grid_hold.holding() {
                 subs.push(iced::time::every(COLUMN_HOLD_TICK).map(|_| Message::ColumnHoldTick));
             }
         }
@@ -1277,10 +1284,10 @@ pub(crate) struct Shelf {
     pub(crate) hovered_album: Option<u64>,
     /// Last tile click, for double-click-to-play detection.
     last_click: Option<(u64, Instant)>,
-    /// The column count pinned across the reflow a tile click causes, so the
-    /// tile does not move between the two presses of a double-click (see
-    /// [`shelf::ColumnHold`]).
-    pub(crate) column_hold: shelf::ColumnHold,
+    /// The grid width pinned across the reflow a tile click causes, so the
+    /// tile does not move — nor change size — between the two presses of a
+    /// double-click (see [`shelf::GridHold`]).
+    pub(crate) grid_hold: shelf::GridHold,
 }
 
 impl Shelf {
@@ -1331,7 +1338,7 @@ impl Shelf {
             last_scan_log: Instant::now(),
             hovered_album: None,
             last_click: None,
-            column_hold: shelf::ColumnHold::default(),
+            grid_hold: shelf::GridHold::default(),
         };
         let task = Task::batch([
             text_input::focus(search_id()),
@@ -1380,7 +1387,7 @@ impl Shelf {
                 // Dragging the window's edge is not the gesture the hold
                 // protects, and holding a stale count through a resize would
                 // draw columns the window no longer has room for.
-                self.column_hold.release();
+                self.grid_hold.release();
                 self.request_visible_thumbs()
             }
             Message::ClosePanel => self.reflow(Selection::close),
@@ -1419,7 +1426,7 @@ impl Shelf {
                 Task::none()
             }
             Message::ColumnHoldTick => {
-                if self.column_hold.expire(Instant::now()) {
+                if self.grid_hold.expire(Instant::now()) {
                     // The gesture is over: let the reflow the click deferred
                     // actually land, and fetch art for whatever it revealed.
                     return self.request_visible_thumbs();
@@ -1473,7 +1480,7 @@ impl Shelf {
         let before = inspector_width(&self.selection);
         transition(&mut self.selection);
         self.grid_size.width += before - inspector_width(&self.selection);
-        self.column_hold.release();
+        self.grid_hold.release();
         self.request_visible_thumbs()
     }
 
@@ -1510,27 +1517,29 @@ impl Shelf {
         now: Instant,
         transition: impl FnOnce(&mut Selection),
     ) -> Task<Message> {
-        // Read the count the grid is *currently* laying out with, before the
-        // transition (and before `reflow` drops any hold that stands).
-        let held = self.columns();
+        // Read the width the grid is *currently* laying out with, before the
+        // transition (and before `reflow` drops any hold that stands). The
+        // width rather than the count, because with a fluid cell the count is
+        // only half of where a tile is: see [`shelf::GridHold`].
+        let held = self.grid().width;
         let occupied = self.selection.inspecting().is_some();
         let task = self.reflow(transition);
         if self.selection.inspecting().is_some() != occupied {
-            self.column_hold.hold(held, now);
+            self.grid_hold.hold(held, now);
         }
         task
     }
 
-    /// The column count the grid lays out with: what the viewport measures,
-    /// unless a tile click is holding it still (see [`shelf::ColumnHold`]).
+    /// The hang the grid lays out with: resolved for what the viewport
+    /// measures, unless a tile click is holding the width still (see
+    /// [`shelf::GridHold`]).
     ///
     /// One answer, read by the view that draws the rows and by the thumbnail
     /// prefetch that decides which of them to decode art for — a prefetch
     /// working from a different grid than the one on screen would request the
     /// wrong tiles for exactly the 400 ms the hold lasts.
-    pub(crate) fn columns(&self) -> usize {
-        self.column_hold
-            .columns(shelf::columns(self.grid_size.width))
+    pub(crate) fn grid(&self) -> shelf::Grid {
+        shelf::Grid::new(self.grid_hold.width(self.grid_size.width))
     }
 
     /// Recompute `visible` for the current query (shelf order preserved —
@@ -1633,10 +1642,11 @@ impl Shelf {
     /// neither cached, in flight, nor known-absent. Ported from the spike;
     /// `get` (not `peek`) refreshes LRU recency for visible entries.
     fn request_visible_thumbs(&mut self) -> Task<Message> {
-        let cols = self.columns();
-        let rows = shelf::total_rows(self.visible.len(), cols);
+        let hang = self.grid();
+        let cols = hang.columns;
+        let rows = hang.rows(self.visible.len());
         let (first_row, end_row) =
-            shelf::visible_rows(self.scroll_offset, self.grid_size.height, rows);
+            hang.visible_rows(self.scroll_offset, self.grid_size.height, rows);
         let start = (first_row * cols).min(self.visible.len());
         let end = (end_row * cols).min(self.visible.len());
         let mut tasks = Vec::new();
@@ -1678,6 +1688,7 @@ impl Shelf {
     /// four-way one the rail needed, and the shelf's width still has exactly
     /// two values.
     fn view<'a>(&'a self, player: &'a PlayerState) -> Element<'a, Message> {
+        let room = theme::active();
         // A selection whose album vanished under a rescan renders no panel
         // rather than an empty one; the next scroll event squares the grid
         // estimate up.
@@ -1689,7 +1700,7 @@ impl Shelf {
         let body: Element<'_, Message> = match inspector {
             Some(panel) => row![
                 views::shelf::view(self, player),
-                vertical_rule(1).style(theme::hairline),
+                vertical_rule(1).style(move |_theme| theme::hairline(room)),
                 panel
             ]
             .into(),
@@ -2130,46 +2141,54 @@ mod tests {
     }
 
     /// The hold that repairs double-click-to-play, exercised through the state
-    /// the update loop actually keeps: the column count the grid lays out with
-    /// does not move while a click's gesture could still be completed by a
-    /// second press, and does move once it cannot.
+    /// the update loop actually keeps: the grid the shelf lays out with does
+    /// not move while a click's gesture could still be completed by a second
+    /// press, and does move once it cannot.
     ///
-    /// The timing rule itself is `shelf::ColumnHold`'s and is tested there;
-    /// what is pinned here is that `app.rs` spends it on the *same* answer the
-    /// grid and the thumbnail prefetch both read.
+    /// The timing rule itself is `shelf::GridHold`'s and is tested there; what
+    /// is pinned here is that `app.rs` spends it on the *same* answer the grid
+    /// and the thumbnail prefetch both read — and that with a fluid cell the
+    /// held answer is the whole hang, sleeve size included, not only a count.
     #[test]
     fn a_tile_click_holds_the_grids_columns_for_the_double_click_window() {
         let now = Instant::now();
         let mut selection = Selection::new();
-        let mut hold = shelf::ColumnHold::default();
+        let mut hold = shelf::GridHold::default();
 
-        // The shipped window with the inspector closed: five columns.
+        // The shipped window with the inspector closed: four columns of 270.
         let mut width = WINDOW.width;
-        let columns = |hold: shelf::ColumnHold, width: f32| hold.columns(shelf::columns(width));
-        assert_eq!(columns(hold, width), 5);
+        let hang = |hold: shelf::GridHold, width: f32| shelf::Grid::new(hold.width(width));
+        assert_eq!(hang(hold, width).columns, 4);
+        let before = hang(hold, width);
 
         // A tile click opens the inspector. The shelf's width drops by one
-        // panel — which on its own is a five-to-three reflow, and the tile the
-        // pointer is over moves 180 px.
-        let pinned = columns(hold, width);
+        // panel — which on its own is a four-to-three reflow, and the tile the
+        // pointer is over moves.
+        let pinned = hang(hold, width).width;
         let occupied = selection.inspecting().is_some();
         selection.select(1);
         width -= inspector_width(&selection);
-        assert_eq!(shelf::columns(width), 3, "the measured grid did reflow");
+        assert_eq!(
+            shelf::Grid::new(width).columns,
+            3,
+            "the measured grid did reflow"
+        );
         assert_ne!(selection.inspecting().is_some(), occupied);
         hold.hold(pinned, now);
 
-        // …and the grid keeps laying out five, so the second press of the
-        // double-click lands on the tile it was aimed at.
-        assert_eq!(columns(hold, width), 5);
+        // …and the grid keeps laying out four columns of 270, so the second
+        // press of the double-click lands on the tile it was aimed at: the
+        // whole hang is held, not only its count.
+        assert_eq!(hang(hold, width), before);
         assert!(hold.holding(), "the app ticks while this stands");
         assert!(!hold.expire(now + shelf::DOUBLE_CLICK / 2));
-        assert_eq!(columns(hold, width), 5);
+        assert_eq!(hang(hold, width), before);
 
         // Once a second press could no longer be part of the gesture, the
         // reflow the click asked for lands — deferred, never cancelled.
         assert!(hold.expire(now + shelf::DOUBLE_CLICK));
-        assert_eq!(columns(hold, width), 3);
+        assert_eq!(hang(hold, width).columns, 3);
+        assert_ne!(hang(hold, width), before);
         assert!(!hold.holding(), "and the tick subscription goes away");
     }
 

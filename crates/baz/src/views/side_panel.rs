@@ -81,6 +81,7 @@ pub(crate) fn view<'a>(
     album: &'a vm::AlbumVm,
     player: &'a PlayerState,
 ) -> Element<'a, Message> {
+    let room = theme::active();
     let playing = player.playing_album() == Some(album.id);
     let art_edge = theme::PANEL_W - 2.0 * PANEL_PAD;
     let art: Element<'_, Message> = match shelf.thumbs.peek(&album.id) {
@@ -89,7 +90,7 @@ pub(crate) fn view<'a>(
             .into(),
         None => gradient_block(album.id, art_edge),
     };
-    let sleeve = container(art).style(move |_theme| theme::sleeve(playing));
+    let sleeve = container(art).style(move |_theme| theme::sleeve(room, playing));
     let chosen = shelf.edition_choice.get(&album.id).copied();
     let edition = vm::selected_edition(album, chosen);
     // A soundtrack grouped under one album artist keeps its per-cue
@@ -155,14 +156,14 @@ pub(crate) fn view<'a>(
             text(hint)
                 .size(theme::SIZE_CAPTION)
                 .line_height(theme::LEADING_CAPTION)
-                .color(theme::PAPER_FAINT),
+                .color(room.paper_faint),
         );
 
     container(content)
         .width(Length::Fixed(theme::PANEL_W))
         .height(Length::Fill)
         .padding(PANEL_PAD)
-        .style(theme::panel)
+        .style(move |_theme| theme::panel(room))
         .into()
 }
 
@@ -192,13 +193,14 @@ fn track_list<'a>(
     rows: Vec<Element<'a, Message>>,
     details: Element<'a, Message>,
 ) -> Element<'a, Message> {
+    let room = theme::active();
     scrollable(
         column![Column::with_children(rows).spacing(theme::GAP_XXS), details]
             .spacing(theme::GAP_XL)
             .padding(theme::scroll_gutter()),
     )
     .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
-    .style(theme::scrollbar)
+    .style(move |_theme, status| theme::scrollbar(room, status))
     .height(Length::Fill)
     .into()
 }
@@ -212,7 +214,7 @@ fn track_list<'a>(
 /// [`theme::primary`], where the argument for an outline rather than an amber
 /// slab lives.
 ///
-/// The glyph is [`theme::PAPER`] rather than amber, and that is a deviation
+/// The glyph is [`room.paper`] rather than amber, and that is a deviation
 /// from `.interface-design/system.md` §5 taken deliberately and cheaply:
 /// [`crate::icon`] rasterises one sprite sheet in one ink, so a second colour
 /// costs a second sheet and names an amber token in a module the accent
@@ -224,6 +226,7 @@ fn track_list<'a>(
 /// [`theme::TRANSPORT_HIT`] tall and the column's full width, so it reads as
 /// the panel's one commitment rather than as another button in a row of them.
 fn play_album(album: u64, live: bool) -> Element<'static, Message> {
+    let room = theme::active();
     button(
         row![
             iced_image(icon::handle(icon::Glyph::Play))
@@ -242,7 +245,7 @@ fn play_album(album: u64, live: bool) -> Element<'static, Message> {
     .width(Length::Fill)
     .height(Length::Fixed(theme::TRANSPORT_HIT))
     .padding(theme::pad(0.0, theme::GAP_MD))
-    .style(theme::primary)
+    .style(move |_theme, status| theme::primary(room, status))
     .on_press_maybe(live.then_some(Message::PlayAlbum(album)))
     .into()
 }
@@ -264,12 +267,13 @@ fn play_album(album: u64, live: bool) -> Element<'static, Message> {
 /// name of the data that exists; sides arrive here unchanged the day the
 /// scanner reads one.
 fn disc_header(disc: u32) -> Element<'static, Message> {
+    let room = theme::active();
     container(
         text(format!("DISC {disc}"))
             .size(theme::SIZE_CAPTION)
             .line_height(theme::LEADING_CAPTION)
             .font(theme::MEDIUM)
-            .color(theme::heading_ink())
+            .color(room.heading())
             .wrapping(text::Wrapping::None),
     )
     .padding(theme::pad(theme::GAP_SM, theme::GAP_XS))
@@ -293,6 +297,7 @@ fn disc_header(disc: u32) -> Element<'static, Message> {
 /// Empty when the scan read nothing at all, in which case the block is not
 /// drawn: a heading over nothing is worse than no heading.
 fn details<'a>(album: &'a vm::AlbumVm, edition: Option<&'a vm::EditionVm>) -> Element<'a, Message> {
+    let room = theme::active();
     let rows = vm::details(album, edition);
     if rows.is_empty() {
         return Space::with_height(Length::Fixed(0.0)).into();
@@ -309,7 +314,7 @@ fn details<'a>(album: &'a vm::AlbumVm, edition: Option<&'a vm::EditionVm>) -> El
                         text(label)
                             .size(theme::SIZE_META)
                             .line_height(theme::LEADING_META)
-                            .color(theme::PAPER_MUTED)
+                            .color(room.paper_muted)
                             .wrapping(text::Wrapping::None)
                     )
                     .width(Length::Fixed(theme::FIELD_LABEL_W))
@@ -317,7 +322,7 @@ fn details<'a>(album: &'a vm::AlbumVm, edition: Option<&'a vm::EditionVm>) -> El
                     text(value)
                         .size(theme::SIZE_META)
                         .line_height(theme::LEADING_META)
-                        .color(theme::PAPER_DIM)
+                        .color(room.paper_dim)
                         .wrapping(text::Wrapping::None),
                 ]
                 .spacing(theme::GAP_SM),
@@ -327,12 +332,12 @@ fn details<'a>(album: &'a vm::AlbumVm, edition: Option<&'a vm::EditionVm>) -> El
         );
     }
     column![
-        horizontal_rule(1).style(theme::hairline),
+        horizontal_rule(1).style(move |_theme| theme::hairline(room)),
         text("Details")
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
             .font(theme::MEDIUM)
-            .color(theme::heading_ink()),
+            .color(room.heading()),
         table,
     ]
     .spacing(theme::GAP_SM)
@@ -349,6 +354,7 @@ fn album_header<'a>(
     album: &'a vm::AlbumVm,
     edition: Option<&'a vm::EditionVm>,
 ) -> Element<'a, Message> {
+    let room = theme::active();
     let title = album.title.as_deref().unwrap_or("Unknown Album");
     let artist = album.artist.label();
     let tracks = edition.map_or(0, |edition| edition.tracks.len());
@@ -383,19 +389,19 @@ fn album_header<'a>(
                 .size(theme::SIZE_TITLE)
                 .line_height(theme::LEADING_TITLE)
                 .font(theme::SEMIBOLD)
-                .color(theme::PAPER)
+                .color(room.paper)
         )
         .max_height(2.0 * theme::SIZE_TITLE * theme::LEADING_TITLE)
         .clip(true),
         text(artist)
             .size(theme::SIZE_EMPHASIS)
             .line_height(theme::LEADING_EMPHASIS)
-            .color(theme::PAPER_DIM),
+            .color(room.paper_dim),
         // The catalogue line: `1992 · 13 tracks · 45:35`.
         text(meta.join(" · "))
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
-            .color(theme::PAPER_FAINT),
+            .color(room.paper_faint),
     ]
     .spacing(theme::GAP_XS);
     if let Some(line) = edition.and_then(vm::EditionVm::encoding_line) {
@@ -403,7 +409,7 @@ fn album_header<'a>(
             text(line)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_FAINT),
+                .color(room.paper_faint),
         );
     }
     header.into()
@@ -420,6 +426,7 @@ fn edition_selector<'a>(
     album: &'a vm::AlbumVm,
     selected: Option<&'a vm::EditionVm>,
 ) -> Element<'a, Message> {
+    let room = theme::active();
     let selected_key = selected.map(|edition| edition.key);
     let mut segments = row![].spacing(theme::GAP_XXS);
     for edition in &album.editions {
@@ -438,14 +445,14 @@ fn edition_selector<'a>(
             )
             .width(Length::Fill)
             .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-            .style(move |_theme, status| theme::segment(status, is_selected))
+            .style(move |_theme, status| theme::segment(room, status, is_selected))
             .on_press(Message::EditionSelected(album.id, edition.key)),
         );
     }
     container(segments)
         .width(Length::Fill)
         .padding(theme::SEGMENT_INSET)
-        .style(theme::segmented)
+        .style(move |_theme| theme::segmented(room))
         .into()
 }
 
@@ -474,6 +481,7 @@ fn track_row(
     playing: bool,
     press: Option<Message>,
 ) -> Element<'_, Message> {
+    let room = theme::active();
     let duration = track.duration.map(vm::format_duration).unwrap_or_default();
     let marker: Element<'_, Message> = if playing {
         lamp_dot()
@@ -481,7 +489,7 @@ fn track_row(
         text(track.number.map(|n| n.to_string()).unwrap_or_default())
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
-            .color(theme::PAPER_FAINT)
+            .color(room.paper_faint)
             .into()
     };
     // The playing row's title takes the medium weight the now-playing bar and
@@ -502,7 +510,7 @@ fn track_row(
             text(artist)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_DIM)
+                .color(room.paper_dim)
                 .wrapping(text::Wrapping::None),
         );
     }
@@ -534,7 +542,7 @@ fn track_row(
                 text(duration)
                     .size(theme::SIZE_META)
                     .line_height(theme::LEADING_META)
-                    .color(theme::PAPER_FAINT)
+                    .color(room.paper_faint)
                     .wrapping(text::Wrapping::None)
             )
             .width(Length::Fixed(theme::DURATION_W))
@@ -547,7 +555,7 @@ fn track_row(
     )
     .width(Length::Fill)
     .padding(theme::pad(theme::GAP_XS, theme::GAP_XS))
-    .style(move |_theme, status| theme::track_row(status, playing))
+    .style(move |_theme, status| theme::track_row(room, status, playing))
     .on_press_maybe(press)
     .into()
 }
@@ -555,10 +563,11 @@ fn track_row(
 /// The playing track's lamp dot — the same amber circle, and the same token,
 /// the shelf puts beside the playing album and the queue beside its row.
 fn lamp_dot() -> Element<'static, Message> {
+    let room = theme::active();
     container(Space::new(
         Length::Fixed(theme::DOT),
         Length::Fixed(theme::DOT),
     ))
-    .style(theme::lamp_dot)
+    .style(move |_theme| theme::lamp_dot(room))
     .into()
 }
