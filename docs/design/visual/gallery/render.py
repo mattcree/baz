@@ -29,8 +29,18 @@ LAMP_GLOW_A = 0.45
 HALO_BLUR = 24          # was 16: it is now the only shadow in the product
 
 GAP_XXS, GAP_XS, GAP_SM, GAP_MD, GAP_LG, GAP_XL = 2, 4, 8, 12, 16, 24
-HANG = 40
-ART_MIN, ART_MAX, ART_TARGET = 240.0, 320.0, 272.0
+# The density control (03-interface-prior-art.md R7). Three named steps; the
+# hang's four numbers are all a function of the step, so the whole grid
+# parameterises rather than the user overriding a designer's constant.
+#   step -> (HANG, ART_MIN, ART_TARGET, ART_MAX)
+DENSITY = {
+    'Spacious': (48.0, 288.0, 320.0, 320.0),
+    'Balanced': (40.0, 240.0, 272.0, 320.0),      # the default
+    'Dense':    (28.0, 176.0, 200.0, 240.0),
+}
+HANG, ART_MIN, ART_TARGET, ART_MAX = DENSITY['Balanced']
+THUMB_PX = 320.0        # == max ART_MAX over every step: nothing upscales, ever
+INDEX_W = 20.0          # the spine index rail (R8)
 
 SIZE_CAPTION, SIZE_META, SIZE_BODY = 11, 12, 13
 SIZE_EMPHASIS, SIZE_TITLE, SIZE_HERO = 15, 22, 32
@@ -64,23 +74,31 @@ SANS = 'IBM Plex Sans'
 # --------------------------------------------------------------------------
 # The hang (system.md §7) — the specification's arithmetic, verbatim
 # --------------------------------------------------------------------------
-def hang(w):
-    cap = max(1, int((w - HANG) // (ART_MIN + HANG)))
-    n = max(1, min(int(round((w + HANG) / (ART_TARGET + HANG))), cap))
-    art = min(ART_MAX, (w - (n + 1) * HANG) / n)
-    if n > 1:
-        gut = (w - 2 * HANG - n * art) / (n - 1)
-    else:
-        gut = 0.0
-    margin = float(HANG)
-    if gut > 2 * HANG:
-        gut = float(2 * HANG)
+def hang(w, density='Balanced'):
+    """The grid, from the *grid width* — see `grid_width()`, which is not the
+    window width. `floor(x + 0.5)`, never a language's `round`: Python's
+    banker's rounding would send 5.5 columns to 6 and 4.5 to 4."""
+    hg, amin, atgt, amax = DENSITY[density]
+    cap = max(1, int((w - hg) // (amin + hg)))
+    n = max(1, min(int((w + hg) / (atgt + hg) + 0.5), cap))
+    art = min(amax, (w - (n + 1) * hg) / n)
+    gut = (w - 2 * hg - n * art) / (n - 1) if n > 1 else 0.0
+    margin = hg
+    if gut > 2 * hg:
+        gut = 2 * hg
         margin = (w - (n * art + (n - 1) * gut)) / 2
-    return n, art, gut, margin, art + GAP_LG + LABEL_H + HANG
+    return n, art, gut, margin, art + GAP_LG + LABEL_H + hg
+
+
+def grid_width(window_w, with_inspector):
+    """What the hang actually lays out in: the content area less the two lanes
+    the shelf keeps clear on its right — the scrollbar's and the index's."""
+    return (window_w - (inspector_w(window_w) if with_inspector else 0)
+            - SCROLLBAR_W - INDEX_W)
 
 
 def inspector_w(window_w):
-    return max(INSPECTOR_MIN_W, min(INSPECTOR_MAX_W, round(0.28 * window_w)))
+    return max(INSPECTOR_MIN_W, min(INSPECTOR_MAX_W, int(0.28 * window_w + 0.5)))
 
 
 # --------------------------------------------------------------------------
@@ -210,7 +228,7 @@ def sleeve(svg, x, y, size, title, artist, idx):
     seed = h32(title + artist)
     pal = SLEEVE_PALETTES[PAL_OVERRIDE.get(idx, seed % len(SLEEVE_PALETTES))]
     idiom = IDIOM_OVERRIDE.get(idx, (seed >> 8) % 6)
-    gid = f'clip{idx}'
+    gid = f'clip{next(_ids)}'          # unique: `idx` selects a palette, not an id
     svg.defs.append(
         f'<clipPath id="{gid}"><rect x="{x:.2f}" y="{y:.2f}"'
         f' width="{size:.2f}" height="{size:.2f}"/></clipPath>')
@@ -218,6 +236,7 @@ def sleeve(svg, x, y, size, title, artist, idx):
     svg.rect(x, y, size, size, pal[0])
     r = lambda n: ((seed >> (n * 3)) % 1000) / 1000.0
 
+    uid = next(_ids)
     if idiom == 0:                                    # concentric rings
         cx, cy = x + size * (0.3 + 0.4 * r(1)), y + size * (0.3 + 0.4 * r(2))
         for k in range(9, 0, -1):
@@ -251,7 +270,7 @@ def sleeve(svg, x, y, size, title, artist, idx):
                 f' L{x:.2f},{y + size * 0.62:.2f} Z" fill="{pal[2]}"'
                 f' fill-opacity="0.55"/>')
     else:                                             # grain field + block
-        gd = f'grad{idx}'
+        gd = f'grad{uid}'
         svg.defs.append(
             f'<linearGradient id="{gd}" x1="0" y1="0" x2="0.6" y2="1">'
             f'<stop offset="0" stop-color="{pal[1]}"/>'
@@ -290,13 +309,50 @@ def wall_label(svg, x, y, width, title, artist, playing=False, hovered=False,
                  PAPER, 1, opacity=HAIRLINE_STRONG_A)
 
 
+INDEX_KEYS = '#ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+# Which initials the fixture library actually has an album under. The rest are
+# drawn, but at PAPER_MUTED — an index that hides its gaps is lying about the
+# collection.
+INDEX_PRESENT = set('#ABEFGHKLMRSTUV')
+
+
+def spine_index(svg, x, y, h, current=None):
+    """The spine index (03-interface-prior-art.md R8): jump-to-letter.
+
+    Type, not chrome — so the shelf still contains only artwork and type. Never
+    the accent: an index is navigation, not playback truth. When 27 keys do not
+    fit the height, the run subsamples and elided keys render as a 2 px dot,
+    the pattern every phone contact list uses.
+    """
+    step = SIZE_CAPTION * 1.45
+    fits = int(h // step)
+    keys = list(INDEX_KEYS)
+    if fits < len(keys):
+        stride = len(keys) / fits
+        keys = [(INDEX_KEYS[int(i * stride)], i) for i in range(fits)]
+        keys = [(k, True) for k, _ in keys]
+    else:
+        keys = [(k, True) for k in keys]
+    top = y + (h - len(keys) * step) / 2
+    for i, (k, _) in enumerate(keys):
+        ky = top + i * step + SIZE_CAPTION * 0.8
+        if k == current:
+            ink, weight = PAPER, 500
+        elif k in INDEX_PRESENT:
+            ink, weight = PAPER_FAINT, 400
+        else:
+            ink, weight = PAPER_MUTED, 400
+        svg.text(x + INDEX_W / 2, ky, k, SIZE_CAPTION, ink, weight,
+                 anchor='middle')
+
+
 def halo(svg, x, y, size, idx):
     """The one shadow primitive in the product, and it is light, not elevation.
 
     `Shadow { color: LAMP_GLOW, offset: 0, blur_radius: HALO_BLUR }`. iced's
     blur radius is about twice a Gaussian sigma, so 24 renders as sigma 12.
     """
-    fid = f'halo{idx}'
+    fid = f'halo{next(_ids)}'
     svg.defs.append(
         f'<filter id="{fid}" x="-60%" y="-60%" width="220%" height="220%">'
         f'<feGaussianBlur stdDeviation="{HALO_BLUR / 2:.1f}"/></filter>')
@@ -428,20 +484,23 @@ def now_playing_bar(svg, w, y, title='Roygbiv', artist='Boards of Canada',
 # 01 / 02 — the shelf at two window widths
 # --------------------------------------------------------------------------
 def shelf(window_w, window_h, name, with_inspector=False, playing_index=1,
-          hover_index=6, selected_index=None, labels=None, albums=None):
+          hover_index=6, selected_index=None, labels=None, albums=None,
+          density='Balanced'):
     svg = Svg(window_w, window_h, WALL, f'baz shelf @ {window_w}px')
     insp = inspector_w(window_w) if with_inspector else 0
-    shelf_w = window_w - insp
-    n, art, gut, margin, row_h = hang(shelf_w)
+    content_w = window_w - insp
+    shelf_w = grid_width(window_w, with_inspector)
+    n, art, gut, margin, row_h = hang(shelf_w, density)
 
     top_bar(svg, window_w)
     shelf_top = TOP_BAR_H + 1
     shelf_bottom = window_h - BAR_H
 
     # clip the shelf region so partial rows read as scrollable, like the real one
-    svg.defs.append(f'<clipPath id="shelfclip"><rect x="0" y="{shelf_top}"'
+    cid = f'shelfclip{next(_ids)}'
+    svg.defs.append(f'<clipPath id="{cid}"><rect x="0" y="{shelf_top}"'
                     f' width="{shelf_w}" height="{shelf_bottom - shelf_top}"/></clipPath>')
-    svg.raw('<g clip-path="url(#shelfclip)">')
+    svg.raw(f'<g clip-path="url(#{cid})">')
 
     order = albums or ALBUMS
     y = shelf_top + HANG
@@ -466,9 +525,12 @@ def shelf(window_w, window_h, name, with_inspector=False, playing_index=1,
         row += 1
     svg.raw('</g>')
 
-    # the reserved scrollbar lane, drawn quiet
-    svg.rect(shelf_w - SCROLLBAR_W, shelf_top + 40, SCROLLBAR_W - 4, 180, PAPER,
-             r=3, opacity=HAIRLINE_A)
+    # the two lanes the shelf keeps clear on its right: the scrollbar's, and the
+    # spine index — the run of letters down the edge of a card-catalogue drawer
+    svg.rect(content_w - INDEX_W - SCROLLBAR_W + 3, shelf_top + 40,
+             SCROLLBAR_W - 4, 180, PAPER, r=3, opacity=HAIRLINE_A)
+    spine_index(svg, content_w - INDEX_W, shelf_top, shelf_bottom - shelf_top,
+                current='B')
 
     if with_inspector:
         inspector(svg, window_w - insp, TOP_BAR_H + 1, insp,
@@ -480,8 +542,9 @@ def shelf(window_w, window_h, name, with_inspector=False, playing_index=1,
     # the picture is a spec: say what the hang computed, and name the states
     ann_y = shelf_top + HANG - 13
     svg.text(margin, ann_y,
-             f'shelf {shelf_w:.0f} px  →  {n} × {art:.0f} px · gutter {gut:.0f}'
-             f' · margin {margin:.0f} · row pitch {row_h:.1f}  ·  dead gutter 0',
+             f'{density} · window {window_w:.0f} → grid {shelf_w:.0f} px  →  '
+             f'{n} × {art:.0f} px · gutter {gut:.0f} · margin {margin:.0f}'
+             f' · row pitch {row_h:.1f}  ·  dead gutter 0',
              SIZE_CAPTION, PAPER_MUTED)
     if labels:
         for c, word in labels.items():
@@ -509,6 +572,28 @@ TRACKS = [
     ('1969', '4:21', False),
     ('Energy Warning', '0:35', False),
     ('The Beach at Redpoint', '4:20', False),
+]
+
+
+FIELD_LABEL_W = 96.0
+
+# What a metadata-rich release actually looks like (R6): the tradition baz
+# succeeds shows ~20 fields for free, and four lines is a regression for the
+# cataloguer personas. Every row is present only when the scan read one.
+DETAILS = [
+    ('Album artist', 'Boards of Canada'),
+    ('Released', '18 February 2002'),
+    ('Label', 'Warp Records'),
+    ('Catalogue', 'WARPCD101'),
+    ('Genre', 'Electronic · IDM'),
+    ('Discs', '1 of 1'),
+    ('Format', 'FLAC · 16-bit · 44.1 kHz · stereo'),
+    ('Bitrate', '921 kbps average'),
+    ('Size', '236.4 MB'),
+    ('ReplayGain', 'album −7.24 dB · peak 0.988'),
+    ('MusicBrainz', 'e8e9c0f4…'),
+    ('Added', '14 March 2024'),
+    ('Path', '~/Music/Boards of Canada/Geogaddi'),
 ]
 
 
@@ -572,6 +657,19 @@ def inspector(svg, x, y, w, h):
     svg.rect(px + inner - SCROLLBAR_W + 2, ly + 2, SCROLLBAR_W - 4,
              max(24.0, (listed / len(TRACKS)) * (listed * 22 - 4)), PAPER, r=3,
              opacity=HAIRLINE_A)
+    # the condition report, in full, below the track list (R6). Drawn faded at
+    # the panel's foot because in the real surface it is below the fold.
+    dy = ly + listed * 22 + GAP_LG
+    if dy < y + h - 40:
+        hairline(svg, px, dy + 0.5, px + inner, dy + 0.5)
+        svg.text(px, dy + 18, 'Details', SIZE_META, PAPER_MUTED, 500)
+        for i, (k, v) in enumerate(DETAILS):
+            fy = dy + 38 + i * 17
+            if fy > y + h - GAP_XL:
+                break
+            svg.text(px + FIELD_LABEL_W, fy, k, SIZE_META, PAPER_MUTED,
+                     anchor='end')
+            svg.text(px + FIELD_LABEL_W + GAP_MD, fy, v, SIZE_META, PAPER_DIM)
 
 
 def album_inspector_sheet():
@@ -758,6 +856,76 @@ def figures_sheet():
     svg.save('05-figures-specimen.svg')
 
 
+def inspector_sheet_full():
+    """The inspector at `INSPECTOR_MAX_W`, unscrolled, so the whole column can
+    be read at once — including the Details block, which in the real surface is
+    below the fold (03-interface-prior-art.md R6)."""
+    w, h = 900, 1180
+    svg = Svg(w, h, WALL, 'baz album inspector, full column')
+    svg.text(40, 44, 'The album inspector, unscrolled', SIZE_HERO - 8, PAPER, 600)
+    svg.text(40, 68, 'At INSPECTOR_MAX_W 420. Four lines above the fold for '
+                     'Devon; the whole condition report below it for Marta and Karl.',
+             SIZE_META, PAPER_DIM)
+    inspector(svg, 40, 88, INSPECTOR_MAX_W, h - 128)
+    ax = 40 + INSPECTOR_MAX_W + 48
+    notes = [
+        ('the sleeve', 'min(column − 2 × GAP_XL, ART_MAX) = 320, left-aligned'),
+        ('the wall label', 'title 22 SemiBold over artist 15 PAPER_DIM'),
+        ('the catalogue line', 'the selected edition, not the album'),
+        ('the condition report', 'only when the scan read one'),
+        ('Play album', 'LAMP outlined — never a fill'),
+        ('the track list', 'right-aligned durations; the playing row dotted'),
+        ('Details', 'every field the scan has, no disclosure, below the fold'),
+    ]
+    ny = 150
+    for k, v in notes:
+        svg.text(ax, ny, k, SIZE_BODY, PAPER, 500)
+        svg.text(ax, ny + 17, v, SIZE_META, PAPER_FAINT)
+        ny += 48
+    svg.text(ax, ny + 24, 'fooyin shows ~20 fields for free.', SIZE_META, PAPER_DIM)
+    svg.text(ax, ny + 42, 'Four lines was a regression; this is', SIZE_META, PAPER_DIM)
+    svg.text(ax, ny + 60, 'the answer, and it costs zero clicks.', SIZE_META, PAPER_DIM)
+    svg.save('07-inspector-full.svg')
+    return h
+
+
+def density_sheet():
+    """The three density steps at one window width, so R7 is visible."""
+    W = 1280
+    panel_h = 320 + GAP_LG + LABEL_H + 12          # the tallest step's cell
+    svg = Svg(W, 96 + 3 * (panel_h + 56), WALL, 'baz shelf density steps @1280')
+    svg.text(40, 52, 'Density is a user control, not a designer’s constant',
+             SIZE_HERO - 6, PAPER, 600)
+    svg.text(40, 78, 'Three named steps, all four hang numbers a function of the '
+                     'step. Settings → Appearance. Shown at a 1280 px window.',
+             SIZE_EMPHASIS, PAPER_DIM)
+    y = 108
+    for step in ('Spacious', 'Balanced', 'Dense'):
+        gw = W - SCROLLBAR_W - INDEX_W
+        n, art, gut, margin, row_h = hang(gw, step)
+        hg = DENSITY[step][0]
+        note = ' (default)' if step == 'Balanced' else ''
+        svg.text(40, y, f'{step}{note}', SIZE_EMPHASIS, PAPER, 600)
+        svg.text(220, y, f'HANG {hg:.0f} · ART_MIN {DENSITY[step][1]:.0f} · '
+                         f'ART_TARGET {DENSITY[step][2]:.0f} · '
+                         f'ART_MAX {DENSITY[step][3]:.0f}   →   '
+                         f'{n} × {art:.0f} px, gutter {gut:.0f}, margin {margin:.0f}',
+                 SIZE_META, PAPER_FAINT)
+        cid = f'den{next(_ids)}'
+        svg.defs.append(f'<clipPath id="{cid}"><rect x="0" y="{y + 12}"'
+                        f' width="{W}" height="{panel_h}"/></clipPath>')
+        svg.raw(f'<g clip-path="url(#{cid})">')
+        for c in range(n):
+            ax = margin + c * (art + gut)
+            title, artist = ALBUMS[c % len(ALBUMS)]
+            sleeve(svg, ax, y + 24, art, title, artist, c)
+            wall_label(svg, ax, y + 24 + art + GAP_LG, art, title, artist)
+        svg.raw('</g>')
+        y += panel_h + 56
+    svg.save('06-density.svg')
+    return svg.h
+
+
 if __name__ == '__main__':
     shelf(1280, 820, '01-shelf-1280.svg', playing_index=1, hover_index=2,
           selected_index=None,
@@ -770,8 +938,12 @@ if __name__ == '__main__':
     album_inspector_sheet()
     bar_sheet()
     figures_sheet()
+    density_sheet()
+    inspector_sheet_full()
     print()
-    for w in (640, 922, 1120, 1280, 1500, 1920, 2560):
-        n, a, g, m, r = hang(w)
-        print(f'  hang({w:>4}) = {n} cols x {a:6.1f} px, gutter {g:4.1f}, '
-              f'margin {m:5.1f}, row {r:6.1f}')
+    for step in DENSITY:
+        print(f'  --- {step}')
+        for w in (640, 892, 1090, 1250, 1470, 1890, 2530):
+            n, a, g, m, r = hang(w, step)
+            print(f'    grid {w:>4} = {n} cols x {a:6.1f} px, gutter {g:4.1f}, '
+                  f'margin {m:5.1f}, row {r:6.1f}')

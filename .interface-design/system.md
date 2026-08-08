@@ -234,19 +234,29 @@ neighbour *and* from a work to the edge of the wall. The art absorbs all
 remaining width up to `ART_MAX`; past that the margins absorb it.
 
 ```
-HANG        = 40
-ART_MIN     = 240        # never smaller
-ART_MAX     = 320        # == art::THUMB_PX; nothing upscales, ever
-ART_TARGET  = 272        # what the wall wants
+grid_w(W)   = W - inspector_w(W) - SCROLLBAR_LANE - INDEX_W     # NOT the window
 
-columns(w)  = clamp(round((w + HANG) / (ART_TARGET + HANG)),
+columns(w)  = clamp(floor((w + HANG) / (ART_TARGET + HANG) + 0.5),
                     1,
                     max(1, floor((w - HANG) / (ART_MIN + HANG))))
 art(w)      = min(ART_MAX, (w - (columns + 1) * HANG) / columns)
 gutter(w)   = columns > 1 ? (w - 2*HANG - columns*art) / (columns - 1) : 0
               # clamped to 2*HANG; surplus goes to the margins, block centred
-row_h(w)    = art(w) + GAP_LG + LABEL_H + HANG        # = art + 92.4
+row_h(w)    = art(w) + GAP_LG + LABEL_H + HANG
 ```
+
+`floor(x + 0.5)`, never a language's `round`: Rust's `f32::round` is
+half-away-from-zero and Python's is banker's, and a grid whose column count
+depends on which language expressed it is not a specification.
+
+**`HANG`, `ART_MIN`, `ART_TARGET` and `ART_MAX` are all functions of the
+density step** (§7.1). The values below are `Balanced`, the default.
+
+| | `HANG` | `ART_MIN` | `ART_TARGET` | `ART_MAX` |
+|---|---|---|---|---|
+| Spacious | 48 | 288 | 320 | 320 |
+| **Balanced** | **40** | **240** | **272** | **320** |
+| Dense | 28 | 176 | 200 | 240 |
 
 | Shelf width | Columns | Art | Gutter | Margin | Row pitch | Today | Today's dead gutter |
 |---|---|---|---|---|---|---|---|
@@ -272,6 +282,57 @@ exactly one width per transition.
 same ~64 % art coverage as today — but *redistributed*: every spare pixel goes
 between the works instead of pooling at the window's edge, and the works are
 **30 % larger in linear terms and 68 % larger in area** at 1280 px.
+
+### 7.1 Density is a user control
+
+`03-interface-prior-art.md` R7 contradicted an earlier draft of this section:
+making the cell a function of the viewport fixes dead gutters but still leaves
+the user with a designer's constant. Density control is universal outside music
+(Lightroom, Calibre, Steam, Plex, Google Photos) and **two products that removed
+one took durable damage**. Under a direction that deliberately shows *fewer,
+larger* covers this matters more, not less: 300 albums and 40 000 albums do not
+want the same wall.
+
+**Three named steps, in Settings → Appearance. Not a free zoom** — a slider
+makes every screenshot of baz different and every layout bug unreproducible.
+Steps parameterise the hang rather than overriding it, so §7's properties
+(`gutter == HANG` when uncapped, `art ∈ [ART_MIN, ART_MAX]`) hold at every step.
+
+| Step | at a 1280 window | at 1920 | Note |
+|---|---|---|---|
+| **Spacious** | 3 × 320 | 5 × 320 | art pinned at `ART_MAX`; the margins take the slack |
+| **Balanced** | 4 × 262 | 6 × 268 | the default |
+| **Dense** | 5 × 216 | 8 × 205 | roughly what baz ships today |
+
+Named plainly rather than in the room's vocabulary, deliberately: a setting is
+where the software talks about *itself*, and it is the one place baz uses plain
+UI language. Drawn in `docs/design/visual/gallery/06-density.png`.
+
+`ART_MAX` never exceeds `THUMB_PX` at any step, so the *nothing upscales*
+invariant is a property of the system, not of the default. At `Dense` the cache
+holds 320² thumbnails for ~200 px tiles; a density-aware decode size is the
+obvious optimisation and is deliberately not taken here.
+
+### 7.2 The spine index
+
+`03-interface-prior-art.md` R8: losing jump-to-letter was the single most
+concrete regression Sonos users named. **A wall of covers is beautiful at 200
+albums and unusable at 5 000 without an index** — and a gallery direction makes
+scrolling *longer*, so this gets worse under this design, not better.
+
+`INDEX_W` **20 px**, a lane the shelf keeps clear on its right, outside the
+scrollbar's. A–Z plus `#`, `SIZE_CAPTION` at 1.45. Letters the collection has an
+album under are `PAPER_FAINT`; letters it does not are `PAPER_MUTED` — an index
+that hides its gaps lies about the collection. The key under the pointer or at
+the current scroll position is `PAPER` Medium. **Never the accent**: an index is
+navigation, not playback truth. When 27 keys do not fit the height the run
+subsamples, the pattern every phone contact list uses.
+
+It is **type, not chrome**, so §1.2's claim survives intact: the shelf still
+contains exactly two kinds of thing.
+
+Type-to-jump is `/`-scoped, never type-anywhere — the audit (§4.8) already
+resolved that bare letters belong to the transport.
 
 ---
 
@@ -374,7 +435,21 @@ halo when playing) → title `SIZE_TITLE`/1.20 SemiBold `PAPER`, two lines max �
 artist `SIZE_EMPHASIS` `PAPER_DIM` → catalogue line `SIZE_META` `PAPER_FAINT`
 (`1992 · 13 tracks · 45:35`) → condition report `SIZE_META` `PAPER_FAINT`
 (`FLAC · 16-bit · 44.1 kHz`) → edition selector when there is a choice →
-`Play album` → track list, reading width capped at 600 px.
+`Play album` → track list, reading width capped at 600 px → **Details**.
+
+**Details** is the condition report in full: a `HAIRLINE` rule, the word
+`Details` in `SIZE_META` `PAPER_MUTED`, then one row per field — label
+right-aligned in `FIELD_LABEL_W` 96 in `PAPER_MUTED`, value left-aligned in
+`PAPER_DIM`, 17 px pitch, a row only when the scan read one. Album artist,
+Released, Label, Catalogue, Genre, Discs, Format, Bitrate, Size, ReplayGain,
+MusicBrainz, Added, Path.
+
+**No disclosure, no click.** `03-interface-prior-art.md` R6: baz's audience came
+from a product that showed ~20 fields for free, and four lines is a regression
+for Marta and Karl. It sits below the track list, so it is below the fold — the
+wall label carries the essentials and the condition report is on the back of the
+card, which you turn over by scrolling. Devon never sees it; Marta never has to
+ask for it. Drawn in `07-inspector-full.png`.
 
 ### Track / queue row
 `TRACK_NO_W` 24 right-aligned number in `SIZE_META` `PAPER_FAINT` (the lamp dot

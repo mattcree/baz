@@ -45,6 +45,21 @@ does not. What survives, what is superseded, and what is new:
 | The now-playing bar is the best thing in the product | **UPHELD** (§6.5) | Its geometry is untouched. Four reserved slots shrink to their measured worst case. |
 | Motion is 0 ms | **UPHELD** (§7) | |
 
+### 0.1 And what the prior-art study changed
+
+`03-interface-prior-art.md` landed while this revision was being drawn — 16+
+products, three peers installed and rendered. It contradicts one thing in this
+document and adds two.
+
+| Finding | Effect here |
+|---|---|
+| **R7 — there is no density control.** Making the cell a function of *viewport* width fixes dead gutters but is still a designer's constant from the user's side. Density control is universal outside music; Steam and Google Photos both took durable damage for removing one. | **§2.7 is new.** Three named steps parameterise all four hang numbers. The viewport-derived width is kept and *parameterised*, not replaced. |
+| **R8 — no shelf index.** Losing jump-to-letter was Sonos users' loudest concrete complaint. Invisible at 29 albums, fatal at Marta's 40 000 — and a gallery direction makes scrolling *longer*. | **§2.8 is new.** A 20 px spine index, type not chrome, so §1.3's claim survives. |
+| **R6 — the inspector shows four lines where fooyin shows twenty.** A regression for the cataloguer personas. | **§6.2 gains `Details`**: the condition report in full, no disclosure, below the fold. |
+| **R9 — keep a strip of shelf below 940 px.** | **§6.9 is new** (the visual half; the structural decision is `01` §4.3's). |
+| **No evidence for "Plexamp is the UX bar."** Its own axiom is player-first with the library one level down — the inverse of baz's bet. | Revision 1 leaned on that premise; §1.3 replaces it with the measured argument. |
+| **Content share at rest: the tradition gives the collection 0–26 % of the window; baz gives it 73–100 %.** | §1.3. This is the strongest available answer to "sameness is failure", and it is about **proportion**, which is exactly what this revision is for. |
+
 ---
 
 ## 1. Direction
@@ -139,6 +154,33 @@ replaces each:
 | Chrome washed in a colour sampled from the current cover | One hue, from one cover, for one 6 px dot / 4 px rail / halo. **If the wall ever changes colour, this feature has been implemented wrongly.** |
 | A monospaced "data" face for the technical bits — the thing the owner actually complained about | Proportional everywhere, with alignment *measured* rather than substituted for (§3). |
 
+**And the measured argument, which is better than any of the above.**
+`03-interface-prior-art.md` §2.3 rendered the peers and measured the fraction of
+the window each gives the user's own collection at rest:
+
+| Product | Collection's share of the window |
+|---|---|
+| fooyin "Vision" | **0 %** — the library is a collapsed vertical tab |
+| Strawberry | 17 % |
+| fooyin "Simple" | 19 % |
+| fooyin "Obsidian" | 26 % |
+| Lollypop | 87 % |
+| **baz** | **73 %** with the inspector open, **100 %** without |
+
+Only three of sixteen surveyed players open on the user's covers at all, and two
+of those are server clients. **The album-shelf home is unoccupied territory.**
+That is where "a near-black grid is what every media app converges on" is
+answered: not by the palette, which cannot win that argument, but by
+*proportion* — which is what this entire revision is about, and why §2 is the
+longest section in the document.
+
+One correction to a premise revision 1 carried: the study found **no evidence
+for "Plexamp is the UX bar."** Plexamp's own stated axiom is that *the player is
+the primary interface element and sits on top of everything else* — player-first
+with a library attached, with its cover wall one level down. That is the inverse
+of baz's bet. Plexamp is worth citing for its transport's polish and its hover
+preview, and for nothing else.
+
 And one structural claim that no other player makes:
 
 > **The shelf contains exactly two kinds of thing: artwork and type.**
@@ -182,12 +224,15 @@ its neighbour **and** from a work to the edge of the wall. The art absorbs all
 remaining width up to `ART_MAX`; only past that do the margins absorb it.
 
 ```
-HANG        = 40            # GAP_XXL — the grid's one spacing token
+HANG        = 40            # the grid's one spacing token
 ART_MIN     = 240           # a sleeve is never drawn smaller
-ART_MAX     = 320           # == art::THUMB_PX — and nothing ever upscales
+ART_MAX     = 320           # ≤ art::THUMB_PX — and nothing ever upscales
 ART_TARGET  = 272           # the size the wall wants
+                            # all four are functions of the density step — §2.7
 
-columns(w)  = clamp( round((w + HANG) / (ART_TARGET + HANG)),
+grid_w(W)   = W - inspector_w(W) - SCROLLBAR_LANE - INDEX_W
+
+columns(w)  = clamp( floor((w + HANG) / (ART_TARGET + HANG) + 0.5),
                      1,
                      max(1, floor((w - HANG) / (ART_MIN + HANG))) )
 
@@ -198,6 +243,17 @@ gutter(w)   = columns > 1 ? (w - 2*HANG - columns*art) / (columns - 1) : 0
 
 row_h(w)    = art(w) + GAP_LG + LABEL_H + HANG          # = art(w) + 92.4
 ```
+
+**The grid width is not the window width.** The shelf keeps two lanes clear on
+its right — the scrollbar's `SCROLLBAR_LANE` 10 (already reserved whether or not
+the list scrolls) and the spine index's `INDEX_W` 20 (§2.8). At a 1280 px window
+with no inspector the hang lays out in **1250 px**, not 1280. The table in §2.3
+is keyed on grid width for that reason.
+
+**`floor(x + 0.5)`, never a language's `round`.** Rust's `f32::round` is
+half-away-from-zero; Python's is banker's. A grid whose column count depends on
+which language expressed it is not a specification, and 5.5 columns is a case
+this arithmetic actually reaches.
 
 Two properties worth naming, because they are what makes this a system rather
 than a formula:
@@ -218,18 +274,18 @@ width — 240 to 320 across a 640 → 2560 range.
 
 ### 2.3 Worked, so the change is checkable
 
-| Shelf width | Columns | Art | Gutter | Margin | Row pitch | Today | Today's dead gutter |
-|---|---|---|---|---|---|---|---|
-| 640 | 2 | 260 | 40 | 40 | 352.4 | 2 × 208 | 112 px |
-| 760 | 2 | 320 | 40 | 40 | 412.4 | 2 × 208 | 232 px |
-| 860 | 2 | 320 | 80 | 70 | 412.4 | 3 × 208 | 92 px |
-| **922** (1280 − inspector) | 3 | **254** | 40 | 40 | 346.4 | 3 × 208 | **154 px** |
-| 1120 | 3 | 320 | 40 | 40 | 412.4 | 4 × 208 | 112 px |
-| 1160 | 4 | 240 | 40 | 40 | 332.4 | 4 × 208 | 152 px |
-| **1280** (no inspector) | **4** | **270** | 40 | 40 | 362.4 | 5 × 208 | 32 px |
-| 1500 (1920 − inspector) | 5 | 252 | 40 | 40 | 344.4 | 6 × 208 | 12 px |
-| **1920** (no inspector) | **6** | **273.3** | 40 | 40 | 365.7 | 7 × 208 | 192 px |
-| 2560 | 8 | 275 | 40 | 40 | 367.4 | 10 × 208 | 112 px |
+At the `Balanced` step, keyed on **grid width** (the window, less the inspector,
+less the two lanes):
+
+| Window | Grid width | Columns | Art | Gutter | Margin | Row pitch | Today | Today's dead gutter |
+|---|---|---|---|---|---|---|---|---|
+| 670 | 640 | 2 | 260 | 40 | 40 | 352.4 | 2 × 208 | 112 px |
+| **1280** + inspector 358 | **892** | 3 | **244** | 40 | 40 | 336.4 | 3 × 208 | **154 px** |
+| 1120 | 1090 | 3 | 310 | 40 | 40 | 402.4 | 4 × 208 | 112 px |
+| **1280** (no inspector) | **1250** | **4** | **262.5** | 40 | 40 | 354.9 | 5 × 208 | 32 px |
+| 1920 + inspector 420 | 1470 | 5 | 246 | 40 | 40 | 338.4 | 6 × 208 | 12 px |
+| **1920** (no inspector) | **1890** | **6** | **268.3** | 40 | 40 | 360.7 | 7 × 208 | 192 px |
+| 2560 | 2530 | 8 | 271.2 | 40 | 40 | 363.6 | 10 × 208 | 112 px |
 
 Drawn at 1280 in `visual/gallery/01-shelf-1280.png` and at 1920 in
 `02-shelf-1920.png`, with the computed figures printed into each picture.
@@ -242,15 +298,15 @@ were chosen for, and put it at one width rather than smeared across a band.
 ### 2.4 What "generous negative space" means, in numbers
 
 Honestly, and it is not what it sounds like. Art coverage per cell is
-essentially unchanged — 64.9 % today (208² in 240 × 284), 64.5 % at 1280 under
-the new grid (270² in 310 × 362.4). **The generosity is not proportional, it is
-distributional:**
+essentially unchanged — 64.9 % today (208² in 240 × 284), 64.2 % at a 1280
+window under the new grid (262.5² in 302.5 × 354.9). **The generosity is not
+proportional, it is distributional:**
 
 - **Dead gutter goes from 32–192 px to 0 px at every width.** Every spare pixel
   is between two works instead of pooled at the window's edge.
-- **The works get larger, everywhere.** At 1280: 208 → 270 px, **+30 % on the
-  edge and +68 % in area**. At 922 (inspector open): 208 → 254, +22 %. At no
-  width in the table does a sleeve get smaller than it is today.
+- **The works get larger, everywhere.** At a 1280 window: 208 → 262.5 px,
+  **+26 % on the edge and +59 % in area**. With the inspector open: 208 → 244,
+  +17 %. At no width in the table does a sleeve get smaller than it is today.
 - **Fewer of them.** 5 → 4 columns at 1280, 7 → 6 at 1920. This is the
   direction's request taken literally.
 - **The vertical rhythm becomes the horizontal one.** The gap between rows is
@@ -301,7 +357,7 @@ Recomputed from `art.rs`'s own derivation, at the same 150 MiB budget:
 600 → 375" for this change; 375 was wrong — 150 MiB ÷ 400 KiB is exactly 384.)
 
 **The budget stays at 150 MiB.** 384 entries is roughly **8× the live widget
-count**: at 1920 the shelf shows 6 columns over `ceil(922 / 365.7) + 1` = 4
+count**: at 1920 the shelf shows 6 columns over `ceil(922 / 360.7) + 1` = 4
 visible rows plus 2 × `OVERSCAN_ROWS`, i.e. ~48 tiles. The LRU exists to make a
 fling meet decoded art, and 384 entries covers 64 rows — about 23 000 px of
 scroll — before it recycles.
@@ -311,6 +367,100 @@ display a 320 logical px tile still wants 640 device px and gets 320. 320 is
 chosen because it is the largest *logical* size the layout can produce, so at
 1× nothing upscales; the honest fix is a DPI-aware cache and it is not this
 document's.
+
+### 2.7 Density is a user control, not a designer's constant
+
+**This section exists because `03-interface-prior-art.md` R7 contradicted an
+earlier draft of §2.2**, and the contradiction was correct. Making the cell a
+function of viewport width fixes the dead gutter but leaves the user with a
+constant they cannot touch. The study's evidence:
+
+- Density control is **universal outside music** — Lightroom (thumbnail slider,
+  `-`/`+`, `J` to cycle cell modes), Calibre (cover size *and* grid
+  background), Steam, Plex (per-view poster slider), Feishin (`itemSize`,
+  `itemGap`, `itemsPerRow`), Google Photos, Apple Photos.
+- **Nobody in music does it**, which is an opportunity rather than a precedent.
+- **Two products that removed a density level took durable damage**: Steam's
+  grid-size slider (users demanded *"a slider to adjust icon size in GRID
+  MODE"*; Valve later restored a small library view) and Google Photos' year
+  view.
+
+Under a gallery direction this matters **more, not less**. A direction whose
+whole point is *fewer, larger* covers is a direction that has made a strong
+choice on the user's behalf, and Marta's 40 000 albums and Devon's 300 are not
+served by the same wall.
+
+**Three named steps. Not a free zoom.** A slider makes every screenshot of baz
+different, every layout report unreproducible, and every reserved-slot argument
+in this document conditional. Steps also mean the grid's properties hold
+everywhere rather than at one setting.
+
+| Step | `HANG` | `ART_MIN` | `ART_TARGET` | `ART_MAX` | at 1280 | at 1920 |
+|---|---|---|---|---|---|---|
+| **Spacious** | 48 | 288 | 320 | 320 | 3 × 320 | 5 × 320 |
+| **Balanced** (default) | 40 | 240 | 272 | 320 | 4 × 262 | 6 × 268 |
+| **Dense** | 28 | 176 | 200 | 240 | 5 × 216 | 8 × 205 |
+
+Drawn at one window width in `visual/gallery/06-density.png`.
+
+Four things this design gets right that a naive size slider would not:
+
+1. **The step parameterises the hang; it does not override it.** §2.2's
+   properties — `gutter == HANG` wherever the art is uncapped, `art` always
+   within `[ART_MIN, ART_MAX]`, dead gutter zero — hold at all three steps.
+2. **`ART_MAX ≤ THUMB_PX` at every step**, so §2.6's *nothing upscales*
+   invariant is a property of the system rather than of the default.
+3. **`Dense` is roughly what baz ships today** (5 × 216 at 1280 against today's
+   5 × 208). Nobody who likes the current shelf loses it; they gain a name for
+   it.
+4. **`Spacious` pins the art at `ART_MAX` and lets the margins take the
+   slack** — which is exactly the `gutter ≤ 2 × HANG` rule from §2.2 finally
+   earning its keep.
+
+**The cost, stated.** At `Dense` the cache holds 320² thumbnails for ~200 px
+tiles — 2.5× the pixels needed. A density-aware decode size is the obvious
+optimisation and is deliberately not taken here: it would make the LRU's
+contents depend on a setting, which means invalidating the whole cache when the
+setting changes, which is a bigger decision than this document should make.
+Live-widget headroom at the worst case (`Dense`, 2560 px, ~110 live tiles
+against 384 entries) is 3.5×, which is thin but sufficient.
+
+Placement: **Settings → Appearance**, which `01-ux-audit-and-ia.md` §4.5 already
+reserves. The steps are named **plainly rather than in the room's vocabulary**,
+deliberately and consistently with §3.3: a setting is where the software talks
+about *itself*, and everything baz says about itself is plain.
+
+### 2.8 The spine index
+
+**`03-interface-prior-art.md` R8.** The single most concrete regression Sonos
+users named was losing alphabetical jump — *"if you want something beginning
+with a 'T', you have to scroll through hundreds of screens"*. baz's fixture is
+29 albums and Marta's library is 40 000, so this gap is invisible in every
+screenshot anyone has taken of this product.
+
+**And a gallery direction makes it worse.** Fewer, larger covers with more air
+between them means a longer scroll for the same collection: at `Balanced` a
+40 000-album library is ~10 000 rows and roughly 3.5 million pixels of scroll.
+Air is a luxury the collection pays for in distance, and an index is what buys
+it back.
+
+| Part | Spec |
+|---|---|
+| lane | `INDEX_W` **20 px**, on the shelf's right, outside `SCROLLBAR_LANE`; taken off the grid width before `columns()` (§2.2) |
+| keys | `#` then `A`–`Z`, `SIZE_CAPTION` 11 at 1.45, centred in the lane |
+| present in the collection | `PAPER_FAINT` |
+| absent from the collection | `PAPER_MUTED` — **drawn, not hidden**: an index that hides its gaps lies about the collection |
+| current (pointer, or the scroll position's initial) | `PAPER` Medium |
+| accent | **never** — an index is navigation, not playback truth |
+| when 27 keys do not fit | the run subsamples, the pattern every phone contact list uses |
+
+**It is type, not chrome**, so §1.3's claim survives intact: the shelf still
+contains exactly two kinds of thing, artwork and type. It is also the archive's
+own device — the run of letters down the edge of a card-catalogue drawer — which
+is why it belongs to this direction rather than being bolted onto it.
+
+Type-to-jump is **`/`-scoped, never type-anywhere**: the audit (§4.8) already
+resolved that bare letters belong to the transport, and that resolution stands.
 
 ---
 
@@ -825,12 +975,67 @@ the shelf.
 | edition selector | §6.6, only when `editions.len() > 1` |
 | Play album | §5.3 |
 | track list | §6.3, reading width capped at 600 px |
+| **Details** | below, always present — see below |
 | gaps | `GAP_MD` between blocks |
 
 Drawn in `visual/gallery/03-album-inspector.png` — deliberately showing an
 album that is **selected but not playing**, with a *different* album playing in
 the shelf beside it, because selection and playback are different facts and the
-inspector has to be able to show one without the other.
+inspector has to be able to show one without the other. The whole column,
+unscrolled, is `07-inspector-full.png`.
+
+#### Details — the condition report in full
+
+**`03-interface-prior-art.md` R6.** baz's audience came from a product that
+showed roughly twenty fields for free; four lines is a regression for Marta and
+Karl, and it is one this document was about to ship.
+
+| Part | Spec |
+|---|---|
+| separator | a `HAIRLINE` rule, full content width |
+| heading | `Details`, `SIZE_META` `PAPER_MUTED` Medium |
+| field label | right-aligned in `FIELD_LABEL_W` **96**, `SIZE_META` `PAPER_MUTED` — wide enough for `Album artist`, the longest label in the set |
+| field value | left-aligned after `GAP_MD`, `SIZE_META` `PAPER_DIM` |
+| pitch | 17 px per row |
+| presence | a row exists **only when the scan read one** — no `—`, no "Unknown" |
+
+Fields, in this order: Album artist · Released · Label · Catalogue · Genre ·
+Discs · Format · Bitrate · Size · ReplayGain · MusicBrainz · Added · Path.
+
+**No disclosure triangle, no click, no "more" affordance.** It sits below the
+track list, so on any real window it is below the fold: the wall label carries
+the essentials and the condition report is on the back of the card, which you
+turn over by scrolling. Devon never sees it. Marta never has to ask for it.
+That is what progressive disclosure is supposed to mean, and it costs one rule
+and a two-column list.
+
+The label/value pair is a **right-aligned label column**, which is the same
+figure-column discipline as §3.5 applied to text: the pinned edge is the one
+the eye runs down.
+
+### 6.9 The shelf strip, below 940 px
+
+**`03-interface-prior-art.md` R9**, and the structural half of this belongs to
+`01-ux-audit-and-ia.md` §4.3 rather than here. Below 940 px the IA has the
+inspector take the content area and the shelf vanish entirely. Both
+cataloguer-grade peers keep the collection on screen in detail view —
+Lightroom's Filmstrip, Calibre's shared model — and since that regime is also
+where the eventual full-window Album *place* is prototyped, the decision
+propagates.
+
+The visual spec, for whatever the IA decides to call it:
+
+| Part | Spec |
+|---|---|
+| height | `ART_MIN(density)` + 2 × `GAP_MD` — 264 at `Balanced` |
+| sleeves | `ART_MIN(density)`, gutter `HANG`, scrolling horizontally |
+| labels | **none** — at strip scale a two-line label is noise, and the inspector already says which work you are on |
+| selected | the 2 px `PAPER_FAINT` rule beneath it, exactly as §6.1 |
+| playing | the halo, exactly as §6.1 |
+| position | directly above the now-playing bar |
+
+Still artwork and type only — in fact artwork only, which is the strongest
+possible form of §1.3's claim.
 
 ### 6.3 Track and queue rows
 
@@ -919,6 +1124,12 @@ for, unchanged from revision 1 except in their numbers:
 4. **The face change is the risk, and the test is the answer.** Four slots
    shrink; `font.rs`'s advance-width test measures each against the face that
    will draw it. Do not ship the change without it.
+5. **The slots are a ratchet** (`03-interface-prior-art.md` R11). Three vendors
+   bought "visual calm" by removing control density inside two years and all
+   three reversed; the information lost was always position, provenance and
+   skip. **A slot may be added to this bar. None may be removed for
+   tidiness** — and §3.4 shrinking four of them is a change to their *width*,
+   which is the opposite move: the same facts, stated in less room.
 
 ### 6.6 Controls
 
@@ -1056,6 +1267,9 @@ No spring, no bounce, no overshoot.
 | `THUMB_PX` 256 → 320 | none | LRU **600 → 384 entries** at the same 150 MiB (§2.6) |
 | no shadow on tiles | **one fewer quad per tile** | none |
 | the label's hover/selection rule | one `rule` widget on at most two tiles at a time | none |
+| the density control | none — the step is read once per layout pass | at `Dense` the LRU holds 320² entries for ~200 px tiles; headroom falls to 3.5× the live widget count at 2560 px (§2.7) |
+| the spine index | ≤ 27 `text` widgets, never virtualized because it is bounded | 20 px off the grid width |
+| `Details` in the inspector | ≤ 13 `text` pairs, on one surface, below the fold | none |
 | quieter placeholder + letterform | one extra `text` per art-less tile | none |
 | art-derived lamp | none | one histogram per **track change**; sub-millisecond |
 
@@ -1124,9 +1338,11 @@ directory. Each is independently shippable and revertible.
 |---|---|---|---|
 | **B1** | **Delete the tile's chrome.** `theme::tile` → no background, no border, ever. Delete `SHADOW` and `SELECTION_EDGE`; `sleeve()` loses its shadow. | `theme.rs`, `views/shelf.rs` | Strictly a deletion, and it must land before B2 or the mock and the build disagree about what a tile is. |
 | **B2** | **The label's rule** — 1 px `HAIRLINE_STRONG` on hover, 2 px `PAPER_FAINT` on selection; the artist's hover ink lift; `LABEL_H` 36.4; `GAP_LG` from art to label. | `views/shelf.rs`, `theme.rs` | Restores the two states B1 removed, in the new vocabulary. **Sequence after the IA's step 2**, which owns the caption block's height. |
-| **B3** | **The hang** — `HANG`, `ART_MIN`, `ART_MAX`, `ART_TARGET`; `columns` / `art` / `gutter` / `row_h` as functions of shelf width. Extend `the_shelf_virtualizes_at_both_of_the_rails_two_widths` to the width *band*. | `shelf.rs` (pure, tested), `views/shelf.rs` | The only change that touches geometry code. **Sequence after the IA's step 9**, which sets the inspector's width band — the hang is a function of what that leaves. |
-| **B4** | **`THUMB_PX` 320** and the `THUMB_CACHE_ENTRIES` re-derivation to 384. Assert `ART_MAX == THUMB_PX`. | `art.rs` | Must follow B3, or the cache grows for art that has not arrived yet. |
+| **B3** | **The hang** — `HANG`, `ART_MIN`, `ART_MAX`, `ART_TARGET`; `grid_width`; `columns` / `art` / `gutter` / `row_h` as functions of grid width, with `floor(x + 0.5)`. Extend `the_shelf_virtualizes_at_both_of_the_rails_two_widths` to the width *band*. | `shelf.rs` (pure, tested), `views/shelf.rs` | The only change that touches geometry code. **Sequence after the IA's step 9**, which sets the inspector's width band — the hang is a function of what that leaves. |
+| **B4** | **`THUMB_PX` 320** and the `THUMB_CACHE_ENTRIES` re-derivation to 384. Assert `max(ART_MAX) == THUMB_PX` over every density step. | `art.rs` | Must follow B3, or the cache grows for art that has not arrived yet. |
 | **B5** | **`LAMP_GLOW` blur 24**; the shelf's scrollbar takes `theme::scrollbar`. | `theme.rs`, `views/shelf.rs` | Two numbers. |
+| **B6** | **The density control** (§2.7) — the three steps as pure data; the hang's four numbers read from the active step; the setting itself in Settings → Appearance. | `shelf.rs`, `theme.rs`, config, `views/settings.rs` | Must follow B3 (it parameterises B3's arithmetic) **and the IA's step 8**, which creates the Settings place the control lives in. Ship the steps as data with `Balanced` hard-coded first, then the setting: the layout half is testable without a UI. |
+| **B7** | **The spine index** (§2.8) — `INDEX_W`, the lane taken off `grid_width`, the key run, jump-on-click, `/`-scoped type-to-jump. | `shelf.rs`, `views/shelf.rs`, `keys.rs` | Must follow B3 (it changes the grid width) and B6 (its lane must not be re-tuned twice). **This is the one item here that is a feature rather than a restyle**, and it is the one the study says a 40 000-album library cannot ship without. |
 
 ### Phase C — the surfaces the IA is still building
 
@@ -1137,6 +1353,8 @@ IA step that creates the surface, not before it.
 |---|---|---|
 | **C1** | Play album: `LAMP`-outlined, `LAMP_WASH` hover/press; delete `LAMP_INK` and the `LAMP_INK on LAMP` contrast row. | any time after A3 — it is one style function |
 | **C2** | The inspector's flush-left sleeve capped at `ART_MAX`, the catalogue and condition lines, the two-line title cap. | IA step 9 |
+| **C2b** | **Details** (§6.2) — the field list. Near-term it renders only the fields the scanner already has; the rest arrive as the scanner does, and the block is designed so a new field is one row rather than a layout decision. | IA step 9, immediately after C2 |
+| **C2c** | The shelf strip below 940 px (§6.9). | IA step 9 — it is the same breakpoint |
 | **C3** | The popover's `PLINTH_LIT` surface, `RADIUS_CTRL` 4, no shadow, no scrim. | IA step 6 |
 | **C4** | The Settings place's section list and 640 px content cap in the new inks. | IA step 8 |
 | **C5** | First run: Sans SemiBold hero, unlit wordmark. | IA step 12 |
@@ -1168,11 +1386,13 @@ disagrees with the shipped app means one of the two is wrong.
 
 | File | What it is |
 |---|---|
-| `01-shelf-1280.svg` / `.png` | the shelf at 1280 — 4 × 270 px, gutter 40, dead gutter 0. Four tile states named in place: rest, playing (halo + dot), hovered (rule + ink lift), and a paper-pale sleeve for the other extreme |
-| `02-shelf-1920.svg` / `.png` | the shelf at 1920 — 6 × 273 px. The wide-window proportion, the squint test, and a near-black sleeve merging into the wall as designed |
-| `03-album-inspector.svg` / `.png` | 1280 with the inspector open — shelf 922 → 3 × 254 px. The inspector's album is *selected but not playing* while a different one plays in the shelf |
+| `01-shelf-1280.svg` / `.png` | the shelf at a 1280 window (grid 1250) — 4 × 262 px, gutter 40, dead gutter 0. Four tile states named in place: rest, playing (halo + dot), hovered (rule + ink lift), and a paper-pale sleeve for the other extreme |
+| `02-shelf-1920.svg` / `.png` | the shelf at a 1920 window (grid 1890) — 6 × 268 px. The wide-window proportion, the squint test, and a near-black sleeve merging into the wall as designed |
+| `03-album-inspector.svg` / `.png` | 1280 with the inspector open (grid 892) — 3 × 244 px. The inspector's album is *selected but not playing* while a different one plays in the shelf |
 | `04-now-playing-bar.svg` / `.png` | the bar at 2×, with every reserved slot, its worst-case string and its measured width |
 | `05-figures-specimen.svg` / `.png` | the proof that deleting the mono costs nothing: digit advance boxes in all three weights, a real duration column, stacked timestamps, and the one jiggle named |
+| `06-density.svg` / `.png` | the three density steps at one window width (§2.7) |
+| `07-inspector-full.svg` / `.png` | the inspector's whole column unscrolled, including the `Details` block (§6.2) |
 | `render.py` | the generator; `python3 docs/design/visual/gallery/render.py` |
 
 The PNGs are rendered with the **real bundled faces** installed into a scratch

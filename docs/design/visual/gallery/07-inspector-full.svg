@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1180" viewBox="0 0 900 1180">
+<title>baz album inspector, full column</title>
+<defs><clipPath id="clip182"><rect x="64.00" y="112.00" width="320.00" height="320.00"/></clipPath></defs>
+<rect x="0.00" y="0.00" width="900.00" height="1180.00" fill="#0C0D0E"/>
+<text x="40.00" y="44.00" font-family="IBM Plex Sans" font-size="24" font-weight="600" fill="#E8E4DB">The album inspector, unscrolled</text>
+<text x="40.00" y="68.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">At INSPECTOR_MAX_W 420. Four lines above the fold for Devon; the whole condition report below it for Marta and Karl.</text>
+<rect x="40.00" y="88.00" width="420.00" height="1052.00" fill="#141517"/>
+<line x1="40.50" y1="88.00" x2="40.50" y2="1140.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.07"/>
+<g clip-path="url(#clip182)">
+<rect x="64.00" y="112.00" width="320.00" height="320.00" fill="#3A0F18"/>
+<rect x="64.00" y="112.00" width="320.00" height="320.00" fill="#B02B3C" fill-opacity="0.35"/>
+<circle cx="211.36" cy="300.32" r="106.70" fill="#F2D9C6" fill-opacity="0.88"/>
+</g>
+<text x="64.00" y="470.00" font-family="IBM Plex Sans" font-size="22" font-weight="600" fill="#E8E4DB">Geogaddi</text>
+<text x="64.00" y="492.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1">Boards of Canada</text>
+<text x="64.00" y="512.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">2002 · 12 tracks · 35:51</text>
+<text x="64.00" y="528.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">FLAC · 16-bit · 44.1 kHz</text>
+<rect x="64.00" y="544.00" width="372.00" height="32.00" fill="#E3A14E" fill-opacity="0.1" rx="4"/>
+<rect x="64.00" y="544.00" width="372.00" height="32" rx="4" fill="none" stroke="#E3A14E" stroke-width="1"/>
+<path d="M79.60,553.60 L90.00,560.00 L79.60,566.40 Z" fill="#E3A14E" fill-opacity="1.0"/>
+<text x="100.00" y="565.00" font-family="IBM Plex Sans" font-size="13" font-weight="600" fill="#E8E4DB">Play album</text>
+<text x="88.00" y="607.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">1</text>
+<text x="96.00" y="607.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#888680">Ready Lets Go</text>
+<text x="426.00" y="607.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">0:57</text>
+<text x="88.00" y="629.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">2</text>
+<text x="96.00" y="629.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#888680">Music Is Math</text>
+<text x="426.00" y="629.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">5:21</text>
+<rect x="60.00" y="636.00" width="380.00" height="22.00" fill="#1C1D20" rx="3"/>
+<rect x="60.00" y="636.00" width="380.00" height="22" rx="3" fill="none" stroke="#E8E4DB" stroke-opacity="0.15"/>
+<circle cx="83.00" cy="647.00" r="3.00" fill="#E3A14E"/>
+<text x="96.00" y="651.00" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Beware the Friendly Stranger</text>
+<text x="426.00" y="651.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">0:38</text>
+<text x="88.00" y="673.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">4</text>
+<text x="96.00" y="673.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#E8E4DB">Gyroscope</text>
+<text x="426.00" y="673.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">3:35</text>
+<text x="88.00" y="695.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">5</text>
+<text x="96.00" y="695.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#E8E4DB">Dandelion</text>
+<text x="426.00" y="695.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">1:00</text>
+<text x="88.00" y="717.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">6</text>
+<text x="96.00" y="717.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#E8E4DB">Sunshine Recorder</text>
+<text x="426.00" y="717.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">6:14</text>
+<text x="88.00" y="739.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">7</text>
+<text x="96.00" y="739.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#E8E4DB">In the Annexe</text>
+<text x="426.00" y="739.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">1:22</text>
+<text x="88.00" y="761.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">8</text>
+<text x="96.00" y="761.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#E8E4DB">Julie and Candy</text>
+<text x="426.00" y="761.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">6:12</text>
+<text x="88.00" y="783.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">9</text>
+<text x="96.00" y="783.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#E8E4DB">The Smallest Weird Number</text>
+<text x="426.00" y="783.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">1:16</text>
+<text x="88.00" y="805.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">10</text>
+<text x="96.00" y="805.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#E8E4DB">1969</text>
+<text x="426.00" y="805.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">4:21</text>
+<text x="88.00" y="827.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">11</text>
+<text x="96.00" y="827.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#E8E4DB">Energy Warning</text>
+<text x="426.00" y="827.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">0:35</text>
+<text x="88.00" y="849.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">12</text>
+<text x="96.00" y="849.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#E8E4DB">The Beach at Redpoint</text>
+<text x="426.00" y="849.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">4:20</text>
+<rect x="428.00" y="594.00" width="6.00" height="260.00" fill="#E8E4DB" fill-opacity="0.07" rx="3"/>
+<line x1="64.00" y1="872.50" x2="436.00" y2="872.50" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.07"/>
+<text x="64.00" y="890.00" font-family="IBM Plex Sans" font-size="12" font-weight="500" fill="#6C6A66">Details</text>
+<text x="160.00" y="910.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66" text-anchor="end">Album artist</text>
+<text x="172.00" y="910.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">Boards of Canada</text>
+<text x="160.00" y="927.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66" text-anchor="end">Released</text>
+<text x="172.00" y="927.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">18 February 2002</text>
+<text x="160.00" y="944.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66" text-anchor="end">Label</text>
+<text x="172.00" y="944.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">Warp Records</text>
+<text x="160.00" y="961.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66" text-anchor="end">Catalogue</text>
+<text x="172.00" y="961.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">WARPCD101</text>
+<text x="160.00" y="978.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66" text-anchor="end">Genre</text>
+<text x="172.00" y="978.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">Electronic · IDM</text>
+<text x="160.00" y="995.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66" text-anchor="end">Discs</text>
+<text x="172.00" y="995.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">1 of 1</text>
+<text x="160.00" y="1012.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66" text-anchor="end">Format</text>
+<text x="172.00" y="1012.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">FLAC · 16-bit · 44.1 kHz · stereo</text>
+<text x="160.00" y="1029.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66" text-anchor="end">Bitrate</text>
+<text x="172.00" y="1029.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">921 kbps average</text>
+<text x="160.00" y="1046.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66" text-anchor="end">Size</text>
+<text x="172.00" y="1046.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">236.4 MB</text>
+<text x="160.00" y="1063.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66" text-anchor="end">ReplayGain</text>
+<text x="172.00" y="1063.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">album −7.24 dB · peak 0.988</text>
+<text x="160.00" y="1080.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66" text-anchor="end">MusicBrainz</text>
+<text x="172.00" y="1080.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">e8e9c0f4…</text>
+<text x="160.00" y="1097.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66" text-anchor="end">Added</text>
+<text x="172.00" y="1097.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">14 March 2024</text>
+<text x="160.00" y="1114.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66" text-anchor="end">Path</text>
+<text x="172.00" y="1114.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">~/Music/Boards of Canada/Geogaddi</text>
+<text x="508.00" y="150.00" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">the sleeve</text>
+<text x="508.00" y="167.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">min(column − 2 × GAP_XL, ART_MAX) = 320, left-aligned</text>
+<text x="508.00" y="198.00" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">the wall label</text>
+<text x="508.00" y="215.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">title 22 SemiBold over artist 15 PAPER_DIM</text>
+<text x="508.00" y="246.00" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">the catalogue line</text>
+<text x="508.00" y="263.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">the selected edition, not the album</text>
+<text x="508.00" y="294.00" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">the condition report</text>
+<text x="508.00" y="311.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">only when the scan read one</text>
+<text x="508.00" y="342.00" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Play album</text>
+<text x="508.00" y="359.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">LAMP outlined — never a fill</text>
+<text x="508.00" y="390.00" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">the track list</text>
+<text x="508.00" y="407.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">right-aligned durations; the playing row dotted</text>
+<text x="508.00" y="438.00" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Details</text>
+<text x="508.00" y="455.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">every field the scan has, no disclosure, below the fold</text>
+<text x="508.00" y="510.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">fooyin shows ~20 fields for free.</text>
+<text x="508.00" y="528.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">Four lines was a regression; this is</text>
+<text x="508.00" y="546.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">the answer, and it costs zero clicks.</text>
+</svg>
