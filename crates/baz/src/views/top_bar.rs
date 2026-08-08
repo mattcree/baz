@@ -26,6 +26,7 @@ const SEARCH_W: f32 = 360.0;
 /// The slim top bar: the search well on the left, quiet status and the route
 /// to the settings on the right, a hairline rule below.
 pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
+    let room = theme::active();
     let search = text_input("Search artists, albums, tracks…", &shelf.query)
         .id(search_id())
         .on_input(Message::SearchChanged)
@@ -33,12 +34,12 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
         .size(theme::SIZE_BODY)
         .line_height(theme::LEADING_BODY)
         .width(Length::Fixed(SEARCH_W))
-        .style(theme::input);
+        .style(move |_theme, status| theme::input(room, status));
     let mut status = row![
         text(counts_line(shelf))
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
-            .color(theme::PAPER_FAINT)
+            .color(room.paper_faint)
     ]
     .spacing(theme::GAP_SM)
     .align_y(iced::Alignment::Center);
@@ -50,7 +51,7 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
             text("scanning…")
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_DIM),
+                .color(room.paper_dim),
         );
     }
     if shelf.files_skipped > 0 {
@@ -58,7 +59,7 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
             text(format!("{} files skipped", shelf.files_skipped))
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_FAINT),
+                .color(room.paper_faint),
         );
     }
     if let Some(problem) = &shelf.problem {
@@ -66,7 +67,7 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
             text(problem.as_str())
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::ALERT),
+                .color(room.alert),
         );
     }
     status = status.push(settings_toggle());
@@ -77,7 +78,7 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
                 .align_y(iced::Alignment::Center),
         )
         .padding(theme::pad(theme::GAP_SM + 2.0, theme::GAP_LG)),
-        horizontal_rule(1).style(theme::hairline),
+        horizontal_rule(1).style(move |_theme| theme::hairline(room)),
     ]
     .into()
 }
@@ -100,6 +101,7 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
 /// from a small, deliberate set, and a cog would be a new one for a control
 /// that has a short and unambiguous name.
 fn settings_toggle() -> Element<'static, Message> {
+    let room = theme::active();
     button(
         container(
             text("Settings")
@@ -113,7 +115,7 @@ fn settings_toggle() -> Element<'static, Message> {
     )
     .width(Length::Fixed(theme::SETTINGS_TOGGLE_W))
     .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-    .style(|_theme, status| theme::panel_toggle(status, false))
+    .style(|_theme, status| theme::panel_toggle(room, status, false))
     .on_press(Message::ToggleSettings)
     .into()
 }

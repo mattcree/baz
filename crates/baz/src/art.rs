@@ -19,11 +19,20 @@
 //!
 //! Thumbnails are decoded to at most [`THUMB_PX`]² RGBA and cached in an LRU
 //! keyed by album id. The spike's 800-entry cache reached 400–500 MiB RSS;
-//! v0.1 budgets **~150 MiB** for decoded thumbnails, and the entry count is
+//! baz budgets **~150 MiB** for decoded thumbnails, and the entry count is
 //! derived from the real worst-case entry size rather than guessed:
-//! 256 × 256 × 4 B = 256 KiB per thumbnail, so 150 MiB / 256 KiB = **600
+//! 320 × 320 × 4 B = 400 KiB per thumbnail, so 150 MiB / 400 KiB = **384
 //! entries** ([`THUMB_CACHE_ENTRIES`]). GPU-side copies held by `iced`'s
 //! image cache are bounded by the same entry count.
+//!
+//! **The edge went 256 → 320 with the hang** (ADR-0017 step 5/7): the wall now
+//! draws a sleeve at up to [`crate::theme::ART_MAX`] 320 px, and a cache that
+//! stayed at 256 would have made *no artwork is ever drawn larger than its
+//! source* false at every width above ~1120 px. The budget did not move; the
+//! entry count absorbed it, which is 36 % fewer entries for 56 % more pixels
+//! each. That is still ~8× the live widget count at any window size, so the
+//! only thing it costs is a scroll further back through the wall before a
+//! thumbnail has to be decoded again.
 
 use std::path::{Path, PathBuf};
 
@@ -31,11 +40,16 @@ use lofty::picture::PictureType;
 use lofty::prelude::*;
 
 /// Max thumbnail edge in pixels; decoded art is downscaled to fit.
-pub const THUMB_PX: u32 = 256;
+///
+/// **Exactly [`crate::theme::ART_MAX`]**, which is the refusal *no artwork is
+/// ever drawn larger than its source* as an equation;
+/// `the_wall_never_draws_art_larger_than_its_source` in [`crate::shelf`]
+/// asserts the two are one number.
+pub const THUMB_PX: u32 = 320;
 
 /// Thumbnail LRU capacity. Derivation (do not hand-tune without redoing it):
-/// budget 150 MiB ÷ (256 × 256 px × 4 B/px = 256 KiB worst case) = 600.
-pub const THUMB_CACHE_ENTRIES: usize = 600;
+/// budget 150 MiB ÷ (320 × 320 px × 4 B/px = 400 KiB worst case) = 384.
+pub const THUMB_CACHE_ENTRIES: usize = 384;
 
 /// Where an album's art comes from, per the resolution order above.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -235,11 +249,11 @@ mod tests {
         write_wav(&track, None);
         // A cover larger than THUMB_PX must be downscaled to the budgeted
         // size; the cache-entry math in the module docs depends on this.
-        std::fs::write(dir.path().join("cover.png"), png_bytes(600, 300)).expect("write");
+        std::fs::write(dir.path().join("cover.png"), png_bytes(800, 400)).expect("write");
         let (w, h, rgba) = load_thumb(&track).expect("thumb");
         assert!(w <= THUMB_PX && h <= THUMB_PX, "got {w}x{h}");
-        assert_eq!(w, 256, "aspect ratio preserved, long edge = THUMB_PX");
-        assert_eq!(h, 128);
+        assert_eq!(w, THUMB_PX, "aspect ratio preserved, long edge = THUMB_PX");
+        assert_eq!(h, THUMB_PX / 2);
         assert_eq!(rgba.len(), (w * h * 4) as usize);
 
         // An undecodable "cover" is no art, not an error.
@@ -252,8 +266,8 @@ mod tests {
     fn embedded_thumb_round_trip() {
         let dir = tempfile::tempdir().expect("tempdir");
         let track = dir.path().join("01 song.wav");
-        write_wav(&track, Some(png_bytes(300, 300)));
+        write_wav(&track, Some(png_bytes(400, 400)));
         let (w, h, _) = load_thumb(&track).expect("thumb");
-        assert_eq!((w, h), (256, 256));
+        assert_eq!((w, h), (THUMB_PX, THUMB_PX));
     }
 }

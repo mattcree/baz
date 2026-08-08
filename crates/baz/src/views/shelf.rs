@@ -1,31 +1,27 @@
 //! The album shelf: the virtualized grid, one tile, and the empty states.
 //!
-//! The *math* this surface spends — how many columns fit, which rows
-//! intersect the viewport, how tall the spacers standing in for the rest
-//! are — is [`crate::shelf`], imported here as `geometry` so the two shelves
-//! never read as one thing (see [`crate::views`]).
+//! The *math* this surface spends — how many columns fit, how large the works
+//! in them are, which rows intersect the viewport, how tall the spacers
+//! standing in for the rest are — is [`crate::shelf::Grid`], so the two
+//! shelves never read as one thing (see [`crate::views`]). This file draws a
+//! grid it is handed; it computes none of it.
 
 use iced::widget::{Space, button, column, container, image as iced_image, row, scrollable, text};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf, scroll_id};
 use crate::player::PlayerState;
-use crate::shelf::{self as geometry, ART_PX, CELL_H, CELL_W, GRID_PADDING};
+use crate::shelf::Grid;
 use crate::views::gradient_block;
 use crate::{theme, vm};
 
-/// Horizontal tile padding: centers [`ART_PX`] artwork inside [`CELL_W`].
-const TILE_PAD_H: f32 = (CELL_W - ART_PX) / 2.0;
-/// Vertical tile padding.
-const TILE_PAD_V: f32 = theme::GAP_MD;
-
 /// The virtualized grid: spacer, visible rows, spacer (see
-/// [`geometry`](crate::shelf)). The grid block is centered in the viewport;
+/// [`crate::shelf::Grid`]). The grid block is centred in the viewport;
 /// spacers are width-shrunk so the column keeps the rows' width and partial
 /// last rows stay left-aligned within the shelf.
 ///
-/// Each row is [`geometry::block_width`] wide — the width the *columns* take,
-/// not the width the items in that row happen to fill. That is what keeps a
+/// Each row is [`crate::shelf::Grid::block_width`] wide — the width the
+/// *columns* take, not the width the items in that row happen to fill. That is what keeps a
 /// filtered shelf anchored: narrowing 29 albums to 1 used to teleport the
 /// survivor from the first column position to the middle of the window,
 /// because the row it was in was only as wide as itself and the block was
@@ -33,41 +29,61 @@ const TILE_PAD_V: f32 = theme::GAP_MD;
 /// result stays where its column is. It is also what keeps a partial *last*
 /// row left-aligned with the full rows above it.
 ///
-/// The column count comes from [`Shelf::columns`], not from the viewport
-/// directly, so a tile click that opens the inspector does not reflow the grid
-/// out from under the double-click it might be the first half of.
+/// The grid comes from [`Shelf::grid`], not from the viewport directly, so a
+/// tile click that opens the inspector does not reflow the grid — nor resize
+/// every sleeve in it — out from under the double-click it might be the first
+/// half of.
 pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a, Message> {
     if shelf.visible.is_empty() {
         return empty_state(shelf);
     }
-    let cols = shelf.columns();
-    let total_rows = geometry::total_rows(shelf.visible.len(), cols);
+    let hang = shelf.grid();
+    let cols = hang.columns;
+    let total_rows = hang.rows(shelf.visible.len());
     let (first_row, end_row) =
-        geometry::visible_rows(shelf.scroll_offset, shelf.grid_size.height, total_rows);
+        hang.visible_rows(shelf.scroll_offset, shelf.grid_size.height, total_rows);
 
-    let mut grid = column![].padding(GRID_PADDING);
-    grid = grid.push(Space::with_height(Length::Fixed(geometry::spacer_height(
-        first_row,
-    ))));
+    // The wall's top edge is a HANG like every other edge; each row carries
+    // its own trailing HANG in `row_h`, so the bottom edge is one too. The
+    // horizontal margins are not padding at all — they are what centring a
+    // `block_width` block in the viewport leaves, which is how they come out
+    // at exactly HANG whenever the art is uncapped.
+    let mut grid = column![].padding(iced::Padding {
+        top: theme::HANG,
+        right: 0.0,
+        bottom: 0.0,
+        left: 0.0,
+    });
+    grid = grid.push(Space::with_height(Length::Fixed(
+        hang.spacer_height(first_row),
+    )));
     for r in first_row..end_row {
-        let mut cells = row![];
+        let mut cells = row![]
+            .spacing(hang.gutter)
+            .align_y(alignment::Vertical::Top);
         for c in 0..cols {
             let Some(&album_index) = shelf.visible.get(r * cols + c) else {
                 break;
             };
             if let Some(album) = shelf.albums.get(album_index) {
-                cells = cells.push(tile(shelf, album, player.playing_album() == Some(album.id)));
+                cells = cells.push(tile(
+                    shelf,
+                    hang,
+                    album,
+                    player.playing_album() == Some(album.id),
+                ));
             }
         }
         grid = grid.push(
             container(cells)
-                .width(Length::Fixed(geometry::block_width(cols)))
-                .height(Length::Fixed(CELL_H)),
+                .width(Length::Fixed(hang.block_width()))
+                .height(Length::Fixed(hang.row_h))
+                .align_y(alignment::Vertical::Top),
         );
     }
-    grid = grid.push(Space::with_height(Length::Fixed(geometry::spacer_height(
-        total_rows - end_row,
-    ))));
+    grid = grid.push(Space::with_height(Length::Fixed(
+        hang.spacer_height(total_rows - end_row),
+    )));
 
     scrollable(
         container(grid)
@@ -84,6 +100,7 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a,
 /// The shelf with nothing to show: a zero-result search, the first
 /// moments of a scan, or a genuinely empty folder. Quiet text, no modal.
 fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
+    let room = theme::active();
     let query = shelf.query.trim();
     let (line, hint) = if query.is_empty() {
         if shelf.scanning {
@@ -107,7 +124,7 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
         text(line)
             .size(theme::SIZE_EMPHASIS)
             .line_height(theme::LEADING_EMPHASIS)
-            .color(theme::PAPER_DIM)
+            .color(room.paper_dim)
     ]
     .spacing(theme::GAP_SM)
     .align_x(iced::Alignment::Center);
@@ -116,7 +133,7 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
             text(hint)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_FAINT),
+                .color(room.paper_faint),
         );
     }
     container(content).center(Length::Fill).into()
@@ -132,17 +149,24 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
 /// lines pushed its artist line down and broke the baseline every other
 /// caption in the row sat on; in a grid whose whole job is calm repetition
 /// that was the loudest thing on screen after the artwork. Reserving the block
-/// costs nothing ([`CELL_H`] already had the room) and the title clips at one
+/// costs nothing (the row pitch already has the room) and the title clips at one
 /// line instead, which is the failure the shelf can afford.
-fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<'a, Message> {
+fn tile<'a>(
+    shelf: &'a Shelf,
+    hang: Grid,
+    album: &'a vm::AlbumVm,
+    playing: bool,
+) -> Element<'a, Message> {
+    let room = theme::active();
+    let edge = hang.art;
     let art: Element<'_, Message> = match shelf.thumbs.peek(&album.id) {
         Some(handle) => iced_image(handle.clone())
-            .width(Length::Fixed(ART_PX))
-            .height(Length::Fixed(ART_PX))
+            .width(Length::Fixed(edge))
+            .height(Length::Fixed(edge))
             .into(),
-        None => gradient_block(album.id, ART_PX),
+        None => gradient_block(album.id, edge),
     };
-    let sleeve = container(art).style(move |_theme| theme::sleeve(playing));
+    let sleeve = container(art).style(move |_theme| theme::sleeve(room, playing));
     let title = album.title.as_deref().unwrap_or("Unknown Album");
     // The *album* artist: one tile per album, captioned by whoever the
     // album is filed under, not by whichever composer happened to be
@@ -176,7 +200,7 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
     // survives a clip is the *first* line, not the middle of two.
     let caption_lane = |content: Element<'a, Message>| {
         container(content)
-            .width(Length::Fixed(ART_PX))
+            .width(Length::Fixed(edge))
             .height(Length::Fixed(theme::CAPTION_LINE_H))
             .align_y(alignment::Vertical::Top)
             .clip(true)
@@ -187,22 +211,25 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
             text(caption)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_DIM)
+                .color(room.paper_dim)
                 .wrapping(text::Wrapping::None)
                 .into(),
         ),
     ]
-    .width(Length::Fixed(ART_PX))
+    .width(Length::Fixed(edge))
     .height(Length::Fixed(theme::CAPTION_H));
     button(
         column![sleeve, caption_block]
-            .spacing(theme::GAP_SM)
-            .width(Length::Fixed(ART_PX)),
+            .spacing(theme::GAP_LG)
+            .width(Length::Fixed(edge)),
     )
-    .width(Length::Fixed(CELL_W))
-    .height(Length::Fixed(CELL_H))
-    .padding(theme::pad(TILE_PAD_V, TILE_PAD_H))
-    .style(move |_theme, status| theme::tile(status, selected))
+    .width(Length::Fixed(edge))
+    // The work and its label — not the row. The row's remaining `HANG` is the
+    // gap to the row below, and a hit area that swallowed it would make the
+    // whole wall one contiguous target with no space between the works.
+    .height(Length::Fixed(hang.row_h - theme::HANG))
+    .padding(0)
+    .style(move |_theme, status| theme::tile(room, status, selected))
     .on_press(Message::AlbumClicked(album.id))
     .into()
 }
@@ -210,10 +237,11 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
 /// The playing album's lamp dot: a small amber circle, the amplifier's
 /// power light.
 fn lamp_dot() -> Element<'static, Message> {
+    let room = theme::active();
     container(Space::new(
         Length::Fixed(theme::DOT),
         Length::Fixed(theme::DOT),
     ))
-    .style(theme::lamp_dot)
+    .style(move |_theme| theme::lamp_dot(room))
     .into()
 }

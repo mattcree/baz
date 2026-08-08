@@ -16,6 +16,7 @@ const SETUP_INPUT_W: f32 = 460.0;
 /// The first-run screen: heading, folder input, an error line when the last
 /// attempt failed, and the footnote that explains what Enter does.
 pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
+    let room = theme::active();
     let heading = column![
         // The wordmark, deliberately unlit. This screen is the first frame baz
         // ever draws and there is nothing playing on it, so the one accent the
@@ -24,7 +25,7 @@ pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
         text("baz")
             .size(theme::SIZE_EMPHASIS)
             .line_height(theme::LEADING_EMPHASIS)
-            .color(theme::PAPER_FAINT),
+            .color(room.paper_faint),
         text("Where's your music?")
             .size(theme::SIZE_HERO)
             .line_height(theme::LEADING_HERO)
@@ -32,7 +33,7 @@ pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
         text("Point baz at a folder — the shelf fills as it scans.")
             .size(theme::SIZE_EMPHASIS)
             .line_height(theme::LEADING_EMPHASIS)
-            .color(theme::PAPER_DIM),
+            .color(room.paper_dim),
     ]
     .spacing(theme::GAP_SM)
     .align_x(iced::Alignment::Center);
@@ -45,7 +46,7 @@ pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
             .size(theme::SIZE_EMPHASIS)
             .line_height(theme::LEADING_EMPHASIS)
             .width(Length::Fixed(SETUP_INPUT_W))
-            .style(theme::input),
+            .style(move |_theme, status| theme::input(room, status)),
     ]
     .spacing(theme::GAP_XL)
     .align_x(iced::Alignment::Center);
@@ -54,14 +55,14 @@ pub(crate) fn view(setup: &Setup) -> Element<'_, Message> {
             text(error.as_str())
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::ALERT),
+                .color(room.alert),
         );
     }
     content = content.push(
         text("Enter confirms · next time, `baz` remembers (or run `baz DIR`)")
             .size(theme::SIZE_CAPTION)
             .line_height(theme::LEADING_CAPTION)
-            .color(theme::PAPER_FAINT),
+            .color(room.paper_faint),
     );
     container(content).center(Length::Fill).into()
 }

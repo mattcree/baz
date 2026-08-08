@@ -30,7 +30,7 @@
 //! qualifies: not what is queued, not what is selected, not what has focus,
 //! not what the scanner is doing, not how a gain stage is configured.
 //!
-//! [`LAMP`] and its relatives may appear in exactly five places
+//! [`Palette::lamp`] and its relatives may appear in exactly five places
 //! (`docs/design/02-visual-language.md` §2.1.1), and
 //! `the_lamp_is_spent_only_on_playback_truth` below is what enforces it rather
 //! than leaving it to be remembered:
@@ -39,7 +39,7 @@
 //! 2. the playing dot — [`lamp_dot`], beside a tile's title or in a row's
 //!    number column;
 //! 3. the seek groove's elapsed fill and knob — [`seek`];
-//! 4. a seek in flight — the elapsed timestamp warms to [`LAMP`] while a
+//! 4. a seek in flight — the elapsed timestamp warms to [`Palette::lamp`] while a
 //!    position has been asked for and not yet confirmed, because a position
 //!    being asked for is a claim about the playhead;
 //! 5. the primary Play action — [`primary`], the one argued exception: it is
@@ -48,16 +48,16 @@
 //!    rectangle anywhere in baz.
 //!
 //! Two uses were **cut** in the redesign's first pass, both of them a lamp
-//! that was on when nothing was playing: input focus (now [`PAPER_RING`], and
+//! that was on when nothing was playing: input focus (now [`Palette::paper_ring`], and
 //! the search field takes focus at launch, so the first frame baz ever drew
-//! was an amber ring with no music), and the scanning note (now [`PAPER_DIM`]
+//! was an amber ring with no music), and the scanning note (now [`Palette::paper_dim`]
 //! — a scan is the library working, not the music). Blue, every streaming
 //! app's accent, remains deliberately absent.
 //!
 //! # Depth strategy: surface steps, and nothing else
 //!
-//! Four planes — [`RECESS`] below the wall, [`WALL`], [`PLINTH`] one step up,
-//! [`PLINTH_LIT`] one above that — whisper-quiet in bytes (8 apart) and plainly
+//! Four planes — [`Palette::recess`] below the wall, [`Palette::wall`], [`Palette::plinth`] one step up,
+//! [`Palette::plinth_lit`] one above that — whisper-quiet in bytes (8 apart) and plainly
 //! felt in linear light (nearly 2× per step, which is what the eye actually
 //! uses at these levels). Squint and you perceive four planes and no edges.
 //!
@@ -74,15 +74,42 @@
 //! the physical object; controls are barely rounded, because an archive is
 //! rectilinear.
 //!
+//! # Rooms
+//!
+//! There is no longer one palette. ADR-0017 §1.5 adopts the critique's
+//! **room** model — a whole coordinated set of surfaces, inks and one accent,
+//! switched together — and every value below is a field on [`Palette`] rather
+//! than a `pub const Color`. Two rooms are defined: [`CLOSING_TIME`], the
+//! near-black gallery baz has always been, and [`READING_ROOM`], its light
+//! mirror. Stone and Plaster are deferred (§1.5).
+//!
+//! The indirection lands **before** any per-surface styling is rewritten,
+//! which is the whole reason it is step 2 of the build plan: ~30 style
+//! functions take a `&Palette`, so the tile, the inspector and the bar are
+//! written against a room once instead of against constants and then again
+//! against a room.
+//!
+//! [`READING_ROOM`] is **defined but not yet selectable** ([`follow`]), which
+//! is exactly what the plan's step-2 row says and what §1.5 gates: the light
+//! room ships only with an answer to "what happens to a pale sleeve on a paper
+//! ground that is not a border on artwork", and that answer is step 20's.
+//! The follow-the-OS resolution is written and tested here so that step is a
+//! one-constant change rather than a design of its own.
+//!
 //! # Contrast
 //!
 //! iced 0.13 publishes no accessibility tree, so contrast and hit-target size
 //! are the only accessibility guarantees baz can make — which is a reason to
-//! honour them exactly rather than a reason to shrug. Every ink-on-surface
-//! pairing the room can produce is computed and checked against its WCAG 2.1
-//! floor by `every_ink_clears_its_contrast_floor_on_every_surface_it_lands_on`.
+//! honour them exactly rather than a reason to shrug. **Two laws govern, over
+//! disjoint domains** (ADR-0017 §1.6): surface against surface is measured in
+//! oklch L and must step by ≥ 0.03, and ink against surface is measured in
+//! WCAG 2.1 and must clear 4.5 : 1 to be read or 3 : 1 to be found. Opacity is
+//! composited *before* either is taken, so a token expressed as an alpha
+//! cannot smuggle an unreadable value past a test that only sees opaque
+//! colours. `every_ink_and_every_surface_clears_its_floor` sweeps both, over
+//! every room.
 
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 
 use iced::font::Weight;
 use iced::widget::rule::FillMode;
@@ -94,113 +121,411 @@ use iced::{Background, Border, Color, Font, Padding, Shadow, Theme, Vector, mous
 // Palette
 // ---------------------------------------------------------------------------
 
-/// **The hanging wall**: the app background behind the shelf. `#0C0D0E` — a
-/// neutral-cool near-black, the matte paint of a black-cube gallery.
+/// Which room the app is in.
 ///
-/// Cool, and that is the single decision that keeps a dark grid of covers from
-/// reading as every other media app: the room is cold and the paper is warm
-/// ([`PAPER`]), which is what a gallery actually looks like at night. The
-/// previous direction's warm charcoal is gone with the listening room it
-/// belonged to.
-pub const WALL: Color = Color::from_rgb(0.047, 0.051, 0.055);
-/// **The shadow gap** where the wall meets the floor: the now-playing bar,
-/// input wells, groove troughs and the backing behind a sleeve — everything
-/// that sits *below* the wall. `#060708`.
-pub const RECESS: Color = Color::from_rgb(0.024, 0.027, 0.031);
-/// **One step up from the wall**: the album inspector's column, the popover,
-/// a resting control. `#141517`.
+/// A *room* is a whole coordinated palette — four surfaces, four inks, one
+/// accent — switched together, never mixed. Two ship as tokens; Stone and
+/// Plaster are deferred (ADR-0017 §1.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Room {
+    /// The near-black gallery after hours: cool room, warm paper.
+    ClosingTime,
+    /// Its mirror: warm paper ground, cool ink, oxblood lamp.
+    ReadingRoom,
+}
+
+impl Room {
+    /// Every room, in the order the tests sweep them.
+    pub const ALL: [Self; 2] = [Self::ClosingTime, Self::ReadingRoom];
+
+    /// The room's resolved palette.
+    #[must_use]
+    pub const fn palette(self) -> &'static Palette {
+        match self {
+            Self::ClosingTime => &CLOSING_TIME,
+            Self::ReadingRoom => &READING_ROOM,
+        }
+    }
+}
+
+/// A resolved room: every colour the interface can paint, in one value.
 ///
-/// A plinth is the thing a work stands on. It was called `CARD`, which is
-/// web-app vocabulary and, under this direction, a lie — there are no cards,
-/// and the shelf in particular may never be drawn on one.
-pub const PLINTH: Color = Color::from_rgb(0.078, 0.082, 0.090);
-/// **One step above [`PLINTH`]**: a selected segment, the playing row, a
-/// hovered control. `#1C1D20`. Never a resting state.
-pub const PLINTH_LIT: Color = Color::from_rgb(0.110, 0.114, 0.125);
-/// Hairline border: findable when you look, invisible when you don't.
-/// [`PAPER`] at **7 %**.
+/// **This replaces ~24 `pub const Color`s**, and the replacement is the point
+/// (ADR-0017 §1.5, build-plan step 2). A style function takes a `&Palette`, so
+/// a surface is styled against *whatever room is standing* rather than against
+/// the near-black one — and the per-surface work of the redesign's later steps
+/// is written once instead of once per room.
 ///
-/// Down from 8 %, and the *perceived* weight is unchanged: the same alpha over
-/// a darker ground is a larger step, so holding a hairline steady across the
-/// repaint meant lowering its number. iced 0.13's `Border` is four-sided, so
-/// every single line in the product is a `rule` widget.
-pub const HAIRLINE: Color = Color { a: 0.07, ..PAPER };
-/// The hairline, firmer — a selected control's edge, the playing row's edge.
-/// [`PAPER`] at **15 %** (down from 17 %, for the reason [`HAIRLINE`] gives).
-pub const HAIRLINE_STRONG: Color = Color { a: 0.15, ..PAPER };
-/// Primary text: **archival mount board**, `#E8E4DB`.
+/// The four alpha-expressed marks — the two hairlines, the focus ring and the
+/// selection wash — are **methods rather than fields**, because they are the
+/// room's own ink at a fixed opacity and deriving them is what stops a room
+/// being defined with a hairline that belongs to a different one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Palette {
+    /// Which room this is.
+    pub room: Room,
+    /// The room's name, as a user would read it.
+    pub name: &'static str,
+    /// **The shadow gap** where the wall meets the floor: the now-playing bar,
+    /// input wells, groove troughs and the backing behind a sleeve —
+    /// everything that sits *below* the wall.
+    ///
+    /// It is the darkest plane in a dark room and the **lightest** in a light
+    /// one: surfaces rise toward the lamp, which means lighter in a dark room
+    /// and darker in a light one, and a recess inverts with them (§1.5).
+    pub recess: Color,
+    /// **The hanging wall**: the app background behind the shelf.
+    pub wall: Color,
+    /// **One step up from the wall**: the album inspector's column, the
+    /// popover, a resting control.
+    ///
+    /// A plinth is the thing a work stands on. It was called `CARD`, which is
+    /// web-app vocabulary and, under this direction, a lie — there are no
+    /// cards, and the shelf in particular may never be drawn on one.
+    pub plinth: Color,
+    /// **One step above [`Palette::plinth`]**: a selected segment, the playing
+    /// row, a hovered control. Never a resting state.
+    pub plinth_lit: Color,
+    /// Primary text — the ink the wall label is printed in.
+    ///
+    /// [`Palette::paper_dim`], [`Palette::paper_faint`] and
+    /// [`Palette::paper_muted`] are **the same r : g : b ratios scaled**, so
+    /// the ink family is one board at four levels of light rather than four
+    /// greys that drifted apart. Each is the *smallest* point on that ramp
+    /// that clears its floor on every surface it can land on, with 0.1 of
+    /// margin.
+    pub paper: Color,
+    /// Secondary text: artists, captions, subtitles. Never a figure that
+    /// ticks — those are primary or tertiary, never in between.
+    pub paper_dim: Color,
+    /// Tertiary text: counts, durations, hints, signal notes, the resting
+    /// fader — present, never loud. This carries the whole of baz's readout
+    /// vocabulary, so it is the ink with the least margin over its floor and
+    /// the one the contrast test exists for.
+    pub paper_faint: Color,
+    /// A control that is *set* but not currently sounding: the volume fader
+    /// while muted, or a stepper at the end of its travel. Not text a user
+    /// must read, so the 3 : 1 non-text floor applies.
+    pub paper_muted: Color,
+    /// The accent. **Playback truth only** — see the module's
+    /// accent-discipline note for the five places it may appear.
+    ///
+    /// Amber in a dark room, oxblood in a light one: a *different mark*, not a
+    /// recoloured one, which is the critique's answer to `02` §10's objection
+    /// that an amber halo has almost no contrast on a paper ground.
+    pub lamp: Color,
+    /// The accent, brightened — the seek fill under the pointer, Play hovered.
+    pub lamp_bright: Color,
+    /// The accent, deepened — the seek fill while dragged, Play pressed.
+    pub lamp_deep: Color,
+    /// Ink for text sitting *on* the accent: the Play button's label today,
+    /// and nothing after step 14 revokes the lamp-filled rectangle.
+    pub lamp_ink: Color,
+    /// Problems, stated quietly. No alarm klaxon.
+    pub alert: Color,
+    /// Success (theme palette slot; nothing renders it directly yet).
+    pub success: Color,
+    /// The sleeve and popover drop shadow's colour.
+    pub shadow: Color,
+    /// The focus ring's opacity, **per room**.
+    ///
+    /// The one alpha a room may set for itself, and it has to be: the same
+    /// opacity over a lighter ground is a *smaller* step, so the ring that
+    /// measures 3.80 : 1 in Closing Time at 45 % measures 2.67 : 1 in Reading
+    /// Room. It is the only alpha-expressed mark with a floor to clear (§1.6's
+    /// exemption list covers the others), so it is the only one that varies.
+    ring_alpha: f32,
+}
+
+/// Opacity of [`Palette::hairline`]: the room's ink at **7 %**.
 ///
-/// A warm ivory that is a *material* rather than "white text" — the colour the
-/// wall label is printed on. The room is cool ([`WALL`]) and the paper is warm,
-/// and that pairing is the whole of what stops a near-black grid of covers
-/// reading as a stock dark theme.
+/// Down from 8 %, and the *perceived* weight was unchanged: the same alpha
+/// over a darker ground is a larger step, so holding a hairline steady across
+/// the repaint meant lowering its number. iced 0.13's `Border` is four-sided,
+/// so every single line in the product is a `rule` widget.
+const HAIRLINE_A: f32 = 0.07;
+/// Opacity of [`Palette::hairline_strong`]: the room's ink at **15 %** (down
+/// from 17 %, for the reason [`HAIRLINE_A`] gives).
+const HAIRLINE_STRONG_A: f32 = 0.15;
+/// Opacity of [`Palette::select_wash`]: the room's ink at **18 %**.
+const SELECT_WASH_A: f32 = 0.18;
+/// Opacity of [`Palette::lamp_glow`]: the accent at **30 %**, blurred.
+const LAMP_GLOW_A: f32 = 0.30;
+
+impl Palette {
+    /// Hairline border: findable when you look, invisible when you don't.
+    /// The room's ink at [`HAIRLINE_A`].
+    #[must_use]
+    pub const fn hairline(&self) -> Color {
+        alpha(self.paper, HAIRLINE_A)
+    }
+
+    /// The hairline, firmer — a selected control's edge, the playing row's
+    /// edge. The room's ink at [`HAIRLINE_STRONG_A`].
+    #[must_use]
+    pub const fn hairline_strong(&self) -> Color {
+        alpha(self.paper, HAIRLINE_STRONG_A)
+    }
+
+    /// Keyboard focus, on the focused `text_input`'s border and nowhere else.
+    ///
+    /// Deliberately **not** the accent. Where the keyboard is has nothing to
+    /// do with where the music is, and the search field takes focus at
+    /// launch — so an amber focus ring made the first frame baz ever drew a
+    /// lit lamp with nothing playing.
+    #[must_use]
+    pub const fn paper_ring(&self) -> Color {
+        alpha(self.paper, self.ring_alpha)
+    }
+
+    /// Selected text in a `text_input`.
+    ///
+    /// Also not the accent, and for the same reason as
+    /// [`Palette::paper_ring`]: a selection is a fact about the keyboard, not
+    /// about the music. A wash rather than a fill, so the glyphs under it keep
+    /// their own ink — which is why the contrast test measures the *ink on the
+    /// composited wash* rather than the wash itself.
+    #[must_use]
+    pub const fn select_wash(&self) -> Color {
+        alpha(self.paper, SELECT_WASH_A)
+    }
+
+    /// The accent as a glow: the playing sleeve's halo, and nothing else.
+    #[must_use]
+    pub const fn lamp_glow(&self) -> Color {
+        alpha(self.lamp, LAMP_GLOW_A)
+    }
+
+    /// The transport glyphs' ink — the same primary ink the labels they
+    /// replaced are set in.
+    #[must_use]
+    pub const fn glyph(&self) -> Color {
+        self.paper
+    }
+
+    /// The room's four planes, **in elevation order**, named.
+    ///
+    /// Order is load-bearing: it is what the oklch-L step law is asserted
+    /// over, and "adjacent" means adjacent *here*.
+    #[must_use]
+    pub const fn surfaces(&self) -> [(&'static str, Color); 4] {
+        [
+            ("recess", self.recess),
+            ("wall", self.wall),
+            ("plinth", self.plinth),
+            ("plinth_lit", self.plinth_lit),
+        ]
+    }
+
+    /// Whether `color` is this room's accent or one of its relatives.
+    ///
+    /// Membership of the accent family **by value**, rather than a hue test:
+    /// the tokens are constants, so what has to be prevented is a *style*
+    /// reaching for one of them, not a new colour that happens to be warm.
+    #[must_use]
+    pub fn is_accent(&self, color: Color) -> bool {
+        [
+            self.lamp,
+            self.lamp_bright,
+            self.lamp_deep,
+            self.lamp_glow(),
+            self.lamp_ink,
+        ]
+        .iter()
+        .any(|accent| {
+            (accent.r - color.r).abs() < f32::EPSILON
+                && (accent.g - color.g).abs() < f32::EPSILON
+                && (accent.b - color.b).abs() < f32::EPSILON
+                && (accent.a - color.a).abs() < f32::EPSILON
+        })
+    }
+}
+
+/// `color` at `opacity`, spelled out field by field so it is usable in a
+/// `const fn`.
+const fn alpha(color: Color, opacity: f32) -> Color {
+    Color {
+        r: color.r,
+        g: color.g,
+        b: color.b,
+        a: opacity,
+    }
+}
+
+/// **Closing Time** — a record archive after hours. The works are lit; the
+/// room is not.
 ///
-/// [`PAPER_DIM`], [`PAPER_FAINT`] and [`PAPER_MUTED`] are **the same r : g : b
-/// ratios scaled down**, so the ink family is one board at four levels of light
-/// rather than four greys that drifted apart. (The ramp baz shipped drifted
-/// warmer as it darkened, which against a cool wall reads yellowish.) Each is
-/// the *smallest* point on that ramp that clears its floor on every surface it
-/// can land on, with 0.1 of margin.
-pub const PAPER: Color = Color::from_rgb(0.910, 0.894, 0.859);
-/// Secondary text: artists, captions, subtitles. `#ABA8A1`. Never a figure that
-/// ticks — those are primary or tertiary, never in between.
-pub const PAPER_DIM: Color = Color::from_rgb(0.671, 0.659, 0.631);
-/// Tertiary text: counts, durations, hints, signal notes, the resting fader —
-/// present, never loud.
+/// The wall is near-black and *neutral-cool*, the matte paint of a black-cube
+/// gallery, and the type is warm ivory, the colour of archival mount board:
+/// **the room is cold and the paper is warm**, which is what a gallery looks
+/// like at night and is the one decision that keeps a near-black grid of
+/// covers from reading as every other media app.
 ///
-/// `#888680`. This carries the whole of baz's readout vocabulary, and the value
-/// it had through v0.1 (`#726D66`) measured **3.4 : 1** on the panel — below
-/// the 4.5 : 1 AA floor for text on every surface it can land on. Re-derived
-/// against the gallery's surfaces it lands two bytes from the correction that
-/// preceded it, which is the interesting result: the near-black wall does not
-/// demand different inks. What it changes is the margin at the top of the
-/// range — this ink on [`PLINTH_LIT`] used to compute to 4.483 and be excused
-/// as a rounding case, and now measures **4.62**.
-/// `every_ink_clears_its_contrast_floor_on_every_surface_it_lands_on` is what
-/// keeps it there, and it no longer has an exception to make.
-pub const PAPER_FAINT: Color = Color::from_rgb(0.533, 0.525, 0.502);
-/// The accent: amplifier-lamp amber. **Playback truth only** — see the
-/// module's accent-discipline note for the five places it may appear.
-pub const LAMP: Color = Color::from_rgb(0.890, 0.631, 0.306);
-/// Lamp amber, brightened — the seek fill under the pointer, Play hovered.
-pub const LAMP_BRIGHT: Color = Color::from_rgb(0.945, 0.702, 0.384);
-/// Lamp amber, deepened — the seek fill while dragged, Play pressed.
-pub const LAMP_DEEP: Color = Color::from_rgb(0.780, 0.533, 0.239);
-/// Lamp amber as a glow: the playing sleeve's halo, and nothing else.
-pub const LAMP_GLOW: Color = Color::from_rgba(0.890, 0.631, 0.306, 0.30);
-/// Near-black ink for text sitting *on* the amber lamp.
-pub const LAMP_INK: Color = Color::from_rgb(0.106, 0.078, 0.043);
-/// Keyboard focus: paper at 45%, on the focused `text_input`'s border and
-/// nowhere else.
+/// The four surfaces are unchanged from the values v0.1 shipped, and they were
+/// kept rather than replaced by the critique's: measured in oklch L they
+/// already satisfy its own ≥ 0.03 elevation law on all three steps (+0.0311 /
+/// +0.0367 / +0.0360) without having been designed to, where the critique's
+/// Closing Time steps `#070809` → `#0C0D0E` by **+0.0248** and fails it
+/// (ADR-0017 §1.6).
+pub const CLOSING_TIME: Palette = Palette {
+    room: Room::ClosingTime,
+    name: "Closing Time",
+    // #060708 / #0C0D0E / #141517 / #1C1D20
+    recess: Color::from_rgb(0.024, 0.027, 0.031),
+    wall: Color::from_rgb(0.047, 0.051, 0.055),
+    plinth: Color::from_rgb(0.078, 0.082, 0.090),
+    plinth_lit: Color::from_rgb(0.110, 0.114, 0.125),
+    // #E8E4DB / #ABA8A1 / #888680 / #6C6A66 — archival mount board at four
+    // levels of light. `paper_faint` and `paper_muted` are the two v0.1
+    // shipped below their floors (3.4 : 1 and 1.9 : 1); the contrast test
+    // pins both corrections as corrections.
+    paper: Color::from_rgb(0.910, 0.894, 0.859),
+    paper_dim: Color::from_rgb(0.671, 0.659, 0.631),
+    paper_faint: Color::from_rgb(0.533, 0.525, 0.502),
+    paper_muted: Color::from_rgb(0.424, 0.416, 0.400),
+    // #E3A14E — amplifier-lamp amber, the power lamp / VU glow.
+    lamp: Color::from_rgb(0.890, 0.631, 0.306),
+    lamp_bright: Color::from_rgb(0.945, 0.702, 0.384),
+    lamp_deep: Color::from_rgb(0.780, 0.533, 0.239),
+    lamp_ink: Color::from_rgb(0.106, 0.078, 0.043),
+    alert: Color::from_rgb(0.851, 0.467, 0.420),
+    success: Color::from_rgb(0.525, 0.663, 0.486),
+    shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.45),
+    ring_alpha: 0.45,
+};
+
+/// **Reading Room** — the mirror: a warm paper ground under a cool ink.
 ///
-/// Deliberately **not** the accent. Where the keyboard is has nothing to do
-/// with where the music is, and the search field takes focus at launch — so
-/// an amber focus ring made the first frame baz ever drew a lit lamp with
-/// nothing playing.
-pub const PAPER_RING: Color = Color { a: 0.45, ..PAPER };
-/// Selected text in a `text_input`: paper at 18%.
+/// Defined, and **not yet selectable** ([`follow`]). §1.5 ships it only with
+/// an answer to the one objection the critique did not close — a pale sleeve
+/// on a paper ground, whose remedy may not be a border on artwork — and that
+/// answer is step 20's, not step 2's. What lands here are its tokens, so that
+/// every style function below is written against a room from the first day
+/// rather than against a near-black constant.
 ///
-/// Also not the accent, and for the same reason as [`PAPER_RING`]: a
-/// selection is a fact about the keyboard, not about the music. A wash rather
-/// than a fill so the glyphs under it keep their own ink.
-pub const SELECT_WASH: Color = Color { a: 0.18, ..PAPER };
-/// A control that is *set* but not currently sounding: the volume fader
-/// while muted, or a stepper at the end of its travel.
+/// Three things invert deliberately, and each is a decision rather than a
+/// negation of a number:
 ///
-/// `#6C6A66`. Not text a user must read, so the 3 : 1 non-text floor applies —
-/// but the value it had through v0.1 (`#4A4743`) measured **1.9 : 1**, below
-/// even that, which made the position the listener chose effectively invisible
-/// while muted. Restoring that position is the entire reason mute leaves the
-/// fader where it is. Re-derived on the gallery's ink ramp it clears 3 : 1 on
-/// every surface (3.74 / 3.61 / 3.39 / 3.13) while staying plainly quieter
-/// than a live control.
-pub const PAPER_MUTED: Color = Color::from_rgb(0.424, 0.416, 0.400);
-/// Problems, stated quietly: a soft brick red, no alarm klaxon.
-pub const ALERT: Color = Color::from_rgb(0.851, 0.467, 0.420);
-/// Success (theme palette slot; nothing renders it directly yet).
-pub const SUCCESS: Color = Color::from_rgb(0.525, 0.663, 0.486);
-/// The sleeve drop shadow's color.
-pub const SHADOW: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.45);
+/// - **Elevation.** Surfaces rise toward the lamp, so a plinth is *darker*
+///   than the wall here, and `recess` — which is below the wall — is the
+///   lightest plane in the room. The steps are 0.034 / 0.036 / 0.035 oklch L,
+///   the same tread Closing Time climbs.
+/// - **The material.** Closing Time is a cool room with warm paper; this is a
+///   warm room with cool ink, so the pairing that stops a flat grey UI is kept
+///   and only its direction is reversed.
+/// - **The lamp.** `oklch(0.50 0.14 35)` — oxblood, `#A33E25`. Amber on paper
+///   is a stain; oxblood is a different mark, which is the critique's own
+///   answer and is adopted verbatim.
+pub const READING_ROOM: Palette = Palette {
+    room: Room::ReadingRoom,
+    name: "Reading Room",
+    // #FAF6EF / #EEEBE4 / #E3DFD8 / #D7D4CD — one warm ivory at four levels,
+    // descending as they rise.
+    recess: Color::from_rgb(0.980, 0.965, 0.937),
+    wall: Color::from_rgb(0.933, 0.922, 0.894),
+    plinth: Color::from_rgb(0.890, 0.875, 0.847),
+    plinth_lit: Color::from_rgb(0.843, 0.831, 0.804),
+    // #1E2226 / #393E42 / #575B60 / #70757B — one cool ink at four levels.
+    // `paper_faint` measures 4.62 : 1 on `plinth_lit`, the same margin the
+    // dark room's tertiary ink carries on the surface it has least room on.
+    paper: Color::from_rgb(0.118, 0.133, 0.149),
+    paper_dim: Color::from_rgb(0.224, 0.243, 0.259),
+    paper_faint: Color::from_rgb(0.341, 0.357, 0.376),
+    paper_muted: Color::from_rgb(0.439, 0.459, 0.482),
+    // #A33E25 — oxblood, the critique's light-room accent, verbatim.
+    lamp: Color::from_rgb(0.639, 0.243, 0.145),
+    lamp_bright: Color::from_rgb(0.745, 0.337, 0.239),
+    lamp_deep: Color::from_rgb(0.537, 0.141, 0.031),
+    lamp_ink: Color::from_rgb(0.965, 0.953, 0.925),
+    alert: Color::from_rgb(0.608, 0.118, 0.133),
+    success: Color::from_rgb(0.208, 0.424, 0.220),
+    shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.45),
+    // 0.55, not 0.45: see `Palette::ring_alpha`.
+    ring_alpha: 0.55,
+};
+
+/// Whether [`READING_ROOM`] may be resolved yet.
+///
+/// **The §1.5 gate, as one constant.** The light room ships when — and only
+/// when — the pale-sleeve-on-paper question has an answer that is not a border
+/// on artwork (build-plan step 20). Until then the room's tokens exist, every
+/// test sweeps them, and nothing selects them. Flipping this is the whole of
+/// what "ship the second room" costs in this module.
+const READING_ROOM_SHIPS: bool = false;
+
+/// What the desktop says it prefers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Appearance {
+    /// A dark desktop, or no answer at all.
+    Dark,
+    /// A light desktop.
+    Light,
+}
+
+/// The desktop's preference, read through iced.
+///
+/// **No new dependency**: `iced_core`'s `auto-detect-theme` feature is on by
+/// default in the version baz already links, and `Theme::default()` is the
+/// answer of the `dark-light` crate it pulls — which on Linux asks the
+/// freedesktop portal over the same D-Bus stack MPRIS already uses. baz never
+/// calls `Theme::default()` for a *theme* (it installs its own, [`theme`]), so
+/// reading it here spends the detection on the only question baz has.
+#[must_use]
+pub fn system_appearance() -> Appearance {
+    match Theme::default() {
+        Theme::Light => Appearance::Light,
+        _ => Appearance::Dark,
+    }
+}
+
+/// The room to stand in, given what the desktop prefers.
+///
+/// Pure, so the whole of "follow the OS" is testable without a desktop. Note
+/// the asymmetry, which is deliberate: `dark-light` reports "no preference"
+/// and "light" identically once iced has mapped them, so **only a positive
+/// light answer leaves Closing Time**. A machine with no portal, no session
+/// bus and no answer gets the room baz is, not the room a failed probe
+/// defaulted to.
+#[must_use]
+pub fn follow(appearance: Appearance) -> &'static Palette {
+    match appearance {
+        Appearance::Light if READING_ROOM_SHIPS => &READING_ROOM,
+        _ => &CLOSING_TIME,
+    }
+}
+
+/// The room this process resolved at startup.
+static ACTIVE: OnceLock<&'static Palette> = OnceLock::new();
+
+/// Resolve the room and stand in it, once, at startup.
+///
+/// Called from `main` before the first frame, so that every [`active`] read —
+/// including [`crate::icon`]'s glyph sheet, which bakes the ink into a
+/// sprite — sees the same room. Calling it twice is a no-op rather than a
+/// panic: the room is a startup fact, and a second opinion about it is not
+/// worth crashing a music player over.
+pub fn install() -> &'static Palette {
+    let room = match std::env::var("BAZ_ROOM").as_deref() {
+        // A development hatch, not a product surface: there is no room picker
+        // until step 22 and no second selectable room until step 20, and the
+        // light room's surfaces still have to be *looked at* before either.
+        Ok("closing-time") => &CLOSING_TIME,
+        Ok("reading-room") => &READING_ROOM,
+        _ => follow(system_appearance()),
+    };
+    let _ = ACTIVE.set(room);
+    active()
+}
+
+/// The room standing now.
+///
+/// [`CLOSING_TIME`] until [`install`] says otherwise, which is what makes
+/// every unit test in the crate deterministic without a desktop: a test that
+/// cares about a room names it, and one that does not gets the room baz is.
+#[must_use]
+pub fn active() -> &'static Palette {
+    ACTIVE.get().copied().unwrap_or(&CLOSING_TIME)
+}
 
 // ---------------------------------------------------------------------------
 // Type scale
@@ -291,6 +616,52 @@ pub const GAP_MD: f32 = 12.0;
 pub const GAP_LG: f32 = 16.0;
 /// 24 px — screen-level breathing room.
 pub const GAP_XL: f32 = 24.0;
+
+/// **The grid's one number** (logical px): the distance from a work to its
+/// neighbour *and* from a work to the edge of the wall.
+///
+/// 40, and it is one token rather than two because it is one decision — a hang
+/// whose works sit 40 px apart and 24 px from the wall is a grid with a frame
+/// round it, which is the thing a gallery does not have. The arithmetic that
+/// spends it is [`crate::shelf::Grid`], and the property it buys is that
+/// **whenever the art is not capped the gutter is exactly `HANG`**, so there
+/// is no dead gutter at any width (`.interface-design/system.md` §7).
+///
+/// It replaces the shelf's `GRID_PADDING` of 24 and its 32 px art-to-art gap,
+/// both of which were constants a cell was measured against rather than a
+/// number the wall was hung by.
+pub const HANG: f32 = 40.0;
+/// Smallest edge a sleeve may be drawn at (logical px).
+///
+/// The column count's *ceiling* is whatever keeps the art at or above this, so
+/// a wide window gains a column only when the column it gains is still worth
+/// looking at.
+pub const ART_MIN: f32 = 240.0;
+/// The edge the column count aims for (logical px).
+///
+/// Not a size the art is ever drawn at — the art absorbs whatever the chosen
+/// column count leaves — but the size the *count* is chosen around, which is
+/// why it sits between [`ART_MIN`] and [`ART_MAX`] rather than at either end.
+pub const ART_TARGET: f32 = 272.0;
+/// Largest edge a sleeve may be drawn at (logical px).
+///
+/// `4/3 × ART_MIN` deliberately, so at every column-count change the art hands
+/// off from its largest to its smallest with no ambiguity: 320 → 240 at
+/// exactly one width per transition.
+///
+/// It is also **exactly [`crate::art::THUMB_PX`]**, which is the refusal *no
+/// artwork is ever drawn larger than its source* expressed as an equation
+/// rather than as a hope; `the_wall_never_draws_art_larger_than_its_source`
+/// asserts it.
+pub const ART_MAX: f32 = 320.0;
+/// Height of a wall label: two lines at [`SIZE_BODY`]'s leading, **36.4**.
+///
+/// The name `.interface-design/system.md` §8 gives [`CAPTION_H`], which is the
+/// same number in the module that draws it. Kept as an alias rather than
+/// collapsed, because the hang's row pitch is arithmetic about a *label* and
+/// the tile's reserved block is arithmetic about a *caption*, and they are the
+/// same 36.4 for a reason worth being able to state twice.
+pub const LABEL_H: f32 = CAPTION_H;
 
 // The radii come down across the board, because **an archive is rectilinear
 // and a sleeve has square corners** (`.interface-design/system.md` §6). Artwork
@@ -418,8 +789,8 @@ pub const VOLUME_BLOCK_W: f32 = TRANSPORT_HIT + GAP_SM + VOLUME_W;
 /// from "a pixel below it" is a five-fold jump in ink weight on a 2 px mark
 /// — findable when you look for it, invisible when you are not.
 #[must_use]
-pub fn detent_ink(engaged: bool) -> Color {
-    if engaged { PAPER } else { HAIRLINE }
+pub fn detent_ink(p: &Palette, engaged: bool) -> Color {
+    if engaged { p.paper } else { p.hairline() }
 }
 
 // ---------------------------------------------------------------------------
@@ -434,9 +805,6 @@ pub const ICON_PX: f32 = 16.0;
 /// glyph so the pointer aims at a target rather than at a shape, and fixed
 /// in both axes so play and pause occupy identically many pixels.
 pub const TRANSPORT_HIT: f32 = 32.0;
-/// The transport glyphs' ink at rest — the same paper white the labels they
-/// replaced were set in.
-pub const GLYPH: Color = PAPER;
 /// Opacity of a glyph on a live control.
 pub const GLYPH_OPACITY: f32 = 1.0;
 /// Opacity of a glyph while its command is in flight: the whole of the
@@ -446,7 +814,7 @@ pub const GLYPH_OPACITY: f32 = 1.0;
 /// the measured round trip, are in [`crate::player`]'s module docs).
 pub const GLYPH_OPACITY_PENDING: f32 = 0.55;
 /// Opacity of a glyph on a control that genuinely cannot act — no engine,
-/// or nothing queued. Lands on roughly [`PAPER_FAINT`] over [`PLINTH`], the
+/// or nothing queued. Lands on roughly [`Palette::paper_faint`] over [`Palette::plinth`], the
 /// weight the rest of the room gives inert text.
 pub const GLYPH_OPACITY_DISABLED: f32 = 0.45;
 
@@ -573,7 +941,7 @@ pub fn list_scrollbar() -> scrollable::Scrollbar {
 /// stock blue-grey iced draws otherwise is the one thing on screen that is not
 /// from this palette.
 #[must_use]
-pub fn scrollbar(_theme: &Theme, status: scrollable::Status) -> scrollable::Style {
+pub fn scrollbar(p: &Palette, status: scrollable::Status) -> scrollable::Style {
     let active = matches!(
         status,
         scrollable::Status::Hovered {
@@ -588,7 +956,11 @@ pub fn scrollbar(_theme: &Theme, status: scrollable::Status) -> scrollable::Styl
         background: None,
         border: Border::default(),
         scroller: scrollable::Scroller {
-            color: if active { HAIRLINE_STRONG } else { HAIRLINE },
+            color: if active {
+                p.hairline_strong()
+            } else {
+                p.hairline()
+            },
             border: Border {
                 color: Color::TRANSPARENT,
                 width: 0.0,
@@ -611,27 +983,27 @@ pub fn scrollbar(_theme: &Theme, status: scrollable::Status) -> scrollable::Styl
 /// and the lamp is reserved (see [`panel_toggle`]); a checked box says so with
 /// the surface step and the hairline the room already uses for "selected".
 #[must_use]
-pub fn check(_theme: &Theme, status: checkbox::Status) -> checkbox::Style {
+pub fn check(p: &Palette, status: checkbox::Status) -> checkbox::Style {
     let (background, border_color) = match status {
         checkbox::Status::Active { is_checked } => (
-            if is_checked { PLINTH_LIT } else { RECESS },
-            HAIRLINE_STRONG,
+            if is_checked { p.plinth_lit } else { p.recess },
+            p.hairline_strong(),
         ),
-        checkbox::Status::Hovered { .. } => (PLINTH_LIT, HAIRLINE_STRONG),
+        checkbox::Status::Hovered { .. } => (p.plinth_lit, p.hairline_strong()),
         checkbox::Status::Disabled { is_checked } => {
-            (if is_checked { PLINTH } else { RECESS }, HAIRLINE)
+            (if is_checked { p.plinth } else { p.recess }, p.hairline())
         }
     };
     let disabled = matches!(status, checkbox::Status::Disabled { .. });
     checkbox::Style {
         background: Background::Color(background),
-        icon_color: if disabled { PAPER_MUTED } else { PAPER },
+        icon_color: if disabled { p.paper_muted } else { p.paper },
         border: Border {
             color: border_color,
             width: 1.0,
             radius: RADIUS_SEGMENT.into(),
         },
-        text_color: Some(if disabled { PAPER_MUTED } else { PAPER }),
+        text_color: Some(if disabled { p.paper_muted } else { p.paper }),
     }
 }
 
@@ -680,23 +1052,40 @@ pub fn pad(vertical: f32, horizontal: f32) -> Padding {
 // Theme + widget styles
 // ---------------------------------------------------------------------------
 
-static THEME: LazyLock<Theme> = LazyLock::new(|| {
+/// One iced `Theme` per room, built once.
+///
+/// Cached because `Theme::custom` allocates a name and `theme()` is called
+/// once per frame, and built **per room** rather than from whichever room
+/// happened to be standing when the first frame drew — a `LazyLock` that read
+/// [`active`] would be a startup-order trap the day a second room becomes
+/// selectable.
+static THEMES: LazyLock<[Theme; Room::ALL.len()]> =
+    LazyLock::new(|| Room::ALL.map(|room| iced_theme(room.palette())));
+
+/// The iced `Theme` a room implies.
+///
+/// baz styles every widget it draws itself, so this carries only the five
+/// colours iced falls back to for widgets baz has not styled — which should be
+/// none of them, and is the reason it is worth keeping honest rather than
+/// worth elaborating.
+fn iced_theme(p: &Palette) -> Theme {
     Theme::custom(
-        "baz dark".to_owned(),
+        format!("baz {}", p.name),
         iced::theme::Palette {
-            background: WALL,
-            text: PAPER,
-            primary: LAMP,
-            success: SUCCESS,
-            danger: ALERT,
+            background: p.wall,
+            text: p.paper,
+            primary: p.lamp,
+            success: p.success,
+            danger: p.alert,
         },
     )
-});
+}
 
-/// The application theme (cached; `Theme` clones are `Arc`-cheap).
+/// The application theme for the room standing now (cached; `Theme` clones
+/// are `Arc`-cheap).
 #[must_use]
 pub fn theme() -> Theme {
-    THEME.clone()
+    THEMES[active().room as usize].clone()
 }
 
 /// A shelf tile's button chrome: invisible at rest (the sleeve leads),
@@ -711,10 +1100,10 @@ pub fn theme() -> Theme {
 /// hover and selection a rule under the *label* instead. This commit is values
 /// only, so it does not reach for that.
 #[must_use]
-pub fn tile(status: button::Status, selected: bool) -> button::Style {
+pub fn tile(p: &Palette, status: button::Status, selected: bool) -> button::Style {
     let mut style = button::Style {
         background: None,
-        text_color: PAPER,
+        text_color: p.paper,
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
@@ -723,12 +1112,12 @@ pub fn tile(status: button::Status, selected: bool) -> button::Style {
         shadow: Shadow::default(),
     };
     if selected {
-        style.background = Some(Background::Color(PLINTH_LIT));
-        style.border.color = HAIRLINE_STRONG;
+        style.background = Some(Background::Color(p.plinth_lit));
+        style.border.color = p.hairline_strong();
         // Two pixels, not one: see [`SELECTION_EDGE`].
         style.border.width = SELECTION_EDGE;
     } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-        style.background = Some(Background::Color(PLINTH));
+        style.background = Some(Background::Color(p.plinth));
     }
     style
 }
@@ -736,22 +1125,22 @@ pub fn tile(status: button::Status, selected: bool) -> button::Style {
 /// The artwork's frame: a soft drop shadow so the sleeve sits on the shelf;
 /// the playing album trades it for a lamp-amber halo.
 #[must_use]
-pub fn sleeve(playing: bool) -> container::Style {
+pub fn sleeve(p: &Palette, playing: bool) -> container::Style {
     let shadow = if playing {
         Shadow {
-            color: LAMP_GLOW,
+            color: p.lamp_glow(),
             offset: Vector::ZERO,
             blur_radius: 16.0,
         }
     } else {
         Shadow {
-            color: SHADOW,
+            color: p.shadow,
             offset: Vector::new(0.0, 3.0),
             blur_radius: 8.0,
         }
     };
     container::Style {
-        background: Some(Background::Color(RECESS)),
+        background: Some(Background::Color(p.recess)),
         shadow,
         ..container::Style::default()
     }
@@ -759,9 +1148,9 @@ pub fn sleeve(playing: bool) -> container::Style {
 
 /// The playing album's lamp dot — the amplifier power light.
 #[must_use]
-pub fn lamp_dot(_theme: &Theme) -> container::Style {
+pub fn lamp_dot(p: &Palette) -> container::Style {
     container::Style {
-        background: Some(Background::Color(LAMP)),
+        background: Some(Background::Color(p.lamp)),
         border: iced::border::rounded(DOT / 2.0),
         ..container::Style::default()
     }
@@ -770,12 +1159,12 @@ pub fn lamp_dot(_theme: &Theme) -> container::Style {
 /// Quiet transport controls (play/pause, next): a card that raises on hover
 /// and sinks on press.
 #[must_use]
-pub fn transport(_theme: &Theme, status: button::Status) -> button::Style {
+pub fn transport(p: &Palette, status: button::Status) -> button::Style {
     let (background, border, text_color) = match status {
-        button::Status::Hovered => (PLINTH_LIT, HAIRLINE_STRONG, PAPER),
-        button::Status::Pressed => (RECESS, HAIRLINE_STRONG, PAPER),
-        button::Status::Disabled => (PLINTH, HAIRLINE, PAPER_FAINT),
-        button::Status::Active => (PLINTH, HAIRLINE, PAPER),
+        button::Status::Hovered => (p.plinth_lit, p.hairline_strong(), p.paper),
+        button::Status::Pressed => (p.recess, p.hairline_strong(), p.paper),
+        button::Status::Disabled => (p.plinth, p.hairline(), p.paper_faint),
+        button::Status::Active => (p.plinth, p.hairline(), p.paper),
     };
     button::Style {
         background: Some(Background::Color(background)),
@@ -791,12 +1180,12 @@ pub fn transport(_theme: &Theme, status: button::Status) -> button::Style {
 
 /// The primary action (Play album): the only lamp-filled control on screen.
 #[must_use]
-pub fn primary(_theme: &Theme, status: button::Status) -> button::Style {
+pub fn primary(p: &Palette, status: button::Status) -> button::Style {
     let (background, text_color) = match status {
-        button::Status::Active => (LAMP, LAMP_INK),
-        button::Status::Hovered => (LAMP_BRIGHT, LAMP_INK),
-        button::Status::Pressed => (LAMP_DEEP, LAMP_INK),
-        button::Status::Disabled => (PLINTH, PAPER_FAINT),
+        button::Status::Active => (p.lamp, p.lamp_ink),
+        button::Status::Hovered => (p.lamp_bright, p.lamp_ink),
+        button::Status::Pressed => (p.lamp_deep, p.lamp_ink),
+        button::Status::Disabled => (p.plinth, p.paper_faint),
     };
     button::Style {
         background: Some(Background::Color(background)),
@@ -810,7 +1199,7 @@ pub fn primary(_theme: &Theme, status: button::Status) -> button::Style {
 /// edge that brightens to a paper ring on focus.
 ///
 /// **Not lamp amber, on either the ring or the selection.** Both used to be —
-/// the ring at `LAMP` 55%, the selection at [`LAMP_GLOW`] — and since the
+/// the ring at `LAMP` 55%, the selection at [`Palette::lamp_glow`] — and since the
 /// search field takes focus at launch, the first frame baz ever drew was an
 /// amber-ringed box with no music playing. A reserved signal that appears
 /// before there is anything to signal is not reserved. Where the keyboard is,
@@ -821,23 +1210,23 @@ pub fn primary(_theme: &Theme, status: button::Status) -> button::Style {
 /// focus affordance the toolkit can render; icon-only controls are named by
 /// tooltips instead ([`tooltip`]).
 #[must_use]
-pub fn input(_theme: &Theme, status: text_input::Status) -> text_input::Style {
+pub fn input(p: &Palette, status: text_input::Status) -> text_input::Style {
     let border_color = match status {
-        text_input::Status::Focused => PAPER_RING,
-        text_input::Status::Hovered => HAIRLINE_STRONG,
-        text_input::Status::Active | text_input::Status::Disabled => HAIRLINE,
+        text_input::Status::Focused => p.paper_ring(),
+        text_input::Status::Hovered => p.hairline_strong(),
+        text_input::Status::Active | text_input::Status::Disabled => p.hairline(),
     };
     text_input::Style {
-        background: Background::Color(RECESS),
+        background: Background::Color(p.recess),
         border: Border {
             color: border_color,
             width: 1.0,
             radius: RADIUS_CTRL.into(),
         },
-        icon: PAPER_FAINT,
-        placeholder: PAPER_FAINT,
-        value: PAPER,
-        selection: SELECT_WASH,
+        icon: p.paper_faint,
+        placeholder: p.paper_faint,
+        value: p.paper,
+        selection: p.select_wash(),
     }
 }
 
@@ -845,22 +1234,22 @@ pub fn input(_theme: &Theme, status: text_input::Status) -> text_input::Style {
 /// a small amber knob that grows under the pointer.
 ///
 /// Position is playback truth, so it earns the accent — the same rule that
-/// gives the playing sleeve its halo. The unplayed remainder is [`RECESS`]:
+/// gives the playing sleeve its halo. The unplayed remainder is [`Palette::recess`]:
 /// the groove is *cut into* the bar rather than laid on top of it, matching
 /// the inset treatment of the input wells.
 #[must_use]
-pub fn seek(_theme: &Theme, status: slider::Status) -> slider::Style {
+pub fn seek(p: &Palette, status: slider::Status) -> slider::Style {
     let (fill, radius) = match status {
-        slider::Status::Active => (LAMP, KNOB),
-        slider::Status::Hovered => (LAMP_BRIGHT, KNOB_ACTIVE),
-        slider::Status::Dragged => (LAMP_DEEP, KNOB_ACTIVE),
+        slider::Status::Active => (p.lamp, KNOB),
+        slider::Status::Hovered => (p.lamp_bright, KNOB_ACTIVE),
+        slider::Status::Dragged => (p.lamp_deep, KNOB_ACTIVE),
     };
     slider::Style {
         rail: Rail {
-            backgrounds: (Background::Color(fill), Background::Color(RECESS)),
+            backgrounds: (Background::Color(fill), Background::Color(p.recess)),
             width: RAIL,
             border: Border {
-                color: HAIRLINE,
+                color: p.hairline(),
                 width: 1.0,
                 radius: (RAIL / 2.0).into(),
             },
@@ -879,13 +1268,13 @@ pub fn seek(_theme: &Theme, status: slider::Status) -> slider::Style {
 /// unfilled and knobless, so the bar's place in the layout does not jump
 /// when a length does arrive.
 #[must_use]
-pub fn seek_inert(_theme: &Theme, _status: slider::Status) -> slider::Style {
+pub fn seek_inert(p: &Palette, _status: slider::Status) -> slider::Style {
     slider::Style {
         rail: Rail {
-            backgrounds: (Background::Color(RECESS), Background::Color(RECESS)),
+            backgrounds: (Background::Color(p.recess), Background::Color(p.recess)),
             width: RAIL,
             border: Border {
-                color: HAIRLINE,
+                color: p.hairline(),
                 width: 1.0,
                 radius: (RAIL / 2.0).into(),
             },
@@ -916,12 +1305,12 @@ pub fn seek_inert(_theme: &Theme, _status: slider::Status) -> slider::Style {
 ///   unity detent along with it, and a detent that moves is not a detent. The
 ///   hover affordance is the ink, the cursor, and the level tip instead.
 #[must_use]
-pub fn volume(_theme: &Theme, status: slider::Status) -> slider::Style {
+pub fn volume(p: &Palette, status: slider::Status) -> slider::Style {
     let fill = match status {
-        slider::Status::Active => PAPER_FAINT,
-        slider::Status::Hovered | slider::Status::Dragged => PAPER_DIM,
+        slider::Status::Active => p.paper_faint,
+        slider::Status::Hovered | slider::Status::Dragged => p.paper_dim,
     };
-    volume_style(fill)
+    volume_style(p, fill)
 }
 
 /// The volume fader while muted: the position the listener chose is still
@@ -929,26 +1318,26 @@ pub fn volume(_theme: &Theme, status: slider::Status) -> slider::Style {
 /// the very setting mute exists to restore — but in the ink of something that
 /// is not currently sounding.
 #[must_use]
-pub fn volume_muted(_theme: &Theme, _status: slider::Status) -> slider::Style {
-    volume_style(PAPER_MUTED)
+pub fn volume_muted(p: &Palette, _status: slider::Status) -> slider::Style {
+    volume_style(p, p.paper_muted)
 }
 
 /// The volume fader with no engine behind it: the groove keeps its place and
 /// its detent, filled with nothing at all.
 #[must_use]
-pub fn volume_inert(_theme: &Theme, _status: slider::Status) -> slider::Style {
-    volume_style(RECESS)
+pub fn volume_inert(p: &Palette, _status: slider::Status) -> slider::Style {
+    volume_style(p, p.recess)
 }
 
 /// The shared shape of every volume-fader state: only the ink varies, so no
 /// state of this control can move a pixel.
-fn volume_style(fill: Color) -> slider::Style {
+fn volume_style(p: &Palette, fill: Color) -> slider::Style {
     slider::Style {
         rail: Rail {
-            backgrounds: (Background::Color(fill), Background::Color(RECESS)),
+            backgrounds: (Background::Color(fill), Background::Color(p.recess)),
             width: RAIL,
             border: Border {
-                color: HAIRLINE,
+                color: p.hairline(),
                 width: 1.0,
                 radius: (RAIL / 2.0).into(),
             },
@@ -966,11 +1355,11 @@ fn volume_style(fill: Color) -> slider::Style {
 /// as a text input, so a segmented control reads as a place you *choose*
 /// something rather than a row of buttons that each do something.
 #[must_use]
-pub fn segmented(_theme: &Theme) -> container::Style {
+pub fn segmented(p: &Palette) -> container::Style {
     container::Style {
-        background: Some(Background::Color(RECESS)),
+        background: Some(Background::Color(p.recess)),
         border: Border {
-            color: HAIRLINE,
+            color: p.hairline(),
             width: 1.0,
             radius: RADIUS_CTRL.into(),
         },
@@ -985,12 +1374,12 @@ pub fn segmented(_theme: &Theme) -> container::Style {
 /// positions actually asked for; a preview is neither — it is the room's
 /// quietest card with a hairline edge, readable and forgettable.
 #[must_use]
-pub fn preview_tip(_theme: &Theme) -> container::Style {
+pub fn preview_tip(p: &Palette) -> container::Style {
     container::Style {
-        background: Some(Background::Color(PLINTH_LIT)),
-        text_color: Some(PAPER_DIM),
+        background: Some(Background::Color(p.plinth_lit)),
+        text_color: Some(p.paper_dim),
         border: Border {
-            color: HAIRLINE_STRONG,
+            color: p.hairline_strong(),
             width: 1.0,
             radius: RADIUS_CHIP.into(),
         },
@@ -1006,13 +1395,13 @@ pub fn preview_tip(_theme: &Theme) -> container::Style {
 /// is playing — a second amber control in the panel would dilute the one
 /// signal the room reserves.
 #[must_use]
-pub fn segment(status: button::Status, selected: bool) -> button::Style {
+pub fn segment(p: &Palette, status: button::Status, selected: bool) -> button::Style {
     let (background, text_color) = if selected {
-        (Some(PLINTH_LIT), PAPER)
+        (Some(p.plinth_lit), p.paper)
     } else {
         match status {
-            button::Status::Hovered | button::Status::Pressed => (Some(PLINTH), PAPER),
-            button::Status::Active | button::Status::Disabled => (None, PAPER_DIM),
+            button::Status::Hovered | button::Status::Pressed => (Some(p.plinth), p.paper),
+            button::Status::Active | button::Status::Disabled => (None, p.paper_dim),
         }
     };
     button::Style {
@@ -1020,7 +1409,7 @@ pub fn segment(status: button::Status, selected: bool) -> button::Style {
         text_color,
         border: Border {
             color: if selected {
-                HAIRLINE_STRONG
+                p.hairline_strong()
             } else {
                 Color::TRANSPARENT
             },
@@ -1033,9 +1422,9 @@ pub fn segment(status: button::Status, selected: bool) -> button::Style {
 
 /// The album side panel: one quiet step above the wall.
 #[must_use]
-pub fn panel(_theme: &Theme) -> container::Style {
+pub fn panel(p: &Palette) -> container::Style {
     container::Style {
-        background: Some(Background::Color(PLINTH)),
+        background: Some(Background::Color(p.plinth)),
         ..container::Style::default()
     }
 }
@@ -1049,25 +1438,25 @@ pub fn panel(_theme: &Theme) -> container::Style {
 /// edge — the room's own way of saying a thing is selected — rather than a
 /// second accent competing with the playing album's dot.
 #[must_use]
-pub fn panel_toggle(status: button::Status, active: bool) -> button::Style {
-    segment(status, active)
+pub fn panel_toggle(p: &Palette, status: button::Status, active: bool) -> button::Style {
+    segment(p, status, active)
 }
 
 /// The now-playing bar: recessed below the wall, like the amp under the
 /// shelf.
 #[must_use]
-pub fn bar(_theme: &Theme) -> container::Style {
+pub fn bar(p: &Palette) -> container::Style {
     container::Style {
-        background: Some(Background::Color(RECESS)),
+        background: Some(Background::Color(p.recess)),
         ..container::Style::default()
     }
 }
 
 /// Hairline rules dividing chrome from shelf.
 #[must_use]
-pub fn hairline(_theme: &Theme) -> rule::Style {
+pub fn hairline(p: &Palette) -> rule::Style {
     rule::Style {
-        color: HAIRLINE,
+        color: p.hairline(),
         width: 1,
         radius: 0.0.into(),
         fill_mode: FillMode::Full,
@@ -1081,12 +1470,12 @@ pub fn hairline(_theme: &Theme) -> rule::Style {
 /// iced 0.13 exposes no accessibility tree, so this tooltip *is* the
 /// control's accessible name as far as the toolkit allows.
 #[must_use]
-pub fn tooltip(_theme: &Theme) -> container::Style {
+pub fn tooltip(p: &Palette) -> container::Style {
     container::Style {
-        background: Some(Background::Color(PLINTH_LIT)),
-        text_color: Some(PAPER_DIM),
+        background: Some(Background::Color(p.plinth_lit)),
+        text_color: Some(p.paper_dim),
         border: Border {
-            color: HAIRLINE_STRONG,
+            color: p.hairline_strong(),
             width: 1.0,
             radius: RADIUS_CHIP.into(),
         },
@@ -1108,7 +1497,7 @@ pub fn tooltip(_theme: &Theme) -> container::Style {
 /// Border width of a **selected** shelf tile (logical px).
 ///
 /// Two, where hover is none and the surface step between the two states is one
-/// [`PLINTH`] → [`PLINTH_LIT`] tick. The audit's finding was that in a still
+/// [`Palette::plinth`] → [`Palette::plinth_lit`] tick. The audit's finding was that in a still
 /// frame you cannot tell which tile is selected and which is merely under the
 /// pointer — one surface step and a 1 px hairline apart is below the threshold
 /// at which two states read as two states.
@@ -1117,7 +1506,7 @@ pub fn tooltip(_theme: &Theme) -> container::Style {
 /// inside the depth strategy: no shadow (reserved for artwork), no accent (
 /// reserved for playback truth), no second surface step. It costs nothing in
 /// layout either — iced draws a border inside the widget's bounds, so the
-/// tile's [`crate::shelf::CELL_W`] pitch is untouched.
+/// hang's column pitch is untouched.
 pub const SELECTION_EDGE: f32 = 2.0;
 
 /// Height of a shelf tile's caption block: **exactly two lines** at
@@ -1130,8 +1519,8 @@ pub const SELECTION_EDGE: f32 = 2.0;
 /// most visible thing on screen after the art itself.
 ///
 /// Two lines is the budget the caption actually needs — a title (clipped at
-/// one line) over an `artist · year` line — and [`crate::shelf::CELL_H`]
-/// already has the room, so nothing about the tile pitch moves. It is the same
+/// one line) over an `artist · year` line — and [`crate::shelf::Grid`]'s row
+/// pitch already has the room, so nothing about the tile pitch moves. It is the same
 /// reserved-slot rule as [`SETTING_NOTE_H`], [`SIGNAL_W`] and [`STAMP_W`]:
 /// the space is always there and what varies is only what is in it.
 ///
@@ -1187,22 +1576,22 @@ pub const CAPTION_LINE_H: f32 = SIZE_BODY * LEADING_BODY;
 /// No accent anywhere: the lamp dot in the number column is the playback
 /// truth, and a row that also washed amber would spend the signal twice.
 #[must_use]
-pub fn track_row(status: button::Status, playing: bool) -> button::Style {
+pub fn track_row(p: &Palette, status: button::Status, playing: bool) -> button::Style {
     let background = match (playing, status) {
         // The playing row keeps its card whatever the pointer is doing, and
         // lifts no further under it: it is already the emphasised row.
-        (true, _) => Some(PLINTH_LIT),
-        (false, button::Status::Hovered | button::Status::Pressed) => Some(PLINTH),
+        (true, _) => Some(p.plinth_lit),
+        (false, button::Status::Hovered | button::Status::Pressed) => Some(p.plinth),
         (false, button::Status::Active | button::Status::Disabled) => None,
     };
     button::Style {
         background: background.map(Background::Color),
         // The row's inks are set per-line by the view (a played row is fainter
         // than an upcoming one), so the button contributes none of its own.
-        text_color: PAPER,
+        text_color: p.paper,
         border: Border {
             color: if playing {
-                HAIRLINE_STRONG
+                p.hairline_strong()
             } else {
                 Color::TRANSPARENT
             },
@@ -1350,16 +1739,16 @@ pub const SETTINGS_BREAKPOINT: f32 = 1000.0;
 /// one thing in baz that casts one, and a floating layer is the one exception
 /// that has to — so it borrows rather than invents.
 #[must_use]
-pub fn popover(_theme: &Theme) -> container::Style {
+pub fn popover(p: &Palette) -> container::Style {
     container::Style {
-        background: Some(Background::Color(PLINTH_LIT)),
+        background: Some(Background::Color(p.plinth_lit)),
         border: Border {
-            color: HAIRLINE_STRONG,
+            color: p.hairline_strong(),
             width: 1.0,
             radius: RADIUS_CTRL.into(),
         },
         shadow: Shadow {
-            color: SHADOW,
+            color: p.shadow,
             offset: Vector::new(0.0, 3.0),
             blur_radius: 8.0,
         },
@@ -1384,22 +1773,22 @@ pub fn popover(_theme: &Theme) -> container::Style {
 /// No accent: opening a popover is a *view* choice, not a claim about what is
 /// playing (the same argument [`panel_toggle`] makes).
 #[must_use]
-pub fn now_playing(status: button::Status, open: bool) -> button::Style {
+pub fn now_playing(p: &Palette, status: button::Status, open: bool) -> button::Style {
     let background = if open {
-        PLINTH_LIT
+        p.plinth_lit
     } else {
         match status {
-            button::Status::Hovered => PLINTH,
-            button::Status::Pressed => RECESS,
+            button::Status::Hovered => p.plinth,
+            button::Status::Pressed => p.recess,
             button::Status::Active | button::Status::Disabled => Color::TRANSPARENT,
         }
     };
     button::Style {
         background: Some(Background::Color(background)),
-        text_color: PAPER,
+        text_color: p.paper,
         border: Border {
             color: if open {
-                HAIRLINE_STRONG
+                p.hairline_strong()
             } else {
                 Color::TRANSPARENT
             },
@@ -1528,21 +1917,36 @@ mod tests {
     #[test]
     fn the_now_playing_affordance_moves_nothing_when_it_lights_up() {
         let mut geometry: Vec<(f32, f32)> = Vec::new();
-        for status in [
-            button::Status::Active,
-            button::Status::Hovered,
-            button::Status::Pressed,
-            button::Status::Disabled,
-        ] {
-            for open in [false, true] {
-                let style = now_playing(status, open);
-                geometry.push((style.border.width, style.border.radius.top_left));
-                assert_eq!(
-                    style.shadow,
-                    Shadow::default(),
-                    "the bar casts no shadow; only artwork and the popover do"
-                );
+        for room in Room::ALL {
+            let p = room.palette();
+            for status in [
+                button::Status::Active,
+                button::Status::Hovered,
+                button::Status::Pressed,
+                button::Status::Disabled,
+            ] {
+                for open in [false, true] {
+                    let style = now_playing(p, status, open);
+                    geometry.push((style.border.width, style.border.radius.top_left));
+                    assert_eq!(
+                        style.shadow,
+                        Shadow::default(),
+                        "the bar casts no shadow; only artwork and the popover do"
+                    );
+                }
             }
+            // And "open" is visibly different from "hovered", or the anchor the
+            // popover has instead of a notch says nothing. True in every room:
+            // a room whose two raised planes collapsed would lose the only
+            // thing standing in for a notch.
+            let open = now_playing(p, button::Status::Active, true);
+            let hovered = now_playing(p, button::Status::Hovered, false);
+            assert_ne!(
+                from_background(open.background),
+                from_background(hovered.background),
+                "{}: open and hovered are the same surface",
+                p.name
+            );
         }
         assert!(
             geometry
@@ -1550,14 +1954,6 @@ mod tests {
                 .all(|pair| (pair[0].0 - pair[1].0).abs() < f32::EPSILON
                     && (pair[0].1 - pair[1].1).abs() < f32::EPSILON),
             "the affordance's border geometry varies with state: {geometry:?}"
-        );
-        // And "open" is visibly different from "hovered", or the anchor the
-        // popover has instead of a notch says nothing.
-        let open = now_playing(button::Status::Active, true);
-        let hovered = now_playing(button::Status::Hovered, false);
-        assert_ne!(
-            from_background(open.background),
-            from_background(hovered.background)
         );
     }
 
@@ -1674,47 +2070,66 @@ mod tests {
     /// **The shelf virtualizes at every width the inspector can produce.**
     ///
     /// One of the four properties `docs/design/01-ux-audit-and-ia.md` §5 says
-    /// must not regress, and it is checked over the whole band rather than at
-    /// the two widths the shipped window happens to have: every window width
-    /// from the smallest iced will hand us to a wall-sized one, with the
-    /// inspector open and closed, must produce a real grid and a covered,
-    /// clamped visible range. The popover is deliberately absent from this
-    /// sweep — that is the *point* of it being an overlay: it produces no width
-    /// at all.
+    /// must not regress, and since ADR-0017 step 5 it is checked over the
+    /// **whole band at 1 px resolution** rather than at a 20 px stride: with a
+    /// fluid cell the column count and every sleeve's size change together,
+    /// the transitions are single-pixel events, and a coarse sweep can step
+    /// straight over one. Every window width from the smallest iced will hand
+    /// us to a wall-sized one, with the inspector open and closed, must
+    /// produce a real grid, a real hang, and a covered, clamped visible range.
+    ///
+    /// The popover is deliberately absent from this sweep — that is the
+    /// *point* of it being an overlay: it produces no width at all.
     #[test]
     fn the_shelf_virtualizes_at_every_width_the_inspector_can_produce() {
-        use crate::shelf as geometry;
+        use crate::shelf::Grid;
 
         const WINDOW_W: f32 = 1280.0;
-        assert_eq!(geometry::columns(WINDOW_W), 5, "the shipped shelf");
+        assert_eq!(Grid::new(WINDOW_W).columns, 4, "the shipped shelf");
         assert_eq!(
-            geometry::columns(WINDOW_W - PANEL_W),
+            Grid::new(WINDOW_W - PANEL_W).columns,
             3,
-            "the inspector open: (1280 - 340 - 48) / 240 = 3.7 -> 3"
+            "the inspector open: 940 px hangs three works of 254"
         );
 
-        // The band: every window width baz can be dragged to, both inspector
-        // states, both a full library and a single search result.
-        let mut window = 640.0_f32;
-        while window <= 2560.0 {
+        // The band: every window width baz can be dragged to, at 1 px, both
+        // inspector states, both a full library and a single search result.
+        for window in 640..=2560 {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a window width in pixels is far below f32's exact-integer range"
+            )]
+            let window = window as f32;
             for inspector in [0.0, PANEL_W] {
-                let width = window - inspector;
-                let cols = geometry::columns(width);
+                let hang = Grid::new(window - inspector);
                 assert!(
-                    cols >= 1,
+                    hang.columns >= 1,
                     "the grid collapsed at {window} px with {inspector} px of inspector"
                 );
+                assert!(
+                    hang.art > 0.0 && hang.art <= ART_MAX,
+                    "{window} px with {inspector} px of inspector: {} px of art",
+                    hang.art
+                );
+                assert!(
+                    hang.row_h > 0.0,
+                    "{window} px: a non-positive row pitch virtualizes nothing"
+                );
                 for albums in [1_usize, 97, 10_000] {
-                    let rows = geometry::total_rows(albums, cols);
-                    assert_eq!(rows, albums.div_ceil(cols));
-                    let (first, end) = geometry::visible_rows(0.0, 800.0, rows);
+                    let rows = hang.rows(albums);
+                    assert_eq!(rows, albums.div_ceil(hang.columns));
+                    let (first, end) = hang.visible_rows(0.0, 800.0, rows);
                     assert!(
                         first < end && end <= rows,
                         "empty or overrunning viewport at {window} px, {albums} albums"
                     );
+                    // A fling to the far end of a 10 000-album wall still
+                    // lands on a clamped range — the pitch is a float now, so
+                    // this is arithmetic worth checking rather than obvious.
+                    let (first, end) = hang.visible_rows(hang.spacer_height(rows), 800.0, rows);
+                    assert!(first <= end && end <= rows);
                 }
             }
-            window += 20.0;
         }
 
         // And the panel has to hold its own contents: the album panel insets
@@ -1755,21 +2170,38 @@ mod tests {
             HandleShape::Circle { radius } => radius,
             HandleShape::Rectangle { width, .. } => f32::from(width),
         };
-        let theme = theme();
         let mut widths = Vec::new();
-        for status in [
-            slider::Status::Active,
-            slider::Status::Hovered,
-            slider::Status::Dragged,
-        ] {
-            for style in [volume, volume_muted, volume_inert] {
-                let drawn = style(&theme, status);
-                widths.push(radius(drawn));
-                assert!(
-                    (drawn.rail.width - RAIL).abs() < f32::EPSILON,
-                    "the rail thickness must not vary with state"
-                );
+        for room in Room::ALL {
+            let p = room.palette();
+            for status in [
+                slider::Status::Active,
+                slider::Status::Hovered,
+                slider::Status::Dragged,
+            ] {
+                for style in [volume, volume_muted, volume_inert] {
+                    let drawn = style(p, status);
+                    widths.push(radius(drawn));
+                    assert!(
+                        (drawn.rail.width - RAIL).abs() < f32::EPSILON,
+                        "the rail thickness must not vary with state"
+                    );
+                }
             }
+            // Muted is quieter than live and still readable against the groove
+            // it sits in — the fader keeps showing the position mute will
+            // restore. "Quieter" is a contrast claim rather than a channel
+            // one now that a room can be light: in Reading Room the muted ink
+            // is the *lighter* of the two.
+            assert!(
+                contrast(p.paper_muted, p.recess) < contrast(p.paper_faint, p.recess),
+                "{}: the muted fader is not quieter than the live one",
+                p.name
+            );
+            assert!(
+                contrast(p.paper_muted, p.recess) >= 3.0,
+                "{}: the muted fader's position is not findable in its trough",
+                p.name
+            );
         }
         assert!(
             widths
@@ -1777,10 +2209,6 @@ mod tests {
                 .all(|pair| (pair[0] - pair[1]).abs() < f32::EPSILON),
             "the volume knob must not change size: {widths:?}"
         );
-        // Muted is quieter than live and still readable above the groove it
-        // sits in — the fader keeps showing the position mute will restore.
-        const { assert!(PAPER_MUTED.r < PAPER_FAINT.r) }
-        const { assert!(PAPER_MUTED.r > RECESS.r * 2.0) }
     }
 
     #[test]
@@ -1788,14 +2216,19 @@ mod tests {
         // Engaged has to be plainly different from at-rest — that contrast
         // is what makes "at unity" and "a pixel below" different on sight —
         // and neither may reach for the accent, which means playback truth.
-        let rest = detent_ink(false);
-        let engaged = detent_ink(true);
-        assert!(engaged.a > rest.a || engaged.r > rest.r * 3.0);
-        for ink in [rest, engaged] {
-            assert!(
-                (ink.r - LAMP.r).abs() > 0.1 || (ink.b - LAMP.b).abs() > 0.1,
-                "the detent must not be lamp amber"
-            );
+        for room in Room::ALL {
+            let p = room.palette();
+            let rest = detent_ink(p, false);
+            let engaged = detent_ink(p, true);
+            assert!(engaged.a > rest.a || engaged.r > rest.r * 3.0);
+            for ink in [rest, engaged] {
+                assert!(!p.is_accent(ink), "{}: the detent is the accent", p.name);
+                assert!(
+                    (ink.r - p.lamp.r).abs() > 0.1 || (ink.b - p.lamp.b).abs() > 0.1,
+                    "{}: the detent must not be the room's lamp",
+                    p.name
+                );
+            }
         }
     }
 
@@ -1837,114 +2270,225 @@ mod tests {
         (a.max(b) + 0.05) / (a.min(b) + 0.05)
     }
 
-    /// **The contrast test.** Every ink the room can put on every surface it
-    /// can land on, computed rather than estimated, against the floor that
-    /// applies to it.
+    /// **An opacity is a colour once it is drawn.** `over` composited under
+    /// `under`, source-over, in the space the renderer blends in.
     ///
-    /// This exists because two tokens shipped below their floor for the whole
-    /// of v0.1 and nobody noticed: [`PAPER_FAINT`] at 3.4 : 1 on the panel —
-    /// carrying every duration, count, hint and signal note in the product —
-    /// and [`PAPER_MUTED`] at 1.9 : 1, which made the muted fader's position
-    /// effectively invisible. Both were corrected;
-    /// `.interface-design/system.md` §4.1 has the full table and the argument,
-    /// and this is what stops either drifting back.
+    /// This is the whole of ADR-0017 §1.6's second extension. A token
+    /// expressed as an alpha is not measurable against a floor until it has
+    /// been resolved against the surface it lands on, and a test that sees
+    /// only opaque tokens cannot see an unreadable one hiding in an opacity —
+    /// which is exactly the failure the critique's "ink opacity is the
+    /// hierarchy" would have shipped (its 40 % tier lands between 2.09 : 1 and
+    /// 3.24 : 1 across the four rooms).
+    fn composite(over: Color, under: Color) -> Color {
+        let a = over.a.clamp(0.0, 1.0);
+        Color {
+            r: over.r * a + under.r * (1.0 - a),
+            g: over.g * a + under.g * (1.0 - a),
+            b: over.b * a + under.b * (1.0 - a),
+            a: 1.0,
+        }
+    }
+
+    /// The **oklch L** of an sRGB colour — the lightness axis of oklab, which
+    /// is a perceptual space and is therefore the right instrument for
+    /// surface-against-surface where WCAG is the wrong one.
     ///
-    /// Floors are WCAG 2.1's: **4.5 : 1** for anything a user has to read,
-    /// **3 : 1** for a non-text mark whose job is to be locatable rather than
-    /// legible. **Every ratio clears its floor outright.** The previous palette
-    /// had one that did not — `PAPER_FAINT` on `CARD_HIGH` computed to 4.483,
-    /// and this test had to excuse it by comparing at the one-decimal precision
-    /// WCAG publishes to. On the gallery's surfaces the same ink measures
-    /// **4.62**, so the excuse is deleted along with the constant that carried
-    /// it. No pairing in this palette needs one, and if a future value needs
-    /// one again that is the palette asking to be re-derived, not the test
-    /// asking to be loosened.
+    /// Twenty-five lines and no dependency (ADR-0017 §1.6). The matrices are
+    /// Björn Ottosson's published oklab constants.
+    fn oklch_l(color: Color) -> f32 {
+        let red = linear(color.r);
+        let green = linear(color.g);
+        let blue = linear(color.b);
+        // The LMS cone responses, then their cube roots — oklab's whole trick.
+        let long = 0.412_221_5 * red + 0.536_332_54 * green + 0.051_445_995 * blue;
+        let medium = 0.211_903_5 * red + 0.680_699_5 * green + 0.107_396_96 * blue;
+        let short = 0.088_302_46 * red + 0.281_718_85 * green + 0.629_978_7 * blue;
+        0.210_454_26 * long.cbrt() + 0.793_617_8 * medium.cbrt() - 0.004_072_047 * short.cbrt()
+    }
+
+    /// **The contrast test.** Both laws, over both rooms, with every opacity
+    /// composited before it is measured.
+    ///
+    /// ADR-0017 §1.6 resolves the critique's *"WCAG ratios are meaningless at
+    /// these lightnesses; do not use them here"* against the test baz shipped,
+    /// and the resolution is that **they are not in conflict, because they
+    /// measure different things**:
+    ///
+    /// 1. **Surface against surface** is an *elevation* question, and at these
+    ///    lightnesses a ratio says nothing — Closing Time's wall on its plinth
+    ///    is 1.30 : 1 and that number carries no information. oklch L is the
+    ///    instrument, and the law is the critique's: **adjacent levels differ
+    ///    by ≥ 0.03 L**, and no room's surfaces sit in the **dead zone**
+    ///    L .45–.58. (The dead zone is a rule about *rooms*; an ink or an
+    ///    accent may live there, and both of Reading Room's do.)
+    /// 2. **Ink against surface** is a *legibility* question, and there the
+    ///    ratio is the entire point: `paper_faint` shipped at 3.4 : 1 through
+    ///    v0.1 carrying every duration, count and hint in the product, and
+    ///    `paper_muted` at 1.9 : 1 made the muted fader's position invisible.
+    ///    Deleting WCAG deletes the rule that catches that.
+    ///
+    /// Three things this test gained at step 2, each named in §1.6:
+    ///
+    /// - **The elevation law**, asserted rather than admired. Closing Time's
+    ///   four shipped surfaces satisfy it on all three steps without having
+    ///   been designed to; the critique's own Closing Time fails its own floor
+    ///   at +0.0248.
+    /// - **Composited measurement** ([`composite`]), so an alpha-expressed
+    ///   token is resolved against each surface it can land on before its
+    ///   ratio is taken.
+    /// - **A named exemption list** instead of a global waiver. The bounded
+    ///   concession: a *non-text mark that exists only to be locatable and is
+    ///   never read* — the hairline edges, and the needle's unfilled track and
+    ///   the index rail's absent letters when they arrive — is governed by the
+    ///   L-step law instead. Anything a user reads keeps its floor. An
+    ///   exemption list you must add a name to is a rule; "WCAG is meaningless
+    ///   here" is not.
     #[test]
-    fn every_ink_clears_its_contrast_floor_on_every_surface_it_lands_on() {
+    fn every_ink_and_every_surface_clears_its_floor() {
         /// The AA floor for text.
         const TEXT: f32 = 4.5;
         /// The floor for a non-text mark.
         const MARK: f32 = 3.0;
+        /// The smallest elevation step the eye reads as a step.
+        const STEP_L: f32 = 0.03;
+        /// The bottom of the lightness band no room's surface may sit in.
+        const DEAD_LO: f32 = 0.45;
+        /// The top of it.
+        const DEAD_HI: f32 = 0.58;
+        /// **The exemption list.** Marks that exist only to be locatable and
+        /// are never read, exempt from the WCAG mark floor by name and
+        /// governed by the L-step law instead (§1.6). The needle's unfilled
+        /// track and the index rail's absent letters join this list when steps
+        /// 8 and 9 build them.
+        const NEVER_READ: [&str; 3] = ["hairline", "hairline_strong", "lamp_glow"];
 
-        let surfaces = [
-            ("WALL", WALL),
-            ("PLINTH", PLINTH),
-            ("RECESS", RECESS),
-            ("PLINTH_LIT", PLINTH_LIT),
-        ];
-        // Every ink the theme paints, with the floor its *use* implies.
-        // `PAPER_MUTED` is the muted fader and a stepper at the end of its
-        // travel — a mark, not a sentence — so it takes the lower floor; the
-        // lamp is a fill and a dot, likewise.
-        let inks = [
-            ("PAPER", PAPER, TEXT),
-            ("PAPER_DIM", PAPER_DIM, TEXT),
-            ("PAPER_FAINT", PAPER_FAINT, TEXT),
-            ("ALERT", ALERT, TEXT),
-            ("PAPER_MUTED", PAPER_MUTED, MARK),
-            ("LAMP", LAMP, MARK),
-        ];
-        for (ink_name, ink, floor) in inks {
-            for (surface_name, surface) in surfaces {
-                let ratio = contrast(ink, surface);
+        for room in Room::ALL {
+            let p = room.palette();
+            let surfaces = p.surfaces();
+
+            // --- law 1: elevation, in oklch L ------------------------------
+            for pair in surfaces.windows(2) {
+                let [(below, lower), (above, upper)] = [pair[0], pair[1]];
+                let step = (oklch_l(upper) - oklch_l(lower)).abs();
                 assert!(
-                    ratio >= floor,
-                    "{ink_name} on {surface_name} is {ratio:.2} : 1, below its \
-                     {floor} : 1 floor"
+                    step >= STEP_L,
+                    "{}: {below} → {above} steps {step:.4} oklch L, below the \
+                     {STEP_L} floor — two planes that close are one plane",
+                    p.name
+                );
+            }
+            for (name, surface) in surfaces {
+                let l = oklch_l(surface);
+                assert!(
+                    !(DEAD_LO..=DEAD_HI).contains(&l),
+                    "{}: {name} sits at L {l:.4}, inside the dead zone \
+                     {DEAD_LO}–{DEAD_HI} — a room at that lightness is neither \
+                     lit nor unlit and every ink on it is a compromise",
+                    p.name
+                );
+            }
+
+            // --- law 2: legibility, in WCAG 2.1 ----------------------------
+            // Every ink the room paints, with the floor its *use* implies.
+            // `paper_muted` is the muted fader and a stepper at the end of its
+            // travel — a mark, not a sentence — so it takes the lower floor;
+            // the lamp is a fill and a dot, likewise.
+            let inks = [
+                ("paper", p.paper, TEXT),
+                ("paper_dim", p.paper_dim, TEXT),
+                ("paper_faint", p.paper_faint, TEXT),
+                ("alert", p.alert, TEXT),
+                ("paper_muted", p.paper_muted, MARK),
+                ("lamp", p.lamp, MARK),
+                // The alpha-expressed marks, composited before measuring.
+                ("paper_ring", p.paper_ring(), MARK),
+                ("hairline", p.hairline(), MARK),
+                ("hairline_strong", p.hairline_strong(), MARK),
+                ("lamp_glow", p.lamp_glow(), MARK),
+            ];
+            for (ink_name, ink, floor) in inks {
+                if NEVER_READ.contains(&ink_name) {
+                    continue;
+                }
+                for (surface_name, surface) in surfaces {
+                    // An opacity is a colour once it is drawn; an opaque ink
+                    // composites to itself, so this one line covers both.
+                    let drawn = composite(ink, surface);
+                    let ratio = contrast(drawn, surface);
+                    assert!(
+                        ratio >= floor,
+                        "{}: {ink_name} on {surface_name} is {ratio:.2} : 1, \
+                         below its {floor} : 1 floor",
+                        p.name
+                    );
+                }
+            }
+
+            // The selection wash is exempt as a *mark* and measured as a
+            // *ground*: what a user reads is the value's ink on the wash, and
+            // the wash lands over the input well.
+            let selected = composite(p.select_wash(), p.recess);
+            let on_selection = contrast(p.paper, selected);
+            assert!(
+                on_selection >= TEXT,
+                "{}: selected text is {on_selection:.2} : 1 on its own wash",
+                p.name
+            );
+
+            // The one ink that sits on the accent rather than on a surface:
+            // the Play button's label and triangle.
+            let on_lamp = contrast(p.lamp_ink, p.lamp);
+            assert!(
+                on_lamp >= TEXT,
+                "{}: lamp_ink on lamp is {on_lamp:.2} : 1, below {TEXT} : 1",
+                p.name
+            );
+
+            // The ordering the room is built on: each ink is quieter than the
+            // one above it. A contrast comparison rather than a channel one,
+            // because in a light room "quieter" is *lighter*.
+            let ramp = [p.paper, p.paper_dim, p.paper_faint, p.paper_muted];
+            for pair in ramp.windows(2) {
+                assert!(
+                    contrast(pair[0], p.plinth) > contrast(pair[1], p.plinth),
+                    "{}: the ink ramp is not monotone",
+                    p.name
                 );
             }
         }
 
-        // The one ink that sits on the accent rather than on a surface: the
-        // Play button's label and triangle.
-        let on_lamp = contrast(LAMP_INK, LAMP);
-        assert!(
-            on_lamp >= TEXT,
-            "LAMP_INK on LAMP is {on_lamp:.2} : 1, below {TEXT} : 1"
-        );
-
         // And the two corrections, pinned as corrections: the values v0.1
         // shipped fail the floors above, so this test would have caught them.
+        let dark = &CLOSING_TIME;
         let old_faint = Color::from_rgb(0.447, 0.427, 0.400);
         let old_muted = Color::from_rgb(0.290, 0.278, 0.263);
         assert!(
-            contrast(old_faint, PLINTH) < TEXT,
-            "the old PAPER_FAINT is supposed to be the failure this test exists for"
+            contrast(old_faint, dark.plinth) < TEXT,
+            "the old paper_faint is supposed to be the failure this test exists for"
         );
-        assert!(contrast(old_muted, PLINTH) < MARK);
+        assert!(contrast(old_muted, dark.plinth) < MARK);
         assert!(
-            contrast(PAPER_FAINT, PLINTH) > contrast(old_faint, PLINTH),
+            contrast(dark.paper_faint, dark.plinth) > contrast(old_faint, dark.plinth),
             "the correction must be lighter, not merely different"
         );
-        assert!(contrast(PAPER_MUTED, PLINTH) > contrast(old_muted, PLINTH));
+        assert!(contrast(dark.paper_muted, dark.plinth) > contrast(old_muted, dark.plinth));
 
-        // The correction must not have cost the *ordering* the room is built
-        // on: faint is quieter than dim, muted is quieter than faint, and
-        // muted is still plainly above the groove it sits in.
-        assert!(contrast(PAPER, PLINTH) > contrast(PAPER_DIM, PLINTH));
-        assert!(contrast(PAPER_DIM, PLINTH) > contrast(PAPER_FAINT, PLINTH));
-        assert!(contrast(PAPER_FAINT, PLINTH) > contrast(PAPER_MUTED, PLINTH));
+        // The critique's own Closing Time fails its own elevation law, which
+        // is why baz kept its four shipped surfaces and adopted only the rule.
+        let theirs = (
+            Color::from_rgb(0.027, 0.031, 0.035),
+            Color::from_rgb(0.047, 0.051, 0.055),
+        );
+        assert!(
+            (oklch_l(theirs.1) - oklch_l(theirs.0)).abs() < STEP_L,
+            "the critique's #070809 → #0C0D0E is supposed to be the counter-example"
+        );
     }
 
     // -----------------------------------------------------------------------
     // The accent discipline
     // -----------------------------------------------------------------------
-
-    /// Whether `color` is the accent or one of its relatives.
-    ///
-    /// Membership of the amber family by value, rather than a hue test: the
-    /// tokens are constants, so what has to be prevented is a *style* reaching
-    /// for one of them, not a new colour that happens to be warm.
-    fn is_lamp(color: Color) -> bool {
-        [LAMP, LAMP_BRIGHT, LAMP_DEEP, LAMP_GLOW, LAMP_INK]
-            .iter()
-            .any(|amber| {
-                (amber.r - color.r).abs() < f32::EPSILON
-                    && (amber.g - color.g).abs() < f32::EPSILON
-                    && (amber.b - color.b).abs() < f32::EPSILON
-                    && (amber.a - color.a).abs() < f32::EPSILON
-            })
-    }
 
     /// The colours in a `Background`, if it is a flat one.
     fn from_background(background: Option<Background>) -> Vec<Color> {
@@ -1989,8 +2533,7 @@ mod tests {
     /// the room is made of, rather than as a hundred lines of setup. Anything
     /// missing from here is invisible to the accent discipline — the length
     /// assertion in the test is the crude guard against that.
-    fn every_painted_style() -> Vec<(&'static str, Vec<Color>)> {
-        let theme = theme();
+    fn every_painted_style(p: &Palette) -> Vec<(&'static str, Vec<Color>)> {
         let button_states = [
             button::Status::Active,
             button::Status::Hovered,
@@ -2005,25 +2548,25 @@ mod tests {
         let mut painted: Vec<(&'static str, Vec<Color>)> = Vec::new();
         for status in button_states {
             for selected in [false, true] {
-                painted.push(("tile", button_colors(&tile(status, selected))));
-                painted.push(("segment", button_colors(&segment(status, selected))));
+                painted.push(("tile", button_colors(&tile(p, status, selected))));
+                painted.push(("segment", button_colors(&segment(p, status, selected))));
                 painted.push((
                     "panel_toggle",
-                    button_colors(&panel_toggle(status, selected)),
+                    button_colors(&panel_toggle(p, status, selected)),
                 ));
             }
-            painted.push(("transport", button_colors(&transport(&theme, status))));
-            painted.push(("primary", button_colors(&primary(&theme, status))));
+            painted.push(("transport", button_colors(&transport(p, status))));
+            painted.push(("primary", button_colors(&primary(p, status))));
             for open in [false, true] {
-                painted.push(("now_playing", button_colors(&now_playing(status, open))));
+                painted.push(("now_playing", button_colors(&now_playing(p, status, open))));
             }
         }
         for status in slider_states {
-            painted.push(("seek", slider_colors(&seek(&theme, status))));
-            painted.push(("seek_inert", slider_colors(&seek_inert(&theme, status))));
-            painted.push(("volume", slider_colors(&volume(&theme, status))));
-            painted.push(("volume_muted", slider_colors(&volume_muted(&theme, status))));
-            painted.push(("volume_inert", slider_colors(&volume_inert(&theme, status))));
+            painted.push(("seek", slider_colors(&seek(p, status))));
+            painted.push(("seek_inert", slider_colors(&seek_inert(p, status))));
+            painted.push(("volume", slider_colors(&volume(p, status))));
+            painted.push(("volume_muted", slider_colors(&volume_muted(p, status))));
+            painted.push(("volume_inert", slider_colors(&volume_inert(p, status))));
         }
         for status in [
             text_input::Status::Active,
@@ -2031,7 +2574,7 @@ mod tests {
             text_input::Status::Focused,
             text_input::Status::Disabled,
         ] {
-            let style = input(&theme, status);
+            let style = input(p, status);
             painted.push((
                 "input",
                 vec![
@@ -2049,7 +2592,7 @@ mod tests {
             checkbox::Status::Hovered { is_checked: true },
             checkbox::Status::Disabled { is_checked: true },
         ] {
-            let style = check(&theme, status);
+            let style = check(p, status);
             let mut colors = from_background(Some(style.background));
             colors.push(style.icon_color);
             colors.push(style.border.color);
@@ -2067,7 +2610,7 @@ mod tests {
                 is_vertical_scrollbar_dragged: true,
             },
         ] {
-            let style = scrollbar(&theme, status);
+            let style = scrollbar(p, status);
             painted.push((
                 "scrollbar",
                 vec![
@@ -2076,17 +2619,20 @@ mod tests {
                 ],
             ));
         }
-        painted.push(("sleeve(resting)", container_colors(&sleeve(false))));
-        painted.push(("sleeve(playing)", container_colors(&sleeve(true))));
-        painted.push(("lamp_dot", container_colors(&lamp_dot(&theme))));
-        painted.push(("segmented", container_colors(&segmented(&theme))));
-        painted.push(("preview_tip", container_colors(&preview_tip(&theme))));
-        painted.push(("panel", container_colors(&panel(&theme))));
-        painted.push(("bar", container_colors(&bar(&theme))));
-        painted.push(("popover", container_colors(&popover(&theme))));
-        painted.push(("tooltip", container_colors(&tooltip(&theme))));
-        painted.push(("hairline", vec![hairline(&theme).color]));
-        painted.push(("detent_ink", vec![detent_ink(false), detent_ink(true)]));
+        painted.push(("sleeve(resting)", container_colors(&sleeve(p, false))));
+        painted.push(("sleeve(playing)", container_colors(&sleeve(p, true))));
+        painted.push(("lamp_dot", container_colors(&lamp_dot(p))));
+        painted.push(("segmented", container_colors(&segmented(p))));
+        painted.push(("preview_tip", container_colors(&preview_tip(p))));
+        painted.push(("panel", container_colors(&panel(p))));
+        painted.push(("bar", container_colors(&bar(p))));
+        painted.push(("popover", container_colors(&popover(p))));
+        painted.push(("tooltip", container_colors(&tooltip(p))));
+        painted.push(("hairline", vec![hairline(p).color]));
+        painted.push((
+            "detent_ink",
+            vec![detent_ink(p, false), detent_ink(p, true)],
+        ));
         painted
     }
 
@@ -2108,62 +2654,167 @@ mod tests {
     /// selection — is made of surface, edge and ink. This test is what makes
     /// that a rule rather than a habit: adding an amber to any style below
     /// fails it by name.
+    ///
+    /// **Swept per room**, since step 2: the discipline is about the *accent*,
+    /// not about amber, so Reading Room's oxblood is held to the same list by
+    /// the same code and a style that reached for one room's accent could not
+    /// pass by being the other's.
     #[test]
     fn the_lamp_is_spent_only_on_playback_truth() {
         /// The styles §2.1.1 permits the accent in. Nothing may be added here
         /// without the specification changing first.
         const PERMITTED: [&str; 4] = ["sleeve(playing)", "lamp_dot", "seek", "primary"];
 
-        let painted = every_painted_style();
-        let mut seen_amber: Vec<&str> = Vec::new();
-        for (name, colors) in &painted {
-            let amber = colors.iter().copied().any(is_lamp);
-            assert!(
-                !amber || PERMITTED.contains(name),
-                "`{name}` paints the accent. The lamp means playback truth \
-                 (theme.rs's module docs, docs/design/02-visual-language.md \
-                 §2.1.1); this surface is not playback truth, so it wants a \
-                 surface step, a hairline, or a paper ink instead."
-            );
-            if amber {
-                seen_amber.push(name);
+        for room in Room::ALL {
+            let p = room.palette();
+            let painted = every_painted_style(p);
+            let mut seen_accent: Vec<&str> = Vec::new();
+            for (name, colors) in &painted {
+                let accent = colors.iter().copied().any(|color| p.is_accent(color));
+                assert!(
+                    !accent || PERMITTED.contains(name),
+                    "{}: `{name}` paints the accent. The lamp means playback \
+                     truth (theme.rs's module docs, ADR-0017 §1.6, \
+                     docs/design/02-visual-language.md §2.1.1); this surface is \
+                     not playback truth, so it wants a surface step, a \
+                     hairline, or an ink instead.",
+                    p.name
+                );
+                if accent {
+                    seen_accent.push(name);
+                }
             }
-        }
-        // The rule cuts both ways: a permitted use that stopped being amber
-        // would mean the one signal reserved for the music had quietly gone
-        // out, so each is asserted present rather than merely allowed.
-        for permitted in PERMITTED {
+            // The rule cuts both ways: a permitted use that stopped being the
+            // accent would mean the one signal reserved for the music had
+            // quietly gone out, so each is asserted present rather than merely
+            // allowed.
+            for permitted in PERMITTED {
+                assert!(
+                    seen_accent.contains(&permitted),
+                    "{}: `{permitted}` is supposed to be the accent and no \
+                     longer paints it",
+                    p.name
+                );
+            }
+            // The room is large: if the sweep ever stopped covering it, the
+            // test would pass vacuously.
             assert!(
-                seen_amber.contains(&permitted),
-                "`{permitted}` is supposed to be the accent and no longer paints it"
+                painted.len() > 40,
+                "only {} styles swept — did a style stop being covered?",
+                painted.len()
             );
         }
-        // The room is large: if the sweep ever stopped covering it, the test
-        // would pass vacuously.
-        assert!(
-            painted.len() > 40,
-            "only {} styles swept — did a style stop being covered?",
-            painted.len()
-        );
+    }
+
+    /// A room is a *whole* palette, and two rooms may not share a value that
+    /// carries meaning.
+    ///
+    /// The cheap failure this catches is a room defined by copying another and
+    /// editing some of it: a light room that kept the dark room's ink, or an
+    /// accent that was never re-chosen, would pass every contrast assertion
+    /// above by accident of the surfaces around it.
+    #[test]
+    fn the_two_rooms_are_two_rooms() {
+        let dark = &CLOSING_TIME;
+        let light = &READING_ROOM;
+        // Every plane and every ink is its own decision.
+        for (a, b) in dark
+            .surfaces()
+            .iter()
+            .zip(light.surfaces().iter())
+            .map(|(a, b)| (a.1, b.1))
+            .chain([
+                (dark.paper, light.paper),
+                (dark.paper_dim, light.paper_dim),
+                (dark.paper_faint, light.paper_faint),
+                (dark.paper_muted, light.paper_muted),
+                (dark.lamp, light.lamp),
+                (dark.lamp_ink, light.lamp_ink),
+                (dark.alert, light.alert),
+            ])
+        {
+            assert_ne!(a, b, "the two rooms share a value");
+        }
+        // The elevation strategy inverts rather than repeating: surfaces rise
+        // toward the lamp, so a plinth is lighter than its wall in a dark room
+        // and darker than its wall in a light one, and the recess inverts with
+        // them (ADR-0017 §1.5).
+        assert!(oklch_l(dark.plinth) > oklch_l(dark.wall));
+        assert!(oklch_l(dark.recess) < oklch_l(dark.wall));
+        assert!(oklch_l(light.plinth) < oklch_l(light.wall));
+        assert!(oklch_l(light.recess) > oklch_l(light.wall));
+        // A dark room's ink is lighter than its wall and a light room's is
+        // darker — which is the whole of why the ramp's *ordering* is asserted
+        // in contrast rather than in channels.
+        assert!(oklch_l(dark.paper) > oklch_l(dark.wall));
+        assert!(oklch_l(light.paper) < oklch_l(light.wall));
+        // The theme cache is indexed by the room's discriminant, so the two
+        // have to agree about which is which.
+        assert_eq!(Room::ClosingTime as usize, 0);
+        assert_eq!(Room::ReadingRoom as usize, 1);
+        for room in Room::ALL {
+            assert_eq!(room.palette().room, room);
+        }
+    }
+
+    /// **Following the OS, and the gate that stops it.**
+    ///
+    /// [`follow`] is pure, so the whole of "the rooms follow the desktop" is
+    /// testable without a desktop — and what it currently answers is
+    /// [`CLOSING_TIME`] either way, because §1.5 ships the light room only
+    /// with an answer to the pale-sleeve question. That is asserted rather
+    /// than left implicit: this test is the thing that will fail, loudly and
+    /// by name, on the day somebody flips the gate without meaning to.
+    #[test]
+    fn the_rooms_follow_the_desktop_once_the_second_one_ships() {
+        assert_eq!(follow(Appearance::Dark), &CLOSING_TIME);
+        if READING_ROOM_SHIPS {
+            assert_eq!(follow(Appearance::Light), &READING_ROOM);
+        } else {
+            assert_eq!(
+                follow(Appearance::Light),
+                &CLOSING_TIME,
+                "the light room is defined, not selectable (ADR-0017 §1.5 and \
+                 build-plan step 20): it ships with an answer to the \
+                 pale-sleeve-on-paper question, and that answer may not be a \
+                 border on artwork"
+            );
+        }
+        // A room nothing installed is the room baz is, so every other test in
+        // the crate is deterministic without a desktop.
+        assert_eq!(active(), &CLOSING_TIME);
+        // And an unknown desktop is never read as a light one: `dark-light`
+        // reports "no preference" and "light" identically once iced has mapped
+        // them, so only a positive light answer may leave Closing Time.
+        assert_eq!(follow(Appearance::Dark), &CLOSING_TIME);
     }
 
     /// The other half of the discipline: the accent is not named outside this
     /// module except where §2.1.1 permits it.
     ///
-    /// The style sweep above cannot see a view that writes `theme::LAMP`
-    /// straight onto a `text`, which is exactly how the scanning note and the
-    /// first-run wordmark came to be amber with nothing playing. So this reads
-    /// the crate's own sources and checks who names an amber token.
+    /// The style sweep above cannot see a view that writes the accent straight
+    /// onto a `text`, which is exactly how the scanning note and the first-run
+    /// wordmark came to be amber with nothing playing. So this reads the
+    /// crate's own sources and checks who names an accent token.
+    ///
+    /// **What it greps for changed at step 2** along with the tokens: a view
+    /// used to write `theme::LAMP` and now writes `room.lamp` — or
+    /// `.lamp_bright`, `.lamp_deep`, `.lamp_glow()` — so the needle is the
+    /// field access, which is a *narrower* net than the old one rather than a
+    /// looser one (a style function is `theme::lamp_dot`, with no dot before
+    /// the name, and is not matched).
     ///
     /// The single entry on the list is §2.1.1's fourth permitted use: the
-    /// elapsed timestamp warms to [`LAMP`] while a position has been asked for
-    /// and not yet confirmed, because a position being asked for is a claim
-    /// about the playhead. It cools the moment the engine answers.
+    /// elapsed timestamp warms to [`Palette::lamp`] while a position has been
+    /// asked for and not yet confirmed, because a position being asked for is
+    /// a claim about the playhead. It cools the moment the engine answers.
     #[test]
     fn the_lamp_is_named_only_where_playback_truth_is_drawn() {
-        /// `src`-relative paths that may name an amber token, and why.
+        /// `src`-relative paths that may name an accent token, and why.
         const PERMITTED: [&str; 1] = ["views/bottom_bar.rs"];
 
+        // Spelled in halves so this test's own source does not match it.
+        let needle = concat!(".", "lamp");
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut offenders: Vec<String> = Vec::new();
         let mut permitted_seen = false;
@@ -2174,12 +2825,13 @@ mod tests {
                 .to_string_lossy()
                 .replace('\\', "/");
             // This module *defines* the tokens; the font module is asset
-            // bytes. Neither is a view.
+            // bytes; the groove is a widget that is handed a style function
+            // rather than a colour. None is a view.
             if relative == "theme.rs" || relative == "font.rs" {
                 continue;
             }
             let source = std::fs::read_to_string(&path).expect("a source file baz ships");
-            if !source.contains("theme::LAMP") {
+            if !source.contains(needle) {
                 continue;
             }
             if PERMITTED.contains(&relative.as_str()) {
@@ -2192,9 +2844,10 @@ mod tests {
             offenders.is_empty(),
             "{offenders:?} name the accent. The lamp means playback truth — \
              which album is sounding, which track, and where the playhead is \
-             (docs/design/02-visual-language.md §2.1.1). A scan, a focus ring, \
-             a selection, a wordmark and a setting are none of those; they \
-             want PAPER_DIM, PAPER_RING, SELECT_WASH or a surface step."
+             (ADR-0017 §1.6, docs/design/02-visual-language.md §2.1.1). A scan, \
+             a focus ring, a selection, a wordmark and a setting are none of \
+             those; they want the room's dim ink, its focus ring, its selection \
+             wash, or a surface step."
         );
         assert!(
             permitted_seen,
