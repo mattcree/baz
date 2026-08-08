@@ -8,9 +8,9 @@
 //! the feature the app builds everywhere with playback UI hidden).
 //!
 //! The modules follow ADR-0006's three layers: pure state and logic
-//! (`vm`, `player`, `panels`, `overlay`, `replaygain`, `shelf`, `config`,
-//! `scan`, `art`, `mpris::state` — no iced imports), design tokens (`theme`,
-//! over the typeface `font` bundles), and view
+//! (`vm`, `player`, `panels`, `overlay`, `queue_edit`, `replaygain`, `shelf`,
+//! `config`, `scan`, `art`, `mpris::state` — no iced imports), design tokens
+//! (`theme`, over the typeface `font` bundles), and view
 //! composition (`views/`,
 //! one module per surface) with the application shell that drives it
 //! (`app`, and beside it `keys` and `mpris`, which produce the shell's
@@ -34,6 +34,7 @@ mod overlay;
 mod panels;
 mod playback;
 mod player;
+mod queue_edit;
 mod replaygain;
 mod scan;
 mod shelf;

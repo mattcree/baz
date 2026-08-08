@@ -54,13 +54,16 @@
 //! the row's number — because that is the one thing on this surface that *is*
 //! playback truth, and the palette reserves the accent for exactly that.
 
-use iced::widget::{Column, Space, column, container, row, scrollable, text};
+use iced::widget::{
+    Column, Space, button, column, container, image as iced_image, mouse_area, row, scrollable,
+    text, tooltip,
+};
 use iced::{Element, Length, alignment};
 
 use crate::app::Message;
 use crate::player::{PlayerState, QueueRow, QueueRowState};
-use crate::theme;
 use crate::views::close_button;
+use crate::{icon, theme};
 
 /// Inner padding of the popover (logical px).
 ///
@@ -83,12 +86,23 @@ const POPOVER_PAD: f32 = theme::GAP_LG;
 /// element is `'static`: the popover's contents are a projection of engine
 /// events and a request-side record, not a borrow of the library, so nothing
 /// on screen can outlive a view-model rebuild mid-scan.
-pub(crate) fn view(player: &PlayerState, max_height: f32) -> Element<'static, Message> {
+pub(crate) fn view(
+    player: &PlayerState,
+    max_height: f32,
+    hovered: Option<usize>,
+) -> Element<'static, Message> {
+    // A row is only a control when there is an engine to send its command to,
+    // exactly as `Play album` and the inspector's rows are.
+    let live = player.engine_ready();
     let content = match player.queue_list() {
         None => empty_state(),
         Some(list) => {
-            let rows: Vec<Element<'static, Message>> =
-                list.rows.into_iter().map(queue_row).collect();
+            let rows: Vec<Element<'static, Message>> = list
+                .rows
+                .into_iter()
+                .enumerate()
+                .map(|(index, row_state)| queue_row(row_state, index, live, hovered == Some(index)))
+                .collect();
             // Where the queue came from, in one line: the album if it has a
             // title, else the artist it is filed under. The design spec's
             // contents list names only the summary, and this is the one
@@ -180,12 +194,36 @@ fn empty_state() -> Element<'static, Message> {
 }
 
 /// One queue row: position (or the lamp dot when it is playing), title over
-/// its artist where there is one, monospace duration.
+/// its artist where there is one, monospace duration — and, now, two things a
+/// listener can do to it.
 ///
-/// The number column is [`theme::TRACK_NO_W`] wide whichever it holds, so the
-/// dot arriving as a track starts moves no text — the same fixed-slot rule the
-/// bottom bar is built on, applied to a list that changes under the reader.
-fn queue_row(row_state: QueueRow) -> Element<'static, Message> {
+/// **Clicking the row plays from there.** ADR-0014's `JumpTo`, and this list is
+/// the one place it needs no decision at all: the rows are drawn from the
+/// record of what was handed to the engine, so a row's index *is* a queue
+/// position. Nothing is re-queued, and the mark follows `TrackStarted` rather
+/// than the click.
+///
+/// **The ✕ takes the entry out**, through `UpdateQueue` and the pure
+/// [`queue_edit`](crate::queue_edit) helper — an edit that does not touch the
+/// playing track does not disturb one delivered sample, which is the guarantee
+/// that ADR-0014 exists to make and the reason this is not a `SetQueue`.
+///
+/// Two fixed-slot rules, because a list that changes under the reader is
+/// exactly where movement is least affordable:
+///
+/// - the number column is [`theme::TRACK_NO_W`] wide whichever it holds, so the
+///   dot arriving as a track starts moves no text;
+/// - **the ✕'s slot is reserved whether or not the ✕ is in it.** The control
+///   appears on hover — twelve permanent crosses would be twelve invitations to
+///   destroy something in a surface built for a glance — but if its width came
+///   and went with it, every duration in the list would slide sideways as the
+///   pointer crossed a row.
+fn queue_row(
+    row_state: QueueRow,
+    index: usize,
+    live: bool,
+    hovered: bool,
+) -> Element<'static, Message> {
     let playing = row_state.state == QueueRowState::Playing;
     let ink = match row_state.state {
         QueueRowState::Played => theme::PAPER_FAINT,
@@ -221,7 +259,7 @@ fn queue_row(row_state: QueueRow) -> Element<'static, Message> {
                 .wrapping(text::Wrapping::None),
         );
     }
-    container(
+    let body = button(
         row![
             container(marker)
                 .width(Length::Fixed(theme::TRACK_NO_W))
@@ -235,8 +273,58 @@ fn queue_row(row_state: QueueRow) -> Element<'static, Message> {
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center),
     )
+    .width(Length::Fill)
     .padding(theme::pad(theme::GAP_XS, theme::GAP_XS))
-    .style(move |_theme| theme::queue_row(playing))
+    .style(move |_theme, status| theme::track_row(status, playing))
+    .on_press_maybe(live.then_some(Message::JumpToQueued(index)));
+    mouse_area(
+        row![body, remove_slot(index, live && hovered)]
+            .spacing(theme::GAP_XS)
+            .align_y(iced::Alignment::Center),
+    )
+    .on_enter(Message::QueueRowEntered(index))
+    .on_exit(Message::QueueRowLeft(index))
+    .into()
+}
+
+/// The per-row removal target: a ✕ while the pointer is on the row, and an
+/// empty space of exactly the same width when it is not.
+///
+/// [`theme::STEPPER_HIT`] rather than [`theme::TRANSPORT_HIT`], the same square
+/// the settings' `−`/`+` pair uses: a destructive control inside a list row
+/// should be reachable without being the largest thing in the row, and 24 px is
+/// the size this room already gives a secondary target.
+///
+/// Inert when there is no engine to send the edit to — the same rule the row it
+/// sits in follows, and the same rule `Play album` follows: a control that
+/// cannot act must not pretend it can.
+fn remove_slot(index: usize, offered: bool) -> Element<'static, Message> {
+    if !offered {
+        return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
+    }
+    let mark = container(
+        iced_image(icon::handle(icon::Glyph::Close))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(theme::GLYPH_OPACITY),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    tooltip(
+        button(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .padding(0)
+            .style(theme::transport)
+            .on_press(Message::RemoveQueued(index)),
+        text("Remove from the queue").size(theme::SIZE_CAPTION),
+        tooltip::Position::Left,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(theme::tooltip)
     .into()
 }
 

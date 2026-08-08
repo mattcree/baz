@@ -924,29 +924,6 @@ pub fn panel_toggle(status: button::Status, active: bool) -> button::Style {
     segment(status, active)
 }
 
-/// One row of the queue list. The playing row is a raised card with a
-/// hairline edge; every other row is the panel it sits on.
-///
-/// The amber is spent on the lamp dot in the row's number column and nowhere
-/// else — a whole row washed in accent would shout, and the dot is already the
-/// mark the shelf uses to say "this one". This style only lifts the row far
-/// enough to find it while scrolling a long queue.
-#[must_use]
-pub fn queue_row(playing: bool) -> container::Style {
-    if !playing {
-        return container::Style::default();
-    }
-    container::Style {
-        background: Some(Background::Color(CARD_HIGH)),
-        border: Border {
-            color: HAIRLINE_STRONG,
-            width: 1.0,
-            radius: RADIUS_SEGMENT.into(),
-        },
-        ..container::Style::default()
-    }
-}
-
 /// The now-playing bar: recessed below the wall, like the amp under the
 /// shelf.
 #[must_use]
@@ -1054,21 +1031,24 @@ pub const CAPTION_H: f32 = 2.0 * CAPTION_LINE_H;
 /// carries the whole string.
 pub const CAPTION_LINE_H: f32 = SIZE_BODY * LINE_HEIGHT;
 
-/// A track row in the album inspector: invisible at rest, a quiet card under
-/// the pointer, and the playing row carded exactly as the queue's is.
+/// A track row — in the album inspector **and** in the **Up next** popover:
+/// invisible at rest, a quiet card under the pointer, and the playing row
+/// carded with a hairline edge.
 ///
 /// The row became a control when clicking it started meaning "play from here"
 /// (ADR-0014's `JumpTo`), and this is the affordance that admits it. Until
 /// then the rows carried none — deliberately, because "an affordance that does
 /// nothing is a lie" — so gaining one is the visible half of gaining the
-/// behaviour, and it is the same rule read forwards.
+/// behaviour, and it is the same rule read forwards. The queue's rows kept
+/// their own container style for exactly as long as they were text; when they
+/// became controls too, the two lists collapsed into **one** style function
+/// rather than two that had to be kept token-for-token identical by hand. They
+/// are, after all, the same twelve rows with the same mark on the same one, and
+/// a listener who has seen one must not have to learn the other.
 ///
-/// The playing row's treatment is [`queue_row`]'s, token for token, because
-/// the two surfaces are now listing the same twelve rows with the same mark on
-/// the same one; a listener who has seen the queue must not have to learn the
-/// inspector separately. Hover sits one surface step below it, so "the pointer
-/// is here" and "this is what is sounding" stay distinguishable — the same
-/// separation [`SELECTION_EDGE`] buys the shelf.
+/// Hover sits one surface step below the playing row, so "the pointer is here"
+/// and "this is what is sounding" stay distinguishable — the same separation
+/// [`SELECTION_EDGE`] buys the shelf.
 ///
 /// No accent anywhere: the lamp dot in the number column is the playback
 /// truth, and a row that also washed amber would spend the signal twice.
@@ -1905,8 +1885,6 @@ mod tests {
         painted.push(("segmented", container_colors(&segmented(&theme))));
         painted.push(("preview_tip", container_colors(&preview_tip(&theme))));
         painted.push(("panel", container_colors(&panel(&theme))));
-        painted.push(("queue_row(plain)", container_colors(&queue_row(false))));
-        painted.push(("queue_row(playing)", container_colors(&queue_row(true))));
         painted.push(("bar", container_colors(&bar(&theme))));
         painted.push(("popover", container_colors(&popover(&theme))));
         painted.push(("tooltip", container_colors(&tooltip(&theme))));

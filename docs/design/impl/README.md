@@ -183,6 +183,59 @@ Two behaviours were driven rather than argued, because both depend on
 
 ---
 
+# Increment 7 — the queue's rows become controls
+
+Where the popover earns its existence: ADR-0014 shipped `JumpTo` and
+`UpdateQueue` and nothing spent them. Captured on the same private display,
+with the same scratch `HOME`, scratch `XDG_*` and null ALSA sink as increment 6,
+and with the transport **paused** wherever a measurement is being made.
+
+| Image | What it shows |
+|---|---|
+| [`20-up-next-row-hover-remove.png`](20-up-next-row-hover-remove.png) | The pointer on row 9. The row lifts, and its ✕ appears — **only** its ✕: twelve permanent crosses would be twelve invitations to destroy something in a surface built for a glance. Every other row is exactly where it was, and so is every duration, because the slot the ✕ appears *in* is reserved whether or not it is in it. |
+| [`21-up-next-row-removed.png`](21-up-next-row-removed.png) | The same queue one press later. *Beware the Friendly Stranger* is gone, the rows below it have renumbered, the summary has fallen from `1 of 12 · 50:25 left` to `1 of 11 · 48:14 left`, and the bar reads `1 / 11`. **The transport has not moved**: still paused, still 2:18 into *Ready Lets Go*. That is ADR-0014's guarantee — an edit that does not touch the playing track does not disturb one delivered sample — on camera. |
+| [`22-up-next-jump-to-row.png`](22-up-next-jump-to-row.png) | A click on row 3. `3 of 11 · 37:26 left`, the dot on *In the Annexe*, rows 1–2 fallen to the history ink behind the cursor, and the bar naming it. The engine trace is `queue #0` then `queue #2` with nothing in between — one jump, not two skips. |
+
+## The ✕ appears without anything moving
+
+The popover was captured with the pointer off the window, then on row 9, then
+off again. Paused throughout, so the pointer is the only variable.
+
+```
+pointer off  vs  pointer off again        0 differing pixels
+pointer off  vs  row 9 hovered            bbox 317x25+17+315
+```
+
+A 25-pixel band in a 360 × 436 popover: row 9, and nothing else. The duration
+column — the one most at risk, because it sits against the same right edge the
+✕ arrives at — occupies the identical box in both:
+
+```
+pointer off      34x308+0+0
+row 9 hovered    34x308+0+0
+```
+
+## Two notes on how it is built
+
+**The edit is a whole list, computed by a pure function.** `queue_edit::without`
+takes the `QueueVm` record and returns the queue as it should now be; the
+payload sent is that value's own `paths()`. ADR-0014 rejected index deltas
+because *an index applied against a stale picture removes a different track and
+neither side can tell*, and working on the record rather than on a bare
+`Vec<PathBuf>` means the list the engine is handed and the list on screen cannot
+come apart. Ten unit tests, no iced.
+
+**Hover is tracked with a row's identity, not a flag.** iced 0.13 tells a widget
+its own hover status inside a style function and nothing about its siblings, so
+each row reports its own crossings. Both messages are published from the same
+`CursorMoved` in widget order — so dragging the pointer *up* a list delivers the
+new row's entry before the old row's exit. An exit that meant "nothing is
+hovered" would undo the entry that had just arrived; naming the row in the exit
+makes the order stop mattering. Found by reasoning about the widget tree rather
+than by watching a ✕ flicker, and the message's own doc comment says so.
+
+---
+
 # Visual language — implementation evidence, pass 1
 
 > The three foundation items of `docs/design/02-visual-language.md`: the

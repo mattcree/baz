@@ -56,7 +56,7 @@ use crate::playback::{Playback, PlayerEvent};
 use crate::player::{Availability, PlayerState};
 use crate::scan::ScanUpdate;
 use crate::theme::PANEL_W;
-use crate::{art, config, font, keys, mpris, player, scan, shelf, theme, views, vm};
+use crate::{art, config, font, keys, mpris, player, queue_edit, scan, shelf, theme, views, vm};
 
 /// Approximate top-bar height, used only for the pre-first-scroll estimate
 /// of the grid viewport (real bounds arrive with every scroll event).
@@ -157,6 +157,31 @@ pub(crate) enum Message {
     /// a toggle — the press that dismisses a popover cannot be the press that
     /// re-opens it.
     CloseUpNext,
+    /// A row of the **Up next** popover was clicked: play the queue from that
+    /// zero-based position ([`Command::JumpTo`], ADR-0014).
+    ///
+    /// Unlike [`Self::PlayTrack`] this needs no decision about re-queueing —
+    /// the list the row was drawn from *is* what the engine is holding, by
+    /// construction.
+    JumpToQueued(usize),
+    /// A row's ✕ in the **Up next** popover: take that entry out of the queue
+    /// without stopping the music ([`Command::UpdateQueue`], ADR-0014).
+    RemoveQueued(usize),
+    /// The pointer entered a queue row, so the row can offer its ✕.
+    ///
+    /// Pure view state and the only hover baz tracks itself: iced 0.13 gives a
+    /// widget its own hover status inside a *style* function, which is enough
+    /// to change a colour and not enough to decide whether a sibling exists.
+    QueueRowEntered(usize),
+    /// The pointer left a queue row.
+    ///
+    /// It carries *which* row, and that is not redundant. Both messages are
+    /// published from the same `CursorMoved`, in widget order, so dragging the
+    /// pointer up a list delivers the new row's entry **before** the old row's
+    /// exit — and an exit that meant "nothing is hovered" would immediately
+    /// undo the entry that had just arrived. Naming the row makes the exit
+    /// conditional and the order stop mattering.
+    QueueRowLeft(usize),
     /// Top bar's Settings toggle, or Ctrl+`,`: show the settings, or put back
     /// whatever they were covering.
     ToggleSettings,
@@ -289,6 +314,15 @@ struct App {
     /// anchored to the *bar* belongs to every place the bar is in, which is all
     /// of them (see [`crate::overlay`]).
     overlay: Overlay,
+    /// Which row of the **Up next** popover the pointer is on, if any.
+    ///
+    /// The popover's rows offer their removal ✕ on hover only, and iced 0.13
+    /// has no way for one widget to ask whether a *sibling* is hovered — a
+    /// style function learns its own status and nothing else. So the row
+    /// reports its own crossings with a `mouse_area` and the shell holds the
+    /// one answer. The ✕'s slot is reserved either way, so this changes what is
+    /// drawn in it and never the geometry around it.
+    hovered_queue_row: Option<usize>,
     /// The window's size, as the last resize event reported it.
     ///
     /// Held for one job: an overlay has no parent to be a fraction of, so the
@@ -384,6 +418,7 @@ impl App {
             first_frame_logged: false,
             screen,
             overlay: Overlay::new(),
+            hovered_queue_row: None,
             window: WINDOW,
             playback,
             player,
@@ -407,18 +442,11 @@ impl App {
         if self.update_volume(&message)
             || self.update_replay_gain(&message)
             || self.update_transport(&message)
+            || self.update_overlay(&message)
         {
             return Task::none();
         }
         match message {
-            Message::ToggleUpNext => {
-                self.overlay.toggle_up_next();
-                Task::none()
-            }
-            Message::CloseUpNext => {
-                self.overlay.close();
-                Task::none()
-            }
             Message::EscapePressed => self.escape(),
             Message::WindowResized(size) => {
                 self.window = size;
@@ -499,6 +527,40 @@ impl App {
                 Screen::Shelf(state) => state.update(message),
             },
         }
+    }
+
+    /// Answer an overlay message, reporting whether it was one.
+    ///
+    /// The **Up next** popover and everything a listener can do to a row of it,
+    /// answered as one small machine for the reason the volume's nine and
+    /// ReplayGain's four are: they all belong to one surface, and folding six
+    /// more arms into the shell's own match would bury the four messages that
+    /// are genuinely about the whole application.
+    ///
+    /// <kbd>Esc</kbd> is deliberately *not* here. It is not an overlay message;
+    /// it is the message that has to know about every layer, so it stays in the
+    /// shell where the layers are ([`Self::escape`]).
+    fn update_overlay(&mut self, message: &Message) -> bool {
+        match *message {
+            Message::ToggleUpNext => self.overlay.toggle_up_next(),
+            Message::CloseUpNext => {
+                self.overlay.close();
+                // A popover that is gone has no row under the pointer, and the
+                // rows will not be there to report their own exit.
+                self.hovered_queue_row = None;
+            }
+            Message::QueueRowEntered(row) => self.hovered_queue_row = Some(row),
+            // Only if it is still the row that left: see the message's own note
+            // on why the pair must not be order-dependent.
+            Message::QueueRowLeft(row) if self.hovered_queue_row == Some(row) => {
+                self.hovered_queue_row = None;
+            }
+            Message::QueueRowLeft(_) => {}
+            Message::JumpToQueued(position) => self.jump_to_queued(position),
+            Message::RemoveQueued(row) => self.remove_queued(row),
+            _ => return false,
+        }
+        true
     }
 
     /// <kbd>Esc</kbd>: **peel one layer, top down.**
@@ -896,6 +958,76 @@ impl App {
         self.publish_mpris(false);
     }
 
+    /// Play the queue from `position` — a click on a row of **Up next**
+    /// (ADR-0014's `JumpTo`, and §3.4 step 3 of the UX spec).
+    ///
+    /// Simpler than the album inspector's [`Self::play_track`] by exactly one
+    /// decision, and the difference is worth naming: the inspector lists an
+    /// album that may or may not be what the engine is holding, so it has to
+    /// ask. This list *is* what the engine is holding — it is drawn from the
+    /// record of what was sent — so a position in it is already a position in
+    /// the queue and `JumpTo` alone is the whole request. Nothing is re-queued
+    /// and the run is not replaced to move within it.
+    ///
+    /// A row past the end of the record asks for nothing: the queue shrank
+    /// under the pointer, which is an ordinary race rather than a fault.
+    ///
+    /// Nothing on screen moves here. The dot follows `TrackStarted`, never the
+    /// click, per ADR-0014's front-end contract.
+    fn jump_to_queued(&mut self, position: usize) {
+        if self
+            .player
+            .queue()
+            .is_none_or(|queue| position >= queue.len())
+        {
+            return;
+        }
+        if self.playback.send(Command::JumpTo { position }) {
+            self.player.note_transport_sent();
+        } else {
+            self.player.engine_closed();
+        }
+    }
+
+    /// Take row `row` out of the queue — a click on a row's ✕ in **Up next**
+    /// (ADR-0014's `UpdateQueue`, and §3.4 step 4 of the UX spec).
+    ///
+    /// The edit itself is [`queue_edit::without`]'s: pure, tested, and working
+    /// on the [`vm::QueueVm`] record so that the paths sent and the rows drawn
+    /// come from one value and cannot describe different music. What is sent is
+    /// the **whole new queue**, never a delta — ADR-0014's reason is that an
+    /// index applied against a stale picture removes a different track and
+    /// neither side can tell.
+    ///
+    /// `UpdateQueue`, never `SetQueue`: the guarantee ADR-0014 exists to make
+    /// is that an edit which does not touch the playing track does not disturb
+    /// one delivered sample, and `SetQueue` is documented to stop the music.
+    /// Sending the wrong one here would silence a track to delete a different
+    /// one.
+    ///
+    /// The record is replaced only once the send is accepted, and through
+    /// [`PlayerState::note_queue_edited`](crate::player::PlayerState::note_queue_edited)
+    /// so the playing position survives the moment between the send and the
+    /// engine's `QueueChanged`.
+    fn remove_queued(&mut self, row: usize) {
+        let Some(edited) = self
+            .player
+            .queue()
+            .and_then(|queue| queue_edit::without(queue, row))
+        else {
+            return;
+        };
+        let paths = edited.paths();
+        if self.playback.send(Command::UpdateQueue { paths }) {
+            self.player.note_queue_edited(edited);
+        } else {
+            self.player.engine_closed();
+        }
+        // A queue emptied to nothing moves `CanPlay`, and that is the one
+        // MPRIS-visible change an edit can make without an engine event.
+        self.publish_mpris(false);
+    }
+
     /// Send a transport command, marking it pending on acceptance and
     /// downgrading to engine-closed state when the channel is gone.
     fn send_transport(&mut self, command: Command) {
@@ -956,9 +1088,11 @@ impl App {
             return place;
         };
         let content = match popover {
-            Popover::UpNext => {
-                views::up_next::view(&self.player, self.window.height * theme::POPOVER_MAX_H)
-            }
+            Popover::UpNext => views::up_next::view(
+                &self.player,
+                self.window.height * theme::POPOVER_MAX_H,
+                self.hovered_queue_row,
+            ),
         };
         stack![
             place,
