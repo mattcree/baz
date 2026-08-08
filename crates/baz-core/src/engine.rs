@@ -149,11 +149,13 @@
 //! | Command | While stopped | While playing | While paused |
 //! |---|---|---|---|
 //! | [`Command::SetQueue`] | replaces queue | stops playback ([`Event::Stopped`]), replaces queue | same |
+//! | [`Command::UpdateQueue`] | replaces queue, starts nothing | edits the queue **without interrupting the audio** (see below) | same, and **stays paused** |
 //! | [`Command::Play`] | starts at the queue top (or emits [`Event::QueueEnded`] if the queue is empty) | no-op | resumes ([`Event::Resumed`]) |
 //! | [`Command::Pause`] | no-op | pauses ([`Event::Paused`]) | no-op |
 //! | [`Command::Stop`] | no-op | stops ([`Event::Stopped`]); a later `Play` starts from the queue top | same |
 //! | [`Command::Next`] | no-op | skips to the next queue position (see below) | skips and *resumes playing* |
 //! | [`Command::Previous`] | no-op | restarts the current track past [`PREVIOUS_RESTART_MS`], else steps back one position | same, and *resumes playing* |
+//! | [`Command::JumpTo`] | **starts playing at that position** | plays that position from its start | jumps and *resumes playing* |
 //! | [`Command::Seek`] | no-op | jumps within the current track, keeps playing | jumps within the current track, **stays paused** |
 //! | [`Command::SetVolume`] / [`Command::SetMute`] | applies, silently | applies within one pump iteration, slewed | applies, silently |
 //! | [`Command::SetReplayGain`] | applies, silently | applies within one pump iteration, slewed | applies, silently |
@@ -273,6 +275,12 @@
 //!   queue order.
 //! - [`Event::QueueEnded`] fires when every queued track has played, failed,
 //!   or been skipped. Playback position resets to the queue top.
+//! - [`Event::QueueChanged`] fires when a [`Command::SetQueue`] or
+//!   [`Command::UpdateQueue`] actually changed something, and carries the
+//!   engine's own re-derived playing position. It is not a playback event —
+//!   a track boundary moves the position and says so with
+//!   [`Event::TrackStarted`] — it is how a front end learns that an *edit*
+//!   moved it.
 //! - Events are emitted only for state that changed: redundant commands
 //!   (pausing while paused, stopping while stopped) emit nothing.
 //!
@@ -336,6 +344,80 @@
 //!   The engine decides this from the track length it already knows; when a
 //!   length was never declared, [`AudioSource::seek`] reports the overrun and
 //!   the producer skips that track instead.
+//!
+//! **[`Command::JumpTo`] is the same drain-and-restart again**, aimed at an
+//! arbitrary queue position instead of a neighbouring one. `Next` is
+//! `JumpTo(current + 1)` in everything but name, and they share the code that
+//! says so — a third way to select a queue entry would have been a third set of
+//! answers about what is discarded, whether pause survives, and what happens
+//! past the end. The one place it deliberately differs from `Next` and
+//! `Previous` is that it works **while stopped**: they are relative and have
+//! nothing to be relative to, an absolute position has no such difficulty, and
+//! a listener clicking a row of a stopped queue means "play this".
+//!
+//! # Editing the queue (ADR-0014)
+//!
+//! [`Command::SetQueue`] replaces the queue *and stops*, which is right for
+//! "play this album instead" and useless for editing: re-sending the queue
+//! minus one track would silence the music to remove a track nobody was
+//! listening to. [`Command::UpdateQueue`] is the edit, and it guarantees the
+//! opposite — **an edit that does not touch the playing track does not disturb
+//! one delivered sample.** Both carry the whole queue, for the reason
+//! [`Command::Seek`] carries an absolute position: an index-based delta
+//! (`RemoveAt`, `MoveTo`) applied against a front end's stale picture removes a
+//! different track, and neither side can tell.
+//!
+//! **Identity, not index.** What survives an edit is the *playing track*; its
+//! position is whatever the new list makes it. The engine therefore re-derives
+//! the position from the path it is delivering — the old index if the new queue
+//! holds that path there, otherwise the first occurrence of it — and reports
+//! the answer on [`Event::QueueChanged`]. Every later transport command
+//! (`Next`, `Previous`, `Seek`, `JumpTo`) is answered in the *new* queue's
+//! terms from that moment on.
+//!
+//! **How the audio survives.** The running session keeps its own snapshot of
+//! the queue it was started with, so nothing about an edit reaches the producer,
+//! the ring, or the sink. The session is instead marked to deliver the track it
+//! is on **to its end and not one sample further**: the pump already refuses to
+//! read across a track boundary (it must, so that a per-track ReplayGain lands
+//! on the right sample), so the cut costs one comparison and lands exactly on
+//! the boundary. The engine then hands the rest of the run to a fresh session
+//! at the edited queue's next position, draining the sink rather than
+//! discarding it — the finished track's tail is audio the listener is owed,
+//! exactly as at a rate change.
+//!
+//! Consequences, stated rather than hidden:
+//!
+//! - **The delivered stream is unchanged.** Offline, the samples either side of
+//!   an edit are bit-identical to an unedited run: the cut is on the boundary,
+//!   so nothing is lost and nothing repeats.
+//! - **The boundary out of the edited-over track is not gapless.** It becomes
+//!   `Next`'s fresh decode (first audio in milliseconds for local files) rather
+//!   than a sample-accurate splice. One edit costs one boundary; the gapless
+//!   path stays reserved for its one guarantee.
+//! - **One decode-ahead is wasted** — the superseded session had already
+//!   prefetched what it thought was next. Bounded to one track, and discarded
+//!   with the session.
+//! - **Nothing is announced twice.** The superseded session emits no further
+//!   [`Event::TrackStarted`]: it is cut before the next track's first sample,
+//!   and a position from its own index space would be a lie about the new
+//!   queue.
+//!
+//! **When the edit removes the playing track** the guarantee does not apply,
+//! because that edit *does* touch it. Playback then moves to the entry that
+//! took its place — the same *index* in the new queue, which for the ordinary
+//! "remove what I am listening to" gesture is the following track — from its
+//! start, exactly as [`Command::JumpTo`] would, and past the end of a shortened
+//! queue the run ends. Index is the right answer in precisely this case,
+//! because identity did not survive.
+//!
+//! **What the engine does not keep.** There is no pull accessor for the queue
+//! and no event carrying its paths: the engine applies what it is given
+//! verbatim — no filtering, no de-duplication, no validation — so a front end's
+//! copy of the list it sent is exact by construction. What it cannot compute is
+//! the re-derived *position* when an edit races a track boundary, and that is
+//! the field [`Event::QueueChanged`] exists to carry (with the length beside
+//! it, as a cheap check that the two sides hold the same number of entries).
 //!
 //! # Elapsed time
 //!
@@ -963,6 +1045,15 @@ struct Control<S: Sink> {
     queue: Vec<PathBuf>,
     /// Queue index where the next idle-state `Play` starts.
     position: usize,
+    /// Where the running session's current track sits in the queue **as it is
+    /// now**, when an edit has moved it (ADR-0014).
+    ///
+    /// A session numbers tracks against the queue it was started with, and an
+    /// edit renumbers that queue underneath it. This is the translation, set by
+    /// an accepted [`Command::UpdateQueue`] and cleared by the next session —
+    /// so [`Control::playing_index`] is the only place that has to know a
+    /// session's index space is not always the queue's.
+    edited_index: Option<usize>,
     paused: bool,
     session: Option<Session>,
     /// Volume state shared with [`EngineHandle`] and read by the pump path
@@ -1044,6 +1135,7 @@ impl<S: Sink> Control<S> {
             instruments,
             queue: Vec::new(),
             position: 0,
+            edited_index: None,
             paused: false,
             session: None,
             volume,
@@ -1106,14 +1198,25 @@ impl<S: Sink> Control<S> {
         // iteration — before the pump, not after, because a track boundary the
         // engine has not heard about yet is a boundary the pump would read
         // straight through at the previous track's ReplayGain.
+        let mut moved = false;
         if let Some(session) = self.session.as_mut() {
             session.absorb();
-            if session.advance_active() {
-                // A new track is now the one being delivered. Resolve its
-                // ReplayGain and fold it into the gain the pump reads, before
-                // a single one of its samples is pulled.
-                self.settle_replay_gain(false);
-            }
+            moved = session.advance_active();
+        }
+        if self.session.as_ref().is_some_and(Session::past_cut) {
+            // The queue was edited while this session played, and the track it
+            // was on has been delivered in full. Hand over *before* the pump,
+            // so not one sample of the superseded queue's next track is heard.
+            // Tested every iteration rather than only when the cursor moved: an
+            // edit can arrive with the cursor already past the track it named.
+            self.hand_over_after_edit();
+            return;
+        }
+        if moved {
+            // A new track is now the one being delivered. Resolve its
+            // ReplayGain and fold it into the gain the pump reads, before
+            // a single one of its samples is pulled.
+            self.settle_replay_gain(false);
         }
         // The pump path's one volume read: a single acquire load of the
         // effective gain — the volume and ReplayGain already multiplied
@@ -1134,6 +1237,14 @@ impl<S: Sink> Control<S> {
         );
         session.report(&self.events, false);
         if session.complete() {
+            if session.superseded() {
+                // Edited over, and it ran out of queue before it reached the
+                // cut: its last track was the last it had. Nothing is flushed —
+                // a report from its index space would name positions in a queue
+                // that no longer exists — and the run continues on the new one.
+                self.hand_over_after_edit();
+                return;
+            }
             session.report(&self.events, true);
             let resume_at = session.rate_change_at();
             self.session = None; // joins the (already finished) producer
@@ -1165,10 +1276,14 @@ impl<S: Sink> Control<S> {
     fn handle(&mut self, command: Command) {
         match command {
             Command::SetQueue { paths } => {
+                let before = self.playing_index();
+                let changed = paths != self.queue;
                 self.stop_session();
                 self.queue = paths;
                 self.position = 0;
+                self.announce_queue(changed, before);
             }
+            Command::UpdateQueue { paths } => self.update_queue(paths),
             Command::Play => {
                 if self.session.is_some() {
                     if self.paused {
@@ -1194,17 +1309,14 @@ impl<S: Sink> Control<S> {
                 self.position = 0;
             }
             Command::Next => {
-                if let Some(session) = self.session.take() {
-                    let next = session.current + 1;
-                    drop(session); // abort: stop flag + join
-                    // The skipped track's audio is gone from the session ring;
-                    // drop the copy already sitting in the sink too.
-                    self.sink.discard_buffered();
-                    self.paused = false;
-                    self.start_session(next, 0, None);
+                // `JumpTo(current + 1)` in everything but name, and the same
+                // code says so. Nothing to be relative to means no-op.
+                if let Some(next) = self.playing_index().map(|current| current + 1) {
+                    self.jump_to(next);
                 }
             }
             Command::Previous => self.previous(),
+            Command::JumpTo { position } => self.jump_to(position),
             Command::Seek { position_ms } => self.seek(position_ms),
             Command::SetVolume { position } => {
                 let volume = Volume::new(position);
@@ -1417,6 +1529,155 @@ impl<S: Sink> Control<S> {
         }
     }
 
+    /// Where the run is **in the queue as it is now**: the position of the
+    /// track the session is delivering, or `None` when nothing is playing.
+    ///
+    /// Every queue-relative command answers through this rather than reading
+    /// [`Session::current`] directly, because an edit renumbers the queue
+    /// underneath a running session and a session's own indices are its
+    /// snapshot's (see [`Control::edited_index`]).
+    fn playing_index(&self) -> Option<usize> {
+        let session = self.session.as_ref()?;
+        Some(self.edited_index.unwrap_or(session.current))
+    }
+
+    /// The playing position *and* the file at it — the pair an edit needs,
+    /// because the position is what changes and the file is what identifies it.
+    ///
+    /// The path comes from the session's own snapshot: it is the file being
+    /// decoded, which is the only honest answer to "what is playing" while the
+    /// queue is being rewritten around it.
+    fn playing_track(&self) -> Option<(usize, PathBuf)> {
+        let session = self.session.as_ref()?;
+        let path = session.queue.get(session.current)?.clone();
+        Some((self.edited_index.unwrap_or(session.current), path))
+    }
+
+    /// Say that the queue changed, if it did — the rule every command in this
+    /// protocol follows.
+    ///
+    /// `changed` is whether the list itself is different; `before` is where the
+    /// run sat before the command, because an edit can renumber the playing
+    /// track without touching the list's contents from the front end's point of
+    /// view. Announced last, after every field it describes has been written:
+    /// the ordering contract [`Self::settle_replay_gain`] states.
+    fn announce_queue(&mut self, changed: bool, before: Option<usize>) {
+        let position = self.playing_index();
+        if !(changed || position != before) {
+            return;
+        }
+        let _ = self.events.send(Event::QueueChanged {
+            len: self.queue.len(),
+            position,
+        });
+    }
+
+    /// [`Command::UpdateQueue`]: replace the queue without interrupting the
+    /// music (ADR-0014; the module docs carry the argument).
+    fn update_queue(&mut self, paths: Vec<PathBuf>) {
+        if paths == self.queue {
+            return; // the engine already holds this queue: nothing to say
+        }
+        let before = self.playing_index();
+        let playing = self.playing_track();
+        // "Delivering" and "has been reported as started" are the same thing:
+        // commands are handled *between* pump iterations, and a track is
+        // reported in the same iteration its first samples are pumped. So a
+        // session that has started nothing has also been heard by nobody.
+        let delivering = self.session.as_ref().is_some_and(Session::started);
+        self.queue = paths;
+        if let Some((index, path)) = playing {
+            let target = derive_position(&self.queue, index, &path);
+            if !delivering {
+                // Nothing audible yet, so there is nothing to protect and no
+                // reason to keep the old session's plan: rebuild it on the new
+                // queue. Past its end, the run ends. The position *within* the
+                // track is carried across — a queue edited while parked mid-
+                // track by a paused seek must not rewind it — and so is the
+                // pause, because an edit is not a transport command.
+                let (seek_ms, track_ms) = self
+                    .session
+                    .as_ref()
+                    .map_or((0, None), |session| (session.seek_ms, session.track_ms));
+                self.move_without_resuming(target.unwrap_or(index), seek_ms, track_ms);
+            } else if let Some(target) = target {
+                // The playing track survived the edit. It plays to its end
+                // untouched; the run continues on the new queue after it.
+                self.edited_index = Some(target);
+                if let Some(session) = self.session.as_mut() {
+                    session.cut_after_current();
+                }
+            } else {
+                // The edit removed the track being played, so it is an edit
+                // that touches it: continue at the entry that took its place
+                // (`Command::UpdateQueue`'s contract).
+                self.move_without_resuming(index, 0, None);
+            }
+        }
+        self.announce_queue(true, before);
+    }
+
+    /// [`Command::JumpTo`]: play the queue entry at `position` from its start,
+    /// whatever the transport was doing.
+    ///
+    /// The drain-and-restart [`Command::Next`], [`Command::Previous`] and
+    /// [`Command::Seek`] share, aimed at an arbitrary index — and `Next` is
+    /// literally this function at `current + 1`. Out of range (including every
+    /// position of an empty queue) [`Self::start_session`] ends the run, which
+    /// is what `Next` past the last track already did.
+    fn jump_to(&mut self, position: usize) {
+        self.abandon_for_move();
+        self.paused = false;
+        self.start_session(position, 0, None);
+    }
+
+    /// [`Self::jump_to`], except that a paused queue stays paused and the
+    /// position *within* the target track can be carried across.
+    ///
+    /// The two distinctions an edit needs. It may have to move the transport
+    /// (it removed the track under it) but is not a transport command, so it
+    /// must not start music that was not playing; and rebuilding a session that
+    /// a paused seek had parked mid-track must not rewind it to the top.
+    fn move_without_resuming(&mut self, position: usize, seek_ms: u64, track_ms: Option<u64>) {
+        let was_paused = self.paused;
+        self.abandon_for_move();
+        self.paused = false;
+        self.start_session(position, seek_ms, track_ms);
+        if self.session.is_some() {
+            self.paused = was_paused;
+        }
+    }
+
+    /// Abandon the running session because the transport is moving somewhere
+    /// else in the queue: join the producer, and drop the audio the sink was
+    /// still holding for the position being left.
+    ///
+    /// The discard is the whole reason this is one function rather than three
+    /// call sites: leaving it out is precisely the "the skip feels late" bug
+    /// ([`Sink::discard_buffered`]).
+    fn abandon_for_move(&mut self) {
+        let Some(session) = self.session.take() else {
+            return; // stopped: nothing to abandon
+        };
+        drop(session); // abort: stop flag + join
+        self.sink.discard_buffered();
+    }
+
+    /// The track a superseded session was delivering has now been delivered in
+    /// full: hand the rest of the run to the edited queue (ADR-0014).
+    ///
+    /// **Drains rather than discards**, for [`Self::continue_at_new_rate`]'s
+    /// reason and by the same rule: a session that played its track out is owed
+    /// its tail, and only a session that was *abandoned* has audio nobody wants
+    /// to hear. That is also why this is not [`Self::jump_to`] — the two look
+    /// alike and differ on exactly the question of whose audio is still owed.
+    fn hand_over_after_edit(&mut self) {
+        let next = self.playing_index().map_or(0, |current| current + 1);
+        self.session = None; // joins the (finished or aborted) producer
+        self.sink.drain_buffered();
+        self.start_session(next, 0, None);
+    }
+
     /// [`Command::Previous`]: go back — restart the current track, or step to
     /// the one before it.
     ///
@@ -1433,15 +1694,10 @@ impl<S: Sink> Control<S> {
     /// transport control must not disagree about whether pressing them starts
     /// the music.
     fn previous(&mut self) {
-        let Some(session) = self.session.take() else {
+        let Some(current) = self.playing_index() else {
             return; // stopped: there is no current track to go back from
         };
-        let current = session.current;
-        let elapsed = session.elapsed_ms();
-        drop(session); // abort: stop flag + join, exactly as Next does
-        // The abandoned position's audio is still queued in the sink; drop it
-        // for the reason `Sink::discard_buffered` exists.
-        self.sink.discard_buffered();
+        let elapsed = self.session.as_ref().map_or(0, Session::elapsed_ms);
         // Past the threshold, or already at the head of the queue with nothing
         // before it: this track again. Otherwise the one before it.
         let target = if elapsed >= PREVIOUS_RESTART_MS || current == 0 {
@@ -1449,26 +1705,23 @@ impl<S: Sink> Control<S> {
         } else {
             current - 1
         };
-        self.paused = false;
-        self.start_session(target, 0, None);
+        self.jump_to(target);
     }
 
     /// [`Command::Seek`]: drain-and-restart the *current* track at
     /// `position_ms` (module docs). Same machinery as [`Command::Next`],
     /// aimed one queue position earlier and with a start offset.
     fn seek(&mut self, position_ms: u64) {
-        let Some(session) = self.session.take() else {
+        let Some(current) = self.playing_index() else {
             return; // stopped: there is no current track to seek within
         };
-        let current = session.current;
-        let track_ms = session.track_ms;
+        let track_ms = self.session.as_ref().and_then(|session| session.track_ms);
         let was_paused = self.paused;
-        drop(session); // abort: stop flag + join, exactly as Next does
         // Aborting the session discards the audio the engine still held, but
         // the sink may hold a further bufferful of the position being left
         // behind. Dropping the session without dropping that is precisely the
         // "seek feels late" bug: see `Sink::discard_buffered`.
-        self.sink.discard_buffered();
+        self.abandon_for_move();
         if track_ms.is_some_and(|total| position_ms >= total) {
             // At or past the end is Next, per Command::Seek's contract.
             self.paused = false;
@@ -1590,6 +1843,9 @@ impl<S: Sink> Control<S> {
     /// [`Event::QueueEnded`].
     fn start_session(&mut self, start: usize, seek_ms: u64, track_ms: Option<u64>) {
         self.paused = false;
+        // A new session numbers its tracks against the queue as it is now, so
+        // any translation left over from an edit is spent (ADR-0014).
+        self.edited_index = None;
         // Nothing has been delivered yet, so a slew would only mean the first
         // 20 ms of the new position playing at the *old* gain. Land on the
         // current setting instead — which is also what makes "set the volume,
@@ -1610,6 +1866,22 @@ impl<S: Sink> Control<S> {
             self.exclusive,
         ));
     }
+}
+
+/// Where the track that was at `index` playing `path` sits in `queue` now —
+/// the identity-not-index rule of ADR-0014, in three lines.
+///
+/// The old index is believed when the new queue holds that path there, because
+/// an edit that did not disturb the playing track must not renumber it; failing
+/// that, the first occurrence of the path is taken (a queue may legitimately
+/// repeat a file, and the first is the same answer a front end reconciling
+/// [`Event::TrackStarted`] already gives); failing *that*, the track is gone
+/// from the queue and the caller has a different question to answer.
+fn derive_position(queue: &[PathBuf], index: usize, path: &Path) -> Option<usize> {
+    if queue.get(index).is_some_and(|at| at == path) {
+        return Some(index);
+    }
+    queue.iter().position(|at| at == path)
 }
 
 // ---------------------------------------------------------------------------
@@ -1733,8 +2005,31 @@ struct Session {
     /// order, so a decode-ahead discovery never outruns the track before it.
     next_report: usize,
     /// Last queue index reported as started — what [`Command::Next`] skips
-    /// from and what [`Command::Seek`] seeks within.
+    /// from and what [`Command::Seek`] seeks within. **In this session's own
+    /// index space**, which an edit can renumber; [`Control::playing_index`] is
+    /// the translation.
     current: usize,
+    /// Delivery slot of the track [`Self::current`] names — `None` until an
+    /// [`Event::TrackStarted`] has been emitted at all, i.e. while `current` is
+    /// still merely the entry the session was started at.
+    ///
+    /// A queue edit asks both halves of this: with nothing delivered there is
+    /// no audio for it to protect, and the slot is where it puts its cut
+    /// (ADR-0014). Recorded here rather than derived from
+    /// [`Self::active_slot`] because the two differ for as long as a track's
+    /// first samples sit in the ring un-pumped — the cursor has moved on and
+    /// `current` has not — and an edit landing in that window must cut after
+    /// the track it *reported*, not the one it is about to start.
+    reported_slot: Option<usize>,
+    /// Deliver the track in this slot to its end and not one sample further —
+    /// set when the queue was edited while this session was playing
+    /// (ADR-0014).
+    ///
+    /// A *slot* rather than a queue index because it is the delivery cursor
+    /// this bounds ([`Self::active_slot`]), and a sample offset would not be
+    /// known yet: the boundary it cuts at is wherever the next track's audio
+    /// turns out to begin.
+    cut_after_slot: Option<usize>,
     /// Where in the delivered stream the current track's audio begins; the
     /// origin every elapsed time is measured from.
     track_origin: usize,
@@ -1804,6 +2099,8 @@ impl Session {
             failures: vec![None; len],
             next_report: start,
             current: start,
+            reported_slot: None,
+            cut_after_slot: None,
             // The session's first track always begins at delivered sample 0,
             // whichever queue index turns out to be playable.
             track_origin: 0,
@@ -2075,6 +2372,44 @@ impl Session {
         moved
     }
 
+    /// Stop delivering at the end of the track now being delivered: the queue
+    /// was edited under this session and everything it planned to play after
+    /// this track belongs to a queue that no longer exists (ADR-0014).
+    ///
+    /// Nothing is torn down and nothing is discarded here — the point is that
+    /// the audio in flight is untouched. The cut is read by [`Self::past_cut`]
+    /// once the delivery cursor moves past this slot, which is the engine's
+    /// signal to hand the rest of the run over.
+    fn cut_after_current(&mut self) {
+        self.cut_after_slot = Some(self.reported_slot.unwrap_or(0));
+    }
+
+    /// Whether this session has reported a track as started — and so whether
+    /// any of its audio has been heard (the two are the same thing: a track is
+    /// reported in the same engine iteration its first samples are pumped).
+    fn started(&self) -> bool {
+        self.reported_slot.is_some()
+    }
+
+    /// Whether this session has been edited over and is playing out its last
+    /// track.
+    fn superseded(&self) -> bool {
+        self.cut_after_slot.is_some()
+    }
+
+    /// Whether the delivery cursor has moved past the cut — i.e. the track this
+    /// session was told to finish has been delivered in full.
+    ///
+    /// Checked before the pump, so "past the cut" is reached with exactly that
+    /// track delivered and none of the next one: the pump never reads across a
+    /// track boundary ([`Self::pump`]).
+    fn past_cut(&self) -> bool {
+        matches!(
+            (self.cut_after_slot, self.active_slot),
+            (Some(cut), Some(active)) if active > cut
+        )
+    }
+
     /// The ReplayGain tags of the track whose audio is being delivered — all
     /// `None` before the first bound arrives, which resolves to "the file said
     /// nothing" and so to the no-ReplayGain pre-amp.
@@ -2099,6 +2434,7 @@ impl Session {
                         position: i,
                     });
                     self.current = i;
+                    self.reported_slot = self.active_slot;
                     self.track_origin = start_sample;
                     self.track_ms = self.durations[i];
                     // The chain follows the track it describes, and is stated
@@ -2798,6 +3134,46 @@ mod tests {
         assert!(
             discarded(&wait_until(&harness, mark, discarded)),
             "SetQueue while playing must discard the sink's buffered audio"
+        );
+        harness.shutdown();
+    }
+
+    /// **Editing the queue is the other deliberate exception** (ADR-0014):
+    /// where `SetQueue` stops and therefore abandons the sink's audio,
+    /// `UpdateQueue` leaves an untouched playing track playing — so a discard
+    /// here would throw away audio nobody asked to stop hearing, which is the
+    /// whole thing the command exists to avoid.
+    #[test]
+    fn an_edit_that_misses_the_playing_track_keeps_the_sinks_buffered_audio() {
+        let harness = Harness::start();
+        harness.play_until_audio_flows();
+        let mark = harness.mark();
+        // Append a second entry: the playing one survives at position 0.
+        harness.send(Command::UpdateQueue {
+            paths: vec![harness.track.clone(), harness.track.clone()],
+        });
+        // Give the engine every chance to misbehave before concluding it did
+        // not: many pump iterations' worth of idle time.
+        thread::sleep(Duration::from_millis(50));
+        assert!(
+            !discarded(&harness.ops_since(mark)),
+            "an edit that misses the playing track must not discard its audio"
+        );
+        harness.shutdown();
+    }
+
+    /// Removing the playing track is the edit that *does* touch it, so it takes
+    /// the same path every other transport move takes: the audio queued for the
+    /// position being left is dropped rather than trailing the command.
+    #[test]
+    fn removing_the_playing_track_discards_the_sinks_buffered_audio() {
+        let harness = Harness::start();
+        harness.play_until_audio_flows();
+        let mark = harness.mark();
+        harness.send(Command::UpdateQueue { paths: Vec::new() });
+        assert!(
+            discarded(&wait_until(&harness, mark, discarded)),
+            "removing the playing track must discard the sink's buffered audio"
         );
         harness.shutdown();
     }

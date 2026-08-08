@@ -87,8 +87,78 @@ use serde::{Deserialize, Serialize};
 pub enum Command {
     /// Replace the play queue with `paths`. Does not start playback; any
     /// playback in progress stops (the engine emits [`Event::Stopped`]).
+    ///
+    /// This is the **reset**: "forget what you were doing and hold this
+    /// queue instead". [`Command::UpdateQueue`] is the edit — same payload,
+    /// same absolute shape, but the music keeps playing (ADR-0014).
     SetQueue {
         /// The new queue, in play order.
+        paths: Vec<PathBuf>,
+    },
+    /// Edit the play queue **without interrupting the music**: remove, insert,
+    /// append or reorder by sending the queue as it should now be (ADR-0014).
+    ///
+    /// [`Command::SetQueue`]'s documented behaviour is to stop, which makes it
+    /// useless for editing — re-sending the queue minus one track would silence
+    /// the music to delete a track nobody was listening to. This command exists
+    /// for exactly that gesture and guarantees the opposite: **an edit that
+    /// does not touch the playing track does not disturb a single delivered
+    /// sample.**
+    ///
+    /// # Absolute, like every other setting in this protocol
+    ///
+    /// It carries the whole queue rather than an operation on it
+    /// (`RemoveAt { index }`, `MoveTo { from, to }`, …) for the reason
+    /// [`Command::Seek`] and [`Command::SetMute`] are absolute: an index-based
+    /// delta applied against a front end's stale picture removes *a different
+    /// track*, and there is no way for either side to notice. A whole-queue
+    /// command cannot desynchronize, expresses every edit including
+    /// multi-selection removal and drag-reorder, and costs a front end nothing
+    /// — it already holds the list it is editing. Sending the queue the engine
+    /// already has emits nothing and changes nothing.
+    ///
+    /// # Identity, not index
+    ///
+    /// The thing that survives an edit is the **playing track**, never its
+    /// position: removing two tracks above it renumbers it, and a front end
+    /// that assumed otherwise would mark the wrong row. The engine therefore
+    /// re-derives its position from the path it is playing — believing the old
+    /// index when the new queue still holds that path there, and otherwise
+    /// taking the first occurrence of it — and reports the answer on
+    /// [`Event::QueueChanged`]. (That is the same reconciliation rule front
+    /// ends already apply to [`Event::TrackStarted`], now stated once, in the
+    /// engine.)
+    ///
+    /// # What happens to the rest of the run
+    ///
+    /// The track being delivered plays to its end and the run then continues
+    /// from the **new** queue, one position past where that track now sits. The
+    /// handover starts a fresh session the way [`Command::Next`] does — except
+    /// that nothing already accepted by the output is thrown away, because a
+    /// track that played out is owed its tail. So the current track is never cut
+    /// short, and the boundary out of it is a fresh decode rather than a
+    /// sample-accurate splice: an edit costs the *next* boundary its gaplessness
+    /// and nothing else. [`crate::engine`] carries the detail.
+    ///
+    /// # When the edit removes the playing track
+    ///
+    /// That edit *does* touch the playing track, so the guarantee above does
+    /// not apply and the engine says what happens instead: playback moves to
+    /// the entry that took its place — the **same index** in the new queue,
+    /// which for the ordinary "remove the track I am listening to" gesture is
+    /// the track that follows it — starting from its beginning, exactly as
+    /// [`Command::JumpTo`] would. Index is the right answer here precisely
+    /// because identity did not survive. If the new queue is too short (or
+    /// empty), the run ends ([`Event::QueueEnded`]).
+    ///
+    /// # While stopped or paused
+    ///
+    /// While stopped it replaces the queue and starts nothing — the difference
+    /// from [`Command::SetQueue`] there is only that no [`Event::Stopped`] is
+    /// emitted, because nothing was playing. While **paused** it stays paused:
+    /// an edit is not a transport command and must not start the music.
+    UpdateQueue {
+        /// The queue as it should now be, in play order.
         paths: Vec<PathBuf>,
     },
     /// Start playback of the current queue position, or resume if paused.
@@ -145,6 +215,53 @@ pub enum Command {
         /// Target position from the start of the current track, in
         /// milliseconds (module docs explain the unit).
         position_ms: u64,
+    },
+    /// Play the queue entry at `position`, from its beginning — the
+    /// queue-relative sibling of [`Command::Seek`], which is track-relative
+    /// (ADR-0014).
+    ///
+    /// This is what a click on a queue row sends. Without it, reaching row 9
+    /// means eight [`Command::Next`]s: eight sessions, eight
+    /// [`Event::SignalPath`] reports, and eight tracks of audio briefly
+    /// reaching the output. That is not a jump.
+    ///
+    /// # What it does, in each transport state
+    ///
+    /// - **While playing** — the current session is abandoned exactly as
+    ///   [`Command::Next`] abandons it (its buffered audio is discarded, so the
+    ///   position being left is not heard afterwards) and a fresh one starts at
+    ///   `position`.
+    /// - **While paused** — it moves *and resumes*, because
+    ///   [`Command::Next`] and [`Command::Previous`] do, and three transport
+    ///   commands that select a queue position must not disagree about whether
+    ///   pressing them starts the music ([`crate::engine`]'s command table
+    ///   states it for all three).
+    /// - **While stopped** — it starts playing at `position`. This is the one
+    ///   place it parts company with `Next` and `Previous`, and the reason is
+    ///   the difference between an absolute command and a relative one: they
+    ///   are no-ops while stopped because there is no current track to step
+    ///   from, which is not a difficulty an absolute position has. `JumpTo` is
+    ///   [`Command::Play`] aimed at a chosen entry.
+    ///
+    /// Aimed at the track already playing it **restarts** it from the
+    /// beginning; that is a change of position, not a redundant command, and
+    /// it is what a click on the playing row plainly means.
+    ///
+    /// # Out of range
+    ///
+    /// `position` past the last entry (and any `position` at all on an empty
+    /// queue) **ends the run**: [`Event::QueueEnded`], and a later
+    /// [`Command::Play`] starts from the top. Not clamped to the last entry —
+    /// playing a track the listener did not point at is a worse answer than
+    /// stopping — and not an error, because a queue that shrank under a click
+    /// is an ordinary race rather than a fault, and this protocol has no error
+    /// channel to report it on. It is exactly what [`Command::Next`] does past
+    /// the end of the queue.
+    JumpTo {
+        /// Zero-based queue position to play, counted in the engine's current
+        /// queue ([`Event::QueueChanged`] is how a front end knows what that
+        /// is after an edit).
+        position: usize,
     },
     /// Set the playback volume to a position on the control's travel.
     ///
@@ -257,6 +374,43 @@ pub enum Event {
     Stopped,
     /// The queue finished: every track played, failed, or was skipped.
     QueueEnded,
+    /// The engine's queue changed, and this is where the run now sits in it
+    /// (ADR-0014).
+    ///
+    /// # Cadence
+    ///
+    /// Only on an accepted [`Command::SetQueue`] or [`Command::UpdateQueue`] —
+    /// user gestures, not a cadence — and only when something actually changed,
+    /// like every other event here. It is **not** how a front end follows
+    /// playback: a track boundary moves the position and announces itself with
+    /// [`Event::TrackStarted`], which carries the position too. This event
+    /// exists for the one thing `TrackStarted` cannot say, which is that the
+    /// position moved *without* the music moving — the renumbering an edit
+    /// causes.
+    ///
+    /// # Reading it
+    ///
+    /// `position` is the engine's own answer to "which entry is playing", after
+    /// re-deriving it from the path being played
+    /// ([`Command::UpdateQueue`] states the rule); `None` means nothing is
+    /// playing. A front end should take it rather than its own computed
+    /// answer — the two can differ when an edit races a track boundary, and the
+    /// engine's is the one the audio agrees with.
+    ///
+    /// `len` is how many entries the engine now holds. The paths are
+    /// deliberately **not** echoed: the sender just supplied them verbatim (the
+    /// engine neither filters, validates nor de-duplicates a queue), so
+    /// repeating a whole album back on every edit would be churn to state a
+    /// fact the front end has already got. What it cannot know without being
+    /// told is whether the engine ended up holding the same *number* of entries
+    /// it sent, and that is the cheap disagreement check this field is for.
+    QueueChanged {
+        /// How many entries the queue now holds.
+        len: usize,
+        /// Zero-based position of the entry now playing, or `None` when
+        /// nothing is.
+        position: Option<usize>,
+    },
     /// A track could not be played and was skipped; the queue continues
     /// with the next track (one bad file never kills the queue).
     TrackFailed {
@@ -708,11 +862,20 @@ mod tests {
                     PathBuf::from("/music/b.wav"),
                 ],
             },
+            Command::UpdateQueue {
+                paths: vec![
+                    PathBuf::from("/music/a.flac"),
+                    PathBuf::from("/music/b.wav"),
+                ],
+            },
+            Command::UpdateQueue { paths: Vec::new() },
             Command::Play,
             Command::Pause,
             Command::Stop,
             Command::Next,
             Command::Previous,
+            Command::JumpTo { position: 0 },
+            Command::JumpTo { position: 9 },
             Command::Seek { position_ms: 0 },
             Command::Seek {
                 position_ms: 93_500,
@@ -753,6 +916,14 @@ mod tests {
             Event::Resumed,
             Event::Stopped,
             Event::QueueEnded,
+            Event::QueueChanged {
+                len: 12,
+                position: Some(3),
+            },
+            Event::QueueChanged {
+                len: 0,
+                position: None,
+            },
             Event::TrackFailed {
                 path: PathBuf::from("/music/broken.flac"),
                 reason: "decode error: oops".into(),
@@ -911,6 +1082,23 @@ mod tests {
                 r#"{"cmd":"set_queue","paths":["/music/a.flac"]}"#,
             ),
             (
+                // The edit (ADR-0014): the same payload as its sibling above,
+                // and a different name because it means a different thing —
+                // this one does not stop the music.
+                serde_json::to_string(&Command::UpdateQueue {
+                    paths: vec![PathBuf::from("/music/a.flac")],
+                })
+                .expect("serialize"),
+                r#"{"cmd":"update_queue","paths":["/music/a.flac"]}"#,
+            ),
+            (
+                // Emptying the queue is a legal edit, and an empty list must
+                // encode as `[]` rather than as an absent key.
+                serde_json::to_string(&Command::UpdateQueue { paths: Vec::new() })
+                    .expect("serialize"),
+                r#"{"cmd":"update_queue","paths":[]}"#,
+            ),
+            (
                 serde_json::to_string(&Command::Play).expect("serialize"),
                 r#"{"cmd":"play"}"#,
             ),
@@ -929,6 +1117,16 @@ mod tests {
             (
                 serde_json::to_string(&Command::Previous).expect("serialize"),
                 r#"{"cmd":"previous"}"#,
+            ),
+            (
+                // A queue position, not a time: an integer for the reason
+                // every other number here is one (module docs).
+                serde_json::to_string(&Command::JumpTo { position: 9 }).expect("serialize"),
+                r#"{"cmd":"jump_to","position":9}"#,
+            ),
+            (
+                serde_json::to_string(&Command::JumpTo { position: 0 }).expect("serialize"),
+                r#"{"cmd":"jump_to","position":0}"#,
             ),
             (
                 serde_json::to_string(&Command::Seek {
@@ -1109,6 +1307,47 @@ mod tests {
                 })
                 .expect("serialize"),
                 r#"{"event":"signal_path","source_rate_hz":96000,"source_bits":24,"output_rate_hz":44100,"chain":{"state":"converting","reason":"fixed_output_rate"}}"#,
+            ),
+        ];
+        for (got, want) in cases {
+            assert_eq!(got, want);
+        }
+    }
+
+    /// [`Event::QueueChanged`]'s bytes, pinned (ADR-0014) — split from its
+    /// sibling above for the reason the others were: one test listing every
+    /// variant of a growing enum outgrows what is readable, not because the
+    /// contract is any weaker.
+    #[test]
+    fn queue_event_wire_format_is_stable() {
+        let cases: Vec<(String, &str)> = vec![
+            (
+                // The position is the engine's own re-derived answer; the
+                // queue's paths are deliberately not echoed (see the variant).
+                serde_json::to_string(&Event::QueueChanged {
+                    len: 12,
+                    position: Some(3),
+                })
+                .expect("serialize"),
+                r#"{"event":"queue_changed","len":12,"position":3}"#,
+            ),
+            (
+                // Nothing playing is `null`, never a sentinel index: a reader
+                // must be able to tell "no row is playing" from "row 0 is".
+                serde_json::to_string(&Event::QueueChanged {
+                    len: 0,
+                    position: None,
+                })
+                .expect("serialize"),
+                r#"{"event":"queue_changed","len":0,"position":null}"#,
+            ),
+            (
+                serde_json::to_string(&Event::QueueChanged {
+                    len: 1,
+                    position: Some(0),
+                })
+                .expect("serialize"),
+                r#"{"event":"queue_changed","len":1,"position":0}"#,
             ),
         ];
         for (got, want) in cases {

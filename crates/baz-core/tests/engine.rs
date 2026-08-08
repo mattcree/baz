@@ -365,22 +365,40 @@ fn next_event(events: &Receiver<Event>) -> Event {
 }
 
 /// The next event that is not a readout — [`Event::Progress`],
-/// [`Event::SignalPath`], [`Event::VolumeChanged`] or
-/// [`Event::ReplayGainChanged`].
+/// [`Event::SignalPath`], [`Event::VolumeChanged`], [`Event::ReplayGainChanged`]
+/// or [`Event::QueueChanged`].
 ///
-/// All four are continuous or incidental *descriptions* of playback rather
+/// All five are continuous or incidental *descriptions* of playback rather
 /// than transport transitions, and all interleave with everything by design;
 /// the tests that assert the *transport* vocabulary's ordering therefore step
-/// over them. Each has its own contract and its own tests below — none is going
-/// unasserted.
+/// over them. (`QueueChanged` describes the queue, not the transport: it rides
+/// along with every accepted `SetQueue` and `UpdateQueue`, including the ones
+/// these tests send merely to set up a fixture.) Each has its own contract and
+/// its own tests below — none is going unasserted.
 fn next_transport_event(events: &Receiver<Event>) -> Event {
     loop {
         match next_event(events) {
             Event::Progress { .. }
             | Event::SignalPath { .. }
             | Event::VolumeChanged { .. }
-            | Event::ReplayGainChanged { .. } => {}
+            | Event::ReplayGainChanged { .. }
+            | Event::QueueChanged { .. } => {}
             other => return other,
+        }
+    }
+}
+
+/// Wait for the next [`Event::QueueChanged`], stepping over the readouts that
+/// ride along with it, and return its two fields.
+fn next_queue_changed(events: &Receiver<Event>) -> (usize, Option<usize>) {
+    loop {
+        match next_event(events) {
+            Event::Progress { .. }
+            | Event::SignalPath { .. }
+            | Event::VolumeChanged { .. }
+            | Event::ReplayGainChanged { .. } => {}
+            Event::QueueChanged { len, position } => return (len, position),
+            other => panic!("expected QueueChanged, got {other:?}"),
         }
     }
 }
@@ -747,6 +765,9 @@ fn set_queue_does_not_autoplay_and_empty_queue_ends() {
             paths: vec![f.a.clone()],
         })
         .expect("send");
+    // The queue is news, and the only news: it is announced, and nothing else
+    // follows it.
+    assert_eq!(next_queue_changed(&events), (1, None));
     assert_no_event_within(&events, Duration::from_millis(120));
     assert_eq!(engine.samples_delivered(), 0, "SetQueue must not autoplay");
 }
@@ -993,6 +1014,7 @@ fn seek_while_stopped_is_a_no_op() {
             paths: vec![f.b.clone()],
         })
         .expect("send");
+    assert_eq!(next_queue_changed(&events), (1, None)); // the SetQueue above
     engine
         .send(Command::Seek { position_ms: 500 })
         .expect("send");
@@ -2342,6 +2364,7 @@ fn previous_while_stopped_is_a_no_op() {
             paths: vec![f.b.clone()],
         })
         .expect("send");
+    assert_eq!(next_queue_changed(&events), (1, None)); // the SetQueue above
     engine.send(Command::Previous).expect("send");
     assert_no_event_within(&events, Duration::from_millis(120));
 
@@ -2355,6 +2378,560 @@ fn previous_while_stopped_is_a_no_op() {
         &collect(output),
         &f.b_ref,
         "a no-op Previous must not have disturbed the queue",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Command::JumpTo — reaching a queue entry by name instead of by repetition
+// ---------------------------------------------------------------------------
+
+/// **`JumpTo` plays the entry it names, from its start.** One command, one
+/// session, one track of audio — the thing a click on a queue row means, and
+/// what eight `Next`s are not.
+///
+/// Asserted on the samples as well as the events: what follows the jump is the
+/// named track whole, bit for bit against a reference decode.
+#[test]
+fn jump_to_plays_the_named_entry_from_its_start() {
+    let f = fixtures();
+    let capacity = f.a_ref.len() + f.dc_ref.len();
+    let (engine, events, output) = spawn_offline(paced_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone(), f.dc.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+
+    engine.send(Command::JumpTo { position: 2 }).expect("send");
+    assert_eq!(
+        next_transport_event(&events),
+        started(&f.dc, 2),
+        "JumpTo must reach the entry it names without playing the ones between"
+    );
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+
+    engine.shutdown();
+    let out = collect(output);
+    assert_samples_eq(
+        &out[out.len() - f.dc_ref.len()..],
+        &f.dc_ref,
+        "the jumped-to track must be delivered whole, from its first sample",
+    );
+    assert_samples_eq(
+        &out[..out.len() - f.dc_ref.len()],
+        &f.a_ref[..out.len() - f.dc_ref.len()],
+        "everything before the jump must be the head of the track it left",
+    );
+}
+
+/// **Aimed at the track already playing, it restarts it.** A click on the
+/// playing row is a position change, not a redundant command.
+#[test]
+fn jump_to_the_playing_entry_restarts_it() {
+    let f = fixtures();
+    let (engine, events, output) =
+        spawn_offline(paced_config(), 2 * f.chirp_ref.len()).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.chirp.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.chirp, 0));
+    park_at(&engine, &events, 4_000);
+
+    engine.send(Command::JumpTo { position: 0 }).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.chirp, 0));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+
+    engine.shutdown();
+    let out = collect(output);
+    assert_samples_eq(
+        &out[out.len() - f.chirp_ref.len()..],
+        &f.chirp_ref,
+        "a restarted track must be delivered whole, from its first sample",
+    );
+}
+
+/// **While paused it moves and resumes**, exactly as `Next` and `Previous` do:
+/// three transport commands that select a queue entry must not disagree about
+/// whether pressing them starts the music.
+#[test]
+fn jump_to_while_paused_moves_and_resumes() {
+    let f = fixtures();
+    let capacity = f.a_ref.len() + f.dc_ref.len();
+    let (engine, events, output) = spawn_offline(paced_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.dc.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    park_at(&engine, &events, 1_000);
+    let frozen = engine.samples_delivered();
+
+    engine.send(Command::JumpTo { position: 1 }).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.dc, 1));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    assert!(
+        engine.samples_delivered() > frozen,
+        "JumpTo while paused must resume, not merely move"
+    );
+
+    engine.shutdown();
+    let out = collect(output);
+    assert_samples_eq(
+        &out[out.len() - f.dc_ref.len()..],
+        &f.dc_ref,
+        "the jumped-to track must play in full after a paused jump",
+    );
+}
+
+/// **While stopped it starts playing there** — the one place it parts company
+/// with `Next` and `Previous`, which are no-ops because they are relative and
+/// have nothing to be relative to. An absolute position has no such difficulty.
+#[test]
+fn jump_to_while_stopped_starts_playing_there() {
+    let f = fixtures();
+    let (engine, events, output) =
+        spawn_offline(fast_config(), 2 * f.dc_ref.len()).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.b.clone(), f.dc.clone()],
+        })
+        .expect("send");
+    assert_eq!(next_queue_changed(&events), (2, None));
+
+    engine.send(Command::JumpTo { position: 1 }).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.dc, 1));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+
+    engine.shutdown();
+    assert_samples_eq(
+        &collect(output),
+        &f.dc_ref,
+        "a jump from a standing start plays the named entry and nothing else",
+    );
+}
+
+/// **Past the end of the queue the run ends** — `Next`'s answer, not a clamp
+/// onto the last entry and not an error. A later `Play` starts from the top,
+/// which is what `QueueEnded` has always meant.
+#[test]
+fn jump_to_out_of_range_ends_the_queue() {
+    let f = fixtures();
+    let (engine, events, _output) =
+        spawn_offline(paced_config(), f.a_ref.len()).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+
+    engine.send(Command::JumpTo { position: 9 }).expect("send");
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    let at_end = engine.samples_delivered();
+    assert_no_event_within(&events, Duration::from_millis(120));
+    assert_eq!(
+        engine.samples_delivered(),
+        at_end,
+        "nothing may play after a jump past the end of the queue"
+    );
+
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+}
+
+/// An empty queue has no entry to jump to, and says so the way `Play` does.
+#[test]
+fn jump_to_on_an_empty_queue_ends_the_queue() {
+    let f = fixtures();
+    let (engine, events, _output) =
+        spawn_offline(fast_config(), f.b_ref.len()).expect("spawn engine");
+    engine.send(Command::JumpTo { position: 0 }).expect("send");
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    assert_eq!(engine.samples_delivered(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Command::UpdateQueue — editing without silencing (ADR-0014)
+// ---------------------------------------------------------------------------
+
+/// **The claim the command exists for: an edit that misses the playing track
+/// does not disturb one delivered sample.**
+///
+/// A track is inserted *above* the one playing — the renumbering case — while
+/// its audio is in flight. What reaches the sink must be byte-for-byte what an
+/// unedited run of the same two tracks delivers: the reference decodes,
+/// concatenated. The events are asserted too, and the absence of
+/// [`Event::Stopped`] among them is the difference from `SetQueue`.
+#[test]
+fn an_edit_that_misses_the_playing_track_leaves_the_audio_untouched() {
+    let f = fixtures();
+    let capacity = f.a_ref.len() + f.b_ref.len() + f.dc_ref.len();
+    let (engine, events, output) = spawn_offline(paced_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+
+    // Prepend a track nobody asked to hear: the playing entry moves from 0 to
+    // 1, and the queue behind it is untouched.
+    engine
+        .send(Command::UpdateQueue {
+            paths: vec![f.dc.clone(), f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    assert_eq!(
+        next_queue_changed(&events),
+        (3, Some(1)),
+        "the engine must re-derive the playing position by identity, not keep the index"
+    );
+    assert_eq!(
+        next_transport_event(&events),
+        started(&f.b, 2),
+        "the run must continue in the edited queue's terms"
+    );
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+
+    engine.shutdown();
+    let mut want = f.a_ref.clone();
+    want.extend_from_slice(&f.b_ref);
+    assert_samples_eq(
+        &collect(output),
+        &want,
+        "an edit that misses the playing track must deliver exactly what an unedited run does",
+    );
+}
+
+/// Removing a track *behind* the playing one takes it out of the run without
+/// touching the audio: the playing track finishes in full, and the removed one
+/// never plays.
+#[test]
+fn removing_a_later_track_leaves_the_playing_one_alone() {
+    let f = fixtures();
+    let capacity = f.a_ref.len() + f.dc_ref.len();
+    let (engine, events, output) = spawn_offline(paced_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.dc.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+
+    engine
+        .send(Command::UpdateQueue {
+            paths: vec![f.a.clone()],
+        })
+        .expect("send");
+    assert_eq!(next_queue_changed(&events), (1, Some(0)));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+
+    engine.shutdown();
+    assert_samples_eq(
+        &collect(output),
+        &f.a_ref,
+        "the playing track must be delivered whole, and the removed one not at all",
+    );
+}
+
+/// **Reordering re-derives the position by identity and the run follows the new
+/// order.** The playing track keeps its place (index 0 still holds it), and
+/// what comes after it is whatever the *edited* queue says — asserted on the
+/// samples, with a constant-amplitude fixture that no sine can be mistaken for.
+#[test]
+fn reordering_the_queue_reroutes_the_rest_of_the_run() {
+    let f = fixtures();
+    let capacity = f.a_ref.len() + f.dc_ref.len() + f.b_ref.len();
+    let (engine, events, output) = spawn_offline(paced_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone(), f.dc.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+
+    // Swap the two tracks that have not played yet.
+    engine
+        .send(Command::UpdateQueue {
+            paths: vec![f.a.clone(), f.dc.clone(), f.b.clone()],
+        })
+        .expect("send");
+    assert_eq!(next_queue_changed(&events), (3, Some(0)));
+    assert_eq!(next_transport_event(&events), started(&f.dc, 1));
+    assert_eq!(next_transport_event(&events), started(&f.b, 2));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+
+    engine.shutdown();
+    let mut want = f.a_ref.clone();
+    want.extend_from_slice(&f.dc_ref);
+    want.extend_from_slice(&f.b_ref);
+    assert_samples_eq(
+        &collect(output),
+        &want,
+        "the rest of the run must follow the edited order",
+    );
+}
+
+/// **Removing the playing track is the one edit that interrupts**, because it
+/// is the one edit that touches it. Playback moves to the entry that took its
+/// place — the same index in the new queue — from its start.
+#[test]
+fn removing_the_playing_track_continues_at_the_entry_that_took_its_place() {
+    let f = fixtures();
+    let capacity = f.a_ref.len() + f.dc_ref.len();
+    let (engine, events, output) = spawn_offline(paced_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.dc.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    let cut = engine.samples_delivered();
+
+    engine
+        .send(Command::UpdateQueue {
+            paths: vec![f.dc.clone()],
+        })
+        .expect("send");
+    // The edit is announced with the position it moved the run to, and the
+    // audio follows: the entry that took the removed one's place.
+    assert_eq!(next_queue_changed(&events), (1, Some(0)));
+    assert_eq!(
+        next_transport_event(&events),
+        started(&f.dc, 0),
+        "the entry that took the removed one's place must start playing"
+    );
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+
+    engine.shutdown();
+    let out = collect(output);
+    assert!(
+        out.len() >= cut + f.dc_ref.len(),
+        "the replacement track must have played in full"
+    );
+    assert_samples_eq(
+        &out[out.len() - f.dc_ref.len()..],
+        &f.dc_ref,
+        "what follows the removal is the entry that took its place, from its start",
+    );
+    assert_samples_eq(
+        &out[..cut],
+        &f.a_ref[..cut],
+        "everything before the removal is the clean head of the track that was playing",
+    );
+}
+
+/// Emptying the queue while it plays ends the run: there is no entry left to
+/// take the playing track's place.
+#[test]
+fn an_edit_that_empties_the_queue_ends_the_run() {
+    let f = fixtures();
+    let (engine, events, _output) =
+        spawn_offline(paced_config(), f.a_ref.len()).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+
+    engine
+        .send(Command::UpdateQueue { paths: Vec::new() })
+        .expect("send");
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    assert_eq!(next_queue_changed(&events), (0, None));
+    let at_end = engine.samples_delivered();
+    assert_no_event_within(&events, Duration::from_millis(120));
+    assert_eq!(
+        engine.samples_delivered(),
+        at_end,
+        "nothing may play out of an emptied queue"
+    );
+}
+
+/// Sending the queue the engine already holds says nothing and does nothing —
+/// the rule every command in this protocol follows.
+#[test]
+fn a_redundant_edit_says_nothing() {
+    let f = fixtures();
+    let (engine, events, _output) =
+        spawn_offline(fast_config(), f.b_ref.len()).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    assert_eq!(next_queue_changed(&events), (2, None));
+
+    engine
+        .send(Command::UpdateQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    assert_no_event_within(&events, Duration::from_millis(120));
+}
+
+/// **An edit is not a transport command**: a paused queue stays paused through
+/// one, delivers nothing while it is applied, and resumes bit-identically.
+#[test]
+fn an_edit_while_paused_stays_paused() {
+    let f = fixtures();
+    let capacity = f.a_ref.len() + f.b_ref.len();
+    let cfg = EngineConfig {
+        consumer_pace: Duration::from_millis(1),
+        ..paced_config()
+    };
+    let (engine, events, output) = spawn_offline(cfg, capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    engine.send(Command::Pause).expect("send");
+    assert_eq!(next_transport_event(&events), Event::Paused);
+    let frozen = engine.samples_delivered();
+    assert!(
+        frozen < f.a_ref.len(),
+        "the pause landed after the track ended"
+    );
+
+    engine
+        .send(Command::UpdateQueue {
+            paths: vec![f.dc.clone(), f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    assert_eq!(next_queue_changed(&events), (3, Some(1)));
+    thread::sleep(Duration::from_millis(50));
+    assert_eq!(
+        engine.samples_delivered(),
+        frozen,
+        "an edit must not start music that was not playing"
+    );
+
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), Event::Resumed);
+    assert_eq!(next_transport_event(&events), started(&f.b, 2));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+
+    engine.shutdown();
+    let mut want = f.a_ref.clone();
+    want.extend_from_slice(&f.b_ref);
+    assert_samples_eq(
+        &collect(output),
+        &want,
+        "pausing, editing and resuming must still deliver exactly the unedited stream",
+    );
+}
+
+/// A queue parked mid-track by a paused seek keeps its position through an
+/// edit: the session is rebuilt on the new queue (nothing has been delivered,
+/// so nothing can be heard), and rebuilding it at the top of the track would
+/// silently rewind the listener.
+#[test]
+fn an_edit_does_not_rewind_a_paused_seek() {
+    let f = fixtures();
+    let (engine, events, output) =
+        spawn_offline(paced_config(), 2 * f.chirp_ref.len()).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.chirp.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.chirp, 0));
+    park_at(&engine, &events, 4_500);
+    let frozen = engine.samples_delivered();
+
+    engine
+        .send(Command::UpdateQueue {
+            paths: vec![f.dc.clone(), f.chirp.clone()],
+        })
+        .expect("send");
+    assert_eq!(next_queue_changed(&events), (2, Some(1)));
+    assert_eq!(
+        engine.samples_delivered(),
+        frozen,
+        "an edit must deliver nothing while paused"
+    );
+
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), Event::Resumed);
+    assert_eq!(
+        next_progress(&events),
+        (4_500, Some(CHIRP_MS)),
+        "the position the listener parked at must survive the edit"
+    );
+    assert_eq!(next_transport_event(&events), started(&f.chirp, 1));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+
+    engine.shutdown();
+    let out = collect(output);
+    let landed = ms_to_frames(4_500, RATE) * CHANNELS;
+    assert_samples_eq(
+        &out[out.len() - (f.chirp_ref.len() - landed)..],
+        &f.chirp_ref[landed..],
+        "playback must resume from where it was parked, not from the top",
+    );
+}
+
+/// Every queue-relative command is answered in the **edited** queue's terms
+/// from the moment the edit lands: a seek after a renumbering seeks within the
+/// track's new position, not the one the session was started with.
+#[test]
+fn transport_commands_after_an_edit_speak_the_new_queues_indices() {
+    let f = fixtures();
+    let capacity = 2 * f.a_ref.len() + f.b_ref.len();
+    let (engine, events, _output) = spawn_offline(paced_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+
+    engine
+        .send(Command::UpdateQueue {
+            paths: vec![f.dc.clone(), f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    assert_eq!(next_queue_changed(&events), (3, Some(1)));
+
+    // Seek: the current track is now entry 1, and that is what must be
+    // re-started at the target — entry 0 is a track that has never played.
+    engine
+        .send(Command::Seek { position_ms: 500 })
+        .expect("send");
+    assert_eq!(
+        next_transport_event(&events),
+        started(&f.a, 1),
+        "a seek after an edit must stay within the track it was already playing"
+    );
+
+    // Previous: two seconds in, so it steps back one position — into the
+    // track the edit put in front, which the old index space did not have.
+    park_at(&engine, &events, 2_000);
+    const { assert!(2_000 < PREVIOUS_RESTART_MS) }
+    engine.send(Command::Previous).expect("send");
+    assert_eq!(
+        next_transport_event(&events),
+        started(&f.dc, 0),
+        "Previous must step back in the queue as it is now"
     );
 }
 

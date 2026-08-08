@@ -97,6 +97,16 @@ next commit.
   same `VolumePath` the volume uses, because there is one gain stage and one
   answer to "is this bit-exact" (ADR-0013, schema v5).
   baz reads these figures; it does not compute them.
+- **Queue editing that does not stop the music.** `JumpTo { position }` plays
+  the entry it names — the queue-relative sibling of `Seek` — from wherever the
+  transport is, including stopped. `UpdateQueue { paths }` removes, reorders,
+  inserts and appends by sending the queue as it should now be: an edit that
+  does not touch the playing track leaves the delivered stream bit-identical to
+  an unedited run, because the running session plays its track out and only then
+  hands over to the edited queue. What survives an edit is the playing *track*,
+  never its index, so the engine re-derives the position by identity and reports
+  it on `QueueChanged { len, position }`; removing the playing track continues
+  at the entry that took its place (ADR-0014).
 - Command/event protocol between the engine and any front end, with the wire
   format pinned by test.
 

@@ -243,24 +243,18 @@
   resized, or replaced. foobar-style layout editing is a later chapter by
   design (VISION pillar 6); a resizable rail is the plausible next step and
   wants the config-file question answered first.
-- **The queue is a view, not a control.** The panel lists what was queued and
-  marks what is playing; it cannot reorder, remove, or jump. Each needs an
-  engine command `baz-core` does not have:
-  - **Click a row to jump to it** wants `Command::JumpTo { position: usize }` —
-    the queue-relative sibling of `Seek`, which is track-relative. `Next` and
-    `Previous` are all there is, so reaching row 9 today means eight skips,
-    eight starts and eight bursts of audio.
-  - **Remove a track** and **reorder** want a `SetQueue` that keeps playing.
-    Today's is documented to stop ("any playback in progress stops"), so the
-    obvious implementation would silence the music to delete a track nobody was
-    listening to.
-
-  With either command the panel change is small and local: rows already carry
-  their queue position, and `PlayerState::queue_list` is the one place that
-  would gain a message.
+- **The queue is a view, not a control.** — **the engine half is closed
+  (ADR-0014); the panel half is not.** `Command::JumpTo { position }` plays the
+  entry it names, and `Command::UpdateQueue { paths }` removes, reorders and
+  appends without stopping the music (an edit that misses the playing track
+  disturbs no delivered sample). `Event::QueueChanged { len, position }` carries
+  the engine's re-derived playing row. What remains is the panel itself: rows
+  already carry their queue position, and `PlayerState::queue_list` is the one
+  place that gains a message.
 - **The queue cannot be built.** There is one way to queue anything — play an
-  album, which replaces the queue wholesale. "Add to queue" / "play next" need
-  the same non-destructive `SetQueue` (or an append command) as removal does.
+  album, which replaces the queue wholesale. "Add to queue" / "play next" are
+  now expressible (`UpdateQueue` with the entry inserted where it belongs) and
+  want a shelf-side gesture to send them.
 - **No keyboard route out of the search field.** Transport keys are bound
   (`crates/baz/src/keys.rs`), but iced 0.13's `text_input` captures every key
   press while focused except Tab and the vertical arrows, so while the search
