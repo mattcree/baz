@@ -1,25 +1,32 @@
 //! The persistent now-playing bar: current track, transport, seek row,
 //! volume — and, now, the door to what is next.
 //!
-//! # The left zone gained a door
+//! # The left zone gained a door, and then stopped needing it
 //!
 //! The audit's finding was that there was no route to "what is next" from the
 //! transport, which is where a listener looks for it: the only door was a
 //! toggle in the *top* bar, two hundred pixels from the thing it described. So
-//! the bar now carries an **Queue** control beside the track title, with a
-//! `3 / 12` readout in it that answers the question outright for the listener
-//! who does not want to open anything at all.
+//! the bar carries a **Queue** control beside the track title.
 //!
 //! It is a **labelled** control rather than a gesture on the now-playing block,
 //! and that is the one place this module departs from the design spec as
 //! written — on evidence the spec did not have. See [`queue_button`].
 //!
+//! A door, though, is still something you have to open. The critique specified
+//! two things for this corner — the wall label *and* "stack status when queued"
+//! — and only the label shipped, which left the popover as the only way to
+//! learn what was coming. So the left zone now states it **ambiently**, on a
+//! third line under the artist ([`continuation_lane`]), and the control's
+//! readout stopped being a position and became the size of what it opens.
+//! Knowing costs nothing; opening is for changing.
+//!
 //! Every addition is a **reserved slot**, which is the promise this module is
 //! built on: [`theme::UP_NEXT_W`] and [`theme::POSITION_W`] are that wide
-//! whether or not anything is playing, and [`theme::now_playing`]'s border is
-//! 1 px in all four states so that finding the control with the pointer does
-//! not move the title under it. The bar gained a route to a new surface and did
-//! not move a pixel.
+//! whether or not anything is playing, [`theme::CONTINUATION_H`] is that tall
+//! whether or not anything follows this track, and [`theme::now_playing`]'s
+//! border is 1 px in all four states so that finding the control with the
+//! pointer does not move the title under it. The bar gained a route to a new
+//! surface and a running commentary on the queue, and did not move a pixel.
 
 use iced::widget::{
     Space, button, column, container, horizontal_rule, image as iced_image, row, text, tooltip,
@@ -122,10 +129,10 @@ fn now_playing_block(player: &PlayerState, open: bool) -> Element<'_, Message> {
     .into()
 }
 
-/// The **Queue** control: the word, the `3 / 12` readout, and the press that
-/// opens the popover.
+/// The **Queue** control: the word, the count of what it opens onto, and the
+/// press that opens it.
 ///
-/// Three properties, each of them load-bearing:
+/// Four properties, each of them load-bearing:
 ///
 /// - **It is labelled, and it is always there.** Not a gesture, not a bare
 ///   figure, not an icon — the word says what the press opens. The study behind
@@ -134,10 +141,20 @@ fn now_playing_block(player: &PlayerState, open: bool) -> Element<'_, Message> {
 ///   what they just did. It is offered with nothing queued too, because the
 ///   popover has an honest empty state and a control that came and went with
 ///   the music would be a moving target in the one row that does not move.
+/// - **It says what it opens, and nothing else.** The readout used to be the
+///   `3 / 12` position; it is now the queue's size — the critique's
+///   `Queue · N`, with the separator carried by the gap rather than a middle
+///   dot, since the label and the figure sit at opposite ends of a 152 px
+///   control and a dot at the right edge would attach to nothing. The position
+///   moved out into the ambient line beside it, where
+///   [`PlayerState::continuation_note`] states it as *what is left* rather than
+///   *where you are*. Printing both would have been the same subtraction twice.
+///   Nothing was removed from the bar: a slot was replaced by a better
+///   statement of the same fact, which is the one move `docs/REFUSALS.md`
+///   permits here.
 /// - **The readout is a reserved slot.** [`theme::POSITION_W`] wide whether or
-///   not there is a position to report, so a queue starting moves no title;
-///   and `None` rather than `0 / 12`, because a queue that has not started has
-///   no position in it.
+///   not there is anything queued, so a queue arriving moves no title; and
+///   `None` rather than `0`, because a queue that does not exist has no size.
 /// - **The whole control is a reserved slot too** ([`theme::UP_NEXT_W`]), and
 ///   [`theme::now_playing`] varies only colour, never geometry — so hovering it
 ///   and opening the popover both leave every pixel where it was. The lit state
@@ -145,7 +162,7 @@ fn now_playing_block(player: &PlayerState, open: bool) -> Element<'_, Message> {
 ///
 /// It is the same message <kbd>Q</kbd> sends.
 fn queue_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
-    let readout: Element<'_, Message> = match player.queue_position_note() {
+    let readout: Element<'_, Message> = match player.queue_size_note() {
         None => Space::with_width(Length::Fixed(theme::POSITION_W)).into(),
         Some(note) => container(
             text(note)
@@ -177,12 +194,31 @@ fn queue_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
     .into()
 }
 
-/// The now-playing lines proper: the current track as a title-over-artist
-/// stack, or the engine's plainly-stated absence as quiet status text.
+/// The now-playing lines proper: the current track as a
+/// title-over-artist-over-continuation stack, or the engine's plainly-stated
+/// absence as quiet status text.
 ///
-/// Neither line wraps. A bar that grew a second row under a long album title
-/// would shove the shelf up by a line, which is exactly the kind of movement
-/// this bar is built not to make; the enclosing zone clips instead.
+/// # The third line is the queue, said without being asked
+///
+/// `docs/design/critique/02-surfaces.md` specifies two things for this corner
+/// and the bar shipped one: the label *and* "stack status when queued". Without
+/// it the only route to what is coming was pressing the control beside it,
+/// which makes *knowing* cost a click — and the popover exists for
+/// *manipulating* the queue (jump, remove), which is a different act with a
+/// different price. So the continuation is ambient:
+/// [`PlayerState::continuation_note`] owns every word of it, this draws it, and
+/// on the last track of a queue it draws nothing at all — silence is a refusal,
+/// not an omission (`docs/REFUSALS.md`).
+///
+/// # Nothing here can move
+///
+/// No line wraps. A bar that grew a row under a long album title would shove
+/// the shelf up by a line, which is exactly the kind of movement this bar is
+/// built not to make; the enclosing zone clips instead. And the continuation's
+/// lane is [`theme::CONTINUATION_H`] tall **whether or not there is a
+/// continuation**, so the title and the artist above it sit on the same pixels
+/// from the first track of a queue to the last — the line coming and going as
+/// the music moves is precisely the case a reserved slot exists for.
 fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
     if let Some(note) = player.availability_note() {
         return text(note)
@@ -217,7 +253,30 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
                 .wrapping(text::Wrapping::None),
         );
     }
-    stack.into()
+    stack.push(continuation_lane(player)).into()
+}
+
+/// The ambient continuation's lane: `then 2 albums · 1:58:00 left` in the
+/// bar's quietest voice, or a strip of the same height saying nothing.
+///
+/// The strip is the whole trick. The line is present for every track of a queue
+/// but the last, so it appears and disappears with the music; reserving its
+/// height means the two lines above it never move, and the zone stays shorter
+/// than the centre column, so the bar's height stays a property of the
+/// transport (asserted in [`theme`] and below).
+fn continuation_lane(player: &PlayerState) -> Element<'_, Message> {
+    let Some(note) = player.continuation_note() else {
+        return Space::with_height(Length::Fixed(theme::CONTINUATION_H)).into();
+    };
+    container(
+        text(note)
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION)
+            .color(theme::PAPER_FAINT)
+            .wrapping(text::Wrapping::None),
+    )
+    .height(Length::Fixed(theme::CONTINUATION_H))
+    .into()
 }
 
 /// The signal path, in the quietest terms the room has: a short
@@ -620,27 +679,32 @@ mod tests {
     }
 
     /// **The bar reserves every slot it can be in** — re-checked for the zone
-    /// that just became a control.
+    /// that just gained an ambient line.
     ///
     /// One of the four properties `docs/design/01-ux-audit-and-ia.md` §5 says
-    /// must not regress. The left zone gained a labelled control carrying a
-    /// readout that comes and goes with the music. Both are reservations rather
-    /// than additions — the control is [`theme::UP_NEXT_W`] and the readout
-    /// inside it [`theme::POSITION_W`], whether either says anything or not,
-    /// and the control's border is present in every state — so the bar carries
-    /// a route to a whole new surface and still cannot move.
+    /// must not regress. The left zone carries a labelled control with a readout
+    /// that comes and goes with the queue, and now a continuation line that
+    /// comes and goes with the *position in* the queue — it is drawn for every
+    /// track but the last. All of them are reservations rather than additions:
+    /// the control is [`theme::UP_NEXT_W`] and the readout inside it
+    /// [`theme::POSITION_W`], the continuation's lane is
+    /// [`theme::CONTINUATION_H`] tall whether it says anything or not, and the
+    /// control's border is present in every state — so the bar carries a route
+    /// to a whole new surface *and* a running commentary on what follows, and
+    /// still cannot move.
     #[test]
-    fn the_left_zone_reserves_the_queue_position_in_every_state_it_has() {
+    fn the_left_zone_reserves_the_continuation_and_the_count_in_every_state() {
         use baz_core::protocol::Event;
 
         // The zone's own budget at the shipped window: the readout, the gap to
         // it, and the button's horizontal padding all come out of the fill
-        // zone, and what is left has to be a real title lane. (The *narrow*
-        // window is a different question, and a known one — §1.5 of the audit
-        // caught the left zone wrapping to three lines below ~900 px, and the
-        // fix is a maximum width on the zone, which is step 10 of the plan.
-        // Nothing here makes that worse: the readout is 72 px in a zone that
-        // already clips.)
+        // zone, and what is left has to be a real title lane — wide enough for
+        // the continuation line as well as the title, since they share it.
+        // (The *narrow* window is a different question, and a known one — §1.5
+        // of the audit caught the left zone wrapping below ~900 px, and the fix
+        // is a maximum width on the zone, which is step 10 of the plan. Nothing
+        // here makes that worse: the continuation adds no width, it is clipped
+        // by the same zone, and it never wraps.)
         const SHIPPED: f32 = 1280.0;
         const ZONE: f32 = SHIPPED
             - 2.0 * theme::GAP_LG // the bar's own padding
@@ -650,19 +714,36 @@ mod tests {
             - theme::GAP_SM
             - theme::VOLUME_BLOCK_W;
         const TITLE_LANE: f32 = ZONE - theme::UP_NEXT_W - theme::GAP_SM;
-        // The zone is also shorter than the centre column, so the control's
-        // padding cannot be what sets the bar's height.
+        // The zone is also shorter than the centre column *with the third line
+        // in it*, so neither the control's padding nor the continuation can be
+        // what sets the bar's height. This is the assertion the ambient line
+        // had to survive: it is the only reason a line appearing under the
+        // artist does not push the transport down.
         const LEFT_H: f32 = theme::SIZE_BODY * theme::LEADING_BODY
             + theme::GAP_XXS
             + theme::SIZE_META * theme::LEADING_META
+            + theme::GAP_XXS
+            + theme::CONTINUATION_H
             + 2.0 * theme::GAP_XS;
         const CENTRE_H: f32 = theme::TRANSPORT_HIT + theme::GAP_SM + theme::SEEK_ROW_H;
         const { assert!(TITLE_LANE > 200.0) }
         const { assert!(LEFT_H < CENTRE_H) }
+        // The continuation is what grew the zone, so state what it cost: the
+        // whole line, and the bar still has a gap of headroom over it.
+        const { assert!(LEFT_H - theme::CONTINUATION_H - theme::GAP_XXS < CENTRE_H) }
+        const { assert!(LEFT_H + theme::GAP_MD < CENTRE_H) }
+        // The line is one line. Nothing in this zone may wrap, so the lane
+        // reserved for it is exactly what one line of its type occupies.
+        assert!(
+            (theme::CONTINUATION_H - theme::SIZE_CAPTION * theme::LEADING_CAPTION).abs()
+                < f32::EPSILON
+        );
 
         let mut player = PlayerState::new(Availability::Ready);
-        // Nothing playing: no readout, and the slot is still that wide.
-        assert_eq!(player.queue_position_note(), None);
+        // Nothing queued and nothing playing: neither the count nor the
+        // continuation says anything, and both slots are still there.
+        assert_eq!(player.queue_size_note(), None);
+        assert_eq!(player.continuation_note(), None);
 
         player.apply(
             &Event::TrackStarted {
@@ -671,9 +752,11 @@ mod tests {
             },
             &[],
         );
-        // Without a recorded queue there is still nothing to be a position in;
-        // the front end never invents one (see `player.rs`'s honesty rule).
-        assert_eq!(player.queue_position_note(), None);
+        // Without a recorded queue there is still nothing to count and nothing
+        // to say follows; the front end never invents either (see `player.rs`'s
+        // honesty rule).
+        assert_eq!(player.queue_size_note(), None);
+        assert_eq!(player.continuation_note(), None);
     }
 
     /// Previous is offered exactly when it can act, and its enabled-ness is a

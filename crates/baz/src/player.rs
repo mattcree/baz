@@ -1423,28 +1423,63 @@ impl PlayerState {
         })
     }
 
-    /// The now-playing bar's queue-position readout — `3 / 12`, or `None`
-    /// when there is nothing honest to say.
+    /// The **Queue** control's readout: how many tracks the door opens onto,
+    /// or `None` when it opens onto nothing.
     ///
-    /// The audit's finding was that a listener has to *open* something to learn
-    /// where in the queue the music is; this is the glance that answers it
-    /// without opening anything, and it is the same reading the popover's
-    /// `3 of 12 · 38:12 left` summary opens with.
+    /// The control's job is to say *what it opens* — a labelled door and the
+    /// size of the room behind it, the critique's `Queue · N`
+    /// (`docs/design/critique/02-surfaces.md`, *Playback*). It is not where a
+    /// listener learns what is coming; that is
+    /// [`Self::continuation_note`]'s line, in the left zone, where it costs no
+    /// click at all.
     ///
-    /// `None` in exactly two cases, and neither is a zero: with no queue there
-    /// is nothing to be a position in, and with a queue that has not started
-    /// (or that has ended) there is no position — `0 / 12` would be a claim
-    /// about music that is not playing. The bar reserves the slot either way,
-    /// so the absence costs no movement.
+    /// **This slot used to read `3 / 12`.** That was a position, and the
+    /// ambient line now states the same fact better — how much is left, and
+    /// what it is — which is the one move `docs/REFUSALS.md` permits on this
+    /// bar: *a slot may be added; none may be removed for tidiness*, and a slot
+    /// may be replaced by a better statement of the same fact. Keeping both
+    /// would have printed "9 more" beside "3 / 12", which are the same
+    /// subtraction twice.
     ///
-    /// Both figures come from the same record and the same reconciliation the
-    /// popover's rows use ([`Self::playing_row`]), so the bar and the list can
-    /// never disagree about which track of how many is sounding.
+    /// `None` rather than `0` when nothing has been queued: the popover has an
+    /// honest empty state and the control is offered anyway (a door that came
+    /// and went with the music would be a moving target in the one row that
+    /// does not move), but a count of zero would be a claim about a queue that
+    /// does not exist. The slot is [`crate::theme::POSITION_W`] wide either
+    /// way, so the absence costs no movement.
     #[must_use]
-    pub fn queue_position_note(&self) -> Option<String> {
-        let total = self.queue.as_ref()?.len();
-        let row = self.playing_row()?;
-        Some(format!("{} / {total}", row + 1))
+    pub fn queue_size_note(&self) -> Option<String> {
+        let queue = self.queue.as_ref()?;
+        (!queue.is_empty()).then(|| queue.len().to_string())
+    }
+
+    /// The bar's **ambient continuation** — `then 2 albums · 1:58:00 left`, or
+    /// `None` when the queue ends with the track that is playing.
+    ///
+    /// The line the critique specified for the bar's left zone and this
+    /// codebase shipped without: *"Wall label bottom-left: Title — Artist ·
+    /// elapsed **+ stack status when queued**"*. Without it the only route to
+    /// what is coming was opening the popover, which makes knowing cost a
+    /// click; the popover's job is *manipulating* the queue, and knowing what
+    /// is next should cost nothing at all.
+    ///
+    /// The wording, every case it covers, and why the rest of the record now
+    /// playing is counted rather than named are in [`continuation`]. What
+    /// belongs here is where the answer comes from:
+    ///
+    /// - **The queue record this process sent** plus **the engine's own
+    ///   confirmed position** ([`Self::playing_row`]) — the identical pair the
+    ///   popover's rows and its summary are drawn from, so the ambient line and
+    ///   the list can never disagree.
+    /// - **Never optimistic.** No confirmed position, no line: a queue that has
+    ///   been sent but has not started says nothing about what follows "this
+    ///   track", because no track is this track yet. The same holds for a
+    ///   `TrackStarted` naming a file this queue does not hold, and for a run
+    ///   that has ended.
+    #[must_use]
+    pub fn continuation_note(&self) -> Option<String> {
+        let queue = self.queue.as_ref()?;
+        continuation(queue, self.playing_row()?, self.elapsed_ms)
     }
 
     /// The queue this process handed the engine, if it has handed it one.
@@ -1846,6 +1881,27 @@ fn queue_summary(queue: &QueueVm, playing: Option<usize>, elapsed_ms: u64) -> St
         return format!("{count} · {}", vm::format_duration(total));
     };
     let count = format!("{} of {}", index + 1, queue.len());
+    match left_note(queue, index, elapsed_ms) {
+        None => count,
+        Some(left) => format!("{count} · {left}"),
+    }
+}
+
+/// **The one remaining-time reading**, shared by the popover's summary line
+/// and the bar's ambient continuation — `38:12 left`, or `None` when there is
+/// no honest figure to state.
+///
+/// One function because the two surfaces are visible *at the same time*: the
+/// popover floats directly over the bar that opened it, and a queue whose
+/// header and whose bar disagreed about how much music was left would be the
+/// most obviously broken thing on screen. Neither caller computes anything;
+/// they only choose what to put in front of it.
+///
+/// The figure is the rest of the playing track plus every track after it — a
+/// clock reading rather than a property of the list — clamped so a progress
+/// report that lands past a track's declared length cannot go negative, and
+/// absent rather than `0:00` when the scan read no durations to add up.
+fn left_note(queue: &QueueVm, index: usize, elapsed_ms: u64) -> Option<String> {
     let ahead: Duration = queue
         .items
         .iter()
@@ -1858,13 +1914,149 @@ fn queue_summary(queue: &QueueVm, playing: Option<usize>, elapsed_ms: u64) -> St
     let current = queue.items.get(index).and_then(|item| item.duration);
     let remaining = match current {
         Some(track) => ahead + track.saturating_sub(Duration::from_millis(elapsed_ms)),
-        None if ahead == Duration::ZERO => return count,
         None => ahead,
     };
-    if remaining == Duration::ZERO {
-        return count;
+    (remaining != Duration::ZERO).then(|| format!("{} left", vm::format_duration(remaining)))
+}
+
+/// One thing the queue holds *after* the record now playing: a whole album, or
+/// a loose song.
+///
+/// The distinction is the point. ADR-0017 §1.7 adopts the stack "with albums
+/// listed as albums, never flattened", and a continuation that counted eleven
+/// tracks where a listener stacked one record would be exactly that flattening,
+/// stated in the one line they cannot avoid reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Entry<'a> {
+    /// A run of consecutive items sharing an album title.
+    Album(&'a str),
+    /// An item queued on its own.
+    Track(&'a str),
+}
+
+impl<'a> Entry<'a> {
+    /// What to call it when it is the only thing left to name.
+    fn name(self) -> &'a str {
+        match self {
+            Self::Album(name) | Self::Track(name) => name,
+        }
     }
-    format!("{count} · {} left", vm::format_duration(remaining))
+
+    /// Whether this is a whole record rather than a loose song.
+    fn is_album(self) -> bool {
+        matches!(self, Self::Album(_))
+    }
+}
+
+/// The bar's ambient continuation: **what the queue holds after this track**,
+/// or `None` when it holds nothing after it.
+///
+/// # The register
+///
+/// One line, always opening with `then`, at the coarsest grain that is still
+/// honest — the critique's `then 2 sleeves · 1h 58m left`
+/// (`docs/design/critique/02-surfaces.md`, *Playback*) in this codebase's own
+/// vocabulary, where a sleeve is an album and a duration is spelled the one way
+/// [`vm::format_duration`] spells it everywhere else:
+///
+/// | The queue after this track | The line |
+/// |---|---|
+/// | nothing | *(no line at all)* |
+/// | more of the record now playing | `then 9 more · 38:12 left` |
+/// | one album | `then Kid A · 1:02:14 left` |
+/// | one loose song | `then Windowlicker · 8:12 left` |
+/// | several albums | `then 2 albums · 1:58:00 left` |
+/// | several loose songs | `then 3 tracks · 12:40 left` |
+/// | a mixture | `then 2 albums and 1 track · 1:58:00 left` |
+///
+/// **The rest of the record you are already inside is counted, not named.** Its
+/// title is not on the bar to be repeated (the bar states the *track* and its
+/// artist), its running order is a property of the record rather than a choice
+/// the listener made, and naming the next track there would put a second title
+/// directly under the one that is sounding — two titles, one of them not
+/// playing. What a listener wants from that case is *how much of this is left*,
+/// and the count and the clock both say it.
+///
+/// **What follows is named, not counted, when there is exactly one of it.** One
+/// album is `then Kid A`, because that is the whole of what is coming and a
+/// name carries more than a numeral. Past one, names would not fit a line that
+/// may not wrap, so the count takes over — and it counts *entries*, so a
+/// stacked record is one thing and not eleven.
+///
+/// **The time is the whole queue's remainder**, the identical string
+/// [`queue_summary`] puts in the popover ([`left_note`]), because there is only
+/// one such figure in the product.
+///
+/// # Silence rather than an omission
+///
+/// The last track of the queue draws no line. Not `up next: nothing`, not `end
+/// of queue` — `docs/REFUSALS.md` makes silence a feature, and the interface
+/// announcing the silence it promised would be the announcement, not the
+/// silence.
+fn continuation(queue: &QueueVm, index: usize, elapsed_ms: u64) -> Option<String> {
+    let tail = queue.items.get(index + 1..)?;
+    // How much of the record now playing is still ahead. Only a *named* album
+    // can be continued: two adjacent loose songs are two things, not a run.
+    let playing_album = queue
+        .items
+        .get(index)
+        .and_then(|item| item.album.as_deref());
+    let rest = playing_album.map_or(0, |album| {
+        tail.iter()
+            .take_while(|item| item.album.as_deref() == Some(album))
+            .count()
+    });
+    // …and everything past it, grouped so that consecutive items sharing an
+    // album title are one entry.
+    let mut entries: Vec<Entry<'_>> = Vec::new();
+    let mut run: Option<&str> = None;
+    for item in &tail[rest..] {
+        match item.album.as_deref() {
+            Some(album) if run == Some(album) => {}
+            Some(album) => {
+                entries.push(Entry::Album(album));
+                run = Some(album);
+            }
+            None => {
+                entries.push(Entry::Track(item.title.as_str()));
+                run = None;
+            }
+        }
+    }
+
+    let what = match entries.as_slice() {
+        [] if rest == 0 => return None,
+        [] => format!("{rest} more"),
+        [only] => only.name().to_owned(),
+        many => {
+            let albums = many.iter().filter(|entry| entry.is_album()).count();
+            let tracks = many.len() - albums;
+            match (albums, tracks) {
+                (0, tracks) => plural(tracks, "track"),
+                (albums, 0) => plural(albums, "album"),
+                (albums, tracks) => {
+                    format!(
+                        "{} and {}",
+                        plural(albums, "album"),
+                        plural(tracks, "track")
+                    )
+                }
+            }
+        }
+    };
+    Some(match left_note(queue, index, elapsed_ms) {
+        None => format!("then {what}"),
+        Some(left) => format!("then {what} · {left}"),
+    })
+}
+
+/// `1 album` / `2 albums` — the one place this line pluralises.
+fn plural(count: usize, noun: &str) -> String {
+    if count == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{count} {noun}s")
+    }
 }
 
 /// A position in `0..=total` from a `0.0..=1.0` fraction, clamped at both
@@ -2049,18 +2241,21 @@ mod tests {
         let albums = albums();
         let mut items: Vec<vm::QueueItemVm> = albums
             .iter()
-            .flat_map(AlbumVm::all_tracks)
-            .map(|track| vm::QueueItemVm {
-                title: track.title.clone(),
-                artist: track.artist.clone(),
-                duration: track.duration,
-                path: track.path.clone(),
+            .flat_map(|album| {
+                album.all_tracks().map(|track| vm::QueueItemVm {
+                    title: track.title.clone(),
+                    artist: track.artist.clone(),
+                    album: album.title.clone(),
+                    duration: track.duration,
+                    path: track.path.clone(),
+                })
             })
             .collect();
         for extra in items.len()..len {
             items.push(vm::QueueItemVm {
                 title: format!("Filler {extra}"),
                 artist: None,
+                album: Some("Filler".to_owned()),
                 duration: Some(Duration::from_secs(100)),
                 path: PathBuf::from(format!("/m/filler/{extra}.flac")),
             });
@@ -4023,30 +4218,72 @@ mod tests {
         );
     }
 
-    /// The bar's `3 / 12` readout: present exactly when there is a position to
-    /// report, absent — never zero — whenever there is not, and always the same
-    /// row the popover's list marks.
+    /// The **Queue** control's readout: the size of what the door opens onto,
+    /// present exactly when there is a queue and absent — never zero — when
+    /// there is not.
+    ///
+    /// It is deliberately *not* a function of playback. The room behind the
+    /// door is the same size whether the music is playing, paused or stopped,
+    /// and a count that vanished when a run ended would make the control's
+    /// label a lie about a popover that still lists twelve tracks.
     #[test]
-    fn the_bars_queue_position_reads_out_only_when_there_is_a_position() {
+    fn the_queue_control_counts_what_it_opens_and_nothing_else() {
         let albums = albums();
         let mut player = PlayerState::new(Availability::Ready);
         assert_eq!(
-            player.queue_position_note(),
+            player.queue_size_note(),
             None,
-            "no queue is not position zero"
+            "no queue is not a queue of zero"
         );
 
         player.note_queue_sent(geogaddi_queue());
         assert_eq!(
-            player.queue_position_note(),
-            None,
-            "a queue that has not started has no position in it"
+            player.queue_size_note().as_deref(),
+            Some("2"),
+            "a queue that has not started is still two tracks long"
         );
 
         player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
-        assert_eq!(player.queue_position_note().as_deref(), Some("1 / 2"));
+        assert_eq!(player.queue_size_note().as_deref(), Some("2"));
         player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
-        assert_eq!(player.queue_position_note().as_deref(), Some("2 / 2"));
+        assert_eq!(player.queue_size_note().as_deref(), Some("2"));
+        player.apply(&Event::QueueEnded, &albums);
+        assert_eq!(
+            player.queue_size_note().as_deref(),
+            Some("2"),
+            "an ended run has not emptied the list the popover still shows"
+        );
+    }
+
+    /// The engine's position drives the mark, the popover's summary **and** the
+    /// bar's ambient line, and it is absent rather than guessed at both ends of
+    /// a run.
+    ///
+    /// `playing_row` is probed directly here because it is the fact under test:
+    /// three surfaces read it, and what used to check it — the bar's `3 / 12`
+    /// readout — is no longer drawn (see [`PlayerState::queue_size_note`]).
+    #[test]
+    fn the_position_is_the_engines_and_absent_when_the_engine_has_not_said() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        assert_eq!(player.playing_row(), None, "no queue is not position zero");
+
+        player.note_queue_sent(geogaddi_queue());
+        assert_eq!(
+            player.playing_row(),
+            None,
+            "a queue that has not started has no position in it"
+        );
+        assert_eq!(
+            player.continuation_note(),
+            None,
+            "and nothing follows a track that is not playing yet"
+        );
+
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        assert_eq!(player.playing_row(), Some(0));
+        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+        assert_eq!(player.playing_row(), Some(1));
 
         // …and it is the same reading the list makes, or the bar and the
         // popover would be able to disagree about where the music is.
@@ -4055,9 +4292,368 @@ mod tests {
 
         player.apply(&Event::QueueEnded, &albums);
         assert_eq!(
-            player.queue_position_note(),
+            player.playing_row(),
             None,
             "an ended run is not still at its last track"
+        );
+        assert_eq!(player.continuation_note(), None);
+    }
+
+    /// A stacked queue: `(album, title, seconds)` per item, in play order, with
+    /// a path derived from the position so [`playing_at`] can start any of them.
+    ///
+    /// `None` for an album is a **loose song** — one queued on its own rather
+    /// than as part of a record. Consecutive items sharing a title are one
+    /// album, which is the grouping the continuation counts in.
+    fn stacked(items: &[(Option<&str>, &str, u64)]) -> QueueVm {
+        QueueVm {
+            album: items
+                .first()
+                .and_then(|(album, _, _)| album.map(ToOwned::to_owned)),
+            artist: "Various".to_owned(),
+            items: items
+                .iter()
+                .enumerate()
+                .map(|(index, (album, title, secs))| vm::QueueItemVm {
+                    title: (*title).to_owned(),
+                    artist: None,
+                    album: album.map(ToOwned::to_owned),
+                    duration: Some(Duration::from_secs(*secs)),
+                    path: PathBuf::from(format!("/m/stack/{index}.flac")),
+                })
+                .collect(),
+        }
+    }
+
+    /// A player holding `queue` with the engine reporting `index` playing.
+    fn playing_at(queue: QueueVm, index: usize) -> PlayerState {
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(queue);
+        player.apply(&started(&format!("/m/stack/{index}.flac"), index), &[]);
+        player
+    }
+
+    /// Two records: the one playing, and one stacked behind it.
+    ///
+    /// **One thing coming is named, not counted.** `then 1 album` would be the
+    /// interface refusing to say the one word it knows.
+    #[test]
+    fn one_record_behind_this_one_is_named() {
+        let player = playing_at(
+            stacked(&[
+                (Some("Geogaddi"), "Ready Lets Go", 200),
+                (Some("Geogaddi"), "Music Is Math", 200),
+                (Some("Kid A"), "Everything In Its Right Place", 300),
+                (Some("Kid A"), "Kid A", 300),
+            ]),
+            0,
+        );
+        assert_eq!(
+            player.continuation_note().as_deref(),
+            Some("then Kid A · 16:40 left"),
+            "the record stacked behind this one is named, and the clock is the \
+             whole queue's remainder"
+        );
+    }
+
+    /// Three records: past one, names will not fit a line that may not wrap, so
+    /// the count takes over — and it counts **records**, not the tracks inside
+    /// them (ADR-0017 §1.7: albums are listed as albums, never flattened).
+    #[test]
+    fn several_records_are_counted_as_records_with_the_time_left() {
+        let player = playing_at(
+            stacked(&[
+                (Some("Geogaddi"), "Ready Lets Go", 1200),
+                (Some("Geogaddi"), "Music Is Math", 1200),
+                (Some("Kid A"), "Everything In Its Right Place", 1200),
+                (Some("Kid A"), "Kid A", 1200),
+                (Some("Amnesiac"), "Pyramid Song", 1200),
+            ]),
+            0,
+        );
+        assert_eq!(
+            player.continuation_note().as_deref(),
+            Some("then 2 albums · 1:40:00 left"),
+            "two records follow — five tracks do, and saying five would flatten \
+             the stack the listener built"
+        );
+    }
+
+    /// A loose song is named when it is the only thing coming, and counted as a
+    /// *track* when it is not — never as an album, and never merged with the
+    /// one beside it.
+    #[test]
+    fn a_loose_song_is_named_alone_and_counted_in_company() {
+        let one = playing_at(
+            stacked(&[
+                (Some("Geogaddi"), "Ready Lets Go", 200),
+                (Some("Geogaddi"), "Music Is Math", 200),
+                (None, "Windowlicker", 240),
+            ]),
+            0,
+        );
+        assert_eq!(
+            one.continuation_note().as_deref(),
+            Some("then Windowlicker · 10:40 left")
+        );
+
+        let three = playing_at(
+            stacked(&[
+                (Some("Geogaddi"), "Ready Lets Go", 200),
+                (None, "Windowlicker", 240),
+                (None, "Come to Daddy", 260),
+                (None, "Avril 14th", 120),
+            ]),
+            0,
+        );
+        assert_eq!(
+            three.continuation_note().as_deref(),
+            Some("then 3 tracks · 13:40 left"),
+            "three songs queued one by one are three things, not one album"
+        );
+    }
+
+    /// A mixture says both halves rather than picking the flattering one. The
+    /// alternative — calling four things "4 more" — would lose exactly the
+    /// distinction the queue exists to keep.
+    #[test]
+    fn a_mixture_names_both_kinds() {
+        let pair = playing_at(
+            stacked(&[
+                (Some("Geogaddi"), "Ready Lets Go", 200),
+                (Some("Kid A"), "Everything In Its Right Place", 300),
+                (Some("Kid A"), "Kid A", 300),
+                (None, "Windowlicker", 240),
+            ]),
+            0,
+        );
+        assert_eq!(
+            pair.continuation_note().as_deref(),
+            Some("then 1 album and 1 track · 17:20 left"),
+            "singular on both sides, and the album is one thing though it is two \
+             tracks"
+        );
+
+        let more = playing_at(
+            stacked(&[
+                (Some("Geogaddi"), "Ready Lets Go", 200),
+                (Some("Kid A"), "Kid A", 300),
+                (Some("Amnesiac"), "Pyramid Song", 300),
+                (None, "Windowlicker", 240),
+                (None, "Avril 14th", 120),
+            ]),
+            0,
+        );
+        assert_eq!(
+            more.continuation_note().as_deref(),
+            Some("then 2 albums and 2 tracks · 19:20 left")
+        );
+    }
+
+    /// **The rest of the record you are already inside is counted, not named.**
+    /// Its title is not on the bar to be repeated, its running order is the
+    /// record's rather than the listener's, and a second title under the one
+    /// that is sounding would be two titles with one of them not playing.
+    #[test]
+    fn the_rest_of_this_record_is_counted_rather_than_named() {
+        let queue = || {
+            stacked(&[
+                (Some("Geogaddi"), "Ready Lets Go", 200),
+                (Some("Geogaddi"), "Music Is Math", 200),
+                (Some("Geogaddi"), "Beware the Friendly Stranger", 200),
+            ])
+        };
+        assert_eq!(
+            playing_at(queue(), 0).continuation_note().as_deref(),
+            Some("then 2 more · 10:00 left")
+        );
+        assert_eq!(
+            playing_at(queue(), 1).continuation_note().as_deref(),
+            Some("then 1 more · 6:40 left"),
+            "one track of this record left is still a count, not the track's name"
+        );
+    }
+
+    /// **The last track says nothing at all.**
+    ///
+    /// Not `up next: nothing`, not `end of queue`. `docs/REFUSALS.md` makes the
+    /// silence after a queue a feature; an interface that announced it would be
+    /// the announcement rather than the silence. The bar reserves the lane
+    /// either way, so the absence costs no movement (`views::bottom_bar`).
+    #[test]
+    fn nothing_follows_the_last_track_and_the_bar_says_nothing() {
+        let player = playing_at(
+            stacked(&[
+                (Some("Geogaddi"), "Ready Lets Go", 200),
+                (Some("Geogaddi"), "Music Is Math", 200),
+            ]),
+            1,
+        );
+        assert_eq!(player.continuation_note(), None);
+        // …and the popover still has a reading, because "what is left" and
+        // "what comes after this" are different questions.
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "2 of 2 · 3:20 left"
+        );
+    }
+
+    /// An empty queue has nothing to count and nothing to continue. Neither
+    /// reading invents a zero.
+    #[test]
+    fn an_empty_queue_states_neither_a_size_nor_a_continuation() {
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(QueueVm {
+            album: None,
+            artist: vm::UNKNOWN_ARTIST.to_owned(),
+            items: Vec::new(),
+        });
+        assert_eq!(
+            player.queue_size_note(),
+            None,
+            "a queue of zero is no queue"
+        );
+        assert_eq!(player.continuation_note(), None);
+        // Even if the engine reports a position into it — which it cannot, but
+        // the reading must not depend on that.
+        player.apply(&started("/m/stack/0.flac", 0), &[]);
+        assert_eq!(player.continuation_note(), None);
+    }
+
+    /// **Never optimistic.** With no confirmed position there is no "this
+    /// track", so there is nothing to say follows it — and that holds for the
+    /// two ways a position goes unknown: a queue that has been sent but has not
+    /// started, and a `TrackStarted` naming a file this queue does not hold.
+    #[test]
+    fn a_queue_whose_position_is_unknown_continues_nothing() {
+        let queue = || {
+            stacked(&[
+                (Some("Geogaddi"), "Ready Lets Go", 200),
+                (Some("Kid A"), "Kid A", 300),
+            ])
+        };
+
+        let mut sent = PlayerState::new(Availability::Ready);
+        sent.note_queue_sent(queue());
+        assert_eq!(sent.playing_row(), None);
+        assert_eq!(
+            sent.continuation_note(),
+            None,
+            "a queue that has not started has no track for anything to follow"
+        );
+        // The size is known, though: the door can say what it opens onto
+        // before a note sounds.
+        assert_eq!(sent.queue_size_note().as_deref(), Some("2"));
+
+        let mut stray = PlayerState::new(Availability::Ready);
+        stray.note_queue_sent(queue());
+        stray.apply(&started("/m/strays/a.wav", 0), &[]);
+        assert_eq!(
+            stray.continuation_note(),
+            None,
+            "the engine's index is believed only when the path at it agrees, and \
+             a continuation drawn from a disagreeing index would name the wrong \
+             record"
+        );
+    }
+
+    /// **One computation, two surfaces.** The ambient line and the popover
+    /// summary are visible at the same time — the popover floats directly over
+    /// the bar that opened it — so they may not merely agree today, they must
+    /// be the same string by construction ([`left_note`]).
+    ///
+    /// Asserted over a run: as the queue advances and the clock moves, the
+    /// figure the bar states and the figure the popover states stay identical.
+    #[test]
+    fn the_ambient_line_and_the_popover_state_the_same_time_left() {
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(stacked(&[
+            (Some("Geogaddi"), "Ready Lets Go", 200),
+            (Some("Geogaddi"), "Music Is Math", 200),
+            (Some("Kid A"), "Kid A", 300),
+        ]));
+
+        let agree = |player: &PlayerState, expected: &str| {
+            let ambient = player.continuation_note().expect("a continuation");
+            let summary = player.queue_list().expect("a queue").summary;
+            let left = ambient
+                .split_once(" · ")
+                .expect("the ambient line states a time")
+                .1;
+            assert_eq!(left, expected);
+            assert!(
+                summary.ends_with(left),
+                "the bar says {left:?} and the popover says {summary:?}"
+            );
+        };
+
+        player.apply(&started("/m/stack/0.flac", 0), &[]);
+        agree(&player, "11:40 left");
+        // A minute in, both readings have come down by a minute.
+        player.apply(&progress(60_000, Some(200_000)), &[]);
+        agree(&player, "10:40 left");
+        // A report past the track's declared length clamps in both, rather
+        // than going negative in one of them.
+        player.apply(&progress(999_000, Some(200_000)), &[]);
+        agree(&player, "8:20 left");
+        // And across a track boundary the pair moves together.
+        player.apply(&started("/m/stack/1.flac", 1), &[]);
+        agree(&player, "8:20 left");
+        assert_eq!(
+            player.continuation_note().as_deref(),
+            Some("then Kid A · 8:20 left"),
+            "the record behind this one is named the moment the record playing \
+             has nothing after it"
+        );
+    }
+
+    /// A queue the scan read no durations for states what is coming and says
+    /// nothing about how long it runs — an unknown is not a zero, the same rule
+    /// the popover's summary and the seek bar's `--:--` follow.
+    #[test]
+    fn a_continuation_with_no_durations_states_no_time() {
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(QueueVm {
+            album: Some("Geogaddi".to_owned()),
+            artist: "Boards of Canada".to_owned(),
+            items: vec![
+                vm::QueueItemVm {
+                    title: "Ready Lets Go".to_owned(),
+                    artist: None,
+                    album: Some("Geogaddi".to_owned()),
+                    duration: None,
+                    path: PathBuf::from("/m/stack/0.flac"),
+                },
+                vm::QueueItemVm {
+                    title: "Kid A".to_owned(),
+                    artist: None,
+                    album: Some("Kid A".to_owned()),
+                    duration: None,
+                    path: PathBuf::from("/m/stack/1.flac"),
+                },
+            ],
+        });
+        player.apply(&started("/m/stack/0.flac", 0), &[]);
+        assert_eq!(player.continuation_note().as_deref(), Some("then Kid A"));
+        assert_eq!(player.queue_list().expect("a queue").summary, "1 of 2");
+    }
+
+    /// A record queued twice with something between the two goes back to being
+    /// two things, because that is what it is: the run is broken, so the count
+    /// counts it twice rather than merging it across the gap.
+    #[test]
+    fn a_record_stacked_twice_is_two_entries() {
+        let player = playing_at(
+            stacked(&[
+                (Some("Geogaddi"), "Ready Lets Go", 200),
+                (Some("Kid A"), "Kid A", 200),
+                (Some("Geogaddi"), "Music Is Math", 200),
+            ]),
+            0,
+        );
+        assert_eq!(
+            player.continuation_note().as_deref(),
+            Some("then 2 albums · 10:00 left")
         );
     }
 
@@ -4076,7 +4672,7 @@ mod tests {
         let mut player = PlayerState::new(Availability::Ready);
         player.note_queue_sent(geogaddi_queue());
         player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
-        assert_eq!(player.queue_position_note().as_deref(), Some("2 / 2"));
+        assert_eq!(player.playing_row(), Some(1));
 
         // Remove the row *above* the playing one. The recorded index (1) is now
         // stale — the playing track is row 0 of the edited list — and nothing
@@ -4085,8 +4681,8 @@ mod tests {
             .expect("row 0 is in the queue");
         player.note_queue_edited(edited);
         assert_eq!(
-            player.queue_position_note().as_deref(),
-            Some("1 / 1"),
+            player.playing_row(),
+            Some(0),
             "the path still finds the row, so the mark survives the round trip"
         );
         let list = player.queue_list().expect("a queue");
@@ -4100,7 +4696,7 @@ mod tests {
             },
             &albums,
         );
-        assert_eq!(player.queue_position_note().as_deref(), Some("1 / 1"));
+        assert_eq!(player.playing_row(), Some(0));
         assert_eq!(
             states(&player.queue_list().expect("a queue")),
             vec![QueueRowState::Playing]
@@ -4117,7 +4713,7 @@ mod tests {
         let mut player = PlayerState::new(Availability::Ready);
         player.note_queue_sent(geogaddi_queue());
         player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
-        assert!(player.queue_position_note().is_some());
+        assert!(player.playing_row().is_some());
 
         player.apply(
             &Event::QueueChanged {
@@ -4126,7 +4722,7 @@ mod tests {
             },
             &albums,
         );
-        assert_eq!(player.queue_position_note(), None);
+        assert_eq!(player.playing_row(), None);
         assert_eq!(
             states(&player.queue_list().expect("a queue")),
             vec![QueueRowState::Upcoming, QueueRowState::Upcoming]
@@ -4143,18 +4739,18 @@ mod tests {
             let mut player = PlayerState::new(Availability::Ready);
             player.note_queue_sent(geogaddi_queue());
             player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
-            assert!(player.queue_position_note().is_some());
+            assert!(player.playing_row().is_some());
             player
         };
 
         let mut edited = playing();
         edited.note_queue_edited(geogaddi_queue());
-        assert!(edited.queue_position_note().is_some(), "an edit keeps it");
+        assert!(edited.playing_row().is_some(), "an edit keeps it");
 
         let mut reset = playing();
         reset.note_queue_sent(geogaddi_queue());
         assert_eq!(
-            reset.queue_position_note(),
+            reset.playing_row(),
             None,
             "a reset stops the music, so a position into it means nothing"
         );
@@ -4268,6 +4864,7 @@ mod tests {
             items: vec![vm::QueueItemVm {
                 title: "stream.mp3".to_owned(),
                 artist: None,
+                album: None,
                 duration: None,
                 path: PathBuf::from("/m/stream.mp3"),
             }],
