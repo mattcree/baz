@@ -1814,7 +1814,7 @@ impl PlayerState {
     }
 }
 
-/// The **Up next** popover's one-line reading.
+/// The **Queue** popover's one-line reading.
 ///
 /// While something is playing it counts and then says **what is left**:
 /// `3 of 12 · 38:12 left`. Otherwise it states the size and the whole running

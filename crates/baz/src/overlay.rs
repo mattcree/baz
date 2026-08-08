@@ -46,9 +46,9 @@
 /// Which popover is floating over the current place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Popover {
-    /// **Up next**: the queue the engine holds, and where it is in it.
+    /// **Queue**: the queue the engine holds, and where it is in it.
     /// Anchored to the now-playing bar, which is the surface it describes.
-    UpNext,
+    QueuePanel,
 }
 
 /// The overlay layer: at most one popover, over whatever place is on screen.
@@ -79,10 +79,10 @@ impl Overlay {
         self.showing.is_some()
     }
 
-    /// The **Up next** affordance and <kbd>Q</kbd>: open it, or put it away
+    /// The **Queue** affordance and <kbd>Q</kbd>: open it, or put it away
     /// if it is what is already showing.
-    pub fn toggle_up_next(&mut self) {
-        self.toggle(Popover::UpNext);
+    pub fn toggle_queue(&mut self) {
+        self.toggle(Popover::QueuePanel);
     }
 
     /// Show `popover`, or dismiss it if it is the one already showing.
@@ -122,13 +122,13 @@ mod tests {
     }
 
     #[test]
-    fn the_affordance_opens_up_next_and_puts_it_away_again() {
+    fn the_affordance_opens_queue_and_puts_it_away_again() {
         let mut overlay = Overlay::new();
-        overlay.toggle_up_next();
-        assert_eq!(overlay.showing(), Some(Popover::UpNext));
+        overlay.toggle_queue();
+        assert_eq!(overlay.showing(), Some(Popover::QueuePanel));
         assert!(overlay.is_open());
 
-        overlay.toggle_up_next();
+        overlay.toggle_queue();
         assert_eq!(overlay.showing(), None);
     }
 
@@ -140,7 +140,7 @@ mod tests {
         let mut overlay = Overlay::new();
         assert!(!overlay.close(), "an empty overlay must not eat the key");
 
-        overlay.toggle_up_next();
+        overlay.toggle_queue();
         assert!(overlay.close(), "an open popover answers the key itself");
         assert_eq!(overlay.showing(), None);
         assert!(!overlay.close(), "and only once");
@@ -152,10 +152,10 @@ mod tests {
     fn no_reachable_state_holds_more_than_one_popover() {
         #[derive(Debug, Clone, Copy)]
         enum Step {
-            UpNext,
+            QueuePanel,
             Close,
         }
-        let steps = [Step::UpNext, Step::Close];
+        let steps = [Step::QueuePanel, Step::Close];
         for a in steps {
             for b in steps {
                 for c in steps {
@@ -163,7 +163,7 @@ mod tests {
                         let mut overlay = Overlay::new();
                         for step in [a, b, c, d] {
                             match step {
-                                Step::UpNext => overlay.toggle_up_next(),
+                                Step::QueuePanel => overlay.toggle_queue(),
                                 Step::Close => {
                                     overlay.close();
                                 }

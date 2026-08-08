@@ -10,7 +10,7 @@
 //!
 //! `Queue` has gone. Its count now sits in the now-playing bar beside the track
 //! it counts, and the queue itself opens from there
-//! ([`crate::views::up_next`]) — closer to its subject, and no longer stale:
+//! ([`crate::views::queue`]) — closer to its subject, and no longer stale:
 //! the toggle went on saying `Queue · 13` after the run had ended, because it
 //! reported the length of the last queue rather than what was next.
 

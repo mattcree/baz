@@ -7,7 +7,7 @@
 //! - [`shelf`] — the virtualized album grid, its tiles, and its empty states.
 //! - [`side_panel`] — the album inspector: header, edition selector, Play,
 //!   track list.
-//! - [`up_next`] — the queue popover: what baz handed the engine, and where it
+//! - [`queue`] — the queue popover: what baz handed the engine, and where it
 //!   is in it.
 //! - [`settings`] — the Settings place: the standing decisions, today
 //!   ReplayGain.
@@ -18,7 +18,7 @@
 //! and [`settings`] is the other one — places fill the window and replace each
 //! other. [`side_panel`] is the Library's **inspector**, the sole tenant of the
 //! column beside the shelf at [`theme::PANEL_W`]; it is open exactly when an
-//! album is selected ([`crate::selection`]). [`up_next`] is the **popover**,
+//! album is selected ([`crate::selection`]). [`queue`] is the **popover**,
 //! anchored to the bar, [`theme::POPOVER_W`] wide, taking no width from the
 //! shelf at all ([`crate::overlay`]). And [`bottom_bar`] is the **bar**, which
 //! is in every place and never moves.
@@ -46,12 +46,12 @@
 //! imported as `geometry` so the two never read as the same thing.
 
 pub(crate) mod bottom_bar;
+pub(crate) mod queue;
 pub(crate) mod settings;
 pub(crate) mod setup;
 pub(crate) mod shelf;
 pub(crate) mod side_panel;
 pub(crate) mod top_bar;
-pub(crate) mod up_next;
 
 use iced::widget::{Space, button, container, image as iced_image, text, tooltip};
 use iced::{Color, Element, Length, alignment};
@@ -86,7 +86,7 @@ pub(crate) fn gradient_block(album_id: u64, size: f32) -> Element<'static, Messa
 /// Shared by every surface that can be dismissed because a dismissal must look
 /// and land the same wherever it is — a close control that moved or changed
 /// size between the album inspector and the popover would be two controls, not
-/// one. `label` names what is being closed ("Close up next"), which is the
+/// one. `label` names what is being closed ("Close queue"), which is the
 /// tooltip and, iced 0.13 having no accessibility tree, the whole of the
 /// control's accessible name.
 ///

@@ -151,21 +151,21 @@ pub(crate) enum Message {
     EscapePressed,
     /// The bar's now-playing block, or `Q`: show what is playing next, or put
     /// it away (see [`crate::overlay`]).
-    ToggleUpNext,
-    /// The popover's ✕, or a press anywhere outside it: close **Up next**.
+    ToggleQueue,
+    /// The popover's ✕, or a press anywhere outside it: close **Queue**.
     ///
-    /// Distinct from [`Self::ToggleUpNext`] because click-outside must not be
+    /// Distinct from [`Self::ToggleQueue`] because click-outside must not be
     /// a toggle — the press that dismisses a popover cannot be the press that
     /// re-opens it.
-    CloseUpNext,
-    /// A row of the **Up next** popover was clicked: play the queue from that
+    CloseQueue,
+    /// A row of the **Queue** popover was clicked: play the queue from that
     /// zero-based position ([`Command::JumpTo`], ADR-0014).
     ///
     /// Unlike [`Self::PlayTrack`] this needs no decision about re-queueing —
     /// the list the row was drawn from *is* what the engine is holding, by
     /// construction.
     JumpToQueued(usize),
-    /// A row's ✕ in the **Up next** popover: take that entry out of the queue
+    /// A row's ✕ in the **Queue** popover: take that entry out of the queue
     /// without stopping the music ([`Command::UpdateQueue`], ADR-0014).
     RemoveQueued(usize),
     /// The pointer entered a queue row, so the row can offer its ✕.
@@ -324,7 +324,7 @@ struct App {
     /// anchored to the *bar* belongs to every place the bar is in, which is all
     /// of them (see [`crate::overlay`]).
     overlay: Overlay,
-    /// Which row of the **Up next** popover the pointer is on, if any.
+    /// Which row of the **Queue** popover the pointer is on, if any.
     ///
     /// The popover's rows offer their removal ✕ on hover only, and iced 0.13
     /// has no way for one widget to ask whether a *sibling* is hovered — a
@@ -561,7 +561,7 @@ impl App {
 
     /// Answer an overlay message, reporting whether it was one.
     ///
-    /// The **Up next** popover and everything a listener can do to a row of it,
+    /// The **Queue** popover and everything a listener can do to a row of it,
     /// answered as one small machine for the reason the volume's nine and
     /// ReplayGain's four are: they all belong to one surface, and folding six
     /// more arms into the shell's own match would bury the four messages that
@@ -572,8 +572,8 @@ impl App {
     /// shell where the layers are ([`Self::escape`]).
     fn update_overlay(&mut self, message: &Message) -> bool {
         match *message {
-            Message::ToggleUpNext => self.overlay.toggle_up_next(),
-            Message::CloseUpNext => {
+            Message::ToggleQueue => self.overlay.toggle_queue(),
+            Message::CloseQueue => {
                 self.overlay.close();
                 // A popover that is gone has no row under the pointer, and the
                 // rows will not be there to report their own exit.
@@ -995,7 +995,7 @@ impl App {
         self.publish_mpris(false);
     }
 
-    /// Play the queue from `position` — a click on a row of **Up next**
+    /// Play the queue from `position` — a click on a row of **Queue**
     /// (ADR-0014's `JumpTo`, and §3.4 step 3 of the UX spec).
     ///
     /// Simpler than the album inspector's [`Self::play_track`] by exactly one
@@ -1026,7 +1026,7 @@ impl App {
         }
     }
 
-    /// Take row `row` out of the queue — a click on a row's ✕ in **Up next**
+    /// Take row `row` out of the queue — a click on a row's ✕ in **Queue**
     /// (ADR-0014's `UpdateQueue`, and §3.4 step 4 of the UX spec).
     ///
     /// The edit itself is [`queue_edit::without`]'s: pure, tested, and working
@@ -1133,7 +1133,7 @@ impl App {
             return place;
         };
         let content = match popover {
-            Popover::UpNext => views::up_next::view(
+            Popover::QueuePanel => views::queue::view(
                 &self.player,
                 self.window.height * theme::POPOVER_MAX_H,
                 self.hovered_queue_row,
@@ -1141,7 +1141,7 @@ impl App {
         };
         stack![
             place,
-            mouse_area(Space::new(Length::Fill, Length::Fill)).on_press(Message::CloseUpNext),
+            mouse_area(Space::new(Length::Fill, Length::Fill)).on_press(Message::CloseQueue),
             container(opaque(content))
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -1905,7 +1905,7 @@ mod tests {
             ("SeekBy", "the bottom bar's seek groove"),
             ("VolumeStep", "the bottom bar's volume fader"),
             ("ToggleMute", "the bottom bar's speaker button"),
-            ("ToggleUpNext", "the bottom bar's now-playing block"),
+            ("ToggleQueue", "the bottom bar's now-playing block"),
             ("ToggleSettings", "the top bar's Settings control"),
             ("FocusSearch", "the top bar's search well"),
             ("EscapePressed", "each layer's own ✕"),
@@ -1998,7 +1998,7 @@ mod tests {
         );
         assert_eq!(
             format!("{from_key:?}"),
-            format!("{:?}", Some(Message::ToggleUpNext))
+            format!("{:?}", Some(Message::ToggleQueue))
         );
 
         let from_key = keys::binding_for(
@@ -2036,7 +2036,7 @@ mod tests {
             "with nothing floating the press must fall through"
         );
 
-        overlay.toggle_up_next();
+        overlay.toggle_queue();
         assert!(overlay.close(), "the popover answers the press itself");
         assert!(!overlay.is_open());
         assert!(

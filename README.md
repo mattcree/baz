@@ -41,10 +41,10 @@ The full vision, competitive analysis, and staged scope live in
 | <kbd>↑</kbd> <kbd>↓</kbd> | volume up / down, one step (~1 dB at the top of the fader) |
 | <kbd>M</kbd> | mute / unmute |
 | <kbd>/</kbd>, or <kbd>Ctrl</kbd>+<kbd>F</kbd> | focus the search field |
-| <kbd>Q</kbd> | show / hide **Up next** — the queue, over the now-playing bar |
+| <kbd>Q</kbd> | show / hide the **queue**, over the now-playing bar |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | go to the settings, or come back |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> | hide the album inspector, or bring it back — the selection is kept |
-| <kbd>Esc</kbd> | peel one layer: **Up next**, else the settings, else the search, else the inspector |
+| <kbd>Esc</kbd> | peel one layer: the queue, else the settings, else the search, else the inspector |
 
 Media keys (play/pause, previous, next, stop) work too — on Linux they usually arrive
 over MPRIS rather than as key presses, which is the same thing by a different
@@ -57,7 +57,7 @@ and it is not a heuristic — baz asks the toolkit whether a widget consumed the
 key and never second-guesses the answer. The search field takes focus at
 startup, so the first <kbd>Esc</kbd> hands the keyboard back to the transport.
 
-Every one of those keys goes on working while **Up next** is open. The popover
+Every one of those keys goes on working while the queue is open. The popover
 is deliberately not modal — iced 0.13 offers no focus containment and no
 accessibility tree, so imitating a modal would be a claim the toolkit cannot
 back — and <kbd>Esc</kbd>, a second <kbd>Q</kbd>, or a press anywhere outside

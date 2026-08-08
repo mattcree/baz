@@ -1,4 +1,4 @@
-//! **Up next**: the queue the engine holds, floating over the place, anchored
+//! **Queue**: the queue the engine holds, floating over the place, anchored
 //! to the bar it describes.
 //!
 //! # What this surface is for
@@ -73,7 +73,7 @@ use crate::{icon, theme};
 /// on air the rows need.
 const POPOVER_PAD: f32 = theme::GAP_LG;
 
-/// The **Up next** popover: a header carrying the title and the ✕, the summary
+/// The **Queue** popover: a header carrying the title and the ✕, the summary
 /// line, and the rows.
 ///
 /// `max_height` is the ceiling the shell computes from the window
@@ -160,12 +160,12 @@ pub(crate) fn view(
 /// and in a floating card 360 px wide those pixels are rows.
 fn header_row() -> Element<'static, Message> {
     row![
-        text("Up next")
+        text("Queue")
             .size(theme::SIZE_EMPHASIS)
             .line_height(theme::LEADING_EMPHASIS)
             .font(theme::MEDIUM),
         Space::with_width(Length::Fill),
-        close_button("Close up next", Message::CloseUpNext),
+        close_button("Close queue", Message::CloseQueue),
     ]
     .align_y(iced::Alignment::Center)
     .into()

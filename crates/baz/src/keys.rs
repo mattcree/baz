@@ -97,11 +97,11 @@
 //! one layer — which is the change the information-architecture move bought
 //! (ADR-0016, `docs/design/01-ux-audit-and-ia.md` §4.8).
 //!
-//! `Q` shows and hides **Up next**. Same key, same meaning, better place: it
+//! `Q` shows and hides **Queue**. Same key, same meaning, better place: it
 //! used to raise a queue *panel* in the right-hand rail, costing the shelf two
 //! columns of covers for a glance; it now raises the popover anchored to the
 //! bar that describes it, which costs the shelf nothing. It resolves to
-//! [`Message::ToggleUpNext`] — the same message the bar's labelled `Up next`
+//! [`Message::ToggleQueue`] — the same message the bar's labelled `Queue`
 //! control sends — so there is no keyboard-only capability here, exactly as
 //! with the transport.
 //!
@@ -226,7 +226,7 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         // Layers. `Q` shows what is playing next; Ctrl+B (Cmd+B) takes the
         // right-hand column away and gives it back; Ctrl+`,` (Cmd+`,`) is the
         // settings (module docs).
-        Key::Character("q" | "Q") if bare || shift => Some(Message::ToggleUpNext),
+        Key::Character("q" | "Q") if bare || shift => Some(Message::ToggleQueue),
         Key::Character("b" | "B") if command => Some(Message::TogglePanels),
         Key::Character(",") if command => Some(Message::ToggleSettings),
 
@@ -477,14 +477,14 @@ mod tests {
         );
     }
 
-    /// `Q` shows and hides **Up next**, in either case, with no modifier — a
+    /// `Q` shows and hides **Queue**, in either case, with no modifier — a
     /// view key, like `/`. The key did not move; what it raises did.
     #[test]
-    fn q_toggles_the_up_next_popover() {
-        assert_eq!(bind(&ch("q"), none()).as_deref(), Some("ToggleUpNext"));
+    fn q_toggles_the_queue_panel_popover() {
+        assert_eq!(bind(&ch("q"), none()).as_deref(), Some("ToggleQueue"));
         assert_eq!(
             bind(&ch("Q"), Modifiers::SHIFT).as_deref(),
-            Some("ToggleUpNext")
+            Some("ToggleQueue")
         );
     }
 

@@ -6,13 +6,13 @@
 //! The audit's finding was that there was no route to "what is next" from the
 //! transport, which is where a listener looks for it: the only door was a
 //! toggle in the *top* bar, two hundred pixels from the thing it described. So
-//! the bar now carries an **Up next** control beside the track title, with a
+//! the bar now carries an **Queue** control beside the track title, with a
 //! `3 / 12` readout in it that answers the question outright for the listener
 //! who does not want to open anything at all.
 //!
 //! It is a **labelled** control rather than a gesture on the now-playing block,
 //! and that is the one place this module departs from the design spec as
-//! written — on evidence the spec did not have. See [`up_next_button`].
+//! written — on evidence the spec did not have. See [`queue_button`].
 //!
 //! Every addition is a **reserved slot**, which is the promise this module is
 //! built on: [`theme::UP_NEXT_W`] and [`theme::POSITION_W`] are that wide
@@ -60,7 +60,7 @@ use crate::{groove, icon, player, theme};
 /// leftward into the gutter instead of shifting anything beside it. Every
 /// glyph, position, and enabled-state comes from [`PlayerState`] —
 /// event-derived, tested in `player.rs`.
-pub(crate) fn view(player: &PlayerState, up_next_open: bool) -> Element<'_, Message> {
+pub(crate) fn view(player: &PlayerState, queue_open: bool) -> Element<'_, Message> {
     let mut status = row![]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center);
@@ -74,7 +74,7 @@ pub(crate) fn view(player: &PlayerState, up_next_open: bool) -> Element<'_, Mess
     }
     status = status.push(signal_path(player)).push(volume(player));
     let bar = row![
-        container(now_playing_block(player, up_next_open))
+        container(now_playing_block(player, queue_open))
             .width(Length::Fill)
             .clip(true),
         transport_stack(player),
@@ -95,7 +95,7 @@ pub(crate) fn view(player: &PlayerState, up_next_open: bool) -> Element<'_, Mess
     .into()
 }
 
-/// The bar's left zone: the now-playing lines, and the **Up next** control
+/// The bar's left zone: the now-playing lines, and the **Queue** control
 /// beside them.
 ///
 /// This is the *place* a listener looks for what is coming, which is the whole
@@ -115,14 +115,14 @@ fn now_playing_block(player: &PlayerState, open: bool) -> Element<'_, Message> {
         container(now_playing_line(player))
             .width(Length::Fill)
             .clip(true),
-        up_next_button(player, open),
+        queue_button(player, open),
     ]
     .spacing(theme::GAP_SM)
     .align_y(iced::Alignment::Center)
     .into()
 }
 
-/// The **Up next** control: the word, the `3 / 12` readout, and the press that
+/// The **Queue** control: the word, the `3 / 12` readout, and the press that
 /// opens the popover.
 ///
 /// Three properties, each of them load-bearing:
@@ -144,7 +144,7 @@ fn now_playing_block(player: &PlayerState, open: bool) -> Element<'_, Message> {
 ///   is the anchor the toolkit will not let the popover draw as a notch.
 ///
 /// It is the same message <kbd>Q</kbd> sends.
-fn up_next_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
+fn queue_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
     let readout: Element<'_, Message> = match player.queue_position_note() {
         None => Space::with_width(Length::Fixed(theme::POSITION_W)).into(),
         Some(note) => container(
@@ -160,7 +160,7 @@ fn up_next_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
     };
     button(
         row![
-            text("Up next")
+            text("Queue")
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
                 .font(theme::MEDIUM)
@@ -173,7 +173,7 @@ fn up_next_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
     .width(Length::Fixed(theme::UP_NEXT_W))
     .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
     .style(move |_theme, status| theme::now_playing(status, open))
-    .on_press(Message::ToggleUpNext)
+    .on_press(Message::ToggleQueue)
     .into()
 }
 

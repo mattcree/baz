@@ -508,11 +508,11 @@ mod tests {
             );
         }
 
-        // The bar's Up next control: its label in the Medium face it is set
+        // The bar's Queue control: its label in the Medium face it is set
         // in, inside what the slot has left after the readout and the padding.
         fits(
             &Face::parse(SANS_MEDIUM),
-            "Up next",
+            "Queue",
             theme::SIZE_META,
             theme::UP_NEXT_W - theme::POSITION_W - 3.0 * theme::GAP_SM,
             "UP_NEXT_W",

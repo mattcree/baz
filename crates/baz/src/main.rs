@@ -2,7 +2,7 @@
 //!
 //! v0.1 scope: pick (or remember) a music folder, scan it live onto a
 //! virtualized album shelf with lazy artwork, search-as-you-type, a dismissible
-//! album inspector beside it, an **Up next** popover anchored to the
+//! album inspector beside it, an **Queue** popover anchored to the
 //! now-playing bar, a Settings place beside the Library, and — with the
 //! `device-output` feature — album playback
 //! through `baz-core`'s engine (see `playback.rs` and `player.rs`; without

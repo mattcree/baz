@@ -1165,7 +1165,7 @@ pub const CAPTION_H: f32 = 2.0 * CAPTION_LINE_H;
 /// 33.8 — the number `.interface-design/system.md` §8 calls `LABEL_H`.
 pub const CAPTION_LINE_H: f32 = SIZE_BODY * LEADING_BODY;
 
-/// A track row — in the album inspector **and** in the **Up next** popover:
+/// A track row — in the album inspector **and** in the **Queue** popover:
 /// invisible at rest, a quiet card under the pointer, and the playing row
 /// carded with a hairline edge.
 ///
@@ -1237,7 +1237,7 @@ pub fn track_row(status: button::Status, playing: bool) -> button::Style {
 // (docs/design/01-ux-audit-and-ia.md §2, ADR-0016)
 // ---------------------------------------------------------------------------
 
-/// Width of the **Up next** popover (logical px).
+/// Width of the **Queue** popover (logical px).
 ///
 /// 360, where the rail it left was [`PANEL_W`] 340. The extra twenty go to the
 /// per-row ✕ the rows gained when they became interactive: the popover lists
@@ -1278,7 +1278,7 @@ pub const POPOVER_MAX_H: f32 = 0.6;
 /// surface's problem.
 pub const POSITION_W: f32 = 56.0;
 
-/// Width of the bar's **Up next** control (logical px) — the label, the
+/// Width of the bar's **Queue** control (logical px) — the label, the
 /// [`POSITION_W`] readout, and the padding around them.
 ///
 /// The control is **labelled and always visible**, and that is a requirement
@@ -1331,7 +1331,7 @@ pub const SETTINGS_CONTENT_W: f32 = 640.0;
 /// breakpoint (§4.3).
 pub const SETTINGS_BREAKPOINT: f32 = 1000.0;
 
-/// The **Up next** popover's surface: one step above the panel, a hairline
+/// The **Queue** popover's surface: one step above the panel, a hairline
 /// edge, and the room's one soft shadow.
 ///
 /// Every part of this is chosen against something iced 0.13 cannot do (§4.6 of
@@ -1367,7 +1367,7 @@ pub fn popover(_theme: &Theme) -> container::Style {
     }
 }
 
-/// The now-playing block in the bar, once it became the door to **Up next**.
+/// The now-playing block in the bar, once it became the door to **Queue**.
 ///
 /// Invisible at rest — the bar's left zone must go on reading as the track
 /// name, not as a button — a quiet card under the pointer, and the raised card

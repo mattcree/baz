@@ -65,7 +65,7 @@ arbitrate, no stack to remember, and one dismissal rule per layer.
 | **Place** | **Library** (home) | The shelf, its search, its counts | — |
 | **Place** | **Settings** | Everything that is a standing decision | `Esc`, Back |
 | **Inspector** | **Album** | The detail of the thing you pointed at *in* the Library | `Esc`, ✕, clicking the tile again, `Ctrl+B` |
-| **Popover** | **Up next** | The queue: what the engine holds and where it is | `Esc`, `Q`, click-outside, the affordance again |
+| **Popover** | **Queue** | The queue: what the engine holds and where it is | `Esc`, `Q`, click-outside, the affordance again |
 | **Bar** | **Now playing** | What is playing, where in it, how loud, what the chain is doing | never |
 
 Five rules follow, and they are the whole of the model a listener has to learn:
@@ -126,7 +126,7 @@ were verified against `iced_widget` 0.13.4 before the surface was specified, and
 driven on a headless display afterwards.
 
 No arrow or notch: container borders here are four-sided only, so the anchor is
-expressed by position and by the **Up next** control taking its raised "open"
+expressed by position and by the **Queue** control taking its raised "open"
 style instead.
 
 ### The door is labelled, and it is not the now-playing text
@@ -141,7 +141,7 @@ three peers headless):
   gesture and has generated years of *"where is my queue / what did I just
   do"* complaints, and a gesture-first redesign elsewhere in the field was
   reversed after two years. **Transient must not mean unverifiable.** So the
-  door says *Up next* in words, in every state including with nothing queued,
+  door says *Queue* in words, in every state including with nothing queued,
   and carries the `3 / 12` readout inside it.
 - **The now-playing text is deliberately left alone.** The most-supported
   affordance in the study is *get back to what is playing* — scroll the shelf
@@ -179,7 +179,7 @@ surface, every style — is `views/` and `theme.rs`.
 Three commits, each leaving the app usable and shippable, and each of the two
 that removes a surface replacing it in the same commit:
 
-1. **Up next becomes a popover.** `Rail::Queue` → `Overlay`; the bar gains the
+1. **Queue becomes a popover.** `Rail::Queue` → `Overlay`; the bar gains the
    now-playing affordance and the `3 / 12` slot; `Q` retargets; the top bar's
    Queue toggle goes.
 2. **Queue rows become interactive.** `JumpTo` on click, a per-row ✕ via
