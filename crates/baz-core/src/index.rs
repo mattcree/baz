@@ -86,10 +86,10 @@ use std::time::Duration;
 use rusqlite::{Connection, params};
 
 use crate::library::{AudioFormat, FileStamp, KnownFiles, TrackMeta};
-use crate::replaygain::ReplayGainTags;
+use crate::replaygain::{ComputedGains, ComputedReplayGain, ReplayGainTags};
 
 /// The schema version this build reads and writes (`PRAGMA user_version`).
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 /// Rows per write transaction in [`Library::add_tracks`]. A scan yields tens
 /// of thousands of tracks; committing in batches keeps any single
@@ -170,8 +170,67 @@ const SCHEMA_V5_COLUMNS: &str = "
     ALTER TABLE tracks ADD COLUMN rg_album_peak_micro   INTEGER; -- 1e-6 FS
 ";
 
+/// Version 6: the ReplayGain figures **baz measured itself**
+/// (`docs/adr/0015-replaygain-analysis.md`). Six more nullable columns, added
+/// rather than rebuilt, exactly as v2 – v5 were.
+///
+/// # Why they are separate columns rather than the v5 ones
+///
+/// Because a computed figure and a tagged one are different claims and the
+/// database is where the difference has to survive:
+///
+/// - **The scanner cannot destroy a measurement.** [`UPSERT_TRACK`] names the
+///   v5 columns and not these, so a rescan — which knows only what a file's
+///   tags say — rewrites the tag columns and leaves these untouched. That is
+///   the "must not fight the incremental scanner" property, held by the shape
+///   of the schema rather than by two writers agreeing to be careful.
+/// - **"Where did this figure come from" has a true answer.** The selection
+///   rule ([`ReplayGainSettings::resolve_with`](crate::replaygain::ReplayGainSettings::resolve_with))
+///   can prefer the tag *field by field* and report which one it used, because
+///   both are still there to choose between.
+///
+/// The last two columns are the [`FileStamp`] of the file **as measured**. A
+/// loudness figure is a claim about a file's samples, so it stops being true
+/// when the file changes; storing the stamp is what lets a stale measurement be
+/// recognised and ignored rather than played
+/// ([`ComputedReplayGain::is_fresh_for`]).
+///
+/// The transaction and the `user_version` bump are applied by
+/// [`migrate_v5_to_v6`].
+const SCHEMA_V6_COLUMNS: &str = "
+    ALTER TABLE tracks ADD COLUMN rg_computed_track_gain_centidb INTEGER; -- 0.01 dB
+    ALTER TABLE tracks ADD COLUMN rg_computed_track_peak_micro   INTEGER; -- 1e-6 FS
+    ALTER TABLE tracks ADD COLUMN rg_computed_album_gain_centidb INTEGER; -- 0.01 dB
+    ALTER TABLE tracks ADD COLUMN rg_computed_album_peak_micro   INTEGER; -- 1e-6 FS
+    ALTER TABLE tracks ADD COLUMN rg_computed_mtime_ns           INTEGER; -- ns since epoch
+    ALTER TABLE tracks ADD COLUMN rg_computed_file_size          INTEGER; -- bytes
+";
+
+/// Write one track's measured ReplayGain (schema v6).
+///
+/// An `UPDATE` rather than an upsert on purpose: a measurement belongs to a
+/// track the library already holds, and a path the library does not hold is a
+/// file that was removed while the pass was running — which updates nothing and
+/// is exactly right.
+const STORE_COMPUTED_REPLAY_GAIN: &str = "
+    UPDATE tracks SET
+        rg_computed_track_gain_centidb = ?2,
+        rg_computed_track_peak_micro   = ?3,
+        rg_computed_album_gain_centidb = ?4,
+        rg_computed_album_peak_micro   = ?5,
+        rg_computed_mtime_ns           = ?6,
+        rg_computed_file_size          = ?7
+    WHERE path = ?1
+";
+
 /// Insert-or-replace by path: a rescan of the same file updates its metadata
 /// instead of failing the batch or duplicating the track.
+///
+/// **The `rg_computed_*` columns are deliberately absent** from both the insert
+/// list and the update list (schema v6): a scan reads tags, and a measurement
+/// is not a tag. A new row therefore gets `NULL` measurements, and an updated
+/// row keeps whatever it had — which, if the file really changed, is a stamp
+/// that no longer matches and so a measurement nothing will use.
 const UPSERT_TRACK: &str = "
     INSERT INTO tracks
         (path, artist, album, title, track, disc, year, duration_ns,
@@ -208,7 +267,10 @@ const SELECT_ALL_TRACKS: &str = "
            format, bit_depth, sample_rate, bitrate, album_artist, compilation,
            mtime_ns, file_size,
            rg_track_gain_centidb, rg_track_peak_micro,
-           rg_album_gain_centidb, rg_album_peak_micro
+           rg_album_gain_centidb, rg_album_peak_micro,
+           rg_computed_track_gain_centidb, rg_computed_track_peak_micro,
+           rg_computed_album_gain_centidb, rg_computed_album_peak_micro,
+           rg_computed_mtime_ns, rg_computed_file_size
     FROM tracks
 ";
 
@@ -298,12 +360,131 @@ impl Library {
     fn hydrate(&mut self) -> Result<(), IndexError> {
         self.index = SearchIndex::default();
         let mut stmt = self.conn.prepare(SELECT_ALL_TRACKS)?;
-        let rows = stmt.query_and_then([], row_to_meta)?;
-        for meta in rows {
-            self.index.insert(meta?);
+        let rows = stmt.query_and_then([], |row| {
+            Ok::<_, IndexError>((row_to_meta(row)?, row_to_computed(row)?))
+        })?;
+        for row in rows {
+            let (meta, computed) = row?;
+            self.index.put(meta, computed);
         }
         self.index.rebuild_order();
         Ok(())
+    }
+
+    /// Re-read everything from the database, replacing the in-RAM index.
+    ///
+    /// For a holder that knows **another connection** has written to the same
+    /// file — which today is exactly one caller, [`crate::analysis`], whose
+    /// worker opens the library a second time and plans each pass against what
+    /// the scanner has since stored. SQLite in WAL mode makes the concurrency
+    /// legal; this makes it visible.
+    ///
+    /// It is a full hydrate, so it costs what opening the library costs. That
+    /// is the honest price of a snapshot: there is no way to learn what changed
+    /// without asking.
+    ///
+    /// # Errors
+    ///
+    /// [`IndexError::Sqlite`] if the read fails and
+    /// [`IndexError::CorruptStoredPath`] if a stored path cannot be decoded on
+    /// this platform. The in-RAM index is left empty in that case rather than
+    /// half-loaded.
+    pub fn reload(&mut self) -> Result<(), IndexError> {
+        self.hydrate()
+    }
+
+    /// What a ReplayGain analysis measured for `path`, if it measured anything
+    /// that **still applies** to the file the index knows (ADR-0015).
+    ///
+    /// A measurement whose stamp no longer matches the row's is reported as no
+    /// measurement: the figures describe samples, and the samples have moved.
+    /// The file is then simply one that needs measuring again, which is the
+    /// state it was in before it was ever measured.
+    #[must_use]
+    pub fn computed_replay_gain(&self, path: &Path) -> ReplayGainTags {
+        self.index
+            .by_path
+            .get(path)
+            .and_then(|&index| self.index.tracks.get(index))
+            .map_or_else(ReplayGainTags::default, |track| {
+                track.computed.figures_for(track.meta.stamp)
+            })
+    }
+
+    /// The whole library's still-applying measurements, as the lookup the
+    /// engine's seam takes ([`ComputedGains`]).
+    ///
+    /// A snapshot rather than a live view, and owned rather than borrowed:
+    /// the engine consults it from its own thread at a track boundary, and a
+    /// front end replaces it wholesale after an analysis pass finishes. Only
+    /// tracks with something measured are included, so an unmeasured library
+    /// costs an empty map.
+    #[must_use]
+    pub fn computed_gains(&self) -> ComputedGainMap {
+        ComputedGainMap(
+            self.index
+                .tracks
+                .iter()
+                .filter_map(|track| {
+                    let figures = track.computed.figures_for(track.meta.stamp);
+                    (!figures.is_empty()).then(|| (track.meta.path.clone(), figures))
+                })
+                .collect(),
+        )
+    }
+
+    /// Record what a ReplayGain analysis measured, for tracks the library
+    /// holds (ADR-0015).
+    ///
+    /// One transaction for the whole batch, because the batch is an album
+    /// edition and an edition's figures are a set: a crash must not leave an
+    /// album whose tracks were measured against an album gain that was never
+    /// written. Paths the library does not hold are ignored — a file removed
+    /// while the pass was running is not an error, it is news.
+    ///
+    /// Returns the number of rows actually written.
+    ///
+    /// # Errors
+    ///
+    /// [`IndexError::Sqlite`] if the write fails; the whole batch is then
+    /// rolled back and the in-RAM index is left matching the database.
+    pub fn store_computed_replay_gain<I>(&mut self, measurements: I) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = (PathBuf, ComputedReplayGain)>,
+    {
+        let measurements: Vec<(PathBuf, ComputedReplayGain)> = measurements.into_iter().collect();
+        let mut written = 0;
+        {
+            let tx = self.conn.transaction()?;
+            {
+                let mut stmt = tx.prepare_cached(STORE_COMPUTED_REPLAY_GAIN)?;
+                for (path, computed) in &measurements {
+                    written += stmt.execute(params![
+                        path_to_blob(path),
+                        computed.figures.track_gain_centidb,
+                        computed.figures.track_peak_micro,
+                        computed.figures.album_gain_centidb,
+                        computed.figures.album_peak_micro,
+                        computed.stamp.map(|stamp| stamp.mtime_ns),
+                        computed
+                            .stamp
+                            .and_then(|stamp| i64::try_from(stamp.size).ok()),
+                    ])?;
+                }
+            }
+            tx.commit()?;
+        }
+        // Mirror into RAM only after the batch is durably committed, exactly as
+        // `add_tracks` does. A measurement changes neither the sort key nor the
+        // search corpus, so no re-sort is needed.
+        for (path, computed) in measurements {
+            if let Some(&index) = self.index.by_path.get(&path)
+                && let Some(track) = self.index.tracks.get_mut(index)
+            {
+                track.computed = computed;
+            }
+        }
+        Ok(written)
     }
 
     /// Add (or, for already-known paths, update) tracks, persisting them and
@@ -828,10 +1009,29 @@ struct SearchIndex {
 }
 
 impl SearchIndex {
-    /// Insert a track, replacing any existing entry for the same path.
+    /// Insert a track, replacing any existing entry for the same path and
+    /// **keeping whatever measurement that entry carried**.
+    ///
+    /// The keeping is the point: this is the path a rescan takes, and a scan
+    /// speaks only about tags. Dropping the measurement here would make the
+    /// in-RAM index disagree with the database, which deliberately preserves
+    /// the `rg_computed_*` columns across an upsert (see [`UPSERT_TRACK`]).
+    /// A measurement of a file that really changed is not lost either — it is
+    /// simply stale, which [`ComputedReplayGain::figures_for`] already answers.
+    ///
     /// Callers must [`SearchIndex::rebuild_order`] afterwards (batched).
     fn insert(&mut self, meta: TrackMeta) {
-        let entry = IndexedTrack::new(meta);
+        let computed = self
+            .by_path
+            .get(&meta.path)
+            .and_then(|&index| self.tracks.get(index))
+            .map_or_else(ComputedReplayGain::default, |track| track.computed);
+        self.put(meta, computed);
+    }
+
+    /// Insert a track together with the measurement recorded for it.
+    fn put(&mut self, meta: TrackMeta, computed: ComputedReplayGain) {
+        let entry = IndexedTrack::new(meta, computed);
         match self.by_path.entry(entry.meta.path.clone()) {
             Entry::Occupied(slot) => {
                 let index = *slot.get();
@@ -887,6 +1087,12 @@ impl SearchIndex {
 /// keystroke costs a substring scan and nothing else.
 struct IndexedTrack {
     meta: TrackMeta,
+    /// What a ReplayGain analysis measured for this file, and which version of
+    /// it (ADR-0015). Kept beside the metadata rather than inside
+    /// [`TrackMeta`] because it is not something a scan produces: `TrackMeta`
+    /// is what reading a file's tags yields, and nothing that builds one has a
+    /// measurement to put in it.
+    computed: ComputedReplayGain,
     /// Case-folded `artist\nalbum artist\nalbum\ntitle` (the separator keeps
     /// a query from matching across field boundaries). The album-artist
     /// slot is left empty when it would only repeat the artist, which is the
@@ -898,7 +1104,7 @@ struct IndexedTrack {
 }
 
 impl IndexedTrack {
-    fn new(meta: TrackMeta) -> Self {
+    fn new(meta: TrackMeta, computed: ComputedReplayGain) -> Self {
         let artist = meta.artist.as_deref().map(str::to_lowercase);
         let album_artist = meta
             .album_artist
@@ -923,9 +1129,45 @@ impl IndexedTrack {
         };
         Self {
             meta,
+            computed,
             haystack,
             key,
         }
+    }
+}
+
+/// A snapshot of every measurement the library holds, as the engine's
+/// [`ComputedGains`] seam consumes it (ADR-0015).
+///
+/// Built by [`Library::computed_gains`] and handed to
+/// [`EngineHandle::set_computed_gains`](crate::engine::EngineHandle::set_computed_gains).
+/// It is immutable and cheap to share: a front end that has just finished an
+/// analysis pass builds a new one and replaces the old, rather than mutating a
+/// map the engine is reading.
+///
+/// Only fresh figures are in it — [`Library::computed_gains`] applies the
+/// staleness rule when it builds the map — so the lookup on the engine's side
+/// is a hash and nothing else.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ComputedGainMap(HashMap<PathBuf, ReplayGainTags>);
+
+impl ComputedGainMap {
+    /// How many tracks have a measurement in this snapshot.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Whether nothing in the library has been measured.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl ComputedGains for ComputedGainMap {
+    fn computed(&self, path: &Path) -> ReplayGainTags {
+        self.0.get(path).copied().unwrap_or_default()
     }
 }
 
@@ -989,6 +1231,7 @@ fn migrate(conn: &Connection) -> Result<(), IndexError> {
             2 => migrate_v2_to_v3(conn)?,
             3 => migrate_v3_to_v4(conn)?,
             4 => migrate_v4_to_v5(conn)?,
+            5 => migrate_v5_to_v6(conn)?,
             SCHEMA_VERSION => return Ok(()),
             found => return Err(IndexError::SchemaTooNew { found }),
         }
@@ -1073,7 +1316,7 @@ fn migrate_v3_to_v4(conn: &Connection) -> Result<(), IndexError> {
 /// `NULL` for every existing row, and the only honest value. A ReplayGain
 /// figure lives in the file's tags and nowhere else — nothing already in the
 /// database implies one, and *computing* one means an EBU R128 analysis pass
-/// over every track, which is separate work that does not exist yet and could
+/// over every track, which is [`crate::analysis`]'s work (ADR-0015) and could
 /// certainly not happen inside a migration. The v2 backfill had a file
 /// extension to read; there is no equivalent here.
 ///
@@ -1096,6 +1339,36 @@ fn migrate_v4_to_v5(conn: &Connection) -> Result<(), IndexError> {
     let tx = conn.unchecked_transaction()?;
     tx.execute_batch(SCHEMA_V5_COLUMNS)?;
     tx.pragma_update(None, "user_version", 5)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// v5 → v6: add the columns a ReplayGain **analysis** writes (ADR-0015).
+///
+/// `NULL` for every existing row, and the only honest value — for a stronger
+/// reason than v5's. A computed loudness is not a fact that could be derived
+/// from anything in the database at all: it is the output of decoding every
+/// sample of every file, which is minutes to hours of work and is exactly what
+/// the background pass exists to do somewhere other than inside a migration.
+/// v2's backfill had a file extension to read; there is not even a tag to read
+/// here.
+///
+/// `NULL` is self-healing on the same terms as v2 – v5, with a different
+/// healer: the first
+/// [`AnalysisCommand::StartReplayGainAnalysis`](crate::protocol::AnalysisCommand::StartReplayGainAnalysis)
+/// a listener sends fills it, and until they send one nothing changes — an
+/// upgraded library sounds exactly as it did, because
+/// [`ReplayGainSource::NoTag`](crate::protocol::ReplayGainSource::NoTag) and
+/// the no-ReplayGain pre-amp (zero by default) are what apply to a file with
+/// no figure of either kind.
+///
+/// The `ALTER TABLE`s and the `user_version` bump are one transaction (SQLite's
+/// DDL is transactional), so an interrupted upgrade leaves a v5 database that
+/// the next open migrates again.
+fn migrate_v5_to_v6(conn: &Connection) -> Result<(), IndexError> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(SCHEMA_V6_COLUMNS)?;
+    tx.pragma_update(None, "user_version", 6)?;
     tx.commit()?;
     Ok(())
 }
@@ -1192,6 +1465,42 @@ fn row_to_meta(row: &rusqlite::Row<'_>) -> Result<TrackMeta, IndexError> {
 /// one bad integer would be the wrong trade (`AudioFormat::from_code` makes the
 /// same call for the same reason).
 fn row_to_replay_gain(row: &rusqlite::Row<'_>) -> Result<ReplayGainTags, IndexError> {
+    figures_at(row, 16)
+}
+
+/// The [`ComputedReplayGain`] a row carries (schema v6) — the figures baz
+/// measured and the stamp of the file it measured them from.
+///
+/// Out-of-range values degrade to `None` on exactly the terms
+/// [`row_to_replay_gain`] states. A measurement with only half a stamp is a
+/// measurement with no stamp, for [`row_to_stamp`]'s reason: a comparison needs
+/// both, and an incomplete pair reported as a partial match is a stale figure
+/// nobody would catch.
+fn row_to_computed(row: &rusqlite::Row<'_>) -> Result<ComputedReplayGain, IndexError> {
+    let mtime_ns: Option<i64> = row.get(24)?;
+    let size: Option<i64> = row.get(25)?;
+    let stamp = match (mtime_ns, size) {
+        (Some(mtime_ns), Some(size)) => u64::try_from(size)
+            .ok()
+            .map(|size| FileStamp { mtime_ns, size }),
+        _ => None,
+    };
+    Ok(ComputedReplayGain {
+        figures: figures_at(row, 20)?,
+        stamp,
+    })
+}
+
+/// The four ReplayGain figures starting at column `first`, in the
+/// gain/peak/gain/peak order both column groups use.
+///
+/// A stored value outside the range its unit can hold degrades to `None` — the
+/// same "this file did not say" a missing column gives — rather than failing
+/// the open. Nothing baz writes can land outside the range; a value that has is
+/// a corrupt database, and refusing to open a listener's whole library over one
+/// bad integer would be the wrong trade (`AudioFormat::from_code` makes the
+/// same call for the same reason).
+fn figures_at(row: &rusqlite::Row<'_>, first: usize) -> Result<ReplayGainTags, IndexError> {
     let gain = |column: usize| -> Result<Option<i16>, IndexError> {
         Ok(row
             .get::<_, Option<i64>>(column)?
@@ -1203,10 +1512,10 @@ fn row_to_replay_gain(row: &rusqlite::Row<'_>) -> Result<ReplayGainTags, IndexEr
             .and_then(|v| u32::try_from(v).ok()))
     };
     Ok(ReplayGainTags {
-        track_gain_centidb: gain(16)?,
-        track_peak_micro: peak(17)?,
-        album_gain_centidb: gain(18)?,
-        album_peak_micro: peak(19)?,
+        track_gain_centidb: gain(first)?,
+        track_peak_micro: peak(first + 1)?,
+        album_gain_centidb: gain(first + 2)?,
+        album_peak_micro: peak(first + 3)?,
     })
 }
 
@@ -1331,11 +1640,14 @@ mod tests {
 
     #[test]
     fn haystack_separates_fields_and_folds_case() {
-        let track = IndexedTrack::new(TrackMeta {
-            artist: Some("Größenwahn".to_owned()),
-            album: Some("LIVE".to_owned()),
-            ..bare_meta()
-        });
+        let track = IndexedTrack::new(
+            TrackMeta {
+                artist: Some("Größenwahn".to_owned()),
+                album: Some("LIVE".to_owned()),
+                ..bare_meta()
+            },
+            ComputedReplayGain::default(),
+        );
         assert_eq!(track.haystack, "größenwahn\n\nlive\n\n");
         // The separator keeps queries from matching across field boundaries.
         assert!(!track.haystack.contains("wahnlive"));
@@ -1344,12 +1656,15 @@ mod tests {
     #[test]
     fn haystack_carries_a_distinct_album_artist_but_never_repeats_the_artist() {
         // A soundtrack: the album is filed under a name no track artist has.
-        let soundtrack = IndexedTrack::new(TrackMeta {
-            artist: Some("Kouhei Okamura".to_owned()),
-            album_artist: Some("RODIK".to_owned()),
-            album: Some("Cookie's Bustle OST (gamerip)".to_owned()),
-            ..bare_meta()
-        });
+        let soundtrack = IndexedTrack::new(
+            TrackMeta {
+                artist: Some("Kouhei Okamura".to_owned()),
+                album_artist: Some("RODIK".to_owned()),
+                album: Some("Cookie's Bustle OST (gamerip)".to_owned()),
+                ..bare_meta()
+            },
+            ComputedReplayGain::default(),
+        );
         assert!(
             soundtrack.haystack.contains("rodik"),
             "searching the name on the tile must find the album"
@@ -1357,12 +1672,15 @@ mod tests {
 
         // The ordinary album: album artist == artist, so the slot stays
         // empty rather than doubling every record in the corpus.
-        let ordinary = IndexedTrack::new(TrackMeta {
-            artist: Some("Stan Rogers".to_owned()),
-            album_artist: Some("STAN ROGERS".to_owned()),
-            album: Some("Northwest Passage".to_owned()),
-            ..bare_meta()
-        });
+        let ordinary = IndexedTrack::new(
+            TrackMeta {
+                artist: Some("Stan Rogers".to_owned()),
+                album_artist: Some("STAN ROGERS".to_owned()),
+                album: Some("Northwest Passage".to_owned()),
+                ..bare_meta()
+            },
+            ComputedReplayGain::default(),
+        );
         assert_eq!(ordinary.haystack, "stan rogers\n\nnorthwest passage\n\n");
     }
 

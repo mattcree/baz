@@ -9,14 +9,25 @@
 //! The workspace and its quality gates (see `docs/ENGINEERING.md`) were
 //! established before feature code; the engine grows behind them. Features
 //! so far: the [`library`] scanner, the [`index`] it feeds, the gapless
-//! [`playback`] machinery, the [`volume`] control, [`replaygain`], and the
-//! [`engine`] service that runs it all behind the [`protocol`].
+//! [`playback`] machinery, the [`volume`] control, [`replaygain`], the
+//! [`loudness`] meter and the [`analysis`] pass that computes ReplayGain for
+//! files that carry none, and the [`engine`] service that runs it all behind
+//! the [`protocol`].
+//!
+//! There are **two** services, deliberately: [`engine`] plays and is given
+//! paths, [`analysis`] measures and is given a library. Each takes its own
+//! command vocabulary ([`protocol::Command`] and [`protocol::AnalysisCommand`])
+//! so that a misrouted command is a compile error, and both announce
+//! themselves on the one [`protocol::Event`] stream a front end has an event
+//! loop for.
 
 #![forbid(unsafe_code)]
 
+pub mod analysis;
 pub mod engine;
 pub mod index;
 pub mod library;
+pub mod loudness;
 pub mod playback;
 pub mod protocol;
 pub mod replaygain;

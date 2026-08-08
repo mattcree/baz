@@ -402,6 +402,24 @@ impl AudioSource {
         self.sample_rate
     }
 
+    /// Channels the **source** carries — 1 or 2 — as distinct from the stereo
+    /// [`next_block`](Self::next_block) always emits.
+    ///
+    /// Reported for exactly one caller: [`crate::analysis`], because a loudness
+    /// measurement is not invariant under duplicating a mono channel. BS.1770
+    /// sums the channels with unity weights, so measuring a mono file through
+    /// this decoder's stereo output reads 3.01 LU louder than every other
+    /// scanner would read the same file — and a library where baz's mono tracks
+    /// sat 3 dB from its tagged ones is the bug this accessor exists to prevent
+    /// (`a_mono_source_is_measured_as_one_channel`).
+    ///
+    /// Playback never asks: the engine wants stereo and gets it, and the
+    /// duplication is what a mono file has always sounded like.
+    #[must_use]
+    pub fn channels(&self) -> usize {
+        self.source_channels
+    }
+
     /// Bit depth the container declares, when it declares one — 24 for the
     /// owner's 24-bit FLACs, 16 for a CD rip, `None` for float PCM and for
     /// containers that stay silent about it.

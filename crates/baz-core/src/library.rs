@@ -372,18 +372,24 @@ pub struct TrackMeta {
     pub stamp: Option<FileStamp>,
     /// The ReplayGain figures the file already carries, if any (ADR-0013).
     ///
-    /// Read, never computed: baz honours `REPLAYGAIN_TRACK_GAIN` and its
-    /// siblings where a scanner has written them, from Vorbis comments, ID3v2
-    /// `TXXX` frames, MP4 freeform atoms and APE items alike — plus the
-    /// Opus-style `R128_*` integer form where that is all a file has. An
-    /// analysis pass that *produces* these numbers is separate, larger work
-    /// that does not exist yet.
+    /// **What the file said**, and only that: baz honours
+    /// `REPLAYGAIN_TRACK_GAIN` and its siblings where a scanner has written
+    /// them, from Vorbis comments, ID3v2 `TXXX` frames, MP4 freeform atoms and
+    /// APE items alike — plus the Opus-style `R128_*` integer form where that
+    /// is all a file has.
+    ///
+    /// Figures **baz measured itself** (ADR-0015) are deliberately *not* here.
+    /// This struct is what reading a file's tags yields, a scan is the only
+    /// thing that builds one, and a scan cannot measure loudness; a measurement
+    /// lives beside the row in the index
+    /// ([`Library::computed_replay_gain`](crate::index::Library::computed_replay_gain)),
+    /// which is also what makes a rescan structurally unable to destroy one.
     ///
     /// All-`None` ([`ReplayGainTags::is_empty`]) is the ordinary state of a
     /// library nothing has ever scanned, and it means "the file did not say" —
     /// never "this track needs no gain". What the engine does with that is
-    /// [`ReplayGainSettings::resolve`](crate::replaygain::ReplayGainSettings::resolve)'s
-    /// no-tag rule.
+    /// [`ReplayGainSettings::resolve_with`](crate::replaygain::ReplayGainSettings::resolve_with)'s
+    /// no-figure rule.
     ///
     /// Integers rather than floats, for the three reasons
     /// [`crate::replaygain`] gives — one of which is that this struct keeps its

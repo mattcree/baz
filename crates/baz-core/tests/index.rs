@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use baz_core::index::{AlbumArtist, IndexError, Library};
 use baz_core::library::{AudioFormat, FileStamp, TrackMeta};
-use baz_core::replaygain::ReplayGainTags;
+use baz_core::replaygain::{ComputedReplayGain, ReplayGainTags};
 
 /// A fully-`None` track except for its path — the shape a tagless file with
 /// an uninformative folder layout produces.
@@ -978,13 +978,13 @@ fn a_v1_database_migrates_in_place_without_losing_anything() {
     let library = Library::open(&db).expect("a v1 database must open");
     assert_eq!(library.len(), 4, "every v1 row survives the upgrade");
 
-    // The schema really did move — and all the way, v1 → v2 → … → v5,
+    // The schema really did move — and all the way, v1 → v2 → … → v6,
     // because migrations chain rather than jumping.
     let conn = rusqlite::Connection::open(&db).expect("raw open");
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 
     let by_path = |needle: &str| {
         library
@@ -1197,7 +1197,7 @@ fn a_v2_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 
     let by_path = |needle: &str| {
         library
@@ -1548,7 +1548,7 @@ fn a_v3_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 
     let by_path = |needle: &str| {
         library
@@ -1901,7 +1901,7 @@ fn a_v4_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 5);
+    assert_eq!(version, 6);
 
     let by_path = |needle: &str| {
         library
@@ -2047,4 +2047,397 @@ fn replay_gain_round_trips_through_a_real_database_file() {
         Some(u32::MAX),
         "the untouched figures are unaffected"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Schema v6: the ReplayGain figures baz measured itself (ADR-0015).
+// ---------------------------------------------------------------------------
+
+/// Build a genuine v5 database with the v5 schema and v5 `INSERT`s only — no
+/// baz code involved, exactly as [`write_v4_database`] does for its own
+/// version. This is the shape of the `library.db` an installed baz leaves on
+/// disk today: file stamps, and the ReplayGain a scanner wrote into the files.
+fn write_v5_database(db: &std::path::Path) {
+    let conn = rusqlite::Connection::open(db).expect("create v5 db");
+    conn.execute_batch(
+        "
+        BEGIN;
+        CREATE TABLE tracks (
+            id                    INTEGER PRIMARY KEY,
+            path                  BLOB NOT NULL UNIQUE,
+            artist                TEXT,
+            album                 TEXT,
+            title                 TEXT,
+            track                 INTEGER,
+            disc                  INTEGER,
+            year                  INTEGER,
+            duration_ns           INTEGER,
+            format                TEXT,
+            bit_depth             INTEGER,
+            sample_rate           INTEGER,
+            bitrate               INTEGER,
+            album_artist          TEXT,
+            compilation           INTEGER,
+            mtime_ns              INTEGER,
+            file_size             INTEGER,
+            rg_track_gain_centidb INTEGER,
+            rg_track_peak_micro   INTEGER,
+            rg_album_gain_centidb INTEGER,
+            rg_album_peak_micro   INTEGER
+        ) STRICT;
+        PRAGMA user_version = 5;
+        COMMIT;
+        ",
+    )
+    .expect("v5 schema");
+
+    for (n, row) in v3_rows().into_iter().enumerate() {
+        // Only the FLAC rip carries ReplayGain, which is what a half-scanned
+        // library looks like: the tagged tracks must come through untouched and
+        // the untagged ones must still read as untagged after the upgrade.
+        let tagged = row.format == "flac";
+        conn.execute(
+            "INSERT INTO tracks
+                 (path, artist, album, title, track, disc, year, duration_ns,
+                  format, bit_depth, sample_rate, bitrate, album_artist,
+                  compilation, mtime_ns, file_size,
+                  rg_track_gain_centidb, rg_track_peak_micro,
+                  rg_album_gain_centidb, rg_album_peak_micro)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                     ?14, ?15, ?16, ?17, ?18, ?19)",
+            rusqlite::params![
+                // The platform's own path encoding, not UTF-8: a `library.db`
+                // is a per-machine cache and Windows stores UTF-16LE, so a
+                // fixture that hard-coded bytes would only be a *Unix* v5
+                // database (see `stored_path_bytes`).
+                stored_path_bytes(row.path),
+                row.artist,
+                row.album,
+                row.title,
+                row.track,
+                row.year,
+                row.duration_ns,
+                row.format,
+                row.bit_depth,
+                row.sample_rate,
+                row.bitrate,
+                row.album_artist,
+                row.compilation,
+                1_700_000_000_000_000_000_i64 + i64::try_from(n).expect("five rows"),
+                40_000_000_i64 + i64::try_from(n).expect("five rows"),
+                tagged.then_some(-775_i64),
+                tagged.then_some(988_525_i64),
+                tagged.then_some(-920_i64),
+                tagged.then_some(1_001_221_i64),
+            ],
+        )
+        .expect("insert v5 row");
+    }
+}
+
+#[test]
+fn a_v5_database_migrates_in_place_without_losing_anything() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    write_v5_database(&db);
+
+    let library = Library::open(&db).expect("a v5 database must open");
+    assert_eq!(library.len(), 5, "every v5 row survives the upgrade");
+
+    let conn = rusqlite::Connection::open(&db).expect("raw open");
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("user_version");
+    assert_eq!(version, 6);
+
+    let by_path = |needle: &str| {
+        library
+            .tracks()
+            .find(|t| t.path.to_string_lossy().contains(needle))
+            .cloned()
+            .unwrap_or_else(|| panic!("{needle} must survive"))
+    };
+
+    // Every v5 column is intact — text, numbers, Unicode, the ADR-0008
+    // columns, the ADR-0010 stamp, and the ADR-0013 figures.
+    let unicode = by_path("Größenwahn");
+    assert_eq!(unicode.artist.as_deref(), Some("Größenwahn"));
+    assert_eq!(unicode.album.as_deref(), Some("Debüt"));
+    assert_eq!(unicode.title.as_deref(), Some("Ærø — 序曲"));
+    assert_eq!(unicode.track, Some(3));
+    assert_eq!(unicode.disc, Some(1));
+    assert_eq!(unicode.year, Some(1999));
+    assert_eq!(unicode.duration, Some(Duration::new(215, 123_456_789)));
+    assert_eq!(unicode.format, Some(AudioFormat::Wav));
+    assert_eq!(unicode.bit_depth, Some(24));
+    assert_eq!(unicode.sample_rate, Some(96_000));
+    assert_eq!(unicode.bitrate, Some(4_608));
+    assert_eq!(unicode.album_artist.as_deref(), Some("Various Artists"));
+    assert_eq!(unicode.compilation, Some(true));
+
+    let soundtrack = by_path("Main Menu.flac");
+    assert_eq!(soundtrack.album_artist.as_deref(), Some("RODIK"));
+    assert_eq!(soundtrack.compilation, None, "NULL is not Some(false)");
+    assert_eq!(
+        soundtrack.replay_gain,
+        ReplayGainTags {
+            track_gain_centidb: Some(-775),
+            track_peak_micro: Some(988_525),
+            album_gain_centidb: Some(-920),
+            album_peak_micro: Some(1_001_221),
+        },
+        "the tags a scanner wrote survive the upgrade byte for byte"
+    );
+    let untagged = by_path(".mp3");
+    assert!(
+        untagged.replay_gain.is_empty(),
+        "and a row that carried no ReplayGain still carries none"
+    );
+
+    // The stamps v4 wrote are untouched, so the upgrade does not cost a
+    // listener the incremental scan they already paid for.
+    assert_eq!(
+        library
+            .known_files()
+            .values()
+            .filter(|s| s.is_some())
+            .count(),
+        5,
+        "every v5 stamp survives, so the next scan is still incremental"
+    );
+
+    // The new columns are NULL for every row. Nothing in a v5 database implies
+    // a *measured* loudness — the only way to know one is to decode every
+    // sample of the file, which is what the background pass is for and could
+    // certainly not happen inside a migration.
+    for track in library.tracks() {
+        assert!(
+            library.computed_replay_gain(&track.path).is_empty(),
+            "{}: an upgraded row carries no measurement",
+            track.path.display()
+        );
+    }
+    assert!(
+        library.computed_gains().is_empty(),
+        "and the engine's snapshot of an upgraded library is empty"
+    );
+
+    // Grouping is *exactly* the pre-v6 behaviour — the upgrade adds columns,
+    // never changes what the shelf shows.
+    let albums = library.albums();
+    let passage = albums
+        .iter()
+        .find(|a| a.title == Some("Northwest Passage"))
+        .expect("the double rip");
+    assert_eq!(passage.artist, AlbumArtist::Named("Stan Rogers"));
+    assert_eq!(passage.editions.len(), 2);
+    let gamerip: Vec<_> = albums
+        .iter()
+        .filter(|a| a.title == Some("Cookie's Bustle OST (gamerip)"))
+        .collect();
+    assert_eq!(gamerip.len(), 1, "still one entry, two editions");
+    assert_eq!(gamerip[0].editions.len(), 2);
+}
+
+/// An analysis after the upgrade fills the new columns, and they are durable.
+/// That is what makes the NULLs self-healing rather than permanent — with a
+/// different healer from v2–v5's, because a rescan cannot produce a
+/// measurement.
+#[test]
+fn the_first_analysis_after_a_v5_upgrade_stores_what_it_measured() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    write_v5_database(&db);
+
+    let mut library = Library::open(&db).expect("open migrates to v6");
+    let paths: Vec<PathBuf> = library.tracks().map(|t| t.path.clone()).collect();
+    let stamps: Vec<Option<FileStamp>> = library.tracks().map(|t| t.stamp).collect();
+    let measured = ReplayGainTags {
+        track_gain_centidb: Some(412),
+        track_peak_micro: Some(750_000),
+        album_gain_centidb: Some(318),
+        album_peak_micro: Some(910_000),
+    };
+    let written = library
+        .store_computed_replay_gain(paths.iter().cloned().zip(stamps.iter().copied()).map(
+            |(path, stamp)| {
+                (
+                    path,
+                    ComputedReplayGain {
+                        figures: measured,
+                        stamp,
+                    },
+                )
+            },
+        ))
+        .expect("store");
+    assert_eq!(written, 5);
+    assert_eq!(library.len(), 5, "an update, not an insert");
+
+    drop(library);
+    let reopened = Library::open(&db).expect("reopen");
+    for path in &paths {
+        assert_eq!(
+            reopened.computed_replay_gain(path),
+            measured,
+            "{}: the measurement is durable",
+            path.display()
+        );
+    }
+    assert_eq!(reopened.computed_gains().len(), 5);
+
+    // The tags are untouched by the measurement: two claims, two column
+    // groups, and the selection rule is what chooses between them.
+    let flac = reopened
+        .tracks()
+        .find(|t| t.path.to_string_lossy().ends_with(".flac"))
+        .expect("a FLAC row");
+    assert_eq!(flac.replay_gain.track_gain_centidb, Some(-775));
+}
+
+/// A measurement whose file has moved on is reported as no measurement.
+///
+/// The stamp is the whole mechanism: a loudness figure is a claim about a
+/// file's samples, and a file that has been re-encoded, re-tagged or replaced
+/// is a file the claim is not about. It stays in the database — a later scan
+/// may restore the very stamp it was taken at — but it does not reach a gain
+/// stage in the meantime.
+#[test]
+fn a_measurement_of_a_file_that_has_since_changed_is_not_used() {
+    let stamp = FileStamp {
+        mtime_ns: 1_700_000_000_000_000_000,
+        size: 40_000_000,
+    };
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks(vec![TrackMeta {
+            stamp: Some(stamp),
+            ..track("/m/a.flac", "Karl", "Signal Chain", "Test Tone", 1)
+        }])
+        .expect("add");
+    let measured = ReplayGainTags {
+        track_gain_centidb: Some(412),
+        track_peak_micro: Some(750_000),
+        ..ReplayGainTags::default()
+    };
+    library
+        .store_computed_replay_gain([(
+            PathBuf::from("/m/a.flac"),
+            ComputedReplayGain {
+                figures: measured,
+                stamp: Some(stamp),
+            },
+        )])
+        .expect("store");
+    assert_eq!(
+        library.computed_replay_gain(std::path::Path::new("/m/a.flac")),
+        measured
+    );
+
+    // The file is re-encoded: same path, different bytes, so the scan records
+    // a different stamp.
+    library
+        .add_tracks(vec![TrackMeta {
+            stamp: Some(FileStamp {
+                mtime_ns: stamp.mtime_ns + 1,
+                size: 41_000_000,
+            }),
+            ..track("/m/a.flac", "Karl", "Signal Chain", "Test Tone", 1)
+        }])
+        .expect("rescan");
+    assert!(
+        library
+            .computed_replay_gain(std::path::Path::new("/m/a.flac"))
+            .is_empty(),
+        "a measurement of the old bytes must not be applied to the new ones"
+    );
+    assert!(library.computed_gains().is_empty());
+}
+
+/// A rescan does not destroy a measurement — which is the "must not fight the
+/// incremental scanner" property, and it is held by the schema rather than by
+/// two writers agreeing to be careful.
+///
+/// A scan produces a [`TrackMeta`], which has nowhere to put a measurement,
+/// and the upsert names the tag columns and not the computed ones. So a file
+/// that was re-read because its *tags* moved — the ordinary case after somebody
+/// runs a tagger — keeps the loudness baz measured, provided the stamp still
+/// matches.
+#[test]
+fn a_rescan_rewrites_tags_and_leaves_measurements_alone() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let stamp = FileStamp {
+        mtime_ns: 1_700_000_000_000_000_000,
+        size: 40_000_000,
+    };
+    let scanned = TrackMeta {
+        stamp: Some(stamp),
+        ..track("/m/a.flac", "Karl", "Signal Chain", "Test Tone", 1)
+    };
+    let measured = ReplayGainTags {
+        track_gain_centidb: Some(412),
+        track_peak_micro: Some(750_000),
+        album_gain_centidb: Some(318),
+        album_peak_micro: Some(910_000),
+    };
+    {
+        let mut library = Library::open(&db).expect("open");
+        library.add_tracks(vec![scanned.clone()]).expect("scan");
+        library
+            .store_computed_replay_gain([(
+                PathBuf::from("/m/a.flac"),
+                ComputedReplayGain {
+                    figures: measured,
+                    stamp: Some(stamp),
+                },
+            )])
+            .expect("store");
+
+        // The same file, re-read because its title changed. Same stamp, so the
+        // measurement still describes these samples.
+        library
+            .add_tracks(vec![TrackMeta {
+                title: Some("Test Tone (2024 remaster tag fix)".to_owned()),
+                replay_gain: ReplayGainTags {
+                    track_gain_centidb: Some(-775),
+                    ..ReplayGainTags::default()
+                },
+                ..scanned.clone()
+            }])
+            .expect("rescan");
+        assert_eq!(
+            library.computed_replay_gain(std::path::Path::new("/m/a.flac")),
+            measured,
+            "in RAM: a scan speaks about tags and must not touch a measurement"
+        );
+    }
+    let reopened = Library::open(&db).expect("reopen");
+    assert_eq!(
+        reopened.computed_replay_gain(std::path::Path::new("/m/a.flac")),
+        measured,
+        "on disk: the upsert names the tag columns and not the computed ones"
+    );
+    let stored = reopened.tracks().next().expect("one track");
+    assert_eq!(
+        stored.title.as_deref(),
+        Some("Test Tone (2024 remaster tag fix)"),
+        "and the rescan did land"
+    );
+    assert_eq!(stored.replay_gain.track_gain_centidb, Some(-775));
+}
+
+/// A measurement for a path the library does not hold writes nothing and is
+/// not an error: a file removed while a pass was running is news, not a fault.
+#[test]
+fn a_measurement_for_an_unknown_path_is_ignored() {
+    let mut library = Library::open_in_memory().expect("open");
+    let written = library
+        .store_computed_replay_gain([(
+            PathBuf::from("/m/gone.flac"),
+            ComputedReplayGain::default(),
+        )])
+        .expect("store");
+    assert_eq!(written, 0);
+    assert!(library.computed_gains().is_empty());
 }

@@ -12,11 +12,13 @@
 //! untrusted input, and "never panics, never returns a value outside its
 //! documented range" is the property, not "handles the inputs we thought of".
 
+use baz_core::library::FileStamp;
 use baz_core::protocol::{ReplayGainMode, ReplayGainSource};
 use baz_core::replaygain::{
-    MAX_APPLIED_CENTIDB, MAX_PREAMP_CENTIDB, MAX_TAG_GAIN_CENTIDB, MAX_TAG_PEAK_MICRO, PEAK_UNITY,
-    R128_REFERENCE_OFFSET_CENTIDB, ReplayGainDecision, ReplayGainField, ReplayGainSettings,
-    ReplayGainTags, field_of_key, parse_gain, parse_peak, parse_r128_gain,
+    ComputedReplayGain, MAX_APPLIED_CENTIDB, MAX_PREAMP_CENTIDB, MAX_TAG_GAIN_CENTIDB,
+    MAX_TAG_PEAK_MICRO, PEAK_UNITY, R128_REFERENCE_OFFSET_CENTIDB, ReplayGainDecision,
+    ReplayGainField, ReplayGainSettings, ReplayGainTags, field_of_key, parse_gain, parse_peak,
+    parse_r128_gain,
 };
 
 // ---------------------------------------------------------------------------
@@ -666,4 +668,273 @@ fn off_resolves_to_unity_for_every_input() {
             assert!(decision.is_transparent());
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Tags versus measurements (ADR-0015's rule, as a table)
+// ---------------------------------------------------------------------------
+
+/// What baz measured for the same file: deliberately *different* numbers from
+/// [`album_track`]'s, so every row below can tell which of the two was used.
+fn measured() -> ReplayGainTags {
+    ReplayGainTags {
+        track_gain_centidb: Some(412),
+        track_peak_micro: Some(500_000),
+        album_gain_centidb: Some(318),
+        album_peak_micro: Some(600_000),
+    }
+}
+
+/// One row of the tags-versus-measurements table: what it demonstrates, the
+/// mode, the file's tags, what baz measured, and the decision the two must
+/// produce together.
+type OriginCase = (
+    &'static str,
+    ReplayGainMode,
+    ReplayGainTags,
+    ReplayGainTags,
+    ReplayGainSource,
+    i16,
+);
+
+/// The whole of ADR-0015's selection rule, as data.
+///
+/// The clipping-prevention column is absent because none of these rows engages
+/// it: the peaks are all below full scale and the gains are all modest, so each
+/// row isolates the one question it is about — which figure, from which origin.
+fn origin_cases() -> Vec<OriginCase> {
+    vec![
+        (
+            "a tagged track gain outranks a measured one",
+            ReplayGainMode::Track,
+            album_track(),
+            measured(),
+            ReplayGainSource::Track,
+            -775,
+        ),
+        (
+            "with no track tag, the measurement is used and says so",
+            ReplayGainMode::Track,
+            ReplayGainTags::default(),
+            measured(),
+            ReplayGainSource::ComputedTrack,
+            412,
+        ),
+        (
+            "a tagged album gain outranks a measured one",
+            ReplayGainMode::Album,
+            album_track(),
+            measured(),
+            ReplayGainSource::Album,
+            -920,
+        ),
+        (
+            "with no album tag, the measured album figure is used",
+            ReplayGainMode::Album,
+            ReplayGainTags::default(),
+            measured(),
+            ReplayGainSource::ComputedAlbum,
+            318,
+        ),
+        (
+            // Field by field: the two sets are not alternatives. A file that
+            // carries a track gain and no album gain takes the measured album
+            // figure for album mode and keeps its own tag for track mode.
+            "a measured album figure fills the gap a tagged track gain leaves",
+            ReplayGainMode::Album,
+            single_track(),
+            measured(),
+            ReplayGainSource::ComputedAlbum,
+            318,
+        ),
+        (
+            "and that same file in track mode still uses its own tag",
+            ReplayGainMode::Track,
+            single_track(),
+            measured(),
+            ReplayGainSource::Track,
+            233,
+        ),
+        (
+            // Album mode with no album figure of either origin falls back to a
+            // track figure, tags first — ADR-0013's rule, with the measured
+            // twin added underneath it.
+            "album mode falls back to the tagged track gain",
+            ReplayGainMode::Album,
+            single_track(),
+            ReplayGainTags {
+                album_gain_centidb: None,
+                album_peak_micro: None,
+                ..measured()
+            },
+            ReplayGainSource::TrackFallback,
+            233,
+        ),
+        (
+            "album mode falls back to the measured track gain when there is no tag at all",
+            ReplayGainMode::Album,
+            ReplayGainTags::default(),
+            ReplayGainTags {
+                album_gain_centidb: None,
+                album_peak_micro: None,
+                ..measured()
+            },
+            ReplayGainSource::ComputedTrackFallback,
+            412,
+        ),
+        (
+            "nothing measured and nothing tagged is still `no_tag`",
+            ReplayGainMode::Track,
+            ReplayGainTags::default(),
+            ReplayGainTags::default(),
+            ReplayGainSource::NoTag,
+            0,
+        ),
+        (
+            "off is off, whatever either origin says",
+            ReplayGainMode::Off,
+            album_track(),
+            measured(),
+            ReplayGainSource::Disabled,
+            0,
+        ),
+    ]
+}
+
+#[test]
+fn tags_outrank_measurements_field_by_field() {
+    for (what, mode, tags, computed, source, gain_centidb) in origin_cases() {
+        assert_eq!(
+            settings(mode).resolve_with(tags, computed),
+            ReplayGainDecision {
+                source,
+                gain_centidb,
+                clipping_prevented: false,
+            },
+            "{what}"
+        );
+    }
+}
+
+/// `resolve` is `resolve_with` against an empty measurement, so ADR-0013's
+/// whole table is still exactly what a file with no measurement produces.
+///
+/// Asserted rather than assumed: the two are one rule, and a second rule that
+/// happened to agree today is the kind that stops agreeing later.
+#[test]
+fn resolving_without_measurements_is_the_adr_0013_rule_unchanged() {
+    let cases = mode_cases()
+        .into_iter()
+        .chain(preamp_cases())
+        .chain(clipping_cases());
+    for (what, settings, tags, ..) in cases {
+        assert_eq!(
+            settings.resolve_with(tags, ReplayGainTags::default()),
+            settings.resolve(tags),
+            "{what}"
+        );
+    }
+}
+
+/// A measured peak is used to clip-check a **tagged** gain when the file
+/// declares no peak of its own.
+///
+/// This is a strict improvement on ADR-0013's "no peak declared, so apply the
+/// gain in full": baz has now measured the same samples, and a peak it measured
+/// is a fact about them. The figure and the bound may honestly come from
+/// different origins, because they are answers to different questions.
+#[test]
+fn a_measured_peak_can_clip_check_a_tagged_gain() {
+    let settings = ReplayGainSettings {
+        mode: ReplayGainMode::Track,
+        preamp_centidb: 0,
+        no_tag_preamp_centidb: 0,
+        prevent_clipping: true,
+    };
+    // The file asks for +6 dB and says nothing about its peak.
+    let tags = ReplayGainTags {
+        track_gain_centidb: Some(600),
+        ..ReplayGainTags::default()
+    };
+    let without = settings.resolve_with(tags, ReplayGainTags::default());
+    assert_eq!(
+        without,
+        ReplayGainDecision {
+            source: ReplayGainSource::Track,
+            gain_centidb: 600,
+            clipping_prevented: false,
+        },
+        "with nothing to check against, the gain is applied in full and said so"
+    );
+
+    // baz has since measured it: the loudest sample is 0.9 of full scale, so
+    // +6 dB would clip and the ceiling is ⌊-20·log10(0.9)⌋ = 91 centidecibels.
+    let with = settings.resolve_with(
+        tags,
+        ReplayGainTags {
+            track_peak_micro: Some(900_000),
+            ..ReplayGainTags::default()
+        },
+    );
+    assert_eq!(
+        with,
+        ReplayGainDecision {
+            source: ReplayGainSource::Track,
+            gain_centidb: 91,
+            clipping_prevented: true,
+        },
+        "the gain is still the file's own; only the bound came from the measurement"
+    );
+    assert!(
+        !with.source.is_computed(),
+        "a measured *peak* does not make the gain a measured one — the source \
+         names where the number came from, and the number is the tag's"
+    );
+    assert!(f64::from(with.amplitude()) * 0.9 <= 1.0);
+}
+
+/// A measurement is stale the moment the file changes, and a stale measurement
+/// is no measurement.
+///
+/// The stamp is the whole mechanism, and both halves are asserted: a matching
+/// stamp lets the figures through, and any mismatch — including "the file
+/// cannot be stamped at all", which ADR-0010 already refuses to read as
+/// freshness — reads as nothing measured.
+#[test]
+fn a_measurement_only_applies_to_the_file_it_measured() {
+    let stamp = FileStamp {
+        mtime_ns: 1_700_000_000_000_000_000,
+        size: 40_000_000,
+    };
+    let computed = ComputedReplayGain {
+        figures: measured(),
+        stamp: Some(stamp),
+    };
+    assert!(computed.is_fresh_for(Some(stamp)));
+    assert_eq!(computed.figures_for(Some(stamp)), measured());
+
+    let moved = FileStamp {
+        mtime_ns: stamp.mtime_ns + 1,
+        ..stamp
+    };
+    let resized = FileStamp {
+        size: stamp.size + 1,
+        ..stamp
+    };
+    for current in [Some(moved), Some(resized), None] {
+        assert!(!computed.is_fresh_for(current), "{current:?}");
+        assert_eq!(
+            computed.figures_for(current),
+            ReplayGainTags::default(),
+            "{current:?}"
+        );
+    }
+    // A measurement that never knew which file it was about is never fresh.
+    let unstamped = ComputedReplayGain {
+        figures: measured(),
+        stamp: None,
+    };
+    assert!(!unstamped.is_fresh_for(Some(stamp)));
+    assert!(!unstamped.is_fresh_for(None));
+    assert!(ComputedReplayGain::default().is_empty());
 }
