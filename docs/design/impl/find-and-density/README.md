@@ -19,6 +19,11 @@ The fixture is the generated, digitally silent 25-album / 206-track set from
 the transport is on screen; the scratch `HOME` carries an `.asoundrc` routing
 ALSA's default PCM to `null`, and every sample in the fixture is a zero.
 
+Re-shot after merging steps 9, 10 and 17 — the needle, the 58 px bar and the
+shuffle pool. The wall's x-geometry is byte-identical across all three merges,
+which is the point: the hang is a function of the grid's width, and none of
+them changed it.
+
 **Every density frame was reached by the real gesture**, not by a seeded
 config: `Ctrl+-`, `Ctrl+=`, `Ctrl+wheel`. So the frames are evidence about the
 bindings as much as about the geometry.
