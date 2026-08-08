@@ -4,11 +4,22 @@
 //!
 //! # Palette rationale
 //!
-//! baz's room is a **dim listening room**: charcoal walls, matte record
-//! sleeves, low warm light. The chrome must recede so 10 000 covers — the
-//! actual interface — supply all the chroma; every surface is therefore a
-//! *warm* near-neutral (a hint of brown, never the blue-grey of a stock
-//! dark theme), and text is warm off-white like liner-note paper.
+//! **A record archive after closing time. The works are lit; the room is not.**
+//!
+//! baz is a hang, not a dashboard. The wall is near-black and *neutral-cool* —
+//! the matte paint of a black-cube gallery, never the warm charcoal of the
+//! listening room this replaced and never the blue-grey of a stock dark theme.
+//! The type is warm ivory, the colour of archival mount board. **The room is
+//! cold and the paper is warm**, which is what a gallery looks like at night,
+//! and it is the one decision that keeps a near-black grid of covers from
+//! reading as every other media app. The chrome recedes so that 10 000 sleeves
+//! — the actual interface — supply every other colour in the room.
+//!
+//! There is one light in it, and it is pointed at one thing: the record that is
+//! playing. Everything else — every control, count, setting and state — is made
+//! of surface, edge and ink. The long argument is
+//! `docs/design/02-visual-language.md`; the condensed version that governs is
+//! `.interface-design/system.md`.
 //!
 //! # The accent discipline
 //!
@@ -43,10 +54,25 @@
 //! — a scan is the library working, not the music). Blue, every streaming
 //! app's accent, remains deliberately absent.
 //!
-//! Depth strategy: hairline borders plus whisper-quiet surface steps
-//! (`WALL` → `CARD` → `CARD_HIGH`, with `RECESS` for inset chrome), and one
-//! soft shadow under artwork so sleeves sit *on* the shelf. Corners: sleeves
-//! are square like the physical object; controls are gently rounded.
+//! # Depth strategy: surface steps, and nothing else
+//!
+//! Four planes — [`RECESS`] below the wall, [`WALL`], [`PLINTH`] one step up,
+//! [`PLINTH_LIT`] one above that — whisper-quiet in bytes (8 apart) and plainly
+//! felt in linear light (nearly 2× per step, which is what the eye actually
+//! uses at these levels). Squint and you perceive four planes and no edges.
+//!
+//! **Not shadows**, and that is measured rather than preferred: black at 55 %
+//! over `#0C0D0E` composites to `#050606`, a contrast ratio of **1.04 : 1**. On
+//! near-black a drop shadow is not a design tool, it is a rounding error, so
+//! the sleeve's contact shadow is deleted rather than tuned (that deletion is
+//! B1 of the adoption order, not this pass). The one shadow primitive left in
+//! the product is the playing halo, and it is not elevation — it is light.
+//!
+//! Hairlines survive in three structural roles — under the top bar, above the
+//! now-playing bar, and dividing the inspector from the shelf — plus a tile's
+//! own hover rule and control borders. Corners: artwork is always square, like
+//! the physical object; controls are barely rounded, because an archive is
+//! rectilinear.
 //!
 //! # Contrast
 //!
@@ -68,15 +94,29 @@ use iced::{Background, Border, Color, Font, Padding, Shadow, Theme, Vector, mous
 // Palette
 // ---------------------------------------------------------------------------
 
-/// The room: the app background behind the shelf. Warm near-black.
-pub const WALL: Color = Color::from_rgb(0.075, 0.067, 0.061);
-/// Inset chrome — the now-playing bar and text-input wells sit *below* the
-/// wall.
-pub const RECESS: Color = Color::from_rgb(0.051, 0.045, 0.041);
-/// Raised card surface: the side panel, resting controls, hovered tiles.
-pub const CARD: Color = Color::from_rgb(0.106, 0.096, 0.088);
-/// One step above [`CARD`]: selected tiles, hovered controls.
-pub const CARD_HIGH: Color = Color::from_rgb(0.133, 0.121, 0.110);
+/// **The hanging wall**: the app background behind the shelf. `#0C0D0E` — a
+/// neutral-cool near-black, the matte paint of a black-cube gallery.
+///
+/// Cool, and that is the single decision that keeps a dark grid of covers from
+/// reading as every other media app: the room is cold and the paper is warm
+/// ([`PAPER`]), which is what a gallery actually looks like at night. The
+/// previous direction's warm charcoal is gone with the listening room it
+/// belonged to.
+pub const WALL: Color = Color::from_rgb(0.047, 0.051, 0.055);
+/// **The shadow gap** where the wall meets the floor: the now-playing bar,
+/// input wells, groove troughs and the backing behind a sleeve — everything
+/// that sits *below* the wall. `#060708`.
+pub const RECESS: Color = Color::from_rgb(0.024, 0.027, 0.031);
+/// **One step up from the wall**: the album inspector's column, the popover,
+/// a resting control. `#141517`.
+///
+/// A plinth is the thing a work stands on. It was called `CARD`, which is
+/// web-app vocabulary and, under this direction, a lie — there are no cards,
+/// and the shelf in particular may never be drawn on one.
+pub const PLINTH: Color = Color::from_rgb(0.078, 0.082, 0.090);
+/// **One step above [`PLINTH`]**: a selected segment, the playing row, a
+/// hovered control. `#1C1D20`. Never a resting state.
+pub const PLINTH_LIT: Color = Color::from_rgb(0.110, 0.114, 0.125);
 /// Hairline border: findable when you look, invisible when you don't.
 pub const HAIRLINE: Color = Color::from_rgba(0.93, 0.89, 0.85, 0.08);
 /// The hairline, slightly firmer — selection edges, hovered controls.
@@ -92,7 +132,7 @@ pub const PAPER_DIM: Color = Color::from_rgb(0.659, 0.635, 0.604);
 /// value it had through v0.1 (`#726D66`) measured **3.4 : 1** on the panel —
 /// below the 4.5 : 1 AA floor for text on every surface it can land on. The
 /// value here is the same hue lightened until it clears that floor everywhere
-/// (5.1 on `WALL`, 4.8 on `CARD`, 5.4 on `RECESS`, 4.5 on `CARD_HIGH`);
+/// (5.1 on `WALL`, 4.8 on `PLINTH`, 5.4 on `RECESS`, 4.5 on `PLINTH_LIT`);
 /// `every_ink_clears_its_contrast_floor_on_every_surface_it_lands_on` is what
 /// keeps it there.
 pub const PAPER_FAINT: Color = Color::from_rgb(0.541, 0.522, 0.486);
@@ -343,7 +383,7 @@ pub const GLYPH_OPACITY: f32 = 1.0;
 /// the measured round trip, are in [`crate::player`]'s module docs).
 pub const GLYPH_OPACITY_PENDING: f32 = 0.55;
 /// Opacity of a glyph on a control that genuinely cannot act — no engine,
-/// or nothing queued. Lands on roughly [`PAPER_FAINT`] over [`CARD`], the
+/// or nothing queued. Lands on roughly [`PAPER_FAINT`] over [`PLINTH`], the
 /// weight the rest of the room gives inert text.
 pub const GLYPH_OPACITY_DISABLED: f32 = 0.45;
 
@@ -497,12 +537,13 @@ pub fn scrollbar(_theme: &Theme, status: scrollable::Status) -> scrollable::Styl
 #[must_use]
 pub fn check(_theme: &Theme, status: checkbox::Status) -> checkbox::Style {
     let (background, border_color) = match status {
-        checkbox::Status::Active { is_checked } => {
-            (if is_checked { CARD_HIGH } else { RECESS }, HAIRLINE_STRONG)
-        }
-        checkbox::Status::Hovered { .. } => (CARD_HIGH, HAIRLINE_STRONG),
+        checkbox::Status::Active { is_checked } => (
+            if is_checked { PLINTH_LIT } else { RECESS },
+            HAIRLINE_STRONG,
+        ),
+        checkbox::Status::Hovered { .. } => (PLINTH_LIT, HAIRLINE_STRONG),
         checkbox::Status::Disabled { is_checked } => {
-            (if is_checked { CARD } else { RECESS }, HAIRLINE)
+            (if is_checked { PLINTH } else { RECESS }, HAIRLINE)
         }
     };
     let disabled = matches!(status, checkbox::Status::Disabled { .. });
@@ -598,12 +639,12 @@ pub fn tile(status: button::Status, selected: bool) -> button::Style {
         shadow: Shadow::default(),
     };
     if selected {
-        style.background = Some(Background::Color(CARD_HIGH));
+        style.background = Some(Background::Color(PLINTH_LIT));
         style.border.color = HAIRLINE_STRONG;
         // Two pixels, not one: see [`SELECTION_EDGE`].
         style.border.width = SELECTION_EDGE;
     } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-        style.background = Some(Background::Color(CARD));
+        style.background = Some(Background::Color(PLINTH));
     }
     style
 }
@@ -647,10 +688,10 @@ pub fn lamp_dot(_theme: &Theme) -> container::Style {
 #[must_use]
 pub fn transport(_theme: &Theme, status: button::Status) -> button::Style {
     let (background, border, text_color) = match status {
-        button::Status::Hovered => (CARD_HIGH, HAIRLINE_STRONG, PAPER),
+        button::Status::Hovered => (PLINTH_LIT, HAIRLINE_STRONG, PAPER),
         button::Status::Pressed => (RECESS, HAIRLINE_STRONG, PAPER),
-        button::Status::Disabled => (CARD, HAIRLINE, PAPER_FAINT),
-        button::Status::Active => (CARD, HAIRLINE, PAPER),
+        button::Status::Disabled => (PLINTH, HAIRLINE, PAPER_FAINT),
+        button::Status::Active => (PLINTH, HAIRLINE, PAPER),
     };
     button::Style {
         background: Some(Background::Color(background)),
@@ -671,7 +712,7 @@ pub fn primary(_theme: &Theme, status: button::Status) -> button::Style {
         button::Status::Active => (LAMP, LAMP_INK),
         button::Status::Hovered => (LAMP_BRIGHT, LAMP_INK),
         button::Status::Pressed => (LAMP_DEEP, LAMP_INK),
-        button::Status::Disabled => (CARD, PAPER_FAINT),
+        button::Status::Disabled => (PLINTH, PAPER_FAINT),
     };
     button::Style {
         background: Some(Background::Color(background)),
@@ -862,7 +903,7 @@ pub fn segmented(_theme: &Theme) -> container::Style {
 #[must_use]
 pub fn preview_tip(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(CARD_HIGH)),
+        background: Some(Background::Color(PLINTH_LIT)),
         text_color: Some(PAPER_DIM),
         border: Border {
             color: HAIRLINE_STRONG,
@@ -883,10 +924,10 @@ pub fn preview_tip(_theme: &Theme) -> container::Style {
 #[must_use]
 pub fn segment(status: button::Status, selected: bool) -> button::Style {
     let (background, text_color) = if selected {
-        (Some(CARD_HIGH), PAPER)
+        (Some(PLINTH_LIT), PAPER)
     } else {
         match status {
-            button::Status::Hovered | button::Status::Pressed => (Some(CARD), PAPER),
+            button::Status::Hovered | button::Status::Pressed => (Some(PLINTH), PAPER),
             button::Status::Active | button::Status::Disabled => (None, PAPER_DIM),
         }
     };
@@ -910,7 +951,7 @@ pub fn segment(status: button::Status, selected: bool) -> button::Style {
 #[must_use]
 pub fn panel(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(CARD)),
+        background: Some(Background::Color(PLINTH)),
         ..container::Style::default()
     }
 }
@@ -958,7 +999,7 @@ pub fn hairline(_theme: &Theme) -> rule::Style {
 #[must_use]
 pub fn tooltip(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(CARD_HIGH)),
+        background: Some(Background::Color(PLINTH_LIT)),
         text_color: Some(PAPER_DIM),
         border: Border {
             color: HAIRLINE_STRONG,
@@ -983,7 +1024,7 @@ pub fn tooltip(_theme: &Theme) -> container::Style {
 /// Border width of a **selected** shelf tile (logical px).
 ///
 /// Two, where hover is none and the surface step between the two states is one
-/// [`CARD`] → [`CARD_HIGH`] tick. The audit's finding was that in a still
+/// [`PLINTH`] → [`PLINTH_LIT`] tick. The audit's finding was that in a still
 /// frame you cannot tell which tile is selected and which is merely under the
 /// pointer — one surface step and a 1 px hairline apart is below the threshold
 /// at which two states read as two states.
@@ -1061,8 +1102,8 @@ pub fn track_row(status: button::Status, playing: bool) -> button::Style {
     let background = match (playing, status) {
         // The playing row keeps its card whatever the pointer is doing, and
         // lifts no further under it: it is already the emphasised row.
-        (true, _) => Some(CARD_HIGH),
-        (false, button::Status::Hovered | button::Status::Pressed) => Some(CARD),
+        (true, _) => Some(PLINTH_LIT),
+        (false, button::Status::Hovered | button::Status::Pressed) => Some(PLINTH),
         (false, button::Status::Active | button::Status::Disabled) => None,
     };
     button::Style {
@@ -1212,7 +1253,7 @@ pub const SETTINGS_BREAKPOINT: f32 = 1000.0;
 #[must_use]
 pub fn popover(_theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(CARD_HIGH)),
+        background: Some(Background::Color(PLINTH_LIT)),
         border: Border {
             color: HAIRLINE_STRONG,
             width: 1.0,
@@ -1246,10 +1287,10 @@ pub fn popover(_theme: &Theme) -> container::Style {
 #[must_use]
 pub fn now_playing(status: button::Status, open: bool) -> button::Style {
     let background = if open {
-        CARD_HIGH
+        PLINTH_LIT
     } else {
         match status {
-            button::Status::Hovered => CARD,
+            button::Status::Hovered => PLINTH,
             button::Status::Pressed => RECESS,
             button::Status::Active | button::Status::Disabled => Color::TRANSPARENT,
         }
@@ -1713,7 +1754,7 @@ mod tests {
     /// **3 : 1** for a non-text mark whose job is to be locatable rather than
     /// legible. Ratios are compared at the precision the specification
     /// publishes them to — one decimal place — which matters for exactly one
-    /// pairing: `PAPER_FAINT` on `CARD_HIGH` computes to 4.483, published as
+    /// pairing: `PAPER_FAINT` on `PLINTH_LIT` computes to 4.483, published as
     /// 4.5. Moving it further would mean re-deriving the palette, which this
     /// change deliberately does not do; the pairing is a duration inside a
     /// playing queue row, and it is named here rather than quietly rounded.
@@ -1729,9 +1770,9 @@ mod tests {
 
         let surfaces = [
             ("WALL", WALL),
-            ("CARD", CARD),
+            ("PLINTH", PLINTH),
             ("RECESS", RECESS),
-            ("CARD_HIGH", CARD_HIGH),
+            ("PLINTH_LIT", PLINTH_LIT),
         ];
         // Every ink the theme paints, with the floor its *use* implies.
         // `PAPER_MUTED` is the muted fader and a stepper at the end of its
@@ -1769,22 +1810,22 @@ mod tests {
         let old_faint = Color::from_rgb(0.447, 0.427, 0.400);
         let old_muted = Color::from_rgb(0.290, 0.278, 0.263);
         assert!(
-            contrast(old_faint, CARD) < TEXT,
+            contrast(old_faint, PLINTH) < TEXT,
             "the old PAPER_FAINT is supposed to be the failure this test exists for"
         );
-        assert!(contrast(old_muted, CARD) < MARK);
+        assert!(contrast(old_muted, PLINTH) < MARK);
         assert!(
-            contrast(PAPER_FAINT, CARD) > contrast(old_faint, CARD),
+            contrast(PAPER_FAINT, PLINTH) > contrast(old_faint, PLINTH),
             "the correction must be lighter, not merely different"
         );
-        assert!(contrast(PAPER_MUTED, CARD) > contrast(old_muted, CARD));
+        assert!(contrast(PAPER_MUTED, PLINTH) > contrast(old_muted, PLINTH));
 
         // The correction must not have cost the *ordering* the room is built
         // on: faint is quieter than dim, muted is quieter than faint, and
         // muted is still plainly above the groove it sits in.
-        assert!(contrast(PAPER, CARD) > contrast(PAPER_DIM, CARD));
-        assert!(contrast(PAPER_DIM, CARD) > contrast(PAPER_FAINT, CARD));
-        assert!(contrast(PAPER_FAINT, CARD) > contrast(PAPER_MUTED, CARD));
+        assert!(contrast(PAPER, PLINTH) > contrast(PAPER_DIM, PLINTH));
+        assert!(contrast(PAPER_DIM, PLINTH) > contrast(PAPER_FAINT, PLINTH));
+        assert!(contrast(PAPER_FAINT, PLINTH) > contrast(PAPER_MUTED, PLINTH));
     }
 
     // -----------------------------------------------------------------------
