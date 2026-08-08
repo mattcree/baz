@@ -55,6 +55,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lofty::file::{FileType, TaggedFile};
@@ -275,14 +276,54 @@ impl FileStamp {
     }
 }
 
-/// Every path the index already knows, with the [`FileStamp`] recorded for
-/// it — `None` for a row written before stamps existed (schema v4) that no
-/// rescan has refreshed yet.
+/// What the index holds about one file it already knows: the stamp a scan
+/// compares, and the **library root the row was recorded under**.
+///
+/// The two are read by the two halves of a scan and neither is guessed at:
+///
+/// - `stamp` is [`scan_incremental`]'s input. `None` — a row written before
+///   stamps existed (schema v4), or a file whose filesystem could not report a
+///   usable timestamp — is never a claim of freshness; such a file is always
+///   re-read.
+/// - `root` is the removal pass's. It is the root whose walk last *read* this
+///   file, recorded in the index (schema v8), and it replaces the
+///   `starts_with(root_being_scanned)` test the multi-root gate used to make
+///   (`docs/adr/0022-library-roots-and-refresh.md`). `None` — a row written
+///   before roots existed that no rescan has refreshed, or one added by a
+///   caller that named no root — belongs to no root, so no root's scan may
+///   ever prune it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KnownFile {
+    /// The size and modification time recorded for the file.
+    pub stamp: Option<FileStamp>,
+    /// The library root the row is recorded under. Shared rather than copied:
+    /// a library has a handful of roots and a hundred thousand rows.
+    pub root: Option<Arc<Path>>,
+}
+
+impl KnownFile {
+    /// A file known by its stamp alone, belonging to no recorded root — what
+    /// every row in a pre-v8 index looks like, and what a caller that names no
+    /// root produces.
+    #[must_use]
+    pub fn stamped(stamp: Option<FileStamp>) -> Self {
+        Self { stamp, root: None }
+    }
+
+    /// A file known by its stamp and the root it was found under.
+    #[must_use]
+    pub fn new(stamp: Option<FileStamp>, root: Option<Arc<Path>>) -> Self {
+        Self { stamp, root }
+    }
+}
+
+/// Every path the index already knows, with the [`KnownFile`] recorded for it.
 ///
 /// This is what [`scan_incremental`] consults to skip unchanged files, and
-/// what a removal pass uses to enumerate the rows a scan did not see. An
-/// entry whose value is `None` is simply always re-read.
-pub type KnownFiles = HashMap<PathBuf, Option<FileStamp>>;
+/// what a removal pass uses to enumerate the rows a scan did not see — and, in
+/// the same lookup, to check that the root doing the pruning is the root that
+/// put the row there.
+pub type KnownFiles = HashMap<PathBuf, KnownFile>;
 
 /// Metadata for one audio file, as the indexer and shelf UI will consume it.
 ///
@@ -599,7 +640,7 @@ impl Scan<'_> {
         let (Some(known), Some(stamp)) = (self.known, stamp) else {
             return false;
         };
-        known.get(path).copied().flatten() == Some(stamp)
+        known.get(path).and_then(|known| known.stamp) == Some(stamp)
     }
 }
 

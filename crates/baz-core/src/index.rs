@@ -110,16 +110,17 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::iter::Peekable;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, params};
 
 use crate::history::{History, Recency, bucket};
-use crate::library::{AudioFormat, FileStamp, KnownFiles, TrackMeta};
+use crate::library::{AudioFormat, FileStamp, KnownFile, KnownFiles, TrackMeta};
 use crate::replaygain::{ComputedGains, ComputedReplayGain, ReplayGainTags};
 
 /// The schema version this build reads and writes (`PRAGMA user_version`).
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 /// Rows per write transaction in [`Library::add_tracks`]. A scan yields tens
 /// of thousands of tracks; committing in batches keeps any single
@@ -263,6 +264,56 @@ const SCHEMA_V7_COLUMNS: &str = "
     ALTER TABLE tracks ADD COLUMN first_seen_ns INTEGER; -- ns since the epoch
 ";
 
+/// Version 8: **which library root each row came from**, and the roots
+/// themselves (`docs/adr/0022-library-roots-and-refresh.md`).
+///
+/// One nullable column added rather than rebuilt, exactly as v2 – v7 were, plus
+/// the first table `tracks` has ever had a companion.
+///
+/// # Why the column exists
+///
+/// It replaces a *guess* with a *record*. ADR-0010's removal policy protects a
+/// multi-root index with four gates, and the second of them was "the path is
+/// under the root just scanned" — a `starts_with` on the path. That test is
+/// correct only while roots cannot nest and no file is reachable from two of
+/// them, which is precisely the assumption supporting several music folders
+/// destroys: `~/Music` and `~/Music/Live` both claim the same file, and so do
+/// a folder and a symlink into it. The column answers the question the prefix
+/// was approximating — *which root's walk actually read this file* — so a
+/// scan of one root can only ever nominate rows that root itself put there.
+///
+/// `NULL` means "no root recorded", and it is a **safe** value rather than a
+/// gap: no root's scan may prune a row that belongs to none. Every pre-v8 row
+/// starts there and is adopted by [`Library::adopt_root`] at the next launch,
+/// which is a backfill that is *knowable* — a pre-v8 baz held exactly one
+/// music folder, so every row it wrote came from that folder — unlike the
+/// three ADR-0019 refused for `first_seen_ns`, each of which would have had to
+/// invent a fact no one recorded.
+///
+/// The blob is the same platform-native path encoding as `tracks.path` (module
+/// docs), for the same reason: a root is a path, and paths are not UTF-8.
+///
+/// # Why there is also a table
+///
+/// `roots` records what baz *knows about* a root — when a scan of it last
+/// completed — as distinct from which roots the listener has chosen, which is
+/// `config.toml`'s business and stays there. Two facts, two homes, and the
+/// index never has an opinion about which folders a listener wants.
+///
+/// `last_scan_ns` is nanoseconds since the Unix epoch, matching `mtime_ns` and
+/// `first_seen_ns` — the table's only timestamp vocabulary — so nothing needs a
+/// conversion nobody would remember to write.
+///
+/// The `ALTER TABLE`, the `CREATE TABLE` and the `user_version` bump are
+/// applied by [`migrate_v7_to_v8`].
+const SCHEMA_V8: &str = "
+    ALTER TABLE tracks ADD COLUMN root BLOB; -- OS-native bytes; see module docs
+    CREATE TABLE roots (
+        path         BLOB PRIMARY KEY,  -- OS-native bytes; see module docs
+        last_scan_ns INTEGER            -- ns since the epoch; NULL = never finished
+    ) STRICT;
+";
+
 /// Write one track's measured ReplayGain (schema v6).
 ///
 /// An `UPDATE` rather than an upsert on purpose: a measurement belongs to a
@@ -293,6 +344,16 @@ const STORE_COMPUTED_REPLAY_GAIN: &str = "
 /// (schema v7), which is the whole of how ADDED survives a rescan: the value
 /// is written when the row is created and there is no statement anywhere that
 /// can move it afterwards. See [`SCHEMA_V7_COLUMNS`].
+///
+/// **`root` is in both lists** (schema v8), which is the opposite decision and
+/// the right one for the opposite reason: where a first-seen is a fact about
+/// the past that a rescan must not disturb, a root is a fact about *now* —
+/// which folder baz is currently finding this file under. A listener who
+/// removes one folder and adds another containing the same tree has re-homed
+/// those tracks, and the row should say so the moment a walk reads it again.
+/// The update is `COALESCE`d so that a caller which names **no** root (a bare
+/// [`Library::add_tracks`]) leaves whatever root a scan recorded alone: saying
+/// nothing about a row's root must not be the same as clearing it.
 const UPSERT_TRACK: &str = "
     INSERT INTO tracks
         (path, artist, album, title, track, disc, year, duration_ns,
@@ -300,10 +361,11 @@ const UPSERT_TRACK: &str = "
          mtime_ns, file_size,
          rg_track_gain_centidb, rg_track_peak_micro,
          rg_album_gain_centidb, rg_album_peak_micro,
-         genre, first_seen_ns)
+         genre, first_seen_ns, root)
     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-            ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
+            ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
     ON CONFLICT(path) DO UPDATE SET
+        root = COALESCE(excluded.root, tracks.root),
         artist = excluded.artist,
         album = excluded.album,
         title = excluded.title,
@@ -335,13 +397,39 @@ const SELECT_ALL_TRACKS: &str = "
            rg_computed_track_gain_centidb, rg_computed_track_peak_micro,
            rg_computed_album_gain_centidb, rg_computed_album_peak_micro,
            rg_computed_mtime_ns, rg_computed_file_size,
-           genre, first_seen_ns
+           genre, first_seen_ns, root
     FROM tracks
 ";
 
 /// Delete one row by path. The `path` column is `UNIQUE`, so this removes at
 /// most one row and reports whether it did.
 const DELETE_TRACK: &str = "DELETE FROM tracks WHERE path = ?1";
+
+/// Claim one unrooted row for a root (schema v8's backfill, one path at a
+/// time). `root IS NULL` in the `WHERE` clause is what makes it unable to
+/// re-home a row that already names a root — adoption fills gaps and never
+/// overrules a scan.
+const ADOPT_TRACK: &str = "UPDATE tracks SET root = ?2 WHERE path = ?1 AND root IS NULL";
+
+/// Every root the index has a record for, with the moment a scan of it last
+/// finished.
+const SELECT_ROOTS: &str = "SELECT path, last_scan_ns FROM roots";
+
+/// Record that a scan of a root finished at a moment.
+const RECORD_ROOT_SCAN: &str = "
+    INSERT INTO roots (path, last_scan_ns) VALUES (?1, ?2)
+    ON CONFLICT(path) DO UPDATE SET last_scan_ns = excluded.last_scan_ns
+";
+
+/// Forget a root: its `roots` row.
+const DELETE_ROOT: &str = "DELETE FROM roots WHERE path = ?1";
+
+/// Forget a root: every track row recorded under it.
+///
+/// Keyed on the recorded `root` column and **not** on a path prefix, for the
+/// reason [`SCHEMA_V8`] gives: a prefix would take rows out of a nested root
+/// the listener did not remove.
+const DELETE_TRACKS_UNDER_ROOT: &str = "DELETE FROM tracks WHERE root = ?1";
 
 /// The library index could not be opened or updated.
 #[derive(Debug, thiserror::Error)]
@@ -379,6 +467,13 @@ pub enum IndexError {
 pub struct Library {
     conn: Connection,
     index: SearchIndex,
+    /// The `roots` table, in RAM: root → when a scan of it last finished
+    /// (schema v8). A library has a handful of roots, so it is hydrated whole
+    /// at open and kept in step by [`Library::record_scan`] and
+    /// [`Library::forget_root`] — the Settings surface asks for it once per
+    /// frame, and a per-frame query for four rows would be four queries too
+    /// many.
+    roots: HashMap<PathBuf, Option<i64>>,
 }
 
 impl Library {
@@ -447,6 +542,7 @@ impl Library {
         let mut library = Self {
             conn,
             index: SearchIndex::default(),
+            roots: HashMap::new(),
         };
         library.hydrate()?;
         Ok(library)
@@ -455,19 +551,42 @@ impl Library {
     /// Load every stored track into the in-RAM index, replacing its contents.
     fn hydrate(&mut self) -> Result<(), IndexError> {
         self.index = SearchIndex::default();
-        let mut stmt = self.conn.prepare(SELECT_ALL_TRACKS)?;
-        let rows = stmt.query_and_then([], |row| {
-            Ok::<_, IndexError>((
-                row_to_meta(row)?,
-                row_to_computed(row)?,
-                row_to_first_seen(row)?,
-            ))
-        })?;
-        for row in rows {
-            let (meta, computed, first_seen) = row?;
-            self.index.put(meta, computed, first_seen);
+        // One `Arc<Path>` per distinct root for the whole library, not one per
+        // row: a hundred thousand tracks come from a handful of folders.
+        let mut roots: HashMap<PathBuf, Arc<Path>> = HashMap::new();
+        {
+            let mut stmt = self.conn.prepare(SELECT_ALL_TRACKS)?;
+            let rows = stmt.query_and_then([], |row| {
+                Ok::<_, IndexError>((
+                    row_to_meta(row)?,
+                    row_to_computed(row)?,
+                    row_to_first_seen(row)?,
+                    row_to_root(row)?,
+                ))
+            })?;
+            for row in rows {
+                let (meta, computed, first_seen, root) = row?;
+                let root = root.map(|root| Arc::clone(shared_root(&mut roots, &root)));
+                self.index.put(meta, computed, first_seen, root);
+            }
         }
         self.index.rebuild_order();
+        self.hydrate_roots()?;
+        Ok(())
+    }
+
+    /// Load the `roots` table into RAM, replacing its contents.
+    fn hydrate_roots(&mut self) -> Result<(), IndexError> {
+        self.roots.clear();
+        let mut stmt = self.conn.prepare(SELECT_ROOTS)?;
+        let rows = stmt.query_and_then([], |row| {
+            let path: Vec<u8> = row.get(0)?;
+            Ok::<_, IndexError>((path_from_blob(path)?, row.get::<_, Option<i64>>(1)?))
+        })?;
+        for row in rows {
+            let (path, last_scan_ns) = row?;
+            self.roots.insert(path, last_scan_ns);
+        }
         Ok(())
     }
 
@@ -604,6 +723,36 @@ impl Library {
     where
         I: IntoIterator<Item = TrackMeta>,
     {
+        self.add_tracks_under(None, tracks)
+    }
+
+    /// [`Library::add_tracks`], recording which **library root** the batch was
+    /// found under (schema v8).
+    ///
+    /// The root belongs to the batch rather than to each [`TrackMeta`], and
+    /// that is not a shortcut: a scan walks one root at a time, so every entry
+    /// it emits came from the root it is currently walking, and a per-track
+    /// field would be the same path repeated a hundred thousand times for a
+    /// fact the caller already knows once. It is also the field a scan is
+    /// *entitled* to set — `TrackMeta` is what reading a file's tags yields,
+    /// and no file carries the name of the folder somebody pointed baz at.
+    ///
+    /// `None` records no root, which is what [`Library::add_tracks`] does and
+    /// what every pre-v8 row holds. Such a row is unprunable by any root's scan
+    /// (see [`KnownFile`]), which is the safe direction.
+    ///
+    /// # Errors
+    ///
+    /// Exactly [`Library::add_tracks`]'s.
+    pub fn add_tracks_under<I>(
+        &mut self,
+        root: Option<&Path>,
+        tracks: I,
+    ) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = TrackMeta>,
+    {
+        let root: Option<Arc<Path>> = root.map(Arc::from);
         let mut iter = tracks.into_iter().peekable();
         let mut added = 0;
         // One clock reading for the whole call, not one per row: the tracks in
@@ -612,7 +761,7 @@ impl Library {
         // not have. Only rows the database has never held will use it (see
         // [`UPSERT_TRACK`]).
         let now_ns = now_ns();
-        let result = self.insert_batches(&mut iter, &mut added, now_ns);
+        let result = self.insert_batches(&mut iter, &mut added, now_ns, root.as_ref());
         // Re-sort exactly once whether or not a batch failed, so the index
         // order always matches what actually landed.
         self.index.rebuild_order();
@@ -624,10 +773,12 @@ impl Library {
         iter: &mut Peekable<I>,
         added: &mut usize,
         now_ns: i64,
+        root: Option<&Arc<Path>>,
     ) -> Result<(), IndexError>
     where
         I: Iterator<Item = TrackMeta>,
     {
+        let root_blob = root.map(|root| path_to_blob(root));
         while iter.peek().is_some() {
             let chunk: Vec<TrackMeta> = iter.by_ref().take(TRANSACTION_BATCH).collect();
             let tx = self.conn.transaction()?;
@@ -657,6 +808,7 @@ impl Library {
                         meta.replay_gain.album_peak_micro,
                         meta.genre,
                         now_ns,
+                        root_blob,
                     ])?;
                 }
             }
@@ -665,10 +817,169 @@ impl Library {
             // a failed batch never leaves ghost tracks in the index.
             *added += chunk.len();
             for meta in chunk {
-                self.index.insert(meta, now_ns);
+                self.index.insert(meta, now_ns, root.map(Arc::clone));
             }
         }
         Ok(())
+    }
+
+    /// Claim every rootless row under `root` for it — schema v8's backfill,
+    /// run by the front end at launch for each folder it is configured to hold
+    /// (`docs/adr/0022-library-roots-and-refresh.md`).
+    ///
+    /// Returns how many rows were adopted.
+    ///
+    /// # Why this backfill is honest where ADR-0019's three were not
+    ///
+    /// It states a fact somebody recorded, not one nobody did. A pre-v8 baz
+    /// held exactly **one** music folder and scanned exactly that folder, so
+    /// every row in a pre-v8 index came from it — the config file still says
+    /// which folder, and the row's own path still says whether it is under it.
+    /// Both halves are checked here: a row is claimed only if it names no root
+    /// *and* lies under this one. The alternative candidates ADR-0019 rejected
+    /// for `first_seen_ns` all had to invent an unrecorded fact; this one reads
+    /// two recorded ones.
+    ///
+    /// A row under **no** configured root stays unrooted and is therefore
+    /// permanently unprunable by any scan — the honest answer for a file baz
+    /// was pointed at once and is not pointed at now, and the state a listener
+    /// clears by adding that folder back or by leaving it forgotten.
+    ///
+    /// Nested roots resolve by whoever asks first: adoption never overrules an
+    /// existing root, so a caller adopting in configuration order gives a file
+    /// under both `~/Music` and `~/Music/Live` to whichever the listener listed
+    /// first. The next full read of that file re-homes it to the root that read
+    /// it, which is the same rule every other row follows.
+    ///
+    /// # Errors
+    ///
+    /// [`IndexError::Sqlite`] if the write fails; the in-RAM index is then left
+    /// matching whatever the database holds.
+    pub fn adopt_root(&mut self, root: &Path) -> Result<usize, IndexError> {
+        let orphans: Vec<usize> = self
+            .index
+            .tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, track)| track.root.is_none() && track.meta.path.starts_with(root))
+            .map(|(index, _)| index)
+            .collect();
+        if orphans.is_empty() {
+            return Ok(0);
+        }
+        let shared: Arc<Path> = Arc::from(root);
+        let root_blob = path_to_blob(root);
+        let mut adopted = 0;
+        {
+            let tx = self.conn.transaction()?;
+            {
+                let mut stmt = tx.prepare_cached(ADOPT_TRACK)?;
+                for &index in &orphans {
+                    if let Some(track) = self.index.tracks.get(index) {
+                        adopted +=
+                            stmt.execute(params![path_to_blob(&track.meta.path), root_blob])?;
+                    }
+                }
+            }
+            tx.commit()?;
+        }
+        // Mirror into RAM only after the batch is durably committed, exactly as
+        // every other writer here does. A root changes neither the sort key nor
+        // the search corpus, so no re-sort is needed.
+        for index in orphans {
+            if let Some(track) = self.index.tracks.get_mut(index) {
+                track.root = Some(Arc::clone(&shared));
+            }
+        }
+        Ok(adopted)
+    }
+
+    /// Forget a library root: **delete every row recorded under it**, and the
+    /// root's own record.
+    ///
+    /// Returns how many track rows went.
+    ///
+    /// This is what removing a folder in the Settings place does, and the
+    /// choice is argued in `docs/adr/0022-library-roots-and-refresh.md`: a
+    /// folder baz no longer holds is a folder baz can no longer refresh, so
+    /// leaving its albums on the wall would leave a listener with rows that no
+    /// scan can ever correct or remove. Nothing on disk is touched — baz has
+    /// never deleted a music file and this does not start.
+    ///
+    /// It is keyed on the **recorded root**, never on a path prefix, so a
+    /// nested root the listener kept does not lose the tracks it holds.
+    ///
+    /// # Errors
+    ///
+    /// [`IndexError::Sqlite`] if the delete fails; the in-RAM index is then
+    /// left matching whatever the database holds.
+    pub fn forget_root(&mut self, root: &Path) -> Result<usize, IndexError> {
+        let root_blob = path_to_blob(root);
+        let deleted = {
+            let tx = self.conn.transaction()?;
+            let deleted = tx.execute(DELETE_TRACKS_UNDER_ROOT, params![root_blob])?;
+            tx.execute(DELETE_ROOT, params![root_blob])?;
+            tx.commit()?;
+            deleted
+        };
+        self.roots.remove(root);
+        if deleted > 0 {
+            self.index
+                .tracks
+                .retain(|track| track.root.as_deref() != Some(root));
+            self.index.rebuild_order();
+        }
+        Ok(deleted)
+    }
+
+    /// Record that a scan of `root` finished at `at_ns` (nanoseconds since the
+    /// Unix epoch) — the `roots` table's only writer.
+    ///
+    /// Called when a scan **completes**, never when one starts: the fact the
+    /// Settings place reports is "baz has looked at this folder and this is
+    /// when it finished", and a scan that was interrupted looked at part of it.
+    ///
+    /// # Errors
+    ///
+    /// [`IndexError::Sqlite`] if the write fails.
+    pub fn record_scan(&mut self, root: &Path, at_ns: i64) -> Result<(), IndexError> {
+        self.conn
+            .execute(RECORD_ROOT_SCAN, params![path_to_blob(root), at_ns])?;
+        self.roots.insert(root.to_path_buf(), Some(at_ns));
+        Ok(())
+    }
+
+    /// What the index holds for one library root: how many tracks are recorded
+    /// under it, and when a scan of it last finished.
+    ///
+    /// A root the index has never seen answers `RootStats::default()` — no
+    /// tracks, never scanned — which is the true statement about a folder a
+    /// listener added a moment ago, not a placeholder.
+    #[must_use]
+    pub fn root_stats(&self, root: &Path) -> RootStats {
+        RootStats {
+            tracks: self
+                .index
+                .tracks
+                .iter()
+                .filter(|track| track.root.as_deref() == Some(root))
+                .count(),
+            last_scan_ns: self.roots.get(root).copied().flatten(),
+        }
+    }
+
+    /// How many rows belong to **no** recorded root: pre-v8 rows no launch has
+    /// adopted, and rows added by a caller that named none.
+    ///
+    /// Reported rather than hidden because it is exactly the population no
+    /// scan can ever prune — see [`Library::adopt_root`].
+    #[must_use]
+    pub fn unrooted_tracks(&self) -> usize {
+        self.index
+            .tracks
+            .iter()
+            .filter(|track| track.root.is_none())
+            .count()
     }
 
     /// Remove tracks by path: delete their rows and drop them from the
@@ -734,21 +1045,28 @@ impl Library {
         Ok(())
     }
 
-    /// Every path the library holds, with the [`FileStamp`] recorded for it
-    /// — the input an incremental scan needs
-    /// ([`crate::library::scan_incremental`]).
+    /// Every path the library holds, with the [`FileStamp`] and the **library
+    /// root** recorded for it — the input an incremental scan needs
+    /// ([`crate::library::scan_incremental`]) and the only rows a scan may ever
+    /// nominate for removal.
     ///
     /// A row written before schema v4, or one for a file whose filesystem
-    /// could not report a usable timestamp, maps to `None` and is therefore
-    /// always re-read. The map is a snapshot: it is handed to a scan worker
-    /// that runs while the library keeps being written to, so it owns its
-    /// paths rather than borrowing them.
+    /// could not report a usable timestamp, carries no stamp and is therefore
+    /// always re-read; a row written before schema v8 that no launch has
+    /// adopted carries no root and can therefore never be pruned. The map is a
+    /// snapshot: it is handed to a scan worker that runs while the library
+    /// keeps being written to, so it owns its paths rather than borrowing them.
     #[must_use]
     pub fn known_files(&self) -> KnownFiles {
         self.index
             .tracks
             .iter()
-            .map(|track| (track.meta.path.clone(), track.meta.stamp))
+            .map(|track| {
+                (
+                    track.meta.path.clone(),
+                    KnownFile::new(track.meta.stamp, track.root.clone()),
+                )
+            })
             .collect()
     }
 
@@ -1055,6 +1373,22 @@ impl Library {
             .filter_map(|index| sorted[index].take())
             .collect()
     }
+}
+
+/// What the index holds for one library root — [`Library::root_stats`].
+///
+/// Two facts and no judgement: how many rows name this root, and when a scan of
+/// it last finished. Whether the folder is *currently* reachable is a question
+/// about the filesystem right now, which a scan answers and an index cannot.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RootStats {
+    /// Tracks recorded under this root.
+    pub tracks: usize,
+    /// When a scan of it last **finished**, in nanoseconds since the Unix
+    /// epoch. `None` means no scan of it has ever completed — including for a
+    /// folder added a moment ago, which is the true answer rather than a
+    /// placeholder.
+    pub last_scan_ns: Option<i64>,
 }
 
 /// The axis the wall's shelves break on: one row of words, no menus
@@ -2039,20 +2373,31 @@ impl SearchIndex {
     /// across a restart.
     ///
     /// Callers must [`SearchIndex::rebuild_order`] afterwards (batched).
-    fn insert(&mut self, meta: TrackMeta, now_ns: i64) {
+    fn insert(&mut self, meta: TrackMeta, now_ns: i64, root: Option<Arc<Path>>) {
         let existing = self
             .by_path
             .get(&meta.path)
             .and_then(|&index| self.tracks.get(index));
         let computed = existing.map_or_else(ComputedReplayGain::default, |track| track.computed);
         let first_seen = existing.map_or(Some(now_ns), |track| track.first_seen);
-        self.put(meta, computed, first_seen);
+        // A caller that names no root leaves the row where it was, rather than
+        // orphaning it — which mirrors the database, where `add_tracks` binds
+        // NULL and the upsert's `root = excluded.root` would otherwise clear a
+        // root a scan had recorded.
+        let root = root.or_else(|| existing.and_then(|track| track.root.clone()));
+        self.put(meta, computed, first_seen, root);
     }
 
-    /// Insert a track together with the measurement recorded for it and the
-    /// moment the library first saw it.
-    fn put(&mut self, meta: TrackMeta, computed: ComputedReplayGain, first_seen: Option<i64>) {
-        let entry = IndexedTrack::new(meta, computed, first_seen);
+    /// Insert a track together with the measurement recorded for it, the
+    /// moment the library first saw it, and the root it was found under.
+    fn put(
+        &mut self,
+        meta: TrackMeta,
+        computed: ComputedReplayGain,
+        first_seen: Option<i64>,
+        root: Option<Arc<Path>>,
+    ) {
+        let entry = IndexedTrack::new(meta, computed, first_seen, root);
         match self.by_path.entry(entry.meta.path.clone()) {
             Entry::Occupied(slot) => {
                 let index = *slot.get();
@@ -2141,6 +2486,21 @@ struct IndexedTrack {
     /// `None` is a row written before schema v7 — permanently, and honestly:
     /// see [`migrate_v6_to_v7`].
     first_seen: Option<i64>,
+    /// The library root this file was found under (schema v8) — the fact
+    /// removal's second gate keys on, in place of the path prefix it used to
+    /// approximate with (`docs/adr/0022-library-roots-and-refresh.md`).
+    ///
+    /// Kept here rather than inside [`TrackMeta`] for [`IndexedTrack::computed`]'s
+    /// reason: `TrackMeta` is what reading a file's *tags* yields, and no file
+    /// carries the name of a folder somebody pointed baz at.
+    ///
+    /// Shared rather than owned: a hundred thousand rows come from a handful of
+    /// folders, so the whole library holds one allocation per distinct root.
+    ///
+    /// `None` is a row from before v8 that no launch has adopted, or one added
+    /// by a caller naming no root. It belongs to no root, so no root's scan can
+    /// prune it — see [`Library::adopt_root`].
+    root: Option<Arc<Path>>,
     /// Case-folded `artist\nalbum artist\nalbum\ntitle` (the separator keeps
     /// a query from matching across field boundaries). The album-artist
     /// slot is left empty when it would only repeat the artist, which is the
@@ -2152,7 +2512,12 @@ struct IndexedTrack {
 }
 
 impl IndexedTrack {
-    fn new(meta: TrackMeta, computed: ComputedReplayGain, first_seen: Option<i64>) -> Self {
+    fn new(
+        meta: TrackMeta,
+        computed: ComputedReplayGain,
+        first_seen: Option<i64>,
+        root: Option<Arc<Path>>,
+    ) -> Self {
         let artist = meta.artist.as_deref().map(str::to_lowercase);
         let album_artist = meta
             .album_artist
@@ -2179,6 +2544,7 @@ impl IndexedTrack {
             meta,
             computed,
             first_seen,
+            root,
             haystack,
             key,
         }
@@ -2282,6 +2648,7 @@ fn migrate(conn: &Connection) -> Result<(), IndexError> {
             4 => migrate_v4_to_v5(conn)?,
             5 => migrate_v5_to_v6(conn)?,
             6 => migrate_v6_to_v7(conn)?,
+            7 => migrate_v7_to_v8(conn)?,
             SCHEMA_VERSION => return Ok(()),
             found => return Err(IndexError::SchemaTooNew { found }),
         }
@@ -2477,6 +2844,44 @@ fn migrate_v6_to_v7(conn: &Connection) -> Result<(), IndexError> {
     Ok(())
 }
 
+/// v7 → v8: add `tracks.root` and the `roots` table
+/// (`docs/adr/0022-library-roots-and-refresh.md`).
+///
+/// `root` is `NULL` for every existing row *here*, and unlike v3 – v7 that
+/// `NULL` is neither permanent nor self-healed by an ordinary rescan. It is
+/// filled by [`Library::adopt_root`], which the front end calls at launch for
+/// each folder it is configured to hold.
+///
+/// **Why the backfill is not in the migration.** The fact is real and knowable
+/// — a pre-v8 baz held exactly one music folder, so every row it wrote came
+/// from that folder — but the migration is the one place in baz that cannot
+/// know *which* folder: the name lives in `config.toml`, which is the front
+/// end's file, and `baz-core` has never read it. So the migration adds the
+/// column and the caller who holds the fact states it, one call, at the moment
+/// it also states which roots to scan. That is the difference between this
+/// backfill and the three ADR-0019 refused for `first_seen_ns`: those had no
+/// holder anywhere, because nobody had ever recorded when a track arrived.
+///
+/// **Why an unadopted `NULL` is safe.** The removal gate reads the recorded
+/// root, and `NULL` matches no root, so an unadopted row is one no scan can
+/// delete. A migration that got the direction wrong here would delete
+/// libraries; this one can only decline to prune.
+///
+/// The `roots` table starts **empty**, which says exactly the truth: no scan
+/// has finished under this schema yet. The first completed scan of each folder
+/// writes its row.
+///
+/// The `ALTER TABLE`, the `CREATE TABLE` and the `user_version` bump are one
+/// transaction (SQLite's DDL is transactional), so an interrupted upgrade
+/// leaves a v7 database that the next open migrates again.
+fn migrate_v7_to_v8(conn: &Connection) -> Result<(), IndexError> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(SCHEMA_V8)?;
+    tx.pragma_update(None, "user_version", 8)?;
+    tx.commit()?;
+    Ok(())
+}
+
 /// Fill `format` for existing rows from the file extension, where the
 /// extension settles the question by itself.
 ///
@@ -2565,6 +2970,25 @@ fn row_to_meta(row: &rusqlite::Row<'_>) -> Result<TrackMeta, IndexError> {
 /// `None` is permanent and honest rather than a gap waiting to be filled.
 fn row_to_first_seen(row: &rusqlite::Row<'_>) -> Result<Option<i64>, IndexError> {
     Ok(row.get(27)?)
+}
+
+/// The library root a row was recorded under (schema v8), or `None` for a row
+/// written before the column existed that no launch has adopted — see
+/// [`Library::adopt_root`].
+fn row_to_root(row: &rusqlite::Row<'_>) -> Result<Option<PathBuf>, IndexError> {
+    row.get::<_, Option<Vec<u8>>>(28)?
+        .map(path_from_blob)
+        .transpose()
+}
+
+/// The one [`Arc<Path>`] this library uses for `root`, made on first sight.
+///
+/// Hydrating a hundred-thousand-row library must not allocate a hundred
+/// thousand copies of four folder names.
+fn shared_root<'a>(roots: &'a mut HashMap<PathBuf, Arc<Path>>, root: &Path) -> &'a Arc<Path> {
+    roots
+        .entry(root.to_path_buf())
+        .or_insert_with(|| Arc::from(root))
 }
 
 /// The [`ReplayGainTags`] a row carries (schema v5), `None` per field for a
@@ -2761,6 +3185,7 @@ mod tests {
             },
             ComputedReplayGain::default(),
             None,
+            None,
         );
         assert_eq!(track.haystack, "größenwahn\n\nlive\n\n");
         // The separator keeps queries from matching across field boundaries.
@@ -2779,6 +3204,7 @@ mod tests {
             },
             ComputedReplayGain::default(),
             None,
+            None,
         );
         assert!(
             soundtrack.haystack.contains("rodik"),
@@ -2795,6 +3221,7 @@ mod tests {
                 ..bare_meta()
             },
             ComputedReplayGain::default(),
+            None,
             None,
         );
         assert_eq!(ordinary.haystack, "stan rogers\n\nnorthwest passage\n\n");

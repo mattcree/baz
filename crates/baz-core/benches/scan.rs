@@ -45,7 +45,7 @@ use std::hint::black_box;
 use std::path::{Path, PathBuf};
 
 use baz_core::index::Library;
-use baz_core::library::{KnownFiles, ScanEntry, TrackMeta, scan, scan_incremental};
+use baz_core::library::{KnownFile, KnownFiles, ScanEntry, TrackMeta, scan, scan_incremental};
 use criterion::{Criterion, criterion_group, criterion_main};
 use lofty::config::WriteOptions;
 use lofty::prelude::*;
@@ -99,7 +99,7 @@ fn stamps(root: &Path) -> KnownFiles {
     scan(root)
         .expect("scan starts")
         .filter_map(|entry| match entry {
-            ScanEntry::Track(meta) => Some((meta.path, meta.stamp)),
+            ScanEntry::Track(meta) => Some((meta.path, KnownFile::stamped(meta.stamp))),
             _ => None,
         })
         .collect()

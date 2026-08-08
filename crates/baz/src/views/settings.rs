@@ -4,11 +4,12 @@
 //! # What this surface is for
 //!
 //! Everything that is a standing decision rather than a transport action. It
-//! holds one section today — **ReplayGain** (ADR-0013), whose content moved
-//! here from the rail panel *verbatim* — and it is built as the container for
-//! the ones the vision promises next: the output chain and exclusive mode, a
-//! signal-path readout, library roots and watch folders, the enrichment toggles
-//! that are off by default.
+//! holds two sections: **Playback** — ReplayGain (ADR-0013), whose content moved
+//! here from the rail panel *verbatim* — and **Library**, the music folders baz
+//! holds and the force sync that re-reads them (ADR-0022). It remains the
+//! container for the ones the vision promises next: the output chain and
+//! exclusive mode, a signal-path readout, the enrichment toggles that are off by
+//! default.
 //!
 //! # Why it is a place, and no longer a panel
 //!
@@ -30,10 +31,13 @@
 //! type sizes. **Nothing about the layout has to be revisited to add one**,
 //! which is the property a place buys that a panel could not.
 //!
-//! The section list has one entry today, and it is drawn anyway. A spine with
-//! one vertebra looks like an over-build for a week and like the obvious place
-//! to put the next thing forever after; the alternative is that the second
-//! section arrives and has to invent the navigation as well as itself.
+//! The section list was drawn with one entry in it, deliberately, against the
+//! day there was a second — and that day arrived with Library. **It cost an
+//! entry in [`SECTIONS`], a block below, and an `on_press`**: no new
+//! arrangement, no new widths, no new heading treatment, and the alternative
+//! (inventing the navigation at the same time as the second section) never
+//! happened. A spine with one vertebra looked like an over-build for a week and
+//! like the obvious place to put the next thing forever after.
 //!
 //! # The frame does not move
 //!
@@ -53,9 +57,21 @@
 //! reading gets the lamp amber — the accent means playback truth (ADR-0013 §8,
 //! ADR-0009 §5), and how a gain stage is configured is not a claim about the
 //! music.
+//!
+//! The Library section's words *are* this module's, because its subject is: a
+//! folder's track count and last scan are facts about the index, and the two
+//! phrases that state them ([`scanned_phrase`], [`tracks_phrase`]) are pinned by
+//! test here rather than described here. Two of them are load-bearing beyond
+//! tone. A folder that is not reachable says so and says that **nothing was
+//! removed from it** — because that is the guarantee, and a listener who sees a
+//! NAS greyed out needs to know their library is intact. And the confirming
+//! press of Remove names what goes: *the tracks*, not the files.
+
+use std::path::PathBuf;
 
 use iced::widget::{
     Column, Space, button, checkbox, column, container, horizontal_rule, row, scrollable, text,
+    text_input,
 };
 use iced::{Element, Length, alignment};
 
@@ -63,6 +79,50 @@ use crate::app::Message;
 use crate::player::PlayerState;
 use crate::replaygain::{self, MODES};
 use crate::theme;
+
+/// One music folder, as the Library section draws it (ADR-0022).
+///
+/// A projection, built by the shell from the config (which folders) and the
+/// index (what is in them). Nothing here is state.
+#[derive(Debug, Clone)]
+pub(crate) struct FolderRow {
+    /// The folder itself.
+    pub(crate) path: PathBuf,
+    /// How many tracks the index holds **recorded under this folder** — not
+    /// how many are under it by path. The two differ exactly where the old
+    /// removal gate was wrong: a nested folder's tracks belong to whichever
+    /// root read them.
+    pub(crate) tracks: usize,
+    /// When a scan of it last finished, in nanoseconds since the Unix epoch;
+    /// `None` when none ever has.
+    pub(crate) last_scan_ns: Option<i64>,
+    /// Whether the most recent pass found it missing — an unmounted share, an
+    /// unplugged drive, a folder somebody renamed.
+    pub(crate) unavailable: bool,
+}
+
+/// Everything the Library section draws, gathered by the shell.
+#[derive(Debug)]
+pub(crate) struct LibraryView<'a> {
+    /// The folders, in the listener's order.
+    pub(crate) folders: Vec<FolderRow>,
+    /// What has been typed into the add-a-folder field.
+    pub(crate) input: &'a str,
+    /// Why the last folder submitted was not added, if it was not.
+    pub(crate) error: Option<&'a str>,
+    /// Which folder's Remove has been pressed once and is waiting for the
+    /// confirming press. See [`folder_block`].
+    pub(crate) pending_removal: Option<usize>,
+    /// Whether a scan is running right now — a force sync while one is in
+    /// flight would be a second worker over the same library.
+    pub(crate) scanning: bool,
+    /// Rows belonging to no folder at all: pre-v8 rows nothing adopted, from a
+    /// folder baz was pointed at once and is not pointed at now.
+    pub(crate) unrooted: usize,
+    /// Now, in nanoseconds since the Unix epoch — so "scanned four minutes ago"
+    /// is arithmetic the view does rather than a clock it reads.
+    pub(crate) now_ns: i64,
+}
 
 /// Inner padding of the place's content area (logical px).
 ///
@@ -76,10 +136,18 @@ const PLACE_PAD: f32 = theme::HANG;
 
 /// The sections this place holds, in the order they are listed.
 ///
-/// One today. It is a `const` rather than an inline string because the next one
-/// is an entry here and nothing else — which is the whole claim the place is
-/// making about how settings grow.
-const SECTIONS: [&str; 1] = ["Playback"];
+/// **Two, and the second one cost an entry here and a block below.** That was
+/// the claim the place made when it had one section and drew the spine anyway,
+/// and Library is the section that tests it: the arrangement, the widths, the
+/// heading shape and the scroll are all unchanged, and the list became a real
+/// control rather than a picture of one.
+///
+/// Playback stays first because it was first; a listener who opens Settings out
+/// of habit finds what they left.
+const SECTIONS: [&str; 2] = ["Playback", "Library"];
+
+/// The index of the Library section in [`SECTIONS`].
+pub(crate) const LIBRARY_SECTION: usize = 1;
 
 /// The Settings place: a header with the way back, a list of sections, and the
 /// current section's content.
@@ -89,12 +157,22 @@ const SECTIONS: [&str; 1] = ["Playback"];
 /// the left and the content sits beside it; below it the two stack, because
 /// under a thousand pixels the list and a 640 px form cannot both have their
 /// width and the form is the one being used.
-pub(crate) fn view(player: &PlayerState, window_width: f32) -> Element<'_, Message> {
+pub(crate) fn view<'a>(
+    player: &'a PlayerState,
+    window_width: f32,
+    section: usize,
+    library: LibraryView<'a>,
+) -> Element<'a, Message> {
     let room = theme::active();
     let beside_the_list = window_width >= theme::SETTINGS_BREAKPOINT;
+    let blocks = if section == LIBRARY_SECTION {
+        vec![library_section(library)]
+    } else {
+        vec![replay_gain_section(player)]
+    };
     let content = container(
         scrollable(
-            Column::with_children(vec![replay_gain_section(player)])
+            Column::with_children(blocks)
                 .spacing(theme::GAP_XL)
                 .padding(theme::scroll_gutter()),
         )
@@ -106,21 +184,19 @@ pub(crate) fn view(player: &PlayerState, window_width: f32) -> Element<'_, Messa
     .height(Length::Fill);
 
     let body: Element<'_, Message> = if beside_the_list {
-        row![section_list(), content]
+        row![section_list(section), content]
             .spacing(theme::GAP_XL)
             .height(Length::Fill)
             .into()
     } else {
-        column![
-            text(SECTIONS[0])
-                .size(theme::SIZE_EMPHASIS)
-                .line_height(theme::LEADING_EMPHASIS)
-                .font(theme::MEDIUM),
-            content,
-        ]
-        .spacing(theme::GAP_MD)
-        .height(Length::Fill)
-        .into()
+        // Below the breakpoint the spine lies down: the same entries, the same
+        // one control height, in a row instead of a column. It is still the
+        // navigation — a heading that named only the current section would
+        // leave the other one unreachable at a small window.
+        column![section_row(section), content]
+            .spacing(theme::GAP_MD)
+            .height(Length::Fill)
+            .into()
     };
 
     column![
@@ -231,48 +307,66 @@ fn header() -> Element<'static, Message> {
     .into()
 }
 
-/// The section list: the place's spine.
+/// The section list: the place's spine, as a column beside the content.
 ///
 /// Styled with the same segmented control the edition selector and the
 /// ReplayGain mode use, for the same reason the room answers *which one of
-/// these few* the same way everywhere. The current section is the only one
-/// there is, so it is the only one selected — and it is not a control that can
-/// do anything yet, which is why it is drawn as a selected segment rather than
-/// as a live button that would go nowhere.
-fn section_list() -> Element<'static, Message> {
-    let room = theme::active();
+/// these few* the same way everywhere.
+///
+/// It became a live control the moment there was a second section to reach —
+/// which is exactly the growth the one-vertebra spine was drawn for, and cost
+/// an `on_press` and nothing else.
+fn section_list(current: usize) -> Element<'static, Message> {
     let mut list = column![].spacing(theme::GAP_XXS);
     for (index, section) in SECTIONS.iter().enumerate() {
-        let current = index == 0;
-        list = list.push(
-            container(
-                text(*section)
-                    .size(theme::SIZE_BODY)
-                    .line_height(theme::LEADING_BODY)
-                    .font(theme::MEDIUM)
-                    .wrapping(text::Wrapping::None),
-            )
-            .width(Length::Fill)
-            // One control height (law L7): the entry is a nav target and stands
-            // `TRANSPORT_HIT`, not the 36 px its own padding used to make it.
-            .height(Length::Fixed(theme::TRANSPORT_HIT))
-            .align_y(alignment::Vertical::Center)
-            .padding(theme::pad(0.0, theme::GAP_MD))
-            .style(move |_theme| {
-                let style = theme::segment(room, iced::widget::button::Status::Active, current);
-                container::Style {
-                    background: style.background,
-                    text_color: Some(style.text_color),
-                    border: style.border,
-                    ..container::Style::default()
-                }
-            }),
-        );
+        list = list.push(section_entry(index, section, current, Length::Fill));
     }
     container(list)
         .width(Length::Fixed(theme::SETTINGS_NAV_W))
         .height(Length::Fill)
         .into()
+}
+
+/// The same spine, laid on its side for a window too narrow to hold it beside
+/// the form. Same entries, same order, same one control height.
+fn section_row(current: usize) -> Element<'static, Message> {
+    let mut list = row![].spacing(theme::GAP_XXS);
+    for (index, section) in SECTIONS.iter().enumerate() {
+        list = list.push(section_entry(index, section, current, Length::Shrink));
+    }
+    list.into()
+}
+
+/// One entry of the spine, in either arrangement.
+fn section_entry(
+    index: usize,
+    section: &'static str,
+    current: usize,
+    width: Length,
+) -> Element<'static, Message> {
+    let room = theme::active();
+    let selected = index == current;
+    button(
+        // Centred in its own fixed box, which is what law L3 asks a fixed box
+        // to state rather than leave to iced's top-left default.
+        container(
+            text(section)
+                .size(theme::SIZE_BODY)
+                .line_height(theme::LEADING_BODY)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
+    )
+    .width(width)
+    // One control height (law L7): the entry is a nav target and stands
+    // `TRANSPORT_HIT`, not the 36 px its own padding used to make it.
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_MD))
+    .style(move |_theme, status| theme::segment(room, status, selected))
+    .on_press(Message::SettingsSection(index))
+    .into()
 }
 
 /// The ReplayGain section: the mode, what that mode does, the two pre-amps,
@@ -361,6 +455,283 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
     }
 
     section.into()
+}
+
+/// The **Library** section: which folders baz holds, what is in each of them,
+/// when it last looked, and the two acts that change any of it — adding a
+/// folder, and forcing a sync (ADR-0022).
+///
+/// The shape is the one this place already had: heading, sentence, controls,
+/// readout. Nothing about the layout was revisited to add it, which is the
+/// property the place was built to have.
+fn library_section(library: LibraryView<'_>) -> Element<'_, Message> {
+    let room = theme::active();
+    let mut section = column![section_heading(
+        "Music folders",
+        "The folders baz holds. Your files are never moved or changed.",
+    )]
+    .spacing(theme::GAP_SM);
+
+    if library.folders.is_empty() {
+        section = section.push(
+            text("No folders yet.")
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.paper_faint),
+        );
+    }
+    for (index, folder) in library.folders.into_iter().enumerate() {
+        let pending = library.pending_removal == Some(index);
+        section = section.push(folder_block(index, &folder, pending, library.now_ns));
+    }
+
+    section = section.push(add_folder_row(library.input));
+    if let Some(error) = library.error {
+        section = section.push(
+            text(error)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.alert),
+        );
+    }
+
+    section = section
+        .push(Space::with_height(Length::Fixed(theme::GAP_MD)))
+        .push(section_heading(
+            "Force sync",
+            "Re-reads every file, including the ones nothing has touched.",
+        ))
+        .push(force_sync_row(library.scanning));
+
+    // What the index has to say about itself, in the slot this place reserves
+    // for the machine's own report. Two lines at most, and each is present only
+    // when it is true.
+    let mut readings: Vec<(String, iced::Color)> = Vec::new();
+    if library.scanning {
+        readings.push(("Scanning now.".to_owned(), room.paper));
+    }
+    if library.unrooted > 0 {
+        readings.push((
+            format!(
+                "{} not in any folder above — from a folder baz no longer holds. \
+                 Add it back to refresh them.",
+                tracks_phrase(library.unrooted)
+            ),
+            room.paper_faint,
+        ));
+    }
+    if !readings.is_empty() {
+        section = section.push(readout_block(readings));
+    }
+    section.into()
+}
+
+/// One folder: its path on a control-height line with its Remove, and one quiet
+/// line underneath saying what is in it and when baz last looked.
+///
+/// **Removing is two presses, and the second one is labelled with what it
+/// does.** The first press replaces the quiet line with the consequence in
+/// words and the control with `Forget` / `Keep`; nothing has happened yet. A
+/// single press would be a destructive act with no undo sitting one pixel from
+/// a scroll — and what it destroys is worth naming, because the tracks go
+/// (ADR-0022 §4) even though the files do not.
+fn folder_block(
+    index: usize,
+    folder: &FolderRow,
+    pending: bool,
+    now_ns: i64,
+) -> Element<'static, Message> {
+    let room = theme::active();
+    let controls: Element<'static, Message> = if pending {
+        row![
+            word_control("Forget", true, Message::RemoveMusicFolder(index)),
+            word_control("Keep", true, Message::CancelRemoveMusicFolder),
+        ]
+        .spacing(theme::GAP_XXS)
+        .into()
+    } else {
+        word_control("Remove", true, Message::ConfirmRemoveMusicFolder(index))
+    };
+    let note = if pending {
+        (
+            format!(
+                "Forget {}? The files stay on disk; baz stops holding them.",
+                tracks_phrase(folder.tracks)
+            ),
+            room.paper,
+        )
+    } else if folder.unavailable {
+        (
+            format!(
+                "Not reachable right now — {} kept, nothing removed.",
+                tracks_phrase(folder.tracks)
+            ),
+            room.paper_faint,
+        )
+    } else {
+        (
+            format!(
+                "{} · {}",
+                tracks_phrase(folder.tracks),
+                scanned_phrase(folder.last_scan_ns, now_ns)
+            ),
+            room.paper_faint,
+        )
+    };
+    column![
+        container(
+            row![
+                text(folder.path.display().to_string())
+                    .size(theme::SIZE_BODY)
+                    .line_height(theme::LEADING_BODY)
+                    .color(room.paper)
+                    .wrapping(text::Wrapping::None),
+                Space::with_width(Length::Fill),
+                controls,
+            ]
+            .spacing(theme::GAP_SM)
+            .align_y(iced::Alignment::Center),
+        )
+        // One row pitch, and it is the product's one control height (law L7),
+        // exactly as the stepper rows above it.
+        .height(Length::Fixed(theme::TRANSPORT_HIT))
+        .align_y(alignment::Vertical::Center),
+        text(note.0)
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(note.1),
+    ]
+    .spacing(theme::GAP_XXS)
+    .into()
+}
+
+/// The add-a-folder row: a well and a word.
+///
+/// A typed path rather than a system folder picker, and that is a constraint
+/// rather than a preference: baz takes no dialog dependency (`rfd` and the
+/// portal it talks to are not in the graph), and the first-run screen has asked
+/// for a typed path since v0.1. The two look the same for the same reason.
+fn add_folder_row(input: &str) -> Element<'_, Message> {
+    let room = theme::active();
+    container(
+        row![
+            text_input("/path/to/another/folder", input)
+                .on_input(Message::MusicFolderInput)
+                .on_submit(Message::AddMusicFolder)
+                // The product's one control height, like the search well and
+                // the first-run field (law L7).
+                .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
+                .size(theme::SIZE_BODY)
+                .line_height(theme::LEADING_BODY)
+                .width(Length::Fill)
+                .style(move |_theme, status| theme::input(room, status)),
+            word_control("Add", !input.trim().is_empty(), Message::AddMusicFolder),
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .align_y(alignment::Vertical::Center)
+    .into()
+}
+
+/// The force-sync control, with the one thing it is worth knowing about it.
+///
+/// Disabled while a scan is running rather than queued: two workers over one
+/// library would write the same rows twice and report two sets of counts.
+fn force_sync_row(scanning: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    container(
+        row![
+            text(if scanning {
+                "A scan is running."
+            } else {
+                "Everything else is incremental; this is not."
+            })
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_dim),
+            Space::with_width(Length::Fill),
+            word_control("Force sync", !scanning, Message::ForceSync),
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .align_y(alignment::Vertical::Center)
+    .into()
+}
+
+/// A word that acts: the transport's quiet card around a label, at the one
+/// control height.
+///
+/// The same treatment `‹ Library` gets in the header, because it is the same
+/// kind of thing — a control whose name is short and unambiguous, so it is a
+/// word rather than a glyph baz would have to invent ([`crate::icon`]).
+fn word_control(label: &'static str, enabled: bool, message: Message) -> Element<'static, Message> {
+    let room = theme::active();
+    button(
+        container(
+            text(label)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .color(if enabled {
+                    room.paper
+                } else {
+                    room.paper_muted
+                })
+                .wrapping(text::Wrapping::None),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_MD))
+    .style(move |_theme, status| theme::transport(room, room.wall, status))
+    .on_press_maybe(enabled.then_some(message))
+    .into()
+}
+
+/// `n tracks`, singular where it should be. A count of zero is stated rather
+/// than hidden: a folder baz has scanned and found nothing in is a fact worth
+/// seeing, not an empty space.
+fn tracks_phrase(tracks: usize) -> String {
+    if tracks == 1 {
+        "1 track".to_owned()
+    } else {
+        format!("{tracks} tracks")
+    }
+}
+
+/// When a scan of a folder last finished, in words.
+///
+/// Coarse on purpose, and coarser the further back it goes: the question a
+/// listener is asking is "has baz looked since I copied that album in", and
+/// `4 minutes ago` answers it where `2026-08-08 14:02:17` makes them do
+/// arithmetic. A clock that has gone backwards reads as `just now` rather than
+/// as a negative age.
+fn scanned_phrase(last_scan_ns: Option<i64>, now_ns: i64) -> String {
+    const MINUTE: i64 = 60 * 1_000_000_000;
+    const HOUR: i64 = 60 * MINUTE;
+    const DAY: i64 = 24 * HOUR;
+    let Some(last) = last_scan_ns else {
+        return "not scanned yet".to_owned();
+    };
+    let age = now_ns.saturating_sub(last).max(0);
+    let plural = |n: i64, unit: &str| {
+        if n == 1 {
+            format!("scanned 1 {unit} ago")
+        } else {
+            format!("scanned {n} {unit}s ago")
+        }
+    };
+    match age {
+        age if age < MINUTE => "scanned just now".to_owned(),
+        age if age < HOUR => plural(age / MINUTE, "minute"),
+        age if age < DAY => plural(age / HOUR, "hour"),
+        age => plural(age / DAY, "day"),
+    }
 }
 
 /// A section's first two lines: **its name, then one sentence saying what it
@@ -535,4 +906,56 @@ fn stepper(glyph: &'static str, enabled: bool, message: Message) -> Element<'sta
     .style(move |_theme, status| theme::transport(room, room.wall, status))
     .on_press_maybe(enabled.then_some(message))
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MINUTE: i64 = 60 * 1_000_000_000;
+    const HOUR: i64 = 60 * MINUTE;
+    const DAY: i64 = 24 * HOUR;
+
+    /// The Library section's one piece of arithmetic, pinned: a folder's age
+    /// reads in the unit a listener is thinking in, and a folder nothing has
+    /// scanned says so rather than pretending to a time.
+    #[test]
+    fn a_folders_last_scan_reads_in_the_unit_the_question_is_asked_in() {
+        let now = 1_000 * DAY;
+        assert_eq!(scanned_phrase(None, now), "not scanned yet");
+        assert_eq!(scanned_phrase(Some(now), now), "scanned just now");
+        assert_eq!(
+            scanned_phrase(Some(now - MINUTE + 1), now),
+            "scanned just now"
+        );
+        assert_eq!(
+            scanned_phrase(Some(now - MINUTE), now),
+            "scanned 1 minute ago"
+        );
+        assert_eq!(
+            scanned_phrase(Some(now - 4 * MINUTE), now),
+            "scanned 4 minutes ago"
+        );
+        assert_eq!(scanned_phrase(Some(now - HOUR), now), "scanned 1 hour ago");
+        assert_eq!(
+            scanned_phrase(Some(now - 23 * HOUR), now),
+            "scanned 23 hours ago"
+        );
+        assert_eq!(scanned_phrase(Some(now - DAY), now), "scanned 1 day ago");
+        assert_eq!(
+            scanned_phrase(Some(now - 400 * DAY), now),
+            "scanned 400 days ago"
+        );
+        // A clock that has gone backwards — a corrected system time, a stamp
+        // written on another machine — reads as `just now`, never as a negative
+        // age.
+        assert_eq!(scanned_phrase(Some(now + DAY), now), "scanned just now");
+    }
+
+    #[test]
+    fn a_track_count_is_stated_even_when_it_is_none() {
+        assert_eq!(tracks_phrase(0), "0 tracks");
+        assert_eq!(tracks_phrase(1), "1 track");
+        assert_eq!(tracks_phrase(3_214), "3214 tracks");
+    }
 }

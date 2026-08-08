@@ -16,8 +16,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use baz_core::library::{
-    AudioFormat, FileStamp, KnownFiles, ScanEntry, ScanError, TrackMeta, is_confirmed_gone, scan,
-    scan_incremental,
+    AudioFormat, FileStamp, KnownFile, KnownFiles, ScanEntry, ScanError, TrackMeta,
+    is_confirmed_gone, scan, scan_incremental,
 };
 use baz_core::replaygain::ReplayGainTags;
 use lofty::config::WriteOptions;
@@ -995,7 +995,7 @@ fn stamps_from_full_scan(root: &Path) -> KnownFiles {
                 "every track a scan reads must carry the stamp the next scan compares: {}",
                 meta.path.display()
             );
-            (meta.path, meta.stamp)
+            (meta.path, KnownFile::stamped(meta.stamp))
         })
         .collect()
 }
@@ -1037,7 +1037,7 @@ fn an_unchanged_file_is_reported_without_being_read() {
         },
     );
     let known = stamps_from_full_scan(dir.path());
-    let stamp = known[&path].expect("a stamp");
+    let stamp = known[&path].stamp.expect("a stamp");
     gut_but_keep_the_stamp(&path, stamp);
 
     let entries: Vec<ScanEntry> = scan_incremental(dir.path(), &known)
@@ -1078,7 +1078,7 @@ fn a_touched_file_is_read_again() {
         [ScanEntry::Track(meta)] => {
             assert_eq!(meta.title.as_deref(), Some("Before"));
             assert_ne!(
-                meta.stamp, known[&path],
+                meta.stamp, known[&path].stamp,
                 "the row must carry the *new* stamp, or every scan re-reads it"
             );
         }
@@ -1093,7 +1093,7 @@ fn a_file_that_changed_size_is_read_again() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = write_wav(dir.path(), "Artist/Album/01 - Grew.wav");
     let known = stamps_from_full_scan(dir.path());
-    let stamp = known[&path].expect("a stamp");
+    let stamp = known[&path].stamp.expect("a stamp");
 
     // Longer file, original mtime restored: only the size gives it away.
     let mut bytes = fs::read(&path).expect("read");
@@ -1155,7 +1155,7 @@ fn a_new_file_is_read_even_when_its_neighbours_are_cached() {
 fn a_known_path_without_a_stamp_is_still_read() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = write_wav(dir.path(), "Artist/Album/01 - Unstamped.wav");
-    let known: KnownFiles = KnownFiles::from([(path.clone(), None)]);
+    let known: KnownFiles = KnownFiles::from([(path.clone(), KnownFile::stamped(None))]);
 
     let entries: Vec<ScanEntry> = scan_incremental(dir.path(), &known)
         .expect("scan starts")
@@ -1185,7 +1185,7 @@ fn a_stamp_belongs_to_one_path_only() {
     assert_eq!(FileStamp::of_path(&two), Some(stamp));
 
     // Only `one` is in the index.
-    let known: KnownFiles = KnownFiles::from([(one.clone(), Some(stamp))]);
+    let known: KnownFiles = KnownFiles::from([(one.clone(), KnownFile::stamped(Some(stamp)))]);
     let entries: Vec<ScanEntry> = scan_incremental(dir.path(), &known)
         .expect("scan starts")
         .collect();

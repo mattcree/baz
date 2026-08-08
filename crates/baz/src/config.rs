@@ -1,10 +1,29 @@
-//! Persistent configuration: the music directory, and the settings a listener
+//! Persistent configuration: the music folders, and the settings a listener
 //! sets once and expects to find again.
 //!
 //! The file is `$XDG_CONFIG_HOME/baz/config.toml` (via the `dirs` crate). It
-//! currently carries two things — the last successfully opened music folder,
-//! and the ReplayGain setting (ADR-0013) — and it is written by baz and
-//! documented as safe to edit by hand.
+//! currently carries three things — the music folders baz holds, the
+//! arrangement of the wall, and the ReplayGain setting (ADR-0013) — and it is
+//! written by baz and documented as safe to edit by hand.
+//!
+//! # `music_dirs`, and the `music_dir` it replaced
+//!
+//! baz held exactly one folder until ADR-0022, under the key `music_dir`. It
+//! now holds an **ordered list**, under `music_dirs`, and the order is the
+//! listener's: it is the order the Settings place lists them in, the order they
+//! are scanned in, and the order a nested pair is resolved in.
+//!
+//! A config written by the old baz is read and **migrated silently**: a file
+//! with `music_dir` and no `music_dirs` yields exactly that one folder, and the
+//! next write replaces the key. Nothing is asked of the listener, and nothing
+//! is lost — losing somebody's library to a change in a file format would be a
+//! self-inflicted version of the failure ADR-0010's removal gates exist to
+//! prevent.
+//!
+//! The fallback is per key rather than per file, like everything else here: a
+//! `music_dirs` that is present but unreadable (not an array, or an array of
+//! numbers) falls back to `music_dir` too, because the *most conservative*
+//! reading of a damaged file is the one that keeps a folder baz can still see.
 //!
 //! # Why the `toml` crate now, and not before
 //!
@@ -59,11 +78,11 @@
 //!
 //! TOML strings are UTF-8, so a music directory whose path is not valid UTF-8
 //! cannot be persisted. Such a directory still works for the session (paths
-//! are handled as `PathBuf` throughout); the `music_dir` key is simply left
-//! out of the document — **and the rest of the document is still written**,
-//! which is the one behaviour change from v0.1's writer. Losing an unrelated
-//! setting because a path is unrepresentable would be a second failure caused
-//! by the first.
+//! are handled as `PathBuf` throughout); it is simply left out of the
+//! `music_dirs` array — **and the rest of the array, and the rest of the
+//! document, are still written**, which is the one behaviour change from v0.1's
+//! writer. Losing an unrelated setting, or an unrelated folder, because one
+//! path is unrepresentable would be a second failure caused by the first.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -78,12 +97,25 @@ const REPLAY_GAIN_TABLE: &str = "replaygain";
 /// The key the active group key is written under.
 const GROUP_KEY: &str = "group_key";
 
+/// The key the music folders are written under (ADR-0022).
+const MUSIC_DIRS: &str = "music_dirs";
+
+/// The key baz wrote its single music folder under before ADR-0022. Read, never
+/// written: a file carrying it is migrated to [`MUSIC_DIRS`] on the next save.
+const LEGACY_MUSIC_DIR: &str = "music_dir";
+
 /// Application configuration. See the [module docs](self) for scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
-    /// The music folder baz scans and shelves on startup. `None` before a
-    /// first run has chosen one — and after one whose path is not UTF-8.
-    pub music_dir: Option<PathBuf>,
+    /// The music folders baz scans and shelves, **in the listener's order**
+    /// (ADR-0022). Empty before a first run has chosen one.
+    ///
+    /// The order is data, not presentation: it is the order the folders are
+    /// scanned in, the order the Settings place lists them in, and — because a
+    /// pre-v8 row can be claimed by only one root — the order a nested pair is
+    /// resolved in. Duplicates are dropped on the way in, since a folder listed
+    /// twice would be walked twice for one set of rows.
+    pub music_dirs: Vec<PathBuf>,
     /// How ReplayGain is configured (ADR-0013). Engine state, persisted here
     /// because it is a listener's standing decision rather than a property of
     /// a session: unlike panel visibility (`crate::panels`, deliberately not
@@ -104,12 +136,12 @@ pub struct Config {
 }
 
 impl Default for Config {
-    /// No music folder, `baz-core`'s own ReplayGain defaults, and the wall
+    /// No music folders, `baz-core`'s own ReplayGain defaults, and the wall
     /// arranged by artist — the state a fresh install is in, and the state an
     /// unreadable config resolves to.
     fn default() -> Self {
         Self {
-            music_dir: None,
+            music_dirs: Vec::new(),
             replay_gain: ReplayGainSettings::default(),
             group_key: GroupKey::Artist,
         }
@@ -129,8 +161,22 @@ impl Config {
         // Writing into a `String` cannot fail, so every `write!` here is
         // infallible; the results are dropped rather than handled.
         let mut out = String::from("# baz configuration — written by baz, safe to edit\n");
-        if let Some(dir) = self.music_dir.as_deref().and_then(Path::to_str) {
-            let _ = writeln!(out, "music_dir = {}", toml_string(dir));
+        // Written on one line per folder rather than as an inline array, so a
+        // list of four is readable and a hand edit is one line. An empty list
+        // omits the key entirely: a fresh install's file should not carry an
+        // empty array asking to be filled in.
+        let dirs: Vec<&str> = self
+            .music_dirs
+            .iter()
+            .filter_map(|dir| dir.to_str())
+            .collect();
+        if !dirs.is_empty() {
+            let _ = writeln!(out, "# the folders baz holds, scanned in this order");
+            let _ = writeln!(out, "{MUSIC_DIRS} = [");
+            for dir in dirs {
+                let _ = writeln!(out, "    {},", toml_string(dir));
+            }
+            let _ = writeln!(out, "]");
         }
         let _ = writeln!(
             out,
@@ -161,11 +207,7 @@ impl Config {
         let Ok(table) = text.parse::<toml::Table>() else {
             return Self::default();
         };
-        let music_dir = table
-            .get("music_dir")
-            .and_then(toml::Value::as_str)
-            .filter(|dir| !dir.is_empty())
-            .map(PathBuf::from);
+        let music_dirs = read_music_dirs(&table);
         let replay_gain = table
             .get(REPLAY_GAIN_TABLE)
             .and_then(toml::Value::as_table)
@@ -180,11 +222,55 @@ impl Config {
             .and_then(GroupKey::from_code)
             .unwrap_or(GroupKey::Artist);
         Self {
-            music_dir,
+            music_dirs,
             replay_gain,
             group_key,
         }
     }
+}
+
+/// The music folders a document names, in order, with the legacy single key as
+/// the fallback (module docs).
+///
+/// Three degradations, each on its own and none of them fatal:
+///
+/// - An entry that is not a string, or is blank, is **skipped**; the folders
+///   around it survive. One mistyped line must not cost a listener their other
+///   three folders.
+/// - A duplicate is dropped, keeping the first mention. A folder listed twice
+///   would be walked twice for one set of rows, and the second walk would
+///   re-home them to the same place it found them.
+/// - A `music_dirs` that is absent, not an array, or an array with nothing
+///   usable in it falls back to the pre-ADR-0022 `music_dir` string. That is
+///   the silent migration, and it is also the most conservative reading of a
+///   damaged file.
+fn read_music_dirs(table: &toml::Table) -> Vec<PathBuf> {
+    let listed: Vec<PathBuf> = table
+        .get(MUSIC_DIRS)
+        .and_then(toml::Value::as_array)
+        .map(|array| {
+            let mut dirs: Vec<PathBuf> = Vec::with_capacity(array.len());
+            for value in array {
+                let Some(dir) = value.as_str().filter(|dir| !dir.is_empty()) else {
+                    continue;
+                };
+                let dir = PathBuf::from(dir);
+                if !dirs.contains(&dir) {
+                    dirs.push(dir);
+                }
+            }
+            dirs
+        })
+        .unwrap_or_default();
+    if !listed.is_empty() {
+        return listed;
+    }
+    table
+        .get(LEGACY_MUSIC_DIR)
+        .and_then(toml::Value::as_str)
+        .filter(|dir| !dir.is_empty())
+        .map(|dir| vec![PathBuf::from(dir)])
+        .unwrap_or_default()
 }
 
 /// Read the `[replaygain]` table, key by key, defaulting each miss on its own.
@@ -270,8 +356,8 @@ pub fn load(path: &Path) -> Config {
 /// # Errors
 ///
 /// Any filesystem error from creating the directory or writing the file. A
-/// non-UTF-8 `music_dir` is **not** an error: the key is omitted and the rest
-/// of the document is written (module docs).
+/// non-UTF-8 music folder is **not** an error: it is omitted from the array and
+/// the rest of the document is written (module docs).
 pub fn store(path: &Path, config: &Config) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -304,7 +390,7 @@ mod tests {
             "/home/user/# not a comment",
         ] {
             let config = Config {
-                music_dir: Some(PathBuf::from(dir)),
+                music_dirs: vec![PathBuf::from(dir)],
                 ..Config::default()
             };
             let back = Config::from_toml(&config.to_toml());
@@ -324,7 +410,7 @@ mod tests {
         ];
         for replay_gain in cases {
             let config = Config {
-                music_dir: Some(PathBuf::from("/m")),
+                music_dirs: vec![PathBuf::from("/m")],
                 replay_gain,
                 group_key: GroupKey::Year,
             };
@@ -366,7 +452,7 @@ mod tests {
     fn round_trips_every_group_key_as_its_own_word() {
         for key in GroupKey::ALL {
             let config = Config {
-                music_dir: Some(PathBuf::from("/m")),
+                music_dirs: vec![PathBuf::from("/m")],
                 group_key: key,
                 ..Config::default()
             };
@@ -391,7 +477,7 @@ mod tests {
             );
             let config = Config::from_toml(&text);
             assert_eq!(config.group_key, GroupKey::Artist, "{spelling}");
-            assert_eq!(config.music_dir, Some(PathBuf::from("/m")), "{spelling}");
+            assert_eq!(config.music_dirs, vec![PathBuf::from("/m")], "{spelling}");
             assert_eq!(config.replay_gain.mode, ReplayGainMode::Album, "{spelling}");
         }
         // Absent entirely — every config written before this key existed.
@@ -407,7 +493,7 @@ mod tests {
                     future_key = 3\n\n[replaygain]\nmode = 'album'\n\
                     preamp_centidb = -3_50\n[future_table]\nx = 1\n";
         let config = Config::from_toml(text);
-        assert_eq!(config.music_dir, Some(PathBuf::from("/m")));
+        assert_eq!(config.music_dirs, vec![PathBuf::from("/m")]);
         assert_eq!(config.replay_gain.mode, ReplayGainMode::Album);
         assert_eq!(config.replay_gain.preamp_centidb, -350);
         // Absent keys inside a table that *is* present still default.
@@ -477,8 +563,8 @@ mod tests {
         ] {
             let config = Config::from_toml(&text);
             assert_eq!(
-                config.music_dir,
-                Some(PathBuf::from("/m")),
+                config.music_dirs,
+                vec![PathBuf::from("/m")],
                 "{description} lost the music folder"
             );
             assert_eq!(
@@ -518,10 +604,10 @@ mod tests {
 
     #[test]
     fn parse_rejects_a_missing_or_empty_music_dir_without_losing_the_rest() {
-        assert_eq!(Config::from_toml("music_dir = \"\"").music_dir, None);
-        assert_eq!(Config::from_toml("other = \"x\"").music_dir, None);
+        assert!(Config::from_toml("music_dir = \"\"").music_dirs.is_empty());
+        assert!(Config::from_toml("other = \"x\"").music_dirs.is_empty());
         let config = Config::from_toml("music_dir = \"\"\n[replaygain]\nmode = \"track\"\n");
-        assert_eq!(config.music_dir, None);
+        assert!(config.music_dirs.is_empty());
         assert_eq!(config.replay_gain.mode, ReplayGainMode::Track);
     }
 
@@ -534,14 +620,14 @@ mod tests {
         use std::os::unix::ffi::OsStringExt as _;
         let raw = std::ffi::OsString::from_vec(b"/music/\xFF\xFE".to_vec());
         let config = Config {
-            music_dir: Some(PathBuf::from(raw)),
+            music_dirs: vec![PathBuf::from(raw)],
             replay_gain: settings(ReplayGainMode::Album, -300, 0, false),
             group_key: GroupKey::Genre,
         };
         let text = config.to_toml();
-        assert!(!text.contains("music_dir"), "{text}");
+        assert!(!text.contains(MUSIC_DIRS), "{text}");
         let back = Config::from_toml(&text);
-        assert_eq!(back.music_dir, None);
+        assert!(back.music_dirs.is_empty());
         assert_eq!(back.replay_gain, config.replay_gain);
     }
 
@@ -550,7 +636,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("nested").join("config.toml");
         let config = Config {
-            music_dir: Some(PathBuf::from("/home/user/Music")),
+            music_dirs: vec![PathBuf::from("/home/user/Music")],
             replay_gain: settings(ReplayGainMode::Album, -350, 250, false),
             group_key: GroupKey::Played,
         };
@@ -560,17 +646,151 @@ mod tests {
         assert_eq!(load(&dir.path().join("absent.toml")), Config::default());
     }
 
+    /// Several folders survive a restart, **in order**, which is the whole
+    /// point of the list: the order is scanned in, listed in, and resolved in.
+    #[test]
+    fn round_trips_several_music_folders_in_order() {
+        let dirs = vec![
+            PathBuf::from("/home/user/Music"),
+            PathBuf::from("/mnt/nas/Archive"),
+            PathBuf::from("/home/ünï çödé/曲"),
+            PathBuf::from("/home/user/My \"Music\""),
+        ];
+        let config = Config {
+            music_dirs: dirs.clone(),
+            ..Config::default()
+        };
+        let text = config.to_toml();
+        let back = Config::from_toml(&text);
+        assert_eq!(
+            back.music_dirs, dirs,
+            "order and contents must both survive"
+        );
+        assert_eq!(back, config);
+        // Reversing the list is a different config, or the order is not data.
+        let reversed = Config {
+            music_dirs: dirs.into_iter().rev().collect(),
+            ..Config::default()
+        };
+        assert_ne!(Config::from_toml(&reversed.to_toml()), config);
+    }
+
+    /// **The silent migration.** A config written by a baz that held one folder
+    /// is read as a one-folder list, and the next save writes the new key. A
+    /// listener must not lose their library to a change in a file format.
+    #[test]
+    fn a_legacy_single_music_dir_migrates_silently_to_the_list() {
+        let old = "music_dir = \"/home/user/Music\"\ngroup_key = \"year\"\n\
+                   [replaygain]\nmode = \"album\"\npreamp_centidb = -350\n";
+        let config = Config::from_toml(old);
+        assert_eq!(config.music_dirs, vec![PathBuf::from("/home/user/Music")]);
+        // Nothing else moved on the way through.
+        assert_eq!(config.group_key, GroupKey::Year);
+        assert_eq!(config.replay_gain.mode, ReplayGainMode::Album);
+        assert_eq!(config.replay_gain.preamp_centidb, -350);
+
+        // And the file baz writes back carries the new key and not the old one,
+        // while naming the same folder.
+        let text = config.to_toml();
+        assert!(text.contains(MUSIC_DIRS), "{text}");
+        let table: toml::Table = text.parse().expect("valid TOML");
+        assert!(
+            !table.contains_key(LEGACY_MUSIC_DIR),
+            "the legacy key is not written back: {text}"
+        );
+        assert_eq!(Config::from_toml(&text).music_dirs, config.music_dirs);
+    }
+
+    /// The list wins where both keys are present — a file edited by hand, or
+    /// one an older baz re-wrote beside a newer one's list.
+    #[test]
+    fn the_list_wins_over_the_legacy_key_when_a_document_carries_both() {
+        let config =
+            Config::from_toml("music_dir = \"/old\"\nmusic_dirs = [\"/new\", \"/newer\"]\n");
+        assert_eq!(
+            config.music_dirs,
+            vec![PathBuf::from("/new"), PathBuf::from("/newer")]
+        );
+    }
+
+    /// Per-key degradation, applied inside the list: one unusable entry costs
+    /// itself and nothing around it, and a whole unusable list falls back to the
+    /// legacy key rather than to nothing.
+    #[test]
+    fn an_unusable_folder_entry_degrades_alone() {
+        // A number and a blank among three good folders.
+        let config = Config::from_toml(
+            "music_dirs = [\"/a\", 7, \"\", \"/b\", true, \"/c\"]\ngroup_key = \"genre\"\n",
+        );
+        assert_eq!(
+            config.music_dirs,
+            vec![
+                PathBuf::from("/a"),
+                PathBuf::from("/b"),
+                PathBuf::from("/c")
+            ]
+        );
+        assert_eq!(config.group_key, GroupKey::Genre);
+
+        // A duplicate is dropped, keeping the first mention: one folder listed
+        // twice would be walked twice for one set of rows.
+        assert_eq!(
+            Config::from_toml("music_dirs = [\"/a\", \"/b\", \"/a\"]\n").music_dirs,
+            vec![PathBuf::from("/a"), PathBuf::from("/b")]
+        );
+
+        // A list that is not a list, and a list with nothing usable in it, both
+        // fall back to the legacy key — the most conservative reading of a
+        // damaged file is the one that keeps a folder baz can still see.
+        for spoiled in [
+            "music_dirs = 7",
+            "music_dirs = []",
+            "music_dirs = [3, \"\"]",
+        ] {
+            let text = format!("{spoiled}\nmusic_dir = \"/legacy\"\n");
+            assert_eq!(
+                Config::from_toml(&text).music_dirs,
+                vec![PathBuf::from("/legacy")],
+                "{spoiled}"
+            );
+        }
+        // With no legacy key either, the answer is simply no folders.
+        assert!(Config::from_toml("music_dirs = 7\n").music_dirs.is_empty());
+    }
+
+    /// One unrepresentable path costs itself and not the folders beside it —
+    /// the array's version of the per-key rule the document already follows.
+    #[cfg(unix)]
+    #[test]
+    fn a_non_utf8_folder_is_omitted_without_losing_the_others() {
+        use std::os::unix::ffi::OsStringExt as _;
+        let raw = std::ffi::OsString::from_vec(b"/music/\xFF\xFE".to_vec());
+        let config = Config {
+            music_dirs: vec![
+                PathBuf::from("/first"),
+                PathBuf::from(raw),
+                PathBuf::from("/third"),
+            ],
+            ..Config::default()
+        };
+        let back = Config::from_toml(&config.to_toml());
+        assert_eq!(
+            back.music_dirs,
+            vec![PathBuf::from("/first"), PathBuf::from("/third")]
+        );
+    }
+
     /// The written document is valid TOML by the crate's own reckoning, not
     /// merely by ours — the assembled-with-comments writer's standing check.
     #[test]
     fn the_written_document_parses_as_toml() {
         let config = Config {
-            music_dir: Some(PathBuf::from("/home/user/My \"Music\"")),
+            music_dirs: vec![PathBuf::from("/home/user/My \"Music\"")],
             replay_gain: settings(ReplayGainMode::Track, -1234, 567, false),
             group_key: GroupKey::Added,
         };
         let table: toml::Table = config.to_toml().parse().expect("baz writes valid TOML");
-        assert!(table.contains_key("music_dir"));
+        assert!(table.contains_key(MUSIC_DIRS));
         assert!(table.contains_key(REPLAY_GAIN_TABLE));
         assert!(table.contains_key(GROUP_KEY));
     }

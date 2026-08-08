@@ -134,16 +134,39 @@
   which is the honest home for every case automation should decline, and
   needs a library-maintenance surface baz does not have yet; (2) remembered
   mount points, so "this directory is gone" can be distinguished from "this
-  directory's filesystem is not attached"; (3) a per-row record of which
-  root a track came from, which would also let gate 2 stop relying on the
-  root currently being scanned. All three are features with their own
-  design, not a tweak to the rule.
+  directory's filesystem is not attached". ~~(3) a per-row record of which
+  root a track came from~~ — **shipped (ADR-0022)**, and it did replace gate
+  2, but it does not touch this case: a deleted album folder and an unmounted
+  one are still the same `NotFound` from below whichever root recorded the
+  rows. Removing the whole *folder* in the Settings place is now a way out
+  that did not exist before, but it is a different act at a different scale.
 
-- **The index has no notion of which root a row came from.** Removal's
-  multi-root protection keys on `starts_with(root_being_scanned)`, which is
-  correct but coarse: rows imported from a folder baz has since stopped
-  scanning are immortal. A `roots` table is the fix, and it wants to land
-  with actual support for more than one music folder.
+- ~~**The index has no notion of which root a row came from.**~~ — **closed
+  (ADR-0022).** Schema v8 records the root on every row and adds a `roots`
+  table, and removal's second gate now reads that record instead of testing
+  `starts_with(root_being_scanned)` — which was wrong the moment two roots
+  could nest or a file could be reached from both. baz holds an ordered list of
+  folders (`config.toml`'s `music_dirs`, migrating a legacy `music_dir`
+  silently), each with its track count and last scan in the Settings place,
+  and an absent folder now prunes nothing from any root and does not fail the
+  pass. Pre-v8 rows are adopted at launch by the front end, which is the one
+  place that knows which folder they came from.
+
+  **What remains** is the rootless population: a row under *none* of the
+  configured folders is still unprunable by any scan. It is now counted and
+  explained rather than invisible (`Library::unrooted_tracks`, and a line in
+  the Settings place), and there are two ways out — add the folder back, or
+  remove it and let its rows go with it — but the "these 412 rows point at
+  files I cannot find; remove them?" prune below is still unbuilt.
+
+- **Removing a music folder loses its tracks' `first_seen_ns`** (ADR-0022 §4).
+  Removing a folder forgets its rows outright, so adding it back files every
+  album under ADDED = *today*. That is a real loss of the one fact ADR-0019
+  built a column and a structural guarantee to protect, accepted because the
+  alternative — keeping rows for a folder baz can no longer refresh — is a
+  wall of albums nothing can ever correct or remove. A tombstone (remember the
+  first-seen for a forgotten root's paths, and restore it if the folder comes
+  back) would fix it and is its own small design.
 - **Multichannel (>2ch) files are rejected**, not downmixed — a typed error
   rather than silently wrong output. 5.1 downmix is unwritten.
 - **Skip and seek are drain-and-restart**, not sample-accurate splices (tens of
@@ -242,11 +265,23 @@
   gear popover — the progressive-disclosure layer already exists, it cannot
   cover the covers or the transport, and it inherits three dismissals iced 0.13
   gives no primitive for — is argued in `panels.rs`.
-- **Settings that are not yet settable.** The panel exists; the output device,
-  the exclusive-mode selection (`BAZ_OUTPUT`/`BAZ_OUTPUT_DEVICE` are still
-  environment variables, ADR-0012), the boundary policy, watch folders and the
-  enrichment toggles are all still off-screen. Each is now a section, not a
+- **Settings that are not yet settable.** The place has two sections now —
+  Playback and Library (ADR-0022) — and the second one cost exactly what the
+  first one promised it would: an entry in `SECTIONS`, a block in the same
+  scroll, and an `on_press` to make the spine a real control. Still off-screen:
+  the output device, the exclusive-mode selection
+  (`BAZ_OUTPUT`/`BAZ_OUTPUT_DEVICE` are still environment variables, ADR-0012),
+  the boundary policy, and the enrichment toggles. Each is a section, not a
   design question.
+- **Music folders are typed, not picked.** The Settings place's add-a-folder
+  control is a text well, like the first-run screen it is the cousin of, because
+  baz takes no file-dialog dependency (`rfd` and the desktop portal behind it
+  are not in the graph). A native picker is what most people expect; it is a
+  reviewed dependency decision, not an oversight.
+- **Music folders cannot be reordered in the interface.** The order is data
+  (scan order, list order, and the order a nested pair is resolved in) and
+  `config.toml` is editable by hand, but a drag handle is a control with its own
+  design.
 - ~~**Panel hiding**~~ — **shipped.** The right-hand rail holds one panel at a
   time (album, queue or settings), each carries a ✕, Escape closes what is
   showing, `Q` toggles the queue, <kbd>Ctrl</kbd>+<kbd>,</kbd> the settings,
@@ -368,7 +403,19 @@
 
 ## Bigger chapters (see `VISION.md` staging)
 
-ReplayGain scanning, cue sheets, watch folders, batch tag editing, exclusive
-outputs, bliss-rs analysis and mood-steered shuffle, the opt-in enrichment pane,
-scrobbling, OpenSubsonic client mode, and the paid-parity hit-list in
+ReplayGain scanning, cue sheets, batch tag editing, exclusive outputs, bliss-rs
+analysis and mood-steered shuffle, the opt-in enrichment pane, scrobbling,
+OpenSubsonic client mode, and the paid-parity hit-list in
 `research/06-paid-product-teardown.md`.
+
+**Watch folders left this list with a `no`, not a tick** (ADR-0022 §7). baz
+holds several folders and rescans them every five minutes while it runs, and
+`notify` was evaluated and rejected: inotify is per-directory and capped
+(8 192 watches on many distributions, shared with the whole desktop), network
+mounts emit no events at all, and `ReadDirectoryChangesW` drops events during
+exactly the bulk copy a listener most wants to see. A watcher would therefore
+need the periodic pass behind it anyway — the fallback is the whole feature —
+and the warm pass costs ~100 ms on a 100k library. What would reverse it: a
+measurement showing the periodic pass is too slow on a real large library, in
+which case a watcher is an optimisation with a stated fallback rather than the
+mechanism.

@@ -1406,7 +1406,7 @@ fn a_v1_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     let by_path = |needle: &str| {
         library
@@ -1619,7 +1619,7 @@ fn a_v2_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     let by_path = |needle: &str| {
         library
@@ -1970,7 +1970,7 @@ fn a_v3_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     let by_path = |needle: &str| {
         library
@@ -2008,7 +2008,10 @@ fn a_v3_database_migrates_in_place_without_losing_anything() {
         assert_eq!(track.stamp, None);
     }
     assert!(
-        library.known_files().values().all(Option::is_none),
+        library
+            .known_files()
+            .values()
+            .all(|known| known.stamp.is_none()),
         "an upgraded library asks for a full first scan, and gets one"
     );
 
@@ -2060,7 +2063,7 @@ fn the_first_scan_after_a_v3_upgrade_stamps_every_row() {
     assert!(reopened.tracks().all(|t| t.stamp == Some(stamp)));
     let known = reopened.known_files();
     assert_eq!(known.len(), 5);
-    assert!(known.values().all(|s| *s == Some(stamp)));
+    assert!(known.values().all(|known| known.stamp == Some(stamp)));
 }
 
 #[test]
@@ -2132,9 +2135,9 @@ fn known_files_reports_every_path_with_the_stamp_recorded_for_it() {
 
     let known = library.known_files();
     assert_eq!(known.len(), 2);
-    assert_eq!(known[&PathBuf::from("/m/stamped.flac")], Some(stamp));
+    assert_eq!(known[&PathBuf::from("/m/stamped.flac")].stamp, Some(stamp));
     assert_eq!(
-        known[&PathBuf::from("/m/unstamped.flac")],
+        known[&PathBuf::from("/m/unstamped.flac")].stamp,
         None,
         "a row with no stamp is offered as one, so it is re-read"
     );
@@ -2323,7 +2326,7 @@ fn a_v4_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     let by_path = |needle: &str| {
         library
@@ -2360,7 +2363,7 @@ fn a_v4_database_migrates_in_place_without_losing_anything() {
         library
             .known_files()
             .values()
-            .filter(|s| s.is_some())
+            .filter(|known| known.stamp.is_some())
             .count(),
         5,
         "every v4 stamp survives, so the next scan is still incremental"
@@ -2570,7 +2573,7 @@ fn a_v5_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     let by_path = |needle: &str| {
         library
@@ -2622,7 +2625,7 @@ fn a_v5_database_migrates_in_place_without_losing_anything() {
         library
             .known_files()
             .values()
-            .filter(|s| s.is_some())
+            .filter(|known| known.stamp.is_some())
             .count(),
         5,
         "every v5 stamp survives, so the next scan is still incremental"
@@ -3001,7 +3004,7 @@ fn a_v6_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     let by_path = |needle: &str| {
         library
@@ -3044,7 +3047,7 @@ fn a_v6_database_migrates_in_place_without_losing_anything() {
         library
             .known_files()
             .values()
-            .filter(|s| s.is_some())
+            .filter(|known| known.stamp.is_some())
             .count(),
         5,
         "every v6 stamp survives, so the next scan is still incremental"
@@ -3625,4 +3628,384 @@ fn group_key_codes_round_trip() {
     assert_eq!(GroupKey::from_code("crates"), None);
     assert_eq!(GroupKey::from_code(""), None);
     assert_eq!(GroupKey::ALL[0].label(), "Artist");
+}
+
+// ---------------------------------------------------------------------------
+// Schema v8: roots as first-class (ADR-0022)
+// ---------------------------------------------------------------------------
+
+/// The moment the v7 fixture's rows were first seen — an hour before the
+/// migration runs, so a backfill that stamped "now" would be visible.
+const V7_FIRST_SEEN_NS: i64 = 1_750_000_000_000_000_000;
+
+/// Build a genuine v7 database with the v7 schema and v7 `INSERT`s only — no
+/// baz code involved — so the v8 upgrade is proved against a database this
+/// build did not create.
+///
+/// It carries everything v1 – v7 ever added: the double rip, the soundtrack,
+/// a real `Various Artists` tag, a real compilation flag, non-ASCII paths and
+/// titles, stamps, tagged and measured ReplayGain, genres and first-seen
+/// timestamps.
+fn write_v7_database(db: &std::path::Path) {
+    let conn = rusqlite::Connection::open(db).expect("create v7 db");
+    conn.execute_batch(
+        "
+        BEGIN;
+        CREATE TABLE tracks (
+            id                             INTEGER PRIMARY KEY,
+            path                           BLOB NOT NULL UNIQUE,
+            artist                         TEXT,
+            album                          TEXT,
+            title                          TEXT,
+            track                          INTEGER,
+            disc                           INTEGER,
+            year                           INTEGER,
+            duration_ns                    INTEGER,
+            format                         TEXT,
+            bit_depth                      INTEGER,
+            sample_rate                    INTEGER,
+            bitrate                        INTEGER,
+            album_artist                   TEXT,
+            compilation                    INTEGER,
+            mtime_ns                       INTEGER,
+            file_size                      INTEGER,
+            rg_track_gain_centidb          INTEGER,
+            rg_track_peak_micro            INTEGER,
+            rg_album_gain_centidb          INTEGER,
+            rg_album_peak_micro            INTEGER,
+            rg_computed_track_gain_centidb INTEGER,
+            rg_computed_track_peak_micro   INTEGER,
+            rg_computed_album_gain_centidb INTEGER,
+            rg_computed_album_peak_micro   INTEGER,
+            rg_computed_mtime_ns           INTEGER,
+            rg_computed_file_size          INTEGER,
+            genre                          TEXT,
+            first_seen_ns                  INTEGER
+        ) STRICT;
+        PRAGMA user_version = 7;
+        COMMIT;
+        ",
+    )
+    .expect("v7 schema");
+
+    for (n, row) in v3_rows().into_iter().enumerate() {
+        let tagged = row.format == "flac";
+        let mtime = 1_700_000_000_000_000_000_i64 + i64::try_from(n).expect("five rows");
+        let size = 40_000_000_i64 + i64::try_from(n).expect("five rows");
+        conn.execute(
+            "INSERT INTO tracks
+                 (path, artist, album, title, track, disc, year, duration_ns,
+                  format, bit_depth, sample_rate, bitrate, album_artist,
+                  compilation, mtime_ns, file_size,
+                  rg_track_gain_centidb, rg_track_peak_micro,
+                  rg_album_gain_centidb, rg_album_peak_micro,
+                  rg_computed_track_gain_centidb, rg_computed_track_peak_micro,
+                  rg_computed_album_gain_centidb, rg_computed_album_peak_micro,
+                  rg_computed_mtime_ns, rg_computed_file_size,
+                  genre, first_seen_ns)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
+                     ?26, ?27)",
+            rusqlite::params![
+                // The platform's own path encoding, not UTF-8: a `library.db`
+                // is a per-machine cache and Windows stores UTF-16LE, so a
+                // fixture that hard-coded bytes would only be a *Unix* v7
+                // database (see `stored_path_bytes`).
+                stored_path_bytes(row.path),
+                row.artist,
+                row.album,
+                row.title,
+                row.track,
+                row.year,
+                row.duration_ns,
+                row.format,
+                row.bit_depth,
+                row.sample_rate,
+                row.bitrate,
+                row.album_artist,
+                row.compilation,
+                mtime,
+                size,
+                tagged.then_some(-775_i64),
+                tagged.then_some(988_525_i64),
+                tagged.then_some(-920_i64),
+                tagged.then_some(1_001_221_i64),
+                tagged.then_some(412_i64),
+                tagged.then_some(750_000_i64),
+                tagged.then_some(318_i64),
+                tagged.then_some(910_000_i64),
+                tagged.then_some(mtime),
+                tagged.then_some(size),
+                if tagged { "Folk" } else { "Game Soundtrack" },
+                V7_FIRST_SEEN_NS + i64::try_from(n).expect("five rows"),
+            ],
+        )
+        .expect("insert v7 row");
+    }
+}
+
+#[test]
+fn a_v7_database_migrates_in_place_without_losing_anything() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    write_v7_database(&db);
+
+    let library = Library::open(&db).expect("a v7 database must open");
+    assert_eq!(library.len(), 5, "every v7 row survives the upgrade");
+
+    let conn = rusqlite::Connection::open(&db).expect("raw open");
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("user_version");
+    assert_eq!(version, 8);
+
+    let by_path = |needle: &str| {
+        library
+            .tracks()
+            .find(|t| t.path.to_string_lossy().contains(needle))
+            .cloned()
+            .unwrap_or_else(|| panic!("{needle} must survive"))
+    };
+
+    // Every v7 column is intact — text, numbers, Unicode, the ADR-0008
+    // columns, the ADR-0010 stamp, the ADR-0013 tags, the ADR-0015 measurement
+    // and the ADR-0019 genre.
+    let unicode = by_path("Größenwahn");
+    assert_eq!(unicode.artist.as_deref(), Some("Größenwahn"));
+    assert_eq!(unicode.album.as_deref(), Some("Debüt"));
+    assert_eq!(unicode.title.as_deref(), Some("Ærø — 序曲"));
+    assert_eq!(unicode.track, Some(3));
+    assert_eq!(unicode.disc, Some(1));
+    assert_eq!(unicode.year, Some(1999));
+    assert_eq!(unicode.duration, Some(Duration::new(215, 123_456_789)));
+    assert_eq!(unicode.format, Some(AudioFormat::Wav));
+    assert_eq!(unicode.bit_depth, Some(24));
+    assert_eq!(unicode.sample_rate, Some(96_000));
+    assert_eq!(unicode.bitrate, Some(4_608));
+    assert_eq!(unicode.album_artist.as_deref(), Some("Various Artists"));
+    assert_eq!(unicode.compilation, Some(true));
+    assert_eq!(unicode.genre.as_deref(), Some("Game Soundtrack"));
+
+    let soundtrack = by_path("Main Menu.flac");
+    assert_eq!(soundtrack.album_artist.as_deref(), Some("RODIK"));
+    assert_eq!(soundtrack.compilation, None, "NULL is not Some(false)");
+    assert_eq!(soundtrack.replay_gain.track_gain_centidb, Some(-775));
+    assert_eq!(soundtrack.genre.as_deref(), Some("Folk"));
+    assert_eq!(
+        library
+            .computed_replay_gain(&soundtrack.path)
+            .track_gain_centidb,
+        Some(412),
+        "the measurement v6 stored is still fresh for the same file"
+    );
+    assert_eq!(
+        library
+            .known_files()
+            .values()
+            .filter(|known| known.stamp.is_some())
+            .count(),
+        5,
+        "every v7 stamp survives, so the next scan is still incremental"
+    );
+
+    // The first-seen timestamps v7 wrote are untouched — the one column a
+    // migration must never move (ADR-0019).
+    for album in library.albums() {
+        assert!(
+            album
+                .first_seen_ns
+                .is_some_and(|seen| (V7_FIRST_SEEN_NS..V7_FIRST_SEEN_NS + 5).contains(&seen)),
+            "the upgrade must not restamp when an album arrived"
+        );
+    }
+
+    // The new column is NULL for every row, and the `roots` table starts
+    // empty: no scan has finished under this schema, and `baz-core` cannot
+    // know which folder a v7 row came from — the front end holds that fact and
+    // states it with `adopt_root`.
+    assert_eq!(library.unrooted_tracks(), 5);
+    assert!(
+        library
+            .known_files()
+            .values()
+            .all(|known| known.root.is_none()),
+        "an upgraded row belongs to no root until something adopts it"
+    );
+    assert_eq!(
+        library.root_stats(Path::new("/m")),
+        baz_core::index::RootStats::default(),
+        "and the roots table has nothing to say yet"
+    );
+    let roots: i64 = conn
+        .query_row("SELECT count(*) FROM roots", [], |row| row.get(0))
+        .expect("the roots table exists");
+    assert_eq!(roots, 0);
+
+    // Grouping is *exactly* the pre-v8 behaviour — the upgrade adds a column
+    // and a table, never changes what the shelf shows.
+    let albums = library.albums();
+    let passage = albums
+        .iter()
+        .find(|a| a.title == Some("Northwest Passage"))
+        .expect("the double rip");
+    assert_eq!(passage.artist, AlbumArtist::Named("Stan Rogers"));
+    assert_eq!(passage.editions.len(), 2);
+    let gamerip: Vec<_> = albums
+        .iter()
+        .filter(|a| a.title == Some("Cookie's Bustle OST (gamerip)"))
+        .collect();
+    assert_eq!(gamerip.len(), 1, "still one entry, two editions");
+    assert_eq!(gamerip[0].editions.len(), 2);
+    assert_eq!(
+        library.shelves(GroupKey::Genre).len(),
+        2,
+        "Folk and the OST"
+    );
+}
+
+/// **The v8 backfill.** A pre-v8 baz held exactly one folder, so every row it
+/// wrote came from that folder — a fact the config file still holds and the
+/// row's own path still confirms. `adopt_root` states it, once, and both halves
+/// are checked: a row is claimed only if it names no root *and* lies under this
+/// one.
+#[test]
+fn adopting_a_root_claims_the_rows_under_it_and_only_those() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    write_v7_database(&db);
+    let mut library = Library::open(&db).expect("open migrates to v8");
+
+    // The fixture's five rows all live under `/m`. A sixth, from the folder an
+    // agent's fixtures once landed in, does not — and must not be claimed.
+    library
+        .add_tracks(vec![bare("/elsewhere/stray.flac")])
+        .expect("a row outside the root");
+
+    assert_eq!(library.adopt_root(Path::new("/m")).expect("adopt"), 5);
+    assert_eq!(
+        library.root_stats(Path::new("/m")).tracks,
+        5,
+        "every row under the folder now names it"
+    );
+    assert_eq!(
+        library.unrooted_tracks(),
+        1,
+        "and the row from somewhere else still belongs to nobody"
+    );
+    assert_eq!(
+        library.root_stats(Path::new("/m")).last_scan_ns,
+        None,
+        "adopting is not scanning"
+    );
+
+    // Idempotent: a second launch adopts nothing, because there is nothing left
+    // to adopt.
+    assert_eq!(library.adopt_root(Path::new("/m")).expect("adopt"), 0);
+
+    // Adoption never overrules a root a scan recorded. A nested folder listed
+    // second gets the rows the first one did not claim, which here is none.
+    assert_eq!(library.adopt_root(Path::new("/m/FLAC")).expect("adopt"), 0);
+    assert_eq!(library.root_stats(Path::new("/m/FLAC")).tracks, 0);
+    assert_eq!(library.root_stats(Path::new("/m")).tracks, 5);
+
+    // Durable, which is the whole point: the next launch reads the roots back
+    // rather than adopting again.
+    drop(library);
+    let reopened = Library::open(&db).expect("reopen");
+    assert_eq!(reopened.root_stats(Path::new("/m")).tracks, 5);
+    assert_eq!(reopened.unrooted_tracks(), 1);
+}
+
+/// A scan records the root it walked, and a rescan can **re-home** a row — the
+/// one way `root` differs from `first_seen_ns`, which no rescan may move.
+#[test]
+fn a_scan_records_its_root_and_a_later_scan_can_rehome_a_row() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let mut library = Library::open(&db).expect("open");
+
+    library
+        .add_tracks_under(Some(Path::new("/first")), vec![bare("/first/a.flac")])
+        .expect("add");
+    let first_seen = library.albums()[0].first_seen_ns.expect("a first seen");
+    assert_eq!(library.root_stats(Path::new("/first")).tracks, 1);
+
+    // The listener removed `/first` and added `/second`, which is a symlink
+    // onto the same tree: the next walk reads the same path under a new name.
+    library
+        .add_tracks_under(Some(Path::new("/second")), vec![bare("/first/a.flac")])
+        .expect("rescan");
+    assert_eq!(library.len(), 1, "an upsert, not a duplicate");
+    assert_eq!(library.root_stats(Path::new("/first")).tracks, 0);
+    assert_eq!(library.root_stats(Path::new("/second")).tracks, 1);
+    assert_eq!(
+        library.albums()[0].first_seen_ns,
+        Some(first_seen),
+        "re-homing a row is not re-adding it"
+    );
+
+    // A caller that names **no** root says nothing about the root, rather than
+    // clearing it — `add_tracks` is not a way to orphan a row.
+    library
+        .add_tracks(vec![bare("/first/a.flac")])
+        .expect("add");
+    assert_eq!(library.root_stats(Path::new("/second")).tracks, 1);
+    assert_eq!(library.unrooted_tracks(), 0);
+
+    drop(library);
+    let reopened = Library::open(&db).expect("reopen");
+    assert_eq!(reopened.root_stats(Path::new("/second")).tracks, 1);
+}
+
+/// Removing a folder **forgets its tracks** (ADR-0022 §4) — keyed on the
+/// recorded root, so a nested folder the listener kept does not lose the rows
+/// it holds. And a scan time is recorded and read back.
+#[test]
+fn forgetting_a_root_takes_its_rows_and_leaves_a_nested_roots_alone() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let mut library = Library::open(&db).expect("open");
+
+    // Two folders, one nested inside the other, each holding rows that a path
+    // prefix could not tell apart: every one of these paths is under `/m`.
+    library
+        .add_tracks_under(
+            Some(Path::new("/m")),
+            vec![bare("/m/Live/a.flac"), bare("/m/Studio/b.flac")],
+        )
+        .expect("add");
+    library
+        .add_tracks_under(Some(Path::new("/m/Live")), vec![bare("/m/Live/c.flac")])
+        .expect("add");
+    library
+        .record_scan(Path::new("/m/Live"), 1_800_000_000_000_000_000)
+        .expect("record");
+    assert_eq!(
+        library.root_stats(Path::new("/m/Live")).last_scan_ns,
+        Some(1_800_000_000_000_000_000)
+    );
+
+    assert_eq!(library.forget_root(Path::new("/m")).expect("forget"), 2);
+    assert_eq!(library.len(), 1, "the nested folder's row is untouched");
+    assert_eq!(
+        library.tracks().next().expect("the survivor").path,
+        PathBuf::from("/m/Live/c.flac"),
+        "a path prefix would have taken this one too"
+    );
+    assert_eq!(
+        library.root_stats(Path::new("/m")),
+        baz_core::index::RootStats::default()
+    );
+    assert_eq!(
+        library.root_stats(Path::new("/m/Live")).last_scan_ns,
+        Some(1_800_000_000_000_000_000),
+        "and the folder that was kept keeps its record"
+    );
+
+    // Durable, and the search index went with it.
+    assert!(library.known_files().len() == 1);
+    drop(library);
+    let reopened = Library::open(&db).expect("reopen");
+    assert_eq!(reopened.len(), 1);
+    assert_eq!(reopened.root_stats(Path::new("/m/Live")).tracks, 1);
 }

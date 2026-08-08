@@ -88,6 +88,16 @@ const WINDOW: Size = Size::new(1280.0, 860.0);
 /// broke a documented one.
 const COLUMN_HOLD_TICK: Duration = Duration::from_millis(40);
 
+/// How often the shell asks whether a periodic rescan is due (ADR-0022 §3).
+///
+/// Subscribed **only while no scan is running**, and it is not the interval —
+/// [`scan::REFRESH_INTERVAL`] is, and [`scan::Refresh`] holds the arithmetic.
+/// This is only how often the question is asked, so the answer does not depend
+/// on when the timer happened to start. One wake a minute against a five-minute
+/// interval costs nothing measurable and keeps the refresh from drifting by up
+/// to a whole period.
+const REFRESH_TICK: Duration = Duration::from_secs(60);
+
 /// The shelf scrollable's id — the update loop scrolls it back to the top
 /// when the query changes, and [`crate::views::shelf`] attaches it.
 pub(crate) fn scroll_id() -> scrollable::Id {
@@ -346,6 +356,27 @@ pub(crate) enum Message {
     ReplayGainNoTagPreamp(i32),
     /// Settings panel: arm or disarm clipping prevention.
     ReplayGainPreventClipping(bool),
+    /// Settings place: show this section of the place (index into
+    /// `views::settings::SECTIONS`).
+    SettingsSection(usize),
+    /// Settings place: the add-a-folder field changed (ADR-0022).
+    MusicFolderInput(String),
+    /// Settings place: add the folder in the field, if it is one.
+    AddMusicFolder,
+    /// Settings place: the **first** press of a folder's Remove. Arms the
+    /// confirmation and does nothing else — see `views::settings::folder_block`
+    /// for why removing is two presses.
+    ConfirmRemoveMusicFolder(usize),
+    /// Settings place: the confirming press. Stops holding the folder and
+    /// forgets its tracks; the files on disk are untouched.
+    RemoveMusicFolder(usize),
+    /// Settings place: the armed removal was declined.
+    CancelRemoveMusicFolder,
+    /// Settings place: **force sync** — re-read every file in every folder,
+    /// ignoring stamps (ADR-0022 §3).
+    ForceSync,
+    /// The periodic-refresh clock ticked; a rescan may be due (ADR-0022 §3).
+    RefreshTick,
     /// An engine event arrived over the bridge subscription.
     Playback(PlayerEvent),
     /// An off-thread thumbnail decode finished (`None` = no usable art).
@@ -473,6 +504,13 @@ struct App {
     /// a shelf to hold it — so the first-run path can hand it to the shelf the
     /// setup screen eventually opens.
     group_key: GroupKey,
+    /// Which section of the Settings place is showing (an index into
+    /// `views::settings::SECTIONS`).
+    ///
+    /// Session state, like every other "where am I looking" answer in the shell
+    /// and for `crate::panels`' reason: which section you last read is not a
+    /// standing decision, so it is not in `config.toml`.
+    settings_section: usize,
 }
 
 enum Screen {
@@ -554,17 +592,28 @@ impl App {
         let group_key = stored
             .as_ref()
             .map_or(GroupKey::Artist, |config| config.group_key);
-        let dir = cli_dir.or_else(|| stored.and_then(|config| config.music_dir));
-        let (screen, task) = match dir {
-            None => (Screen::Setup(Setup::fresh(None)), Task::none()),
-            Some(dir) => match Shelf::open(dir, group_key) {
+        // The folders baz holds this run (ADR-0022): what the config remembers,
+        // with a `baz DIR` argument **added to the front** rather than replacing
+        // them. Pointing baz at a folder for an afternoon must not silently
+        // forget the other three — and the one that was named on the command
+        // line is the one being asked for, so it is scanned first.
+        let mut dirs: Vec<PathBuf> = stored.map(|config| config.music_dirs).unwrap_or_default();
+        if let Some(dir) = cli_dir {
+            dirs.retain(|held| held != &dir);
+            dirs.insert(0, dir);
+        }
+        let (screen, task) = if dirs.is_empty() {
+            (Screen::Setup(Setup::fresh(None)), Task::none())
+        } else {
+            match Shelf::open(dirs, group_key) {
                 Ok((shelf, task)) => (Screen::Shelf(Box::new(shelf)), task),
                 Err(error) => (Screen::Setup(Setup::fresh(Some(error))), Task::none()),
-            },
+            }
         };
         let mut app = Self {
             _history_ledger: history_ledger,
             group_key,
+            settings_section: 0,
             started,
             first_frame_logged: false,
             screen,
@@ -615,6 +664,13 @@ impl App {
                 if matches!(self.screen, Screen::Shelf(_)) {
                     self.place = self.place.toggled();
                 }
+                Task::none()
+            }
+            // The Settings place's spine. Session state and deliberately not
+            // persisted, on `crate::panels`' rule: which section you were last
+            // reading is not a standing decision.
+            Message::SettingsSection(section) => {
+                self.settings_section = section;
                 Task::none()
             }
             // The one binding that needs both halves of the shell: what to do
@@ -885,7 +941,7 @@ impl App {
             setup.error = Some(format!("`{}` is not a directory", dir.display()));
             return Task::none();
         }
-        match Shelf::open(dir, self.group_key) {
+        match Shelf::open(vec![dir], self.group_key) {
             Ok((state, task)) => {
                 self.screen = Screen::Shelf(Box::new(state));
                 task
@@ -1500,8 +1556,17 @@ impl App {
         let ink = self.ink();
         let screen: Element<'_, Message> = match (&self.screen, self.place) {
             (Screen::Setup(setup), _) => return views::setup::view(setup),
-            (Screen::Shelf(_), Place::Settings) => {
-                views::settings::view(&self.player, self.window.width)
+            (Screen::Shelf(state), Place::Settings) => {
+                // Built here rather than inside the view: the folders come from
+                // the shell's own list and their contents from the index, and a
+                // view that reached into the library would be a second place
+                // that knows how roots are counted.
+                views::settings::view(
+                    &self.player,
+                    self.window.width,
+                    self.settings_section,
+                    state.library_view(),
+                )
             }
             (Screen::Shelf(state), Place::Library) => {
                 state.view(&self.player, ink, self.warmth.value())
@@ -1628,6 +1693,14 @@ impl App {
         if let Screen::Shelf(state) = &self.screen {
             if state.scanning {
                 subs.push(iced::time::every(Duration::from_millis(100)).map(|_| Message::ScanTick));
+            } else {
+                // The periodic refresh's only clock (ADR-0022 §3), and it runs
+                // **only while no scan is running** — the two are alternatives,
+                // never both. It ticks far more often than the interval so that
+                // "due" is answered by the arithmetic in `scan::Refresh` rather
+                // than by the timer's phase; at one wake a minute this is
+                // nothing beside the 10 Hz tick it replaces.
+                subs.push(iced::time::every(REFRESH_TICK).map(|_| Message::RefreshTick));
             }
             // Only while a tile click is holding the grid's columns still, and
             // never otherwise: the hold's expiry is the one layout change with
@@ -1728,6 +1801,24 @@ pub(crate) struct Shelf {
     /// or cover files may have arrived for early albums.
     no_art: HashSet<u64>,
     scan_rx: Option<Receiver<ScanUpdate>>,
+    /// The music folders baz is holding, in the listener's order (ADR-0022).
+    ///
+    /// The shell's copy of `config.music_dirs`: the config file is the durable
+    /// record and this is what is scanned, listed and removed from. They are
+    /// kept in step by writing the config every time this moves.
+    pub(crate) roots: Vec<PathBuf>,
+    /// The folders the most recent pass could not walk at all. Cleared at the
+    /// start of each pass, so it always describes the latest attempt rather
+    /// than accumulating every share that was ever offline.
+    unavailable: HashSet<PathBuf>,
+    /// The periodic-refresh clock (ADR-0022 §3).
+    refresh: scan::Refresh,
+    /// What has been typed into the Settings place's add-a-folder field.
+    folder_input: String,
+    /// Why the last folder submitted was not added, if it was not.
+    folder_error: Option<String>,
+    /// Which folder's Remove is armed and waiting for its confirming press.
+    folder_pending_removal: Option<usize>,
     /// Whether the scan worker is still running.
     pub(crate) scanning: bool,
     /// Files the scan could not read.
@@ -1844,9 +1935,9 @@ pub(crate) struct Pull {
 }
 
 impl Shelf {
-    /// Open the library DB, hydrate the shelf, persist the chosen dir, and
+    /// Open the library DB, hydrate the shelf, persist the chosen folders, and
     /// kick off the scan worker. Errors are user-presentable strings.
-    fn open(music_dir: PathBuf, group_key: GroupKey) -> Result<(Self, Task<Message>), String> {
+    fn open(roots: Vec<PathBuf>, group_key: GroupKey) -> Result<(Self, Task<Message>), String> {
         let t0 = Instant::now();
         let db_path = config::library_db_file()
             .ok_or_else(|| "no usable data directory on this system".to_owned())?;
@@ -1854,17 +1945,27 @@ impl Shelf {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
         }
-        let library = Library::open(&db_path)
+        let mut library = Library::open(&db_path)
             .map_err(|e| format!("cannot open library at {}: {e}", db_path.display()))?;
+        // Schema v8's backfill, and the one place that can make it (ADR-0022):
+        // `baz-core` cannot know which folder a pre-v8 row came from, and this
+        // is the code that reads the config file that does. Rows already naming
+        // a root are untouched, and a row under none of these folders stays
+        // rootless — which means unprunable, the safe direction.
+        adopt_roots(&mut library, &roots);
         // The ledger, read once. A missing file is an empty history and not an
         // error; an unreadable one costs the PLAYED key its detail and nothing
         // else, so it is a note rather than a `problem`.
         let history = read_history();
 
-        persist_music_dir(&music_dir);
+        persist_roots(&roots);
         // The snapshot is what makes the scan incremental — and the only
         // rows it is ever allowed to prune (see `scan::vanished`).
-        let scan_rx = scan::spawn(music_dir, library.known_files());
+        let scan_rx = scan::spawn(
+            roots.clone(),
+            library.known_files(),
+            scan::ScanMode::Incremental,
+        );
 
         let mut shelf = Self {
             library,
@@ -1883,6 +1984,12 @@ impl Shelf {
             pending: HashSet::new(),
             no_art: HashSet::new(),
             scan_rx: Some(scan_rx),
+            roots,
+            unavailable: HashSet::new(),
+            refresh: scan::Refresh::new(scan::REFRESH_INTERVAL, Instant::now()),
+            folder_input: String::new(),
+            folder_error: None,
+            folder_pending_removal: None,
             scanning: true,
             files_skipped: 0,
             problem: None,
@@ -1920,6 +2027,13 @@ impl Shelf {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        // The Library section's own small machine, answered first and
+        // separately — six messages that all resolve to "change which folders
+        // baz holds, then rescan", exactly as the volume's nine are answered
+        // apart from the shell's own arms.
+        if let Some(task) = self.update_library(&message) {
+            return task;
+        }
         match message {
             Message::SearchChanged(query) => {
                 self.query = query;
@@ -2414,28 +2528,231 @@ impl Shelf {
         }
     }
 
+    /// Answer a message that only the folders baz holds care about, reporting
+    /// whether it was one (ADR-0022).
+    ///
+    /// Every one of them ends in the same two acts — the list moves, and a scan
+    /// starts or does not — so they are one machine rather than six arms
+    /// scattered through the shelf's own.
+    fn update_library(&mut self, message: &Message) -> Option<Task<Message>> {
+        match message {
+            // The periodic refresh. The clock says whether it is due; a pass
+            // already running always says no.
+            Message::RefreshTick => {
+                if self.refresh.due(Instant::now(), self.scanning) {
+                    println!("[scan] periodic refresh");
+                    self.start_scan(scan::ScanMode::Incremental);
+                }
+            }
+            Message::MusicFolderInput(value) => {
+                self.folder_input.clone_from(value);
+                self.folder_error = None;
+            }
+            Message::AddMusicFolder => return Some(self.add_root()),
+            // The first press arms; the second acts. See
+            // `views::settings::folder_block` for why it is two.
+            Message::ConfirmRemoveMusicFolder(index) => {
+                self.folder_pending_removal = Some(*index);
+            }
+            Message::CancelRemoveMusicFolder => self.folder_pending_removal = None,
+            Message::RemoveMusicFolder(index) => return Some(self.remove_root(*index)),
+            Message::ForceSync => {
+                if !self.scanning {
+                    println!("[scan] force sync requested");
+                    self.start_scan(scan::ScanMode::Force);
+                }
+            }
+            _ => return None,
+        }
+        Some(Task::none())
+    }
+
+    /// What the Settings place's Library section draws (ADR-0022).
+    ///
+    /// A projection built here rather than in the view, because it is the join
+    /// of two things this struct holds: the folders the shell is scanning, and
+    /// what the index records under each of them.
+    fn library_view(&self) -> views::settings::LibraryView<'_> {
+        views::settings::LibraryView {
+            folders: self
+                .roots
+                .iter()
+                .map(|root| {
+                    let stats = self.library.root_stats(root);
+                    views::settings::FolderRow {
+                        path: root.clone(),
+                        tracks: stats.tracks,
+                        last_scan_ns: stats.last_scan_ns,
+                        unavailable: self.unavailable.contains(root),
+                    }
+                })
+                .collect(),
+            input: &self.folder_input,
+            error: self.folder_error.as_deref(),
+            pending_removal: self.folder_pending_removal,
+            scanning: self.scanning,
+            unrooted: self.library.unrooted_tracks(),
+            now_ns: now_ns(),
+        }
+    }
+
+    /// Add the folder in the Settings field and scan it.
+    ///
+    /// The same validation the first-run screen applies, in the same words: a
+    /// path that is not a directory is refused with the reason, and nothing
+    /// moves. A folder already held is not added twice — it would be walked
+    /// twice for one set of rows.
+    fn add_root(&mut self) -> Task<Message> {
+        let dir = expand_tilde(self.folder_input.trim());
+        if dir.as_os_str().is_empty() {
+            return Task::none();
+        }
+        if !dir.is_dir() {
+            self.folder_error = Some(format!("`{}` is not a directory", dir.display()));
+            return Task::none();
+        }
+        if self.roots.contains(&dir) {
+            self.folder_error = Some(format!("`{}` is already here", dir.display()));
+            return Task::none();
+        }
+        self.folder_input.clear();
+        self.folder_error = None;
+        self.folder_pending_removal = None;
+        self.roots.push(dir.clone());
+        persist_roots(&self.roots);
+        // A folder added now may hold rows an older baz left rootless — the
+        // pre-v8 population this is the only cure for. Claim them before the
+        // scan, so the walk that follows can prune them if they are gone.
+        adopt_roots(&mut self.library, std::slice::from_ref(&dir));
+        println!("[config] holding {}", dir.display());
+        // Incremental, not forced: a folder that overlaps one baz already holds
+        // must not cost a re-read of every file in it.
+        self.start_scan(scan::ScanMode::Incremental);
+        Task::none()
+    }
+
+    /// Stop holding a folder, and **forget its tracks** (ADR-0022 §4).
+    ///
+    /// Nothing on disk is touched. What goes is the index's record of the
+    /// folder: its rows, and its scan time. The argument for forgetting rather
+    /// than keeping is in the ADR and in `Library::forget_root` — in short, a
+    /// folder baz no longer holds is one baz can no longer refresh, so keeping
+    /// its albums would leave a listener with rows nothing can ever correct or
+    /// remove.
+    fn remove_root(&mut self, index: usize) -> Task<Message> {
+        self.folder_pending_removal = None;
+        if index >= self.roots.len() {
+            return Task::none();
+        }
+        let root = self.roots.remove(index);
+        self.unavailable.remove(&root);
+        persist_roots(&self.roots);
+        match self.library.forget_root(&root) {
+            Ok(count) => println!("[index] {count} tracks forgotten with {}", root.display()),
+            Err(error) => {
+                println!("[index] could not forget {}: {error}", root.display());
+                self.problem = Some(format!("could not forget that folder: {error}"));
+            }
+        }
+        // The inspector and the art caches are keyed by album id, and the
+        // albums a forgotten folder held are gone — so the rebuild has to be
+        // followed by the same clean-up a finished scan does.
+        self.selection.close();
+        self.no_art.clear();
+        self.rebuild_shelves();
+        self.request_visible_thumbs()
+    }
+
+    /// Start a scan of every folder baz holds, in `mode`, replacing whatever
+    /// pass was running.
+    ///
+    /// The refresh clock is restarted here rather than only on completion, so
+    /// that a force sync or a newly added folder also pushes the automatic
+    /// rescan out — a listener who has just refreshed does not need baz to do
+    /// it again in ten seconds.
+    fn start_scan(&mut self, mode: scan::ScanMode) {
+        self.unavailable.clear();
+        self.files_skipped = 0;
+        self.refresh.restarted(Instant::now());
+        if self.roots.is_empty() {
+            self.scan_rx = None;
+            self.scanning = false;
+            return;
+        }
+        self.scan_rx = Some(scan::spawn(
+            self.roots.clone(),
+            self.library.known_files(),
+            mode,
+        ));
+        self.scanning = true;
+    }
+
     /// Apply every pending scan update: one `add_tracks` + one view-model
     /// rebuild per tick regardless of how many batches arrived.
     fn drain_scan(&mut self) -> Task<Message> {
-        let Some(rx) = &self.scan_rx else {
+        let Some(drained) = self.collect_scan() else {
             return Task::none();
         };
-        let mut fresh_tracks: Vec<baz_core::library::TrackMeta> = Vec::new();
+        let Drained {
+            fresh_tracks,
+            vanished,
+            scanned,
+            missing,
+            finished,
+        } = drained;
+        self.apply_scan(fresh_tracks, &vanished, scanned, missing, finished)
+    }
+
+    /// Take everything the worker has said since the last tick, without
+    /// touching the index — the receiving half of [`Shelf::drain_scan`].
+    fn collect_scan(&mut self) -> Option<Drained> {
+        let rx = self.scan_rx.as_ref()?;
+        // Batches are kept per root, because the root is what makes the write
+        // an `add_tracks_under`: it is the fact removal's second gate will read
+        // back. A tick usually holds one root's worth; a small library can hold
+        // several, and the order is the order they arrived in.
+        let mut fresh_tracks: Vec<(PathBuf, Vec<baz_core::library::TrackMeta>)> = Vec::new();
         let mut vanished: Vec<std::path::PathBuf> = Vec::new();
+        let mut scanned: Vec<(PathBuf, i64)> = Vec::new();
+        let mut missing: Vec<(PathBuf, String)> = Vec::new();
         let mut finished = false;
         loop {
             match rx.try_recv() {
-                Ok(ScanUpdate::Batch { tracks, failed }) => {
+                Ok(ScanUpdate::Batch {
+                    root,
+                    tracks,
+                    failed,
+                }) => {
                     self.files_skipped += failed;
-                    fresh_tracks.extend(tracks);
+                    match fresh_tracks.last_mut() {
+                        Some((held, batch)) if *held == root => batch.extend(tracks),
+                        _ => fresh_tracks.push((root, tracks)),
+                    }
                 }
                 Ok(ScanUpdate::Removed { paths }) => vanished.extend(paths),
+                Ok(ScanUpdate::RootDone {
+                    root,
+                    at_ns,
+                    added,
+                    updated,
+                    unchanged,
+                    failed,
+                }) => {
+                    println!(
+                        "[scan] {}: {added} added, {updated} updated, {unchanged} unchanged, \
+                         {failed} skipped",
+                        root.display()
+                    );
+                    scanned.push((root, at_ns));
+                }
+                Ok(ScanUpdate::RootUnavailable { root, reason }) => missing.push((root, reason)),
                 Ok(ScanUpdate::Done {
                     added,
                     updated,
                     unchanged,
                     removed,
                     failed,
+                    unavailable,
                     elapsed,
                 }) => {
                     let secs = elapsed.as_secs_f64();
@@ -2447,7 +2764,8 @@ impl Shelf {
                     let rate = if secs > 0.0 { read as f64 / secs } else { 0.0 };
                     println!(
                         "[scan] done: {added} added, {updated} updated, {unchanged} unchanged, \
-                         {removed} removed, {failed} files skipped, {secs:.1} s ({rate:.0} tracks/s)"
+                         {removed} removed, {failed} files skipped, \
+                         {unavailable} folders unavailable, {secs:.1} s ({rate:.0} tracks/s)"
                     );
                     finished = true;
                     break;
@@ -2465,15 +2783,67 @@ impl Shelf {
                 }
             }
         }
+        Some(Drained {
+            fresh_tracks,
+            vanished,
+            scanned,
+            missing,
+            finished,
+        })
+    }
+
+    /// Write what one tick's worth of scan updates said, rebuild the shelf, and
+    /// report the folders that were not there — the applying half of
+    /// [`Shelf::drain_scan`].
+    fn apply_scan(
+        &mut self,
+        fresh_tracks: Vec<(PathBuf, Vec<baz_core::library::TrackMeta>)>,
+        vanished: &[PathBuf],
+        scanned: Vec<(PathBuf, i64)>,
+        missing: Vec<(PathBuf, String)>,
+        finished: bool,
+    ) -> Task<Message> {
+        // A folder that is not reachable right now: never a scan failure — the
+        // pass carried on and pruned nothing from it (ADR-0022 §2).
+        //
+        // The status line gets a **count**, not a path, and that is a frame
+        // constraint rather than terseness: the top bar's note is a single
+        // unwrapped line sharing its row with the counts and `Settings`, and a
+        // message carrying `/mnt/nas/Music/Archive` wraps it to two and pushes
+        // `Settings` off the strip. Which folder it was, and that nothing was
+        // removed from it, is said per folder in the Settings place — where
+        // there is room to say it properly.
+        let absent = missing.len();
+        for (root, reason) in missing {
+            println!("[scan] {} is unavailable: {reason}", root.display());
+            self.unavailable.insert(root);
+        }
+        if absent == 1 {
+            self.problem = Some("1 folder is not reachable".to_owned());
+        } else if absent > 1 {
+            self.problem = Some(format!("{absent} folders are not reachable"));
+        }
+        // When a folder's walk finished, so the Settings place can say when baz
+        // last looked at it.
+        for (root, at_ns) in scanned {
+            if let Err(error) = self.library.record_scan(&root, at_ns) {
+                println!(
+                    "[index] could not record the scan of {}: {error}",
+                    root.display()
+                );
+            }
+        }
 
         let mut task = Task::none();
         if !fresh_tracks.is_empty() || !vanished.is_empty() {
-            if let Err(error) = self.library.add_tracks(fresh_tracks) {
-                println!("[index] write failed: {error}");
-                self.problem = Some(format!("library write failed: {error}"));
+            for (root, tracks) in fresh_tracks {
+                if let Err(error) = self.library.add_tracks_under(Some(&root), tracks) {
+                    println!("[index] write failed: {error}");
+                    self.problem = Some(format!("library write failed: {error}"));
+                }
             }
             if !vanished.is_empty() {
-                match self.library.remove_tracks(&vanished) {
+                match self.library.remove_tracks(vanished) {
                     Ok(count) => println!("[index] {count} vanished tracks removed"),
                     Err(error) => {
                         println!("[index] removal failed: {error}");
@@ -2495,6 +2865,9 @@ impl Shelf {
         if finished {
             self.scanning = false;
             self.scan_rx = None;
+            // The periodic refresh is a gap *between* passes: the clock starts
+            // when this one finishes, not when the next one is wanted.
+            self.refresh.restarted(Instant::now());
             // Early albums may have gained art (late tracks, cover files
             // written mid-scan): allow one clean retry pass.
             self.no_art.clear();
@@ -2625,6 +2998,26 @@ impl Shelf {
     }
 }
 
+/// One tick's worth of scan updates, taken off the channel and not yet applied
+/// (`Shelf::collect_scan` → `Shelf::apply_scan`).
+///
+/// The split exists because the two halves want different borrows: receiving
+/// holds the channel, and applying holds the library. Keeping them apart is
+/// also what makes the "one `add_tracks_under` per root per tick" property
+/// visible rather than buried in a loop.
+struct Drained {
+    /// Tracks read this tick, grouped by the root that produced them.
+    fresh_tracks: Vec<(PathBuf, Vec<baz_core::library::TrackMeta>)>,
+    /// Rows the removal pass proved are gone.
+    vanished: Vec<PathBuf>,
+    /// Roots whose walk finished, with the moment it did.
+    scanned: Vec<(PathBuf, i64)>,
+    /// Roots that could not be walked, with the reason.
+    missing: Vec<(PathBuf, String)>,
+    /// Whether the pass is over.
+    finished: bool,
+}
+
 /// How much width the album inspector is taking from the shelf.
 ///
 /// The one place pixels meet [`crate::selection`]'s pure state machine: the
@@ -2661,16 +3054,57 @@ fn message_for(request: mpris::Request) -> Message {
     }
 }
 
-/// Persist the chosen music dir; best-effort with a log, never fatal — a
+/// Persist the folders baz holds; best-effort with a log, never fatal — a
 /// read-only config dir must not block listening to music.
-fn persist_music_dir(music_dir: &std::path::Path) {
-    if music_dir.to_str().is_none() {
-        println!(
-            "[config] music dir is not valid UTF-8; it cannot be written to config.toml \
-             (this session is unaffected)"
-        );
+///
+/// This is also where the silent migration lands: [`persist`] reads the
+/// file first, so a document that still carries the pre-ADR-0022 `music_dir` is
+/// parsed into the list, replaced by it, and written back under the new key
+/// with everything else in the document intact.
+fn persist_roots(roots: &[PathBuf]) {
+    for root in roots {
+        if root.to_str().is_none() {
+            println!(
+                "[config] {} is not valid UTF-8; it cannot be written to config.toml \
+                 (this session is unaffected)",
+                root.display()
+            );
+        }
     }
-    persist(|config| config.music_dir = Some(music_dir.to_path_buf()));
+    persist(|config| config.music_dirs = roots.to_vec());
+}
+
+/// Claim the index's rootless rows for the folders baz holds — schema v8's
+/// backfill, made from the one place that knows both halves (ADR-0022).
+///
+/// Best-effort with a log: a failure leaves those rows rootless, which costs
+/// them nothing but the ability to be pruned. In order, so a file under two
+/// nested folders goes to the one the listener listed first.
+fn adopt_roots(library: &mut Library, roots: &[PathBuf]) {
+    for root in roots {
+        match library.adopt_root(root) {
+            Ok(0) => {}
+            Ok(count) => println!("[index] {count} rows now recorded under {}", root.display()),
+            Err(error) => println!(
+                "[index] could not adopt rows under {}: {error}",
+                root.display()
+            ),
+        }
+    }
+}
+
+/// The moment now, in nanoseconds since the Unix epoch — what the Settings
+/// place measures a folder's last scan against.
+///
+/// Saturating rather than panicking on an absurd clock, exactly as the index's
+/// own first-seen stamp is.
+fn now_ns() -> i64 {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(since) => i64::try_from(since.as_nanos()).unwrap_or(i64::MAX),
+        Err(before) => {
+            i64::try_from(before.duration().as_nanos()).map_or(i64::MIN, i64::saturating_neg)
+        }
+    }
 }
 
 /// Remember how the wall is arranged (ADR-0017 §1.3: view *state*, persisted,
