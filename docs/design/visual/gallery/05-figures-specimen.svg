@@ -1,0 +1,187 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1000" viewBox="0 0 1280 1000">
+<title>baz figures specimen — no monospace</title>
+
+<rect x="0.00" y="0.00" width="1280.00" height="1000.00" fill="#0C0D0E"/>
+<text x="48.00" y="60.00" font-family="IBM Plex Sans" font-size="32" font-weight="600" fill="#E8E4DB">Figures without a monospace</text>
+<text x="48.00" y="88.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1">IBM Plex Sans ships tabular figures by default. Measured with HarfBuzz, default features on — what cosmic-text will draw.</text>
+<text x="48.00" y="132.00" font-family="IBM Plex Sans" font-size="12" font-weight="500" fill="#6C6A66">1 · EVERY DIGIT ADVANCES 600/1000 EM, IN ALL THREE WEIGHTS</text>
+<line x1="48.00" y1="140.50" x2="1232.00" y2="140.50" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.07"/>
+<text x="48.00" y="190.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Regular</text>
+<rect x="138.00" y="160.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="138.50" y1="160.00" x2="138.50" y2="204.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="148.20" y="192.00" font-family="IBM Plex Sans" font-size="34" font-weight="400" fill="#E8E4DB" text-anchor="middle">0</text>
+<rect x="158.40" y="160.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="158.90" y1="160.00" x2="158.90" y2="204.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="168.60" y="192.00" font-family="IBM Plex Sans" font-size="34" font-weight="400" fill="#E8E4DB" text-anchor="middle">1</text>
+<rect x="178.80" y="160.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="179.30" y1="160.00" x2="179.30" y2="204.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="189.00" y="192.00" font-family="IBM Plex Sans" font-size="34" font-weight="400" fill="#E8E4DB" text-anchor="middle">2</text>
+<rect x="199.20" y="160.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="199.70" y1="160.00" x2="199.70" y2="204.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="209.40" y="192.00" font-family="IBM Plex Sans" font-size="34" font-weight="400" fill="#E8E4DB" text-anchor="middle">3</text>
+<rect x="219.60" y="160.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="220.10" y1="160.00" x2="220.10" y2="204.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="229.80" y="192.00" font-family="IBM Plex Sans" font-size="34" font-weight="400" fill="#E8E4DB" text-anchor="middle">4</text>
+<rect x="240.00" y="160.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="240.50" y1="160.00" x2="240.50" y2="204.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="250.20" y="192.00" font-family="IBM Plex Sans" font-size="34" font-weight="400" fill="#E8E4DB" text-anchor="middle">5</text>
+<rect x="260.40" y="160.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="260.90" y1="160.00" x2="260.90" y2="204.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="270.60" y="192.00" font-family="IBM Plex Sans" font-size="34" font-weight="400" fill="#E8E4DB" text-anchor="middle">6</text>
+<rect x="280.80" y="160.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="281.30" y1="160.00" x2="281.30" y2="204.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="291.00" y="192.00" font-family="IBM Plex Sans" font-size="34" font-weight="400" fill="#E8E4DB" text-anchor="middle">7</text>
+<rect x="301.20" y="160.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="301.70" y1="160.00" x2="301.70" y2="204.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="311.40" y="192.00" font-family="IBM Plex Sans" font-size="34" font-weight="400" fill="#E8E4DB" text-anchor="middle">8</text>
+<rect x="321.60" y="160.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="322.10" y1="160.00" x2="322.10" y2="204.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="331.80" y="192.00" font-family="IBM Plex Sans" font-size="34" font-weight="400" fill="#E8E4DB" text-anchor="middle">9</text>
+<line x1="342.50" y1="160.00" x2="342.50" y2="204.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="354.00" y="190.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">20.4 px at 34 px · identical for 0–9</text>
+<text x="48.00" y="248.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Medium</text>
+<rect x="138.00" y="218.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="138.50" y1="218.00" x2="138.50" y2="262.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="148.20" y="250.00" font-family="IBM Plex Sans" font-size="34" font-weight="500" fill="#E8E4DB" text-anchor="middle">0</text>
+<rect x="158.40" y="218.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="158.90" y1="218.00" x2="158.90" y2="262.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="168.60" y="250.00" font-family="IBM Plex Sans" font-size="34" font-weight="500" fill="#E8E4DB" text-anchor="middle">1</text>
+<rect x="178.80" y="218.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="179.30" y1="218.00" x2="179.30" y2="262.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="189.00" y="250.00" font-family="IBM Plex Sans" font-size="34" font-weight="500" fill="#E8E4DB" text-anchor="middle">2</text>
+<rect x="199.20" y="218.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="199.70" y1="218.00" x2="199.70" y2="262.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="209.40" y="250.00" font-family="IBM Plex Sans" font-size="34" font-weight="500" fill="#E8E4DB" text-anchor="middle">3</text>
+<rect x="219.60" y="218.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="220.10" y1="218.00" x2="220.10" y2="262.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="229.80" y="250.00" font-family="IBM Plex Sans" font-size="34" font-weight="500" fill="#E8E4DB" text-anchor="middle">4</text>
+<rect x="240.00" y="218.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="240.50" y1="218.00" x2="240.50" y2="262.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="250.20" y="250.00" font-family="IBM Plex Sans" font-size="34" font-weight="500" fill="#E8E4DB" text-anchor="middle">5</text>
+<rect x="260.40" y="218.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="260.90" y1="218.00" x2="260.90" y2="262.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="270.60" y="250.00" font-family="IBM Plex Sans" font-size="34" font-weight="500" fill="#E8E4DB" text-anchor="middle">6</text>
+<rect x="280.80" y="218.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="281.30" y1="218.00" x2="281.30" y2="262.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="291.00" y="250.00" font-family="IBM Plex Sans" font-size="34" font-weight="500" fill="#E8E4DB" text-anchor="middle">7</text>
+<rect x="301.20" y="218.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="301.70" y1="218.00" x2="301.70" y2="262.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="311.40" y="250.00" font-family="IBM Plex Sans" font-size="34" font-weight="500" fill="#E8E4DB" text-anchor="middle">8</text>
+<rect x="321.60" y="218.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="322.10" y1="218.00" x2="322.10" y2="262.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="331.80" y="250.00" font-family="IBM Plex Sans" font-size="34" font-weight="500" fill="#E8E4DB" text-anchor="middle">9</text>
+<line x1="342.50" y1="218.00" x2="342.50" y2="262.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="354.00" y="248.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">20.4 px at 34 px · identical for 0–9</text>
+<text x="48.00" y="306.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">SemiBold</text>
+<rect x="138.00" y="276.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="138.50" y1="276.00" x2="138.50" y2="320.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="148.20" y="308.00" font-family="IBM Plex Sans" font-size="34" font-weight="600" fill="#E8E4DB" text-anchor="middle">0</text>
+<rect x="158.40" y="276.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="158.90" y1="276.00" x2="158.90" y2="320.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="168.60" y="308.00" font-family="IBM Plex Sans" font-size="34" font-weight="600" fill="#E8E4DB" text-anchor="middle">1</text>
+<rect x="178.80" y="276.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="179.30" y1="276.00" x2="179.30" y2="320.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="189.00" y="308.00" font-family="IBM Plex Sans" font-size="34" font-weight="600" fill="#E8E4DB" text-anchor="middle">2</text>
+<rect x="199.20" y="276.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="199.70" y1="276.00" x2="199.70" y2="320.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="209.40" y="308.00" font-family="IBM Plex Sans" font-size="34" font-weight="600" fill="#E8E4DB" text-anchor="middle">3</text>
+<rect x="219.60" y="276.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="220.10" y1="276.00" x2="220.10" y2="320.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="229.80" y="308.00" font-family="IBM Plex Sans" font-size="34" font-weight="600" fill="#E8E4DB" text-anchor="middle">4</text>
+<rect x="240.00" y="276.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="240.50" y1="276.00" x2="240.50" y2="320.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="250.20" y="308.00" font-family="IBM Plex Sans" font-size="34" font-weight="600" fill="#E8E4DB" text-anchor="middle">5</text>
+<rect x="260.40" y="276.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="260.90" y1="276.00" x2="260.90" y2="320.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="270.60" y="308.00" font-family="IBM Plex Sans" font-size="34" font-weight="600" fill="#E8E4DB" text-anchor="middle">6</text>
+<rect x="280.80" y="276.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="281.30" y1="276.00" x2="281.30" y2="320.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="291.00" y="308.00" font-family="IBM Plex Sans" font-size="34" font-weight="600" fill="#E8E4DB" text-anchor="middle">7</text>
+<rect x="301.20" y="276.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="301.70" y1="276.00" x2="301.70" y2="320.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="311.40" y="308.00" font-family="IBM Plex Sans" font-size="34" font-weight="600" fill="#E8E4DB" text-anchor="middle">8</text>
+<rect x="321.60" y="276.00" width="20.40" height="44.00" fill="#141517"/>
+<line x1="322.10" y1="276.00" x2="322.10" y2="320.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="331.80" y="308.00" font-family="IBM Plex Sans" font-size="34" font-weight="600" fill="#E8E4DB" text-anchor="middle">9</text>
+<line x1="342.50" y1="276.00" x2="342.50" y2="320.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="354.00" y="306.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">20.4 px at 34 px · identical for 0–9</text>
+<text x="48.00" y="342.00" font-family="IBM Plex Sans" font-size="12" font-weight="500" fill="#6C6A66">2 · THE COLUMN THE MONO EXISTED FOR</text>
+<line x1="48.00" y1="350.50" x2="1232.00" y2="350.50" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.07"/>
+<text x="48.00" y="372.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">a real duration column, right-aligned</text>
+<text x="68.00" y="396.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#ABA8A1">Ready Lets Go</text>
+<text x="308.00" y="396.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB" text-anchor="end">0:57</text>
+<text x="68.00" y="415.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#ABA8A1">Music Is Math</text>
+<text x="308.00" y="415.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB" text-anchor="end">5:21</text>
+<text x="68.00" y="434.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#ABA8A1">Beware the Friendly Stranger</text>
+<text x="308.00" y="434.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB" text-anchor="end">0:38</text>
+<text x="68.00" y="453.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#ABA8A1">Gyroscope</text>
+<text x="308.00" y="453.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB" text-anchor="end">3:35</text>
+<text x="68.00" y="472.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#ABA8A1">Dandelion</text>
+<text x="308.00" y="472.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB" text-anchor="end">1:00</text>
+<text x="68.00" y="491.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#ABA8A1">Sunshine Recorder</text>
+<text x="308.00" y="491.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB" text-anchor="end">6:14</text>
+<text x="68.00" y="510.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#ABA8A1">In the Annexe</text>
+<text x="308.00" y="510.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB" text-anchor="end">1:22</text>
+<text x="68.00" y="529.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#ABA8A1">Julie and Candy</text>
+<text x="308.00" y="529.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB" text-anchor="end">6:12</text>
+<line x1="309.50" y1="384.00" x2="309.50" y2="538.00" stroke="#E3A14E" stroke-width="1" stroke-opacity="0.45"/>
+<text x="68.00" y="554.00" font-family="IBM Plex Sans" font-size="11" font-weight="400" fill="#6C6A66">one edge, every row — the pinned side is the one the eye follows</text>
+<text x="448.00" y="372.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">timestamps stacked — every one 43.008 px wide</text>
+<text x="448.00" y="396.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">0:00</text>
+<text x="448.00" y="415.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">1:07</text>
+<text x="448.00" y="434.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">2:31</text>
+<text x="448.00" y="453.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">3:36</text>
+<text x="448.00" y="472.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">9:41</text>
+<text x="448.00" y="491.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">10:24</text>
+<text x="448.00" y="510.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">47:21</text>
+<text x="448.00" y="529.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">1:03:45</text>
+<line x1="447.50" y1="384.00" x2="447.50" y2="538.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<text x="668.00" y="372.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">same shape ⇒ same width, measured</text>
+<text x="668.00" y="396.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">0:00:00</text>
+<text x="808.00" y="396.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">9:59:59</text>
+<text x="948.00" y="396.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66">Δ 0.000 px</text>
+<text x="668.00" y="415.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">1:23:45</text>
+<text x="808.00" y="415.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">8:07:02</text>
+<text x="948.00" y="415.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66">Δ 0.000 px</text>
+<text x="668.00" y="434.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">12 / 32 albums</text>
+<text x="808.00" y="434.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">11 / 11 albums</text>
+<text x="948.00" y="434.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66">Δ 0.000 px</text>
+<text x="668.00" y="453.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">999</text>
+<text x="808.00" y="453.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">111</text>
+<text x="948.00" y="453.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66">Δ 0.000 px</text>
+<text x="668.00" y="472.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">-18.1 dB</text>
+<text x="808.00" y="472.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">-60.0 dB</text>
+<text x="948.00" y="472.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66">Δ 0.000 px</text>
+<text x="668.00" y="491.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">3:36</text>
+<text x="808.00" y="491.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB">9:41</text>
+<text x="948.00" y="491.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#6C6A66">Δ 0.000 px</text>
+<text x="48.00" y="590.00" font-family="IBM Plex Sans" font-size="12" font-weight="500" fill="#6C6A66">3 · THE ONE PLACE A PROPORTIONAL FACE CAN STILL MOVE A FIGURE</text>
+<line x1="48.00" y1="598.50" x2="1232.00" y2="598.50" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.07"/>
+<rect x="68.00" y="628.00" width="60.00" height="22.00" fill="#141517"/>
+<text x="125.00" y="644.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#D9776B" text-anchor="end">-20.00 dB</text>
+<line x1="125.50" y1="626.00" x2="125.50" y2="652.00" stroke="#E3A14E" stroke-width="1" stroke-opacity="0.6"/>
+<line x1="70.52" y1="626.00" x2="70.52" y2="652.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.35" stroke-dasharray="2 2"/>
+<text x="152.00" y="644.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">54.48 px — hyphen-minus advances 0.399 em</text>
+<rect x="68.00" y="656.00" width="60.00" height="22.00" fill="#141517"/>
+<text x="125.00" y="672.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1" text-anchor="end">+20.00 dB</text>
+<line x1="125.50" y1="654.00" x2="125.50" y2="680.00" stroke="#E3A14E" stroke-width="1" stroke-opacity="0.6"/>
+<line x1="68.11" y1="654.00" x2="68.11" y2="680.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.35" stroke-dasharray="2 2"/>
+<text x="152.00" y="672.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">56.89 px — plus advances 0.600 em</text>
+<rect x="68.00" y="684.00" width="60.00" height="22.00" fill="#141517"/>
+<text x="125.00" y="700.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#E8E4DB" text-anchor="end">−20.00 dB</text>
+<line x1="125.50" y1="682.00" x2="125.50" y2="708.00" stroke="#E3A14E" stroke-width="1" stroke-opacity="0.6"/>
+<line x1="68.11" y1="682.00" x2="68.11" y2="708.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.35" stroke-dasharray="2 2"/>
+<text x="152.00" y="700.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">56.89 px — U+2212 also advances 0.600 em — the fix</text>
+<rect x="68.00" y="712.00" width="60.00" height="22.00" fill="#141517"/>
+<text x="125.00" y="728.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">0.00 dB</text>
+<line x1="125.50" y1="710.00" x2="125.50" y2="736.00" stroke="#E3A14E" stroke-width="1" stroke-opacity="0.6"/>
+<line x1="75.31" y1="710.00" x2="75.31" y2="736.00" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.35" stroke-dasharray="2 2"/>
+<text x="152.00" y="728.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">49.69 px — unsigned: 7.2 px narrower, one point in the travel, accepted</text>
+<text x="68.00" y="760.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">Never acceptable for anything that ticks with playback — elapsed, remaining, preview, level, position. Those are fixed-digit-count strings and are exact to 0.000 px.</text>
+<text x="48.00" y="770.00" font-family="IBM Plex Sans" font-size="12" font-weight="500" fill="#6C6A66">4 · VERDICT</text>
+<line x1="48.00" y1="778.50" x2="1232.00" y2="778.50" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.07"/>
+<text x="48.00" y="802.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#ABA8A1">—  MONO is deleted. Nothing in baz needs it: the alignment it was standing in for is a property of the Sans.</text>
+<text x="48.00" y="826.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#ABA8A1">—  Every reserved slot is re-derived from the real advances. Four of them shrink; STAMP_W keeps 52 px and gains a ten-hour track.</text>
+<text x="48.00" y="850.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#ABA8A1">—  Rule: figures are right-aligned, in fixed slots, at fixed digit counts. Ragged-left reads fine editorially.</text>
+<text x="48.00" y="874.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#ABA8A1">—  Bundle drops from five faces (1 001 520 B) to three (605 592 B). SERIF goes with it — the room supplies nothing, the work supplies everything.</text>
+</svg>
