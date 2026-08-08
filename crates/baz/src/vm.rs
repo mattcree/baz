@@ -31,7 +31,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use baz_core::index::{Album, AlbumArtist, Edition, Library};
+use baz_core::history::{History, Recency};
+use baz_core::index::{Album, AlbumArtist, Edition, GroupHeader, GroupKey, Initial, Library};
 use baz_core::library::{AudioFormat, TrackMeta};
 
 /// What the shelf calls an album whose artist is not known at all.
@@ -308,30 +309,109 @@ impl TrackVm {
     }
 }
 
-/// Build the full shelf from the library, in [`Library::albums`] order
-/// (album artist, then album, case-insensitively; unknowns first). Called
-/// after each applied scan batch — owned strings are cloned per rebuild,
-/// which is milliseconds for a 10k-album shelf and happens off the
-/// per-frame path.
-pub fn build_albums(library: &Library) -> Vec<AlbumVm> {
+/// The owned, render-ready form of [`baz_core::index::GroupHeader`].
+///
+/// Owned for the reason every other type here is owned — the wall keeps it
+/// across frames while a scan grows the library underneath — and **typed**
+/// rather than reduced to its label, because the index rail needs to know what
+/// kind of value it is looking at in order to say what is *missing* between
+/// two of them (see [`crate::rail`]). A rail built from strings could draw the
+/// shelves that exist and nothing else.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupHeaderVm {
+    /// [`GroupKey::Artist`] — an A–Z shelf, or one of the two anonymous ends.
+    Initial(Initial),
+    /// [`GroupKey::Year`] — a decade by its first year; `None` is "No year".
+    Decade(Option<u32>),
+    /// [`GroupKey::Genre`] — the genre verbatim; `None` is "No genre".
+    Genre(Option<String>),
+    /// [`GroupKey::Added`] / [`GroupKey::Played`] — a recency bucket.
+    Recency(Recency),
+}
+
+impl GroupHeaderVm {
+    fn from_core(header: &GroupHeader<'_>) -> Self {
+        match header {
+            GroupHeader::Initial(initial) => Self::Initial(*initial),
+            GroupHeader::Decade(decade) => Self::Decade(*decade),
+            GroupHeader::Genre(genre) => Self::Genre(genre.map(str::to_owned)),
+            GroupHeader::Recency(recency) => Self::Recency(*recency),
+            // `GroupHeader` is not `#[non_exhaustive]` today; the arm exists so
+            // that a key added to `baz-core` fails to *draw* rather than fails
+            // to compile the whole front end.
+            #[expect(
+                unreachable_patterns,
+                reason = "a future GroupHeader variant must degrade, not break the build"
+            )]
+            other => Self::Genre(Some(other.label())),
+        }
+    }
+
+    /// The header's text — [`baz_core::index::GroupHeader::label`]'s answer,
+    /// unchanged. Typography (the caps, the tracking) is the view's business.
+    #[must_use]
+    pub fn label(&self) -> String {
+        match self {
+            Self::Initial(initial) => initial.label(),
+            Self::Decade(Some(decade)) => format!("{decade}s"),
+            Self::Decade(None) => "No year".to_owned(),
+            Self::Genre(Some(genre)) => genre.clone(),
+            Self::Genre(None) => "No genre".to_owned(),
+            Self::Recency(recency) => recency.label(),
+        }
+    }
+}
+
+/// One shelf of the wall: a group header and the albums under it, owned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShelfVm {
+    /// What the shelf's header says, and what the rail projects.
+    pub header: GroupHeaderVm,
+    /// The albums on it, in library order. Never empty.
+    pub albums: Vec<AlbumVm>,
+}
+
+/// Build the wall from the library, **arranged by `key`** —
+/// [`Library::shelves_with_history`] projected into owned view models
+/// (ADR-0019).
+///
+/// Called after each applied scan batch and whenever the key changes; owned
+/// strings are cloned per rebuild, which is milliseconds for a 10k-album wall
+/// and happens off the per-frame path.
+///
+/// `history` is consulted only for [`GroupKey::Played`], and `None` is a
+/// correct answer rather than a degraded one: a library with no ledger has one
+/// `Never played` shelf holding everything, which is a true statement about a
+/// library nobody has played.
+pub fn build_shelves(library: &Library, key: GroupKey, history: Option<&History>) -> Vec<ShelfVm> {
     library
-        .albums()
+        .shelves_with_history(key, history)
         .into_iter()
-        .filter_map(|album| {
-            let first = album.default_edition()?.tracks.first()?;
-            Some(AlbumVm {
-                id: album_id(album.artist, album.title),
-                title: album.title.map(str::to_owned),
-                track_artists_vary: track_artists_vary(&album),
-                artist: AlbumArtistVm::from_core(album.artist),
-                year: album.year,
-                genre: album.genre.map(str::to_owned),
-                first_seen_ns: album.first_seen_ns,
-                first_track: first.path.clone(),
-                editions: album.editions.iter().map(build_edition).collect(),
+        .filter_map(|shelf| {
+            let albums: Vec<AlbumVm> = shelf.albums.iter().filter_map(build_album).collect();
+            (!albums.is_empty()).then(|| ShelfVm {
+                header: GroupHeaderVm::from_core(&shelf.header),
+                albums,
             })
         })
         .collect()
+}
+
+/// Project one core album into its owned, render-ready form. `None` for an
+/// album with no readable first track, which cannot be shown or played.
+fn build_album(album: &Album<'_>) -> Option<AlbumVm> {
+    let first = album.default_edition()?.tracks.first()?;
+    Some(AlbumVm {
+        id: album_id(album.artist, album.title),
+        title: album.title.map(str::to_owned),
+        track_artists_vary: track_artists_vary(album),
+        artist: AlbumArtistVm::from_core(album.artist),
+        year: album.year,
+        genre: album.genre.map(str::to_owned),
+        first_seen_ns: album.first_seen_ns,
+        first_track: first.path.clone(),
+        editions: album.editions.iter().map(build_edition).collect(),
+    })
 }
 
 /// Whether any track names an artist the album's header does not already
@@ -959,6 +1039,27 @@ mod tests {
         albums.remove(0)
     }
 
+    /// The ARTIST projection, flattened — the wall as a plain list.
+    ///
+    /// It was `vm::build_albums`, calling `Library::albums()`, and the
+    /// application no longer asks the library for a flat list at all: it asks
+    /// for [`build_shelves`] under the active key (ADR-0017 step 8). The swap
+    /// is safe on **evidence rather than inspection** — ADR-0019's
+    /// `the_artist_key_is_the_flat_shelf_with_its_breaks_named` compares
+    /// `albums()` against `shelves(GroupKey::Artist)` element for element, so
+    /// the two hold the same albums in the same order and the only difference
+    /// is whether the A–Z breaks between them are stated.
+    ///
+    /// So it survives here, where the tests that were written against the flat
+    /// list still want one, and `the_artist_key_flattens_to_the_wall_as_it_was`
+    /// re-makes the ADR's comparison from this side of the boundary.
+    fn build_albums(library: &Library) -> Vec<AlbumVm> {
+        build_shelves(library, GroupKey::Artist, None)
+            .into_iter()
+            .flat_map(|shelf| shelf.albums)
+            .collect()
+    }
+
     fn library_with(tracks: Vec<TrackMeta>) -> Library {
         let mut library = Library::open_in_memory().expect("in-memory library");
         library.add_tracks(tracks).expect("add tracks");
@@ -1006,6 +1107,127 @@ mod tests {
         assert_eq!(AlbumArtistVm::Named("RODIK".into()).name(), Some("RODIK"));
         assert_eq!(AlbumArtistVm::Various.name(), None);
         assert_eq!(AlbumArtistVm::Unknown.name(), None);
+    }
+
+    /// A library with enough variety that shelving is visible: several
+    /// artists, three decades, messy genres, one record with nothing declared.
+    fn varied_library() -> Library {
+        let track = |artist: &str, album: &str, year: u32, genre: Option<&str>| TrackMeta {
+            year: Some(year),
+            genre: genre.map(str::to_owned),
+            ..meta(artist, album, "One", 1)
+        };
+        library_with(vec![
+            track("Boards of Canada", "Geogaddi", 2002, Some("Electronic")),
+            track("Bark Psychosis", "Hex", 1994, Some("Post-Rock")),
+            track("Talk Talk", "Laughing Stock", 1991, Some("post rock")),
+            track("Aphex Twin", "Selected Ambient", 1992, Some("electronic")),
+            track("10cc", "The Original Soundtrack", 1975, None),
+            TrackMeta {
+                year: None,
+                ..meta("Ólafur Arnalds", "Found Songs", "One", 1)
+            },
+        ])
+    }
+
+    /// **The wall the application draws is the same wall it drew before, for
+    /// ARTIST** — the swap from `Library::albums()` to `shelves(key)`, re-made
+    /// from the front end's side.
+    ///
+    /// ADR-0019 asserts the two lists are equal in `baz-core`
+    /// (`the_artist_key_is_the_flat_shelf_with_its_breaks_named`); this asserts
+    /// that projecting them into view models does not disturb it, which is the
+    /// half of the claim that lives here.
+    #[test]
+    fn the_artist_key_flattens_to_the_wall_as_it_was() {
+        let library = varied_library();
+        let shelved = build_shelves(&library, GroupKey::Artist, None);
+        let flat: Vec<&AlbumVm> = shelved.iter().flat_map(|shelf| &shelf.albums).collect();
+        let direct: Vec<AlbumVm> = library.albums().iter().filter_map(build_album).collect();
+        assert_eq!(flat.len(), direct.len());
+        for (shelved, direct) in flat.iter().zip(&direct) {
+            assert_eq!(**shelved, *direct);
+        }
+        // And the breaks are now *stated*: `10cc` starts with a digit, so it
+        // is the `#` shelf; the rest are their initials, `Ó` included, and the
+        // two B's are one shelf holding two records.
+        assert_eq!(
+            shelved
+                .iter()
+                .map(|shelf| shelf.header.label())
+                .collect::<Vec<_>>(),
+            ["#", "A", "B", "T", "Ó"]
+        );
+        assert_eq!(
+            shelved[2].albums.len(),
+            2,
+            "Bark Psychosis and Boards of Canada"
+        );
+    }
+
+    /// **Every key is a projection, never a filter**: every album appears
+    /// under every key, exactly once. Asserted in `baz-core` and re-asserted
+    /// here, because the view model drops albums with no readable first track
+    /// and a projection that lost one on its way through would be a wall that
+    /// quietly hid records.
+    #[test]
+    fn every_key_shelves_every_album_exactly_once() {
+        let library = varied_library();
+        let expected: Vec<u64> = {
+            let mut ids: Vec<u64> = build_albums(&library).iter().map(|a| a.id).collect();
+            ids.sort_unstable();
+            ids
+        };
+        assert_eq!(expected.len(), 6);
+        for key in GroupKey::ALL {
+            let shelves = build_shelves(&library, key, None);
+            assert!(
+                shelves.iter().all(|shelf| !shelf.albums.is_empty()),
+                "{key:?} produced an empty shelf"
+            );
+            let mut ids: Vec<u64> = shelves
+                .iter()
+                .flat_map(|shelf| &shelf.albums)
+                .map(|album| album.id)
+                .collect();
+            ids.sort_unstable();
+            assert_eq!(ids, expected, "{key:?} did not hold every album once");
+        }
+    }
+
+    /// The headers each key draws, on one library — the five arrangements, in
+    /// the order the wall lays them out.
+    #[test]
+    fn each_key_draws_its_own_headers() {
+        let library = varied_library();
+        let labels = |key| {
+            build_shelves(&library, key, None)
+                .iter()
+                .map(|shelf| shelf.header.label())
+                .collect::<Vec<_>>()
+        };
+        // Undated at the front, then decades, oldest first.
+        assert_eq!(
+            labels(GroupKey::Year),
+            ["No year", "1970s", "1990s", "2000s"]
+        );
+        // Genre verbatim, and case-folded into one shelf: `Post-Rock` and
+        // `post rock` are **two** genres because the files say so, but
+        // `Electronic` and `electronic` are one — headed by the first spelling
+        // seen, which is Aphex Twin's lowercase one because the wall is in
+        // album-artist order underneath. Shelf order is the case-folded name,
+        // so `post rock` precedes `Post-Rock` (space sorts before hyphen).
+        assert_eq!(
+            labels(GroupKey::Genre),
+            ["No genre", "electronic", "post rock", "Post-Rock"]
+        );
+        // Everything was inserted a moment ago, so ADDED is one shelf — and it
+        // reads `This evening`, which ADR-0019 §7 states rather than discovers:
+        // ADDED borrows the ledger's bands so the rail has one vocabulary, and
+        // the ledger's first band is six hours.
+        assert_eq!(labels(GroupKey::Added), ["This evening"]);
+        // …and with no ledger, PLAYED is one honest shelf.
+        assert_eq!(labels(GroupKey::Played), ["Never played"]);
     }
 
     #[test]

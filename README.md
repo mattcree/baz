@@ -40,6 +40,7 @@ The full vision, competitive analysis, and staged scope live in
 | <kbd>Ctrl</kbd>+<kbd>←</kbd> | previous track — or restart this one, if you are more than 3 s in |
 | <kbd>↑</kbd> <kbd>↓</kbd> | volume up / down, one step (~1 dB at the top of the fader) |
 | <kbd>M</kbd> | mute / unmute |
+| <kbd>1</kbd> … <kbd>5</kbd> | arrange the wall by **artist**, **year**, **genre**, **added** or **played** — the same five words in the top bar |
 | <kbd>/</kbd>, or <kbd>Ctrl</kbd>+<kbd>F</kbd> | focus the search field |
 | <kbd>Q</kbd> | show / hide the **queue**, over the now-playing bar |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | go to the settings, or come back |

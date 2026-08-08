@@ -160,6 +160,27 @@ next commit.
 
 **Interface**
 
+- **The wall has five arrangements, and it says where the breaks are.**
+  ARTIST · YEAR · GENRE · ADDED · PLAYED as one row of words in the top bar —
+  no menu, no dropdown, no chip around the live one; the active key is full
+  paper in the Medium face and the other four are quiet. <kbd>1</kbd>–<kbd>5</kbd>
+  select the same five. The choice is remembered in `config.toml`
+  (ADR-0017 step 8, ADR-0019).
+- **Shelf headers, pinned.** The wall renders shelves rather than a flat grid:
+  each group breaks to a new row under a 10 px tracked-caps header, and the
+  header of the shelf you are looking at stays at the top of the viewport while
+  its covers pass beneath it. The band is exactly one `HANG`, which is what
+  makes the hand-over exact — a header stops being pinned at the same pixel its
+  shelf's last row leaves the top.
+- **An index rail** down the wall's right-hand edge: a pure projection of the
+  active key, holding no state of its own — A–Z for artist, decades for year,
+  genre names verbatim, recency buckets for added and played. Clicking jumps.
+  Values the collection has nothing under are **drawn**, quieter and inert,
+  because an index that hides its gaps lies about the collection; long sets
+  elide to the ends plus a window around where you are.
+- **The play ledger is wired.** ADR-0018 built it and nothing called it, so
+  nothing was being recorded; baz now opens it at start-up and hands it to the
+  engine, which is what gives the PLAYED key something to sort by.
 - The iced GUI (ADR-0005): first-run screen, album shelf with virtualized
   scrolling and album art, side panel with the track list and an edition
   selector, and a bottom bar with transport, seek groove and now-playing.

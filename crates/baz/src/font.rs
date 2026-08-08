@@ -357,6 +357,154 @@ mod tests {
         }
     }
 
+    /// **The tracking is real, in every weight a heading can be set in.**
+    ///
+    /// [`theme::tracked`] spells letter-spacing into the string as U+2009 THIN
+    /// SPACE, because iced 0.13 has no `letter-spacing` property. That is only
+    /// honest if the bundled faces actually carry the character: a missing
+    /// glyph would fall back to whatever the host has, which for a space-like
+    /// character is invisible until it is not.
+    ///
+    /// Measured, not assumed: the advance is read out of `hmtx` and asserted to
+    /// be a real, non-zero fraction of the em — 0.118 em in these faces, which
+    /// is squarely inside the 0.08 – 0.15 em band caps at this size want. And
+    /// the tracked string is asserted to be *wider* than the untracked one by
+    /// exactly one advance per gap, which is the arithmetic the layout below
+    /// depends on.
+    #[test]
+    fn the_bundled_faces_carry_the_tracking_space() {
+        let track: char = theme::TRACKING
+            .chars()
+            .next()
+            .expect("the tracking is one character");
+        assert_eq!(track as u32, 0x2009, "the tracking is U+2009 THIN SPACE");
+        for (name, bytes) in [
+            ("Sans Regular", SANS_REGULAR),
+            ("Sans Medium", SANS_MEDIUM),
+            ("Sans SemiBold", SANS_SEMIBOLD),
+        ] {
+            let face = Face::parse(bytes);
+            assert_ne!(
+                face.glyph(track),
+                0,
+                "{name} has no glyph for the tracking space — a tracked \
+                 heading would fall back to a system font between every pair \
+                 of letters"
+            );
+            let em = face.advance(track) / face.units_per_em();
+            assert!(
+                (0.08..=0.15).contains(&em),
+                "{name} advances the tracking space {em} em, which is not \
+                 letter-spacing"
+            );
+            // One advance per *gap*, never a trailing one: a tracked label that
+            // ended in a space would sit a pixel off a right-aligned edge.
+            let plain = face.width("ARTIST", theme::SIZE_HEADING);
+            let tracked = face.width(&theme::tracked("ARTIST"), theme::SIZE_HEADING);
+            let gaps = 5.0 * face.width(theme::TRACKING, theme::SIZE_HEADING);
+            assert!(
+                (tracked - plain - gaps).abs() < 0.01,
+                "{name}: tracked {tracked:.2} px against plain {plain:.2} px \
+                 and {gaps:.2} px of track"
+            );
+        }
+    }
+
+    /// **The group-key row fits the shipped window**, tracked caps and all.
+    ///
+    /// The row is five words, each in a button with [`theme::GAP_XS`] of
+    /// padding on both sides and [`theme::GAP_MD`] between them, sitting after
+    /// the search well and the gap that separates the two clusters. The right
+    /// of the bar holds the counts and the `Settings` word. Measured against
+    /// the 1280 px window baz opens at, with the widest counts line a large
+    /// library can produce.
+    #[test]
+    fn the_group_key_row_fits_the_top_bar_at_the_shipped_window() {
+        use baz_core::index::GroupKey;
+
+        let medium = Face::parse(SANS_MEDIUM);
+        let keys: f32 = GroupKey::ALL
+            .iter()
+            .map(|key| {
+                medium.width(
+                    &theme::tracked(&key.label().to_uppercase()),
+                    theme::SIZE_META,
+                ) + 2.0 * theme::GAP_XS
+            })
+            .sum::<f32>()
+            + 4.0 * theme::GAP_MD;
+        let well = crate::views::top_bar::SEARCH_W;
+        let left = 2.0f32.mul_add(theme::GAP_LG, well + theme::GAP_XL + keys);
+
+        let sans = sans();
+        // A library larger than the owner's, in the longest form the line takes.
+        let counts = sans.width("40 000 albums · 512 345 tracks", theme::SIZE_META);
+        let right = counts + theme::GAP_LG + theme::SETTINGS_TOGGLE_W;
+
+        let window = 1280.0_f32;
+        assert!(
+            left + theme::GAP_LG + right <= window,
+            "the top bar wants {:.1} px at 1280: {left:.1} left (well {well} \
+             + keys {keys:.1}) and {right:.1} right",
+            left + theme::GAP_LG + right
+        );
+        // And the five words really are the bulk of what was added, so this is
+        // measuring the row rather than the well beside it.
+        assert!(keys > 200.0 && keys < 420.0, "the key row is {keys:.1} px");
+    }
+
+    /// **The index rail's lane holds the labels the keys actually produce** —
+    /// or, where it cannot, the test says so by name rather than the wall
+    /// discovering it.
+    ///
+    /// [`theme::INDEX_W`] is 36 px, fixed by ADR-0017 §1.7, and the labels are
+    /// `baz-core`'s own. Two groups come out of the measurement and both are
+    /// stated:
+    ///
+    /// - **ARTIST and YEAR fit, bar one value.** Every letter, `#`, `Various`,
+    ///   `No year` and every decade is inside the lane, which is what matters
+    ///   because ARTIST is the default arrangement and A–Z is what a listener
+    ///   reaches for. The one ARTIST value that overruns is `Unknown`, at
+    ///   42.4 px.
+    /// - **The recency buckets and long genres do not fit**, and they are
+    ///   clipped at the lane's right edge with their heads intact. The full
+    ///   value is set in the shelf header one `HANG` to the left at the same
+    ///   moment, so nothing is unreadable; the rail is a ruler, not a legend.
+    ///
+    /// The lane is 36 px because ADR-0017 §1.7 fixed it there, and the
+    /// scrollbar's own lane bounds it from the other side
+    /// ([`theme::INDEX_CLEARANCE`]). Widening it is a decision for that ADR,
+    /// not for this file — so what this test does is keep the trade *measured*
+    /// rather than discovered on a screenshot.
+    #[test]
+    fn the_index_rail_holds_every_letter_and_decade_whole() {
+        let sans = sans();
+        for label in [
+            "#", "A", "M", "W", "Ø", "曲", "Various", "No year", "1890s", "1980s", "2020s", "Today",
+        ] {
+            let width = sans.width(label, theme::SIZE_HEADING);
+            assert!(
+                width + 1.0 <= theme::INDEX_W,
+                "{label:?} measures {width:.2} px in a {} px rail",
+                theme::INDEX_W
+            );
+        }
+        // The stated exceptions: they clip, and the header carries them.
+        for label in [
+            "Unknown",
+            "This evening",
+            "Never played",
+            "Not recorded",
+            "Electronic",
+        ] {
+            assert!(
+                sans.width(label, theme::SIZE_HEADING) > theme::INDEX_W,
+                "{label:?} now fits the rail — the doc comment saying it does \
+                 not is stale"
+            );
+        }
+    }
+
     /// **The measurement that deleted the monospace.**
     ///
     /// baz shipped a second face for one reason: iced 0.13 exposes no

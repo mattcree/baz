@@ -13,7 +13,17 @@
 //! ([`crate::views::queue`]) — closer to its subject, and no longer stale:
 //! the toggle went on saying `Queue · 13` after the run had ended, because it
 //! reported the length of the last queue rather than what was next.
+//!
+//! # The group keys sit here, beside the well
+//!
+//! ARTIST · YEAR · GENRE · ADDED · PLAYED (ADR-0019) are the bar's third
+//! tenant, and they belong to its subject: search narrows the collection and
+//! the keys arrange it, so both are about the library and both are on the left.
+//! The application's own affairs — the counts it can report, the route to the
+//! Settings — stay on the right. See [`group_key`] for why the row is five
+//! words and not a menu.
 
+use baz_core::index::GroupKey;
 use iced::widget::{Space, button, column, container, horizontal_rule, row, text, text_input};
 use iced::{Element, Length, alignment};
 
@@ -22,7 +32,7 @@ use crate::app::{Message, Shelf, search_id};
 use crate::theme;
 
 /// The search field's width in the top bar (logical px).
-const SEARCH_W: f32 = 360.0;
+pub(crate) const SEARCH_W: f32 = 360.0;
 
 /// The search well's vertical padding (logical px), derived so the well is
 /// exactly [`theme::TRANSPORT_HIT`] tall.
@@ -51,6 +61,12 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
         .line_height(theme::LEADING_BODY)
         .width(Length::Fixed(SEARCH_W))
         .style(move |_theme, status| theme::input(room, status));
+    let mut keys = row![]
+        .spacing(theme::GAP_MD)
+        .align_y(iced::Alignment::Center);
+    for key in GroupKey::ALL {
+        keys = keys.push(group_key(key, key == shelf.group_key));
+    }
     let mut status = row![
         text(counts_line(shelf))
             .size(theme::SIZE_META)
@@ -89,9 +105,18 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
     status = status.push(settings_toggle());
     column![
         container(
-            row![search, Space::with_width(Length::Fill), status]
-                .spacing(theme::GAP_LG)
-                .align_y(iced::Alignment::Center),
+            row![
+                // The well and the keys are one cluster — both are about the
+                // library — held apart by the ladder's largest gap so they
+                // read as two groups on one line rather than as six controls.
+                row![search, keys]
+                    .spacing(theme::GAP_XL)
+                    .align_y(iced::Alignment::Center),
+                Space::with_width(Length::Fill),
+                status
+            ]
+            .spacing(theme::GAP_LG)
+            .align_y(iced::Alignment::Center),
         )
         .padding(theme::pad(theme::GAP_SM + 2.0, theme::GAP_LG)),
         horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
@@ -161,21 +186,54 @@ fn counts_line(shelf: &Shelf) -> String {
     }
 }
 
-// # The group-key row is **not** wired here, and that is deliberate
-//
-// `Library::shelves(key)` and `GroupKey` landed in `baz-core` (ADR-0019) and
-// nothing in this crate calls either yet. The row of words — ARTIST · YEAR ·
-// GENRE · ADDED · PLAYED — belongs in this bar, and drawing it is the easy
-// tenth of the work: the rest is the active key in `Shelf`, persisted in
-// `config.rs`, the shelf rebuilt as a list of *groups* rather than a flat
-// vector, sticky headers inside the virtualizer's row arithmetic, and the index
-// rail projecting the same keys down the shelf's right edge. That is ADR-0017
-// step 8, it lands squarely on top of `shelf.rs`'s geometry, and a parallel
-// pass owns that file for the hang.
-//
-// So the seam is left rather than half-taken. Drawing five words that do
-// nothing would be worse than drawing none: *an affordance that does nothing is
-// a lie*, and `docs/REFUSALS.md` puts every action behind a visible control
-// precisely so that the reverse cannot happen either. When the key arrives it
-// arrives as one `row!` of `word_button`s here, one field on `Shelf`, and the
-// grouping in `vm`.
+/// One of the five words the wall is arranged by.
+///
+/// # The seam this closes
+///
+/// This file used to carry a note saying the row was deliberately *not* wired,
+/// because "five words that do nothing would be a lie". The rest of step 8
+/// has landed — the active key on `Shelf`, persisted in `config.rs`, the wall
+/// rebuilt as [`crate::shelf::Shelves`], the sticky headers in the virtualizer
+/// and the rail down the wall's right edge — so the words now do the thing
+/// they name.
+///
+/// # It is a word, and nothing else
+///
+/// No menu, no dropdown, no segmented control, no chip around the live one.
+/// `docs/REFUSALS.md` refuses view-options menus by name, and a pill drawn
+/// around the active key would be the dropdown's ghost — the same "this is a
+/// widget" statement one step quieter. What says *active* is
+/// [`theme::group_key`]: full paper in the Medium face against
+/// [`theme::Palette::paper_faint`] in Regular. Two axes, neither of them
+/// colour and neither of them size.
+///
+/// # The type is the shelf headers' type
+///
+/// Caps, tracked ([`theme::tracked`]), at the metadata size (12) — the same
+/// vocabulary the shelf headers use at the heading size (10), one step
+/// larger. That is the whole hierarchy of the wall's chrome in two sizes of
+/// one voice: **the key names the arrangement, the header names a break in
+/// it.** A third size, or a second face, would make them two systems.
+///
+/// The word is a `button`, so the keyboard's `1`–`5` ([`crate::keys`]) and
+/// this control send the identical message and the visible-control rule holds.
+fn group_key(key: GroupKey, active: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    button(
+        text(theme::tracked(&key.label().to_uppercase()))
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .font(if active { theme::MEDIUM } else { theme::SANS })
+            .wrapping(text::Wrapping::None),
+    )
+    // The same 32 px as the well beside it and every other control in the
+    // product, so the bar's clusters sit on one grid rather than on one centre
+    // line. Horizontal padding is `GAP_XS` — enough that the hover wash is not
+    // tight against the glyphs, small enough that five of them stay one line of
+    // type rather than five boxes.
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_XS))
+    .style(move |_theme, status| theme::group_key(room, room.wall, status, active))
+    .on_press(Message::GroupKeySelected(key))
+    .into()
+}

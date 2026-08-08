@@ -145,6 +145,33 @@
 //! `app.rs`, where the layers do; this module only says that the key means
 //! "peel".
 //!
+//! # The arrangement — `1` … `5`
+//!
+//! The five group keys (ADR-0019) select from the number row: `1` ARTIST,
+//! `2` YEAR, `3` GENRE, `4` ADDED, `5` PLAYED, in the order the top bar's row
+//! of words states them and the order
+//! [`GroupKey::ALL`](baz_core::index::GroupKey::ALL) publishes them. The
+//! mapping is [`group_key`], which reads that array rather than repeating it,
+//! so the digits, the words and the library's own order cannot drift apart.
+//!
+//! **Digits, deliberately.** ADR-0017 §1.2's keyboard table already spends
+//! `1` and `2` on the Wall / Marquee lenses and states the trade out loud —
+//! *digits are not letters, and no album title begins with one often enough to
+//! matter* — which is the same argument, made for the same reason, one step
+//! earlier: when type-anywhere lands (step 11) every bare *letter* becomes
+//! query and the number row is the one place a bare binding can survive.
+//! Whichever of the two ends up owning the digits, this is where the row is
+//! spent, and the resolution is a decision for step 18 rather than a thing to
+//! guess at now.
+//!
+//! They are bare for `Q`'s reason: selecting an arrangement is a *view* act —
+//! it interrupts nothing, plays nothing, and is undone by pressing another
+//! one — and a modifier on a key pressed dozens of times a session is a tax
+//! with no safety to buy. Each resolves to
+//! [`Message::GroupKeySelected`], which is the same message the word in the
+//! top bar sends, so the visible-control rule holds: there is no arrangement
+//! reachable only from the keyboard.
+//!
 //! **The `XF86AudioRaiseVolume` family is deliberately not bound.** The
 //! transport media keys are bound (below) because `MediaPlayPause` means one
 //! thing everywhere; the volume keys do not. On every desktop they mean *the
@@ -230,6 +257,12 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Character("b" | "B") if command => Some(Message::TogglePanels),
         Key::Character(",") if command => Some(Message::ToggleSettings),
 
+        // Arrangement. `1`–`5` are the five group keys, in the order the top
+        // bar's row of words states them (module docs).
+        Key::Character(digit @ ("1" | "2" | "3" | "4" | "5")) if bare => {
+            Some(Message::GroupKeySelected(group_key(digit)?))
+        }
+
         // Search. `/` is the reflex from every pager and browser; Ctrl+F
         // (Cmd+F) is the reflex from every document. Shift is tolerated on
         // `/` because plenty of layouts need it to type the character.
@@ -254,6 +287,19 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
 
         _ => None,
     }
+}
+
+/// The group key a digit names: `1` is the first word in
+/// [`GroupKey::ALL`](baz_core::index::GroupKey::ALL) and `5` is the last.
+///
+/// Derived from the enum's own order rather than written out, so the row of
+/// words in the top bar, the digits that select them and the order
+/// `baz-core` publishes are one list. A sixth key (CRATES, MOOD) becomes
+/// `6` here with no edit at all — and until then `6` is unbound, because
+/// `ALL` has five entries and this returns `None` past its end.
+fn group_key(digit: &str) -> Option<baz_core::index::GroupKey> {
+    let index = digit.parse::<usize>().ok()?.checked_sub(1)?;
+    baz_core::index::GroupKey::ALL.get(index).copied()
 }
 
 #[cfg(test)]
@@ -323,6 +369,8 @@ mod tests {
             (ch(","), Modifiers::COMMAND),
             (ch("/"), none()),
             (ch("f"), Modifiers::COMMAND),
+            (ch("1"), none()),
+            (ch("5"), none()),
             (named(key::Named::Escape), none()),
             (named(key::Named::MediaPlayPause), none()),
             (named(key::Named::MediaTrackNext), none()),
@@ -535,6 +583,40 @@ mod tests {
         assert_eq!(bind(&ch("f"), none()), None);
     }
 
+    /// **`1`–`5` are the five group keys, in `baz-core`'s own order**, and the
+    /// mapping is that order rather than a copy of it.
+    #[test]
+    fn the_number_row_selects_the_five_arrangements() {
+        use baz_core::index::GroupKey;
+
+        for (index, key) in GroupKey::ALL.iter().enumerate() {
+            let digit = (index + 1).to_string();
+            assert_eq!(
+                bind(&ch(&digit), none()).as_deref(),
+                Some(format!("GroupKeySelected({key:?})").as_str()),
+                "{digit} should select {key:?}"
+            );
+        }
+        // Named for what they are, so a reordering of `ALL` is a visible test
+        // failure rather than a silently different wall.
+        assert_eq!(
+            bind(&ch("1"), none()).as_deref(),
+            Some("GroupKeySelected(Artist)")
+        );
+        assert_eq!(
+            bind(&ch("5"), none()).as_deref(),
+            Some("GroupKeySelected(Played)")
+        );
+        // There is no sixth key and no zeroth one.
+        assert_eq!(bind(&ch("6"), none()), None);
+        assert_eq!(bind(&ch("0"), none()), None);
+        // A modifier is not the binding, and a focused well types the digit.
+        for modifiers in [Modifiers::COMMAND, Modifiers::ALT, Modifiers::SHIFT] {
+            assert_eq!(bind(&ch("2"), modifiers), None, "{modifiers:?}");
+        }
+        assert!(binding_for(&ch("2"), none(), Focus::TextField).is_none());
+    }
+
     #[test]
     fn escape_keeps_its_existing_meaning() {
         assert_eq!(
@@ -624,7 +706,10 @@ mod tests {
             named(key::Named::F1),
             ch("a"),
             ch("z"),
-            ch("1"),
+            // `1`–`5` are the five group keys; `6` is not, because there is no
+            // sixth key to select (see `group_key`).
+            ch("6"),
+            ch("0"),
             ch("."),
             ch("?"),
         ];

@@ -41,6 +41,7 @@ mod place;
 mod playback;
 mod player;
 mod queue_edit;
+mod rail;
 mod replaygain;
 mod scan;
 mod selection;

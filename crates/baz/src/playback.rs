@@ -211,6 +211,26 @@ mod imp {
                 .is_some_and(|handle| handle.send(command).is_ok())
         }
 
+        /// Hand the engine the play ledger to append to (ADR-0018), or take it
+        /// away.
+        ///
+        /// **The whole of a front end's involvement in history.** The engine
+        /// is the only thing that knows what reached the output and for how
+        /// long; a ledger written from up here would lose an album to a crash
+        /// and would be written twice by two front ends attached to one
+        /// engine. Reports whether there was an engine to tell — with no
+        /// device there is nothing that could produce a play to record, so a
+        /// `false` here is not a failure to handle.
+        pub fn set_history(&self, ledger: Option<Arc<baz_core::history::HistoryLedger>>) -> bool {
+            match &self.handle {
+                Some(handle) => {
+                    handle.set_history(ledger);
+                    true
+                }
+                None => false,
+            }
+        }
+
         /// The bridge's event stream as an iced subscription (module docs).
         pub fn subscription(&self) -> Subscription<PlayerEvent> {
             if self.handle.is_none() {
@@ -272,6 +292,16 @@ mod imp {
         /// No engine: every send is refused. (Unreachable in practice —
         /// the UI that would send is hidden.)
         pub fn send(&self, _command: Command) -> bool {
+            false
+        }
+
+        /// No engine, so nothing can produce a play to record. The ledger is
+        /// still opened by the shell (and still read, for the PLAYED key) —
+        /// this build simply has nothing to append to it.
+        pub fn set_history(
+            &self,
+            _ledger: Option<std::sync::Arc<baz_core::history::HistoryLedger>>,
+        ) -> bool {
             false
         }
 

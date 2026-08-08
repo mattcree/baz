@@ -3,8 +3,9 @@
 //! One module per surface of the interface:
 //!
 //! - [`setup`] — the first-run "Where's your music?" screen.
-//! - [`top_bar`] — the search well and the quiet counts beside it.
-//! - [`shelf`] — the virtualized album grid, its tiles, and its empty states.
+//! - [`top_bar`] — the search well, the group-key row, and the quiet counts.
+//! - [`shelf`] — the wall: the shelved, virtualized album grid, its pinned
+//!   group headers, the index rail, its tiles and its empty states.
 //! - [`side_panel`] — the album inspector: header, edition selector, Play,
 //!   track list.
 //! - [`queue`] — the queue popover: what baz handed the engine, and where it

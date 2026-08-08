@@ -68,11 +68,15 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+use baz_core::index::GroupKey;
 use baz_core::protocol::ReplayGainMode;
 use baz_core::replaygain::ReplayGainSettings;
 
 /// The `[replaygain]` table's name in the document.
 const REPLAY_GAIN_TABLE: &str = "replaygain";
+
+/// The key the active group key is written under.
+const GROUP_KEY: &str = "group_key";
 
 /// Application configuration. See the [module docs](self) for scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,15 +89,29 @@ pub struct Config {
     /// a session: unlike panel visibility (`crate::panels`, deliberately not
     /// persisted) it has something to say on the first frame of every launch.
     pub replay_gain: ReplayGainSettings,
+    /// How the wall is arranged — ARTIST / YEAR / GENRE / ADDED / PLAYED
+    /// (ADR-0019).
+    ///
+    /// **View state, persisted**, which is the distinction ADR-0017 §1.3 draws
+    /// and the reason there is no Settings row for it: a listener presses a
+    /// word in the top bar once and expects the wall to be arranged that way
+    /// the next time baz opens. Density lands here on the same terms.
+    ///
+    /// Written as [`GroupKey::code`] — a stable lowercase word, not an index —
+    /// so the file stays legible and a key added or reordered in `baz-core`
+    /// cannot silently re-arrange somebody's wall.
+    pub group_key: GroupKey,
 }
 
 impl Default for Config {
-    /// No music folder, and `baz-core`'s own ReplayGain defaults — the state a
-    /// fresh install is in, and the state an unreadable config resolves to.
+    /// No music folder, `baz-core`'s own ReplayGain defaults, and the wall
+    /// arranged by artist — the state a fresh install is in, and the state an
+    /// unreadable config resolves to.
     fn default() -> Self {
         Self {
             music_dir: None,
             replay_gain: ReplayGainSettings::default(),
+            group_key: GroupKey::Artist,
         }
     }
 }
@@ -114,6 +132,12 @@ impl Config {
         if let Some(dir) = self.music_dir.as_deref().and_then(Path::to_str) {
             let _ = writeln!(out, "music_dir = {}", toml_string(dir));
         }
+        let _ = writeln!(
+            out,
+            "# how the wall is arranged: \"artist\", \"year\", \"genre\", \
+             \"added\" or \"played\"\n{GROUP_KEY} = {}",
+            toml_string(self.group_key.code()),
+        );
         let _ = write!(
             out,
             "\n[{REPLAY_GAIN_TABLE}]\n\
@@ -146,9 +170,19 @@ impl Config {
             .get(REPLAY_GAIN_TABLE)
             .and_then(toml::Value::as_table)
             .map_or_else(ReplayGainSettings::default, read_replay_gain);
+        // The same per-key degradation every value here gets: a key spelled
+        // by a newer baz, or by a hand that guessed, is the default arrangement
+        // and costs nothing around it. `GroupKey::from_code` is documented for
+        // exactly this.
+        let group_key = table
+            .get(GROUP_KEY)
+            .and_then(toml::Value::as_str)
+            .and_then(GroupKey::from_code)
+            .unwrap_or(GroupKey::Artist);
         Self {
             music_dir,
             replay_gain,
+            group_key,
         }
     }
 }
@@ -292,6 +326,7 @@ mod tests {
             let config = Config {
                 music_dir: Some(PathBuf::from("/m")),
                 replay_gain,
+                group_key: GroupKey::Year,
             };
             let back = Config::from_toml(&config.to_toml());
             assert_eq!(back, config, "round-trip failed for {replay_gain:?}");
@@ -322,6 +357,48 @@ mod tests {
             // which is what makes the two directions one decision.
             assert_eq!(Config::from_toml(&config.to_toml()).replay_gain.mode, mode);
         }
+    }
+
+    /// The active group key survives a restart, in every arrangement — and it
+    /// is written as the word `baz-core` spells it, so the file is legible and
+    /// a reordered enum cannot re-arrange somebody's wall.
+    #[test]
+    fn round_trips_every_group_key_as_its_own_word() {
+        for key in GroupKey::ALL {
+            let config = Config {
+                music_dir: Some(PathBuf::from("/m")),
+                group_key: key,
+                ..Config::default()
+            };
+            let text = config.to_toml();
+            assert!(
+                text.contains(&format!("group_key = \"{}\"", key.code())),
+                "{key:?} was not written as its code:\n{text}"
+            );
+            assert_eq!(Config::from_toml(&text), config, "{key:?} did not survive");
+        }
+    }
+
+    /// A group key baz cannot read degrades **alone**, to ARTIST — the same
+    /// per-key rule the pre-amps get, applied to the one setting whose loss
+    /// would rearrange a whole wall.
+    #[test]
+    fn an_unreadable_group_key_degrades_to_artist_alone() {
+        for spelling in ["\"crates\"", "\"ARTIST\"", "7", "true", "\"\""] {
+            let text = format!(
+                "music_dir = \"/m\"\ngroup_key = {spelling}\n\
+                 [replaygain]\nmode = \"album\"\n"
+            );
+            let config = Config::from_toml(&text);
+            assert_eq!(config.group_key, GroupKey::Artist, "{spelling}");
+            assert_eq!(config.music_dir, Some(PathBuf::from("/m")), "{spelling}");
+            assert_eq!(config.replay_gain.mode, ReplayGainMode::Album, "{spelling}");
+        }
+        // Absent entirely — every config written before this key existed.
+        assert_eq!(
+            Config::from_toml("music_dir = \"/m\"\n").group_key,
+            GroupKey::Artist
+        );
     }
 
     #[test]
@@ -459,6 +536,7 @@ mod tests {
         let config = Config {
             music_dir: Some(PathBuf::from(raw)),
             replay_gain: settings(ReplayGainMode::Album, -300, 0, false),
+            group_key: GroupKey::Genre,
         };
         let text = config.to_toml();
         assert!(!text.contains("music_dir"), "{text}");
@@ -474,6 +552,7 @@ mod tests {
         let config = Config {
             music_dir: Some(PathBuf::from("/home/user/Music")),
             replay_gain: settings(ReplayGainMode::Album, -350, 250, false),
+            group_key: GroupKey::Played,
         };
         store(&path, &config).expect("store creates parents and writes");
         assert_eq!(load(&path), config);
@@ -488,9 +567,11 @@ mod tests {
         let config = Config {
             music_dir: Some(PathBuf::from("/home/user/My \"Music\"")),
             replay_gain: settings(ReplayGainMode::Track, -1234, 567, false),
+            group_key: GroupKey::Added,
         };
         let table: toml::Table = config.to_toml().parse().expect("baz writes valid TOML");
         assert!(table.contains_key("music_dir"));
         assert!(table.contains_key(REPLAY_GAIN_TABLE));
+        assert!(table.contains_key(GROUP_KEY));
     }
 }

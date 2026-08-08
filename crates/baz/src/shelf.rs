@@ -89,7 +89,7 @@
 //! those columns change size, which is the same tile moving under the same
 //! pointer by another route.
 
-use crate::theme::{ART_MAX, ART_MIN, ART_TARGET, GAP_LG, HANG, LABEL_H};
+use crate::theme::{ART_MAX, ART_MIN, ART_TARGET, GAP_LG, HANG, LABEL_H, SHELF_HEADER_H};
 
 /// Extra rows rendered beyond each edge of the viewport so fast flings meet
 /// already-built rows instead of blank space.
@@ -240,6 +240,252 @@ impl Grid {
     )]
     pub fn spacer_height(self, rows: usize) -> f32 {
         rows as f32 * self.row_h
+    }
+}
+
+/// One shelf's place on the wall: its header band, its rows, and which slice
+/// of the visible list it holds.
+///
+/// Produced by [`Shelves`]. Every measurement is from the top of the
+/// scrollable's *content*, which is the coordinate the scroll offset is in, so
+/// nothing here needs to know what a viewport is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Run {
+    /// Which group this run draws — an index into the caller's own list of
+    /// shelves, carried so the rail and the header can be looked up without a
+    /// second parallel vector.
+    pub group: usize,
+    /// Index of this shelf's first album within the visible list.
+    pub first: usize,
+    /// How many albums survive the filter on this shelf. Never zero: a shelf
+    /// with nothing left on it is not drawn at all.
+    pub len: usize,
+    /// How many grid rows those albums take.
+    pub rows: usize,
+    /// The top of the header band, in content coordinates.
+    pub top: f32,
+}
+
+impl Run {
+    /// The top of this shelf's first row of covers: the band, spent.
+    #[must_use]
+    pub fn rows_top(self) -> f32 {
+        self.top + SHELF_HEADER_H
+    }
+
+    /// One past the bottom of this shelf — the top of the next shelf's band,
+    /// or the bottom of the wall.
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "row counts are far below f32's 2^24 exact-integer range"
+    )]
+    pub fn end(self, grid: Grid) -> f32 {
+        self.rows_top() + self.rows as f32 * grid.row_h
+    }
+}
+
+/// **The wall, broken into shelves** (ADR-0017 step 8, ADR-0019).
+///
+/// [`Grid`] answers how wide a work is and which rows are on screen; this
+/// answers where one shelf ends and the next begins, and it is the same kind
+/// of thing: pure arithmetic over a width and a list of counts, unit-tested
+/// without a window.
+///
+/// # The vertical rhythm, stated once
+///
+/// The wall's own top hang, then, per shelf, a band of exactly
+/// [`crate::theme::SHELF_HEADER_H`] and then its rows at the grid's pitch:
+///
+/// ```text
+/// HANG                                   the wall's top edge
+/// ┌ SHELF_HEADER_H  = HANG               the header band
+/// │   HEADING_LINE_H = 14                  the header's line box, at its top
+/// │   26                                    clear wall
+/// └ rows × row_h                         the covers; each row_h ends in a HANG
+/// ```
+///
+/// Every number is `HANG` or derived from it, so a shelf break costs the wall
+/// exactly one more hang than a row break does and the whole page keeps one
+/// vertical unit. The gap a reader sees above a header is the previous row's
+/// trailing hang (40) and the gap below it is `HANG − HEADING_LINE_H` (26) —
+/// **20 : 13**, a header nearer the shelf it names than the one it follows.
+///
+/// # Why the sticky header is exact rather than approximate
+///
+/// Because the band and the row's trailing gap are the same number, the scroll
+/// offset at which a shelf's last row of covers leaves the top of the viewport
+/// is *precisely* the offset at which the next shelf's band enters it. So the
+/// pinned lane can hold exactly one header at every offset, with no overlap and
+/// no gap and nothing that moves: see [`Shelves::sticky`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Shelves {
+    runs: Vec<Run>,
+    height: f32,
+    grid: Grid,
+}
+
+impl Shelves {
+    /// Lay `counts` — the number of albums surviving on each shelf, in shelf
+    /// order — out over `grid`.
+    ///
+    /// Empty shelves are skipped rather than drawn as a header with nothing
+    /// under it: a filtered wall shows the breaks its *results* fall on, not
+    /// the breaks the library has. [`Run::group`] keeps the original index, so
+    /// the caller's headers still line up.
+    #[must_use]
+    pub fn new(grid: Grid, counts: &[usize]) -> Self {
+        let mut runs = Vec::with_capacity(counts.len());
+        let mut first = 0;
+        let mut top = HANG;
+        for (group, &len) in counts.iter().enumerate() {
+            if len == 0 {
+                continue;
+            }
+            let run = Run {
+                group,
+                first,
+                len,
+                rows: grid.rows(len),
+                top,
+            };
+            top = run.end(grid);
+            first += len;
+            runs.push(run);
+        }
+        Self {
+            runs,
+            height: top,
+            grid,
+        }
+    }
+
+    /// The shelves, in wall order.
+    #[must_use]
+    pub fn runs(&self) -> &[Run] {
+        &self.runs
+    }
+
+    /// Total content height, including the wall's top hang and the trailing
+    /// hang of its last row.
+    #[must_use]
+    pub fn height(&self) -> f32 {
+        self.height
+    }
+
+    /// How many albums are on the wall at all.
+    #[must_use]
+    pub fn albums(&self) -> usize {
+        self.runs.last().map_or(0, |run| run.first + run.len)
+    }
+
+    /// The run containing content coordinate `y` — the shelf whose band or
+    /// rows that pixel belongs to.
+    ///
+    /// Everything above the first band belongs to the first shelf, so a wall
+    /// scrolled to the very top already names its first header.
+    #[must_use]
+    pub fn run_at(&self, y: f32) -> Option<usize> {
+        if self.runs.is_empty() {
+            return None;
+        }
+        let y = y.max(0.0);
+        // Runs are contiguous and ascending, so the answer is the last one
+        // that starts at or before `y`. Linear rather than binary: a wall has
+        // tens of shelves, not thousands, and this is one pass per frame.
+        let mut found = 0;
+        for (index, run) in self.runs.iter().enumerate() {
+            if run.top <= y {
+                found = index;
+            } else {
+                break;
+            }
+        }
+        Some(found)
+    }
+
+    /// **Which header is pinned at the top of the viewport, and none is ever
+    /// pinned over another.**
+    ///
+    /// `None` means the lane holds an in-flow header instead — either because
+    /// the shelf's own header has not scrolled off yet (`scroll <= top`) or
+    /// because the *next* shelf's band has entered the lane, and the incoming
+    /// header is drawn where it lies rather than pinned.
+    ///
+    /// The two hand-overs are continuous, which is the property worth having:
+    ///
+    /// - At `scroll == run.top` the in-flow header sits at viewport y = 0,
+    ///   which is exactly where the pinned one is drawn. Nothing moves.
+    /// - The pin is released at `scroll == next.top − SHELF_HEADER_H`, and
+    ///   since a row's pitch ends in a `HANG` and the band *is* a `HANG`, that
+    ///   is the same instant the shelf's last row of covers clears the top of
+    ///   the viewport. The header stops being pinned exactly when its shelf
+    ///   stops being on screen at the top, and the lane below it is clear wall
+    ///   rather than covers.
+    ///
+    /// So the pinned band never covers a header, never covers a cover, and
+    /// never needs a transition to hide behind.
+    #[must_use]
+    pub fn sticky(&self, scroll: f32) -> Option<usize> {
+        let index = self.run_at(scroll)?;
+        let run = self.runs.get(index)?;
+        if scroll <= run.top {
+            return None;
+        }
+        match self.runs.get(index + 1) {
+            Some(next) if scroll > next.top - SHELF_HEADER_H => None,
+            _ => Some(index),
+        }
+    }
+
+    /// Half-open range of runs `[first, end)` with anything to draw for a
+    /// scroll offset and viewport height, [`OVERSCAN_ROWS`] included.
+    ///
+    /// The overscan is spent in the same unit [`Grid::visible_rows`] spends it
+    /// in — rows — so a fling that crosses a shelf break meets built rows on
+    /// the other side of it rather than a blank shelf.
+    #[must_use]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "the overscan is two rows; f32 is exact far past that"
+    )]
+    pub fn visible_runs(&self, scroll: f32, viewport_height: f32) -> (usize, usize) {
+        let slack = OVERSCAN_ROWS as f32 * self.grid.row_h;
+        let top = scroll - slack;
+        let bottom = scroll + viewport_height.max(0.0) + slack;
+        let first = self
+            .runs
+            .iter()
+            .position(|run| run.end(self.grid) > top)
+            .unwrap_or(self.runs.len());
+        let end = self
+            .runs
+            .iter()
+            .position(|run| run.top >= bottom)
+            .unwrap_or(self.runs.len());
+        (first, end.max(first))
+    }
+
+    /// Half-open range of *albums* — indices into the visible list — that the
+    /// viewport and its overscan touch.
+    ///
+    /// What the thumbnail prefetch spends: it asks for art by album, and it
+    /// has to ask for the same albums the view is about to draw or it decodes
+    /// the wrong ones.
+    #[must_use]
+    pub fn visible_albums(&self, scroll: f32, viewport_height: f32) -> (usize, usize) {
+        let (first_run, end_run) = self.visible_runs(scroll, viewport_height);
+        let mut start = self.albums();
+        let mut end = 0;
+        for run in &self.runs[first_run..end_run] {
+            let (row, row_end) =
+                self.grid
+                    .visible_rows(scroll - run.rows_top(), viewport_height, run.rows);
+            let columns = self.grid.columns.max(1);
+            start = start.min(run.first + (row * columns).min(run.len));
+            end = end.max(run.first + (row_end * columns).min(run.len));
+        }
+        if start > end { (0, 0) } else { (start, end) }
     }
 }
 
@@ -648,6 +894,249 @@ mod tests {
         assert_eq!(grid.rows(6), 1);
         assert_eq!(grid.rows(7), 2);
         assert!((grid.spacer_height(3) - 3.0 * grid.row_h).abs() < f32::EPSILON);
+    }
+
+    /// **The hang survives the index rail, at every width in the band.**
+    ///
+    /// The rail takes [`crate::theme::INDEX_LANE_W`] off the wall before the
+    /// grid is resolved, so the grid's own arithmetic is untouched — and this
+    /// is the assertion that it really is untouched rather than merely
+    /// believed to be. Every claim
+    /// `the_gutter_is_the_hang_wherever_the_art_is_uncapped` makes about a
+    /// wall of width `w` is re-made here about a wall of width
+    /// `w − INDEX_LANE_W`: gutter == HANG, margin == HANG, and nothing
+    /// unaccounted for.
+    #[test]
+    fn the_hang_holds_with_the_index_rail_taken_off_the_wall() {
+        /// f32 rounding on quantities of this magnitude.
+        const EPSILON: f32 = 0.01;
+
+        let mut uncapped = 0;
+        for wall in band() {
+            let width = wall - crate::theme::INDEX_LANE_W;
+            if width <= 0.0 {
+                continue;
+            }
+            let grid = Grid::new(width);
+            if grid.art >= ART_MAX - EPSILON {
+                continue;
+            }
+            uncapped += 1;
+            if grid.columns > 1 {
+                assert!(
+                    (grid.gutter - HANG).abs() < EPSILON,
+                    "{wall} px of wall ({width} px of grid): a {} px gutter, not {HANG}",
+                    grid.gutter
+                );
+            }
+            assert!(
+                (grid.margin - HANG).abs() < EPSILON,
+                "{wall} px of wall: a {} px margin, not {HANG}",
+                grid.margin
+            );
+            let accounted = grid.block_width() + 2.0 * grid.margin;
+            assert!(
+                (accounted - width).abs() < EPSILON,
+                "{wall} px of wall: {} px unaccounted",
+                width - accounted
+            );
+        }
+        assert!(
+            uncapped > 1000,
+            "only {uncapped} uncapped widths with the rail on"
+        );
+    }
+
+    /// **The rail's lane hangs at exactly one `HANG` from the last column** —
+    /// the rail is hung on the wall like a work, not bolted to its edge.
+    ///
+    /// The grid is resolved for `wall − INDEX_LANE_W` and centred in it, so
+    /// the distance from the right edge of the last cover to the left edge of
+    /// the rail's lane is the grid's own right margin, which the test above
+    /// pins at `HANG`. Restated here as the thing a ruler held up to a
+    /// screenshot actually measures.
+    #[test]
+    fn the_rail_lane_hangs_at_exactly_one_hang_from_the_last_column() {
+        for wall in band() {
+            let width = wall - crate::theme::INDEX_LANE_W;
+            if width <= 0.0 {
+                continue;
+            }
+            let grid = Grid::new(width);
+            if grid.art >= ART_MAX - 0.01 {
+                continue; // capped art: the margins take the slack (see above)
+            }
+            // The lane starts where the grid's width ends.
+            let last_cover_right = grid.margin + grid.block_width();
+            let lane_left = width;
+            assert!(
+                (lane_left - last_cover_right - HANG).abs() < 0.01,
+                "{wall} px: {} px between the last cover and the rail's lane",
+                lane_left - last_cover_right
+            );
+        }
+    }
+
+    /// The shelved wall's vertical rhythm, as arithmetic: the wall's top hang,
+    /// then a `SHELF_HEADER_H` band and its rows per shelf, and nothing else.
+    #[test]
+    fn a_shelved_wall_is_a_hang_then_a_band_and_its_rows_per_shelf() {
+        let grid = Grid::new(1280.0 - crate::theme::INDEX_LANE_W);
+        let shelves = Shelves::new(grid, &[4, 9, 1]);
+        let runs = shelves.runs();
+        assert_eq!(runs.len(), 3);
+        // Four columns at this width: 4 → 1 row, 9 → 3 rows, 1 → 1 row.
+        assert_eq!(grid.columns, 4);
+        assert_eq!(
+            runs.iter().map(|run| run.rows).collect::<Vec<_>>(),
+            [1, 3, 1]
+        );
+        // Slices of the visible list, contiguous and in order.
+        assert_eq!(
+            runs.iter()
+                .map(|run| (run.first, run.len))
+                .collect::<Vec<_>>(),
+            [(0, 4), (4, 9), (13, 1)]
+        );
+        // The first band opens one HANG below the top of the content — the
+        // wall's own top edge, the same one an unshelved wall had.
+        assert!((runs[0].top - HANG).abs() < f32::EPSILON);
+        // And each band opens exactly where the shelf above it ended.
+        for pair in runs.windows(2) {
+            assert!((pair[1].top - pair[0].end(grid)).abs() < f32::EPSILON);
+        }
+        // Height is the sum and nothing more: three bands, five rows, one top
+        // hang. (Each row's own trailing hang is inside `row_h`, so the
+        // wall's bottom edge is a hang too.)
+        let expected = HANG + 3.0 * SHELF_HEADER_H + 5.0 * grid.row_h;
+        assert!((shelves.height() - expected).abs() < 0.01);
+        assert_eq!(shelves.albums(), 14);
+    }
+
+    /// A shelf the filter emptied is not drawn — no header with nothing under
+    /// it — and the shelves that survive keep their original identity.
+    #[test]
+    fn an_emptied_shelf_is_not_drawn_and_the_survivors_keep_their_group() {
+        let grid = Grid::new(1280.0);
+        let shelves = Shelves::new(grid, &[0, 3, 0, 0, 2]);
+        assert_eq!(
+            shelves
+                .runs()
+                .iter()
+                .map(|run| run.group)
+                .collect::<Vec<_>>(),
+            [1, 4],
+            "the header a run draws is still its own"
+        );
+        assert_eq!(shelves.albums(), 5);
+        // Nothing at all: no runs, no height beyond the wall's top edge.
+        let empty = Shelves::new(grid, &[0, 0]);
+        assert!(empty.runs().is_empty());
+        assert_eq!(empty.run_at(0.0), None);
+        assert_eq!(empty.sticky(0.0), None);
+        assert_eq!(empty.visible_runs(0.0, 800.0), (0, 0));
+        assert_eq!(empty.visible_albums(0.0, 800.0), (0, 0));
+    }
+
+    /// **The pinned lane holds exactly one header at every scroll offset**,
+    /// and the hand-over is continuous at both ends (see [`Shelves::sticky`]).
+    ///
+    /// Swept at 1 px over two whole shelves rather than sampled at the
+    /// boundaries, because the property being claimed is "at every offset" and
+    /// the interesting offsets are single pixels either side of a hand-over.
+    #[test]
+    fn exactly_one_header_is_in_the_pinned_lane_at_every_offset() {
+        let grid = Grid::new(1280.0 - crate::theme::INDEX_LANE_W);
+        let shelves = Shelves::new(grid, &[8, 8, 8]);
+        let runs = shelves.runs().to_vec();
+
+        // Nothing is pinned while the first band is still on screen…
+        assert_eq!(shelves.sticky(0.0), None);
+        assert_eq!(shelves.sticky(runs[0].top), None, "the hand-over instant");
+        // …and the first pixel past it pins the header it just replaced, in
+        // the same place, so nothing moves across the hand-over.
+        assert_eq!(shelves.sticky(runs[0].top + 1.0), Some(0));
+
+        // The release: at the offset where the next band enters the lane.
+        let release = runs[1].top - SHELF_HEADER_H;
+        assert_eq!(shelves.sticky(release), Some(0));
+        assert_eq!(shelves.sticky(release + 0.5), None);
+        // That offset is also exactly where shelf 0's last row of covers
+        // clears the top of the viewport — which is why the lane below the
+        // header is clear wall rather than artwork.
+        let last_row_bottom = runs[0].end(grid) - HANG;
+        assert!(
+            (release - last_row_bottom).abs() < f32::EPSILON,
+            "the pin releases at {release} but the covers end at {last_row_bottom}"
+        );
+
+        // Sweep: at every pixel, a pinned header and an in-flow header never
+        // both occupy the lane — and once the wall has scrolled far enough for
+        // the first band to have reached it, one of them always does.
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "a scroll offset in pixels is a small non-negative integer here"
+        )]
+        for step in 0..(runs[2].top as u32) {
+            let scroll = f32::from(u16::try_from(step).unwrap_or(u16::MAX));
+            let pinned = shelves.sticky(scroll);
+            let in_lane = runs
+                .iter()
+                .any(|run| (run.top - scroll) >= 0.0 && (run.top - scroll) < SHELF_HEADER_H);
+            assert!(
+                !(pinned.is_some() && in_lane),
+                "at {scroll}: {pinned:?} pinned *and* an in-flow header in the lane"
+            );
+            if scroll >= runs[0].top {
+                assert!(
+                    pinned.is_some() || in_lane,
+                    "at {scroll}: the lane holds no header at all"
+                );
+            }
+        }
+        // Above the first band the lane is empty on purpose: the wall's own
+        // top hang is what is there, and pinning a header over it would put
+        // chrome where the wall's edge is.
+        assert_eq!(shelves.sticky(runs[0].top - 1.0), None);
+    }
+
+    /// Virtualization survives shelving: only the shelves the viewport touches
+    /// are built, and the albums the prefetch asks for are the ones on screen.
+    #[test]
+    fn only_the_shelves_the_viewport_touches_are_built() {
+        let grid = Grid::new(1280.0 - crate::theme::INDEX_LANE_W);
+        // Twenty shelves of a dozen albums: 60 rows, ~22 000 px of wall.
+        let shelves = Shelves::new(grid, &[12; 20]);
+        assert_eq!(shelves.runs().len(), 20);
+
+        let (first, end) = shelves.visible_runs(0.0, 800.0);
+        assert_eq!(first, 0);
+        assert!(
+            end <= 3,
+            "an 800 px viewport touched {end} shelves of 20 — the wall is not virtualized"
+        );
+
+        // Scrolled into the middle: the run range is a small window, not the
+        // whole wall, and the prefetch's album range sits inside it.
+        let middle = shelves.runs()[10].top + 40.0;
+        let (first, end) = shelves.visible_runs(middle, 800.0);
+        assert!(first >= 9 && end <= 13, "{first}..{end}");
+        let (start, stop) = shelves.visible_albums(middle, 800.0);
+        assert!(
+            start >= shelves.runs()[first].first,
+            "{start} is above the first built shelf"
+        );
+        assert!(stop <= shelves.albums());
+        assert!(
+            stop - start <= 4 * 12,
+            "{} albums asked for at once",
+            stop - start
+        );
+
+        // Scrolled past the end: an empty window, never an underflow.
+        let (first, end) = shelves.visible_runs(1.0e7, 800.0);
+        assert!(first <= end && end <= 20);
     }
 
     /// **No artwork is ever drawn larger than its source** — the refusal, as

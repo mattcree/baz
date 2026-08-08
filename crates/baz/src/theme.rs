@@ -806,6 +806,142 @@ pub const ART_MAX: f32 = 320.0;
 /// same 36.4 for a reason worth being able to state twice.
 pub const LABEL_H: f32 = CAPTION_H;
 
+// ---------------------------------------------------------------------------
+// The shelf break and the index rail (ADR-0017 step 8, §1.7).
+//
+// Everything below is arithmetic on `HANG`, `GAP_LG` and the type scale. The
+// wall has exactly one number; a group key that introduced a second would be a
+// second grid.
+// ---------------------------------------------------------------------------
+
+/// Height of a shelf's group-header band — **exactly [`HANG`]**.
+///
+/// The band holds the header's line box at its **top** and clear wall for the
+/// rest, so the vertical rhythm of a break is stated in three numbers and all
+/// three are the grid's own:
+///
+/// ```text
+/// HANG                    40   the trailing hang of the row above (or the
+///                              wall's own top hang, for the first shelf)
+/// HEADING_LINE_H          14   the header's line box
+/// SHELF_HEADER_H - line   26   clear wall, then the shelf's first row
+/// ```
+///
+/// Air above the ink is 40 and air below it is 26 — **20 : 13** — so a header
+/// sits nearer the shelf it names than the shelf it follows, which is the one
+/// thing a section heading has to say with position. Neither number was
+/// chosen: 40 is `HANG` and 26 is `HANG − HEADING_LINE_H`.
+///
+/// It is also what makes the sticky header exact. The band is `HANG`, the
+/// trailing hang of the row above is `HANG`, so the scroll offset at which a
+/// shelf's last row of covers leaves the top of the viewport is precisely the
+/// offset at which the next shelf's band enters it — see
+/// [`crate::shelf::Shelves::sticky`].
+pub const SHELF_HEADER_H: f32 = HANG;
+
+/// The index rail's ink lane (logical px) — `.interface-design/system.md`
+/// §7.2's spine index at the width ADR-0017 §1.7 gives it.
+///
+/// The rail is **type, not chrome**: no ground, no edge, no chips. This is the
+/// width its type is laid out in, not the width of a widget with a background.
+pub const INDEX_W: f32 = 36.0;
+
+/// Clearance between the wall's scrollbar and the rail's ink.
+///
+/// The bar overlays the right of the grid's margin, and the rail's lane begins
+/// where the grid's width ends, so the two are neighbours by construction and
+/// the rail's ink has to be told to stand off. [`GAP_SM`] is the ladder's
+/// "siblings within a group", which is what a scrollbar and an index are.
+pub const INDEX_CLEARANCE: f32 = GAP_SM;
+
+/// What the rail costs the wall: the scrollbar's clearance, the rail's ink
+/// lane, and the gutter between the lane and the window's edge — **60**.
+///
+/// Three tokens and no new number:
+///
+/// ```text
+///  8  INDEX_CLEARANCE   the wall's scrollbar is on the other side of this
+/// 36  INDEX_W           the rail's type
+/// 16  GAP_LG            the gutter to the window's edge
+/// ```
+///
+/// The right gutter is [`GAP_LG`] because that is the top bar's own horizontal
+/// padding, so **the rail's right edge is the same x as the `Settings` word
+/// above it**: the rail borrows an alignment edge the bar already established
+/// rather than introducing one.
+///
+/// With the grid resolved for `width − INDEX_LANE_W`, the hang then leaves
+/// exactly [`HANG`] between the last column of covers and the start of the
+/// rail's lane — the rail hangs off the wall at the same distance as every
+/// work hangs off its neighbour. That is asserted over the whole width band by
+/// `the_rail_lane_hangs_at_exactly_one_hang_from_the_last_column`.
+pub const INDEX_LANE_W: f32 = INDEX_CLEARANCE + INDEX_W + GAP_LG;
+
+/// Group heading type: **10 px**, the caps size the critique names ("9–10 px
+/// caps at ink 40 %, the only chrome voice").
+///
+/// Smaller than [`SIZE_CAPTION`], and the only size in the scale below it,
+/// because a heading in this direction is the quietest thing on the wall
+/// rather than the loudest.
+pub const SIZE_HEADING: f32 = 10.0;
+/// Leading for [`SIZE_HEADING`] — [`LEADING_BODY`]'s, so the band's arithmetic
+/// lands on a whole pixel (10 × 1.40 = 14.0) rather than on 14.5.
+pub const LEADING_HEADING: f32 = 1.40;
+/// A heading's line box: **14.0** (module docs on [`SHELF_HEADER_H`]).
+pub const HEADING_LINE_H: f32 = SIZE_HEADING * LEADING_HEADING;
+
+/// One rail entry's line box.
+///
+/// [`LEADING_CAPTION`] rather than [`LEADING_HEADING`], because the rail is a
+/// *column* of small type where the shelf header is a single line of it, and
+/// §7.2 sets the spine index at 1.45 for exactly that reason: the smallest
+/// type is the type that needs the air.
+pub const RAIL_LINE_H: f32 = SIZE_HEADING * LEADING_CAPTION;
+/// Rail entry pitch: the line box and the gap to the next entry.
+///
+/// [`GAP_XS`] is the smallest gap in the ladder, which is what a ruler wants —
+/// the entries have to read as one run of type rather than as a list of
+/// separate labels.
+pub const RAIL_PITCH: f32 = RAIL_LINE_H + GAP_XS;
+
+/// The letter-spacing baz applies to a heading, as the string it is spelled
+/// with: U+2009 THIN SPACE, one fifth of an em.
+///
+/// iced 0.13 has no `letter-spacing` — [`Palette::heading`] recorded that and
+/// gave the tracking up. It is available after all, at the cost of spelling it
+/// into the string: the bundled faces all map U+2009 (verified against the
+/// `cmap` of each of the three, `the_bundled_faces_carry_the_tracking_space`),
+/// so [`tracked`] is a real 0.2 em track and not a synthesised one.
+///
+/// **Headings only**, and only the short ones baz draws in caps. It is
+/// deliberately not applied to anything a user reads as prose, anything
+/// searchable, or anything measured for a reserved slot.
+pub const TRACKING: &str = "\u{2009}";
+
+/// A heading's text, tracked: [`TRACKING`] between every pair of characters.
+///
+/// Caps at 10 px with no tracking read as a small word; caps at 10 px with
+/// 0.2 em of track read as a *label*, which is the difference between a header
+/// and a caption that happens to be short. The design asked for both the caps
+/// and the track (`.interface-design/system.md` §7.2, ADR-0017 step 8) and the
+/// caps were already the view's own `to_uppercase`; this is the other half.
+///
+/// Pure and total: an empty string tracks to an empty string, one character
+/// tracks to itself, and the space is inserted *between* characters rather
+/// than after them, so a tracked heading never carries a trailing space that
+/// would push a right-aligned label off its edge.
+#[must_use]
+pub fn tracked(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() * 2);
+    for (index, character) in text.chars().enumerate() {
+        if index > 0 {
+            out.push_str(TRACKING);
+        }
+        out.push(character);
+    }
+    out
+}
+
 // The radii come down across the board, because **an archive is rectilinear
 // and a sleeve has square corners** (`.interface-design/system.md` §6). Artwork
 // is radius 0 always, and every rule is too; what is left is barely rounded
@@ -1513,6 +1649,75 @@ pub fn word_button(p: &Palette, on: Color, status: button::Status) -> button::St
             radius: RADIUS_CTRL.into(),
         },
         shadow: Shadow::default(),
+    }
+}
+
+/// **A group key**: one of the five words the wall is arranged by — ARTIST ·
+/// YEAR · GENRE · ADDED · PLAYED (ADR-0017 §1.3, ADR-0019).
+///
+/// `docs/REFUSALS.md` refuses view-options menus outright: *no grid-size
+/// picker, no list-mode toggle, no column chooser, no sort dropdown. Group
+/// keys are a row of words.* So there is no menu, no dropdown, no segmented
+/// control and — the part that is easy to get wrong — **no chip and no border
+/// on the active one either**. A pill drawn around the live key would be the
+/// dropdown's ghost: the same "this is a widget" statement, one step quieter.
+///
+/// The chrome here is type, and it says *active* on two axes at once so it
+/// never depends on either alone:
+///
+/// | | ink | face |
+/// |---|---|---|
+/// | active | [`Palette::paper`] | [`MEDIUM`] |
+/// | at rest | [`Palette::paper_faint`] | [`SANS`] |
+///
+/// One size for all five, one caps treatment for all five, one tracked
+/// spelling for all five — the row is a single line of type in which one word
+/// is lit. The ink step is `#E8E4DB` against `#888680`, which is 2.6 × the
+/// luminance; the weight step is a real drawn face rather than a synthesised
+/// one. Neither is colour, so *no state is signalled by colour alone* holds
+/// (`docs/REFUSALS.md`).
+///
+/// Hover and press are [`word_button`]'s wash, because a key *is* a word that
+/// is a control; what this adds over `word_button` is the resting distinction
+/// between the one that is in force and the four that are not, which
+/// navigation has no need of.
+#[must_use]
+pub fn group_key(p: &Palette, on: Color, status: button::Status, active: bool) -> button::Style {
+    let resting = if active { p.paper } else { p.paper_faint };
+    let (background, text_color) = match status {
+        button::Status::Hovered => (p.ink_wash(on), p.paper),
+        button::Status::Pressed => (p.ink_wash_press(on), p.paper),
+        button::Status::Disabled => (Color::TRANSPARENT, p.paper_muted),
+        button::Status::Active => (Color::TRANSPARENT, resting),
+    };
+    button::Style {
+        background: Some(Background::Color(background)),
+        text_color,
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 1.0,
+            radius: RADIUS_CTRL.into(),
+        },
+        shadow: Shadow::default(),
+    }
+}
+
+/// The band a **pinned** shelf header is drawn in: the wall's own colour, and
+/// nothing else.
+///
+/// It is opaque, and that is its whole job — the covers of the shelf it heads
+/// scroll *under* it and have to stop being drawn at the band's edge rather
+/// than through it. Wall on wall is invisible as a surface, so §1.2's claim
+/// survives: the shelf still contains exactly two kinds of thing, artwork and
+/// type. There is no rule under it, no shadow beneath it and no step up in
+/// lightness; a pinned header differs from an unpinned one in nothing a
+/// screenshot can show, which is what makes the pin a *position* rather than a
+/// state.
+#[must_use]
+pub fn shelf_header_band(p: &Palette) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(p.wall)),
+        ..container::Style::default()
     }
 }
 
@@ -2587,7 +2792,9 @@ mod tests {
             )]
             let window = window as f32;
             for inspector in [0.0, PANEL_W] {
-                let hang = Grid::new(window - inspector);
+                // What the wall really measures now: the window, less the
+                // inspector, less the index rail's lane (ADR-0017 step 8).
+                let hang = Grid::new((window - inspector - INDEX_LANE_W).max(0.0));
                 assert!(
                     hang.columns >= 1,
                     "the grid collapsed at {window} px with {inspector} px of inspector"
@@ -2621,6 +2828,85 @@ mod tests {
         // And the panel has to hold its own contents: the album panel insets
         // the artwork by its padding on both sides and must not go negative.
         const { assert!(PANEL_W > 2.0 * GAP_XL) }
+    }
+
+    /// **The shelf break's vertical rhythm is `HANG` and arithmetic on it.**
+    ///
+    /// A group header that introduced a spacing number of its own would be a
+    /// second vertical grid on a wall that has one, so every quantity in the
+    /// band is asserted to be either the hang or the hang minus the type.
+    ///
+    /// The ratio is stated here as well as in the doc comment, because it is
+    /// the thing a ruler held up to a screenshot measures: **40 px of air above
+    /// a header's ink and 26 below it**, which puts a header nearer the shelf
+    /// it names than the shelf it follows.
+    #[test]
+    fn a_shelf_break_is_a_hang_and_the_type_inside_it() {
+        // The band is the hang, exactly.
+        const { assert!(SHELF_HEADER_H == HANG) }
+        // The line box is the heading size at its own leading, and it lands on
+        // a whole pixel — 10 × 1.40 — rather than on a half one.
+        assert!((HEADING_LINE_H - 14.0).abs() < f32::EPSILON);
+        assert!((HEADING_LINE_H - SIZE_HEADING * LEADING_HEADING).abs() < f32::EPSILON);
+        // Air above the ink is the row above's trailing hang; air below is
+        // whatever the band has left. Both are derived, neither is chosen.
+        let below = SHELF_HEADER_H - HEADING_LINE_H;
+        assert!((below - 26.0).abs() < f32::EPSILON);
+        assert!(
+            HANG > below,
+            "a header must sit nearer the shelf it names ({below}) than the \
+             one it follows ({HANG})"
+        );
+        // …but not so much nearer that the break stops reading as a break: the
+        // header owns more air than the label under a sleeve does.
+        assert!(below > GAP_LG);
+        // The heading is the smallest type in the product, below the caption.
+        const { assert!(SIZE_HEADING < SIZE_CAPTION) }
+    }
+
+    /// **The index rail costs the wall three tokens and no new number**, and
+    /// its right edge is the top bar's own gutter.
+    #[test]
+    fn the_index_rail_borrows_every_edge_it_stands_on() {
+        // What the wall gives up is the clearance, the lane and the gutter.
+        assert!((INDEX_LANE_W - (INDEX_CLEARANCE + INDEX_W + GAP_LG)).abs() < f32::EPSILON);
+        assert!((INDEX_LANE_W - 60.0).abs() < f32::EPSILON);
+        // The lane is the width ADR-0017 §1.7 gives it, and the gutter to the
+        // window's edge is the top bar's own horizontal padding — the `Settings`
+        // word above the rail is set against the same x.
+        assert!((INDEX_W - 36.0).abs() < f32::EPSILON);
+        const { assert!(INDEX_CLEARANCE == GAP_SM) }
+        // The clearance really does clear the scrollbar, which sits in the
+        // grid's right margin immediately left of the lane.
+        const { assert!(INDEX_CLEARANCE > 0.0 && INDEX_CLEARANCE < SCROLLBAR_LANE) }
+        // A rail entry's pitch is its line box and the ladder's smallest gap,
+        // and 27 letters fit the shortest wall a window can produce (860 px of
+        // window less the two bars).
+        assert!((RAIL_LINE_H - SIZE_HEADING * LEADING_CAPTION).abs() < f32::EPSILON);
+        assert!((RAIL_PITCH - (RAIL_LINE_H + GAP_XS)).abs() < f32::EPSILON);
+        const { assert!(27.0 * RAIL_PITCH < 640.0) }
+    }
+
+    /// The tracking is inserted **between** characters and nowhere else.
+    ///
+    /// Total on every input: the empty string, one character, and a string
+    /// whose characters are outside the BMP (a `char` is a scalar value, not a
+    /// byte, so this must not split anything).
+    #[test]
+    fn tracking_goes_between_characters_and_never_after_them() {
+        assert_eq!(tracked(""), "");
+        assert_eq!(tracked("A"), "A");
+        assert_eq!(tracked("AB"), format!("A{TRACKING}B"));
+        assert_eq!(tracked("ARTIST").chars().count(), 6 + 5);
+        assert!(!tracked("ARTIST").ends_with(TRACKING));
+        assert!(!tracked("ARTIST").starts_with(TRACKING));
+        // Non-Latin and astral input survives unsplit — a rail entry can be a
+        // CJK initial, and a genre tag can be anything at all.
+        assert_eq!(tracked("曲人"), format!("曲{TRACKING}人"));
+        assert_eq!(tracked("𝄞𝄢"), format!("𝄞{TRACKING}𝄢"));
+        // And it is exactly one character, which is what makes the width
+        // arithmetic in `font.rs` one advance per gap.
+        assert_eq!(TRACKING.chars().count(), 1);
     }
 
     #[test]

@@ -7,29 +7,50 @@
 //! grid it is handed; it computes none of it.
 
 use iced::widget::{
-    Space, button, column, container, image as iced_image, mouse_area, row, scrollable, text,
+    Space, button, column, container, image as iced_image, mouse_area, row, scrollable, stack, text,
 };
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf, scroll_id};
 use crate::player::PlayerState;
-use crate::shelf::Grid;
+use crate::rail::{RailEntry, RailSlot};
+use crate::shelf::{Grid, Run, Shelves};
 use crate::views::gradient_block;
-use crate::{theme, vm};
+use crate::{rail, theme, vm};
 
-/// The virtualized grid: spacer, visible rows, spacer (see
-/// [`crate::shelf::Grid`]). The grid block is centred in the viewport;
-/// spacers are width-shrunk so the column keeps the rows' width and partial
-/// last rows stay left-aligned within the shelf.
+/// **The wall**: the shelved, virtualized grid, its pinned group header, and
+/// the index rail down its right-hand side.
 ///
-/// Each row is [`crate::shelf::Grid::block_width`] wide — the width the
-/// *columns* take, not the width the items in that row happen to fill. That is what keeps a
-/// filtered shelf anchored: narrowing 29 albums to 1 used to teleport the
-/// survivor from the first column position to the middle of the window,
-/// because the row it was in was only as wide as itself and the block was
-/// centred on that. The block is now the same width whatever survives, so the
-/// result stays where its column is. It is also what keeps a partial *last*
-/// row left-aligned with the full rows above it.
+/// Three things sit side by side and on top of each other here, and the
+/// arrangement is the whole of step 8's composition:
+///
+/// ```text
+/// ┌──────────────────────────────────────────┬──────┐
+/// │ scrollable( shelf headers + rows )        │ rail │  the rail is a sibling
+/// │ ────────────────────────────────────────  │      │  of the wall, so the
+/// │ ↑ the pinned header, stacked over the top  │      │  grid's width is what
+/// └──────────────────────────────────────────┴──────┘  the scrollable measures
+/// ```
+///
+/// # The one alignment edge everything shares
+///
+/// Every row is [`Grid::block_width`] wide — the width the *columns* take, not
+/// the width the items in that row happen to fill — and the shelf headers are
+/// laid out in exactly the same block. So **a header's left edge is the first
+/// column's left edge**, pinned or not, at every width and every column count.
+/// The wall introduces no x-position of its own.
+///
+/// That is also what keeps a filtered shelf anchored: narrowing 29 albums to 1
+/// used to teleport the survivor from the first column position to the middle
+/// of the window, because the row it was in was only as wide as itself and the
+/// block was centred on that. The block is the same width whatever survives.
+///
+/// # The vertical unit is `HANG`
+///
+/// The wall's top edge, the gap between two rows, the gap above a header and
+/// the header's own band are all `HANG` or arithmetic on it — see
+/// [`crate::shelf::Shelves`], which owns the numbers and proves the pinned
+/// header's hand-over from them.
 ///
 /// The grid comes from [`Shelf::grid`], not from the viewport directly, so a
 /// tile click that opens the inspector does not reflow the grid — nor resize
@@ -40,55 +61,43 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a,
         return empty_state(shelf);
     }
     let hang = shelf.grid();
-    let cols = hang.columns;
-    let total_rows = hang.rows(shelf.visible.len());
-    let (first_row, end_row) =
-        hang.visible_rows(shelf.scroll_offset, shelf.grid_size.height, total_rows);
+    let shelves = shelf.shelves();
+    let runs = shelves.runs();
+    let (first_run, end_run) = shelves.visible_runs(shelf.scroll_offset, shelf.grid_size.height);
 
-    // The wall's top edge is a HANG like every other edge; each row carries
-    // its own trailing HANG in `row_h`, so the bottom edge is one too. The
-    // horizontal margins are not padding at all — they are what centring a
-    // `block_width` block in the viewport leaves, which is how they come out
-    // at exactly HANG whenever the art is uncapped.
-    let mut grid = column![].padding(iced::Padding {
-        top: theme::HANG,
-        right: 0.0,
-        bottom: 0.0,
-        left: 0.0,
-    });
-    grid = grid.push(Space::with_height(Length::Fixed(
-        hang.spacer_height(first_row),
-    )));
-    for r in first_row..end_row {
-        let mut cells = row![]
-            .spacing(hang.gutter)
-            .align_y(alignment::Vertical::Top);
-        for c in 0..cols {
-            let Some(&album_index) = shelf.visible.get(r * cols + c) else {
-                break;
-            };
-            if let Some(album) = shelf.albums.get(album_index) {
-                cells = cells.push(tile(
-                    shelf,
-                    hang,
-                    album,
-                    player.playing_album() == Some(album.id),
-                ));
-            }
-        }
-        grid = grid.push(
-            container(cells)
-                .width(Length::Fixed(hang.block_width()))
-                .height(Length::Fixed(hang.row_h))
-                .align_y(alignment::Vertical::Top),
+    // One column, laid out in content coordinates: everything not on screen is
+    // a single spacer, so a wall of 500 genre shelves costs the same per frame
+    // as a wall of five.
+    let mut grid = column![].width(Length::Fixed(hang.block_width()));
+    let mut drawn = 0.0_f32;
+    let spacer = |grid: iced::widget::Column<'a, Message>, to: f32, drawn: &mut f32| {
+        let gap = (to - *drawn).max(0.0);
+        *drawn = to;
+        grid.push(Space::with_height(Length::Fixed(gap)))
+    };
+    for run in &runs[first_run..end_run] {
+        grid = spacer(grid, run.top, &mut drawn);
+        grid = grid.push(header_band(shelf, *run, hang.block_width()));
+        drawn = run.rows_top();
+        let (first_row, end_row) = hang.visible_rows(
+            shelf.scroll_offset - run.rows_top(),
+            shelf.grid_size.height,
+            run.rows,
         );
+        grid = spacer(
+            grid,
+            run.rows_top() + hang.spacer_height(first_row),
+            &mut drawn,
+        );
+        for r in first_row..end_row {
+            grid = grid.push(shelf_row(shelf, player, hang, *run, r));
+        }
+        drawn += hang.spacer_height(end_row - first_row);
     }
-    grid = grid.push(Space::with_height(Length::Fixed(
-        hang.spacer_height(total_rows - end_row),
-    )));
+    grid = spacer(grid, shelves.height(), &mut drawn);
 
     let room = theme::active();
-    scrollable(
+    let wall = scrollable(
         container(grid)
             .width(Length::Fill)
             .align_x(alignment::Horizontal::Center),
@@ -104,7 +113,295 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a,
     // exact failure.
     .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
     .width(Length::Fill)
-    .height(Length::Fill)
+    .height(Length::Fill);
+
+    // **The pinned layer is always in the tree**, even with nothing pinned,
+    // and that is load-bearing rather than tidy. iced 0.13 keys widget state
+    // by position *and type* in the tree: a `stack` that appeared the moment a
+    // header pinned put the `scrollable` one level deeper, `Tree::diff` saw a
+    // different widget where the scrollable had been, and its state — the
+    // scroll offset — was rebuilt from nothing. The wall then snapped back to
+    // the top, which un-pinned the header, which removed the stack, which
+    // restored the offset: a two-frame oscillation that made the wall
+    // unscrollable past the first shelf. The layer is constant; only what it
+    // draws changes.
+    let pinned = shelves
+        .sticky(shelf.scroll_offset)
+        .and_then(|index| runs.get(index))
+        .copied();
+    row![
+        stack![wall, pinned_header(shelf, pinned, hang.block_width())],
+        index_rail(shelf, &shelves)
+    ]
+    .into()
+}
+
+/// One row of works, at the block's width so a partial last row stays
+/// left-aligned with the full rows above it.
+fn shelf_row<'a>(
+    shelf: &'a Shelf,
+    player: &'a PlayerState,
+    hang: Grid,
+    run: Run,
+    row_index: usize,
+) -> Element<'a, Message> {
+    let mut cells = row![]
+        .spacing(hang.gutter)
+        .align_y(alignment::Vertical::Top);
+    for column_index in 0..hang.columns {
+        let offset = row_index * hang.columns + column_index;
+        if offset >= run.len {
+            break;
+        }
+        let Some(&album_index) = shelf.visible.get(run.first + offset) else {
+            break;
+        };
+        if let Some(album) = shelf.albums.get(album_index) {
+            cells = cells.push(tile(
+                shelf,
+                hang,
+                album,
+                player.playing_album() == Some(album.id),
+            ));
+        }
+    }
+    container(cells)
+        .width(Length::Fixed(hang.block_width()))
+        .height(Length::Fixed(hang.row_h))
+        .align_y(alignment::Vertical::Top)
+        .into()
+}
+
+/// A shelf's header where it lies, in the flow of the wall.
+fn header_band(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
+    container(header_line(shelf, run, block))
+        .width(Length::Fixed(block))
+        .height(Length::Fixed(theme::SHELF_HEADER_H))
+        .align_y(alignment::Vertical::Top)
+        .into()
+}
+
+/// The same header, **pinned** to the top of the viewport while its shelf is
+/// the one on screen (`docs/design/critique/02-surfaces.md`: *sticky in the
+/// virtualizer*).
+///
+/// # How it sticks, and why nothing moves
+///
+/// iced 0.13 has no sticky positioning, so the band is a second layer in a
+/// `stack` over the wall, drawn at the viewport's top edge in exactly the
+/// geometry the in-flow band has: the same block, the same left edge, the same
+/// line box at the same offset. [`Shelves::sticky`] then decides *when* it is
+/// drawn, and its two hand-overs are exact rather than eased —
+///
+/// - it appears at the scroll offset where the in-flow header reaches y = 0,
+///   which is where this one is drawn, so the swap is invisible;
+/// - it disappears at the offset where the next shelf's band enters the lane,
+///   which is the same offset at which this shelf's last row of covers leaves
+///   it, so what replaces the pinned header is the next one arriving in the
+///   flow and never a cover.
+///
+/// The band is opaque [`theme::shelf_header_band`] — wall on wall — across the
+/// full width rather than the block's, because the covers passing beneath it
+/// are the full width of the wall. There is no rule, no shadow and no lift: a
+/// pinned header differs from an unpinned one in nothing a screenshot can
+/// show, which is what makes this a position rather than a state, and is why
+/// it needs no transition (`docs/REFUSALS.md`: *no motion — hard cuts by
+/// design*).
+///
+/// `run` is `None` when nothing is pinned, and the layer is still built: see
+/// the note at the call site for why it may not come and go.
+fn pinned_header(shelf: &Shelf, run: Option<Run>, block: f32) -> Element<'_, Message> {
+    let room = theme::active();
+    let body: Element<'_, Message> = match run {
+        Some(run) => container(header_line(shelf, run, block))
+            .width(Length::Fixed(block))
+            .height(Length::Fixed(theme::SHELF_HEADER_H))
+            .align_y(alignment::Vertical::Top)
+            .into(),
+        None => Space::new(Length::Fixed(block), Length::Fixed(0.0)).into(),
+    };
+    container(body)
+        .width(Length::Fill)
+        // Only the band, never the wall: a layer as tall as the viewport would
+        // be a transparent sheet over every cover, and iced hands the topmost
+        // layer of a `stack` the pointer first.
+        .height(Length::Fixed(if run.is_some() {
+            theme::SHELF_HEADER_H
+        } else {
+            0.0
+        }))
+        .align_x(alignment::Horizontal::Center)
+        .style(move |_theme| {
+            if run.is_some() {
+                theme::shelf_header_band(room)
+            } else {
+                iced::widget::container::Style::default()
+            }
+        })
+        .into()
+}
+
+/// A group header's line of type: caps, tracked, at the quiet ink.
+///
+/// **Three axes away from the caption under a sleeve and one size smaller** —
+/// caps where the caption is sentence case, tracked where the caption is not,
+/// [`theme::Palette::paper_faint`] where a title is full paper. Hierarchy is
+/// not carried by size alone here, which is what stops the wall from needing a
+/// fourth type size to say a fourth thing.
+///
+/// The line box is [`theme::HEADING_LINE_H`] and it sits at the **top** of the
+/// band, so the air above the ink is the previous row's trailing `HANG` and
+/// the air below is `HANG − HEADING_LINE_H`. See
+/// [`theme::SHELF_HEADER_H`] for the ratio and why it is that way round.
+fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
+    let room = theme::active();
+    let label = shelf
+        .groups
+        .get(run.group)
+        .map_or_else(String::new, |group| group.header.label());
+    container(
+        text(theme::tracked(&label.to_uppercase()))
+            .size(theme::SIZE_HEADING)
+            .line_height(theme::LEADING_HEADING)
+            .font(theme::MEDIUM)
+            .color(room.paper_faint)
+            .wrapping(text::Wrapping::None),
+    )
+    .width(Length::Fixed(block))
+    .height(Length::Fixed(theme::HEADING_LINE_H))
+    .clip(true)
+    .into()
+}
+
+/// **The index rail**: a pure projection of the active group key, holding no
+/// state of its own (`.interface-design/system.md` §7.2, ADR-0017 §1.7).
+///
+/// Everything it draws is derived, this frame, from the shelves the wall is
+/// showing and where the wall is scrolled to — [`crate::rail`] is the whole of
+/// the logic and it is pure. Change the key and the rail is simply built from
+/// the new headers; there is nothing here to invalidate.
+///
+/// # It is type, not chrome
+///
+/// No ground, no edge, no chips, no rule between the lane and the wall. Three
+/// inks and one of them is a weight:
+///
+/// | | ink | face |
+/// |---|---|---|
+/// | the shelf you are on | [`theme::Palette::paper`] | [`theme::MEDIUM`] |
+/// | a value the collection has | [`theme::Palette::paper_faint`] | [`theme::SANS`] |
+/// | a value it does not | [`theme::Palette::paper_muted`] | [`theme::SANS`] |
+///
+/// **Never the accent.** An index is navigation, not playback truth.
+///
+/// # Absent values are drawn
+///
+/// §7.2 is explicit that an index which hides its gaps lies about the
+/// collection, so the letters, decades and buckets the library has nothing
+/// under are drawn in the muted ink and are **inert** — no button, no hover,
+/// no press. A control that did nothing when pressed would be the lie
+/// `docs/REFUSALS.md` guards against from the other side.
+///
+/// # Where its edges are
+///
+/// Entries are right-aligned to the lane, so the rail's right edge is
+/// [`theme::GAP_LG`] from the wall's — the top bar's own gutter, which is the
+/// alignment edge the `Settings` word above already established. An entry
+/// wider than [`theme::INDEX_W`] grows *leftwards* to that cap and then clips,
+/// which is why the lane keeps [`theme::INDEX_CLEARANCE`] between itself and
+/// the scrollbar. The full value is never lost: it is set in the shelf header
+/// one `HANG` to the left, at the same moment, in the same voice.
+fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
+    let room = theme::active();
+    let runs = shelves.runs();
+    let headers: Vec<vm::GroupHeaderVm> = runs
+        .iter()
+        .filter_map(|run| shelf.groups.get(run.group))
+        .map(|group| group.header.clone())
+        .collect();
+    let entries = rail::entries(shelf.group_key, &headers);
+    // Where the wall is: the shelf at the top of the viewport, mapped onto the
+    // rail's own list. This is the *only* thing the rail reads about scroll
+    // position, and it reads it rather than remembering it.
+    let here = shelves.run_at(shelf.scroll_offset);
+    let focus = here.and_then(|run| entries.iter().position(|entry| entry.shelf == Some(run)));
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a slot count floored from a non-negative viewport height"
+    )]
+    let capacity = (shelf.grid_size.height.max(0.0) / theme::RAIL_PITCH).floor() as usize;
+
+    // `Fill`, so that aligning the entries right aligns them to the *lane*
+    // rather than to the widest of them: a column of single letters would
+    // otherwise sit wherever the longest entry happened to put it.
+    let mut lane = column![]
+        .width(Length::Fill)
+        .spacing(theme::GAP_XS)
+        .align_x(alignment::Horizontal::Right);
+    for slot in rail::elide(&entries, capacity, focus) {
+        lane = lane.push(match slot {
+            RailSlot::Gap => rail_text(rail::GAP_MARK.to_owned(), room.paper_muted, false),
+            RailSlot::Entry(index) => match entries.get(index) {
+                Some(entry) => rail_entry(entry, entry.shelf == here),
+                None => rail_text(String::new(), room.paper_muted, false),
+            },
+        });
+    }
+    container(lane)
+        .width(Length::Fixed(theme::INDEX_LANE_W))
+        .height(Length::Fill)
+        .padding(iced::Padding {
+            top: 0.0,
+            right: theme::GAP_LG,
+            bottom: 0.0,
+            left: theme::INDEX_CLEARANCE,
+        })
+        .align_y(alignment::Vertical::Center)
+        .into()
+}
+
+/// One value in the rail: a jump when the collection has it, a statement of a
+/// gap when it does not.
+fn rail_entry(entry: &RailEntry, current: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    if !entry.present() {
+        return rail_text(entry.label.clone(), room.paper_muted, false);
+    }
+    let Some(target) = entry.shelf else {
+        return rail_text(entry.label.clone(), room.paper_muted, false);
+    };
+    let ink = if current {
+        room.paper
+    } else {
+        room.paper_faint
+    };
+    button(rail_text(entry.label.clone(), ink, current))
+        .padding(0)
+        .style(move |_theme, status| theme::group_key(room, room.wall, status, current))
+        .on_press(Message::RailJumped(target))
+        .into()
+}
+
+/// One line of rail type: shrink-to-fit up to [`theme::INDEX_W`], clipped
+/// there, right-aligned by the lane that holds it.
+///
+/// Shrink rather than a fixed box, so a single letter sits flush against the
+/// rail's right edge instead of floating at the left of a 36 px lane, while a
+/// long value still fills the lane and clips at its own right edge — the head
+/// of the word survives, which is the half you navigate by.
+fn rail_text(label: String, ink: iced::Color, current: bool) -> Element<'static, Message> {
+    container(
+        text(label)
+            .size(theme::SIZE_HEADING)
+            .line_height(theme::LEADING_CAPTION)
+            .font(if current { theme::MEDIUM } else { theme::SANS })
+            .color(ink)
+            .wrapping(text::Wrapping::None),
+    )
+    .max_width(theme::INDEX_W)
+    .height(Length::Fixed(theme::RAIL_LINE_H))
+    .clip(true)
     .into()
 }
 

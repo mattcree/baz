@@ -34,10 +34,12 @@
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
-use baz_core::index::Library;
+use baz_core::history::{History, HistoryLedger};
+use baz_core::index::{GroupKey, Library};
 use baz_core::protocol::{self as protocol, Command, Event, SignalChain};
 use baz_core::replaygain::ReplayGainSettings;
 use iced::keyboard;
@@ -202,6 +204,13 @@ pub(crate) enum Message {
     Scrolled(Viewport),
     /// Window resized (approximate grid geometry until the next scroll).
     WindowResized(Size),
+    /// A word in the top bar's group-key row, or `1`–`5`: arrange the wall by
+    /// this key (ADR-0019). Persisted — a listener sets it once.
+    GroupKeySelected(baz_core::index::GroupKey),
+    /// An entry in the index rail was clicked: put that shelf at the top of
+    /// the wall. Carries the run's index, not a pixel — the rail knows which
+    /// shelf it points at and nothing about where the shelf is.
+    RailJumped(usize),
     /// An album tile was clicked (toggles selection / side panel; a second
     /// click within [`shelf::DOUBLE_CLICK`] plays the album).
     AlbumClicked(u64),
@@ -380,6 +389,17 @@ struct App {
     /// `ReplayGainChanged` — the event also arrives at track boundaries, where
     /// the settings have not moved at all and there is nothing to write.
     saved_replay_gain: ReplayGainSettings,
+    /// The play ledger the engine is appending to (ADR-0018), or `None` when
+    /// it could not be opened.
+    ///
+    /// Held here for its lifetime rather than only inside the engine: the
+    /// no-audio build has no engine to hold it, and a ledger dropped at the end
+    /// of `new` would flush and close a file this process is meant to keep.
+    _history_ledger: Option<Arc<HistoryLedger>>,
+    /// The arrangement the wall opens in, read from the config before there is
+    /// a shelf to hold it — so the first-run path can hand it to the shelf the
+    /// setup screen eventually opens.
+    group_key: GroupKey,
 }
 
 enum Screen {
@@ -434,15 +454,44 @@ impl App {
         if saved_replay_gain != ReplayGainSettings::default() {
             playback.send(command_for(saved_replay_gain));
         }
+        // **The play ledger, handed to the engine.** ADR-0018 built it and put
+        // the whole of a front end's involvement in one call; nothing in this
+        // crate made it, so nothing was being recorded and PLAYED had nothing
+        // to sort by. This is that call.
+        //
+        // The engine is the only thing that knows what actually reached the
+        // output and for how long, which is why the ledger is written there and
+        // not here (`baz_core::history`). A ledger that cannot be opened is
+        // carried on without: `set_history(None)` is the engine's own default,
+        // so the failure costs the record of *this* session and nothing else —
+        // no dialog, no degraded playback, and the file is tried again next
+        // launch.
+        let history_ledger = match HistoryLedger::open_default() {
+            Ok(ledger) => {
+                let ledger = Arc::new(ledger);
+                println!("[history] recording to {}", ledger.path().display());
+                playback.set_history(Some(Arc::clone(&ledger)));
+                Some(ledger)
+            }
+            Err(error) => {
+                println!("[history] not recording: {error}");
+                None
+            }
+        };
+        let group_key = stored
+            .as_ref()
+            .map_or(GroupKey::Artist, |config| config.group_key);
         let dir = cli_dir.or_else(|| stored.and_then(|config| config.music_dir));
         let (screen, task) = match dir {
             None => (Screen::Setup(Setup::fresh(None)), Task::none()),
-            Some(dir) => match Shelf::open(dir) {
+            Some(dir) => match Shelf::open(dir, group_key) {
                 Ok((shelf, task)) => (Screen::Shelf(Box::new(shelf)), task),
                 Err(error) => (Screen::Setup(Setup::fresh(Some(error))), Task::none()),
             },
         };
         let mut app = Self {
+            _history_ledger: history_ledger,
+            group_key,
             started,
             first_frame_logged: false,
             screen,
@@ -664,7 +713,7 @@ impl App {
             setup.error = Some(format!("`{}` is not a directory", dir.display()));
             return Task::none();
         }
-        match Shelf::open(dir) {
+        match Shelf::open(dir, self.group_key) {
             Ok((state, task)) => {
                 self.screen = Screen::Shelf(Box::new(state));
                 task
@@ -1219,6 +1268,23 @@ impl Setup {
     }
 }
 
+/// One shelf of the wall, as the shell holds it: its header and the slice of
+/// [`Shelf::albums`] under it.
+///
+/// The albums themselves stay in one flat vector so that a selection, a
+/// thumbnail and a playing album are all still just an index — re-arranging
+/// the wall must not re-key the caches (see [`Shelf::rebuild_shelves`]).
+pub(crate) struct GroupVm {
+    /// What the shelf's header draws, and what the rail projects.
+    pub(crate) header: vm::GroupHeaderVm,
+    /// One past its last album in [`Shelf::albums`].
+    ///
+    /// The end alone, because the shelves are contiguous and in order: a
+    /// shelf begins where the one before it ended, and carrying both would be
+    /// two numbers that have to agree.
+    pub(crate) end: usize,
+}
+
 /// The shelf screen: library, scan state, and grid/panel view state.
 ///
 /// Fields the view layer reads are `pub(crate)`; the ones the update loop
@@ -1227,10 +1293,31 @@ impl Setup {
 pub(crate) struct Shelf {
     /// The open library: the search index the counts and the query run over.
     pub(crate) library: Library,
-    /// Owned view model of every album, in `Library::albums` order.
+    /// How the wall is arranged (ADR-0019). Persisted in `config.toml`; the
+    /// top bar's row of words and `1`–`5` are the two ways to change it.
+    pub(crate) group_key: GroupKey,
+    /// The play ledger, read once at open — what [`GroupKey::Played`] shelves
+    /// on and what the pull will weight on.
+    ///
+    /// A **snapshot**, not a live view: the file is append-only, so a snapshot
+    /// can only ever be missing the last few minutes and can never be wrong
+    /// about an earlier play (`baz_core::history::History`). `None` is a
+    /// correct answer rather than a broken one — PLAYED then draws one
+    /// `Never played` shelf holding the library, which is a true statement
+    /// about a library baz has no record of.
+    history: Option<History>,
+    /// Owned view model of every album, in the active key's shelf order —
+    /// the shelves flattened, so an album is still one index.
     pub(crate) albums: Vec<vm::AlbumVm>,
-    /// Indices into `albums` that survive the current query.
+    /// One entry per shelf: what its header says and which slice of `albums`
+    /// it holds. Contiguous and in wall order, so a shelf is a range rather
+    /// than a per-album lookup.
+    pub(crate) groups: Vec<GroupVm>,
+    /// Indices into `albums` that survive the current query, in wall order.
     pub(crate) visible: Vec<usize>,
+    /// How many of each shelf's albums survived it, in `groups` order — what
+    /// [`shelf::Shelves`] lays the wall out from.
+    visible_counts: Vec<usize>,
     /// The live search text.
     pub(crate) query: String,
     /// Which album the inspector is showing, and whether it is showing —
@@ -1293,7 +1380,7 @@ pub(crate) struct Shelf {
 impl Shelf {
     /// Open the library DB, hydrate the shelf, persist the chosen dir, and
     /// kick off the scan worker. Errors are user-presentable strings.
-    fn open(music_dir: PathBuf) -> Result<(Self, Task<Message>), String> {
+    fn open(music_dir: PathBuf, group_key: GroupKey) -> Result<(Self, Task<Message>), String> {
         let t0 = Instant::now();
         let db_path = config::library_db_file()
             .ok_or_else(|| "no usable data directory on this system".to_owned())?;
@@ -1303,14 +1390,10 @@ impl Shelf {
         }
         let library = Library::open(&db_path)
             .map_err(|e| format!("cannot open library at {}: {e}", db_path.display()))?;
-        let albums = vm::build_albums(&library);
-        println!(
-            "[startup] library open + hydrate: {:.1} ms ({} albums / {} tracks) from {}",
-            t0.elapsed().as_secs_f64() * 1e3,
-            albums.len(),
-            library.len(),
-            db_path.display()
-        );
+        // The ledger, read once. A missing file is an empty history and not an
+        // error; an unreadable one costs the PLAYED key its detail and nothing
+        // else, so it is a note rather than a `problem`.
+        let history = read_history();
 
         persist_music_dir(&music_dir);
         // The snapshot is what makes the scan incremental — and the only
@@ -1319,8 +1402,12 @@ impl Shelf {
 
         let mut shelf = Self {
             library,
-            visible: (0..albums.len()).collect(),
-            albums,
+            group_key,
+            history,
+            albums: Vec::new(),
+            groups: Vec::new(),
+            visible: Vec::new(),
+            visible_counts: Vec::new(),
             query: String::new(),
             selection: Selection::new(),
             edition_choice: HashMap::new(),
@@ -1334,12 +1421,25 @@ impl Shelf {
             files_skipped: 0,
             problem: None,
             scroll_offset: 0.0,
-            grid_size: Size::new(WINDOW.width, WINDOW.height - TOP_BAR_H),
+            grid_size: Size::new(
+                WINDOW.width - theme::INDEX_LANE_W,
+                WINDOW.height - TOP_BAR_H,
+            ),
             last_scan_log: Instant::now(),
             hovered_album: None,
             last_click: None,
             grid_hold: shelf::GridHold::default(),
         };
+        shelf.rebuild_shelves();
+        println!(
+            "[startup] library open + hydrate: {:.1} ms ({} albums / {} shelves by {} / {} tracks) from {}",
+            t0.elapsed().as_secs_f64() * 1e3,
+            shelf.albums.len(),
+            shelf.groups.len(),
+            group_key.code(),
+            shelf.library.len(),
+            db_path.display()
+        );
         let task = Task::batch([
             text_input::focus(search_id()),
             shelf.request_visible_thumbs(),
@@ -1372,6 +1472,8 @@ impl Shelf {
                     ])
                 }
             }
+            Message::GroupKeySelected(key) => self.arrange_by(key),
+            Message::RailJumped(run) => self.jump_to_shelf(run),
             Message::Scrolled(viewport) => {
                 self.scroll_offset = viewport.absolute_offset().y;
                 let bounds = viewport.bounds();
@@ -1380,8 +1482,10 @@ impl Shelf {
             }
             Message::WindowResized(size) => {
                 // Estimate until the next scroll event reports real bounds.
+                // The rail's lane comes off here too, because the scrollable
+                // the next `Scrolled` will measure has already given it up.
                 self.grid_size = Size::new(
-                    size.width - inspector_width(&self.selection),
+                    size.width - inspector_width(&self.selection) - theme::INDEX_LANE_W,
                     (size.height - TOP_BAR_H).max(100.0),
                 );
                 // Dragging the window's edge is not the gesture the hold
@@ -1454,6 +1558,58 @@ impl Shelf {
             Message::ScanTick => self.drain_scan(),
             _ => Task::none(),
         }
+    }
+
+    /// **Arrange the wall by `key`** — the top bar's row of words and `1`–`5`
+    /// both land here.
+    ///
+    /// Re-arranging is a *projection*, never a filter: every album is still
+    /// there, in a different order under different headers (ADR-0019 §1). So
+    /// the query, the selection, the edition choices, the thumbnail cache and
+    /// what is playing are all untouched — an album's id does not depend on the
+    /// key, which is what makes this cheap and what makes it safe.
+    ///
+    /// The wall does go back to the top, and that is the one thing that is
+    /// *not* preserved. It is a deliberate choice rather than an omission:
+    /// after a re-arrangement the record you were looking at is somewhere else
+    /// entirely, so holding the scroll offset would drop you into an unrelated
+    /// part of the collection while claiming nothing had moved.
+    fn arrange_by(&mut self, key: GroupKey) -> Task<Message> {
+        if self.group_key == key {
+            return Task::none();
+        }
+        self.group_key = key;
+        self.rebuild_shelves();
+        self.scroll_offset = 0.0;
+        persist_group_key(key);
+        Task::batch([
+            scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
+            self.request_visible_thumbs(),
+        ])
+    }
+
+    /// Put a shelf at the top of the wall — what an index-rail entry does.
+    ///
+    /// It jumps to the shelf's **header band**, not to its first row: landing
+    /// on a shelf has to land you on the thing that names it, and one `HANG`
+    /// of clear wall above the covers is the difference between arriving
+    /// somewhere and arriving mid-shelf.
+    fn jump_to_shelf(&mut self, run: usize) -> Task<Message> {
+        let shelves = self.shelves();
+        let Some(target) = shelves.runs().get(run) else {
+            return Task::none();
+        };
+        self.scroll_offset = target.top;
+        Task::batch([
+            scrollable::scroll_to(
+                scroll_id(),
+                AbsoluteOffset {
+                    x: 0.0,
+                    y: target.top,
+                },
+            ),
+            self.request_visible_thumbs(),
+        ])
     }
 
     /// Apply a change to the inspector and keep the grid's width estimate in
@@ -1531,21 +1687,76 @@ impl Shelf {
     }
 
     /// The hang the grid lays out with: resolved for what the viewport
-    /// measures, unless a tile click is holding the width still (see
-    /// [`shelf::GridHold`]).
+    /// measures **less the index rail's lane**, unless a tile click is holding
+    /// the width still (see [`shelf::GridHold`]).
     ///
     /// One answer, read by the view that draws the rows and by the thumbnail
     /// prefetch that decides which of them to decode art for — a prefetch
     /// working from a different grid than the one on screen would request the
     /// wrong tiles for exactly the 400 ms the hold lasts.
+    ///
+    /// The rail's lane is already off `grid_size`: the wall and the rail are
+    /// siblings in one row, so what the scrollable *measures* is the grid's
+    /// width and the subtraction happens once, in the layout, rather than at
+    /// each reader. `the_hang_holds_with_the_index_rail_taken_off_the_wall`
+    /// asserts the hang survives that subtraction at every width in the band.
     pub(crate) fn grid(&self) -> shelf::Grid {
         shelf::Grid::new(self.grid_hold.width(self.grid_size.width))
     }
 
-    /// Recompute `visible` for the current query (shelf order preserved —
-    /// see [`vm::matching_album_ids`] for the track→album mapping).
+    /// How the wall is broken into shelves, for the current filter and grid.
+    ///
+    /// Rebuilt per call rather than cached: it is one pass over a few dozen
+    /// counts, it has to follow the grid (which follows the window, the
+    /// inspector and the double-click hold), and a cache of it would be a
+    /// fourth thing that could disagree with the other three.
+    pub(crate) fn shelves(&self) -> shelf::Shelves {
+        shelf::Shelves::new(self.grid(), &self.visible_counts)
+    }
+
+    /// Re-ask the library for the wall under the active key, and re-derive
+    /// everything that hangs off it.
+    ///
+    /// **The album ids do not change**, which is what makes re-arranging cheap
+    /// and safe: an id is a hash of the (artist, album) pair
+    /// ([`vm::album_id`]), so the thumbnail cache, the selection, the playing
+    /// album and the edition choices all survive a key change untouched. Only
+    /// the order and the breaks are new.
+    fn rebuild_shelves(&mut self) {
+        let shelves = vm::build_shelves(&self.library, self.group_key, self.history.as_ref());
+        self.albums.clear();
+        self.groups.clear();
+        for shelf in shelves {
+            self.albums.extend(shelf.albums);
+            self.groups.push(GroupVm {
+                header: shelf.header,
+                end: self.albums.len(),
+            });
+        }
+        self.refilter();
+    }
+
+    /// Recompute `visible` for the current query (wall order preserved —
+    /// see [`vm::matching_album_ids`] for the track→album mapping), and with
+    /// it how many albums each shelf has left.
+    ///
+    /// The two are computed in one pass from one filter, so the wall's layout
+    /// and its contents cannot disagree about which albums survived.
     fn refilter(&mut self) {
         self.visible = vm::visible_indices(&self.albums, &self.library, &self.query);
+        // The shelves are contiguous slices of `albums` and `visible` is in
+        // the same order, so each shelf's surviving count is one walk of the
+        // two lists together rather than a second filter that could disagree
+        // with the first.
+        let mut seen = self.visible.iter().peekable();
+        self.visible_counts.clear();
+        for group in &self.groups {
+            let mut count = 0;
+            while seen.next_if(|index| **index < group.end).is_some() {
+                count += 1;
+            }
+            self.visible_counts.push(count);
+        }
     }
 
     /// Apply every pending scan update: one `add_tracks` + one view-model
@@ -1615,8 +1826,7 @@ impl Shelf {
                     }
                 }
             }
-            self.albums = vm::build_albums(&self.library);
-            self.refilter();
+            self.rebuild_shelves();
             if self.last_scan_log.elapsed() > Duration::from_secs(2) {
                 self.last_scan_log = Instant::now();
                 println!(
@@ -1642,13 +1852,10 @@ impl Shelf {
     /// neither cached, in flight, nor known-absent. Ported from the spike;
     /// `get` (not `peek`) refreshes LRU recency for visible entries.
     fn request_visible_thumbs(&mut self) -> Task<Message> {
-        let hang = self.grid();
-        let cols = hang.columns;
-        let rows = hang.rows(self.visible.len());
-        let (first_row, end_row) =
-            hang.visible_rows(self.scroll_offset, self.grid_size.height, rows);
-        let start = (first_row * cols).min(self.visible.len());
-        let end = (end_row * cols).min(self.visible.len());
+        let (start, end) = self
+            .shelves()
+            .visible_albums(self.scroll_offset, self.grid_size.height);
+        let (start, end) = (start.min(self.visible.len()), end.min(self.visible.len()));
         let mut tasks = Vec::new();
         for &album_index in &self.visible[start..end] {
             let Some(album) = self.albums.get(album_index) else {
@@ -1761,6 +1968,38 @@ fn persist_music_dir(music_dir: &std::path::Path) {
         );
     }
     persist(|config| config.music_dir = Some(music_dir.to_path_buf()));
+}
+
+/// Remember how the wall is arranged (ADR-0017 §1.3: view *state*, persisted,
+/// not a preference anybody goes anywhere to set).
+fn persist_group_key(key: GroupKey) {
+    persist(|config| config.group_key = key);
+}
+
+/// Read the play ledger's snapshot, or say why there is none.
+///
+/// Every failure here is a note on stdout and a `None`, never a `problem` in
+/// the top bar: an unreadable ledger costs the PLAYED key its detail — it
+/// draws one `Never played` shelf, which is what a library with no history
+/// looks like anyway — and costs nothing else in the application. A modal, or
+/// a red line in the bar, would be baz complaining about its own file.
+fn read_history() -> Option<History> {
+    let path = HistoryLedger::default_path()?;
+    match History::read(&path) {
+        Ok(history) => {
+            println!(
+                "[history] {} records over {} tracks from {}",
+                history.records(),
+                history.tracks().count(),
+                path.display()
+            );
+            Some(history)
+        }
+        Err(error) => {
+            println!("[history] cannot read {}: {error}", path.display());
+            None
+        }
+    }
 }
 
 /// Read the config, apply `change`, and write it back if anything moved.
