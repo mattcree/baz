@@ -354,6 +354,7 @@ dependencies = [
  "alsa",
  "cpal",
  "criterion",
+ "dirs 6.0.0",
  "hound",
  "lofty",
  "memchr",
