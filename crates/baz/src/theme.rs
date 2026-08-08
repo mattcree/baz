@@ -118,24 +118,47 @@ pub const PLINTH: Color = Color::from_rgb(0.078, 0.082, 0.090);
 /// hovered control. `#1C1D20`. Never a resting state.
 pub const PLINTH_LIT: Color = Color::from_rgb(0.110, 0.114, 0.125);
 /// Hairline border: findable when you look, invisible when you don't.
-pub const HAIRLINE: Color = Color::from_rgba(0.93, 0.89, 0.85, 0.08);
-/// The hairline, slightly firmer — selection edges, hovered controls.
-pub const HAIRLINE_STRONG: Color = Color::from_rgba(0.93, 0.89, 0.85, 0.17);
-/// Primary text: warm off-white, liner-note paper.
-pub const PAPER: Color = Color::from_rgb(0.918, 0.902, 0.878);
-/// Secondary text: artists, captions, subtitles.
-pub const PAPER_DIM: Color = Color::from_rgb(0.659, 0.635, 0.604);
+/// [`PAPER`] at **7 %**.
+///
+/// Down from 8 %, and the *perceived* weight is unchanged: the same alpha over
+/// a darker ground is a larger step, so holding a hairline steady across the
+/// repaint meant lowering its number. iced 0.13's `Border` is four-sided, so
+/// every single line in the product is a `rule` widget.
+pub const HAIRLINE: Color = Color { a: 0.07, ..PAPER };
+/// The hairline, firmer — a selected control's edge, the playing row's edge.
+/// [`PAPER`] at **15 %** (down from 17 %, for the reason [`HAIRLINE`] gives).
+pub const HAIRLINE_STRONG: Color = Color { a: 0.15, ..PAPER };
+/// Primary text: **archival mount board**, `#E8E4DB`.
+///
+/// A warm ivory that is a *material* rather than "white text" — the colour the
+/// wall label is printed on. The room is cool ([`WALL`]) and the paper is warm,
+/// and that pairing is the whole of what stops a near-black grid of covers
+/// reading as a stock dark theme.
+///
+/// [`PAPER_DIM`], [`PAPER_FAINT`] and [`PAPER_MUTED`] are **the same r : g : b
+/// ratios scaled down**, so the ink family is one board at four levels of light
+/// rather than four greys that drifted apart. (The ramp baz shipped drifted
+/// warmer as it darkened, which against a cool wall reads yellowish.) Each is
+/// the *smallest* point on that ramp that clears its floor on every surface it
+/// can land on, with 0.1 of margin.
+pub const PAPER: Color = Color::from_rgb(0.910, 0.894, 0.859);
+/// Secondary text: artists, captions, subtitles. `#ABA8A1`. Never a figure that
+/// ticks — those are primary or tertiary, never in between.
+pub const PAPER_DIM: Color = Color::from_rgb(0.671, 0.659, 0.631);
 /// Tertiary text: counts, durations, hints, signal notes, the resting fader —
 /// present, never loud.
 ///
-/// `#8A857C`. This carries the whole of baz's readout vocabulary, and the
-/// value it had through v0.1 (`#726D66`) measured **3.4 : 1** on the panel —
-/// below the 4.5 : 1 AA floor for text on every surface it can land on. The
-/// value here is the same hue lightened until it clears that floor everywhere
-/// (5.1 on `WALL`, 4.8 on `PLINTH`, 5.4 on `RECESS`, 4.5 on `PLINTH_LIT`);
+/// `#888680`. This carries the whole of baz's readout vocabulary, and the value
+/// it had through v0.1 (`#726D66`) measured **3.4 : 1** on the panel — below
+/// the 4.5 : 1 AA floor for text on every surface it can land on. Re-derived
+/// against the gallery's surfaces it lands two bytes from the correction that
+/// preceded it, which is the interesting result: the near-black wall does not
+/// demand different inks. What it changes is the margin at the top of the
+/// range — this ink on [`PLINTH_LIT`] used to compute to 4.483 and be excused
+/// as a rounding case, and now measures **4.62**.
 /// `every_ink_clears_its_contrast_floor_on_every_surface_it_lands_on` is what
-/// keeps it there.
-pub const PAPER_FAINT: Color = Color::from_rgb(0.541, 0.522, 0.486);
+/// keeps it there, and it no longer has an exception to make.
+pub const PAPER_FAINT: Color = Color::from_rgb(0.533, 0.525, 0.502);
 /// The accent: amplifier-lamp amber. **Playback truth only** — see the
 /// module's accent-discipline note for the five places it may appear.
 pub const LAMP: Color = Color::from_rgb(0.890, 0.631, 0.306);
@@ -154,23 +177,24 @@ pub const LAMP_INK: Color = Color::from_rgb(0.106, 0.078, 0.043);
 /// with where the music is, and the search field takes focus at launch — so
 /// an amber focus ring made the first frame baz ever drew a lit lamp with
 /// nothing playing.
-pub const PAPER_RING: Color = Color::from_rgba(0.918, 0.902, 0.878, 0.45);
+pub const PAPER_RING: Color = Color { a: 0.45, ..PAPER };
 /// Selected text in a `text_input`: paper at 18%.
 ///
 /// Also not the accent, and for the same reason as [`PAPER_RING`]: a
 /// selection is a fact about the keyboard, not about the music. A wash rather
 /// than a fill so the glyphs under it keep their own ink.
-pub const SELECT_WASH: Color = Color::from_rgba(0.918, 0.902, 0.878, 0.18);
+pub const SELECT_WASH: Color = Color { a: 0.18, ..PAPER };
 /// A control that is *set* but not currently sounding: the volume fader
 /// while muted, or a stepper at the end of its travel.
 ///
-/// `#6E6A62`. Not text a user must read, so the 3 : 1 non-text floor applies —
+/// `#6C6A66`. Not text a user must read, so the 3 : 1 non-text floor applies —
 /// but the value it had through v0.1 (`#4A4743`) measured **1.9 : 1**, below
 /// even that, which made the position the listener chose effectively invisible
 /// while muted. Restoring that position is the entire reason mute leaves the
-/// fader where it is. The value here clears 3 : 1 on every surface (3.5 / 3.3
-/// / 3.6 / 3.1) while staying plainly quieter than a live control.
-pub const PAPER_MUTED: Color = Color::from_rgb(0.431, 0.416, 0.384);
+/// fader where it is. Re-derived on the gallery's ink ramp it clears 3 : 1 on
+/// every surface (3.74 / 3.61 / 3.39 / 3.13) while staying plainly quieter
+/// than a live control.
+pub const PAPER_MUTED: Color = Color::from_rgb(0.424, 0.416, 0.400);
 /// Problems, stated quietly: a soft brick red, no alarm klaxon.
 pub const ALERT: Color = Color::from_rgb(0.851, 0.467, 0.420);
 /// Success (theme palette slot; nothing renders it directly yet).
@@ -1747,22 +1771,21 @@ mod tests {
     /// carrying every duration, count, hint and signal note in the product —
     /// and [`PAPER_MUTED`] at 1.9 : 1, which made the muted fader's position
     /// effectively invisible. Both were corrected;
-    /// `docs/design/02-visual-language.md` §2.1.2 has the full table and the
-    /// argument, and this is what stops either drifting back.
+    /// `.interface-design/system.md` §4.1 has the full table and the argument,
+    /// and this is what stops either drifting back.
     ///
     /// Floors are WCAG 2.1's: **4.5 : 1** for anything a user has to read,
     /// **3 : 1** for a non-text mark whose job is to be locatable rather than
-    /// legible. Ratios are compared at the precision the specification
-    /// publishes them to — one decimal place — which matters for exactly one
-    /// pairing: `PAPER_FAINT` on `PLINTH_LIT` computes to 4.483, published as
-    /// 4.5. Moving it further would mean re-deriving the palette, which this
-    /// change deliberately does not do; the pairing is a duration inside a
-    /// playing queue row, and it is named here rather than quietly rounded.
+    /// legible. **Every ratio clears its floor outright.** The previous palette
+    /// had one that did not — `PAPER_FAINT` on `CARD_HIGH` computed to 4.483,
+    /// and this test had to excuse it by comparing at the one-decimal precision
+    /// WCAG publishes to. On the gallery's surfaces the same ink measures
+    /// **4.62**, so the excuse is deleted along with the constant that carried
+    /// it. No pairing in this palette needs one, and if a future value needs
+    /// one again that is the palette asking to be re-derived, not the test
+    /// asking to be loosened.
     #[test]
     fn every_ink_clears_its_contrast_floor_on_every_surface_it_lands_on() {
-        /// Half of the one-decimal precision the specification's table is
-        /// published to.
-        const ROUNDING: f32 = 0.05;
         /// The AA floor for text.
         const TEXT: f32 = 4.5;
         /// The floor for a non-text mark.
@@ -1790,7 +1813,7 @@ mod tests {
             for (surface_name, surface) in surfaces {
                 let ratio = contrast(ink, surface);
                 assert!(
-                    ratio + ROUNDING >= floor,
+                    ratio >= floor,
                     "{ink_name} on {surface_name} is {ratio:.2} : 1, below its \
                      {floor} : 1 floor"
                 );
