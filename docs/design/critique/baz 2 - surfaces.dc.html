@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; font-family:'IBM Plex Sans',sans-serif; color:#17161A; font-variant-numeric:tabular-nums; }
+  a { color:oklch(0.50 0.14 35); } a:hover { color:oklch(0.42 0.14 35); }
+  doc-page:not(:defined) { visibility:hidden; }
+</style>
+<script src="./doc-page.js"></script>
+</helmet>
+<doc-page margin="0.85in">
+  <div style="font-size:10px; letter-spacing:0.14em; color:rgba(23,22,26,0.45); margin-bottom:24px;">BAZ DESIGN DOCUMENTS · 2 OF 3 · <a href="baz%201%20—%20foundations.dc.html" style="color:rgba(23,22,26,0.6);">FOUNDATIONS</a> · SURFACES · <a href="baz%203%20—%20build%20guide.dc.html" style="color:rgba(23,22,26,0.6);">BUILD GUIDE</a></div>
+  <h1 style="font-size:27px; font-weight:600; margin:0 0 6px;">baz — Surfaces &amp; Workflows</h1>
+  <p style="font-size:13px; color:rgba(23,22,26,0.55); margin:0 0 8px;">Every surface: the decision, the spec, and its mock on the <a href="baz%20critique.dc.html">critique board</a>. Scope tags: <strong>[v1]</strong> ships first; <strong>[defer]</strong> is designed but parked — see the <a href="baz%203%20—%20build%20guide.dc.html">Build guide</a>.</p>
+  <p style="font-size:13px; line-height:1.6; margin:0 0 28px; padding:10px 14px; background:rgba(23,22,26,0.05);">The friction budget, binding on every feature: launch→music resumes &lt;200ms (wall position and paused track restored) · intent→sound = 1 click · keystroke→filtered wall = next frame · new files→on the wall with no dialog, ever · tag fix inline, playback never blocked. Anything adding a click before sound argues for its life.</p>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">THE WALL — HOME [v1] <span style="font-weight:400; color:rgba(23,22,26,0.45);">(1b, <a href="baz%20critique.dc.html#1b">board</a>)</span></h2>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0 0 24px; padding-left:20px;">
+    <li>Covers ≥160px at default density; gutters ≈14% of cover width, vertical &gt; horizontal. Square, borderless, unclipped.</li>
+    <li>No captions at rest. Selected: ink ring 55% + caption (title / artist·year). Playing: accent halo + caption + accent dot. Hover: ink 6% overlay.</li>
+    <li>Shelf breaks from the active group key: 9–10px caps headers at ink 40%, sticky in the virtualizer. Count top-right at ink 40%.</li>
+    <li>Group keys [v1]: ARTIST · YEAR · GENRE · ADDED · PLAYED — one row of words, no menus (10a, 12a). Genre verbatim from tags; messy tags show, honestly. CRATES joins later [defer].</li>
+    <li>Density is zoom, not a setting: 3–4 discrete stops; the full-collection overview (11b) is the last stop [defer].</li>
+  </ul>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">FIND — TYPE ANYWHERE [v1] <span style="font-weight:400; color:rgba(23,22,26,0.45);">(4a)</span></h2>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0 0 24px; padding-left:20px;">
+    <li>No search field exists. Any bare keystroke filters the wall on the next frame; the query renders as display type (~48px) bottom-left, with match count.</li>
+    <li>Enter plays the first match; Esc clears. All other shortcuts live on a modifier layer (Cmd/Ctrl+…), since bare letters are query.</li>
+    <li>The index rail (11a) [v1]: a 36px type-only rail that is a projection of the active group key — ARTIST → A–Z · YEAR → decades · GENRE → genre names · ADDED/PLAYED → recency buckets (TODAY, THIS WEEK, months, NEVER). Change the key, the rail re-derives; it never has its own state. Click jumps, drag riffles, PgUp/PgDn snap a shelf. Fixed landmarks over infinite scroll — scroll works but is never the only way. Long value sets (many genres) elide to the shelves currently near the viewport plus first/last.</li>
+  </ul>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">PLAYBACK — THE NEEDLE [v1] <span style="font-weight:400; color:rgba(23,22,26,0.45);">(5a, 9a)</span></h2>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0 0 24px; padding-left:20px;">
+    <li>No transport bar. A 2px seek line sits flush on the window's bottom edge, segmented by the album's real track lengths — 2px gaps at track boundaries, 6px at a side break. Fill is the accent; track is recess −1.</li>
+    <li>Wall label, bottom-left in 11px: “Title — Artist · elapsed”, plus stack status when queued (“· then 2 sleeves · 1h 58m left”). Bottom-right: “Queue · N”, opening the stack.</li>
+    <li>Click a groove segment to jump tracks — prev/next buttons don't exist. Keys: space play/pause, ←/→ seek, ↑/↓ or scroll volume, M mute.</li>
+    <li>Hovering the playing cover reveals transport glyphs over the art — the only icons in the app. Hard cut, no fade; must be usability-tested (no animation runtime).</li>
+    <li>The wall at rest is 100% collection; playback costs 2px and one line of type.</li>
+  </ul>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">LENSES [v1: WALL + MARQUEE] <span style="font-weight:400; color:rgba(23,22,26,0.45);">(3a, 2a, 2b)</span></h2>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0 0 24px; padding-left:20px;">
+    <li>One library, shared state (selection, sort, filter, playing); the switcher is type — WALL · MARQUEE (· CRATE later) — keys 1/2/3.</li>
+    <li>Marquee (2a): the playing sleeve at half-window, full-bleed, poster type over a vertex-alpha scrim; the wall dims to 35% and waits. Default after ~30s idle while playing; any keystroke snaps back to the wall. Also hosts the pull (6b).</li>
+    <li>Crate (2b) [defer]: spine browsing; needs edge-sampled spine colors and rasterised rotated text — parked until proven cheap.</li>
+    <li>Lenses never grow settings. No grid-size pickers, no list mode, no column options.</li>
+  </ul>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">INSPECTOR [v1] <span style="font-weight:400; color:rgba(23,22,26,0.45);">(9b, 12b)</span></h2>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0 0 24px; padding-left:20px;">
+    <li>340px right panel on +1, hairline left edge; toggleable (Cmd+I). Art, title/artist/year, track list.</li>
+    <li>SIDE A / SIDE B headers when the rip's metadata carries sides — data-driven, never faked; playing track gets the accent dot.</li>
+    <li>The card: “PLAYED · N times since YYYY” with a column of date stamps (“12 Mar 2026 · side A only”). No charts.</li>
+    <li>Inline tag editing, field by field, playback never blocked. Bulk retagging is out of scope forever — Picard exists; punt gracefully. Format details (FLAC 24/96) live here, not in playback chrome.</li>
+  </ul>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">THE STACK — THE QUEUE [v1] <span style="font-weight:400; color:rgba(23,22,26,0.45);">(6a, 13a)</span></h2>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0 0 24px; padding-left:20px;">
+    <li>Click always just plays. Shift+click stacks a sleeve (or a track, from the inspector) for later; a numeral chip on the cover is the only mark.</li>
+    <li>One queue holding whole sleeves and loose songs; popover on +2 from “Queue · N”; drag to reorder; albums listed as albums, never flattened.</li>
+    <li>Ephemeral by design: clears when it ends; the stack emptying means silence. “Pour into a mixtape” is the save path [defer with mixtapes]. No half-saved queue limbo.</li>
+  </ul>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">SHUFFLE &amp; THE PULL [v1] <span style="font-weight:400; color:rgba(23,22,26,0.45);">(10b, 6b)</span></h2>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0 0 24px; padding-left:20px;">
+    <li>One rule: shuffle plays from whatever the wall currently shows — a shelf, a filter's matches, or everything. The pool is always visible: non-pool covers dim to 35%; the next two draws carry faint ink rings.</li>
+    <li>“Vibe shuffle” is therefore a group key or a filter, not a feature. A future MOOD key (audio analysis) slots in without new UI.</li>
+    <li>The pull (⌘R): one sleeve, weighted toward the long-unplayed, presented in Marquee with “last played N years ago”. Nothing plays until space drops the needle; ⌘R pulls again, Esc returns.</li>
+  </ul>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">HISTORY [v1] <span style="font-weight:400; color:rgba(23,22,26,0.45);">(12a, 12b)</span></h2>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0 0 24px; padding-left:20px;">
+    <li>An append-only ledger in a plain local file — one line per play; the user's to grep, back up, or burn. Last.fm scrobbling is an optional output, never a dependency.</li>
+    <li>Surfaces: the PLAYED group key (THIS EVENING → months → NEVER PLAYED), the inspector card's stamps, the pull's weighting. Nothing else.</li>
+  </ul>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">FIRST RUN &amp; IMPORT [v1] <span style="font-weight:400; color:rgba(23,22,26,0.45);">(4b)</span></h2>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0 0 24px; padding-left:20px;">
+    <li>Point baz at a folder once. Covers land on the wall as they're read; recess −1 squares mark what's still coming; playback works from the first cover. Header: “watching ~/Music · N of M imported”.</li>
+    <li>No importer dialog, no progress modal, ever. Ongoing watching uses the same surface: new rips appear under ADDED.</li>
+  </ul>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">CURATION [defer] <span style="font-weight:400; color:rgba(23,22,26,0.45);">(13b, 13c)</span></h2>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0 0 24px; padding-left:20px;">
+    <li>Crates: album-level sets, hand-built, living as shelves under a CRATES group key; stored as plain text lists. Mixtapes: track-level, sequenced, SIDE A/B with optional C60/C90 budget (“1:48 left on side A”); serialized as .m3u8 beside the music; wall tile set in type on +1 — the licensed non-artwork tile.</li>
+  </ul>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">SETTINGS</h2>
+  <p style="font-size:13.5px; line-height:1.65; margin:0;">Not a screen. With zero-config import, no view options, and appearance as one control (follow system + four rooms), settings shrink to a small panel over the wall: music folder, appearance, scrobbling, output device. If it grows past one panel, something upstream went wrong.</p>
+</doc-page>
+</x-dc>
+</body>
+</html>

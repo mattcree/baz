@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#121214; font-family:'IBM Plex Sans',sans-serif; color:#E8E4DB; }
+  a { color:#D9A96A; } a:hover { color:#E8C08A; }
+</style>
+</helmet>
+<section style="display:flex; flex-wrap:wrap; gap:48px; padding:48px 48px 8px; align-items:flex-start;">
+
+  <div id="13a" style="width:420px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">13a</span>
+      <span style="font-size:14px; font-weight:600;">The stack is the queue — and it dies at dawn</span>
+    </div>
+    <div style="width:340px; background:#242120; border:1px solid rgba(232,228,219,0.14); padding:14px;">
+      <div style="font-size:9px; letter-spacing:0.14em; color:rgba(232,228,219,0.45); padding-bottom:10px;">THE STACK · 2 SLEEVES · 3 SONGS · 1H 12M</div>
+      <sc-for list="{{ stackRows }}" as="r" hint-placeholder-count="5">
+        <div style="display:flex; gap:10px; align-items:center; padding:4px 0;">
+          <div style="width:26px; height:26px; background:{{ r.art }}; flex:none;"></div>
+          <div style="flex:1; font-size:11px; color:#E8E4DB;">{{ r.title }}<br><span style="font-size:10px; color:rgba(232,228,219,0.45);">{{ r.sub }}</span></div>
+          <span style="font-size:10px; color:rgba(232,228,219,0.40);">{{ r.d }}</span>
+        </div>
+      </sc-for>
+      <div style="display:flex; justify-content:space-between; padding-top:12px; font-size:10px;">
+        <span style="color:{{ accent }};">pour into a mixtape →</span>
+        <span style="color:rgba(232,228,219,0.35);">clears when it ends</span>
+      </div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">One queue, holding whole sleeves and loose songs alike; drag to reorder. It is deliberately ephemeral — tonight's listening, gone when it ends (<a href="#6a" style="color:#D9A96A;">6a</a> rule 4). The bridge is the point: a stack that turned out well pours into a mixtape in one action. Ephemeral queue, permanent tape — never a half-saved “recent queue” limbo.</div>
+  </div>
+
+  <div id="13b" style="width:700px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">13b</span>
+      <span style="font-size:14px; font-weight:600;">Mixtapes — track playlists with sides and a length</span>
+    </div>
+    <div style="width:700px; height:340px; background:#0C0D0E; position:relative; overflow:hidden; display:flex; gap:28px; padding:24px;">
+      <div style="width:150px; flex:none;">
+        <div style="width:150px; height:150px; background:#181716; border-top:1px solid rgba(232,228,219,0.10); padding:12px; display:flex; flex-direction:column; justify-content:flex-end;">
+          <div style="font-size:14px; font-weight:600; line-height:1.15;">NIGHT<br>DRIVING</div>
+          <div style="font-size:9px; color:rgba(232,228,219,0.45); margin-top:6px;">C90 · 19 songs</div>
+        </div>
+        <div style="font-size:10px; color:rgba(232,228,219,0.40); margin-top:8px; line-height:1.5;">its tile on the wall — type, not art</div>
+      </div>
+      <div style="flex:1;">
+        <div style="font-size:9px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding-bottom:6px;">SIDE A · 43:12 · <span style="color:rgba(232,228,219,0.60);">1:48 LEFT</span></div>
+        <sc-for list="{{ mixA }}" as="t" hint-placeholder-count="4">
+          <div style="display:flex; gap:10px; align-items:baseline; padding:3px 0; font-size:11px;">
+            <span style="flex:1; color:rgba(232,228,219,0.75);">{{ t.title }} <span style="color:rgba(232,228,219,0.40);">— {{ t.artist }}</span></span>
+            <span style="color:rgba(232,228,219,0.40);">{{ t.d }}</span>
+          </div>
+        </sc-for>
+        <div style="font-size:9px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding:14px 0 6px;">SIDE B · 33:40 · <span style="color:rgba(232,228,219,0.60);">11:20 LEFT</span></div>
+        <sc-for list="{{ mixB }}" as="t" hint-placeholder-count="3">
+          <div style="display:flex; gap:10px; align-items:baseline; padding:3px 0; font-size:11px;">
+            <span style="flex:1; color:rgba(232,228,219,0.75);">{{ t.title }} <span style="color:rgba(232,228,219,0.40);">— {{ t.artist }}</span></span>
+            <span style="color:rgba(232,228,219,0.40);">{{ t.d }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">A playlist with no constraint is a dump; a mixtape is a composition. Sides and an optional length (C60/C90/uncapped) turn curating into fitting — “1:48 left on side A” is a creative problem, not a limit. Serialized as a plain .m3u8 beside your music: portable, greppable, survives baz. Its wall tile is set in type on a +1 surface — the only tiles that aren't artwork are the things you made.</div>
+  </div>
+
+  <div id="13c" style="width:660px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">13c</span>
+      <span style="font-size:14px; font-weight:600;">Crates — album playlists that live as shelves</span>
+    </div>
+    <div style="width:660px; height:500px; background:#0C0D0E; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:0; right:0; top:0; height:52px; display:flex; align-items:center; padding:0 24px;">
+        <div style="display:flex; gap:16px; font-size:11px; letter-spacing:0.14em;">
+          <span style="color:rgba(232,228,219,0.40);">ARTIST</span>
+          <span style="color:rgba(232,228,219,0.40);">GENRE</span>
+          <span style="color:rgba(232,228,219,0.40);">PLAYED</span>
+          <span style="color:#E8E4DB; border-bottom:2px solid {{ accent }}; padding-bottom:3px;">CRATES</span>
+        </div>
+      </div>
+      <div style="position:absolute; left:24px; right:24px; top:60px;">
+        <div style="font-size:10px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding-bottom:10px;">RAINY DAYS · 8</div>
+        <div style="display:grid; grid-template-columns:repeat(5,104px); column-gap:18px; row-gap:22px; padding-bottom:20px;">
+          <sc-for list="{{ crateCovers }}" as="c" hint-placeholder-count="5"><div style="width:104px; height:104px; background:{{ c.bg }};"></div></sc-for>
+          <div style="width:104px; height:104px; background:#181716; border-top:1px solid rgba(232,228,219,0.10); padding:10px; display:flex; flex-direction:column; justify-content:flex-end;">
+            <div style="font-size:11px; font-weight:600; line-height:1.2;">NIGHT<br>DRIVING</div>
+            <div style="font-size:8px; color:rgba(232,228,219,0.45); margin-top:4px;">C90 · 19 songs</div>
+          </div>
+        </div>
+        <div style="font-size:10px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding-bottom:10px;">SUNDAY MORNING · 12</div>
+        <div style="display:grid; grid-template-columns:repeat(5,104px); column-gap:18px; row-gap:22px;">
+          <sc-for list="{{ shelfA }}" as="c" hint-placeholder-count="3"><div style="width:104px; height:104px; background:{{ c.bg }};"></div></sc-for>
+        </div>
+      </div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">A crate is a shelf you built by hand: albums (and mixtapes — note the tape filed in RAINY DAYS) dragged together under a name. It's just the group key CRATES, so everything composes: shuffle a crate (<a href="#10b" style="color:#D9A96A;">10b</a>), jump between crates on the rail (<a href="#11a" style="color:#D9A96A;">11a</a>), stack from one (<a href="#6a" style="color:#D9A96A;">6a</a>). Stored as plain text lists. The refusal here: no smart playlists, no auto-generated “Made for you” crates — every crate on the wall was made by a person, which is exactly why they're worth browsing.</div>
+  </div>
+
+</section>
+
+<section style="display:flex; flex-wrap:wrap; gap:48px; padding:48px 48px 8px; align-items:flex-start;">
+
+  <div id="12a" style="width:660px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">12a</span>
+      <span style="font-size:14px; font-weight:600;">History on the wall — PLAYED is just another group key</span>
+    </div>
+    <div style="width:660px; height:420px; background:#0C0D0E; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:0; right:0; top:0; height:52px; display:flex; align-items:center; justify-content:space-between; padding:0 24px;">
+        <div style="display:flex; gap:16px; font-size:11px; letter-spacing:0.14em;">
+          <span style="color:rgba(232,228,219,0.40);">ARTIST</span>
+          <span style="color:rgba(232,228,219,0.40);">YEAR</span>
+          <span style="color:rgba(232,228,219,0.40);">GENRE</span>
+          <span style="color:rgba(232,228,219,0.40);">ADDED</span>
+          <span style="color:#E8E4DB; border-bottom:2px solid {{ accent }}; padding-bottom:3px;">PLAYED</span>
+        </div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.40);">1,204 albums</div>
+      </div>
+      <div style="position:absolute; left:24px; right:48px; top:60px;">
+        <div style="font-size:10px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding-bottom:10px;">THIS EVENING</div>
+        <div style="display:grid; grid-template-columns:repeat(5,104px); column-gap:18px; row-gap:22px; padding-bottom:20px;">
+          <sc-for list="{{ playedToday }}" as="c" hint-placeholder-count="2"><div style="width:104px; height:104px; background:{{ c.bg }}; box-shadow:{{ c.halo }};"></div></sc-for>
+        </div>
+        <div style="font-size:10px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding-bottom:10px;">MARCH</div>
+        <div style="display:grid; grid-template-columns:repeat(5,104px); column-gap:18px; row-gap:22px; padding-bottom:20px;">
+          <sc-for list="{{ shelfB }}" as="c" hint-placeholder-count="5"><div style="width:104px; height:104px; background:{{ c.bg }};"></div></sc-for>
+        </div>
+        <div style="font-size:10px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding-bottom:10px;">NEVER PLAYED · 61</div>
+        <div style="display:grid; grid-template-columns:repeat(5,104px); column-gap:18px; row-gap:22px;">
+          <sc-for list="{{ shelfA }}" as="c" hint-placeholder-count="3"><div style="width:104px; height:104px; background:{{ c.bg }};"></div></sc-for>
+        </div>
+      </div>
+      <div style="position:absolute; left:0; right:0; bottom:0; height:2px; background:#070809;"><div style="width:38%; height:2px; background:{{ accent }};"></div></div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">No history screen, no timeline widget: PLAYED joins the group keys from <a href="#10a" style="color:#D9A96A;">10a</a> and the wall becomes your listening diary — this evening at the top, drifting back through the months, ending at NEVER PLAYED. That last shelf is the one collectors will live on; it's also what the pull (<a href="#6b" style="color:#D9A96A;">6b</a>) draws from. Shuffle-what-you-see composes for free: stand on MARCH and shuffle your March.</div>
+  </div>
+
+  <div id="12b" style="width:400px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">12b</span>
+      <span style="font-size:14px; font-weight:600;">The card — every album keeps its checkout stamps</span>
+    </div>
+    <div style="width:340px; background:#181716; border-top:1px solid rgba(232,228,219,0.10); padding:18px;">
+      <div style="display:flex; gap:12px; align-items:flex-end; padding-bottom:14px;">
+        <div style="width:84px; height:84px; background:#B33A2E; flex:none;"></div>
+        <div><div style="font-size:14px; font-weight:600;">Copper Veins</div><div style="font-size:11px; color:rgba(232,228,219,0.45);">The Ossuary Choir · 2019</div></div>
+      </div>
+      <div style="font-size:9px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding:8px 0 6px;">PLAYED · 31 TIMES SINCE 2019</div>
+      <sc-for list="{{ stamps }}" as="s" hint-placeholder-count="6">
+        <div style="display:flex; gap:10px; align-items:baseline; padding:3px 0; font-size:11px;">
+          <span style="width:88px; color:rgba(232,228,219,0.65);">{{ s.date }}</span>
+          <span style="flex:1; color:rgba(232,228,219,0.40);">{{ s.note }}</span>
+        </div>
+      </sc-for>
+      <div style="font-size:11px; color:rgba(232,228,219,0.35); padding-top:6px;">↓ 25 earlier</div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">The date-stamped card in the back of a library book — skeuomorphism of structure again (<a href="#9a" style="color:#D9A96A;">9a</a>'s rule). A column of stamps in the inspector, tabular Plex digits keeping the dates ruled. “first listen” and “complete, both sides” fall out of the ledger for free; no charts, no graphs.</div>
+  </div>
+
+  <div style="width:100%; font-size:12px; color:rgba(232,228,219,0.55); line-height:1.6; max-width:900px;">Mechanics: history is an append-only ledger in a plain local file — one line per play, yours to grep, back up, or burn; Last.fm scrobbling is an optional output of the same ledger, never a dependency. It quietly powers what already exists: the pull's weighting, ADDED/PLAYED shelves, “last played 3 years ago.” The refusal: no Wrapped, no streaks, no top-artists charts, no listening-minutes — engagement theater is the streaming reflex again. baz records what happened; it never performs it back at you.</div>
+
+</section>
+
+<section style="display:flex; flex-wrap:wrap; gap:48px; padding:48px 48px 8px; align-items:flex-start;">
+
+  <div id="11a" style="width:660px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">11a</span>
+      <span style="font-size:14px; font-weight:600;">The index rail — jump, don't scroll</span>
+    </div>
+    <div style="width:660px; height:420px; background:#0C0D0E; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:24px; right:48px; top:24px;">
+        <div style="font-size:10px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding-bottom:10px;">M</div>
+        <div style="display:grid; grid-template-columns:repeat(5,104px); column-gap:18px; row-gap:22px;">
+          <sc-for list="{{ lensCovers }}" as="c" hint-placeholder-count="10">
+            <div style="width:104px; height:104px; background:{{ c.bg }}; box-shadow:{{ c.halo }};"></div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="position:absolute; right:0; top:0; bottom:2px; width:36px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;">
+        <sc-for list="{{ railLetters }}" as="l" hint-placeholder-count="26">
+          <div style="font-size:9px; line-height:1.35; color:{{ l.ink }}; font-weight:{{ l.wt }};">{{ l.ch }}</div>
+        </sc-for>
+      </div>
+      <div style="position:absolute; left:0; right:0; bottom:0; height:2px; background:#070809;"><div style="width:38%; height:2px; background:{{ accent }};"></div></div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">A thin rail of the current group key's values — letters when by artist, decades when by year, genres when by genre. Click jumps to that shelf; drag riffles through the collection like flipping dividers in a crate; PgUp/PgDn snap a shelf at a time. Type only, 36px, always the same place: the wall gets fixed landmarks, so “M is two-thirds down” becomes muscle memory the way it is on a real shelf. Scrolling still works — it's just never the only way anywhere.</div>
+  </div>
+
+  <div id="11b" style="width:660px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">11b</span>
+      <span style="font-size:14px; font-weight:600;">The overview — zoom out until the whole collection fits</span>
+    </div>
+    <div style="width:660px; height:420px; background:#0C0D0E; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:24px; right:24px; top:24px; bottom:44px; display:grid; grid-template-columns:repeat(21,24px); gap:4px; align-content:start; justify-content:center; overflow:hidden;">
+        <sc-for list="{{ tinyCovers }}" as="c" hint-placeholder-count="60">
+          <div style="width:24px; height:24px; background:{{ c.bg }}; box-shadow:{{ c.halo }};"></div>
+        </sc-for>
+      </div>
+      <div style="position:absolute; left:24px; bottom:14px; font-size:11px; color:rgba(232,228,219,0.65);">1,204 albums <span style="color:rgba(232,228,219,0.40);">· all of them · click anywhere to land there · ⌘− / ⌘+ or pinch</span></div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">The radical end of the same idea: zoom out until there is nothing to scroll. At 24px a 1,200-album collection fits one screen; the amber halo still finds the playing record from orbit. No captions — at this altitude the wall is a map, and you navigate it the way you spot a spine across the room: by color and position. Click lands you on that shelf at full size. This is “your collection IS the interface” at its purest, and virtualization makes it nearly free. Zoom becomes the density setting from <a href="#1b" style="color:#D9A96A;">1b</a> — continuous, spatial, no settings menu.</div>
+  </div>
+
+  <div style="width:100%; font-size:12px; color:rgba(232,228,219,0.55); line-height:1.6; max-width:900px;">Together: the wall stops being a feed. Landmarks (<a href="#11a" style="color:#D9A96A;">11a</a>) + altitude (<a href="#11b" style="color:#D9A96A;">11b</a>) + filter (<a href="#4a" style="color:#D9A96A;">4a</a>) mean scroll is a stroll of a few shelves at most, never a commute. One iced caveat: smooth zoom wants the animation runtime you don't have — ship it as 3–4 discrete zoom stops (full / half / quarter / orbit), which is honestly more shelf-like anyway.</div>
+
+</section>
+
+<section style="display:flex; flex-wrap:wrap; gap:48px; padding:48px 48px 8px; align-items:flex-start;">
+
+  <div id="10a" style="width:660px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">10a</span>
+      <span style="font-size:14px; font-weight:600;">Grouping — one control, four keys; the headers are the shelves</span>
+    </div>
+    <div style="width:660px; height:420px; background:#0C0D0E; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:0; right:0; top:0; height:52px; display:flex; align-items:center; justify-content:space-between; padding:0 24px;">
+        <div style="display:flex; gap:16px; font-size:11px; letter-spacing:0.14em;">
+          <span style="color:rgba(232,228,219,0.40);">ARTIST</span>
+          <span style="color:rgba(232,228,219,0.40);">YEAR</span>
+          <span style="color:#E8E4DB; border-bottom:2px solid {{ accent }}; padding-bottom:3px;">GENRE</span>
+          <span style="color:rgba(232,228,219,0.40);">ADDED</span>
+        </div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.40);">1,204 albums</div>
+      </div>
+      <div style="position:absolute; left:24px; right:24px; top:60px;">
+        <div style="font-size:10px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding-bottom:10px;">DUB · 14</div>
+        <div style="display:grid; grid-template-columns:repeat(5,104px); column-gap:18px; row-gap:22px; padding-bottom:20px;">
+          <sc-for list="{{ shelfB }}" as="c" hint-placeholder-count="5"><div style="width:104px; height:104px; background:{{ c.bg }};"></div></sc-for>
+        </div>
+        <div style="font-size:10px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding-bottom:10px;">KRAUTROCK · 22</div>
+        <div style="display:grid; grid-template-columns:repeat(5,104px); column-gap:18px; row-gap:22px;">
+          <sc-for list="{{ shelfA }}" as="c" hint-placeholder-count="3"><div style="width:104px; height:104px; background:{{ c.bg }};"></div></sc-for>
+        </div>
+      </div>
+      <div style="position:absolute; left:0; right:0; bottom:0; height:2px; background:#070809;"><div style="width:38%; height:2px; background:{{ accent }};"></div></div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">Group-by is the shelf-break system from <a href="#1b" style="color:#D9A96A;">1b</a> given its control: artist / year / genre / added, same 10px-caps headers, sticky in the virtualizer. This is the entire “view options” surface — four words, no menus. Genre comes from your tags verbatim (baz never invents categories); messy tags will show, and that's honest — the fix lives in the inspector, not in a clustering algorithm.</div>
+  </div>
+
+  <div id="10b" style="width:660px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">10b</span>
+      <span style="font-size:14px; font-weight:600;">Shuffle what you can see — the constraint is the wall itself</span>
+    </div>
+    <div style="width:660px; height:420px; background:#0C0D0E; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:0; right:0; top:0; height:52px; display:flex; align-items:center; padding:0 24px;">
+        <div style="font-size:10px; letter-spacing:0.14em; color:rgba(232,228,219,0.40);">GENRE · DUB · 14</div>
+      </div>
+      <div style="position:absolute; left:24px; right:24px; top:60px; display:grid; grid-template-columns:repeat(5,104px); column-gap:18px; row-gap:22px;">
+        <sc-for list="{{ driftCovers }}" as="c" hint-placeholder-count="10">
+          <div style="width:104px; height:104px; background:{{ c.bg }}; box-shadow:{{ c.halo }}; opacity:{{ c.op }};"></div>
+        </sc-for>
+      </div>
+      <div style="position:absolute; left:24px; bottom:14px; font-size:11px; color:rgba(232,228,219,0.65);">shuffling this shelf <span style="color:rgba(232,228,219,0.40);">· Halide — Moss &amp; Wire · next two marked</span></div>
+      <div style="position:absolute; left:0; right:0; bottom:0; height:2px; background:#070809;"><div style="width:61%; height:2px; background:{{ accent }};"></div></div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">One mental model kills the whole “smart shuffle” feature tree: <em>shuffle always plays from whatever the wall currently shows</em>. Grouped by genre and standing on the DUB shelf? Shuffle dubs. Typed “kra” (<a href="#4a" style="color:#D9A96A;">4a</a>)? Shuffle the matches. Whole wall? Shuffle everything. Vibe-shuffle needs no new UI, no ML, no mode — the filter IS the vibe, and it's always visible: non-pool covers dim to 35%, the next two draws carry faint rings, so shuffle stops being a dice roll behind a curtain. It composes with the stack (<a href="#6a" style="color:#D9A96A;">6a</a>) and the pull (<a href="#6b" style="color:#D9A96A;">6b</a>) without touching either.</div>
+  </div>
+
+  <div style="width:100%; font-size:12px; color:rgba(232,228,219,0.55); line-height:1.6; max-width:900px;">On “pedestrian”: play-album and play-song should stay boring — any invention there is a tax before sound, and the friction budget (<a href="#4b" style="color:#D9A96A;">4b</a>) forbids it. Spend the strangeness where the category is lazy: shuffle. If you later want true vibe-shuffle (tempo, energy, era-adjacency from audio analysis), it slots in as one more group key — SHELF · MOOD — not as a new feature. What I'd still refuse: any shuffle that draws from records the wall isn't showing; the moment the pool is invisible, you've rebuilt the curtain.</div>
+
+</section>
+
+<section style="display:flex; flex-wrap:wrap; gap:48px; padding:48px 48px 8px; align-items:flex-start;">
+
+  <div id="9a" style="width:680px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">9a</span>
+      <span style="font-size:14px; font-weight:600;">The groove, literally — you can see where the songs are</span>
+    </div>
+    <div style="width:680px; height:150px; background:#0C0D0E; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:24px; bottom:34px; font-size:11px; color:rgba(232,228,219,0.65);">Copper Veins — The Ossuary Choir <span style="color:rgba(232,228,219,0.40);">· 4 of 10 · 2:41</span></div>
+      <div style="position:absolute; left:0; right:0; bottom:0; height:4px; display:flex; gap:2px;">
+        <sc-for list="{{ grooveTracks }}" as="t" hint-placeholder-count="10">
+          <div style="flex:{{ t.w }}; height:4px; background:#070809; position:relative;"><div style="position:absolute; left:0; top:0; bottom:0; width:{{ t.fill }}; background:{{ accent }};"></div></div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">On a real record you can see the songs — the grooves space out between tracks. Same move on the needle from <a href="#5a" style="color:#D9A96A;">5a</a>: the seek line is segmented by the album's actual track lengths, 2px gaps at the boundaries. At a glance: how far in, which track, how long the record runs — with zero added chrome. Click a segment to jump tracks; prev/next stops being a button you need. This is skeuomorphism as information, not decoration — and it's just rectangles, so iced draws it for free.</div>
+  </div>
+
+  <div id="9b" style="width:400px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">9b</span>
+      <span style="font-size:14px; font-weight:600;">Sides — the record's own structure in the inspector</span>
+    </div>
+    <div style="width:340px; background:#181716; border-top:1px solid rgba(232,228,219,0.10); padding:18px;">
+      <div style="display:flex; gap:12px; align-items:flex-end; padding-bottom:14px;">
+        <div style="width:84px; height:84px; background:#B33A2E; flex:none;"></div>
+        <div><div style="font-size:14px; font-weight:600;">Copper Veins</div><div style="font-size:11px; color:rgba(232,228,219,0.45);">The Ossuary Choir · 2019</div></div>
+      </div>
+      <div style="font-size:9px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding:8px 0 6px;">SIDE A</div>
+      <sc-for list="{{ sideA }}" as="t" hint-placeholder-count="5">
+        <div style="display:flex; gap:10px; align-items:baseline; padding:3px 0; font-size:11px; color:{{ t.ink }};">
+          <span style="width:14px; color:rgba(232,228,219,0.35);">{{ t.n }}</span>
+          <span style="flex:1;">{{ t.title }} <span style="color:{{ t.dotColor }};">{{ t.dot }}</span></span>
+          <span style="color:rgba(232,228,219,0.40);">{{ t.d }}</span>
+        </div>
+      </sc-for>
+      <div style="font-size:9px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding:12px 0 6px;">SIDE B</div>
+      <sc-for list="{{ sideB }}" as="t" hint-placeholder-count="5">
+        <div style="display:flex; gap:10px; align-items:baseline; padding:3px 0; font-size:11px; color:{{ t.ink }};">
+          <span style="width:14px; color:rgba(232,228,219,0.35);">{{ t.n }}</span>
+          <span style="flex:1;">{{ t.title }}</span>
+          <span style="color:rgba(232,228,219,0.40);">{{ t.d }}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">When the rip carries side/disc metadata (vinyl rips usually do), the track list honors it — SIDE A / SIDE B as the same 9px caps used for shelf headers. Data-driven, never faked: a CD shows no sides. The groove in <a href="#9a" style="color:#D9A96A;">9a</a> gets a wider 6px gap at the side break.</div>
+  </div>
+
+  <div style="width:100%; font-size:12px; color:rgba(232,228,219,0.55); line-height:1.6; max-width:900px;">The rule to write down: the record supplies <em>physics, structure, and vocabulary</em> — the stack, the sides, the groove spacing, “drop the needle” — never <em>surface</em>. Banned outright: vinyl discs peeking from sleeves, wood grain, tonearms, VU meters, wear-and-patina effects, any circle pretending to be a record. Your audience owns the real objects; imitating them on screen reads as costume. Quoting their behavior reads as respect.</div>
+
+</section>
+
+<section style="display:flex; flex-wrap:wrap; gap:48px; padding:48px 48px 8px; align-items:flex-start;">
+
+  <div id="8a" style="width:720px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">8a</span>
+      <span style="font-size:14px; font-weight:600;">One axis: room lightness — where a room can live, and the dead zone</span>
+    </div>
+    <div style="display:flex; height:72px;">
+      <div style="flex:2.2; background:#0C0D0E;"></div>
+      <div style="flex:1.4; background:#26231F;"></div>
+      <div style="flex:2.2; background:#4A463F;"></div>
+      <div style="flex:2.6; background:#7B756A; position:relative;"><div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:10px; letter-spacing:0.12em; color:rgba(0,0,0,0.55);">DEAD ZONE</div></div>
+      <div style="flex:2.2; background:#B7B0A4;"></div>
+      <div style="flex:1.4; background:#D5CFC2;"></div>
+      <div style="flex:2.2; background:#E9E4D9;"></div>
+    </div>
+    <div style="display:flex; font-size:10px; color:rgba(232,228,219,0.5);">
+      <div style="flex:2.2;">Closing Time<br>L .17</div>
+      <div style="flex:1.4;"></div>
+      <div style="flex:2.2;">Stone<br>L .38</div>
+      <div style="flex:2.6;">L .45–.58<br>neither ink works</div>
+      <div style="flex:2.2;">Plaster<br>L .72</div>
+      <div style="flex:1.4;"></div>
+      <div style="flex:2.2;">Reading Room<br>L .92</div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">You're right, and it's a better system than my mixed pair in <a href="#7a" style="color:#D9A96A;">7a</a>: hold temperature warm-neutral, step only room lightness, derive the rest. Ink: ivory below the dead zone, near-black above it. Accent: amber on dark rooms, oxblood on light — same playback-truth rule. Elevation: same ±0.03 L-deltas, rising lighter in dark rooms, darker in light ones. The one hard rule: never park a room at L .5 — text contrast fails both ways and mid-value sleeves melt into the wall. If these four earn their place, they REPLACE Lamplight/Gallery — six themes is a paint catalog, four is a system. System setting maps dark→Closing Time, light→Reading Room; Stone and Plaster are deliberate picks.</div>
+  </div>
+
+  <div id="8b" style="width:640px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">8b</span>
+      <span style="font-size:14px; font-weight:600;">The two in-between rooms</span>
+    </div>
+    <div style="display:flex; gap:24px; align-items:flex-start;">
+      <div style="width:300px; display:flex; flex-direction:column; gap:10px;">
+        <div style="font-size:12px; color:rgba(232,228,219,0.55);">Stone · dark mid · L .38</div>
+        <div style="width:300px; height:200px; background:#4A463F; position:relative; overflow:hidden;">
+          <div style="position:absolute; left:12px; top:12px; display:grid; grid-template-columns:repeat(3,48px); gap:10px;">
+            <sc-for list="{{ mixCovers }}" as="c" hint-placeholder-count="6"><div style="width:48px; height:48px; background:{{ c.bg }};"></div></sc-for>
+          </div>
+          <div style="position:absolute; left:64px; top:12px; width:48px; height:48px; box-shadow:0 0 0 2px oklch(0.74 0.13 75);"></div>
+          <div style="position:absolute; right:0; top:0; bottom:28px; width:86px; background:#55504A; border-left:1px solid rgba(237,233,224,0.10); padding:8px;">
+            <div style="width:68px; height:68px; background:#8C3B5A;"></div>
+            <div style="font-size:9px; color:#EDE9E0; margin-top:6px;">Mirror Phase</div>
+          </div>
+          <div style="position:absolute; left:0; right:0; bottom:0; height:28px; background:#55504A; border-top:1px solid rgba(237,233,224,0.12);"><div style="width:38%; height:2px; background:oklch(0.74 0.13 75);"></div></div>
+        </div>
+        <div style="font-size:10px; color:rgba(232,228,219,0.45); line-height:1.6;">ivory ink · amber · halo loses its glow up here — ring only, no bloom</div>
+      </div>
+      <div style="width:300px; display:flex; flex-direction:column; gap:10px;">
+        <div style="font-size:12px; color:rgba(232,228,219,0.55);">Plaster · light mid · L .72</div>
+        <div style="width:300px; height:200px; background:#B7B0A4; position:relative; overflow:hidden;">
+          <div style="position:absolute; left:12px; top:12px; display:grid; grid-template-columns:repeat(3,48px); gap:10px;">
+            <sc-for list="{{ mixCovers }}" as="c" hint-placeholder-count="6"><div style="width:48px; height:48px; background:{{ c.bg }};"></div></sc-for>
+          </div>
+          <div style="position:absolute; left:64px; top:12px; width:48px; height:48px; box-shadow:0 0 0 2px oklch(0.50 0.14 35);"></div>
+          <div style="position:absolute; right:0; top:0; bottom:28px; width:86px; background:#AAA296; border-left:1px solid rgba(33,31,28,0.12); padding:8px;">
+            <div style="width:68px; height:68px; background:#8C3B5A;"></div>
+            <div style="font-size:9px; color:#211F1C; margin-top:6px;">Mirror Phase</div>
+          </div>
+          <div style="position:absolute; left:0; right:0; bottom:0; height:28px; background:#AAA296; border-top:1px solid rgba(33,31,28,0.14);"><div style="width:38%; height:2px; background:oklch(0.50 0.14 35);"></div></div>
+        </div>
+        <div style="font-size:10px; color:rgba(232,228,219,0.45); line-height:1.6;">near-black ink · oxblood · panels rise darker</div>
+      </div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">The honest cost of mid rooms: mid-value sleeves (grays, faded pastels — a lot of ambient and classical) sit closer to the wall than on the extremes. Watch the second row above — some covers hold, some soften. If real libraries show too much melt, the fix is nudging Stone darker (L .33) and Plaster lighter (L .76), never adding borders to artwork.</div>
+  </div>
+
+</section>
+
+<section style="display:flex; flex-wrap:wrap; gap:48px; padding:48px 48px 8px; align-items:flex-start;">
+
+  <div id="7a" style="width:1280px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">7a</span>
+      <span style="font-size:14px; font-weight:600;">Appearance — follow the OS by default; four rooms, no gray</span>
+    </div>
+    <div style="display:flex; gap:24px; align-items:flex-start;">
+      <div style="width:290px; display:flex; flex-direction:column; gap:10px;">
+        <div style="font-size:12px; color:rgba(232,228,219,0.55);">Closing Time · dark <span style="color:rgba(232,228,219,0.35);">— system dark maps here</span></div>
+        <div style="width:290px; height:190px; background:#0C0D0E; position:relative; overflow:hidden;">
+          <div style="position:absolute; left:12px; top:12px; display:grid; grid-template-columns:repeat(3,46px); gap:9px;">
+            <sc-for list="{{ mixCovers }}" as="c" hint-placeholder-count="6"><div style="width:46px; height:46px; background:{{ c.bg }};"></div></sc-for>
+          </div>
+          <div style="position:absolute; right:0; top:0; bottom:30px; width:84px; background:#181716; border-left:1px solid rgba(232,228,219,0.08); padding:8px;">
+            <div style="width:66px; height:66px; background:#8C3B5A;"></div>
+            <div style="font-size:9px; color:#E8E4DB; margin-top:6px;">Mirror Phase</div>
+          </div>
+          <div style="position:absolute; left:0; right:0; bottom:0; height:30px; background:#181716; border-top:1px solid rgba(232,228,219,0.10);"><div style="width:38%; height:2px; background:oklch(0.74 0.13 75);"></div></div>
+        </div>
+        <div style="font-size:10px; color:rgba(232,228,219,0.45); line-height:1.6;">dark room · dark panels · amber</div>
+      </div>
+      <div style="width:290px; display:flex; flex-direction:column; gap:10px;">
+        <div style="font-size:12px; color:rgba(232,228,219,0.55);">Lamplight · dark/light</div>
+        <div style="width:290px; height:190px; background:#0C0D0E; position:relative; overflow:hidden;">
+          <div style="position:absolute; left:12px; top:12px; display:grid; grid-template-columns:repeat(3,46px); gap:9px;">
+            <sc-for list="{{ mixCovers }}" as="c" hint-placeholder-count="6"><div style="width:46px; height:46px; background:{{ c.bg }};"></div></sc-for>
+          </div>
+          <div style="position:absolute; right:0; top:0; bottom:30px; width:84px; background:#E9E4D9; padding:8px;">
+            <div style="width:66px; height:66px; background:#8C3B5A;"></div>
+            <div style="font-size:9px; color:#17161A; margin-top:6px;">Mirror Phase</div>
+          </div>
+          <div style="position:absolute; left:0; right:0; bottom:0; height:30px; background:#E9E4D9;"><div style="width:38%; height:2px; background:oklch(0.50 0.14 35);"></div></div>
+        </div>
+        <div style="font-size:10px; color:rgba(232,228,219,0.45); line-height:1.6;">dark room · paper panels · oxblood — “the works are lit, the room is not,” literally</div>
+      </div>
+      <div style="width:290px; display:flex; flex-direction:column; gap:10px;">
+        <div style="font-size:12px; color:rgba(232,228,219,0.55);">Gallery · light/dark</div>
+        <div style="width:290px; height:190px; background:#E9E4D9; position:relative; overflow:hidden;">
+          <div style="position:absolute; left:12px; top:12px; display:grid; grid-template-columns:repeat(3,46px); gap:9px;">
+            <sc-for list="{{ mixCovers }}" as="c" hint-placeholder-count="6"><div style="width:46px; height:46px; background:{{ c.bg }};"></div></sc-for>
+          </div>
+          <div style="position:absolute; right:0; top:0; bottom:30px; width:84px; background:#17161A; padding:8px;">
+            <div style="width:66px; height:66px; background:#8C3B5A;"></div>
+            <div style="font-size:9px; color:#E8E4DB; margin-top:6px;">Mirror Phase</div>
+          </div>
+          <div style="position:absolute; left:0; right:0; bottom:0; height:30px; background:#17161A;"><div style="width:38%; height:2px; background:oklch(0.74 0.13 75);"></div></div>
+        </div>
+        <div style="font-size:10px; color:rgba(232,228,219,0.45); line-height:1.6;">paper room · dark panels · amber — the plinth under the wall</div>
+      </div>
+      <div style="width:290px; display:flex; flex-direction:column; gap:10px;">
+        <div style="font-size:12px; color:rgba(232,228,219,0.55);">Reading Room · light <span style="color:rgba(232,228,219,0.35);">— system light maps here</span></div>
+        <div style="width:290px; height:190px; background:#E9E4D9; position:relative; overflow:hidden;">
+          <div style="position:absolute; left:12px; top:12px; display:grid; grid-template-columns:repeat(3,46px); gap:9px;">
+            <sc-for list="{{ mixCovers }}" as="c" hint-placeholder-count="6"><div style="width:46px; height:46px; background:{{ c.bg }};"></div></sc-for>
+          </div>
+          <div style="position:absolute; right:0; top:0; bottom:30px; width:84px; background:#DFD9CC; border-left:1px solid rgba(23,22,26,0.10); padding:8px;">
+            <div style="width:66px; height:66px; background:#8C3B5A;"></div>
+            <div style="font-size:9px; color:#17161A; margin-top:6px;">Mirror Phase</div>
+          </div>
+          <div style="position:absolute; left:0; right:0; bottom:0; height:30px; background:#DFD9CC; border-top:1px solid rgba(23,22,26,0.12);"><div style="width:38%; height:2px; background:oklch(0.50 0.14 35);"></div></div>
+        </div>
+        <div style="font-size:10px; color:rgba(232,228,219,0.45); line-height:1.6;">paper room · paper panels · oxblood</div>
+      </div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5; max-width:900px;">Default = “follow system”: OS dark → Closing Time, OS light → Reading Room; Lamplight and Gallery are deliberate picks. The “in-between” you asked for is deliberately NOT a mid-gray wall — a 50% surface competes with every sleeve on it, which is why no gallery paints gray — it's a mix of surfaces: the room stays extreme, the panels cross over. Note what the mixed themes break: the elevation-as-warmth scale from <a href="#1a" style="color:#D9A96A;">1a</a> doesn't apply across a paper panel in a dark room — there, panels aren't “raised wall,” they're a different material (a lit object), so they need no hairline edges at all; contrast does everything. Accent rule survives everywhere: amber on dark surfaces, oxblood on paper, playback-truth only.</div>
+  </div>
+
+  <div id="6a" style="width:1360px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">6a</span>
+      <span style="font-size:14px; font-weight:600;">Workflow: the evening session — a queue of sleeves, not tracks</span>
+    </div>
+    <div style="display:flex; gap:24px;">
+      <div style="width:322px; display:flex; flex-direction:column; gap:8px;">
+        <div style="width:322px; height:210px; background:#0C0D0E; position:relative; overflow:hidden;">
+          <div style="position:absolute; left:14px; top:14px; display:grid; grid-template-columns:repeat(4,64px); gap:10px;">
+            <sc-for list="{{ sessionPick }}" as="c" hint-placeholder-count="8">
+              <div style="position:relative; width:64px; height:64px; background:{{ c.bg }}; box-shadow:{{ c.halo }};">
+                <sc-if value="{{ c.picked }}" hint-placeholder-val="{{ false }}">
+                  <span style="position:absolute; right:3px; top:3px; font-size:10px; font-weight:600; color:#E8E4DB; background:rgba(12,13,14,0.75); padding:1px 5px;">{{ c.num }}</span>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="position:absolute; left:14px; bottom:12px; font-size:10px; color:rgba(232,228,219,0.45);">shift+click · stack of 2</div>
+        </div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">1 · Click always just plays. Shift+click stacks sleeves for later — the numeral is the only chrome.</div>
+      </div>
+      <div style="width:322px; display:flex; flex-direction:column; gap:8px;">
+        <div style="width:322px; height:210px; background:#0C0D0E; position:relative; overflow:hidden;">
+          <div style="position:absolute; right:14px; bottom:44px; width:190px; background:#242120; border:1px solid rgba(232,228,219,0.14); padding:10px;">
+            <div style="font-size:8px; letter-spacing:0.12em; color:rgba(232,228,219,0.45); padding-bottom:8px;">THE STACK</div>
+            <div style="display:flex; gap:8px; align-items:center; padding-bottom:6px;"><div style="width:26px; height:26px; background:#2E4A6B; flex:none;"></div><div style="font-size:10px;">Harbour Light<br><span style="color:rgba(232,228,219,0.45);">9 tracks · 41 min</span></div></div>
+            <div style="display:flex; gap:8px; align-items:center;"><div style="width:26px; height:26px; background:#C9A227; flex:none;"></div><div style="font-size:10px;">Meridian<br><span style="color:rgba(232,228,219,0.45);">11 tracks · 47 min</span></div></div>
+          </div>
+          <div style="position:absolute; left:14px; bottom:12px; font-size:11px; color:rgba(232,228,219,0.65);">Copper Veins <span style="color:rgba(232,228,219,0.40);">· then 2 sleeves · 1h 58m left</span></div>
+          <div style="position:absolute; left:0; right:0; bottom:0; height:2px; background:#070809;"><div style="width:38%; height:2px; background:{{ accent }};"></div></div>
+        </div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">2 · The wall label says what's true: playing now, then 2 sleeves, time left in the evening. The stack lists albums, never a flat track list.</div>
+      </div>
+      <div style="width:322px; display:flex; flex-direction:column; gap:8px;">
+        <div style="width:322px; height:210px; background:#0C0D0E; position:relative; overflow:hidden;">
+          <div style="position:absolute; left:14px; top:14px; display:grid; grid-template-columns:repeat(4,64px); gap:10px;">
+            <sc-for list="{{ sessionPlay }}" as="c" hint-placeholder-count="8">
+              <div style="width:64px; height:64px; background:{{ c.bg }}; box-shadow:{{ c.halo }};"></div>
+            </sc-for>
+          </div>
+          <div style="position:absolute; left:14px; bottom:12px; font-size:11px; color:rgba(232,228,219,0.65);">Harbour Light <span style="color:rgba(232,228,219,0.40);">· then 1 sleeve</span></div>
+          <div style="position:absolute; left:0; right:0; bottom:0; height:2px; background:#070809;"><div style="width:4%; height:2px; background:{{ accent }};"></div></div>
+        </div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">3 · A record ends, the next one you chose begins; the halo walks the wall. No crossfade, no auto-DJ, no “because you listened to.”</div>
+      </div>
+      <div style="width:322px; display:flex; flex-direction:column; gap:8px;">
+        <div style="width:322px; height:210px; background:#0C0D0E; position:relative; overflow:hidden;">
+          <div style="position:absolute; left:14px; bottom:12px; font-size:11px; color:rgba(232,228,219,0.45);">end of the stack · 11:42 pm</div>
+          <div style="position:absolute; left:0; right:0; bottom:0; height:2px; background:#070809;"></div>
+        </div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">4 · The stack empties and baz goes silent. Silence is a feature — “keep audio flowing at all costs” is the streaming reflex this audience left behind.</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="6b" style="width:660px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">6b</span>
+      <span style="font-size:14px; font-weight:600;">Workflow: “I don't know what to play” — pull a record</span>
+    </div>
+    <div style="width:660px; height:420px; background:#0C0D0E; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:50%; top:52px; transform:translateX(-50%); width:220px; height:220px; background:#31543F;"></div>
+      <div style="position:absolute; left:0; right:0; top:296px; text-align:center;">
+        <div style="font-size:20px; font-weight:600;">Evergreen</div>
+        <div style="font-size:12px; color:rgba(232,228,219,0.55); margin-top:2px;">Cold Pastoral · 2003 · last played 3 years ago</div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.40); margin-top:14px;">space drops the needle · ⌘R pulls again · esc back to the wall</div>
+      </div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">The most common moment in a big collection is indecision. ⌘R pulls one sleeve — weighted toward the long-unplayed — and presents it in the Marquee lens; nothing plays until you drop the needle. Shuffle rebuilt for people who chose ownership: one record, offered, never forced. “Last played 3 years ago” is the line that sells it.</div>
+  </div>
+
+  <div style="width:100%; font-size:12px; color:rgba(232,228,219,0.55); line-height:1.6; max-width:900px;">Workflow inventory: open→play, find→play, new-files→wall solved above (<a href="#4a" style="color:#D9A96A;">4a</a>, <a href="#4b" style="color:#D9A96A;">4b</a>); the session and indecision solved here; rediscovery is a sort key plus the Crate (<a href="#2b" style="color:#D9A96A;">2b</a>) — no new UI. Still open: inline tag-fix in the inspector (unmocked), and Settings — with zero-config import, no view options, and appearance as one control (<a href="#7a" style="color:#D9A96A;">7a</a>), the separate settings screen has almost nothing left to hold. Cut it to a small panel over the wall.</div>
+
+</section>
+
+<section style="display:flex; flex-wrap:wrap; gap:48px; padding:48px 48px 8px; align-items:flex-start;">
+
+  <div id="5a" style="width:660px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">5a</span>
+      <span style="font-size:14px; font-weight:600;">The needle — no bar; playback is a line and a wall label</span>
+    </div>
+    <div style="width:660px; height:420px; background:#0C0D0E; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:24px; right:24px; top:24px; display:grid; grid-template-columns:repeat(5,104px); column-gap:18px; row-gap:24px; align-content:start; justify-content:center;">
+        <sc-for list="{{ lensCovers }}" as="c" hint-placeholder-count="10">
+          <div style="width:104px; height:104px; background:{{ c.bg }}; box-shadow:{{ c.halo }};"></div>
+        </sc-for>
+      </div>
+      <div style="position:absolute; left:24px; bottom:14px; font-size:11px; color:rgba(232,228,219,0.65);">Copper Veins — The Ossuary Choir <span style="color:rgba(232,228,219,0.40);">· 2:41</span></div>
+      <div style="position:absolute; right:24px; bottom:14px; font-size:11px; color:rgba(232,228,219,0.40);">Queue · 12</div>
+      <div style="position:absolute; left:0; right:0; bottom:0; height:2px; background:#070809;"><div style="width:38%; height:2px; background:{{ accent }};"></div></div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">The transport bar was the loudest Spotify signal on every mock above — and it was already the weakest part of the spec. Here playback is a 2px seek line on the window's bottom edge and a gallery wall-label set on the wall itself. Transport: space/arrows, scroll for volume, and hover on the playing cover reveals prev/play/next over the art — the only place icons exist. Collection at rest: 100% of the window. Risk: discoverability — acceptable for foobar refugees, a real cliff for anyone else; the hover-reveal needs testing with no animation to soften it.</div>
+  </div>
+
+  <div id="5b" style="width:660px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">5b</span>
+      <span style="font-size:14px; font-weight:600;">Daylight default — no music player is light-first; be the one</span>
+    </div>
+    <div style="width:660px; height:420px; background:#E9E4D9; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:0; right:0; top:0; height:52px; display:flex; align-items:center; justify-content:space-between; padding:0 24px;">
+        <div style="display:flex; gap:20px; font-size:11px; letter-spacing:0.14em;">
+          <span style="color:#17161A; border-bottom:2px solid oklch(0.50 0.14 35); padding-bottom:3px;">WALL</span>
+          <span style="color:rgba(23,22,26,0.40);">CRATE</span>
+          <span style="color:rgba(23,22,26,0.40);">MARQUEE</span>
+        </div>
+        <div style="font-size:11px; color:rgba(23,22,26,0.40);">1,204 albums</div>
+      </div>
+      <div style="position:absolute; left:24px; right:24px; top:60px; display:grid; grid-template-columns:repeat(5,104px); column-gap:18px; row-gap:24px; align-content:start; justify-content:center;">
+        <sc-for list="{{ paperCovers }}" as="c" hint-placeholder-count="10">
+          <div style="width:104px; height:104px; background:{{ c.bg }}; box-shadow:{{ c.halo }};"></div>
+        </sc-for>
+      </div>
+      <div style="position:absolute; left:24px; bottom:14px; font-size:11px; color:rgba(23,22,26,0.70);">Copper Veins — The Ossuary Choir <span style="color:rgba(23,22,26,0.40);">· 2:41</span></div>
+      <div style="position:absolute; left:0; right:0; bottom:0; height:2px; background:#F2EEE5;"><div style="width:38%; height:2px; background:oklch(0.50 0.14 35);"></div></div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">Dark + cover grid + bar is the category uniform; paper isn't. Reading Room as the DEFAULT (Closing Time becomes the evening option) makes baz identifiable in a single screenshot, flatters artwork the way a white gallery wall does, and “the archive in daylight” is at least as true to record collecting as closing-time gloom. Shown here combined with the needle from <a href="#5a" style="color:#D9A96A;">5a</a> — together they remove every Spotify signal at once. Cheapest distinctive move available; the only cost is that you wrote the whole direction around darkness.</div>
+  </div>
+
+  <div style="width:100%; font-size:12px; color:rgba(232,228,219,0.55); line-height:1.6; max-width:900px;">The squint audit, honestly: identity at a glance is silhouette, not seasoning. Everything signature in the spec — warm/cool split, halo-never-fill, elevation discipline, no captions — sits below squint threshold. Above it sit three Spotify signals: dark field, uniform square grid, full-width bottom bar. The grid you keep (it's the product). The other two are negotiable, and <a href="#5a" style="color:#D9A96A;">5a</a>/<a href="#5b" style="color:#D9A96A;">5b</a> each remove one. Do both and nobody says Spotify again.</div>
+
+</section>
+
+<section style="display:flex; flex-wrap:wrap; gap:48px; padding:48px 48px 8px; align-items:flex-start;">
+
+  <div id="4a" style="width:660px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">4a</span>
+      <span style="font-size:14px; font-weight:600;">There is no search box — typing is the search</span>
+    </div>
+    <div style="width:660px; height:420px; background:#0C0D0E; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:0; right:0; top:0; height:52px; display:flex; align-items:center; justify-content:space-between; padding:0 24px;">
+        <div style="display:flex; gap:20px; font-size:11px; letter-spacing:0.14em;">
+          <span style="color:#E8E4DB; border-bottom:2px solid {{ accent }}; padding-bottom:3px;">WALL</span>
+          <span style="color:rgba(232,228,219,0.40);">CRATE</span>
+          <span style="color:rgba(232,228,219,0.40);">MARQUEE</span>
+        </div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.40);">1,204 albums</div>
+      </div>
+      <div style="position:absolute; left:24px; right:24px; top:70px; display:flex; gap:24px;">
+        <div style="width:150px; height:150px; background:#B33A2E;"></div>
+        <div style="width:150px; height:150px; background:#4A6B8C;"></div>
+        <div style="width:150px; height:150px; background:#C2B49A;"></div>
+      </div>
+      <div style="position:absolute; left:24px; bottom:72px;">
+        <div style="font-size:48px; font-weight:600; letter-spacing:-0.01em; color:rgba(232,228,219,0.9); display:flex; align-items:center;">cop<span style="display:inline-block; width:4px; height:44px; background:{{ accent }}; margin-left:6px;"></span></div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.45); margin-top:6px;">3 of 1,204 · enter plays the first · esc clears</div>
+      </div>
+      <div style="position:absolute; left:0; right:0; bottom:0; height:44px; background:#181716; border-top:1px solid rgba(232,228,219,0.10);"></div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">No field, no focus, no Ctrl+F: any keystroke, anywhere, filters the wall on the next frame; the query is set in display type on the wall itself. Enter plays the first match — thought to sound in one word and one key. This turns your worst constraint (no focus tree) into the category's fastest search, and it deletes the search box from <a href="#3a" style="color:#D9A96A;">3a</a>. Cost: keyboard shortcuts must move to a modifier layer (Cmd/Ctrl+key), since bare letters are now query.</div>
+  </div>
+
+  <div id="4b" style="width:660px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">4b</span>
+      <span style="font-size:14px; font-weight:600;">First run — the wall is the progress bar</span>
+    </div>
+    <div style="width:660px; height:420px; background:#0C0D0E; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:0; right:0; top:0; height:52px; display:flex; align-items:center; justify-content:space-between; padding:0 24px;">
+        <div style="font-size:11px; color:rgba(232,228,219,0.45);">watching ~/Music</div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.40);">412 of 1,204 imported</div>
+      </div>
+      <div style="position:absolute; left:24px; right:24px; top:60px; bottom:52px; display:grid; grid-template-columns:repeat(5,104px); column-gap:18px; row-gap:24px; align-content:start; justify-content:center;">
+        <sc-for list="{{ importCovers }}" as="c" hint-placeholder-count="15">
+          <div style="width:104px; height:104px; background:{{ c.bg }};"></div>
+        </sc-for>
+      </div>
+      <div style="position:absolute; left:0; right:0; bottom:0; height:44px; background:#181716; border-top:1px solid rgba(232,228,219,0.10); display:flex; align-items:center; padding:0 16px;">
+        <span style="font-size:11px; color:rgba(232,228,219,0.45);">click anything to start listening — the scan keeps going</span>
+      </div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">No importer dialog, no progress modal, no “library setup.” Point baz at a folder once; covers land on the wall as they're read (recessed −1 squares mark what's still coming), and playback works from the first cover. Every incumbent makes you watch a scanner before you may listen — deleting that wait is the whole first impression. Same surface handles ongoing folder-watching: new rips just appear under RECENTLY ADDED.</div>
+  </div>
+
+  <div style="width:100%; font-size:12px; color:rgba(232,228,219,0.55); line-height:1.6; max-width:900px;">The friction budget, stated as numbers so features can be tested against it: launch→music resumes &lt;200ms (wall position and paused track restored) · intent→sound = 1 click · keystroke→filtered wall = next frame · new files→on the wall = no dialog, ever · tag fix = inline in the inspector, playback never blocked. Anything that adds a click before sound needs to argue for its life.</div>
+
+</section>
+
+<section style="display:flex; flex-wrap:wrap; gap:48px; padding:48px 48px 8px; align-items:flex-start;">
+
+  <div id="3a" style="width:660px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">3a</span>
+      <span style="font-size:14px; font-weight:600;">One library, three lenses — Wall / Crate / Marquee as views, not apps</span>
+    </div>
+    <div style="width:660px; height:420px; background:#0C0D0E; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:0; right:0; top:0; height:52px; display:flex; align-items:center; justify-content:space-between; padding:0 24px;">
+        <div style="width:200px; height:26px; background:#070809; display:flex; align-items:center; padding:0 10px; font-size:11px; color:rgba(232,228,219,0.35);">type to filter…</div>
+        <div style="display:flex; gap:20px; font-size:11px; letter-spacing:0.14em;">
+          <span style="color:#E8E4DB; border-bottom:2px solid {{ accent }}; padding-bottom:3px;">WALL</span>
+          <span style="color:rgba(232,228,219,0.40);">CRATE</span>
+          <span style="color:rgba(232,228,219,0.40);">MARQUEE</span>
+        </div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.40);">1,204 albums</div>
+      </div>
+      <div style="position:absolute; left:24px; right:24px; top:60px; bottom:52px; display:grid; grid-template-columns:repeat(5,104px); column-gap:18px; row-gap:24px; align-content:start; justify-content:center;">
+        <sc-for list="{{ lensCovers }}" as="c" hint-placeholder-count="10">
+          <div style="width:104px; height:104px; background:{{ c.bg }}; box-shadow:{{ c.halo }};"></div>
+        </sc-for>
+      </div>
+      <div style="position:absolute; left:0; right:0; bottom:0; height:44px; background:#181716; border-top:1px solid rgba(232,228,219,0.10);"></div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">Yes — they compose, on three conditions. The lenses share one state (selection, sort, filter, playing) so switching never loses your place; the switcher is type, not icons (three fewer glyph sets, and it names the metaphors); keys 1/2/3 cycle it — global shortcuts don't need a focus tree. Wall stays the default; Crate is a browsing mood, Marquee is what the app relaxes into after 30s idle while playing. What this must never become: a “view options” menu with grid sizes, list mode, column pickers — that's the foobar2000 gravity well the whole product exists to escape. Three named lenses, zero settings inside them.</div>
+  </div>
+
+  <div id="3b" style="width:1120px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">3b</span>
+      <span style="font-size:14px; font-weight:600;">Themes — a theme is a room, not a skin: (room temperature, room lightness); ink and accent oppose it</span>
+    </div>
+    <div style="display:flex; gap:24px; align-items:flex-start;">
+      <div style="width:350px; display:flex; flex-direction:column; gap:10px;">
+        <div style="font-size:12px; color:rgba(232,228,219,0.55);">Closing Time — cool dark room, warm ink · default</div>
+        <div style="width:350px; height:230px; background:#0C0D0E; position:relative; overflow:hidden;">
+          <div style="position:absolute; left:16px; right:16px; top:16px; display:grid; grid-template-columns:repeat(4,70px); gap:12px;">
+            <sc-for list="{{ themeCovers }}" as="c" hint-placeholder-count="8">
+              <div style="width:70px; height:70px; background:{{ c.bg }};"></div>
+            </sc-for>
+          </div>
+          <div style="position:absolute; left:98px; top:16px; width:70px; height:70px; box-shadow:0 0 0 2px oklch(0.74 0.13 75), 0 0 22px oklch(0.74 0.13 75 / 0.35);"></div>
+          <div style="position:absolute; left:0; right:0; bottom:0; height:38px; background:#181716; border-top:1px solid rgba(232,228,219,0.10); display:flex; align-items:center; padding:0 14px; gap:10px;">
+            <span style="font-size:11px; color:#E8E4DB;">Copper Veins</span>
+            <div style="flex:1; height:3px; background:#070809;"><div style="width:38%; height:3px; background:oklch(0.74 0.13 75);"></div></div>
+          </div>
+        </div>
+        <div style="font-size:10px; color:rgba(232,228,219,0.45); line-height:1.6;">wall #0C0D0E cool · ink #E8E4DB warm · accent arc 40–110° (amber) · rise = warmer</div>
+      </div>
+      <div style="width:350px; display:flex; flex-direction:column; gap:10px;">
+        <div style="font-size:12px; color:rgba(232,228,219,0.55);">Reading Room — warm paper, cool black ink · daylight</div>
+        <div style="width:350px; height:230px; background:#E9E4D9; position:relative; overflow:hidden;">
+          <div style="position:absolute; left:16px; right:16px; top:16px; display:grid; grid-template-columns:repeat(4,70px); gap:12px;">
+            <sc-for list="{{ themeCovers }}" as="c" hint-placeholder-count="8">
+              <div style="width:70px; height:70px; background:{{ c.bg }};"></div>
+            </sc-for>
+          </div>
+          <div style="position:absolute; left:98px; top:16px; width:70px; height:70px; box-shadow:0 0 0 2px oklch(0.50 0.14 35), 0 0 18px oklch(0.50 0.14 35 / 0.30);"></div>
+          <div style="position:absolute; left:0; right:0; bottom:0; height:38px; background:#DFD9CC; border-top:1px solid rgba(23,22,26,0.12); display:flex; align-items:center; padding:0 14px; gap:10px;">
+            <span style="font-size:11px; color:#17161A;">Copper Veins</span>
+            <div style="flex:1; height:3px; background:#F2EEE5;"><div style="width:38%; height:3px; background:oklch(0.50 0.14 35);"></div></div>
+          </div>
+        </div>
+        <div style="font-size:10px; color:rgba(232,228,219,0.45); line-height:1.6;">wall #E9E4D9 warm · ink #17161A cool · accent arc 20–60° (oxblood) · rise = darker, recess = lighter paper</div>
+      </div>
+      <div style="width:350px; display:flex; flex-direction:column; gap:10px;">
+        <div style="font-size:12px; color:rgba(232,228,219,0.55);">Dust — warm dark room, cold paper ink · the inversion</div>
+        <div style="width:350px; height:230px; background:#131009; position:relative; overflow:hidden;">
+          <div style="position:absolute; left:16px; right:16px; top:16px; display:grid; grid-template-columns:repeat(4,70px); gap:12px;">
+            <sc-for list="{{ themeCovers }}" as="c" hint-placeholder-count="8">
+              <div style="width:70px; height:70px; background:{{ c.bg }};"></div>
+            </sc-for>
+          </div>
+          <div style="position:absolute; left:98px; top:16px; width:70px; height:70px; box-shadow:0 0 0 2px oklch(0.74 0.10 230), 0 0 22px oklch(0.74 0.10 230 / 0.35);"></div>
+          <div style="position:absolute; left:0; right:0; bottom:0; height:38px; background:#1B1712; border-top:1px solid rgba(226,230,232,0.10); display:flex; align-items:center; padding:0 14px; gap:10px;">
+            <span style="font-size:11px; color:#E2E6E8;">Copper Veins</span>
+            <div style="flex:1; height:3px; background:#0B0905;"><div style="width:38%; height:3px; background:oklch(0.74 0.10 230);"></div></div>
+          </div>
+        </div>
+        <div style="font-size:10px; color:rgba(232,228,219,0.45); line-height:1.6;">wall #131009 warm · ink #E2E6E8 cold · accent arc 200–260° (glacier) · rise = warmer still</div>
+      </div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5; max-width:900px;">The discipline: a theme sets exactly two values — room temperature and room lightness. Ink takes the opposite temperature (that split IS the brand, so it survives every theme), the accent clamp-arc flips to oppose the room, and the elevation scale keeps its L-deltas verbatim (light theme rises darker instead of lighter). Everything else — no radii, no shadows, halo-never-fill, captions-only-when-true — is invariant, so a theme is ~6 tokens, not a re-skin. Ship Closing Time + Reading Room; Dust is there to prove the system generalises, not because three is better than two. What I'd refuse: user-picked accent colors — the accent means “playback truth,” and a preference picker dilutes it into decoration.</div>
+  </div>
+
+</section>
+
+<section style="display:flex; flex-wrap:wrap; gap:48px; padding:48px 48px 8px; align-items:flex-start;">
+
+  <div id="2a" style="width:600px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">2a</span>
+      <span style="font-size:14px; font-weight:600;">Marquee — playback is a poster, the wall parts around it</span>
+    </div>
+    <div style="width:600px; height:400px; background:#0C0D0E; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:0; top:0; bottom:0; width:300px; background:#8C3B5A;"></div>
+      <div style="position:absolute; left:0; top:0; bottom:0; width:300px; background:linear-gradient(90deg, rgba(12,13,14,0) 55%, rgba(12,13,14,0.9));"></div>
+      <div style="position:absolute; left:36px; bottom:96px; z-index:2;">
+        <div style="font-size:52px; font-weight:600; line-height:0.95; letter-spacing:-0.02em;">Copper<br>Veins</div>
+        <div style="font-size:13px; margin-top:10px; color:rgba(232,228,219,0.65);">The Ossuary Choir · 2019 · <span style="color:{{ accent }};">track 4 of 11</span></div>
+      </div>
+      <div style="position:absolute; right:0; top:0; bottom:44px; width:330px; padding:20px; display:grid; grid-template-columns:repeat(3,86px); gap:14px; align-content:start; justify-content:end;">
+        <sc-for list="{{ recedeCovers }}" as="c" hint-placeholder-count="9">
+          <div style="width:86px; height:86px; background:{{ c.bg }}; opacity:{{ c.op }};"></div>
+        </sc-for>
+      </div>
+      <div style="position:absolute; left:0; right:0; bottom:0; height:44px; background:#181716; border-top:1px solid rgba(232,228,219,0.10); display:flex; align-items:center; padding:0 16px; gap:14px;">
+        <div style="width:0; height:0; border-top:6px solid transparent; border-bottom:6px solid transparent; border-left:9px solid #E8E4DB;"></div>
+        <div style="flex:1; height:4px; background:#070809;"><div style="width:38%; height:4px; background:{{ accent }};"></div></div>
+        <span style="font-size:10px; color:rgba(232,228,219,0.45);">2:41</span>
+      </div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">The playing sleeve takes half the window, full-bleed and square; the wall dims to 35% and waits. Poster typography does the flair — still just artwork and type, zero new chrome. Trade-off: it demotes browsing while anything plays; probably a mode (default while idle-listening, any keystroke snaps back to the wall). The gradient scrim is one linear-gradient — iced can do it as a quad with vertex alpha.</div>
+  </div>
+
+  <div id="2b" style="width:600px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">2b</span>
+      <span style="font-size:14px; font-weight:600;">The crate — spines, not thumbnails</span>
+    </div>
+    <div style="width:600px; height:400px; background:#0C0D0E; position:relative; overflow:hidden; display:flex; align-items:flex-end; padding:0 0 60px 36px;">
+      <div style="display:flex; align-items:flex-end; gap:3px;">
+        <sc-for list="{{ spinesA }}" as="c" hint-placeholder-count="8">
+          <div style="width:22px; height:240px; background:{{ c.bg }}; display:flex; align-items:flex-end; justify-content:center; padding-bottom:10px;">
+            <div style="writing-mode:vertical-rl; transform:rotate(180deg); font-size:9px; letter-spacing:0.06em; color:{{ c.ink }}; white-space:nowrap; overflow:hidden; max-height:200px;">{{ c.title }} — {{ c.artist }}</div>
+          </div>
+        </sc-for>
+        <div style="width:240px; height:240px; background:#C9A227; box-shadow:0 0 0 2px {{ accent }}; flex:none;"></div>
+        <sc-for list="{{ spinesB }}" as="c" hint-placeholder-count="8">
+          <div style="width:22px; height:240px; background:{{ c.bg }}; display:flex; align-items:flex-end; justify-content:center; padding-bottom:10px;">
+            <div style="writing-mode:vertical-rl; transform:rotate(180deg); font-size:9px; letter-spacing:0.06em; color:{{ c.ink }}; white-space:nowrap; overflow:hidden; max-height:200px;">{{ c.title }} — {{ c.artist }}</div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="position:absolute; left:36px; top:36px;">
+        <div style="font-size:13px;">Meridian <span style="color:rgba(232,228,219,0.45);">· R. Adler · 2017</span></div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.45); margin-top:2px;">flipping through 1,204 records</div>
+      </div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">The pointer flips through spines like a crate; the hovered record turns face-out. Nothing else on the market looks like this, and it is the truest metaphor for this audience. Honest risks: spine color must be sampled from art edges (tag data won't give it to you), rotated text in iced means rasterising your own glyph runs, and with no animation the face-out flip is a hard cut — test whether that feels crisp or broken. Density is worse than the wall; this is a browsing mode, not the home.</div>
+  </div>
+
+  <div id="2c" style="width:600px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">2c</span>
+      <span style="font-size:14px; font-weight:600;">Catalogue — the archive speaks in specimen type</span>
+    </div>
+    <div style="width:600px; height:400px; background:#0C0D0E; position:relative; overflow:hidden;">
+      <div style="position:absolute; left:-10px; top:-60px; font-size:340px; font-weight:600; letter-spacing:-0.04em; color:rgba(232,228,219,0.055); line-height:1;">19</div>
+      <div style="position:absolute; left:36px; top:32px; font-size:11px; letter-spacing:0.18em; color:rgba(232,228,219,0.45);">1994 — 2001 · 61 RECORDS</div>
+      <div style="position:absolute; left:36px; right:36px; top:70px; display:grid; grid-template-columns:repeat(4,110px); column-gap:26px; row-gap:20px;">
+        <sc-for list="{{ catCovers }}" as="c" hint-placeholder-count="8">
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <div style="width:110px; height:110px; background:{{ c.bg }};"></div>
+            <div style="font-size:9px; letter-spacing:0.12em; color:rgba(232,228,219,0.40);">{{ c.cat }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">Era headers become 340px specimen numerals at ivory 6% — chrome that is also decoration, scrolling behind the shelf. Captions are catalog plates (accession number, not title) — pure archive flair, and tabular Plex digits keep them ruled. Risk: it flirts with decoration-for-its-own-sake, and giant glyphs at 6% ivory will band on cheap panels — test on a real display before committing.</div>
+  </div>
+
+  <div style="width:100%; font-size:12px; color:rgba(232,228,219,0.55); line-height:1.6; max-width:900px;">Where the flair should live: the wall (<a href="#1b" style="color:#D9A96A;">1b</a>) stays the home — it is the defensible position. <a href="#2a" style="color:#D9A96A;">2a</a> adds flair to <em>playback</em>, <a href="#2b" style="color:#D9A96A;">2b</a> to <em>browsing</em>, <a href="#2c" style="color:#D9A96A;">2c</a> to <em>wayfinding</em>. Pick one; all three together is a theme park. My vote is 2a — it spends drama on the exact moment your accent system already declares sacred, and it is the cheapest against your constraints.</div>
+
+</section>
+
+<section style="display:flex; flex-wrap:wrap; gap:48px; padding:48px; align-items:flex-start;">
+
+  <div id="1a" style="width:640px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">1a</span>
+      <span style="font-size:14px; font-weight:600;">Elevation on #0C0D0E — L-delta scale + warm rise, no shadows</span>
+    </div>
+    <div style="display:flex; gap:20px;">
+      <div style="width:230px; display:flex; flex-direction:column;">
+        <div style="background:#070809; padding:14px 16px;">
+          <div style="font-size:12px;">−1 · recess</div>
+          <div style="font-size:11px; color:rgba(232,228,219,0.45);">#070809 · oklch L .14 · wells, seek groove, search field</div>
+        </div>
+        <div style="background:#0C0D0E; padding:14px 16px;">
+          <div style="font-size:12px;">0 · the wall</div>
+          <div style="font-size:11px; color:rgba(232,228,219,0.45);">#0C0D0E · L .17 · cool, neutral</div>
+        </div>
+        <div style="background:#181716; border-top:1px solid rgba(232,228,219,0.10); padding:14px 16px;">
+          <div style="font-size:12px;">+1 · panel</div>
+          <div style="font-size:11px; color:rgba(232,228,219,0.45);">#181716 · L .21 · warmer · inspector, bottom bar · hairline top edge ivory 10%</div>
+        </div>
+        <div style="background:#242120; border-top:1px solid rgba(232,228,219,0.14); padding:14px 16px;">
+          <div style="font-size:12px;">+2 · float</div>
+          <div style="font-size:11px; color:rgba(232,228,219,0.45);">#242120 · L .25 · warmest · queue popover, menus · edge ivory 14%. No +3 — redesign instead.</div>
+        </div>
+        <div style="padding:12px 2px; font-size:11px; line-height:1.5; color:rgba(232,228,219,0.5);">Rule: ≥ 0.03 oklch-L per step; hue drifts cool→warm as it rises (“closer to the lamp”). Edges separate; surface deltas group. Hover = ivory 6% overlay; selected = ivory 10% + halo.</div>
+      </div>
+      <div style="width:380px; height:300px; background:#0C0D0E; position:relative; overflow:hidden; flex:none;">
+        <div style="position:absolute; inset:0 96px 44px 0; padding:14px; display:grid; grid-template-columns:repeat(4,56px); gap:12px; align-content:start;">
+          <sc-for list="{{ miniCovers }}" as="c" hint-placeholder-count="8">
+            <div style="width:56px; height:56px; background:{{ c.bg }}; box-shadow:{{ c.halo }};"></div>
+          </sc-for>
+        </div>
+        <div style="position:absolute; top:0; right:0; bottom:44px; width:96px; background:#181716; border-left:1px solid rgba(232,228,219,0.08); padding:10px;">
+          <div style="width:76px; height:76px; background:#8C3B5A;"></div>
+          <div style="margin-top:8px; font-size:9px;">Mirror Phase</div>
+          <div style="font-size:8px; color:rgba(232,228,219,0.45);">Held Aloft · 2021</div>
+        </div>
+        <div style="position:absolute; left:0; right:0; bottom:0; height:44px; background:#181716; border-top:1px solid rgba(232,228,219,0.10);"></div>
+        <div style="position:absolute; right:104px; bottom:52px; width:150px; height:110px; background:#242120; border:1px solid rgba(232,228,219,0.14); padding:8px;">
+          <div style="font-size:8px; letter-spacing:0.1em; color:rgba(232,228,219,0.45);">UP NEXT</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="1b" style="width:1080px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">1b</span>
+      <span style="font-size:14px; font-weight:600;">The wall — what makes it a collection, not a spreadsheet</span>
+    </div>
+    <div style="display:flex; gap:24px; align-items:flex-start;">
+      <div style="width:300px; display:flex; flex-direction:column; gap:10px;">
+        <div style="font-size:12px; color:rgba(232,228,219,0.55);">✕ Spreadsheet mode: small tiles, tight uniform gutters, a caption under everything</div>
+        <div style="background:#0C0D0E; padding:12px; display:grid; grid-template-columns:repeat(4,62px); gap:8px;">
+          <sc-for list="{{ sheetCovers }}" as="c" hint-placeholder-count="12">
+            <div style="display:flex; flex-direction:column; gap:3px;">
+              <div style="width:62px; height:62px; background:{{ c.bg }};"></div>
+              <div style="font-size:8px; line-height:1.25; color:#E8E4DB; white-space:nowrap; overflow:hidden;">{{ c.title }}<br><span style="color:rgba(232,228,219,0.45);">{{ c.artist }}</span></div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="width:420px; display:flex; flex-direction:column; gap:10px;">
+        <div style="font-size:12px; color:rgba(232,228,219,0.55);">✓ Wall: covers ≥160px real-size, gutter ≈14% of cover, vertical &gt; horizontal, captions only where state is true</div>
+        <div style="background:#0C0D0E; padding:18px; display:grid; grid-template-columns:repeat(3,118px); column-gap:16px; row-gap:22px;">
+          <sc-for list="{{ wallCovers }}" as="c" hint-placeholder-count="9">
+            <div style="display:flex; flex-direction:column; gap:5px;">
+              <div style="width:118px; height:118px; background:{{ c.bg }}; box-shadow:{{ c.halo }};"></div>
+              <sc-if value="{{ c.cap }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:10px; line-height:1.3;">{{ c.title }}<br><span style="color:rgba(232,228,219,0.45);">{{ c.artist }}</span> <span style="color:{{ c.dotColor }};">{{ c.dot }}</span></div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">Shown at ~⅔ scale. Amber halo = playing (never a fill); ivory ring = selected. Try the “captions at rest” tweak to watch it turn back into a spreadsheet.</div>
+      </div>
+      <div style="width:420px; display:flex; flex-direction:column; gap:10px;">
+        <div style="font-size:12px; color:rgba(232,228,219,0.55);">✓ At scale (2,000+ albums): shelf breaks from the sort key stop the wall becoming texture</div>
+        <div style="background:#0C0D0E; padding:18px;">
+          <div style="font-size:10px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding-bottom:10px;">RECENTLY ADDED</div>
+          <div style="display:grid; grid-template-columns:repeat(3,118px); column-gap:16px; row-gap:22px; padding-bottom:22px;">
+            <sc-for list="{{ shelfA }}" as="c" hint-placeholder-count="3">
+              <div style="width:118px; height:118px; background:{{ c.bg }};"></div>
+            </sc-for>
+          </div>
+          <div style="font-size:10px; letter-spacing:0.14em; color:rgba(232,228,219,0.40); padding-bottom:10px;">2019</div>
+          <div style="display:grid; grid-template-columns:repeat(3,118px); column-gap:16px; row-gap:22px;">
+            <sc-for list="{{ shelfB }}" as="c" hint-placeholder-count="6">
+              <div style="width:118px; height:118px; background:{{ c.bg }};"></div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5;">Headers are the only chrome on the wall: 10px caps, ivory 40%. They ride the virtualizer as sticky rows.</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="1c" style="width:1000px; display:flex; flex-direction:column; gap:16px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="border:1px solid rgba(232,228,219,0.35); padding:2px 8px; font-size:12px; letter-spacing:0.08em;">1c</span>
+      <span style="font-size:14px; font-weight:600;">Bottom bar — current (7 controls) vs proposed (4 + art)</span>
+    </div>
+    <div style="font-size:12px; color:rgba(232,228,219,0.55);">✕ Current: now-playing · prev/play/next · groove · elapsed/total · queue button · fader · mute</div>
+    <div style="height:64px; background:#181716; border-top:1px solid rgba(232,228,219,0.10); display:flex; align-items:center; padding:0 20px; gap:24px;">
+      <div style="width:220px;">
+        <div style="font-size:13px;">Copper Veins</div>
+        <div style="font-size:11px; color:rgba(232,228,219,0.45);">The Ossuary Choir</div>
+      </div>
+      <div style="flex:1; display:flex; flex-direction:column; gap:6px; align-items:center;">
+        <div style="display:flex; gap:18px; align-items:center;">
+          <div style="width:0; height:0; border-top:5px solid transparent; border-bottom:5px solid transparent; border-right:8px solid #E8E4DB;"></div>
+          <div style="width:0; height:0; border-top:7px solid transparent; border-bottom:7px solid transparent; border-left:11px solid #E8E4DB;"></div>
+          <div style="width:0; height:0; border-top:5px solid transparent; border-bottom:5px solid transparent; border-left:8px solid #E8E4DB;"></div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px; width:100%;">
+          <span style="font-size:10px; color:rgba(232,228,219,0.45);">2:41</span>
+          <div style="flex:1; height:4px; background:#070809;"><div style="width:38%; height:4px; background:{{ accent }};"></div></div>
+          <span style="font-size:10px; color:rgba(232,228,219,0.45);">4:34</span>
+        </div>
+      </div>
+      <div style="font-size:11px; border:1px solid rgba(232,228,219,0.25); padding:4px 10px;">UP NEXT</div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="width:70px; height:3px; background:#070809; position:relative;"><div style="position:absolute; left:60%; top:-4px; width:11px; height:11px; border-radius:50%; background:#E8E4DB;"></div></div>
+        <div style="font-size:11px; border:1px solid rgba(232,228,219,0.25); padding:4px 8px;">MUTE</div>
+        <div style="font-size:10px; color:rgba(232,228,219,0.40);">FLAC 24/96</div>
+      </div>
+    </div>
+    <div style="font-size:12px; color:rgba(232,228,219,0.55); margin-top:8px;">✓ Proposed: art thumb ties bar to wall · queue folded into the now-playing block as text · elapsed only · fader-to-zero is mute</div>
+    <div style="height:64px; background:#181716; border-top:1px solid rgba(232,228,219,0.10); display:flex; align-items:center; padding:0 20px; gap:24px;">
+      <div style="display:flex; gap:12px; align-items:center; width:280px;">
+        <div style="width:44px; height:44px; background:#8C3B5A; box-shadow:0 0 0 1px {{ accentDim }};"></div>
+        <div>
+          <div style="font-size:13px;">Copper Veins</div>
+          <div style="font-size:11px; color:rgba(232,228,219,0.45);">The Ossuary Choir · <span style="color:rgba(232,228,219,0.65);">Queue · 12</span></div>
+        </div>
+      </div>
+      <div style="flex:1; display:flex; flex-direction:column; gap:6px; align-items:center;">
+        <div style="display:flex; gap:18px; align-items:center;">
+          <div style="width:0; height:0; border-top:5px solid transparent; border-bottom:5px solid transparent; border-right:8px solid #E8E4DB;"></div>
+          <div style="width:0; height:0; border-top:7px solid transparent; border-bottom:7px solid transparent; border-left:11px solid #E8E4DB;"></div>
+          <div style="width:0; height:0; border-top:5px solid transparent; border-bottom:5px solid transparent; border-left:8px solid #E8E4DB;"></div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px; width:100%;">
+          <span style="font-size:10px; color:rgba(232,228,219,0.45);">2:41</span>
+          <div style="flex:1; height:4px; background:#070809;"><div style="width:38%; height:4px; background:{{ accent }};"></div></div>
+        </div>
+      </div>
+      <div style="width:70px; height:3px; background:#070809; position:relative;"><div style="position:absolute; left:60%; top:-4px; width:11px; height:11px; border-radius:50%; background:#E8E4DB;"></div></div>
+    </div>
+    <div style="font-size:11px; color:rgba(232,228,219,0.5); line-height:1.5; max-width:760px;">Cut: mute toggle (fader-to-zero + keyboard M), total time (click elapsed toggles remaining), the labelled queue button, the format readout (it belongs in the inspector — the bar states what’s true about playback, not about the file). Three fewer hand-rasterised glyph sets. The accent-hue tweak on this board shows why the art-derived hue needs clamping to the warm arc — drag it to 250 and watch the room go cold.</div>
+  </div>
+
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;accentHue&quot;: {&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:75,&quot;min&quot;:20,&quot;max&quot;:260,&quot;step&quot;:5,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Accent&quot;,&quot;unit&quot;:&quot;°&quot;},
+  &quot;clampHue&quot;: {&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Accent&quot;},
+  &quot;captionsAtRest&quot;: {&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Wall&quot;}
+}">
+class Component extends DCLogic {
+  renderVals() {
+    const rawHue = this.props.accentHue ?? 75;
+    const clamp = this.props.clampHue ?? false;
+    const hue = clamp ? Math.min(110, Math.max(40, rawHue)) : rawHue;
+    const accent = `oklch(0.74 0.13 ${hue})`;
+    const accentDim = `oklch(0.74 0.13 ${hue} / 0.55)`;
+    const glow = `0 0 0 2px ${accent}, 0 0 26px oklch(0.74 0.13 ${hue} / 0.35)`;
+    const capsAtRest = this.props.captionsAtRest ?? false;
+    const palette = ['#B33A2E','#DCCFB8','#2E4A6B','#C9A227','#5B6E58','#1E1F22','#8C3B5A','#D8D5CE','#3E6B5A','#A65B2A','#243B53','#CB4F2E','#6B4A7A','#8B9498','#463125','#C2B49A','#2B2B2E','#7A8C3B','#B0413E','#EAE6DF','#31543F','#9A3742','#54301E','#4A6B8C'];
+    const titles = ['Copper Veins','Static Bloom','Harbour Light','Meridian','Dry Season','Nocturne IV','Mirror Phase','Paper Crown','Undergrowth','Kiln','North of Here','Signal Fire','Violet Hour','Grey Weather','Rootstock','Field Notes','After Image','Chalk Lines','Ember Days','Whitework','Evergreen','Carmine','Peat','Fathom'];
+    const artists = ['The Ossuary Choir','Lene Marlin Trio','Casco Bay','R. Adler','Sunder','K. Ito','Held Aloft','The Peonies','Moss & Wire','Anhedonia','Cold Pastoral','J. Braxton'];
+    const covers = palette.map((bg, i) => ({ bg, title: titles[i], artist: artists[i % artists.length] }));
+    const wallCovers = covers.slice(0, 9).map((c, i) => {
+      const playing = i === 4, selected = i === 7;
+      return { ...c,
+        halo: playing ? glow : selected ? '0 0 0 2px rgba(232,228,219,0.55)' : 'none',
+        cap: playing || selected || capsAtRest,
+        dot: playing ? '●' : '', dotColor: accent };
+    });
+    const ink = bg => {
+      const n = parseInt(bg.slice(1), 16), lum = 0.2126*(n>>16) + 0.7152*((n>>8)&255) + 0.0722*(n&255);
+      return lum > 140 ? 'rgba(12,13,14,0.75)' : 'rgba(232,228,219,0.75)';
+    };
+    const spine = c => ({ ...c, ink: ink(c.bg) });
+    return {
+      accent, accentDim,
+      recedeCovers: covers.slice(0, 9).map(c => ({ ...c, op: 0.35 })),
+      lensCovers: covers.slice(2, 12).map((c, i) => ({ ...c, halo: i === 3 ? glow : 'none' })),
+      themeCovers: covers.slice(16, 24),
+      mixCovers: covers.slice(4, 10),
+      stackRows: [
+        { art: '#B33A2E', title: 'Copper Veins', sub: 'The Ossuary Choir · whole record', d: '43 min' },
+        { art: '#2E4A6B', title: 'Harbour Light', sub: 'Casco Bay · whole record', d: '41 min' },
+        { art: '#31543F', title: 'Pale Harbour', sub: 'Evergreen · Cold Pastoral', d: '4:24' },
+        { art: '#C9A227', title: 'Slow Orbit', sub: 'Meridian · R. Adler', d: '3:48' },
+        { art: '#6B4A7A', title: 'Chalk Lines', sub: 'Violet Hour · Sunder', d: '3:07' }
+      ],
+      mixA: [
+        { title: 'Halide', artist: 'The Ossuary Choir', d: '4:24' },
+        { title: 'North of Here', artist: 'Cold Pastoral', d: '5:02' },
+        { title: 'Signal Fire', artist: 'Anhedonia', d: '3:55' },
+        { title: 'Vestibule', artist: 'Casco Bay', d: '2:51' }
+      ],
+      mixB: [
+        { title: 'Tarnish', artist: 'Sunder', d: '3:55' },
+        { title: 'Sober Light', artist: 'R. Adler', d: '3:07' },
+        { title: 'The Long Field', artist: 'Moss & Wire', d: '5:36' }
+      ],
+      crateCovers: covers.slice(13, 18),
+      playedToday: covers.slice(0, 2).map((c, i) => ({ ...c, halo: i === 0 ? glow : 'none' })),
+      stamps: [
+        { date: '8 Aug 2026', note: 'this evening · complete' },
+        { date: '12 Mar 2026', note: 'side A only' },
+        { date: '3 Jan 2026', note: 'complete' },
+        { date: '28 Nov 2025', note: 'complete' },
+        { date: '9 Nov 2025', note: 'tracks 4–8' },
+        { date: '2 Jun 2019', note: 'first listen · day added' }
+      ],
+      railLetters: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(ch => ({
+        ch, ink: ch === 'M' ? '#E8E4DB' : 'rgba(232,228,219,0.35)', wt: ch === 'M' ? '600' : '400' })),
+      tinyCovers: Array.from({ length: 273 }, (_, i) => ({
+        bg: palette[(i * 7 + Math.floor(i / 13)) % palette.length],
+        halo: i === 150 ? `0 0 0 2px ${accent}, 0 0 14px oklch(0.74 0.13 ${hue} / 0.45)` : 'none' })),
+      driftCovers: covers.slice(8, 18).map((c, i) => ({ ...c,
+        halo: i === 2 ? glow : (i === 5 || i === 8) ? '0 0 0 2px rgba(232,228,219,0.40)' : 'none',
+        op: (i === 2 || i === 5 || i === 8) ? 1 : 0.35 })),
+      grooveTracks: (() => {
+        const durs = [3.2, 4.1, 2.8, 5.6, 3.9, 4.4, 3.1, 6.2, 2.5, 4.0];
+        const total = durs.reduce((a, b) => a + b, 0);
+        let elapsed = total * 0.38;
+        return durs.map(d => {
+          const f = Math.max(0, Math.min(1, elapsed / d));
+          elapsed -= d;
+          return { w: d, fill: `${Math.round(f * 100)}%` };
+        });
+      })(),
+      sideA: [['Copper Veins', '4:12'], ['Slow Orbit', '3:48'], ['Vestibule', '2:51'], ['The Long Field', '5:36'], ['Tarnish', '3:55']].map((t, i) => ({
+        n: String(i + 1), title: t[0], d: t[1], ink: i === 3 ? '#E8E4DB' : 'rgba(232,228,219,0.65)',
+        dot: i === 3 ? '●' : '', dotColor: accent })),
+      sideB: [['Halide', '4:24'], ['Sober Light', '3:07'], ['Ossuary', '6:14'], ['Reprise', '2:33'], ['Copper Veins (Slight Return)', '4:01']].map((t, i) => ({
+        n: String(i + 6), title: t[0], d: t[1], ink: 'rgba(232,228,219,0.65)' })),
+      sessionPick: covers.slice(0, 8).map((c, i) => ({ ...c,
+        halo: i === 0 ? glow : (i === 2 || i === 3) ? '0 0 0 2px rgba(232,228,219,0.55)' : 'none',
+        picked: i === 2 || i === 3, num: i === 2 ? '1' : '2' })),
+      sessionPlay: covers.slice(0, 8).map((c, i) => ({ ...c, halo: i === 2 ? glow : 'none' })),
+      paperCovers: covers.slice(2, 12).map((c, i) => ({ ...c, halo: i === 3 ? `0 0 0 2px oklch(0.50 0.14 35), 0 0 18px oklch(0.50 0.14 35 / 0.30)` : 'none' })),
+      importCovers: [...covers.slice(0, 12).map((c, i) => (i % 3 === 2 ? { bg: '#070809' } : c)), { bg: '#070809' }, { bg: '#070809' }, { bg: '#070809' }],
+      spinesA: covers.slice(0, 8).map(spine),
+      spinesB: covers.slice(12, 20).map(spine),
+      catCovers: covers.slice(4, 12).map((c, i) => ({ ...c, cat: `BAZ-0${117 + i * 3}` })),
+      miniCovers: covers.slice(12, 20).map((c, i) => ({ ...c, halo: i === 2 ? glow : 'none' })),
+      sheetCovers: covers.slice(0, 12),
+      wallCovers,
+      shelfA: covers.slice(9, 12),
+      shelfB: covers.slice(15, 21)
+    };
+  }
+}
+</script>
+</body>
+</html>

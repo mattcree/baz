@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; font-family:'IBM Plex Sans',sans-serif; color:#17161A; font-variant-numeric:tabular-nums; }
+  a { color:oklch(0.50 0.14 35); } a:hover { color:oklch(0.42 0.14 35); }
+  doc-page:not(:defined) { visibility:hidden; }
+  table { border-collapse:collapse; width:100%; font-size:12px; }
+  th { text-align:left; font-weight:600; padding:6px 10px 6px 0; border-bottom:1px solid rgba(23,22,26,0.35); }
+  td { padding:6px 10px 6px 0; border-bottom:1px solid rgba(23,22,26,0.12); vertical-align:top; }
+</style>
+<script src="./doc-page.js"></script>
+</helmet>
+<doc-page margin="0.85in">
+  <div style="font-size:10px; letter-spacing:0.14em; color:rgba(23,22,26,0.45); margin-bottom:24px;">BAZ DESIGN DOCUMENTS · 3 OF 3 · <a href="baz%201%20—%20foundations.dc.html" style="color:rgba(23,22,26,0.6);">FOUNDATIONS</a> · <a href="baz%202%20—%20surfaces.dc.html" style="color:rgba(23,22,26,0.6);">SURFACES</a> · BUILD GUIDE</div>
+  <h1 style="font-size:27px; font-weight:600; margin:0 0 6px;">baz — Build Guide</h1>
+  <p style="font-size:13px; color:rgba(23,22,26,0.55); margin:0 0 28px;">Scope, order, iced-specific notes, and the open questions. Rust + iced 0.13; constraints are real: no clipped images, no animation runtime, 4-sided borders only, no icon set, no accessibility tree, 100k-track virtualization, ~200ms cold start.</p>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">SCOPE</h2>
+  <table style="margin-bottom:8px;">
+    <tr><th>v1</th><th>Deferred</th></tr>
+    <tr>
+      <td>Rooms + elevation tokens (8a) · wall grid + shelves (1b) · type-to-filter (4a) · needle + segmented groove (5a, 9a) · inspector + sides + card (9b, 12b) · stack (6a, 13a) · group keys incl. PLAYED (10a, 12a) · index rail (11a) · shuffle-what-you-see (10b) · the pull (6b) · Marquee lens (2a, 3a) · first-run wall (4b) · history ledger + optional scrobbling</td>
+      <td>Crate lens (2b) · overview zoom stop (11b) · mixtapes (13b) · crates + CRATES key (13c) · art-derived accent hue (clamped experiment) · Lamplight/Gallery mixed rooms (7a — superseded by 8a)</td>
+    </tr>
+  </table>
+  <p style="font-size:12px; line-height:1.6; color:rgba(23,22,26,0.6); margin:0 0 24px;">Deferrals are designed, not discarded — each has a mock on the <a href="baz%20critique.dc.html">board</a> and slots into existing machinery (Crate = a lens word; overview = a zoom stop; crates = a group key; mixtapes = the stack's save path).</p>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">BUILD ORDER</h2>
+  <ol style="font-size:13.5px; line-height:1.65; margin:0 0 8px; padding-left:22px;">
+    <li><strong>History ledger first.</strong> Append-only file, written from the first beta build even with zero UI — history cannot be backfilled, and the PLAYED key, the card, and the pull all feed on it.</li>
+    <li>Room tokens + elevation primitives (the four surface levels, hairline-edge helper, state overlays).</li>
+    <li>Wall: virtualized grid, shelf headers, selection/playing states, halo.</li>
+    <li>Type-to-filter + Enter-plays-first; modifier-layer shortcuts.</li>
+    <li>Needle: segmented groove, wall label, transport keys, hover-reveal transport on the playing cover.</li>
+    <li>Inspector: track list, sides, inline tag edit, the card.</li>
+    <li>Stack: shift+click, numeral chips, popover, ephemerality.</li>
+    <li>Group keys + index rail (rail derives from the active key).</li>
+    <li>Shuffle-what-you-see + the pull.</li>
+    <li>Marquee lens + idle behavior.</li>
+    <li>First-run/import wall; folder watching.</li>
+    <li>Rooms 2–4 + follow-system switching (build on tokens from step 2 — cheap if step 2 was honest).</li>
+  </ol>
+  <p style="font-size:12px; line-height:1.6; color:rgba(23,22,26,0.6); margin:0 0 24px;">Steps 3–5 are the product: wall → click → sound. Everything after is additive; nothing before it ships without them.</p>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">ICED NOTES</h2>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0 0 24px; padding-left:20px;">
+    <li><strong>Hairline edges:</strong> 4-sided borders can't draw one edge — stack a 1px-tall container (or a custom quad) along the lit side instead.</li>
+    <li><strong>Halo:</strong> ring = 2px offset quad behind the art; bloom (Closing Time only) = layered translucent quads or a small custom widget. Test for banding at 6–10% ivory on cheap panels.</li>
+    <li><strong>Marquee scrim:</strong> one quad with per-vertex alpha; no gradient API needed.</li>
+    <li><strong>Zoom/density:</strong> 3–4 discrete stops, no tweening — a hard cut between grid metrics is shelf-like, not broken.</li>
+    <li><strong>Glyph inventory (total):</strong> play, pause, prev, next — four hand-rasterised polygons, shown only over the playing cover on hover. Everything else is type.</li>
+    <li><strong>Groove segments:</strong> plain rects from track durations; side break = wider gap. Click-to-jump = hit-test on segment index.</li>
+    <li><strong>Rotated text</strong> (Crate lens, deferred) means rasterising glyph runs — the reason it's deferred; prove it cheap before committing.</li>
+    <li><strong>Keyboard:</strong> global shortcuts don't need the focus tree. But no AT tree means screen-reader support is zero — see open questions.</li>
+    <li><strong>Cold start:</strong> resume = persist wall scroll offset + paused track/position on every change, restore before first paint; thumbnail cache keyed by file mtime so the wall paints from cache, art decodes lazily.</li>
+  </ul>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">OPEN QUESTIONS</h2>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0 0 24px; padding-left:20px;">
+    <li><strong>Accessibility.</strong> No AT tree and no keyboard focus is a product risk beyond visual design, and this audience lives on keyboards. The type-to-filter + modifier-layer scheme covers operation; screen-reader access has no current answer. Decide the stance before 1.0, not after.</li>
+    <li><strong>Hover-reveal transport with no animation</strong> — crisp or broken? Usability-test the hard cut (5a).</li>
+    <li><strong>Mid-value sleeve melt</strong> on Stone/Plaster — validate against real libraries; remedy is nudging room L (.33 / .76), never borders on art (8b).</li>
+    <li><strong>Art-derived accent hue</strong> — if revisited: hue clamped to the room's arc, amber/oxblood fallback below a chroma threshold; ship only if users notice unprompted (the board's hue tweak demos the failure).</li>
+    <li><strong>“No search box” onboarding</strong> — first-run hint for users who look for a field? One quiet line, once, or nothing.</li>
+  </ul>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:0 0 10px;">DEFINITION OF DONE</h2>
+  <p style="font-size:13.5px; line-height:1.65; margin:0;">v1 is done when the friction budget holds on a 20,000-album library on mid hardware: launch→resume &lt;200ms · click→sound &lt;100ms perceived · keystroke→filter next frame · import with zero dialogs · tag fix without pausing playback — and the wall at rest is 100% collection in all four rooms.</p>
+</doc-page>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; font-family:'IBM Plex Sans',sans-serif; color:#17161A; font-variant-numeric:tabular-nums; }
+  a { color:oklch(0.50 0.14 35); } a:hover { color:oklch(0.42 0.14 35); }
+  doc-page:not(:defined) { visibility:hidden; }
+  table { border-collapse:collapse; width:100%; font-size:12px; }
+  th { text-align:left; font-weight:600; padding:6px 10px 6px 0; border-bottom:1px solid rgba(23,22,26,0.35); }
+  td { padding:6px 10px 6px 0; border-bottom:1px solid rgba(23,22,26,0.12); vertical-align:top; }
+</style>
+<script src="./doc-page.js"></script>
+</helmet>
+<doc-page margin="0.85in">
+  <div style="font-size:10px; letter-spacing:0.14em; color:rgba(23,22,26,0.45); margin-bottom:24px;">BAZ DESIGN DOCUMENTS · 1 OF 3 · FOUNDATIONS · <a href="baz%202%20—%20surfaces.dc.html" style="color:rgba(23,22,26,0.6);">SURFACES</a> · <a href="baz%203%20—%20build%20guide.dc.html" style="color:rgba(23,22,26,0.6);">BUILD GUIDE</a></div>
+  <h1 style="font-size:27px; font-weight:600; margin:0 0 6px;">baz — Foundations</h1>
+  <p style="font-size:13px; color:rgba(23,22,26,0.55); margin:0 0 28px;">What governs every screen. Visual mocks live on the <a href="baz%20critique.dc.html">critique board</a>; references like (5a) point there.</p>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:28px 0 10px;">THESIS</h2>
+  <p style="font-size:13.5px; line-height:1.65; margin:0 0 10px;"><em>“A record archive after closing time — the works are lit, the room is not.”</em> Your collection IS the interface: baz opens onto a wall of your own covers; click one, it plays. For people who own their music — collectors, Bandcamp buyers, rippers — arriving from foobar2000 and MusicBee.</p>
+  <p style="font-size:13.5px; line-height:1.65; margin:0 0 10px;">The defensible position: prior art gives the collection 0–26% of the window at rest; baz gives it 73–100%. Nothing may trade this away. The failure mode to guard against is <strong>lobby</strong> — gorgeous at rest, useless in motion. The wall must be a working surface: filter, sort, and scale from 40 to 20,000 albums.</p>
+  <p style="font-size:13.5px; line-height:1.65; margin:0;">The shelf contains exactly two kinds of thing: <strong>artwork and type</strong> — plus one licensed exception: tiles for objects the user made (mixtapes, deferred) are set in type on a panel surface, never fake art.</p>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:28px 0 10px;">THE FOUR ROOMS <span style="font-weight:400; color:rgba(23,22,26,0.45);">(8a, 8b)</span></h2>
+  <p style="font-size:13.5px; line-height:1.65; margin:0 0 12px;">A theme is a room, not a skin. One axis — room lightness, warm-neutral throughout. Ink and the accent arc oppose the room. Default is <strong>follow system</strong>: OS dark → Closing Time, OS light → Reading Room; Stone and Plaster are deliberate picks. Never park a room at oklch L .45–.58 — the dead zone where neither ink reaches contrast and mid-value sleeves melt.</p>
+  <table>
+    <tr><th>Room</th><th>Wall</th><th>Panel +1</th><th>Float +2</th><th>Recess −1</th><th>Ink</th><th>Accent</th></tr>
+    <tr><td><strong>Closing Time</strong> · L .17</td><td>#0C0D0E</td><td>#181716</td><td>#242120</td><td>#070809</td><td>#E8E4DB</td><td>amber, glow allowed</td></tr>
+    <tr><td><strong>Stone</strong> · L .38</td><td>#4A463F</td><td>#55504A</td><td>#605B54</td><td>#3F3B35</td><td>#EDE9E0</td><td>amber, ring only</td></tr>
+    <tr><td><strong>Plaster</strong> · L .72</td><td>#B7B0A4</td><td>#AAA296</td><td>#9D9589</td><td>#C2BBAE</td><td>#211F1C</td><td>oxblood</td></tr>
+    <tr><td><strong>Reading Room</strong> · L .92</td><td>#E9E4D9</td><td>#DFD9CC</td><td>#D5CFC2</td><td>#F2EEE5</td><td>#17161A</td><td>oxblood</td></tr>
+  </table>
+  <p style="font-size:12px; line-height:1.6; color:rgba(23,22,26,0.6); margin:10px 0 0;">Accents: amber = oklch(0.74 0.13 75) · oxblood = oklch(0.50 0.14 35). Fixed per room — the art-derived hue stays a labelled experiment (see Build guide), clamped to the room's arc if ever shipped.</p>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:28px 0 10px;">ELEVATION <span style="font-weight:400; color:rgba(23,22,26,0.45);">(1a)</span></h2>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0; padding-left:20px;">
+    <li>Four levels, ever: recess −1, wall 0, panel +1, float +2. A need for +3 means redesign.</li>
+    <li>Each step ≥ 0.03 oklch L from its neighbor. WCAG ratios are meaningless at these lightnesses — do not use them here.</li>
+    <li>Surfaces rise toward the lamp: lighter-and-warmer in dark rooms, darker in light rooms; recesses go the other way.</li>
+    <li>Hairline edges do the separating (ink at 8–14%, on the lit side); surface deltas do the grouping. No shadows, anywhere.</li>
+    <li>Recess −1 holds wells only: the groove, input-like regions.</li>
+  </ul>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:28px 0 10px;">THE ACCENT LAW</h2>
+  <p style="font-size:13.5px; line-height:1.65; margin:0;">The accent states <strong>what is true about playback right now</strong> — the playing album's halo, the playing-track dot, the needle's fill — and nothing else. Never an opaque fill, never a button color, never decoration. Glow (soft bloom) exists only in Closing Time; elsewhere the halo is a 2px ring. State colors elsewhere: hover = ink at 6% overlay; selected = ink ring at 55%.</p>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:28px 0 10px;">TYPE</h2>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0; padding-left:20px;">
+    <li>IBM Plex Sans only; its digits are tabular by default, so columns rule themselves. No monospace, no second family.</li>
+    <li>Scale: 9–10px letter-spaced caps (0.14em) for shelf headers, group keys, and section labels — the only “chrome” voice; 11px for working UI text; 13px for names; poster sizes (40px+) belong to the Marquee lens and the filter query only.</li>
+    <li>Ink opacity is the hierarchy: 100% names, 65% working text, 40–45% metadata and labels, 35% disabled.</li>
+  </ul>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:28px 0 10px;">THE SKEUOMORPHISM RULE <span style="font-weight:400; color:rgba(23,22,26,0.45);">(9a, 9b)</span></h2>
+  <p style="font-size:13.5px; line-height:1.65; margin:0;">The record supplies <strong>physics, structure, and vocabulary</strong> — the stack, the sides, groove spacing, “drop the needle” — never surface. Banned outright: vinyl discs peeking from sleeves, wood grain, tonearms, VU meters, wear/patina, any circle pretending to be a record. The audience owns the real objects; imitation reads as costume, quotation reads as respect.</p>
+
+  <h2 style="font-size:12px; letter-spacing:0.14em; font-weight:600; margin:28px 0 10px;">THE REFUSALS LEDGER</h2>
+  <p style="font-size:12px; color:rgba(23,22,26,0.55); margin:0 0 8px;">Each of these was considered and rejected on principle. Re-opening one requires beating the argument, not forgetting it.</p>
+  <ul style="font-size:13.5px; line-height:1.65; margin:0; padding-left:20px;">
+    <li><strong>No autoplay, no radio.</strong> When the stack empties, baz goes silent. Silence is a feature.</li>
+    <li><strong>No invisible shuffle pools.</strong> Shuffle draws only from what the wall shows (10b).</li>
+    <li><strong>No auto-generated playlists</strong> — every crate and mixtape was made by a person.</li>
+    <li><strong>No engagement stats.</strong> History records what happened; it never performs it back (no Wrapped, streaks, charts).</li>
+    <li><strong>No user-picked accent color</strong> — the accent means playback truth; a picker dilutes it to decoration.</li>
+    <li><strong>No view-options menus.</strong> Four group-key words and the lens switcher are the entire surface.</li>
+    <li><strong>No captions at rest</strong> on the wall; captions state selection or playback only.</li>
+    <li><strong>No mid-gray rooms</strong> (L .45–.58), no borders on artwork, no radii, no shadows, no motion (the toolkit has none — design for hard cuts).</li>
+  </ul>
+</doc-page>
+</x-dc>
+</body>
+</html>
