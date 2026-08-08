@@ -537,6 +537,38 @@ pub fn matching_album_ids(library: &Library, query: &str) -> Option<HashSet<u64>
     Some(ids)
 }
 
+/// **The best match for `query`** — the album <kbd>Enter</kbd> plays
+/// (ADR-0017 §1.2, ADR-0021).
+///
+/// `None` when the query is blank or nothing matches. Blank is not "the first
+/// album on the wall": <kbd>Enter</kbd> with no query is the *selection's*
+/// press, and inventing a record to play out of an empty query is exactly the
+/// "nothing begins that the user did not begin" refusal.
+///
+/// # Why this asks the library a second question
+///
+/// [`matching_album_ids`] asks *which* albums match and deliberately throws
+/// the order away, because the wall is a place and not a ranking — a filtered
+/// shelf keeps its shelves, its headers and its alphabet. This asks *which
+/// matched best*, which is a different question with a different answer, and
+/// [`Library::search_albums`] is ADR-0021's answer to it: ranked by how well
+/// the query fits the field it landed in, then by which field that was, then
+/// by library order, with an album taking its best track's rank and appearing
+/// once.
+///
+/// It costs one more corpus scan per <kbd>Enter</kbd> — not per keystroke —
+/// which is a scan a listener has already decided to spend by pressing a key
+/// that starts music.
+#[must_use]
+pub fn top_match(library: &Library, query: &str) -> Option<u64> {
+    let query = query.trim();
+    if query.is_empty() {
+        return None;
+    }
+    let best = library.search_albums(query, 1).into_iter().next()?;
+    Some(album_id(best.artist, best.title))
+}
+
 /// The queue baz handed the engine: what was sent, in the order it was sent,
 /// with the catalogue facts needed to *show* it.
 ///
@@ -1677,6 +1709,52 @@ mod tests {
         assert_eq!(visible_indices(&albums, &library, "rodik"), vec![0]);
         // A composer finds it too, through their own track.
         assert_eq!(visible_indices(&albums, &library, "Katsuhiko"), vec![0]);
+    }
+
+    /// **What <kbd>Enter</kbd> plays** — the top-*ranked* match, not the
+    /// first one in library order (ADR-0017 §1.2 via ADR-0021).
+    ///
+    /// The corpus is the one ADR-0021 argues from, laid out so that library
+    /// order and rank disagree: `Kids Everywhere` by the Aardvark Collective
+    /// sorts first by album artist and would have been what the old
+    /// corpus-ordered `search` returned, and `Kid A` is the record a listener
+    /// typing `kid` means. The whole reason step 12 had to precede step 11 is
+    /// that this assertion could not have been made before it.
+    #[test]
+    fn enter_plays_the_ranked_first_match_and_not_the_first_in_library_order() {
+        let library = library_with(vec![
+            meta("Aardvark Collective", "Kids Everywhere", "Opening", 1),
+            meta("Radiohead", "Kid A", "Everything In Its Right Place", 1),
+            meta("Skid Row", "Slave to the Grind", "Monkey Business", 1),
+        ]);
+        // Library order — album artist first — puts the Aardvarks at the top
+        // of the wall, and the wall keeps that order under a filter.
+        let albums = build_albums(&library);
+        assert_eq!(
+            albums.first().and_then(|album| album.artist.name()),
+            Some("Aardvark Collective"),
+            "the fixture is only interesting while the wall disagrees with the rank"
+        );
+        assert_eq!(visible_indices(&albums, &library, "kid").len(), 3);
+
+        // …and Enter plays `Kid A`, because `kid` starts that field and ends
+        // on a word boundary where it ends inside `Kids` and inside `Skid`.
+        let played = top_match(&library, "kid").expect("a match");
+        assert_eq!(
+            played,
+            album_id(AlbumArtist::Named("Radiohead"), Some("Kid A"))
+        );
+
+        // An empty or blank query plays nothing: Enter with no query is the
+        // selection's press, and inventing a record would be the software
+        // beginning something nobody began.
+        assert_eq!(top_match(&library, ""), None);
+        assert_eq!(top_match(&library, "   "), None);
+        // A query nothing matches plays nothing either.
+        assert_eq!(top_match(&library, "zzzz"), None);
+        // Leading and trailing space is trimmed, exactly as the filter trims
+        // it, so the two halves of one keystroke cannot disagree.
+        assert_eq!(top_match(&library, " kid "), Some(played));
     }
 
     #[test]

@@ -31,38 +31,62 @@ The full vision, competitive analysis, and staged scope live in
 
 ## Keyboard
 
+**Start typing.** Any letter, anywhere, filters the wall — there is no field to
+click into first, and the search well fills in as you type so you can see what
+you asked for. That is why every letter shortcut in the table below wears a
+modifier: the letters belong to the query now.
+
 | Key | Does |
 |---|---|
+| any printable character | filter the wall by it, from wherever you are — the search well takes the caret with the first keystroke |
+| <kbd>Enter</kbd> | play the best match for what you typed; with no query, play the selected album |
+| <kbd>Esc</kbd> | leave the search field, then clear the query, then peel one layer: the queue, else the settings, else the inspector |
 | <kbd>Space</kbd> | play / pause |
 | <kbd>←</kbd> <kbd>→</kbd> | seek 5 s back / forward |
 | <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> | seek 30 s back / forward |
-| <kbd>N</kbd>, or <kbd>Ctrl</kbd>+<kbd>→</kbd> | next track |
+| <kbd>Ctrl</kbd>+<kbd>→</kbd> | next track |
 | <kbd>Ctrl</kbd>+<kbd>←</kbd> | previous track — or restart this one, if you are more than 3 s in |
 | <kbd>↑</kbd> <kbd>↓</kbd> | volume up / down, one step (~1 dB at the top of the fader) |
-| <kbd>M</kbd> | mute / unmute |
+| <kbd>Ctrl</kbd>+<kbd>M</kbd> | mute / unmute |
+| <kbd>Ctrl</kbd>+<kbd>-</kbd> <kbd>Ctrl</kbd>+<kbd>=</kbd>, or <kbd>Ctrl</kbd>+scroll | hang the wall closer or wider — **spacious**, **balanced**, **dense** |
 | <kbd>1</kbd> … <kbd>5</kbd> | arrange the wall by **artist**, **year**, **genre**, **added** or **played** — the same five words in the top bar |
-| <kbd>/</kbd>, or <kbd>Ctrl</kbd>+<kbd>F</kbd> | focus the search field |
-| <kbd>Q</kbd> | show / hide the **queue**, over the now-playing bar |
+| <kbd>/</kbd>, or <kbd>Ctrl</kbd>+<kbd>F</kbd> | put the caret in the search field without typing anything |
+| <kbd>Ctrl</kbd>+<kbd>U</kbd> | show / hide what is playing **up next**, over the now-playing bar |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | go to the settings, or come back |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> | hide the album inspector, or bring it back — the selection is kept |
-| <kbd>Esc</kbd> | peel one layer: the queue, else the settings, else the search, else the inspector |
 
 Media keys (play/pause, previous, next, stop) work too — on Linux they usually arrive
 over MPRIS rather than as key presses, which is the same thing by a different
 road. The *volume* media keys are deliberately left alone: on every desktop
 they mean the system's volume, and baz's fader is baz's own.
 
+**The number row is the one place a bare key is not the query.** `1`–`5` pick
+the arrangement and the rest of the row does nothing, because a row where `1`
+rearranges the wall and `6` types a `6` would be two rules wearing one shape.
+The cost, stated rather than discovered: you cannot start a search with a digit
+from the wall. Press <kbd>/</kbd> first and every digit types, including the
+first.
+
 **While the search field has focus, every key belongs to the field**: Space
-types a space, the arrows move the caret, `N` types an `N`. That is deliberate
+types a space, the arrows move the caret, `n` types an `n`. That is deliberate
 and it is not a heuristic — baz asks the toolkit whether a widget consumed the
-key and never second-guesses the answer. The search field takes focus at
-startup, so the first <kbd>Esc</kbd> hands the keyboard back to the transport.
+key and never second-guesses the answer. It is also why exactly one keystroke
+per search reaches the shortcut table: the first one, which hands the caret to
+the field, after which the field has them all. **Nothing has focus at startup**
+— it used to be the search field, which cost <kbd>Space</kbd> its meaning until
+you pressed <kbd>Esc</kbd> — because typing no longer needs a focused field.
+
+**The wall's density is a gesture, not a setting.** There is no appearance
+panel, no grid-size picker and no zoom slider: <kbd>Ctrl</kbd>+scroll on the
+wall, or the two zoom keys, and baz remembers where you left it. Three named
+steps rather than a free zoom, so that every screenshot of baz is one of three
+walls and a layout bug is reproducible.
 
 Every one of those keys goes on working while the queue is open. The popover
 is deliberately not modal — iced 0.13 offers no focus containment and no
 accessibility tree, so imitating a modal would be a claim the toolkit cannot
-back — and <kbd>Esc</kbd>, a second <kbd>Q</kbd>, or a press anywhere outside
-it all put it away.
+back — and <kbd>Esc</kbd>, a second <kbd>Ctrl</kbd>+<kbd>U</kbd>, or a press
+anywhere outside it all put it away.
 
 ## Accessibility — read this before you install
 

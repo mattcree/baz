@@ -319,7 +319,9 @@ was deliberately given the same width so the pair reads as a pair.
 - **The search field takes focus at startup**, so the keyboard belongs to a
   text box before the user has done anything: the first `Space` types a space
   instead of playing. The README documents this honestly, which does not make
-  it good.
+  it good. **Fixed by ADR-0017 step 11**: type-anywhere means typing no longer
+  needs a focused field, so nothing takes focus at launch and `Space` means
+  play on the first frame.
 - **`Esc` does not clear the search on the first press.** The README's key
   table says "Esc clears the search"; in practice the focused `text_input`
   consumes `Esc` to blur itself, `keys::binding_for` never sees it, and the

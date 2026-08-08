@@ -49,8 +49,9 @@
 //!
 //! Two uses were **cut** in the redesign's first pass, both of them a lamp
 //! that was on when nothing was playing: input focus (now [`Palette::paper_ring`], and
-//! the search field takes focus at launch, so the first frame baz ever drew
-//! was an amber ring with no music), and the scanning note (now [`Palette::paper_dim`]
+//! the search field used to take focus at launch, so the first frame baz ever
+//! drew was an amber ring with no music — type-anywhere has since removed the
+//! launch focus too), and the scanning note (now [`Palette::paper_dim`]
 //! — a scan is the library working, not the music). Blue, every streaming
 //! app's accent, remains deliberately absent.
 //!
@@ -905,7 +906,8 @@ pub const LABEL_H: f32 = CAPTION_H;
 // second grid.
 // ---------------------------------------------------------------------------
 
-/// Height of a shelf's group-header band — **exactly [`HANG`]**.
+/// Height of a shelf's group-header band at the **default** density —
+/// exactly [`HANG`].
 ///
 /// The band holds the header's line box at its **top** and clear wall for the
 /// rest, so the vertical rhythm of a break is stated in three numbers and all
@@ -921,14 +923,22 @@ pub const LABEL_H: f32 = CAPTION_H;
 /// Air above the ink is 40 and air below it is 28 — **10 : 7** — so a header
 /// sits nearer the shelf it names than the shelf it follows, which is the one
 /// thing a section heading has to say with position. Neither number was
-/// chosen: 40 is `HANG` and 28 is `HANG − HEADING_LINE_H`, and both are now on
-/// the 4 px lattice because the header's line box is (law L2).
+/// chosen: 40 is `HANG` and 28 is `HANG − HEADING_LINE_H`, and both are on the
+/// 4 px lattice because the header's line box is (law L2).
 ///
-/// It is also what makes the sticky header exact. The band is `HANG`, the
-/// trailing hang of the row above is `HANG`, so the scroll offset at which a
+/// It is also what makes the sticky header exact. The band is the hang, the
+/// trailing hang of the row above is the hang, so the scroll offset at which a
 /// shelf's last row of covers leaves the top of the viewport is precisely the
 /// offset at which the next shelf's band enters it — see
 /// [`crate::shelf::Shelves::sticky`].
+///
+/// **The wall reads it from the grid, not from here** —
+/// [`crate::shelf::Grid::header_h`] — because ADR-0017 step 6 makes the hang a
+/// function of the density step, and a band fixed at 40 while the rows around
+/// it zoomed would break the exactness in the paragraph above at two of the
+/// three steps. This constant is the default's value and the one the type
+/// scale was derived against; it is *asserted* equal to the grid's band at
+/// `Balanced` rather than read by the view.
 pub const SHELF_HEADER_H: f32 = HANG;
 
 /// The index rail's ink lane (logical px) — `.interface-design/system.md`
@@ -2157,9 +2167,10 @@ pub fn primary(p: &Palette, status: button::Status) -> button::Style {
 /// edge that brightens to a paper ring on focus.
 ///
 /// **Not lamp amber, on either the ring or the selection.** Both used to be —
-/// the ring at `LAMP` 55%, the selection at [`Palette::lamp_glow`] — and since the
-/// search field takes focus at launch, the first frame baz ever drew was an
-/// amber-ringed box with no music playing. A reserved signal that appears
+/// the ring at `LAMP` 55%, the selection at [`Palette::lamp_glow`] — and since
+/// the search field took focus at launch back then, the first frame baz ever
+/// drew was an amber-ringed box with no music playing. A reserved signal that
+/// appears
 /// before there is anything to signal is not reserved. Where the keyboard is,
 /// and what it has selected, are facts about the keyboard; the accent means
 /// playback truth (see the module's accent-discipline note).
@@ -3501,18 +3512,24 @@ mod tests {
     /// *point* of it being an overlay: it produces no width at all.
     #[test]
     fn the_shelf_virtualizes_at_every_width_the_inspector_can_produce() {
-        use crate::shelf::Grid;
+        use crate::shelf::{Density, Grid};
 
         const WINDOW_W: f32 = 1280.0;
-        assert_eq!(Grid::new(WINDOW_W).columns, 4, "the shipped shelf");
         assert_eq!(
-            Grid::new(WINDOW_W - PANEL_W).columns,
+            Grid::new(WINDOW_W, Density::Balanced).columns,
+            4,
+            "the shipped shelf"
+        );
+        assert_eq!(
+            Grid::new(WINDOW_W - PANEL_W, Density::Balanced).columns,
             3,
             "the inspector open: 940 px hangs three works of 254"
         );
 
         // The band: every window width baz can be dragged to, at 1 px, both
-        // inspector states, both a full library and a single search result.
+        // inspector states, both a full library and a single search result —
+        // and now every density step, since the step is what the grid's four
+        // numbers come from (ADR-0017 step 6).
         for window in 640..=2560 {
             #[expect(
                 clippy::cast_precision_loss,
@@ -3520,35 +3537,37 @@ mod tests {
             )]
             let window = window as f32;
             for inspector in [0.0, PANEL_W] {
-                // What the wall really measures now: the window, less the
-                // inspector, less the index rail's lane (ADR-0017 step 8).
-                let hang = Grid::new((window - inspector - INDEX_LANE_W).max(0.0));
-                assert!(
-                    hang.columns >= 1,
-                    "the grid collapsed at {window} px with {inspector} px of inspector"
-                );
-                assert!(
-                    hang.art > 0.0 && hang.art <= ART_MAX,
-                    "{window} px with {inspector} px of inspector: {} px of art",
-                    hang.art
-                );
-                assert!(
-                    hang.row_h > 0.0,
-                    "{window} px: a non-positive row pitch virtualizes nothing"
-                );
-                for albums in [1_usize, 97, 10_000] {
-                    let rows = hang.rows(albums);
-                    assert_eq!(rows, albums.div_ceil(hang.columns));
-                    let (first, end) = hang.visible_rows(0.0, 800.0, rows);
+                for density in Density::ALL {
+                    // What the wall really measures now: the window, less the
+                    // inspector, less the index rail's lane (ADR-0017 step 8).
+                    let hang = Grid::new((window - inspector - INDEX_LANE_W).max(0.0), density);
                     assert!(
-                        first < end && end <= rows,
-                        "empty or overrunning viewport at {window} px, {albums} albums"
+                        hang.columns >= 1,
+                        "the grid collapsed at {window} px with {inspector} px of inspector"
                     );
-                    // A fling to the far end of a 10 000-album wall still
-                    // lands on a clamped range — the pitch is a float now, so
-                    // this is arithmetic worth checking rather than obvious.
-                    let (first, end) = hang.visible_rows(hang.spacer_height(rows), 800.0, rows);
-                    assert!(first <= end && end <= rows);
+                    assert!(
+                        hang.art > 0.0 && hang.art <= density.art_max(),
+                        "{window} px with {inspector} px of inspector: {} px of art",
+                        hang.art
+                    );
+                    assert!(
+                        hang.row_h > 0.0,
+                        "{window} px: a non-positive row pitch virtualizes nothing"
+                    );
+                    for albums in [1_usize, 97, 10_000] {
+                        let rows = hang.rows(albums);
+                        assert_eq!(rows, albums.div_ceil(hang.columns));
+                        let (first, end) = hang.visible_rows(0.0, 800.0, rows);
+                        assert!(
+                            first < end && end <= rows,
+                            "empty or overrunning viewport at {window} px, {albums} albums"
+                        );
+                        // A fling to the far end of a 10 000-album wall still
+                        // lands on a clamped range — the pitch is a float now, so
+                        // this is arithmetic worth checking rather than obvious.
+                        let (first, end) = hang.visible_rows(hang.spacer_height(rows), 800.0, rows);
+                        assert!(first <= end && end <= rows);
+                    }
                 }
             }
         }

@@ -81,16 +81,16 @@ pub(crate) fn view<'a>(
     };
     for run in &runs[first_run..end_run] {
         grid = spacer(grid, run.top, &mut drawn);
-        grid = grid.push(header_band(shelf, *run, hang.block_width()));
-        drawn = run.rows_top();
+        grid = grid.push(header_band(shelf, hang, *run, hang.block_width()));
+        drawn = run.rows_top(hang);
         let (first_row, end_row) = hang.visible_rows(
-            shelf.scroll_offset - run.rows_top(),
+            shelf.scroll_offset - run.rows_top(hang),
             shelf.grid_size.height,
             run.rows,
         );
         grid = spacer(
             grid,
-            run.rows_top() + hang.spacer_height(first_row),
+            run.rows_top(hang) + hang.spacer_height(first_row),
             &mut drawn,
         );
         for r in first_row..end_row {
@@ -134,7 +134,7 @@ pub(crate) fn view<'a>(
         .and_then(|index| runs.get(index))
         .copied();
     row![
-        stack![wall, pinned_header(shelf, pinned, hang.block_width())],
+        stack![wall, pinned_header(shelf, hang, pinned, hang.block_width())],
         index_rail(shelf, &shelves)
     ]
     .into()
@@ -179,10 +179,16 @@ fn shelf_row<'a>(
 }
 
 /// A shelf's header where it lies, in the flow of the wall.
-fn header_band(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
+///
+/// The band is **one hang** and takes it from the grid rather than from
+/// `theme::SHELF_HEADER_H`, because the hang is the density's
+/// ([`crate::shelf::Grid::header_h`]): a band fixed at 40 while the rows
+/// around it zoomed would put the pinned header a few pixels out at two of the
+/// three steps, which is the one place in the wall a few pixels are visible.
+fn header_band(shelf: &Shelf, hang: Grid, run: Run, block: f32) -> Element<'_, Message> {
     container(header_line(shelf, run, block))
         .width(Length::Fixed(block))
-        .height(Length::Fixed(theme::SHELF_HEADER_H))
+        .height(Length::Fixed(hang.header_h()))
         .align_y(alignment::Vertical::Top)
         .into()
 }
@@ -216,12 +222,12 @@ fn header_band(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
 ///
 /// `run` is `None` when nothing is pinned, and the layer is still built: see
 /// the note at the call site for why it may not come and go.
-fn pinned_header(shelf: &Shelf, run: Option<Run>, block: f32) -> Element<'_, Message> {
+fn pinned_header(shelf: &Shelf, hang: Grid, run: Option<Run>, block: f32) -> Element<'_, Message> {
     let room = theme::active();
     let body: Element<'_, Message> = match run {
         Some(run) => container(header_line(shelf, run, block))
             .width(Length::Fixed(block))
-            .height(Length::Fixed(theme::SHELF_HEADER_H))
+            .height(Length::Fixed(hang.header_h()))
             .align_y(alignment::Vertical::Top)
             .into(),
         None => Space::new(Length::Fixed(block), Length::Fixed(0.0)).into(),
@@ -232,7 +238,7 @@ fn pinned_header(shelf: &Shelf, run: Option<Run>, block: f32) -> Element<'_, Mes
         // be a transparent sheet over every cover, and iced hands the topmost
         // layer of a `stack` the pointer first.
         .height(Length::Fixed(if run.is_some() {
-            theme::SHELF_HEADER_H
+            hang.header_h()
         } else {
             0.0
         }))
@@ -256,9 +262,10 @@ fn pinned_header(shelf: &Shelf, run: Option<Run>, block: f32) -> Element<'_, Mes
 /// fourth type size to say a fourth thing.
 ///
 /// The line box is [`theme::HEADING_LINE_H`] and it sits at the **top** of the
-/// band, so the air above the ink is the previous row's trailing `HANG` and
-/// the air below is `HANG − HEADING_LINE_H`. See
-/// [`theme::SHELF_HEADER_H`] for the ratio and why it is that way round.
+/// band, so the air above the ink is the previous row's trailing hang and the
+/// air below is `hang − HEADING_LINE_H` — the same ratio at every density
+/// step, since both numbers are the step's. See [`theme::SHELF_HEADER_H`] for
+/// why it is that way round.
 fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
     let room = theme::active();
     let label = shelf
@@ -629,13 +636,20 @@ fn tile<'a>(
         )
         .width(Length::Fixed(edge))
         // The work, its label and the label's rule — not the row. The row's
-        // remaining `HANG` is the gap to the row below, and a hit area that
+        // remaining hang is the gap to the row below, and a hit area that
         // swallowed it would make the whole wall one contiguous target with no
         // space between the works. `RULE_LANE_H` of that gap is spent on the
         // state rule, which is part of the label rather than part of the gap;
         // what is left between two works is still more than three quarters of a
-        // `HANG`.
-        .height(Length::Fixed(hang.row_h - theme::HANG + RULE_LANE_H))
+        // hang.
+        //
+        // **The grid's hang, not `theme::HANG`.** This read the token, and at
+        // `Dense` — where the hang is 28 — that made the box 12 px shorter than
+        // the label it holds, so every tile on the wall clipped its artist line
+        // while the title stayed. Caught on the pixels rather than in the
+        // arithmetic, because the arithmetic was in a different file from the
+        // number it was wrong about.
+        .height(Length::Fixed(hang.row_h - hang.hang + RULE_LANE_H))
         .padding(0)
         .style(move |_theme, status| theme::tile(room, status, selected))
         .on_press(Message::AlbumClicked(album.id)),
@@ -648,7 +662,7 @@ fn tile<'a>(
 /// What the state rule costs the tile vertically: the gap under the label plus
 /// the lane the rule is drawn in (logical px).
 ///
-/// Taken out of the row's trailing `HANG` rather than out of the work or the
+/// Taken out of the row's trailing hang rather than out of the work or the
 /// label, because it belongs to the label and the label's block is a reserved
 /// slot that may not shrink. At the `Balanced` step that leaves 34 px of clear
 /// wall between one row's rule and the next row's sleeve, which is still more
@@ -686,4 +700,49 @@ fn lamp_dot() -> Element<'static, Message> {
     ))
     .style(move |_theme| theme::lamp_dot(room))
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RULE_LANE_H;
+    use crate::shelf::{Density, Grid};
+    use crate::theme;
+
+    /// **A tile's box holds the tile, at every density and every width.**
+    ///
+    /// The one number this file computes rather than receives — the hit box's
+    /// height — has to be at least the work, the gap to the label, the label
+    /// block, and the rule's own lane. It was written as
+    /// `row_h − theme::HANG + RULE_LANE_H`, which is right at the default and
+    /// **12 px short at `Dense`**, where it clipped the artist line off every
+    /// tile on the wall while leaving the title. The defect was found on a
+    /// screenshot; this is what would have found it first.
+    #[test]
+    fn a_tiles_box_holds_its_work_and_its_whole_label() {
+        for density in Density::ALL {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a grid width in pixels is far below f32's exact-integer range"
+            )]
+            for width in (300..=2560).map(|width| width as f32) {
+                let grid = Grid::new(width, density);
+                let box_h = grid.row_h - grid.hang + RULE_LANE_H;
+                let content = grid.art
+                    + theme::GAP_LG
+                    + theme::CAPTION_H
+                    + theme::GAP_XS
+                    + theme::SELECTION_EDGE;
+                assert!(
+                    box_h >= content - 0.01,
+                    "{} at {width} px: a {box_h} px box around {content} px of tile — \
+                     the label clips",
+                    density.label()
+                );
+            }
+            // …and it is not *larger* than the row, or the hit areas of two
+            // rows would meet and the wall would be one contiguous target.
+            let grid = Grid::new(1172.0, density);
+            assert!(grid.row_h - grid.hang + RULE_LANE_H < grid.row_h);
+        }
+    }
 }

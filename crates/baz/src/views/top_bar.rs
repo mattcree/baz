@@ -43,9 +43,16 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
     // stands [`theme::TRANSPORT_HIT`] tall — the same 32 px as every control in
     // the product — which is what puts the bar's left and right clusters on one
     // vertical grid instead of merely on one centre line.
+    // **`on_submit` is what makes Enter mean one thing.** With the well
+    // focused iced 0.13's `text_input` consumes <kbd>Enter</kbd> and publishes
+    // this; with the well unfocused `crate::keys` binds the same message. Both
+    // roads are [`Message::PlayFirstMatch`], so a listener who typed from the
+    // wall and one who clicked into the well get the same record
+    // (ADR-0017 §1.2, ADR-0021).
     let search = text_input("Search artists, albums, tracks…", &shelf.query)
         .id(search_id())
         .on_input(Message::SearchChanged)
+        .on_submit(Message::PlayFirstMatch)
         .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
         .size(theme::SIZE_BODY)
         .line_height(theme::LEADING_BODY)

@@ -72,11 +72,16 @@ use baz_core::index::GroupKey;
 use baz_core::protocol::ReplayGainMode;
 use baz_core::replaygain::ReplayGainSettings;
 
+use crate::shelf::Density;
+
 /// The `[replaygain]` table's name in the document.
 const REPLAY_GAIN_TABLE: &str = "replaygain";
 
 /// The key the active group key is written under.
 const GROUP_KEY: &str = "group_key";
+
+/// The key the density step is written under.
+const DENSITY: &str = "density";
 
 /// Application configuration. See the [module docs](self) for scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,17 +106,33 @@ pub struct Config {
     /// so the file stays legible and a key added or reordered in `baz-core`
     /// cannot silently re-arrange somebody's wall.
     pub group_key: GroupKey,
+    /// How closely the wall hangs its works — Spacious / Balanced / Dense
+    /// (ADR-0017 step 6, `.interface-design/system.md` §7.1).
+    ///
+    /// **View state, persisted, and deliberately not a setting.** ADR-0017
+    /// §1.3 takes the critique's better half — *Settings must never be the
+    /// answer to a view question* — and supersedes `02` §2.7's Settings →
+    /// Appearance row: the control is <kbd>Ctrl</kbd>+<kbd>-</kbd> /
+    /// <kbd>Ctrl</kbd>+<kbd>=</kbd> and <kbd>Ctrl</kbd>+scroll, and this key
+    /// is where the gesture's *result* is remembered, exactly as `group_key`
+    /// remembers the press on a word in the top bar. There is no density row
+    /// anywhere in the Settings place, and `docs/REFUSALS.md` refuses the
+    /// grid-size picker that would be the other way to spell it.
+    ///
+    /// Written as [`Density::code`], for `group_key`'s reason.
+    pub density: Density,
 }
 
 impl Default for Config {
-    /// No music folder, `baz-core`'s own ReplayGain defaults, and the wall
-    /// arranged by artist — the state a fresh install is in, and the state an
-    /// unreadable config resolves to.
+    /// No music folder, `baz-core`'s own ReplayGain defaults, the wall
+    /// arranged by artist and hung at the default density — the state a fresh
+    /// install is in, and the state an unreadable config resolves to.
     fn default() -> Self {
         Self {
             music_dir: None,
             replay_gain: ReplayGainSettings::default(),
             group_key: GroupKey::Artist,
+            density: Density::Balanced,
         }
     }
 }
@@ -137,6 +158,12 @@ impl Config {
             "# how the wall is arranged: \"artist\", \"year\", \"genre\", \
              \"added\" or \"played\"\n{GROUP_KEY} = {}",
             toml_string(self.group_key.code()),
+        );
+        let _ = writeln!(
+            out,
+            "# how closely it hangs: \"spacious\", \"balanced\" or \"dense\" \
+             (Ctrl+- / Ctrl+= / Ctrl+scroll)\n{DENSITY} = {}",
+            toml_string(self.density.code()),
         );
         let _ = write!(
             out,
@@ -179,10 +206,20 @@ impl Config {
             .and_then(toml::Value::as_str)
             .and_then(GroupKey::from_code)
             .unwrap_or(GroupKey::Artist);
+        // The same per-key degradation, for the same reason: a step this build
+        // cannot name must cost the wall its zoom and nothing else. It
+        // degrades to Balanced rather than to the nearest step, because there
+        // is no nearest step to an unreadable word.
+        let density = table
+            .get(DENSITY)
+            .and_then(toml::Value::as_str)
+            .and_then(Density::from_code)
+            .unwrap_or(Density::Balanced);
         Self {
             music_dir,
             replay_gain,
             group_key,
+            density,
         }
     }
 }
@@ -327,6 +364,7 @@ mod tests {
                 music_dir: Some(PathBuf::from("/m")),
                 replay_gain,
                 group_key: GroupKey::Year,
+                density: Density::Dense,
             };
             let back = Config::from_toml(&config.to_toml());
             assert_eq!(back, config, "round-trip failed for {replay_gain:?}");
@@ -379,6 +417,61 @@ mod tests {
         }
     }
 
+    /// **The density step survives a restart**, in every step, written as the
+    /// word `shelf.rs` spells it — the zoom is a gesture, but where it landed
+    /// is remembered like any other view state (ADR-0017 §1.3).
+    #[test]
+    fn round_trips_every_density_step_as_its_own_word() {
+        for density in Density::ALL {
+            let config = Config {
+                music_dir: Some(PathBuf::from("/m")),
+                density,
+                ..Config::default()
+            };
+            let text = config.to_toml();
+            assert!(
+                text.contains(&format!("density = \"{}\"", density.code())),
+                "{density:?} was not written as its code:\n{text}"
+            );
+            assert_eq!(
+                Config::from_toml(&text),
+                config,
+                "{density:?} did not survive"
+            );
+        }
+    }
+
+    /// A density step baz cannot read degrades **alone**, to Balanced — the
+    /// same per-key rule everything else in the document gets, applied to the
+    /// one value that would otherwise re-hang a whole wall.
+    #[test]
+    fn an_unreadable_density_degrades_to_balanced_alone() {
+        for spelling in [
+            "\"compact\"",
+            "\"DENSE\"",
+            "3",
+            "true",
+            "\"\"",
+            "\"dense \"",
+        ] {
+            let text = format!(
+                "music_dir = \"/m\"\ngroup_key = \"year\"\ndensity = {spelling}\n\
+                 [replaygain]\nmode = \"album\"\n"
+            );
+            let config = Config::from_toml(&text);
+            assert_eq!(config.density, Density::Balanced, "{spelling}");
+            assert_eq!(config.group_key, GroupKey::Year, "{spelling}");
+            assert_eq!(config.music_dir, Some(PathBuf::from("/m")), "{spelling}");
+            assert_eq!(config.replay_gain.mode, ReplayGainMode::Album, "{spelling}");
+        }
+        // Absent entirely — every config written before this key existed, and
+        // every config written by a baz that has never been zoomed.
+        assert_eq!(
+            Config::from_toml("music_dir = \"/m\"\n").density,
+            Density::Balanced
+        );
+    }
+
     /// A group key baz cannot read degrades **alone**, to ARTIST — the same
     /// per-key rule the pre-amps get, applied to the one setting whose loss
     /// would rearrange a whole wall.
@@ -386,11 +479,12 @@ mod tests {
     fn an_unreadable_group_key_degrades_to_artist_alone() {
         for spelling in ["\"crates\"", "\"ARTIST\"", "7", "true", "\"\""] {
             let text = format!(
-                "music_dir = \"/m\"\ngroup_key = {spelling}\n\
+                "music_dir = \"/m\"\ngroup_key = {spelling}\ndensity = \"dense\"\n\
                  [replaygain]\nmode = \"album\"\n"
             );
             let config = Config::from_toml(&text);
             assert_eq!(config.group_key, GroupKey::Artist, "{spelling}");
+            assert_eq!(config.density, Density::Dense, "{spelling}");
             assert_eq!(config.music_dir, Some(PathBuf::from("/m")), "{spelling}");
             assert_eq!(config.replay_gain.mode, ReplayGainMode::Album, "{spelling}");
         }
@@ -537,6 +631,7 @@ mod tests {
             music_dir: Some(PathBuf::from(raw)),
             replay_gain: settings(ReplayGainMode::Album, -300, 0, false),
             group_key: GroupKey::Genre,
+            density: Density::Spacious,
         };
         let text = config.to_toml();
         assert!(!text.contains("music_dir"), "{text}");
@@ -553,6 +648,7 @@ mod tests {
             music_dir: Some(PathBuf::from("/home/user/Music")),
             replay_gain: settings(ReplayGainMode::Album, -350, 250, false),
             group_key: GroupKey::Played,
+            density: Density::Spacious,
         };
         store(&path, &config).expect("store creates parents and writes");
         assert_eq!(load(&path), config);
@@ -568,10 +664,12 @@ mod tests {
             music_dir: Some(PathBuf::from("/home/user/My \"Music\"")),
             replay_gain: settings(ReplayGainMode::Track, -1234, 567, false),
             group_key: GroupKey::Added,
+            density: Density::Dense,
         };
         let table: toml::Table = config.to_toml().parse().expect("baz writes valid TOML");
         assert!(table.contains_key("music_dir"));
         assert!(table.contains_key(REPLAY_GAIN_TABLE));
         assert!(table.contains_key(GROUP_KEY));
+        assert!(table.contains_key(DENSITY));
     }
 }

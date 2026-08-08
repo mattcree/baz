@@ -370,25 +370,62 @@ one took durable damage**. Under a direction that deliberately shows *fewer,
 larger* covers this matters more, not less: 300 albums and 40 000 albums do not
 want the same wall.
 
-**Three named steps, in Settings → Appearance. Not a free zoom** — a slider
-makes every screenshot of baz different and every layout bug unreproducible.
-Steps parameterise the hang rather than overriding it, so §7's properties
-(`gutter == HANG` when uncapped, `art ∈ [ART_MIN, ART_MAX]`) hold at every step.
+**Three named steps. Not a free zoom** — a slider makes every screenshot of baz
+different and every layout bug unreproducible. Steps parameterise the hang
+rather than overriding it, so §7's properties (`gutter == HANG` when uncapped,
+`art ∈ [ART_MIN, ART_MAX]`) hold at every step.
 
-| Step | at a 1280 window | at 1920 | Note |
+**A gesture, not a Settings row.** ADR-0017 §1.3 supersedes this section's
+original placement in *Settings → Appearance*, on the critique's better
+argument: *Settings must never be the answer to a **view** question.* The
+control is `Ctrl+-` / `Ctrl+=` and `Ctrl+scroll` on the wall; the current step
+persists in `config.toml` as **state**, the way the group key does, not as a
+preference somebody goes somewhere to set. There is no density row, no
+grid-size picker and no zoom readout (`docs/REFUSALS.md`).
+
+**Built** (ADR-0017 step 6). `crates/baz/src/shelf.rs`'s `Density` supplies the
+grid's four numbers and `Grid::new(width, density)` is the same arithmetic
+around them.
+
+| Step | `HANG` | `ART_MIN` | `ART_TARGET` | `ART_MAX` |
+|---|---|---|---|---|
+| Spacious | 48 | 288 | 320 | 320 |
+| **Balanced** | **40** | **240** | **272** | **320** |
+| Dense | 28 | 176 | 200 | 240 |
+
+The walls those produce, **measured at the width the window actually gives the
+grid** — the window less `INDEX_LANE_W` 108, so 1172 at the shipped 1280 and
+1812 at 1920. The row this table used to carry was computed before the index
+rail's lane existed and is corrected here rather than reproduced;
+`the_density_steps_reproduce_the_specifications_table` is the assertion.
+
+| Step | at a 1280 window (1172 of grid) | at 1920 (1812) | Note |
 |---|---|---|---|
-| **Spacious** | 3 × 320 | 5 × 320 | art pinned at `ART_MAX`; the margins take the slack |
-| **Balanced** | 4 × 262 | 6 × 268 | the default |
-| **Dense** | 5 × 216 | 8 × 205 | roughly what baz ships today |
+| **Spacious** | 3 × 320, gutter 58 | 5 × 304.8, gutter 48 | art pinned at `ART_MAX` over most of the band; the margins take the slack |
+| **Balanced** | 4 × 243 | 6 × 255.3 | the default, and `theme.rs`'s tokens exactly |
+| **Dense** | 5 × 200.8 | 8 × 195 | **today's shelf**: baz drew 5 × 208 here before the hang landed |
 
-Named plainly rather than in the room's vocabulary, deliberately: a setting is
-where the software talks about *itself*, and it is the one place baz uses plain
-UI language. Drawn in `docs/design/visual/gallery/06-density.png`.
+Named plainly rather than in the room's vocabulary, deliberately: the steps are
+the one place baz uses plain UI language about itself.
+
+**The hang's own numbers are the step's, in both axes.** The shelf-break band
+(§7's `SHELF_HEADER_H`) and the wall's top edge are the step's hang, not a
+fixed 40 — otherwise the pinned header's hand-over, which is exact only because
+the band and a row's trailing gap are the same number, would be a few pixels
+out at two of the three steps. What does **not** zoom is the window gutter: the
+top bar, the bottom bar, the Settings place and the index rail's right-hand
+lane all keep `HANG` 40 at every step, because law L1 gives every window-edge
+surface one gutter and the zoom is of the works rather than of the room.
 
 `ART_MAX` never exceeds `THUMB_PX` at any step, so the *nothing upscales*
 invariant is a property of the system, not of the default. At `Dense` the cache
 holds 320² thumbnails for ~200 px tiles; a density-aware decode size is the
 obvious optimisation and is deliberately not taken here.
+
+`ART_MAX = 4/3 × ART_MIN` is a property of **Balanced** and not of the ladder:
+Spacious runs a deliberately narrow 288 … 320 because its art is meant to sit
+at the cap, and Dense's 176 … 240 is 4/3 to within a third of a pixel and is
+written as whole numbers instead.
 
 ### 7.2 The spine index
 
@@ -414,8 +451,13 @@ subsamples, the pattern every phone contact list uses.
 It is **type, not chrome**, so §1.2's claim survives intact: the shelf still
 contains exactly two kinds of thing.
 
-Type-to-jump is `/`-scoped, never type-anywhere — the audit (§4.8) already
-resolved that bare letters belong to the transport.
+~~Type-to-jump is `/`-scoped, never type-anywhere — the audit (§4.8) already
+resolved that bare letters belong to the transport.~~ **Superseded by ADR-0017
+§1.2 and built as step 11**: any bare printable character filters the wall from
+wherever focus is, and the letters the transport held (`n`, `m`, `q`) are on a
+modifier layer. The rail is unaffected — it jumps, it does not filter — and the
+field stays, because `text_input` is the only focusable widget in baz and the
+only thing an accessibility tree could attach to (§4 of the ADR).
 
 ---
 
@@ -633,6 +675,8 @@ gradients; shadows on anything that is not the playing halo.
 | a focus ring on buttons | `PAPER_RING` on `text_input` only; tooltips name icon-only controls |
 | transitions | 0 ms everywhere |
 | pointer capture | end the gesture on `CursorLeft`/`Unfocused` and commit (`groove.rs`) |
+| a chord that reaches the app through a focused field | `text_input` inserts whatever character a press *produced* and checks the command modifier for its own four clipboard chords only, so `Ctrl+-` typed a `-` into the query. A command-modified keystroke is discarded rather than becoming query text (`app.rs`'s `update_modified_input`); the chord itself is still the field's, because the focus rule may not bend. `Esc` leaves the field; `Ctrl+scroll` works either way |
+| unfocusing a widget | there is no `unfocus` task — focus an id nothing carries, which is defined to unfocus everything it walks (`app.rs`'s `nothing_id`) |
 | text ellipsis | `Wrapping::None` clips; every clipping slot has a fixed width |
 | shadow spread | tuned via blur (`LAMP_GLOW` only) |
 | an accessibility tree | contrast floors and hit targets are the guarantees baz *can* make, so honour them exactly |

@@ -34,6 +34,61 @@
 //! startup, so this is the first thing a keyboard user meets; it is
 //! documented in the README's key table.)
 //!
+//! # Type anywhere — and the focus rule is untouched
+//!
+//! ADR-0017 §1.2, build-plan step 11: **a bare printable character filters the
+//! wall from wherever you are**, with no field to click first. The audit had
+//! rejected this — *"type-ahead search cannot coexist with bare-letter
+//! transport bindings; the transport wins"* — and that resolution is
+//! superseded, because the frequency argument runs the other way: on a 40 000
+//! album wall filtering is the primary act of navigation and muting is not,
+//! and `n` / `m` / `q` were baz's own inventions rather than muscle memory
+//! inherited from anything we surveyed. The budget the critique set is the
+//! right one: *keystroke → filtered wall = next frame*, and a door you must
+//! open first is a click before sound.
+//!
+//! **How a bare letter reaches the query without the focus rule bending.**
+//! It does not need to bend, and this is the whole mechanism:
+//!
+//! 1. Nothing is focused, so iced reports the press `Ignored` —
+//!    [`Focus::Elsewhere`] — and it is the application's to interpret.
+//! 2. [`binding_for`] answers [`Message::QueryTyped`] carrying the character
+//!    the key produced. It is the *last* `Character` arm in the table, so
+//!    every binding above it wins; a key that means something is never text.
+//! 3. `app.rs` appends the character to the query, re-filters, and focuses the
+//!    well — one message, both halves, so the first keystroke both filters and
+//!    lands somewhere visible.
+//! 4. **Every keystroke after it is the field's**, by the ordinary rule: the
+//!    well now has focus, iced reports `Captured`, and this function answers
+//!    `None` for all of them. baz never types into a field it is also
+//!    shortcutting.
+//!
+//! So exactly one press per query goes through this module, and the *field*
+//! remains what holds the caret, the selection, the paste and the focus ring.
+//! ADR-0017 refused the critique's removal of the well for that reason and for
+//! §4's: `text_input` is the only focusable widget in baz and the only thing
+//! an accessibility tree would have to attach to.
+//!
+//! **The query is drawn in the well**, at `SIZE_BODY`, and not as the
+//! critique's ~48 px display type bottom-left: `02` §3.2 reserves poster sizes
+//! for the *work*, and the critique put the query and the 11 px wall label in
+//! the same bottom-left corner, where they would collide every time somebody
+//! filtered while music was playing.
+//!
+//! # The modifier layer
+//!
+//! Bare letters being query is not free: **every bare-letter shortcut had to
+//! move**, and three did. `q` → <kbd>Ctrl</kbd>+<kbd>U</kbd>, `m` →
+//! <kbd>Ctrl</kbd>+<kbd>M</kbd>, and `n` gives up its letter to the second
+//! spelling it already had, <kbd>Ctrl</kbd>+<kbd>→</kbd>. ADR-0017 §1.2 names
+//! `M` as a defect in the critique's own scheme — it claimed all letters were
+//! query and then bound bare `M` to mute four lines later — and resolves it
+//! the consistent way, which is the way taken here: **no letter binds bare, at
+//! all.** The mute glyph in the bar remains the pointer route, as the
+//! visible-control rule requires.
+//!
+//! The number row is the one exception and it is argued below.
+//!
 //! # Why these steps
 //!
 //! [`SEEK_STEP_MS`] is 5 s because that is what an arrow key means to people
@@ -53,9 +108,10 @@
 //! exact mirror of the <kbd>Ctrl</kbd>+<kbd>→</kbd> that was already Next. The
 //! symmetry is the argument: the arrow cluster's two horizontal keys seek, and
 //! the same two under the transport modifier step tracks, so a hand that knows
-//! one knows the other. It is also the only spelling this command gets a bare
-//! key for — `p` is not the reflex `n` is, and it is one slip away from a
-//! *play* the transport already binds to Space.
+//! one knows the other. It never had a bare letter — `p` is not the reflex `n`
+//! was, and it is one slip away from a *play* the transport already binds to
+//! Space — and under type-anywhere no letter has one, so Previous and Next are
+//! now spelled the same way as each other.
 //!
 //! `MediaTrackPrevious` joins the media-key family below for the reason the
 //! rest of them are there: on the machines that deliver it to the window
@@ -85,11 +141,57 @@
 //! module carries the full derivation and the two properties that follow
 //! from the number dividing 1000 exactly.
 //!
-//! `M` mutes and unmutes. It is the letter every player uses for it, it
-//! needs no modifier, and — like the transport keys — it resolves against
-//! the *confirmed* state rather than a flag we keep, so the command that
-//! goes out is the idempotent `SetMute { muted }` the protocol asks for
-//! rather than a toggle two front ends could disagree about.
+//! <kbd>Ctrl</kbd>+<kbd>M</kbd> mutes and unmutes. `M` is the letter every
+//! player uses for it and it used to be bare; type-anywhere took the letter
+//! and the modifier is where it went (ADR-0017 §1.2's keyboard table). Like
+//! the transport keys it resolves against the *confirmed* state rather than a
+//! flag we keep, so the command that goes out is the idempotent
+//! `SetMute { muted }` the protocol asks for rather than a toggle two front
+//! ends could disagree about.
+//!
+//! # Enter — what plays
+//!
+//! <kbd>Enter</kbd> plays **the top-ranked match** when a query is narrowing
+//! the wall, and the selected album when one is not. That sentence is only
+//! defensible because ADR-0021 shipped: `Library::search` used to return
+//! corpus order — which is library order — so "the first match" meant
+//! whichever matching record happened to be alphabetically earliest by album
+//! artist. `Library::search_albums` now ranks by how well the query fits, then
+//! by which field it landed in, then by library order, and keeps an album's
+//! tracks together, so the first result is the best one and pressing Enter on
+//! it is a defensible thing for a listener to do.
+//!
+//! It is also the one binding that arrives by two roads and must mean the same
+//! thing on both. With the well focused iced's `text_input` consumes
+//! <kbd>Enter</kbd> and publishes its `on_submit`; with the well unfocused
+//! this module binds it. Both are [`Message::PlayFirstMatch`], so which road a
+//! press took is invisible.
+//!
+//! # Density — a zoom, on the modifier layer
+//!
+//! <kbd>Ctrl</kbd>+<kbd>-</kbd> and <kbd>Ctrl</kbd>+<kbd>=</kbd> step the
+//! wall's density (ADR-0017 step 6, [`crate::shelf::Density`]), and
+//! <kbd>Ctrl</kbd>+scroll is the same gesture with a pointer
+//! ([`wheel_binding`]). The two keys are the zoom pair every browser, editor
+//! and image viewer has trained: the physical keys are adjacent, they are
+//! *not* letters, and neither is anything baz could have spent on the query.
+//!
+//! Shift is tolerated on both, because `+` is Shift+`=` on most layouts and a
+//! listener pressing <kbd>Ctrl</kbd>+<kbd>+</kbd> means the same thing as one
+//! pressing <kbd>Ctrl</kbd>+<kbd>=</kbd>. `_` joins `-` for the same reason.
+//! There is no <kbd>Ctrl</kbd>+<kbd>0</kbd> reset: there are three steps and
+//! the default is one press from either end.
+//!
+//! **One toolkit limit, stated where it bites.** While the search well has
+//! focus, iced's `text_input` swallows a chord whose key produces a printable
+//! character — `Ctrl+-`, `Ctrl+=`, `Ctrl+,` — because it inserts what the
+//! press *produced* and only checks the command modifier for its own four
+//! clipboard chords. The focus rule says a captured press is the field's and
+//! that rule does not bend, so those chords do nothing there rather than
+//! reaching this table. What they must not do is type themselves into the
+//! query, and `app.rs`'s `update_modified_input` is where that is stopped —
+//! with its measurement. <kbd>Esc</kbd> leaves the field, and
+//! <kbd>Ctrl</kbd>+scroll never had the problem.
 //!
 //! # Layers
 //!
@@ -97,25 +199,26 @@
 //! one layer — which is the change the information-architecture move bought
 //! (ADR-0016, `docs/design/01-ux-audit-and-ia.md` §4.8).
 //!
-//! `Q` shows and hides **Queue**. Same key, same meaning, better place: it
-//! used to raise a queue *panel* in the right-hand rail, costing the shelf two
-//! columns of covers for a glance; it now raises the popover anchored to the
-//! bar that describes it, which costs the shelf nothing. It resolves to
-//! [`Message::ToggleQueue`] — the same message the bar's labelled `Queue`
-//! control sends — so there is no keyboard-only capability here, exactly as
-//! with the transport.
+//! <kbd>Ctrl</kbd>+<kbd>U</kbd> shows and hides **Queue** — *up next*, which
+//! is what the bar's control is labelled. It was bare `Q` and ADR-0017 §1.2's
+//! table moves it, for the reason every letter moved: bare letters are the
+//! query now. The old argument for `Q` being bare — a view key you press dozens
+//! of times a session should not be taxed — is real and is simply outbid, and
+//! the tax it now pays is one modifier on a key that still resolves to
+//! [`Message::ToggleQueue`], the same message the bar's labelled control
+//! sends.
 //!
-//! `Q` is bare because it is a *view* key like `/`: it interrupts nothing, it
-//! is reversible by pressing it again, and a modifier on a key you will press
-//! dozens of times a session is a tax with no safety to buy. It is also free —
-//! foobar2000 and `MusicBee` both put queue-adjacent commands on it, and nothing
-//! in baz wanted `q`.
+//! `U` rather than `Q` because the two are not interchangeable under Ctrl:
+//! <kbd>Ctrl</kbd>+<kbd>Q</kbd> is *quit* on every desktop baz runs on, and a
+//! key that closes the application on a listener expecting a popover is the
+//! worst possible mis-key. `U` is `Up next`, it is unclaimed, and it is what
+//! the ADR's table names.
 //!
 //! <kbd>Ctrl</kbd>+<kbd>B</kbd> (<kbd>Cmd</kbd>+<kbd>B</kbd>) hides the album
 //! inspector and brings it back. It is the sidebar reflex from every editor
-//! written this decade, and it earns its modifier for the opposite reason to
-//! `Q`'s: it is the *layout* key, the one that changes how much room the shelf
-//! gets, and those are conventionally modified. What comes back is what was
+//! written this decade, and it was already modified when the letters around it
+//! were not: it is the *layout* key, the one that changes how much room the
+//! shelf gets, and those are conventionally modified. What comes back is what was
 //! dismissed (see [`crate::selection`]), so the pair is a true toggle rather
 //! than a destructive close — and it is an *honest* sidebar toggle now that
 //! there is exactly one sidebar. It no longer conjures a queue panel out of an
@@ -128,22 +231,26 @@
 //! the macOS convention it borrows has always meant — and it is the same
 //! message the top bar's `Settings` control and the place's own Back both send.
 //!
-//! It takes a modifier where `Q` does not, and the reasoning is `Q`'s
-//! in reverse: a preferences key is pressed a handful of times in a
-//! *lifetime*, not dozens of times a session, so the tax the modifier charges
-//! is never actually paid — and <kbd>Cmd</kbd>+<kbd>,</kbd> is a macOS system
-//! convention that every cross-platform application has adopted, which makes
-//! it the one binding here a listener is more likely to already know than to
-//! learn. A bare `,` would also be the first bare punctuation key baz binds,
-//! and punctuation is what people type when a field is not focused by
-//! accident.
+//! <kbd>Cmd</kbd>+<kbd>,</kbd> is a macOS system convention that every
+//! cross-platform application has adopted, which makes it the one binding here
+//! a listener is more likely to already know than to learn. A bare `,` is not
+//! available in any case: it is a printable character, and printable
+//! characters are the query.
 //!
 //! <kbd>Esc</kbd> peels **one layer, top down**: the popover first, then a
-//! place that is not home, then — in the search well — the query, then the
-//! inspector. It never has to choose between unrelated things, because at each
-//! press exactly one layer is the top one. The layering itself lives in
-//! `app.rs`, where the layers do; this module only says that the key means
-//! "peel".
+//! place that is not home, then the query, then the inspector. It never has to
+//! choose between unrelated things, because at each press exactly one layer is
+//! the top one. The layering itself lives in `app.rs`, where the layers do;
+//! this module only says that the key means "peel".
+//!
+//! Under type-anywhere the query layer is the one that matters, and the order
+//! is why <kbd>Esc</kbd> *clears* before it blurs: a listener who has typed
+//! three letters into a wall wants the wall back, not the caret moved. iced's
+//! `text_input` consumes <kbd>Esc</kbd> to blur itself first, so what a
+//! listener actually presses is **Esc, Esc** — blur, then clear — and the
+//! second press reaches [`Message::EscapePressed`] through this module. That
+//! is a toolkit limit rather than a design choice and it is recorded as one in
+//! `app.rs`'s `escape`.
 //!
 //! # The arrangement — `1` … `5`
 //!
@@ -154,23 +261,26 @@
 //! mapping is [`group_key`], which reads that array rather than repeating it,
 //! so the digits, the words and the library's own order cannot drift apart.
 //!
-//! **Digits, deliberately.** ADR-0017 §1.2's keyboard table already spends
-//! `1` and `2` on the Wall / Marquee lenses and states the trade out loud —
-//! *digits are not letters, and no album title begins with one often enough to
-//! matter* — which is the same argument, made for the same reason, one step
-//! earlier: when type-anywhere lands (step 11) every bare *letter* becomes
-//! query and the number row is the one place a bare binding can survive.
-//! Whichever of the two ends up owning the digits, this is where the row is
-//! spent, and the resolution is a decision for step 18 rather than a thing to
-//! guess at now.
+//! **Digits, deliberately — and they are the one place bare characters are not
+//! query.** ADR-0017 §1.2 states the trade out loud: *digits are not letters,
+//! and no album title begins with one often enough to matter*. Type-anywhere
+//! (step 11) took every letter and every punctuation mark for the query; the
+//! number row is what survived, and this is where it is spent. The ADR's table
+//! pencils `1` and `2` in for the Wall / Marquee lenses, which are step 18 and
+//! not built; the five group keys are built, they are five and not two, and a
+//! row of words in the top bar already names them.
 //!
-//! They are bare for `Q`'s reason: selecting an arrangement is a *view* act —
-//! it interrupts nothing, plays nothing, and is undone by pressing another
-//! one — and a modifier on a key pressed dozens of times a session is a tax
-//! with no safety to buy. Each resolves to
-//! [`Message::GroupKeySelected`], which is the same message the word in the
-//! top bar sends, so the visible-control rule holds: there is no arrangement
-//! reachable only from the keyboard.
+//! **The whole row is out of the query, not just the five keys that bind.**
+//! `0` and `6`–`9` do nothing rather than typing themselves, because a row in
+//! which `1` arranges the wall and `6` types a `6` is two rules wearing one
+//! shape. The cost is stated rather than discovered: from a cold wall you
+//! cannot type `1999`. You press `/` first — which is what `/` is for — and
+//! from that moment the well has focus and every digit types, including the
+//! first one.
+//!
+//! Each resolves to [`Message::GroupKeySelected`], the same message the word
+//! in the top bar sends, so the visible-control rule holds: there is no
+//! arrangement reachable only from the keyboard.
 //!
 //! **The `XF86AudioRaiseVolume` family is deliberately not bound.** The
 //! transport media keys are bound (below) because `MediaPlayPause` means one
@@ -225,16 +335,21 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
     let bare = modifiers.is_empty();
     let shift = modifiers == Modifiers::SHIFT;
     let command = modifiers == Modifiers::COMMAND;
+    // The zoom pair alone tolerates Shift, because `+` *is* Shift+`=` on most
+    // layouts and `_` is Shift+`-` (module docs). No other binding does.
+    let zoom = command || modifiers == Modifiers::COMMAND | Modifiers::SHIFT;
 
     match key.as_ref() {
         // Transport. Space is the universal play/pause and takes no
         // modifiers at all — Ctrl+Space and friends belong to whatever binds
-        // them later.
+        // them later. It is a printable character and is deliberately *not*
+        // query: a space cannot start a search, and the one key every player
+        // on earth pauses with does not become a text key because the letters
+        // around it did.
         Key::Named(key::Named::Space) | Key::Character(" ") if bare => Some(Message::PlayPause),
-        Key::Character("n" | "N") if bare || shift => Some(Message::NextTrack),
-        // Ctrl+Right (Cmd+Right on macOS) is the second spelling of Next, for
-        // hands that never leave the arrow cluster — and Ctrl+Left is its
-        // mirror, Previous (module docs).
+        // Ctrl+Right (Cmd+Right on macOS) is Next — the only spelling it has
+        // now that bare `n` is query — and Ctrl+Left is its mirror, Previous
+        // (module docs).
         Key::Named(key::Named::ArrowRight) if command => Some(Message::NextTrack),
         Key::Named(key::Named::ArrowLeft) if command => Some(Message::PreviousTrack),
 
@@ -244,18 +359,24 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Named(key::Named::ArrowLeft) if bare => Some(Message::SeekBy(-SEEK_STEP_MS)),
         Key::Named(key::Named::ArrowLeft) if shift => Some(Message::SeekBy(-SEEK_STEP_LARGE_MS)),
 
-        // Volume. The vertical arrows are the axis a fader moves on, and
-        // `M` is mute everywhere. Neither takes a modifier (module docs).
+        // Volume. The vertical arrows are the axis a fader moves on — they are
+        // not printable and keep their bare bindings — and mute moved to the
+        // modifier layer with every other letter (module docs).
         Key::Named(key::Named::ArrowUp) if bare => Some(Message::VolumeStep(1)),
         Key::Named(key::Named::ArrowDown) if bare => Some(Message::VolumeStep(-1)),
-        Key::Character("m" | "M") if bare || shift => Some(Message::ToggleMute),
+        Key::Character("m" | "M") if command => Some(Message::ToggleMute),
 
-        // Layers. `Q` shows what is playing next; Ctrl+B (Cmd+B) takes the
-        // right-hand column away and gives it back; Ctrl+`,` (Cmd+`,`) is the
-        // settings (module docs).
-        Key::Character("q" | "Q") if bare || shift => Some(Message::ToggleQueue),
+        // Layers. Ctrl+U shows what is playing **up next**; Ctrl+B (Cmd+B)
+        // takes the right-hand column away and gives it back; Ctrl+`,`
+        // (Cmd+`,`) is the settings (module docs).
+        Key::Character("u" | "U") if command => Some(Message::ToggleQueue),
         Key::Character("b" | "B") if command => Some(Message::TogglePanels),
         Key::Character(",") if command => Some(Message::ToggleSettings),
+
+        // The zoom. Ctrl+`-` tightens the hang, Ctrl+`=` loosens it, and the
+        // shifted spellings of both keys mean the same thing (module docs).
+        Key::Character("-" | "_") if zoom => Some(Message::DensityStep(-1)),
+        Key::Character("=" | "+") if zoom => Some(Message::DensityStep(1)),
 
         // Arrangement. `1`–`5` are the five group keys, in the order the top
         // bar's row of words states them (module docs).
@@ -265,12 +386,26 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
 
         // Search. `/` is the reflex from every pager and browser; Ctrl+F
         // (Cmd+F) is the reflex from every document. Shift is tolerated on
-        // `/` because plenty of layouts need it to type the character.
+        // `/` because plenty of layouts need it to type the character. Both
+        // survive type-anywhere as the *explicit* door: a listener who wants
+        // the caret before they want a filter, and the only way to start a
+        // query with a digit.
         Key::Character("/") if bare || shift => Some(Message::FocusSearch),
         Key::Character("f" | "F") if command => Some(Message::FocusSearch),
 
+        // Play the top-ranked match, else the selected album (module docs).
+        Key::Named(key::Named::Enter) if bare => Some(Message::PlayFirstMatch),
+
         // Peel one layer, top down (module docs; `app.rs` holds the order).
         Key::Named(key::Named::Escape) if bare => Some(Message::EscapePressed),
+
+        // **Type anywhere.** The last `Character` arm in the table, so every
+        // binding above wins and a key that means something is never text
+        // (module docs). Shift rides along because a capital letter is a
+        // letter.
+        Key::Character(text) if (bare || shift) && is_query_text(text) => {
+            Some(Message::QueryTyped(text.to_owned()))
+        }
 
         // Media keys, for the machines that deliver them to the focused
         // window rather than to a desktop shortcut daemon. On Linux the
@@ -300,6 +435,73 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
 fn group_key(digit: &str) -> Option<baz_core::index::GroupKey> {
     let index = digit.parse::<usize>().ok()?.checked_sub(1)?;
     baz_core::index::GroupKey::ALL.get(index).copied()
+}
+
+/// **Whether the text a key produced is query text** — the whole of what
+/// "any bare printable character" means (module docs).
+///
+/// Three exclusions and each one is a binding that outranks the query:
+///
+/// - **whitespace and controls**, because a query cannot begin with a space
+///   and `Space` is play/pause;
+/// - **the ASCII digits**, because the number row selects the arrangement and
+///   the row is spent as a row rather than key by key;
+/// - **`/`**, which is the explicit door to the well and the one way to start
+///   a query with a digit.
+///
+/// Everything else is text, including punctuation an album title actually
+/// contains — `!!!`, `Sgt. Pepper`, `AC/DC`'s slash notwithstanding — and
+/// every letter of every script, because this asks what the *key produced*
+/// rather than which key it was.
+///
+/// A multi-character string (a dead key resolving, an input method
+/// committing) is text when every one of its characters is, which is the same
+/// rule applied the same way rather than a special case.
+fn is_query_text(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .chars()
+            .all(|c| !c.is_control() && !c.is_whitespace() && !c.is_ascii_digit() && c != '/')
+}
+
+/// **Whether an edit the search field published is really query text.**
+///
+/// The other side of [`is_query_text`], for the path where the *field* saw the
+/// key rather than this module. iced 0.13's `text_input` inserts whatever
+/// character a press produced and consults the command modifier for its own
+/// four clipboard chords only, so `Ctrl+-` typed a hyphen into the query
+/// (measured; see `app.rs`'s `update_modified_input`). One rule, both paths:
+/// **a keystroke made with the command modifier is never query text.**
+///
+/// Only the command modifier. Shift is a capital letter, and `Alt` is
+/// deliberately absent: winit reports `AltGr` as its own level shift rather
+/// than as `Alt`, so a press that composes `€` or `é` on a European layout
+/// arrives here unmodified and must go on working — discarding `Alt` would
+/// have bought nothing and cost those keyboards their letters.
+pub(crate) fn field_edit_is_query(modifiers: Modifiers) -> bool {
+    !modifiers.command()
+}
+
+/// **<kbd>Ctrl</kbd>+scroll is the zoom's pointer half** — the same gesture as
+/// <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd>, and the reason
+/// density can be a gesture at all without breaking §4's visible-control rule:
+/// the wall itself is the control, and it is as pointer-reachable as a slider
+/// would be without being a view-options menu (`docs/REFUSALS.md`).
+///
+/// Pure, like [`binding_for`], and for the same reason: it is one decision
+/// about one event, and the state it would otherwise need — which modifiers
+/// are down — is passed in. iced 0.13's `WheelScrolled` carries no modifiers
+/// of its own, so `app.rs` tracks them from `ModifiersChanged` and hands them
+/// here.
+///
+/// A scroll **up** loosens the hang, which is the direction every zoom in
+/// every application agrees on. Anything without the command modifier, and any
+/// notch with no vertical travel, is the wall scrolling and is not this.
+pub(crate) fn wheel_binding(delta_y: f32, modifiers: Modifiers) -> Option<Message> {
+    if !modifiers.command() || delta_y == 0.0 || !delta_y.is_finite() {
+        return None;
+    }
+    Some(Message::DensityStep(if delta_y > 0.0 { 1 } else { -1 }))
 }
 
 #[cfg(test)]
@@ -362,15 +564,23 @@ mod tests {
             (named(key::Named::ArrowLeft), Modifiers::COMMAND),
             (named(key::Named::ArrowUp), none()),
             (named(key::Named::ArrowDown), none()),
-            (ch("n"), none()),
-            (ch("m"), none()),
-            (ch("q"), none()),
+            (ch("m"), Modifiers::COMMAND),
+            (ch("u"), Modifiers::COMMAND),
             (ch("b"), Modifiers::COMMAND),
             (ch(","), Modifiers::COMMAND),
+            (ch("-"), Modifiers::COMMAND),
+            (ch("="), Modifiers::COMMAND),
             (ch("/"), none()),
             (ch("f"), Modifiers::COMMAND),
             (ch("1"), none()),
             (ch("5"), none()),
+            // The type-anywhere arm itself: a bare letter is query when
+            // nothing is focused and is *typed* when the well is, which is the
+            // one place the focus rule is doing the most work.
+            (ch("k"), none()),
+            (ch("K"), Modifiers::SHIFT),
+            (ch("&"), none()),
+            (named(key::Named::Enter), none()),
             (named(key::Named::Escape), none()),
             (named(key::Named::MediaPlayPause), none()),
             (named(key::Named::MediaTrackNext), none()),
@@ -428,14 +638,24 @@ mod tests {
         );
     }
 
+    /// **Mute moved to the modifier layer**, in either case — and bare `m` is
+    /// now a letter of the query, which is the whole of ADR-0017 §1.2's
+    /// resolution of the critique's own `M`-while-all-letters-are-query
+    /// defect.
     #[test]
-    fn m_mutes_in_either_case() {
-        assert_eq!(bind(&ch("m"), none()).as_deref(), Some("ToggleMute"));
-        // Shift+M is still M, whatever the layout calls it — the same
-        // tolerance `N` and `/` already get.
+    fn ctrl_m_mutes_and_bare_m_is_query() {
+        assert_eq!(
+            bind(&ch("m"), Modifiers::COMMAND).as_deref(),
+            Some("ToggleMute")
+        );
+        assert_eq!(
+            bind(&ch("M"), Modifiers::COMMAND).as_deref(),
+            Some("ToggleMute")
+        );
+        assert_eq!(bind(&ch("m"), none()).as_deref(), Some("QueryTyped(\"m\")"));
         assert_eq!(
             bind(&ch("M"), Modifiers::SHIFT).as_deref(),
-            Some("ToggleMute")
+            Some("QueryTyped(\"M\")")
         );
     }
 
@@ -453,18 +673,24 @@ mod tests {
         }
     }
 
+    /// **Next has one spelling now.** `n` was the bare letter and the arrow
+    /// cluster was its second spelling; type-anywhere took the letter and
+    /// ADR-0017 §1.2's table leaves the arrow, which is also the mirror of
+    /// Previous.
     #[test]
-    fn next_track_has_two_spellings() {
-        assert_eq!(bind(&ch("n"), none()).as_deref(), Some("NextTrack"));
-        // Shift+N is still N, whatever the layout calls it.
-        assert_eq!(
-            bind(&ch("N"), Modifiers::SHIFT).as_deref(),
-            Some("NextTrack")
-        );
+    fn next_track_is_the_modified_arrow_and_n_is_query() {
         assert_eq!(
             bind(&named(key::Named::ArrowRight), Modifiers::COMMAND).as_deref(),
             Some("NextTrack")
         );
+        assert_eq!(bind(&ch("n"), none()).as_deref(), Some("QueryTyped(\"n\")"));
+        assert_eq!(
+            bind(&ch("N"), Modifiers::SHIFT).as_deref(),
+            Some("QueryTyped(\"N\")")
+        );
+        // And Ctrl+N is not a second spelling either: it is unbound, so a hand
+        // reaching for the old key finds nothing rather than something else.
+        assert_eq!(bind(&ch("n"), Modifiers::COMMAND), None);
     }
 
     /// Ctrl+Right is Next and Ctrl+Left is Previous, not 5-second seeks: the
@@ -525,19 +751,29 @@ mod tests {
         );
     }
 
-    /// `Q` shows and hides **Queue**, in either case, with no modifier — a
-    /// view key, like `/`. The key did not move; what it raises did.
+    /// **Ctrl+U shows and hides Up next**, in either case — and bare `q` is
+    /// query, along with Ctrl+Q, which is *quit* everywhere else and must not
+    /// be a popover here.
     #[test]
-    fn q_toggles_the_queue_panel_popover() {
-        assert_eq!(bind(&ch("q"), none()).as_deref(), Some("ToggleQueue"));
+    fn ctrl_u_toggles_the_up_next_popover() {
         assert_eq!(
-            bind(&ch("Q"), Modifiers::SHIFT).as_deref(),
+            bind(&ch("u"), Modifiers::COMMAND).as_deref(),
             Some("ToggleQueue")
+        );
+        assert_eq!(
+            bind(&ch("U"), Modifiers::COMMAND).as_deref(),
+            Some("ToggleQueue")
+        );
+        assert_eq!(bind(&ch("q"), none()).as_deref(), Some("QueryTyped(\"q\")"));
+        assert_eq!(
+            bind(&ch("q"), Modifiers::COMMAND),
+            None,
+            "Ctrl+Q closes applications; it must not open a popover"
         );
     }
 
-    /// Ctrl+B (Cmd+B) is the layout key: it hides the inspector and brings it back.
-    /// Bare `b` types a `b`.
+    /// Ctrl+B (Cmd+B) is the layout key: it hides the inspector and brings it
+    /// back. Bare `b` is a letter of the query.
     #[test]
     fn ctrl_b_hides_and_restores_the_inspector() {
         assert_eq!(
@@ -548,20 +784,23 @@ mod tests {
             bind(&ch("B"), Modifiers::COMMAND).as_deref(),
             Some("TogglePanels")
         );
-        assert_eq!(bind(&ch("b"), none()), None);
+        assert_eq!(bind(&ch("b"), none()).as_deref(), Some("QueryTyped(\"b\")"));
     }
 
     /// Ctrl+`,` (Cmd+`,`) is the preferences reflex from every platform, and it
     /// is navigation between places now rather than a panel toggle.
-    /// A bare comma types a comma — the modifier is the whole binding.
+    /// A bare comma is query — the modifier is the whole binding.
     #[test]
     fn ctrl_comma_navigates_to_the_settings() {
         assert_eq!(
             bind(&ch(","), Modifiers::COMMAND).as_deref(),
             Some("ToggleSettings")
         );
-        assert_eq!(bind(&ch(","), none()), None);
-        assert_eq!(bind(&ch(","), Modifiers::SHIFT), None);
+        assert_eq!(bind(&ch(","), none()).as_deref(), Some("QueryTyped(\",\")"));
+        assert_eq!(
+            bind(&ch(","), Modifiers::SHIFT).as_deref(),
+            Some("QueryTyped(\",\")")
+        );
     }
 
     #[test]
@@ -579,8 +818,8 @@ mod tests {
             bind(&ch("F"), Modifiers::COMMAND).as_deref(),
             Some("FocusSearch")
         );
-        // Bare `f` types an `f`; it is not a shortcut.
-        assert_eq!(bind(&ch("f"), none()), None);
+        // Bare `f` is a letter of the query; it is not a shortcut.
+        assert_eq!(bind(&ch("f"), none()).as_deref(), Some("QueryTyped(\"f\")"));
     }
 
     /// **`1`–`5` are the five group keys, in `baz-core`'s own order**, and the
@@ -625,6 +864,194 @@ mod tests {
         );
     }
 
+    /// **Enter plays the top-ranked match**, and it is the same message the
+    /// well's own `on_submit` sends, so the two roads a press can take are one
+    /// intention (module docs, ADR-0021).
+    #[test]
+    fn enter_plays_the_first_match() {
+        assert_eq!(
+            bind(&named(key::Named::Enter), none()).as_deref(),
+            Some("PlayFirstMatch")
+        );
+        // Bare only: a modified Enter is somebody else's binding, not a
+        // quieter way to start the music.
+        for modifiers in [Modifiers::COMMAND, Modifiers::SHIFT, Modifiers::ALT] {
+            assert_eq!(
+                bind(&named(key::Named::Enter), modifiers),
+                None,
+                "{modifiers:?}"
+            );
+        }
+    }
+
+    /// **Type anywhere**: a bare printable character is the query, in every
+    /// script, with punctuation, and with Shift for its capitals — and a
+    /// *modified* one never is.
+    #[test]
+    fn a_bare_printable_character_is_the_query_and_a_modified_one_is_not() {
+        for text in ["k", "z", "é", "曲", "ß", "&", "!", "'", "-", ".", "?", ","] {
+            assert_eq!(
+                bind(&ch(text), none()).as_deref(),
+                Some(format!("QueryTyped({text:?})").as_str()),
+                "bare {text:?} should reach the query"
+            );
+            // Shift is a capital, not a modifier that suppresses.
+            assert_eq!(
+                bind(&ch(text), Modifiers::SHIFT).as_deref(),
+                Some(format!("QueryTyped({text:?})").as_str()),
+                "Shift+{text:?} should reach the query"
+            );
+        }
+        // A capital arrives as its own text, and it arrives verbatim: the
+        // query is what the key produced, not what we guessed it meant.
+        assert_eq!(
+            bind(&ch("K"), Modifiers::SHIFT).as_deref(),
+            Some("QueryTyped(\"K\")")
+        );
+        // A multi-character commit (a dead key resolving, an input method)
+        // is text by the same rule.
+        assert_eq!(bind(&ch("ǽ"), none()).as_deref(), Some("QueryTyped(\"ǽ\")"));
+
+        // **A modified character is never query.** Ctrl and Alt belong to the
+        // modifier layer, whether or not the key they are on binds anything.
+        for text in ["k", "z", "j", "&", "é"] {
+            for modifiers in [
+                Modifiers::COMMAND,
+                Modifiers::ALT,
+                Modifiers::LOGO,
+                Modifiers::COMMAND | Modifiers::SHIFT,
+            ] {
+                assert!(
+                    !format!("{:?}", bind(&ch(text), modifiers)).contains("QueryTyped"),
+                    "{text:?} + {modifiers:?} reached the query"
+                );
+            }
+        }
+        // And a focused well takes the letter itself — the focus rule, on the
+        // arm that most needs it.
+        assert!(binding_for(&ch("k"), none(), Focus::TextField).is_none());
+    }
+
+    /// The three characters a bare press does **not** send to the query, each
+    /// because something above it in the table has the key (module docs on
+    /// [`is_query_text`]).
+    #[test]
+    fn space_the_digits_and_the_slash_are_not_query() {
+        assert_eq!(bind(&ch(" "), none()).as_deref(), Some("PlayPause"));
+        assert_eq!(bind(&ch("/"), none()).as_deref(), Some("FocusSearch"));
+        // The number row is spent as a row: the five that bind arrange the
+        // wall and the five that do not are silent, so `1` and `6` are one
+        // rule rather than two.
+        for digit in ["1", "2", "3", "4", "5"] {
+            assert!(
+                bind(&ch(digit), none())
+                    .as_deref()
+                    .is_some_and(|tag| tag.starts_with("GroupKeySelected")),
+                "{digit} should arrange the wall"
+            );
+        }
+        for digit in ["0", "6", "7", "8", "9"] {
+            assert_eq!(bind(&ch(digit), none()), None, "{digit} must not be query");
+        }
+        // The predicate itself, stated once rather than inferred from the
+        // table above it.
+        assert!(is_query_text("k") && is_query_text("&") && is_query_text("曲"));
+        assert!(!is_query_text("") && !is_query_text(" ") && !is_query_text("\t"));
+        assert!(!is_query_text("7") && !is_query_text("/") && !is_query_text("a/b"));
+    }
+
+    /// **The zoom, both keys and both shifted spellings** — and it is the only
+    /// pair in the table that tolerates Shift alongside the command modifier.
+    #[test]
+    fn ctrl_minus_and_ctrl_equals_step_the_density() {
+        for (text, tag) in [("-", "DensityStep(-1)"), ("=", "DensityStep(1)")] {
+            assert_eq!(bind(&ch(text), Modifiers::COMMAND).as_deref(), Some(tag));
+            assert_eq!(
+                bind(&ch(text), Modifiers::COMMAND | Modifiers::SHIFT).as_deref(),
+                Some(tag)
+            );
+        }
+        // `_` and `+` are the same physical keys, shifted.
+        assert_eq!(
+            bind(&ch("_"), Modifiers::COMMAND | Modifiers::SHIFT).as_deref(),
+            Some("DensityStep(-1)")
+        );
+        assert_eq!(
+            bind(&ch("+"), Modifiers::COMMAND | Modifiers::SHIFT).as_deref(),
+            Some("DensityStep(1)")
+        );
+        // Bare, they are query — `-` is in album titles and `=` is in a few.
+        assert_eq!(bind(&ch("-"), none()).as_deref(), Some("QueryTyped(\"-\")"));
+        assert_eq!(bind(&ch("="), none()).as_deref(), Some("QueryTyped(\"=\")"));
+        // Alt is not the zoom.
+        assert_eq!(bind(&ch("-"), Modifiers::ALT), None);
+    }
+
+    /// **One rule about modifiers, on both paths into the query.** A key this
+    /// module sees and a key the *field* sees must agree about what is text,
+    /// or `Ctrl+-` types a hyphen into the query — which it did, on a real
+    /// frame, before [`field_edit_is_query`] existed.
+    #[test]
+    fn a_command_modified_keystroke_is_never_query_on_either_path() {
+        for modifiers in [
+            Modifiers::COMMAND,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Modifiers::COMMAND | Modifiers::ALT,
+        ] {
+            assert!(!field_edit_is_query(modifiers), "{modifiers:?}");
+            // …and the binding path says the same thing about the same press.
+            assert!(
+                !format!("{:?}", bind(&ch("-"), modifiers)).contains("QueryTyped"),
+                "{modifiers:?}"
+            );
+        }
+        // Everything else is text. Shift is a capital; Alt is AltGr's
+        // neighbour and a European layout's letters must survive it.
+        for modifiers in [Modifiers::empty(), Modifiers::SHIFT, Modifiers::ALT] {
+            assert!(field_edit_is_query(modifiers), "{modifiers:?}");
+        }
+    }
+
+    /// **Ctrl+scroll is the same gesture as Ctrl+`=`**, with the same sign
+    /// convention, and a plain scroll is the wall scrolling rather than a
+    /// zoom.
+    #[test]
+    fn ctrl_scroll_steps_the_density_and_a_plain_scroll_does_not() {
+        let tag = |delta: f32, modifiers| {
+            wheel_binding(delta, modifiers)
+                .as_ref()
+                .map(|message| format!("{message:?}"))
+        };
+        assert_eq!(
+            tag(1.0, Modifiers::COMMAND).as_deref(),
+            Some("DensityStep(1)"),
+            "scrolling up loosens the hang, as every zoom does"
+        );
+        assert_eq!(
+            tag(-1.0, Modifiers::COMMAND).as_deref(),
+            Some("DensityStep(-1)")
+        );
+        // The magnitude is not spent: one notch is one step, so a trackpad's
+        // 40-pixel flick does not fall through the whole ladder.
+        assert_eq!(
+            tag(120.0, Modifiers::COMMAND).as_deref(),
+            Some("DensityStep(1)")
+        );
+        assert_eq!(
+            tag(0.2, Modifiers::COMMAND | Modifiers::SHIFT).as_deref(),
+            Some("DensityStep(1)")
+        );
+        // Without the modifier it is the wall scrolling, which is not this
+        // module's business at all.
+        for modifiers in [Modifiers::empty(), Modifiers::SHIFT, Modifiers::ALT] {
+            assert_eq!(tag(3.0, modifiers), None, "{modifiers:?}");
+        }
+        // A notch with no travel, and the values a broken backend can hand us.
+        assert_eq!(tag(0.0, Modifiers::COMMAND), None);
+        assert_eq!(tag(f32::NAN, Modifiers::COMMAND), None);
+        assert_eq!(tag(f32::INFINITY, Modifiers::COMMAND), None);
+    }
+
     #[test]
     fn media_keys_reach_the_transport() {
         assert_eq!(
@@ -654,7 +1081,9 @@ mod tests {
     }
 
     /// A binding must not fire because an unrelated modifier happened to be
-    /// down. Each case here is a key that *does* bind bare.
+    /// down. Each case here is a key that *does* bind under some other
+    /// modifier state — including the letters, whose bare press is now the
+    /// query.
     #[test]
     fn unrelated_modifiers_suppress_a_binding() {
         let suppressed = [
@@ -671,16 +1100,17 @@ mod tests {
             (named(key::Named::ArrowUp), Modifiers::SHIFT),
             (named(key::Named::ArrowUp), Modifiers::COMMAND),
             (named(key::Named::ArrowDown), Modifiers::ALT),
-            (ch("n"), Modifiers::COMMAND),
-            (ch("n"), Modifiers::ALT),
-            (ch("m"), Modifiers::COMMAND),
             (ch("m"), Modifiers::ALT),
-            (ch("q"), Modifiers::COMMAND),
-            (ch("q"), Modifiers::ALT),
+            (ch("m"), Modifiers::COMMAND | Modifiers::SHIFT),
+            (ch("u"), Modifiers::ALT),
+            (ch("u"), Modifiers::COMMAND | Modifiers::SHIFT),
             (ch("b"), Modifiers::ALT),
             (ch("b"), Modifiers::COMMAND | Modifiers::SHIFT),
             (ch("/"), Modifiers::COMMAND),
             (ch("f"), Modifiers::ALT),
+            (ch("1"), Modifiers::COMMAND),
+            (ch("1"), Modifiers::ALT),
+            (named(key::Named::Enter), Modifiers::COMMAND),
             (named(key::Named::Escape), Modifiers::COMMAND),
             (named(key::Named::Escape), Modifiers::SHIFT),
         ];
@@ -696,7 +1126,6 @@ mod tests {
     #[test]
     fn unknown_keys_map_to_nothing() {
         let unbound = [
-            named(key::Named::Enter),
             named(key::Named::Tab),
             named(key::Named::Backspace),
             named(key::Named::Delete),
@@ -704,14 +1133,10 @@ mod tests {
             named(key::Named::End),
             named(key::Named::PageUp),
             named(key::Named::F1),
-            ch("a"),
-            ch("z"),
-            // `1`–`5` are the five group keys; `6` is not, because there is no
-            // sixth key to select (see `group_key`).
+            // `1`–`5` are the five group keys; the rest of the row is silent,
+            // because the row is spent as a row (module docs).
             ch("6"),
             ch("0"),
-            ch("."),
-            ch("?"),
         ];
         for key in &unbound {
             assert_eq!(bind(key, none()), None, "{key:?} must be unbound");
