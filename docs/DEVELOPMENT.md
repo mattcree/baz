@@ -113,11 +113,34 @@ and an earlier run polluted the maintainer's real database by relying on
 backup-and-restore, which races the app's own writes:
 
 ```sh
-toolbox run -c baz-dev env -u WAYLAND_DISPLAY WINIT_UNIX_BACKEND=x11 \
+toolbox run -c baz-dev env -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS \
+  WINIT_UNIX_BACKEND=x11 HOME=/tmp/scratch/home \
   XDG_DATA_HOME=/tmp/scratch/data XDG_CONFIG_HOME=/tmp/scratch/config \
-  XDG_CACHE_HOME=/tmp/scratch/cache \
+  XDG_CACHE_HOME=/tmp/scratch/cache XDG_RUNTIME_DIR=/tmp/scratch/run \
   xvfb-run -s '-screen 0 1400x1000x24' cargo run --release -p baz -- /tmp/fixture-music
 ```
+
+**Redirect all six, not just the three obvious ones.** Each omission has cost
+us something real:
+
+- `XDG_DATA_HOME` — the library database. An early run relied on
+  backup-and-restore instead and **polluted the maintainer's real library**,
+  because a restore races the app's own writes.
+- `XDG_CONFIG_HOME` — the remembered music folder and settings.
+- `XDG_CACHE_HOME` — thumbnails.
+- `HOME` — everything that resolves through it when the above are unset, and
+  the `.asoundrc` you may want (see below).
+- `XDG_RUNTIME_DIR` **and** `DBUS_SESSION_BUS_ADDRESS` — zbus falls back to
+  `$XDG_RUNTIME_DIR/bus`, so a run that leaves these alone **joins the
+  maintainer's session bus and publishes an MPRIS name onto his desktop**. That
+  happened. A correctly isolated run logs `[mpris] no session bus`; treat that
+  line as the receipt that the isolation held.
+
+**Silence, when you build with `device-output`.** The transport only exists in
+that build, so rendering the bottom bar needs it — but nothing should be
+audible. Put an `.asoundrc` in the scratch `HOME` routing ALSA's default PCM to
+`null`, and use silent fixtures. Two independent guarantees: the sink discards
+every sample, and every sample is a zero. `BAZ_DEVICE_TESTS` stays unset.
 
 ### Verifying MPRIS without touching the owner's desktop
 
