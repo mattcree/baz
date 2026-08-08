@@ -242,6 +242,11 @@ last, and which it does depends on arithmetic the user cannot see.
 album, then filter it out of the shelf: the panel keeps showing it. Selection
 and the visible set are unsynchronised.
 
+**(i2) Hiding it is the only way to see the library again without losing your
+place.** [`08-rail-hidden.png`](audit/08-rail-hidden.png) is `Ctrl+B`: five
+columns are back and the selection is remembered. That the escape hatch exists
+is good; that it is needed dozens of times a session is the finding.
+
 **(j) The ✕ owns a row of its own.** `TRANSPORT_HIT` = 32 px plus `GAP_MD` = 12
 of column spacing at the top of every panel — 44 px of vertical budget in the
 app's most contested column, spent on a control that `Esc` already provides
@@ -725,6 +730,11 @@ popover's height; the search field between 360 and 480 px.
 | **1200–1599** | 3–5 columns | `clamp(0.28 × W, 340, 420)` | 28% is the proportion at which the shelf keeps at least three columns at the bottom of the band: `columns(1200 − 340)` = 3. |
 | **940–1199** | 2–3 columns | 340 px (`INSPECTOR_MIN_W`) | Below 340 the header, the segmented control and the encoding line stop fitting. |
 | **< 940** | hidden while the inspector is open | fills the content area, with a **Back** affordance at its head | `columns(940 − 340)` = 2, and it is 1 by 800 px; a "shelf" of one or two sleeves is not a shelf. Replacing beats splitting. |
+
+At the other end, [`16-window-1400.png`](audit/16-window-1400.png) shows what
+the extra width currently buys with the rail closed: another column of covers,
+which is the right answer and the reason the inspector's width is capped rather
+than proportional all the way up.
 
 The `< 940` regime is the *same view function* as the eventual full-window
 Album place. Building it now costs one branch and buys the growth path in §2.3
