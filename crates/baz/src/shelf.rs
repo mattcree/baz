@@ -31,7 +31,7 @@
 //! landed, for [`DOUBLE_CLICK`] — the same window the double-click detector
 //! itself uses, because it is the same fact — and the reflow simply happens
 //! when the gesture can no longer be one. Every other reflow (a resize, a
-//! panel swap, closing the rail from the keyboard) is untouched.
+//! panel swap, closing the inspector from the keyboard) is untouched.
 
 /// Tile width including inter-tile padding (logical px). Art leads: the
 /// tile is mostly artwork ([`ART_PX`]) with a 32 px art-to-art gutter.
@@ -193,7 +193,7 @@ mod tests {
     }
 
     /// The grid block is as wide as its *columns*, at every width the window
-    /// and the rail between them can produce — never as wide as the items that
+    /// and the inspector between them can produce — never as wide as the items that
     /// happen to be in a row.
     ///
     /// This is the assertion behind "filtering to one result leaves it in the
@@ -201,7 +201,7 @@ mod tests {
     /// same block five tiles are centred in, so the survivor does not move.
     #[test]
     fn the_grid_block_is_as_wide_as_its_columns() {
-        // Every width the shipped window and the rail can produce, plus the
+        // Every width the shipped window and the inspector can produce, plus the
         // extremes at either end of the band.
         for width in [640.0_f32, 760.0, 940.0, 1000.0, 1280.0, 1400.0, 2560.0] {
             let cols = columns(width);

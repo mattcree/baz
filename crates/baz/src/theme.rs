@@ -215,15 +215,16 @@ pub const RADIUS_SEGMENT: f32 = 4.0;
 pub const SEGMENT_INSET: f32 = 2.0;
 /// Corner radius for the tile's hover/selection card.
 pub const RADIUS_TILE: f32 = 10.0;
-/// Width of the right-hand rail — the album panel and the queue panel both
-/// (logical px).
+/// Width of the album inspector, the column beside the shelf (logical px).
 ///
-/// **One number for both**, and that is the property the layout rests on: the
-/// rail is either showing a panel or it is not, and *which* panel is showing
-/// can never change how much room the shelf has. Switching between them
-/// reflows nothing; only opening or closing the rail does, by exactly this
-/// much. `app.rs`'s grid estimate is kept in step with it (see
-/// [`crate::panels`]).
+/// **One number, and now for one surface.** It was one number for three — the
+/// album, the queue and the settings took turns in this width — and that shared
+/// width was the only thing they had in common, which is what ADR-0015 is
+/// about. What survives the move is the property the layout actually rests on:
+/// the column is either showing an album or it is not, and swapping which album
+/// can never change how much room the shelf has. Only opening and closing
+/// reflow the grid, by exactly this much, and `app.rs`'s estimate is kept in
+/// step with it (see [`crate::selection`]).
 pub const PANEL_W: f32 = 340.0;
 /// Width of the number column in a track or queue list (logical px). Enough
 /// for three monospace figures at [`SIZE_META`], so a long queue's positions
@@ -924,29 +925,6 @@ pub fn panel_toggle(status: button::Status, active: bool) -> button::Style {
     segment(status, active)
 }
 
-/// One row of the queue list. The playing row is a raised card with a
-/// hairline edge; every other row is the panel it sits on.
-///
-/// The amber is spent on the lamp dot in the row's number column and nowhere
-/// else — a whole row washed in accent would shout, and the dot is already the
-/// mark the shelf uses to say "this one". This style only lifts the row far
-/// enough to find it while scrolling a long queue.
-#[must_use]
-pub fn queue_row(playing: bool) -> container::Style {
-    if !playing {
-        return container::Style::default();
-    }
-    container::Style {
-        background: Some(Background::Color(CARD_HIGH)),
-        border: Border {
-            color: HAIRLINE_STRONG,
-            width: 1.0,
-            radius: RADIUS_SEGMENT.into(),
-        },
-        ..container::Style::default()
-    }
-}
-
 /// The now-playing bar: recessed below the wall, like the amp under the
 /// shelf.
 #[must_use]
@@ -1054,21 +1032,24 @@ pub const CAPTION_H: f32 = 2.0 * CAPTION_LINE_H;
 /// carries the whole string.
 pub const CAPTION_LINE_H: f32 = SIZE_BODY * LINE_HEIGHT;
 
-/// A track row in the album inspector: invisible at rest, a quiet card under
-/// the pointer, and the playing row carded exactly as the queue's is.
+/// A track row — in the album inspector **and** in the **Up next** popover:
+/// invisible at rest, a quiet card under the pointer, and the playing row
+/// carded with a hairline edge.
 ///
 /// The row became a control when clicking it started meaning "play from here"
 /// (ADR-0014's `JumpTo`), and this is the affordance that admits it. Until
 /// then the rows carried none — deliberately, because "an affordance that does
 /// nothing is a lie" — so gaining one is the visible half of gaining the
-/// behaviour, and it is the same rule read forwards.
+/// behaviour, and it is the same rule read forwards. The queue's rows kept
+/// their own container style for exactly as long as they were text; when they
+/// became controls too, the two lists collapsed into **one** style function
+/// rather than two that had to be kept token-for-token identical by hand. They
+/// are, after all, the same twelve rows with the same mark on the same one, and
+/// a listener who has seen one must not have to learn the other.
 ///
-/// The playing row's treatment is [`queue_row`]'s, token for token, because
-/// the two surfaces are now listing the same twelve rows with the same mark on
-/// the same one; a listener who has seen the queue must not have to learn the
-/// inspector separately. Hover sits one surface step below it, so "the pointer
-/// is here" and "this is what is sounding" stay distinguishable — the same
-/// separation [`SELECTION_EDGE`] buys the shelf.
+/// Hover sits one surface step below the playing row, so "the pointer is here"
+/// and "this is what is sounding" stay distinguishable — the same separation
+/// [`SELECTION_EDGE`] buys the shelf.
 ///
 /// No accent anywhere: the lamp dot in the number column is the playback
 /// truth, and a row that also washed amber would spend the signal twice.
@@ -1132,6 +1113,175 @@ pub const SERIF: Font = Font {
     ..Font::with_name(crate::font::SERIF)
 };
 
+// ---------------------------------------------------------------------------
+// The information-architecture move: places, an inspector, a popover, the bar
+// (docs/design/01-ux-audit-and-ia.md §2, ADR-0015)
+// ---------------------------------------------------------------------------
+
+/// Width of the **Up next** popover (logical px).
+///
+/// 360, where the rail it left was [`PANEL_W`] 340. The extra twenty go to the
+/// per-row ✕ the rows gained when they became interactive: the popover lists
+/// exactly what the rail's queue panel listed, in the same row geometry, and
+/// the removal target has to sit beside the duration column rather than on top
+/// of it.
+///
+/// Fixed rather than proportional, and fixed at *less than a quarter of the
+/// shipped window*: this is an overlay, and an overlay that grew with the
+/// window would eventually be a panel that forgot to reflow the shelf. It
+/// covers the bottom-right corner of the covers for a few seconds and no more.
+pub const POPOVER_W: f32 = 360.0;
+
+/// The tallest a popover may grow, as a fraction of the window's height.
+///
+/// A queue can be a box set, and a list that ran from the bar to the top bar
+/// would be a place with no name. Six tenths leaves the shelf legible above it,
+/// which is the whole argument for an overlay over a panel: glancing at what is
+/// next must not cost the covers.
+pub const POPOVER_MAX_H: f32 = 0.6;
+
+/// Width reserved in the now-playing bar for the queue-position readout
+/// (logical px) — the `3 / 12` beside the track title.
+///
+/// A **reserved slot**, exactly like [`SIGNAL_W`] and [`STAMP_W`]: the readout
+/// is absent when nothing is playing and present when something is, and the bar
+/// must not move between those two states. Wide enough for `999 / 999` — nine
+/// monospace figures at [`SIZE_META`] — because a queue's length is not
+/// something the front end gets to bound.
+pub const QUEUE_POS_W: f32 = 72.0;
+
+/// Width of the bar's **Up next** control (logical px) — the label, the
+/// [`QUEUE_POS_W`] readout, and the padding around them.
+///
+/// The control is **labelled and always visible**, and that is a requirement
+/// rather than a preference: `docs/design/03-interface-prior-art.md` §5.3(1)
+/// and R1 record that the closest product to baz in ambition hides the same
+/// surface behind an unlabelled gesture, and has generated years of "where is
+/// my queue / what did I just do" complaints for it. *Transient must not mean
+/// unverifiable.* So the door to the popover says what it opens, in words, in
+/// every state — including with nothing playing, where the readout beside the
+/// label is empty and the slot is still this wide.
+pub const UP_NEXT_W: f32 = 152.0;
+
+/// Width of the top bar's `Settings` control (logical px).
+///
+/// A reserved slot like the rest, but reserved for **one word** rather than for
+/// a figure that changes. It was 92 px — a width fitted to the `Queue` toggle
+/// it used to sit beside, so the pair would read as a pair — and at a 760 px
+/// window the longer word wrapped to two lines inside it (§1.4 of the audit).
+/// With the queue gone to the bar, the control has no twin to match and is
+/// sized to its own label instead; `font.rs` measures `Settings` in the face
+/// that draws it against this number less its padding.
+pub const SETTINGS_TOGGLE_W: f32 = 84.0;
+
+/// Width of the Settings place's section list (logical px).
+///
+/// A place needs a spine, and 200 px is what a list of one-word section names
+/// wants: wide enough that *Appearance* and *Playback* never wrap, narrow
+/// enough that it reads as navigation rather than as content. It is the one
+/// piece of chrome the settings gain by becoming a place, and it is what makes
+/// the next section an entry rather than a layout decision.
+pub const SETTINGS_NAV_W: f32 = 200.0;
+
+/// Greatest width the Settings place gives its content (logical px).
+///
+/// A settings form is a column of short labelled controls, and a control row
+/// stretched across a 1600 px window is a line the eye has to travel twice to
+/// read. 640 is roughly 55 characters at [`SIZE_BODY`] — the top of the
+/// comfortable measure — and the content sits **left-aligned** in whatever
+/// space is left rather than centred in it, so the form stays anchored to the
+/// section list that names it.
+pub const SETTINGS_CONTENT_W: f32 = 640.0;
+
+/// Window width below which the Settings place stacks into one column
+/// (logical px).
+///
+/// Under a thousand pixels the section list and a 640 px form cannot both have
+/// their width, and of the two the *form* is the one being used. The list
+/// becomes a heading above the content instead of a column beside it. One
+/// branch, and it is the same branch the album inspector will need at its own
+/// breakpoint (§4.3).
+pub const SETTINGS_BREAKPOINT: f32 = 1000.0;
+
+/// The **Up next** popover's surface: one step above the panel, a hairline
+/// edge, and the room's one soft shadow.
+///
+/// Every part of this is chosen against something iced 0.13 cannot do (§4.6 of
+/// the spec):
+///
+/// - **No arrow or notch.** Container borders here are four-sided only, so a
+///   pointer triangle would have to be a second widget under a floating
+///   element. The anchor is expressed by *position* — bottom right, above the
+///   bar — and by the affordance below it taking its open styling.
+/// - **No blur, no backdrop filter, and no scrim.** Separation is a surface
+///   step, a hairline and the shadow, which is the depth strategy the whole
+///   room already uses. Dimming ten thousand covers to show twelve rows would
+///   contradict the palette rationale outright (§2.4).
+///
+/// The shadow is the *sleeve's* shadow, offset and blur alike: artwork is the
+/// one thing in baz that casts one, and a floating layer is the one exception
+/// that has to — so it borrows rather than invents.
+#[must_use]
+pub fn popover(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(CARD_HIGH)),
+        border: Border {
+            color: HAIRLINE_STRONG,
+            width: 1.0,
+            radius: RADIUS_CTRL.into(),
+        },
+        shadow: Shadow {
+            color: SHADOW,
+            offset: Vector::new(0.0, 3.0),
+            blur_radius: 8.0,
+        },
+        ..container::Style::default()
+    }
+}
+
+/// The now-playing block in the bar, once it became the door to **Up next**.
+///
+/// Invisible at rest — the bar's left zone must go on reading as the track
+/// name, not as a button — a quiet card under the pointer, and the raised card
+/// with a hairline edge while the popover it opens is showing. That last state
+/// is the anchor: with no notch available, "this control opened that layer" is
+/// said by the control staying lit.
+///
+/// **The border width is 1 px in every state, including the invisible one.**
+/// iced draws a border inside the widget's bounds, so a border that appeared on
+/// hover would shrink the text under the pointer by a pixel — and this is the
+/// bar, where nothing may move. Only colours vary here; the geometry is one
+/// number in all four states, and `bottom_bar.rs` pins that.
+///
+/// No accent: opening a popover is a *view* choice, not a claim about what is
+/// playing (the same argument [`panel_toggle`] makes).
+#[must_use]
+pub fn now_playing(status: button::Status, open: bool) -> button::Style {
+    let background = if open {
+        CARD_HIGH
+    } else {
+        match status {
+            button::Status::Hovered => CARD,
+            button::Status::Pressed => RECESS,
+            button::Status::Active | button::Status::Disabled => Color::TRANSPARENT,
+        }
+    };
+    button::Style {
+        background: Some(Background::Color(background)),
+        text_color: PAPER,
+        border: Border {
+            color: if open {
+                HAIRLINE_STRONG
+            } else {
+                Color::TRANSPARENT
+            },
+            width: 1.0,
+            radius: RADIUS_CTRL.into(),
+        },
+        shadow: Shadow::default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1174,6 +1324,108 @@ mod tests {
         // `192 → 176.4 kHz`, fifteen monospace figures — so that a note
         // appearing there moves nothing beside it.
         const { assert!(SIGNAL_W > SIZE_META * 15.0 * MONO_EM) }
+        // And the queue-position readout the left zone gained with the popover
+        // is the same rule again: `999 / 999` is nine monospace figures, the
+        // slot holds them, and it is that wide whether or not anything is
+        // playing — so `3 / 12` appearing as a track starts moves no title.
+        const { assert!(QUEUE_POS_W > SIZE_META * 9.0 * MONO_EM) }
+        // …and the control that carries it holds the readout, its label and the
+        // padding around both. The label itself is measured in the face that
+        // draws it by `font.rs`; this is the arithmetic that leaves room.
+        const { assert!(UP_NEXT_W > QUEUE_POS_W + 3.0 * GAP_SM) }
+    }
+
+    /// The popover is an overlay, and an overlay's whole promise is that it
+    /// costs the surface underneath nothing. Both halves of that are geometry.
+    #[test]
+    fn the_popover_floats_rather_than_taking_the_shelfs_width() {
+        /// What a row has left for its title once the number column, the
+        /// reserved scrollbar lane, the removal target the rows gain in step 7
+        /// and the gaps between them have taken their share.
+        const ROW_TITLE_LANE: f32 =
+            POPOVER_W - 2.0 * GAP_LG - TRACK_NO_W - SCROLLBAR_LANE - STEPPER_HIT - 3.0 * GAP_SM;
+
+        // Narrower than a third of the shipped window: it covers the
+        // bottom-right corner of the covers, not a column of them.
+        const { assert!(POPOVER_W < 1280.0 / 3.0) }
+        // …and wide enough for the rows it inherited from the rail.
+        const { assert!(ROW_TITLE_LANE > 180.0) }
+        // It never grows into a place: six tenths of the window leaves the
+        // shelf legible above it, and the fraction is a fraction.
+        const { assert!(POPOVER_MAX_H > 0.0 && POPOVER_MAX_H < 1.0) }
+        // Its anchor inset is a rung of the spacing ladder, not a number.
+        assert!((GAP_LG - 16.0).abs() < f32::EPSILON);
+    }
+
+    /// The Settings place's two columns fit the window they claim to, and the
+    /// form is a readable measure rather than whatever is left over.
+    ///
+    /// The breakpoint is the load-bearing number: below it the section list and
+    /// a full-width form cannot both have their width, so they stack. This is
+    /// the arithmetic that says *where* that is true.
+    #[test]
+    fn the_settings_place_fits_both_of_its_arrangements() {
+        // Above the breakpoint, the list, the gap between the columns and the
+        // place's padding all come out before the form does — and what is left
+        // at the breakpoint *itself* is already more than the cap. So in the
+        // two-column arrangement the form is exactly `SETTINGS_CONTENT_W`, at
+        // every window width it can be in, and the cap is the whole rule rather
+        // than a limit that sometimes applies.
+        const AT_BREAKPOINT: f32 = SETTINGS_BREAKPOINT - 2.0 * GAP_XL - SETTINGS_NAV_W - GAP_XL;
+        const { assert!(AT_BREAKPOINT >= SETTINGS_CONTENT_W) }
+        // The form is a readable measure: roughly 55 characters of body text at
+        // half an em apiece, which is the top of the comfortable range and well
+        // under the 60-em line the rail could never have produced anyway.
+        const { assert!(SETTINGS_CONTENT_W / (SIZE_BODY * 0.5) < 100.0) }
+        // Every control the section holds still fits it. These were fitted to a
+        // 292 px column and are unchanged by the move, which is the claim
+        // "verbatim" is making.
+        const { assert!(SETTINGS_CONTENT_W > SETTING_VALUE_W + 2.0 * STEPPER_HIT + 3.0 * GAP_SM) }
+        // The place's spine is narrower than its content, or it would read as a
+        // second column of content rather than as navigation.
+        const { assert!(SETTINGS_NAV_W < SETTINGS_CONTENT_W) }
+    }
+
+    /// The bar's now-playing affordance changes colour and **nothing else**.
+    ///
+    /// This is the pixel-stability claim in its smallest form: the left zone
+    /// became a control, and a control that grew a border on hover would shift
+    /// the track title by a pixel every time the pointer crossed it. The border
+    /// is therefore present in all four states and merely transparent in three.
+    #[test]
+    fn the_now_playing_affordance_moves_nothing_when_it_lights_up() {
+        let mut geometry: Vec<(f32, f32)> = Vec::new();
+        for status in [
+            button::Status::Active,
+            button::Status::Hovered,
+            button::Status::Pressed,
+            button::Status::Disabled,
+        ] {
+            for open in [false, true] {
+                let style = now_playing(status, open);
+                geometry.push((style.border.width, style.border.radius.top_left));
+                assert_eq!(
+                    style.shadow,
+                    Shadow::default(),
+                    "the bar casts no shadow; only artwork and the popover do"
+                );
+            }
+        }
+        assert!(
+            geometry
+                .windows(2)
+                .all(|pair| (pair[0].0 - pair[1].0).abs() < f32::EPSILON
+                    && (pair[0].1 - pair[1].1).abs() < f32::EPSILON),
+            "the affordance's border geometry varies with state: {geometry:?}"
+        );
+        // And "open" is visibly different from "hovered", or the anchor the
+        // popover has instead of a notch says nothing.
+        let open = now_playing(button::Status::Active, true);
+        let hovered = now_playing(button::Status::Hovered, false);
+        assert_ne!(
+            from_background(open.background),
+            from_background(hovered.background)
+        );
     }
 
     /// The advance width of one glyph in the bundled monospace, as a fraction
@@ -1281,15 +1533,18 @@ mod tests {
         }
     }
 
-    /// The rail's width is one number, and the shelf still virtualizes at both
-    /// of the two widths it can therefore have.
+    /// **The shelf virtualizes at every width the inspector can produce.**
     ///
-    /// The geometry helpers themselves are unchanged by the queue panel — that
-    /// is the point of the panels sharing a slot — and this is what pins the
-    /// claim: at the shipped window size the shelf goes from five columns to
-    /// three when the rail opens, and both are real, non-degenerate grids.
+    /// One of the four properties `docs/design/01-ux-audit-and-ia.md` §5 says
+    /// must not regress, and it is checked over the whole band rather than at
+    /// the two widths the shipped window happens to have: every window width
+    /// from the smallest iced will hand us to a wall-sized one, with the
+    /// inspector open and closed, must produce a real grid and a covered,
+    /// clamped visible range. The popover is deliberately absent from this
+    /// sweep — that is the *point* of it being an overlay: it produces no width
+    /// at all.
     #[test]
-    fn the_shelf_virtualizes_at_both_of_the_rails_two_widths() {
+    fn the_shelf_virtualizes_at_every_width_the_inspector_can_produce() {
         use crate::shelf as geometry;
 
         const WINDOW_W: f32 = 1280.0;
@@ -1297,21 +1552,31 @@ mod tests {
         assert_eq!(
             geometry::columns(WINDOW_W - PANEL_W),
             3,
-            "one panel open: (1280 - 340 - 48) / 240 = 3.7 -> 3"
+            "the inspector open: (1280 - 340 - 48) / 240 = 3.7 -> 3"
         );
-        // The rail must leave a usable shelf on the smallest window iced will
-        // hand us as well, or opening a panel would collapse the grid.
-        assert!(geometry::columns(640.0 - PANEL_W) >= 1);
 
-        // Virtualization is width-independent, but the row count is not: the
-        // same albums over fewer columns must still produce a covered,
-        // clamped range rather than an empty or overrunning one.
-        for width in [WINDOW_W, WINDOW_W - PANEL_W] {
-            let cols = geometry::columns(width);
-            let rows = geometry::total_rows(97, cols);
-            assert_eq!(rows, 97_usize.div_ceil(cols));
-            let (first, end) = geometry::visible_rows(0.0, 800.0, rows);
-            assert!(first < end && end <= rows, "empty viewport at {width} px");
+        // The band: every window width baz can be dragged to, both inspector
+        // states, both a full library and a single search result.
+        let mut window = 640.0_f32;
+        while window <= 2560.0 {
+            for inspector in [0.0, PANEL_W] {
+                let width = window - inspector;
+                let cols = geometry::columns(width);
+                assert!(
+                    cols >= 1,
+                    "the grid collapsed at {window} px with {inspector} px of inspector"
+                );
+                for albums in [1_usize, 97, 10_000] {
+                    let rows = geometry::total_rows(albums, cols);
+                    assert_eq!(rows, albums.div_ceil(cols));
+                    let (first, end) = geometry::visible_rows(0.0, 800.0, rows);
+                    assert!(
+                        first < end && end <= rows,
+                        "empty or overrunning viewport at {window} px, {albums} albums"
+                    );
+                }
+            }
+            window += 20.0;
         }
 
         // And the panel has to hold its own contents: the album panel insets
@@ -1611,6 +1876,9 @@ mod tests {
             }
             painted.push(("transport", button_colors(&transport(&theme, status))));
             painted.push(("primary", button_colors(&primary(&theme, status))));
+            for open in [false, true] {
+                painted.push(("now_playing", button_colors(&now_playing(status, open))));
+            }
         }
         for status in slider_states {
             painted.push(("seek", slider_colors(&seek(&theme, status))));
@@ -1676,9 +1944,8 @@ mod tests {
         painted.push(("segmented", container_colors(&segmented(&theme))));
         painted.push(("preview_tip", container_colors(&preview_tip(&theme))));
         painted.push(("panel", container_colors(&panel(&theme))));
-        painted.push(("queue_row(plain)", container_colors(&queue_row(false))));
-        painted.push(("queue_row(playing)", container_colors(&queue_row(true))));
         painted.push(("bar", container_colors(&bar(&theme))));
+        painted.push(("popover", container_colors(&popover(&theme))));
         painted.push(("tooltip", container_colors(&tooltip(&theme))));
         painted.push(("hairline", vec![hairline(&theme).color]));
         painted.push(("detent_ink", vec![detent_ink(false), detent_ink(true)]));

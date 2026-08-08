@@ -630,9 +630,9 @@ pub struct QueueList {
     pub album: Option<String>,
     /// Who that album is filed under.
     pub artist: String,
-    /// The one-line reading: `3 of 12 · 51:20` while something is playing,
+    /// The one-line reading: `3 of 12 · 38:12 left` while something is playing,
     /// `12 tracks · 51:20` otherwise, with the time dropped when the scan read
-    /// no durations to add up.
+    /// no durations to add up (see [`queue_summary`]).
     pub summary: String,
     /// The rows, in play order.
     pub rows: Vec<QueueRow>,
@@ -888,6 +888,15 @@ impl PlayerState {
                 self.queue_position = None;
                 self.reset_progress();
             }
+            // The engine's own answer to "where is the playing track now",
+            // after a queue it accepted changed shape (ADR-0014 §6). Taken in
+            // preference to anything this side computed: the two differ exactly
+            // when an edit races a track boundary, and the engine's is the one
+            // the audio agrees with. `len` is not stored — the record this
+            // process holds *is* the list it sent, so a mismatch would mean the
+            // picture is stale, and the fix for that is to re-send the queue
+            // rather than to patch a number.
+            Event::QueueChanged { position, .. } => self.queue_position = *position,
             Event::TrackFailed { .. } => self.failed += 1,
             Event::Progress {
                 elapsed_ms,
@@ -961,6 +970,32 @@ impl PlayerState {
         self.queue = Some(queue);
         self.queue_position = None;
         self.failed = 0;
+    }
+
+    /// Record an *edit* accepted by the engine's channel
+    /// ([`UpdateQueue`](baz_core::protocol::Command::UpdateQueue)).
+    ///
+    /// The difference from [`Self::note_queue_sent`] is the whole of ADR-0014's
+    /// bargain and it is one line: **the position survives.** `SetQueue` is the
+    /// reset — it stops the music, so a position into what was playing means
+    /// nothing afterwards — where an edit that does not touch the playing track
+    /// does not disturb one delivered sample, and dropping the position here
+    /// would blank the dot and the bar's `3 / 12` for the moment between the
+    /// send and the engine's answer.
+    ///
+    /// It is not left *stale* either. The index may well have moved — remove
+    /// two rows above the playing one and it is renumbered — and the engine
+    /// re-derives the truth and announces it as
+    /// [`Event::QueueChanged`], which [`Self::apply`] takes. In the gap between
+    /// the two, the row is still found by *path*
+    /// ([`QueueVm::playing`]), which is the same reconciliation every other
+    /// reading in this module uses. So the mark is right before the event, and
+    /// right after it, for two different reasons.
+    ///
+    /// The skipped-track count is deliberately not reset: an edit is not a new
+    /// run, and the files that failed in this one still failed.
+    pub fn note_queue_edited(&mut self, queue: QueueVm) {
+        self.queue = Some(queue);
     }
 
     /// Record that a transport command (Play/Pause/Next) was accepted by
@@ -1383,9 +1418,45 @@ impl PlayerState {
         Some(QueueList {
             album: queue.album.clone(),
             artist: queue.artist.clone(),
-            summary: queue_summary(queue, playing),
+            summary: queue_summary(queue, playing, self.elapsed_ms),
             rows,
         })
+    }
+
+    /// The now-playing bar's queue-position readout — `3 / 12`, or `None`
+    /// when there is nothing honest to say.
+    ///
+    /// The audit's finding was that a listener has to *open* something to learn
+    /// where in the queue the music is; this is the glance that answers it
+    /// without opening anything, and it is the same reading the popover's
+    /// `3 of 12 · 38:12 left` summary opens with.
+    ///
+    /// `None` in exactly two cases, and neither is a zero: with no queue there
+    /// is nothing to be a position in, and with a queue that has not started
+    /// (or that has ended) there is no position — `0 / 12` would be a claim
+    /// about music that is not playing. The bar reserves the slot either way,
+    /// so the absence costs no movement.
+    ///
+    /// Both figures come from the same record and the same reconciliation the
+    /// popover's rows use ([`Self::playing_row`]), so the bar and the list can
+    /// never disagree about which track of how many is sounding.
+    #[must_use]
+    pub fn queue_position_note(&self) -> Option<String> {
+        let total = self.queue.as_ref()?.len();
+        let row = self.playing_row()?;
+        Some(format!("{} / {total}", row + 1))
+    }
+
+    /// The queue this process handed the engine, if it has handed it one.
+    ///
+    /// The record an edit is computed *from*: [`crate::queue_edit`] takes it,
+    /// returns the list the gesture means, and the caller sends that list's
+    /// paths and hands the edited record back through
+    /// [`Self::note_queue_edited`]. Borrowed rather than cloned because the
+    /// ordinary answer to a click is "no edit" — a row that is not there.
+    #[must_use]
+    pub fn queue(&self) -> Option<&QueueVm> {
+        self.queue.as_ref()
     }
 
     /// Which row of the recorded queue the engine is playing, reconciled
@@ -1743,28 +1814,57 @@ impl PlayerState {
     }
 }
 
-/// The queue panel's one-line reading.
+/// The **Up next** popover's one-line reading.
 ///
-/// While something is playing it counts: `3 of 12` — the position the listener
-/// wants at a glance, and the one number the panel adds to what the bottom bar
-/// already says. Otherwise it states the size, because "0 of 12" would be a
-/// position that does not exist.
+/// While something is playing it counts and then says **what is left**:
+/// `3 of 12 · 38:12 left`. Otherwise it states the size and the whole running
+/// time, because "0 of 12" would be a position that does not exist and
+/// "remaining" is the same number as "total" before anything has started.
 ///
-/// The total time is appended when there is one to state. A queue of tracks
-/// the scan read no duration for says nothing rather than `0:00`, on the same
+/// *Remaining*, not total, and that is a correction taken from prior art
+/// (`docs/design/03-interface-prior-art.md` §5.3(3), R5). `MusicBee`'s queue
+/// header and Elisa's *"%1/%2 tracks remaining"* both report what is ahead,
+/// because a queue is a thing you are partway through: `51:20` describes a list,
+/// where `38:12 left` answers the question the listener actually opened the
+/// popover with. The figure is the rest of the playing track plus every track
+/// after it, so it is a clock reading rather than a property of the list.
+///
+/// The time is appended only when there is one to state. A queue of tracks the
+/// scan read no duration for says nothing rather than `0:00`, on the same
 /// principle as the `--:--` the seek bar shows for an undeclared length: an
 /// unknown is not a zero.
-fn queue_summary(queue: &QueueVm, playing: Option<usize>) -> String {
-    let count = match playing {
-        Some(index) => format!("{} of {}", index + 1, queue.len()),
-        None if queue.len() == 1 => "1 track".to_owned(),
-        None => format!("{} tracks", queue.len()),
+fn queue_summary(queue: &QueueVm, playing: Option<usize>, elapsed_ms: u64) -> String {
+    let Some(index) = playing else {
+        let count = match queue.len() {
+            1 => "1 track".to_owned(),
+            n => format!("{n} tracks"),
+        };
+        let total = queue.total_time();
+        if total == Duration::ZERO {
+            return count;
+        }
+        return format!("{count} · {}", vm::format_duration(total));
     };
-    let total = queue.total_time();
-    if total == Duration::ZERO {
+    let count = format!("{} of {}", index + 1, queue.len());
+    let ahead: Duration = queue
+        .items
+        .iter()
+        .skip(index + 1)
+        .filter_map(|item| item.duration)
+        .sum();
+    // The playing track counts only for what is left *of it*. The engine's
+    // last confirmed position is the only honest source for that, and it is
+    // clamped so a report that arrives a beat past the end cannot go negative.
+    let current = queue.items.get(index).and_then(|item| item.duration);
+    let remaining = match current {
+        Some(track) => ahead + track.saturating_sub(Duration::from_millis(elapsed_ms)),
+        None if ahead == Duration::ZERO => return count,
+        None => ahead,
+    };
+    if remaining == Duration::ZERO {
         return count;
     }
-    format!("{count} · {}", vm::format_duration(total))
+    format!("{count} · {} left", vm::format_duration(remaining))
 }
 
 /// A position in `0..=total` from a `0.0..=1.0` fraction, clamped at both
@@ -3865,7 +3965,8 @@ mod tests {
             states(&list),
             vec![QueueRowState::Playing, QueueRowState::Upcoming]
         );
-        assert_eq!(list.summary, "1 of 2 · 6:40");
+        // Nothing has elapsed yet, so what is left is the whole queue.
+        assert_eq!(list.summary, "1 of 2 · 6:40 left");
 
         player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
         let list = player.queue_list().expect("a queue");
@@ -3873,7 +3974,190 @@ mod tests {
             states(&list),
             vec![QueueRowState::Played, QueueRowState::Playing]
         );
-        assert_eq!(list.summary, "2 of 2 · 6:40");
+        assert_eq!(
+            list.summary, "2 of 2 · 3:20 left",
+            "the first track is behind us and must not count towards what is left"
+        );
+    }
+
+    /// **What is left, not what exists.** The summary is a clock reading: the
+    /// rest of the playing track plus every track after it, so it falls as the
+    /// music plays rather than restating a property of the list.
+    ///
+    /// Taken from prior art rather than invented — `MusicBee`'s queue header and
+    /// Elisa's *"tracks remaining"* both report what is ahead
+    /// (`docs/design/03-interface-prior-art.md` §5.3(3)).
+    #[test]
+    fn the_summary_counts_down_what_is_left_rather_than_up_what_exists() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(geogaddi_queue());
+
+        // Before a run starts there is no position, so the reading is the
+        // list's own size and its whole running time — "remaining" and "total"
+        // are the same number, and the plainer of the two words is right.
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "2 tracks · 6:40"
+        );
+
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "1 of 2 · 6:40 left"
+        );
+        player.apply(&progress(60_000, Some(200_000)), &albums);
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "1 of 2 · 5:40 left",
+            "a minute into the first track, a minute has come off the reading"
+        );
+
+        // A progress report that lands past the track's own declared length —
+        // a rate change hands over, a container lied — must not produce a
+        // negative remainder.
+        player.apply(&progress(999_000, Some(200_000)), &albums);
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "1 of 2 · 3:20 left"
+        );
+    }
+
+    /// The bar's `3 / 12` readout: present exactly when there is a position to
+    /// report, absent — never zero — whenever there is not, and always the same
+    /// row the popover's list marks.
+    #[test]
+    fn the_bars_queue_position_reads_out_only_when_there_is_a_position() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        assert_eq!(
+            player.queue_position_note(),
+            None,
+            "no queue is not position zero"
+        );
+
+        player.note_queue_sent(geogaddi_queue());
+        assert_eq!(
+            player.queue_position_note(),
+            None,
+            "a queue that has not started has no position in it"
+        );
+
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        assert_eq!(player.queue_position_note().as_deref(), Some("1 / 2"));
+        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+        assert_eq!(player.queue_position_note().as_deref(), Some("2 / 2"));
+
+        // …and it is the same reading the list makes, or the bar and the
+        // popover would be able to disagree about where the music is.
+        let list = player.queue_list().expect("a queue");
+        assert_eq!(list.summary, "2 of 2 · 3:20 left");
+
+        player.apply(&Event::QueueEnded, &albums);
+        assert_eq!(
+            player.queue_position_note(),
+            None,
+            "an ended run is not still at its last track"
+        );
+    }
+
+    /// **An edit does not blank the mark.** ADR-0014's whole bargain is that
+    /// removing a track the listener is not listening to disturbs nothing, and
+    /// a dot that vanished for the round trip would be the interface saying
+    /// otherwise.
+    ///
+    /// Two mechanisms carry the mark across the edit, and this exercises both:
+    /// before the engine answers, the row is found by *path* against the edited
+    /// record; when `QueueChanged` arrives, the engine's re-derived position
+    /// replaces the stale index outright.
+    #[test]
+    fn an_edit_keeps_the_playing_row_marked_and_then_takes_the_engines_answer() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(geogaddi_queue());
+        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+        assert_eq!(player.queue_position_note().as_deref(), Some("2 / 2"));
+
+        // Remove the row *above* the playing one. The recorded index (1) is now
+        // stale — the playing track is row 0 of the edited list — and nothing
+        // has come back from the engine yet.
+        let edited = crate::queue_edit::without(player.queue().expect("a queue"), 0)
+            .expect("row 0 is in the queue");
+        player.note_queue_edited(edited);
+        assert_eq!(
+            player.queue_position_note().as_deref(),
+            Some("1 / 1"),
+            "the path still finds the row, so the mark survives the round trip"
+        );
+        let list = player.queue_list().expect("a queue");
+        assert_eq!(states(&list), vec![QueueRowState::Playing]);
+
+        // …and then the engine says where it is, and its answer wins.
+        player.apply(
+            &Event::QueueChanged {
+                len: 1,
+                position: Some(0),
+            },
+            &albums,
+        );
+        assert_eq!(player.queue_position_note().as_deref(), Some("1 / 1"));
+        assert_eq!(
+            states(&player.queue_list().expect("a queue")),
+            vec![QueueRowState::Playing]
+        );
+    }
+
+    /// `QueueChanged { position: None }` is the engine saying nothing is
+    /// playing in the queue it now holds — an edit that emptied it, or one
+    /// applied while stopped. The mark goes, and it goes because the engine
+    /// said so rather than because the front end guessed.
+    #[test]
+    fn a_queue_change_with_no_position_unmarks_every_row() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(geogaddi_queue());
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        assert!(player.queue_position_note().is_some());
+
+        player.apply(
+            &Event::QueueChanged {
+                len: 2,
+                position: None,
+            },
+            &albums,
+        );
+        assert_eq!(player.queue_position_note(), None);
+        assert_eq!(
+            states(&player.queue_list().expect("a queue")),
+            vec![QueueRowState::Upcoming, QueueRowState::Upcoming]
+        );
+    }
+
+    /// The one line that separates an edit from a reset: `SetQueue` drops the
+    /// position because it stops the music, and `UpdateQueue` keeps it because
+    /// it does not.
+    #[test]
+    fn a_reset_drops_the_position_where_an_edit_keeps_it() {
+        let albums = albums();
+        let playing = || {
+            let mut player = PlayerState::new(Availability::Ready);
+            player.note_queue_sent(geogaddi_queue());
+            player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+            assert!(player.queue_position_note().is_some());
+            player
+        };
+
+        let mut edited = playing();
+        edited.note_queue_edited(geogaddi_queue());
+        assert!(edited.queue_position_note().is_some(), "an edit keeps it");
+
+        let mut reset = playing();
+        reset.note_queue_sent(geogaddi_queue());
+        assert_eq!(
+            reset.queue_position_note(),
+            None,
+            "a reset stops the music, so a position into it means nothing"
+        );
     }
 
     /// The engine's position is believed only when the path at it agrees. A

@@ -1,5 +1,20 @@
-//! The album side panel: large art, header, edition selector, Play, and the
+//! The **album inspector**: large art, header, edition selector, Play, and the
 //! selected edition's track list.
+//!
+//! # The sole tenant of the column
+//!
+//! It shared the right-hand rail with the play queue and the settings; both
+//! have left (ADR-0015), and this is what remains — because it is the one
+//! surface that genuinely needs the shelf beside it. The browse loop is *click,
+//! read, click the next sleeve*, and a full-window album view would turn a
+//! one-click compare into a three-step round trip. Prior art agrees from a
+//! direction the audit did not have: every cataloguing product studied in
+//! `docs/design/03-interface-prior-art.md` runs a right-hand inspector, and it
+//! is the consumption products that run a full page.
+//!
+//! With one tenant, the rule the column obeys collapses to a sentence — **it is
+//! open exactly when an album is selected** ([`crate::selection`]) — and the
+//! dismissal model with it.
 //!
 //! # The track list is a now-playing view of the album
 //!
@@ -110,7 +125,7 @@ pub(crate) fn view<'a>(
     // control in one place whichever is on screen.
     let header_row = row![
         Space::with_width(Length::Fill),
-        close_button("Close the album panel"),
+        close_button("Close the album panel", Message::ClosePanel),
     ]
     .align_y(iced::Alignment::Center);
     let mut content =

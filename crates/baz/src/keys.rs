@@ -91,13 +91,19 @@
 //! goes out is the idempotent `SetMute { muted }` the protocol asks for
 //! rather than a toggle two front ends could disagree about.
 //!
-//! # Panels
+//! # Layers
 //!
-//! `Q` shows and hides the play queue, and <kbd>Ctrl</kbd>+<kbd>B</kbd>
-//! (<kbd>Cmd</kbd>+<kbd>B</kbd>) hides the right-hand rail outright and brings
-//! it back. Both resolve to the same messages the on-screen affordances send —
-//! the top bar's Queue toggle and each panel's ✕ — so there is no keyboard-only
-//! capability here, exactly as with the transport.
+//! Three keys move between what is on screen, and each one now names exactly
+//! one layer — which is the change the information-architecture move bought
+//! (ADR-0015, `docs/design/01-ux-audit-and-ia.md` §4.8).
+//!
+//! `Q` shows and hides **Up next**. Same key, same meaning, better place: it
+//! used to raise a queue *panel* in the right-hand rail, costing the shelf two
+//! columns of covers for a glance; it now raises the popover anchored to the
+//! bar that describes it, which costs the shelf nothing. It resolves to
+//! [`Message::ToggleUpNext`] — the same message the bar's labelled `Up next`
+//! control sends — so there is no keyboard-only capability here, exactly as
+//! with the transport.
 //!
 //! `Q` is bare because it is a *view* key like `/`: it interrupts nothing, it
 //! is reversible by pressing it again, and a modifier on a key you will press
@@ -105,15 +111,24 @@
 //! foobar2000 and `MusicBee` both put queue-adjacent commands on it, and nothing
 //! in baz wanted `q`.
 //!
-//! <kbd>Ctrl</kbd>+<kbd>B</kbd> is the sidebar reflex from every editor
-//! written this decade, and it earns its modifier for the opposite reason: it
-//! is the *layout* key, the one that changes how much room the shelf gets, and
-//! those are conventionally modified. What comes back is what was dismissed
-//! (see [`crate::panels`]), so the pair is a true toggle rather than a
-//! destructive close.
+//! <kbd>Ctrl</kbd>+<kbd>B</kbd> (<kbd>Cmd</kbd>+<kbd>B</kbd>) hides the album
+//! inspector and brings it back. It is the sidebar reflex from every editor
+//! written this decade, and it earns its modifier for the opposite reason to
+//! `Q`'s: it is the *layout* key, the one that changes how much room the shelf
+//! gets, and those are conventionally modified. What comes back is what was
+//! dismissed (see [`crate::selection`]), so the pair is a true toggle rather
+//! than a destructive close — and it is an *honest* sidebar toggle now that
+//! there is exactly one sidebar. It no longer conjures a queue panel out of an
+//! empty rail, which was the audit's evidence that the rail had no model behind
+//! it.
 //!
-//! <kbd>Ctrl</kbd>+<kbd>,</kbd> (<kbd>Cmd</kbd>+<kbd>,</kbd>) opens the
-//! settings, and takes a modifier where `Q` does not. The reasoning is `Q`'s
+//! <kbd>Ctrl</kbd>+<kbd>,</kbd> (<kbd>Cmd</kbd>+<kbd>,</kbd>) goes to the
+//! **Settings place** and comes back ([`crate::place`]). Same key as before; it
+//! is now *navigation* rather than a request to raise a panel, which is what
+//! the macOS convention it borrows has always meant — and it is the same
+//! message the top bar's `Settings` control and the place's own Back both send.
+//!
+//! It takes a modifier where `Q` does not, and the reasoning is `Q`'s
 //! in reverse: a preferences key is pressed a handful of times in a
 //! *lifetime*, not dozens of times a session, so the tax the modifier charges
 //! is never actually paid — and <kbd>Cmd</kbd>+<kbd>,</kbd> is a macOS system
@@ -122,6 +137,13 @@
 //! learn. A bare `,` would also be the first bare punctuation key baz binds,
 //! and punctuation is what people type when a field is not focused by
 //! accident.
+//!
+//! <kbd>Esc</kbd> peels **one layer, top down**: the popover first, then a
+//! place that is not home, then — in the search well — the query, then the
+//! inspector. It never has to choose between unrelated things, because at each
+//! press exactly one layer is the top one. The layering itself lives in
+//! `app.rs`, where the layers do; this module only says that the key means
+//! "peel".
 //!
 //! **The `XF86AudioRaiseVolume` family is deliberately not bound.** The
 //! transport media keys are bound (below) because `MediaPlayPause` means one
@@ -201,10 +223,10 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Named(key::Named::ArrowDown) if bare => Some(Message::VolumeStep(-1)),
         Key::Character("m" | "M") if bare || shift => Some(Message::ToggleMute),
 
-        // Panels. `Q` shows what is playing next; Ctrl+B (Cmd+B) takes the
-        // whole rail away and gives it back; Ctrl+`,` (Cmd+`,`) is the
+        // Layers. `Q` shows what is playing next; Ctrl+B (Cmd+B) takes the
+        // right-hand column away and gives it back; Ctrl+`,` (Cmd+`,`) is the
         // settings (module docs).
-        Key::Character("q" | "Q") if bare || shift => Some(Message::ToggleQueue),
+        Key::Character("q" | "Q") if bare || shift => Some(Message::ToggleUpNext),
         Key::Character("b" | "B") if command => Some(Message::TogglePanels),
         Key::Character(",") if command => Some(Message::ToggleSettings),
 
@@ -214,8 +236,7 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Character("/") if bare || shift => Some(Message::FocusSearch),
         Key::Character("f" | "F") if command => Some(Message::FocusSearch),
 
-        // Unchanged from the first keyboard pass: clear the search, else
-        // close what the rail is showing.
+        // Peel one layer, top down (module docs; `app.rs` holds the order).
         Key::Named(key::Named::Escape) if bare => Some(Message::EscapePressed),
 
         // Media keys, for the machines that deliver them to the focused
@@ -456,21 +477,21 @@ mod tests {
         );
     }
 
-    /// `Q` shows and hides the queue, in either case, with no modifier — a
-    /// view key, like `/`.
+    /// `Q` shows and hides **Up next**, in either case, with no modifier — a
+    /// view key, like `/`. The key did not move; what it raises did.
     #[test]
-    fn q_toggles_the_queue_panel() {
-        assert_eq!(bind(&ch("q"), none()).as_deref(), Some("ToggleQueue"));
+    fn q_toggles_the_up_next_popover() {
+        assert_eq!(bind(&ch("q"), none()).as_deref(), Some("ToggleUpNext"));
         assert_eq!(
             bind(&ch("Q"), Modifiers::SHIFT).as_deref(),
-            Some("ToggleQueue")
+            Some("ToggleUpNext")
         );
     }
 
-    /// Ctrl+B (Cmd+B) is the layout key: it hides the rail and brings it back.
+    /// Ctrl+B (Cmd+B) is the layout key: it hides the inspector and brings it back.
     /// Bare `b` types a `b`.
     #[test]
-    fn ctrl_b_hides_and_restores_the_rail() {
+    fn ctrl_b_hides_and_restores_the_inspector() {
         assert_eq!(
             bind(&ch("b"), Modifiers::COMMAND).as_deref(),
             Some("TogglePanels")
@@ -482,10 +503,11 @@ mod tests {
         assert_eq!(bind(&ch("b"), none()), None);
     }
 
-    /// Ctrl+`,` (Cmd+`,`) is the preferences reflex from every platform.
+    /// Ctrl+`,` (Cmd+`,`) is the preferences reflex from every platform, and it
+    /// is navigation between places now rather than a panel toggle.
     /// A bare comma types a comma — the modifier is the whole binding.
     #[test]
-    fn ctrl_comma_opens_the_settings() {
+    fn ctrl_comma_navigates_to_the_settings() {
         assert_eq!(
             bind(&ch(","), Modifiers::COMMAND).as_deref(),
             Some("ToggleSettings")

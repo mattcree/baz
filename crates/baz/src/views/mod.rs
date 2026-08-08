@@ -5,16 +5,23 @@
 //! - [`setup`] — the first-run "Where's your music?" screen.
 //! - [`top_bar`] — the search well and the quiet counts beside it.
 //! - [`shelf`] — the virtualized album grid, its tiles, and its empty states.
-//! - [`side_panel`] — the selected album: header, edition selector, Play,
+//! - [`side_panel`] — the album inspector: header, edition selector, Play,
 //!   track list.
-//! - [`queue_panel`] — what baz handed the engine, and where it is in it.
-//! - [`settings_panel`] — the standing decisions: today, ReplayGain.
+//! - [`up_next`] — the queue popover: what baz handed the engine, and where it
+//!   is in it.
+//! - [`settings`] — the Settings place: the standing decisions, today
+//!   ReplayGain.
 //! - [`bottom_bar`] — now-playing, transport, seek row.
 //!
-//! [`side_panel`], [`queue_panel`] and [`settings_panel`] share one slot
-//! beside the shelf — the *rail* — and are therefore the same
-//! [`theme::PANEL_W`] wide; which of them is on screen is
-//! [`crate::panels`]'s decision, not theirs.
+//! They are the four kinds ADR-0015 names, and which kind a surface is decides
+//! what it may cost. [`top_bar`] and [`shelf`] compose the Library **place**,
+//! and [`settings`] is the other one — places fill the window and replace each
+//! other. [`side_panel`] is the Library's **inspector**, the sole tenant of the
+//! column beside the shelf at [`theme::PANEL_W`]; it is open exactly when an
+//! album is selected ([`crate::selection`]). [`up_next`] is the **popover**,
+//! anchored to the bar, [`theme::POPOVER_W`] wide, taking no width from the
+//! shelf at all ([`crate::overlay`]). And [`bottom_bar`] is the **bar**, which
+//! is in every place and never moves.
 //!
 //! Everything here is iced-specific and holds no state: each module exposes a
 //! `view` function that reads [`crate::app`]'s state (and [`crate::player`]'s
@@ -39,12 +46,12 @@
 //! imported as `geometry` so the two never read as the same thing.
 
 pub(crate) mod bottom_bar;
-pub(crate) mod queue_panel;
-pub(crate) mod settings_panel;
+pub(crate) mod settings;
 pub(crate) mod setup;
 pub(crate) mod shelf;
 pub(crate) mod side_panel;
 pub(crate) mod top_bar;
+pub(crate) mod up_next;
 
 use iced::widget::{Space, button, container, image as iced_image, text, tooltip};
 use iced::{Color, Element, Length, alignment};
@@ -73,19 +80,23 @@ pub(crate) fn gradient_block(album_id: u64, size: f32) -> Element<'static, Messa
         .into()
 }
 
-/// The ✕ that dismisses a rail panel: the close glyph in the same fixed
-/// square, and with the same quiet card, as the bottom bar's transport
-/// buttons.
+/// The ✕ that dismisses a layer: the close glyph in the same fixed square,
+/// and with the same quiet card, as the bottom bar's transport buttons.
 ///
-/// Shared by both rail panels because a dismissal must look and land the same
-/// wherever it is — a close control that moved or changed size between the
-/// album panel and the queue would be two controls, not one. `label` names the
-/// panel being closed ("Close the queue"), which is the tooltip and, iced 0.13
-/// having no accessibility tree, the whole of the control's accessible name.
+/// Shared by every surface that can be dismissed because a dismissal must look
+/// and land the same wherever it is — a close control that moved or changed
+/// size between the album inspector and the popover would be two controls, not
+/// one. `label` names what is being closed ("Close up next"), which is the
+/// tooltip and, iced 0.13 having no accessibility tree, the whole of the
+/// control's accessible name.
+///
+/// `message` is the layer's own dismissal, because there is one rule *per
+/// layer* rather than one rule: the inspector's ✕ closes the inspector, the
+/// popover's closes the popover, and neither can reach the other.
 ///
 /// The tooltip opens *below* the button rather than above it: these sit in a
-/// panel's top row, where there is nothing above to open into.
-pub(crate) fn close_button(label: &'static str) -> Element<'static, Message> {
+/// surface's top row, where there is nothing above to open into.
+pub(crate) fn close_button(label: &'static str, message: Message) -> Element<'static, Message> {
     let mark = container(
         iced_image(icon::handle(icon::Glyph::Close))
             .width(Length::Fixed(theme::ICON_PX))
@@ -102,7 +113,7 @@ pub(crate) fn close_button(label: &'static str) -> Element<'static, Message> {
             .height(Length::Fixed(theme::TRANSPORT_HIT))
             .padding(0)
             .style(theme::transport)
-            .on_press(Message::ClosePanel),
+            .on_press(message),
         text(label).size(theme::SIZE_CAPTION),
         tooltip::Position::Bottom,
     )

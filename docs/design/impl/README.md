@@ -100,6 +100,196 @@ bar-1-stopped            4 241 px  title, timestamps and groove appear at all
 
 ---
 
+# Increment 6 — Up next becomes a popover
+
+The first surface to leave the rail (ADR-0015). Captured the same way as
+everything above — a private `Xvfb :147` at 1400×1000, scratch `HOME` **and**
+scratch `XDG_*` (including `XDG_RUNTIME_DIR`, so the maintainer's session bus
+was never joined: the log reads `[mpris] no session bus`), an 18-album /
+183-track fixture of generated covers and digitally silent FLAC, and a
+`--features device-output` release build whose scratch `HOME` carries an
+`.asoundrc` routing ALSA's default PCM to `null`. `BAZ_DEVICE_TESTS` was never
+set. Captures are targeted at this process's window by pid.
+
+| Image | What it shows |
+|---|---|
+| [`15-up-next-popover.png`](15-up-next-popover.png) | **Up next**, open. 360 px, anchored 16 px above the bar and 16 px in from the right edge, over the shelf and over the album inspector — **and not over the transport**, which keeps every reserved pixel and stays live. No scrim: the covers behind it are at full brightness. The playing row is carded and dotted, `2 of 12 · 43:54 left` summarises what is *ahead*, and the bar's `Up next  2 / 12` control is in its raised "open" state — the anchor the toolkit will not let the popover draw as a notch. |
+| [`19-up-next-affordance-at-rest.png`](19-up-next-affordance-at-rest.png) | The same control with the popover shut, at 250%: **a labelled, always-visible door**, and no chrome at all until you reach for it. This is the prior-art study's R1 — *transient must not mean unverifiable* — and it is the one place this increment departs from the design spec, which offered only `Q` and an unlabelled press on the now-playing block. |
+| [`16-up-next-esc-peels-one-layer.png`](16-up-next-esc-peels-one-layer.png) | **One <kbd>Esc</kbd>, one layer.** The popover is gone and the album inspector beside it is untouched — still open, still marking the playing track. A second press would take the inspector. Verified with an instrumented build that counted the messages: one key press, one `EscapePressed`. |
+| [`17-up-next-click-outside.png`](17-up-next-click-outside.png) | **Click-outside, and only that.** The press landed on a shelf tile: the popover closed and the tile did not change selection, because the `mouse_area` layer captured the press before the place underneath could see it. This is the dismissal iced 0.13 gives no other route to, working. |
+| [`18-bar-diff-popover-open-vs-closed.png`](18-bar-diff-popover-open-vs-closed.png) | The bottom bar, popover-closed against popover-open, auto-levelled. Everything that changed is inside the 152 px control. |
+
+## The bar did not move
+
+The bar gained a control, so its promise — *nothing moves as the music moves* —
+was re-measured rather than assumed. The transport was **paused** first, so the
+only variable across the three captures is the popover's state.
+
+**Closed, then open, then closed again is pixel-identical to the first frame:**
+
+```
+magick compare -metric AE  crop-bar-a-closed.png  crop-bar-c-closed-again.png
+0
+```
+
+**Nothing outside the control changed at all.** The bounding box of every
+differing pixel between closed and open, in a 1280 × 104 bar:
+
+```
+152x25+282+41         the Up next control, and nothing else
+                      (3 696 differing pixels, every one of them its card)
+```
+
+152 is `UP_NEXT_W` exactly.
+
+**The three things that must not move, in all three states:**
+
+```
+                        transport row     label + readout ink   title+artist ink
+bar-a-closed            110x28+45+0       119x11+0+3            94x28+1+1
+bar-b-open              110x28+45+0       119x11+0+3            94x28+1+1
+bar-c-closed-again      110x28+45+0       119x11+0+3            94x28+1+1
+```
+
+110 = 3 × `TRANSPORT_HIT` 32 + 2 × `GAP_SM` 8, less the two glyph boxes' own
+transparent margins — the same measurement increments 1–5 made, unchanged. The
+`Up next` label and its `2 / 12` readout occupy the same 119 × 11 px of ink
+whether the popover is open or shut, inside the control's 152 px slot; and the
+track title beside them is identical to the pixel, which is the thing a border
+appearing on hover would have broken.
+
+**And the bar's top edge is where it was.** Sampled at x = 470, a column with no
+content in any state:
+
+```
+y0=srgb(124,51,34)  y1=srgb(19,17,16)  y2=srgb(77,73,70)  y3=srgb(13,11,10)
+```
+
+— identical in all three. The hairline is at row 2 and `RECESS` begins at row 3,
+so the bar's 102 px height did not change when the popover opened.
+
+## What the captures also settle
+
+Two behaviours were driven rather than argued, because both depend on
+`iced_widget` primitives the design spec verified by reading:
+
+- **`opaque` really does capture presses inside its bounds.** The popover's ✕
+  and its rows take clicks; the press that lands beside it does not reach the
+  shelf ([`17`](17-up-next-click-outside.png)).
+- **The popover really is not modal.** With it open, the transport below is
+  uncovered and clickable, the shelf still scrolls, and every keyboard binding
+  still fires — <kbd>Q</kbd> closed it in one run, <kbd>Esc</kbd> in another,
+  and a press on the shelf in a third.
+
+---
+
+# Increment 7 — the queue's rows become controls
+
+Where the popover earns its existence: ADR-0014 shipped `JumpTo` and
+`UpdateQueue` and nothing spent them. Captured on the same private display,
+with the same scratch `HOME`, scratch `XDG_*` and null ALSA sink as increment 6,
+and with the transport **paused** wherever a measurement is being made.
+
+| Image | What it shows |
+|---|---|
+| [`20-up-next-row-hover-remove.png`](20-up-next-row-hover-remove.png) | The pointer on row 9. The row lifts, and its ✕ appears — **only** its ✕: twelve permanent crosses would be twelve invitations to destroy something in a surface built for a glance. Every other row is exactly where it was, and so is every duration, because the slot the ✕ appears *in* is reserved whether or not it is in it. |
+| [`21-up-next-row-removed.png`](21-up-next-row-removed.png) | The same queue one press later. *Beware the Friendly Stranger* is gone, the rows below it have renumbered, the summary has fallen from `1 of 12 · 50:25 left` to `1 of 11 · 48:14 left`, and the bar reads `1 / 11`. **The transport has not moved**: still paused, still 2:18 into *Ready Lets Go*. That is ADR-0014's guarantee — an edit that does not touch the playing track does not disturb one delivered sample — on camera. |
+| [`22-up-next-jump-to-row.png`](22-up-next-jump-to-row.png) | A click on row 3. `3 of 11 · 37:26 left`, the dot on *In the Annexe*, rows 1–2 fallen to the history ink behind the cursor, and the bar naming it. The engine trace is `queue #0` then `queue #2` with nothing in between — one jump, not two skips. |
+
+## The ✕ appears without anything moving
+
+The popover was captured with the pointer off the window, then on row 9, then
+off again. Paused throughout, so the pointer is the only variable.
+
+```
+pointer off  vs  pointer off again        0 differing pixels
+pointer off  vs  row 9 hovered            bbox 317x25+17+315
+```
+
+A 25-pixel band in a 360 × 436 popover: row 9, and nothing else. The duration
+column — the one most at risk, because it sits against the same right edge the
+✕ arrives at — occupies the identical box in both:
+
+```
+pointer off      34x308+0+0
+row 9 hovered    34x308+0+0
+```
+
+## Two notes on how it is built
+
+**The edit is a whole list, computed by a pure function.** `queue_edit::without`
+takes the `QueueVm` record and returns the queue as it should now be; the
+payload sent is that value's own `paths()`. ADR-0014 rejected index deltas
+because *an index applied against a stale picture removes a different track and
+neither side can tell*, and working on the record rather than on a bare
+`Vec<PathBuf>` means the list the engine is handed and the list on screen cannot
+come apart. Ten unit tests, no iced.
+
+**Hover is tracked with a row's identity, not a flag.** iced 0.13 tells a widget
+its own hover status inside a style function and nothing about its siblings, so
+each row reports its own crossings. Both messages are published from the same
+`CursorMoved` in widget order — so dragging the pointer *up* a list delivers the
+new row's entry before the old row's exit. An exit that meant "nothing is
+hovered" would undo the entry that had just arrived; naming the row in the exit
+makes the order stop mattering. Found by reasoning about the widget tree rather
+than by watching a ✕ flicker, and the message's own doc comment says so.
+
+---
+
+# Increment 8 — Settings becomes a place, and the rail ceases to exist
+
+The move completed. The settings leave the right-hand column for a place of
+their own, the column's last roommate goes with them, and `panels.rs` — the
+state machine that arbitrated three tenants — becomes `selection.rs`, which
+answers one question with two fields.
+
+| Image | What it shows |
+|---|---|
+| [`23-settings-place-1280.png`](23-settings-place-1280.png) | **The Settings place** at the shipped window. A section list on the left (`SETTINGS_NAV_W` 200), the form beside it capped at `SETTINGS_CONTENT_W` 640 and left-aligned, and a header carrying the way back. The ReplayGain content is the rail panel's, moved **verbatim** — the same segmented control, the same reserved note slot, the same `SETTING_VALUE_W` steppers, all of which were built for a 292 px column and are still fine at 640. And the now-playing bar is underneath, unchanged, still playing: **the bar is in every place**. |
+| [`24-settings-place-960.png`](24-settings-place-960.png) | The same place below `SETTINGS_BREAKPOINT`. One column, the section name as a heading over its content. One branch, and it is the branch the album inspector will need at its own breakpoint. |
+| [`25-library-restored-by-esc.png`](25-library-restored-by-esc.png) | <kbd>Esc</kbd> from the Settings, and the Library is **exactly as it was left** — same scroll offset, same selection, same inspector, same playing row, same paused position. That is what "a place is free to reverse" means: the Library's state lives in one struct that the Settings place does not touch. |
+| [`26-library-1280-inspector.png`](26-library-1280-inspector.png) · [`27-library-960-inspector.png`](27-library-960-inspector.png) | The Library with the inspector at two window widths — three columns at 1280, two at 960. The column is the same 340 px in both, and it is the only thing that can be there now. |
+
+## What the rail cost, and what replaced it
+
+`panels.rs` carried three fields and a four-way question. `selection.rs`
+carries two fields and a one-line answer:
+
+```rust
+pub fn inspecting(self) -> Option<u64> {
+    if self.hidden { None } else { self.selected }
+}
+```
+
+`showing_album` is now literally that expression compared to an id, which is
+why the exhaustive walk over every path of four moves — *no reachable state
+shows an inspector without an album* — got shorter rather than being deleted.
+It is still walked, because "obviously true" is exactly what the rail's rule
+looked like from the inside as well.
+
+Two rules died with it, and both were symptoms rather than bugs:
+
+- **Un-hiding an empty rail opened the queue.** A key whose entire job is to
+  give the shelf its width back was creating a panel, because it had to invent
+  content and the queue was the one tenant always meaningful to ask for.
+  <kbd>Ctrl</kbd>+<kbd>B</kbd> now offers the album that is *playing* — a fact
+  rather than an invention — and otherwise does nothing.
+- **`Esc` had to choose between unrelated things.** It now peels one layer, top
+  down: popover, then a place that is not home, then the search query, then the
+  inspector. Four `if`s, in the order the layers stack.
+
+## One thing the pixels caught that the code did not
+
+The form's 640 px cap was first written as `container(...).max_width(640)`, and
+the render shows what that produced: a segmented control **998 px** wide. A
+`max_width` bounds the *limits* a child is laid out in, and a `Fill` child
+inside a `Shrink` container resolves against what the row actually handed it.
+The width is now arithmetic the view does from the window's own width, and the
+measurement that caught it is in the function's doc comment so the next person
+does not re-derive it.
+
+---
+
 # Visual language — implementation evidence, pass 1
 
 > The three foundation items of `docs/design/02-visual-language.md`: the
