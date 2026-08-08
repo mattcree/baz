@@ -63,6 +63,35 @@ accessibility tree, so imitating a modal would be a claim the toolkit cannot
 back — and <kbd>Esc</kbd>, a second <kbd>Q</kbd>, or a press anywhere outside
 it all put it away.
 
+## Accessibility — read this before you install
+
+**baz has no screen-reader support.** Not partial, not planned-for-soon: none.
+The toolkit it is built on ([iced](https://iced.rs) 0.13) publishes no
+accessibility tree, and its buttons take no keyboard focus. If you use a screen
+reader, baz will not work for you today, and we would rather you learn that here
+than after installing it.
+
+That choice was made openly — ADR-0005 chose iced knowing it, with
+"AccessKit-dependent accessibility" written into its accepted costs — and
+[ADR-0017 §4](docs/adr/0017-design-direction.md) publishes it rather than
+letting it be inherited quietly.
+
+What baz does guarantee, because these are the guarantees still available and
+being unable to make the big one is a reason to be strict about the rest:
+
+- **Every action has a visible, pointer-reachable control.** No action is
+  keyboard-only, and no control's only affordance is hover. This is a
+  [standing refusal](docs/REFUSALS.md), not an aspiration — it has already
+  cost design proposals that were prettier without it.
+- **Contrast floors are tested**, every ink against every surface, with opacity
+  composited before measuring rather than assumed away.
+- **Hit targets have a floor** and it is asserted in the test suite.
+- **No state is signalled by colour alone.**
+
+If AccessKit support lands in iced, baz's side of it is small — every control
+is already a labelled, focusable-in-principle widget rather than a bare
+positional mark. That was a deliberate constraint on the design, not luck.
+
 ## Desktop integration (Linux)
 
 baz implements [MPRIS2], so GNOME's and KDE's media controls, the lock screen,
