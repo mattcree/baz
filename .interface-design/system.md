@@ -1,5 +1,16 @@
 # baz — design system
 
+> **Read [ADR-0016](../docs/adr/0016-design-direction.md) first.** It resolves
+> this system against an independent design critique
+> (`docs/design/critique/`) and supersedes five things below: density moves
+> from a Settings row to a zoom gesture; the `#`+A–Z spine index becomes an
+> index rail derived from the active group key at `INDEX_W` 36; the bar's seek
+> row becomes a 2 px segmented needle and the bar drops 102 → 58 px (Previous ·
+> Play/Pause · Next stay); the four-room model is adopted with the `Palette`
+> indirection landing early; and the WCAG contrast floors are joined — not
+> replaced — by a ≥ 0.03 oklch-L step law over surfaces. Everything else here
+> stands.
+
 > The file future work reads first. Written 2026-08-08 for the **gallery /
 > archive** direction the owner chose over the previous "listening room".
 > Every number here is either a token that already exists in

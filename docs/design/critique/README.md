@@ -1,5 +1,18 @@
 # Handoff: baz — desktop music player (Rust + iced 0.13)
 
+> **Adopted, with six named exceptions, by [ADR-0016](../../adr/0016-design-direction.md).**
+> Read the ADR before implementing anything here. It supersedes this package on:
+> the transport (the needle is adopted; **prev/next buttons stay** and the bar
+> survives at 58 px — §1.1); the search field (type-anywhere is adopted, **the
+> field stays**, the 48 px poster query does not — §1.2); Settings (**a place,
+> not a panel** — §1.3); captions at rest (**kept** — §1.4); rooms (adopted;
+> two ship, two deferred — §1.5); and contrast (**WCAG floors stay** and govern
+> ink-on-surface, the ≥ 0.03 oklch-L step law is adopted alongside them and
+> governs surface-on-surface — §1.6). The refusals ledger is adopted and lives
+> in [`docs/REFUSALS.md`](../../REFUSALS.md). Everything else here — the rooms,
+> the history ledger, group keys, the index rail, the stack, shuffle-what-you-
+> see, the pull, lenses, the friction budget — is adopted as written.
+
 ## Overview
 Design package for **baz**, an album-wall-first desktop music player for people who own their music files. The thesis: the collection IS the interface — the app opens onto a wall of the user's covers; click one, it plays. This package contains the complete design system, per-surface specs, and build guidance.
 

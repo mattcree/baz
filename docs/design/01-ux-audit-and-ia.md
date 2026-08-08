@@ -1,5 +1,21 @@
 # baz — UX audit and information architecture
 
+> **Partly superseded by [ADR-0016](../adr/0016-design-direction.md).** This
+> document's diagnosis and its places/inspector/popover/bar model still govern
+> and shipped as ADR-0015. Four things in it no longer do:
+>
+> | No longer governs | Now |
+> |---|---|
+> | §4.8's rejection of type-ahead — *"the transport wins, `/` remains the door"* | **Superseded.** Bare printable characters filter the wall; `n` / `m` / `q` move to the modifier layer; the search **field is kept** as the visible affordance and the only focusable widget. ADR-0016 §1.2 |
+> | §4.2 / §4.5's 102 px bar with its 380 px seek column | **Superseded.** A 2 px segmented needle flush on the window's bottom edge takes the seek row's job; the bar keeps Previous · Play/Pause · Next and drops to 58 px. ADR-0016 §1.1 |
+> | §5's fourteen increments | **Superseded** by ADR-0016 §7's single sequence. Increments 1–8 shipped; 9–13 are re-ordered into it. |
+> | §1.2's "the shelf has one sort and no facets" as a scope call | **Taken up.** Group keys (ARTIST / YEAR / GENRE / ADDED / PLAYED) and an index rail derived from the active key. ADR-0016 §1.7 |
+>
+> Still load-bearing and **not** superseded: the audit itself (§1), the IA
+> diagnosis and model (§2), the flow specification (§3), the responsive regimes
+> and iced-limit table (§4.3, §4.6), and the accessibility gap it declares —
+> which ADR-0016 §4 turns from a declaration into a stance.
+
 > A design specification, not an implementation. Written 2026-08-08 against
 > `1919193` (the merge that added the settings panel). Screenshots in
 > [`audit/`](audit/) were taken from the real binary on a private Xvfb with a

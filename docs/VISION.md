@@ -34,6 +34,8 @@ Refuse (the fixes): closed source; Windows-first; configuration-before-usability
 
 Betrayal list (things that would lose the community, from `research/01`): Electron-grade sluggishness, telemetry/accounts by default, dumbing down that caps the power ceiling, forced streaming integration, skin-first development, snake-oil audio claims.
 
+Both lists have a standing successor: **[`docs/REFUSALS.md`](REFUSALS.md)** — things considered and rejected on principle, where an entry leaves only by an ADR that beats its argument. New refusals go there, not here.
+
 ## Product pillars
 
 1. **The library is the interface.** Home = album shelf (GOG-Galaxy-style tactility as one reference; iOS Longplay is the proven pattern). One click plays an album front-to-back. Playlists optional, queues transient.
