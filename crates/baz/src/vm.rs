@@ -28,7 +28,7 @@
 //! tested as one.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use baz_core::index::{Album, AlbumArtist, Edition, Library};
@@ -363,24 +363,128 @@ pub fn matching_album_ids(library: &Library, query: &str) -> Option<HashSet<u64>
     Some(ids)
 }
 
-/// The album's play queue: every path of the **selected edition** in the
-/// side panel's disc/track/title order (the order [`EditionVm::tracks`]
-/// already carries, straight from [`Library::albums`]), byte-for-byte
-/// verbatim — this is exactly the `paths` payload for
-/// [`Command::SetQueue`](baz_core::protocol::Command::SetQueue).
+/// The queue baz handed the engine: what was sent, in the order it was sent,
+/// with the catalogue facts needed to *show* it.
+///
+/// This is deliberately one value rather than two parallel ones. The paths
+/// are the [`Command::SetQueue`](baz_core::protocol::Command::SetQueue)
+/// payload and the rows are what the queue panel lists, and they are built in
+/// the same pass from the same edition — so the list on screen cannot drift
+/// from the list the engine is playing. [`Self::paths`] is the only way to get
+/// the payload, which is what makes that structural rather than a convention.
+///
+/// It carries no notion of *where* playback is: that is engine truth, arrives
+/// as [`Event::TrackStarted`](baz_core::protocol::Event::TrackStarted), and is
+/// reconciled against this record by [`Self::playing`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueVm {
+    /// Title of the album the queue was built from, when it has one.
+    pub album: Option<String>,
+    /// Who that album is filed under, as the shelf labels it
+    /// ([`AlbumArtistVm::label`]) — always something.
+    pub artist: String,
+    /// The tracks, in play order. Indices are queue positions, which is the
+    /// unit [`Event::TrackStarted`](baz_core::protocol::Event::TrackStarted)
+    /// reports in.
+    pub items: Vec<QueueItemVm>,
+}
+
+/// One track in the queue, as much of it as the panel shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueItemVm {
+    /// Display title (the tag/inferred title, else the file name).
+    pub title: String,
+    /// The track's own artist, carried only when the album's header does not
+    /// already cover it — the same rule, and the same field, the side panel's
+    /// track list follows ([`AlbumVm::track_artists_vary`]).
+    pub artist: Option<String>,
+    /// Playing time, when the scan read one.
+    pub duration: Option<Duration>,
+    /// The file. The identity the engine addresses this track by, and what
+    /// [`QueueVm::playing`] reconciles a `TrackStarted` against.
+    pub path: PathBuf,
+}
+
+impl QueueVm {
+    /// The `paths` payload for
+    /// [`Command::SetQueue`](baz_core::protocol::Command::SetQueue): every
+    /// item's path, in order, byte-for-byte verbatim from the library.
+    #[must_use]
+    pub fn paths(&self) -> Vec<PathBuf> {
+        self.items.iter().map(|item| item.path.clone()).collect()
+    }
+
+    /// How many tracks were queued.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    /// Whether nothing was queued.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// Total playing time of the queue, over the tracks that declared one.
+    #[must_use]
+    pub fn total_time(&self) -> Duration {
+        self.items.iter().filter_map(|item| item.duration).sum()
+    }
+
+    /// Which row the engine's last
+    /// [`TrackStarted`](baz_core::protocol::Event::TrackStarted) names —
+    /// `None` when this record cannot honestly claim to hold that track.
+    ///
+    /// The engine reports a queue *position* and a *path*, and this record is
+    /// the app's own memory of what it sent. Those can disagree: a queue
+    /// replaced while the previous one's last event was still in flight is the
+    /// ordinary way it happens. So the position is taken as the answer **only
+    /// when the path at it matches**; otherwise the path is searched for
+    /// (a queue that repeats a file answers with its first occurrence), and if
+    /// it is not in this queue at all the answer is nothing at all. The panel
+    /// then marks no row rather than marking the wrong one — the honesty rule
+    /// [`crate::player`] states, applied to a list.
+    #[must_use]
+    pub fn playing(&self, position: usize, path: &Path) -> Option<usize> {
+        if self
+            .items
+            .get(position)
+            .is_some_and(|item| item.path == path)
+        {
+            return Some(position);
+        }
+        self.items.iter().position(|item| item.path == path)
+    }
+}
+
+/// The album's play queue: the **selected edition**'s tracks in the side
+/// panel's disc/track/title order (the order [`EditionVm::tracks`] already
+/// carries, straight from [`Library::albums`]).
 ///
 /// What the panel lists is what plays: `chosen` is the same value the track
 /// list was rendered from, resolved by the same [`selected_edition`], so a
 /// queue can never contain a format the user was not looking at.
 #[must_use]
-pub fn album_queue(album: &AlbumVm, chosen: Option<EditionKey>) -> Vec<PathBuf> {
-    selected_edition(album, chosen).map_or_else(Vec::new, |edition| {
+pub fn album_queue(album: &AlbumVm, chosen: Option<EditionKey>) -> QueueVm {
+    let per_track_artists = album.track_artists_vary;
+    let items = selected_edition(album, chosen).map_or_else(Vec::new, |edition| {
         edition
             .tracks
             .iter()
-            .map(|track| track.path.clone())
+            .map(|track| QueueItemVm {
+                title: track.title.clone(),
+                artist: track.artist.clone().filter(|_| per_track_artists),
+                duration: track.duration,
+                path: track.path.clone(),
+            })
             .collect()
-    })
+    });
+    QueueVm {
+        album: album.title.clone(),
+        artist: album.artist.label().to_owned(),
+        items,
+    }
 }
 
 /// Indices into `albums` that survive the current query filter (all of them
@@ -677,7 +781,7 @@ mod tests {
         );
 
         // The queue is exactly the listed edition, in the listed order.
-        let queue = album_queue(&album, Some(mp3));
+        let queue = album_queue(&album, Some(mp3)).paths();
         let listed: Vec<PathBuf> = chosen.tracks.iter().map(|t| t.path.clone()).collect();
         assert_eq!(queue, listed);
         assert!(
@@ -685,7 +789,7 @@ mod tests {
             "playing the MP3 edition queues MP3 files only"
         );
         // And it differs from the default queue, or the selector is a lie.
-        assert_ne!(queue, album_queue(&album, None));
+        assert_ne!(queue, album_queue(&album, None).paths());
         assert_eq!(album_queue(&album, None).len(), 2, "no duplicated tracks");
     }
 
@@ -696,7 +800,10 @@ mod tests {
         let stale = EditionKey(Some(AudioFormat::Opus));
         let edition = selected_edition(&album, Some(stale)).expect("a fallback");
         assert_eq!(edition.key, EditionKey(Some(AudioFormat::Flac)));
-        assert_eq!(album_queue(&album, Some(stale)), album_queue(&album, None));
+        assert_eq!(
+            album_queue(&album, Some(stale)).paths(),
+            album_queue(&album, None).paths()
+        );
     }
 
     #[test]
@@ -718,7 +825,10 @@ mod tests {
         // collapse into the default.
         let chosen = selected_edition(album, Some(unknown)).expect("the unnamed edition");
         assert_eq!(chosen.key, unknown);
-        assert_ne!(album_queue(album, Some(unknown)), album_queue(album, None));
+        assert_ne!(
+            album_queue(album, Some(unknown)).paths(),
+            album_queue(album, None).paths()
+        );
     }
 
     #[test]
@@ -945,7 +1055,7 @@ mod tests {
         let library = library_with(vec![d2t1, d1t2, d1t1.clone()]);
         let albums = build_albums(&library);
         assert_eq!(albums.len(), 1);
-        let queue = album_queue(&albums[0], None);
+        let queue = album_queue(&albums[0], None).paths();
         assert_eq!(
             queue,
             vec![
@@ -962,6 +1072,109 @@ mod tests {
                 "queue path {path:?} must come from the album's tracks"
             );
         }
+    }
+
+    /// The queue record and the `SetQueue` payload are one construction, so
+    /// what the panel lists is exactly what the engine was handed — including
+    /// the ordering and the verbatim paths the test above pins.
+    #[test]
+    fn the_queue_record_carries_the_rows_and_the_payload_together() {
+        let album = two_edition_album();
+        let queue = album_queue(&album, None);
+
+        assert_eq!(queue.album.as_deref(), Some("Northwest Passage"));
+        assert_eq!(queue.artist, "Stan Rogers");
+        assert_eq!(queue.len(), 2);
+        assert!(!queue.is_empty());
+        // Row order is item order is payload order.
+        let titles: Vec<&str> = queue.items.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["Passage", "Lies"]);
+        assert_eq!(
+            queue.paths(),
+            queue
+                .items
+                .iter()
+                .map(|item| item.path.clone())
+                .collect::<Vec<_>>()
+        );
+        // The durations the scan read add up.
+        assert_eq!(queue.total_time(), Duration::from_secs(400));
+    }
+
+    /// A per-track artist appears on a queue row exactly when the side panel
+    /// would show it — one rule for both lists, read off the album.
+    #[test]
+    fn queue_rows_name_a_track_artist_only_when_the_album_header_does_not() {
+        let mut ordinary = meta("Rodik", "Solo", "Alone", 1);
+        ordinary.artist = Some("Rodik".to_owned());
+        let library = library_with(vec![ordinary]);
+        let album = &build_albums(&library)[0];
+        assert!(!album.track_artists_vary);
+        assert_eq!(album_queue(album, None).items[0].artist, None);
+
+        let mut cue = meta("Various Composers", "Score", "Main Title", 1);
+        cue.album_artist = Some("Various Composers".to_owned());
+        cue.artist = Some("Jóhann Jóhannsson".to_owned());
+        let library = library_with(vec![cue]);
+        let album = &build_albums(&library)[0];
+        assert!(album.track_artists_vary);
+        assert_eq!(
+            album_queue(album, None).items[0].artist.as_deref(),
+            Some("Jóhann Jóhannsson")
+        );
+    }
+
+    /// The marking rule: the engine's position is believed when the path at it
+    /// agrees, the path wins when it does not, and a track this queue never
+    /// held marks nothing at all.
+    #[test]
+    fn the_playing_row_is_resolved_by_position_then_by_path() {
+        let album = two_edition_album();
+        let queue = album_queue(&album, None);
+        let first = queue.items[0].path.clone();
+        let second = queue.items[1].path.clone();
+
+        assert_eq!(queue.playing(0, &first), Some(0));
+        assert_eq!(queue.playing(1, &second), Some(1));
+        // Position and path disagree (a queue replaced under an in-flight
+        // event): the path is the identity, so it wins.
+        assert_eq!(queue.playing(0, &second), Some(1));
+        // Position past the end, path still known.
+        assert_eq!(queue.playing(99, &first), Some(0));
+        // A file this queue never held marks nothing — not row 0, not row 99.
+        assert_eq!(queue.playing(0, Path::new("/m/elsewhere/x.flac")), None);
+        assert_eq!(queue.playing(1, Path::new("/m/elsewhere/x.flac")), None);
+        // An empty queue can mark nothing whatever it is told.
+        let empty = QueueVm {
+            album: None,
+            artist: UNKNOWN_ARTIST.to_owned(),
+            items: Vec::new(),
+        };
+        assert!(empty.is_empty());
+        assert_eq!(empty.playing(0, &first), None);
+    }
+
+    /// A queue that repeats a file answers with its first occurrence when the
+    /// position cannot settle it — the only choice that is not a guess.
+    #[test]
+    fn a_repeated_path_resolves_by_position_first() {
+        let path = PathBuf::from("/m/a/1.flac");
+        let item = |title: &str| QueueItemVm {
+            title: title.to_owned(),
+            artist: None,
+            duration: Some(Duration::from_secs(60)),
+            path: path.clone(),
+        };
+        let queue = QueueVm {
+            album: Some("Loop".to_owned()),
+            artist: "A".to_owned(),
+            items: vec![item("once"), item("again")],
+        };
+        // The position is exact and its path agrees, so it is the answer.
+        assert_eq!(queue.playing(1, &path), Some(1));
+        // With no usable position, the first occurrence is the answer.
+        assert_eq!(queue.playing(7, &path), Some(0));
+        assert_eq!(queue.total_time(), Duration::from_secs(120));
     }
 
     #[test]

@@ -10,10 +10,13 @@
 //! allowed to remember about its own requests is exactly two things, both
 //! request-side knowledge rather than playback state:
 //!
-//! - **Queue size** ([`PlayerState::note_queue_sent`]): the engine echoes no
-//!   event for [`SetQueue`](baz_core::protocol::Command::SetQueue), and
-//!   "did we ever hand the engine a queue" is what decides whether a Play
-//!   button can do anything at all.
+//! - **The queue** ([`PlayerState::note_queue_sent`]): the engine echoes no
+//!   event for [`SetQueue`](baz_core::protocol::Command::SetQueue), so what
+//!   was queued is knowledge only the sender has. It decides whether a Play
+//!   button can do anything at all, and — since the queue panel landed — it is
+//!   also the *only* record of what is playing next, which is why the whole
+//!   [`vm::QueueVm`] is kept rather than merely its length. See "The queue"
+//!   below.
 //! - **A pending transport command** ([`PlayerState::note_transport_sent`]):
 //!   the documented "brief pending affordance". Pending clears on the *next
 //!   event of any kind* (any event proves the engine processed past our
@@ -151,6 +154,35 @@
 //! bit-perfect position is a place the hand lands rather than a place it has
 //! to be threaded into.
 //!
+//! # The queue
+//!
+//! What baz handed the engine is request-side memory, exactly like the queue
+//! *size* always was — and it has to be, because there is no command that asks
+//! the engine what its queue is and no event that reports one. The honesty
+//! rule therefore applies to the queue in a specific shape:
+//!
+//! - **The list** is what we sent ([`vm::QueueVm`], recorded whole by
+//!   [`PlayerState::note_queue_sent`]). It is not a claim about the engine's
+//!   state; it is a claim about ours, and it is exactly true.
+//! - **The position in it** is engine truth and nothing else:
+//!   [`Event::TrackStarted`] carries a zero-based queue position, and
+//!   [`PlayerState::apply`] is the only place it is recorded. It clears the
+//!   moment a session ends ([`Event::Stopped`], [`Event::QueueEnded`], or the
+//!   engine going away) — a queue with nothing playing marks no row.
+//! - **The two are reconciled, never assumed** ([`vm::QueueVm::playing`]): the
+//!   engine's position is believed when the path it arrived with agrees with
+//!   the path we recorded there, and the path wins when it does not. A track
+//!   that is not in the queue we remember marks nothing at all.
+//!
+//! The list survives a stop, which is the engine's own behaviour rather than a
+//! choice made here: `Stop` abandons the current run through the queue, but
+//! "the queue itself is kept; a later `Play` starts from the top". So the panel
+//! keeps showing what would play, with no row marked.
+//!
+//! What is deliberately *not* here is any way to change it. Reordering,
+//! removing a track, and clicking a row to jump to it all need engine commands
+//! that do not exist — see [`PlayerState::queue_list`] for exactly which.
+//!
 //! # The signal path
 //!
 //! [`Event::SignalPath`] reports what sits between the decoded file and the
@@ -199,7 +231,7 @@ use std::time::Duration;
 use baz_core::protocol::{ConversionReason, Event, SignalChain, VolumePath};
 use baz_core::volume::{MAX_POSITION, Volume};
 
-use crate::vm::{self, AlbumVm};
+use crate::vm::{self, AlbumVm, QueueVm};
 
 /// Whether a playback engine exists to talk to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -533,6 +565,54 @@ pub struct VolumeBar {
     pub mute_label: &'static str,
 }
 
+/// Where one queue row sits relative to the one that is playing.
+///
+/// Three states rather than a pair of booleans, because they are exhaustive
+/// and mutually exclusive, and because the view's whole job is to pick an ink
+/// per state. When nothing is playing every row is [`Self::Upcoming`] — a
+/// stopped queue has not been played, it is waiting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueRowState {
+    /// Behind the playing row: the engine has been past it.
+    Played,
+    /// The row the engine last said it started.
+    Playing,
+    /// Ahead of the playing row, or the whole queue when nothing is playing.
+    Upcoming,
+}
+
+/// One row of the queue panel, render-ready.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueRow {
+    /// Position in the queue as the panel numbers it, from 1.
+    pub position: usize,
+    /// The track's title.
+    pub title: String,
+    /// Its own artist, when the album's header does not already cover it.
+    pub artist: Option<String>,
+    /// `m:ss`, or empty when the scan read no duration — never a `0:00` that
+    /// would read as a real, very short track.
+    pub duration: String,
+    /// Where this row sits relative to what is playing.
+    pub state: QueueRowState,
+}
+
+/// The queue panel's render-ready state: what was queued, where the engine is
+/// in it, and one summary line — with nothing about how to draw any of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueList {
+    /// Title of the album the queue came from, when it has one.
+    pub album: Option<String>,
+    /// Who that album is filed under.
+    pub artist: String,
+    /// The one-line reading: `3 of 12 · 51:20` while something is playing,
+    /// `12 tracks · 51:20` otherwise, with the time dropped when the scan read
+    /// no durations to add up.
+    pub summary: String,
+    /// The rows, in play order.
+    pub rows: Vec<QueueRow>,
+}
+
 /// The chain the engine last reported, exactly as [`Event::SignalPath`]
 /// stated it: what the file is, what the output is running at, and what (if
 /// anything) sits between them.
@@ -587,8 +667,13 @@ pub struct PlayerState {
     /// (MPRIS's `mpris:trackid`) has one that changes exactly when the track
     /// does — and never when a seek restarts the same file.
     track_seq: u64,
-    /// Tracks in the queue we last asked for (request-side; module docs).
-    queued: usize,
+    /// The queue we last asked for (request-side; module docs). `None` until
+    /// something has been queued at all.
+    queue: Option<QueueVm>,
+    /// Zero-based position in that queue the engine last said it started, for
+    /// as long as a session is running. Engine truth, from
+    /// [`Event::TrackStarted`] and nowhere else.
+    queue_position: Option<usize>,
     /// A transport command awaiting its confirming event (module docs).
     pending: bool,
     /// [`Event::TrackFailed`] count since the last queue request.
@@ -638,7 +723,8 @@ impl PlayerState {
             now_playing: None,
             now_playing_path: None,
             track_seq: 0,
-            queued: 0,
+            queue: None,
+            queue_position: None,
             pending: false,
             failed: 0,
             elapsed_ms: 0,
@@ -685,8 +771,12 @@ impl PlayerState {
     /// view model, used to resolve [`Event::TrackStarted`] paths.
     pub fn apply(&mut self, event: &Event, albums: &[AlbumVm]) {
         match event {
-            Event::TrackStarted { path, .. } => {
+            Event::TrackStarted { path, position } => {
                 self.phase = Phase::Playing;
+                // Engine truth about where in the queue we are. Recorded on
+                // every start, including the one a seek causes, because the
+                // position is what the engine says it is (module docs).
+                self.queue_position = Some(*position);
                 // A seek restarts the *current* track, so TrackStarted is not
                 // by itself news of a new track. Only a genuinely different
                 // path resets the position; otherwise the bar would snap to
@@ -707,6 +797,10 @@ impl PlayerState {
                 self.now_playing_path = None;
                 // The chain described a session; there is no session now.
                 self.signal = None;
+                // The queue itself survives — the engine keeps it, and a later
+                // Play starts from the top — but nothing in it is playing, so
+                // the panel marks no row.
+                self.queue_position = None;
                 self.reset_progress();
             }
             Event::TrackFailed { .. } => self.failed += 1,
@@ -766,9 +860,16 @@ impl PlayerState {
         self.seek_pending = None;
     }
 
-    /// Record that a new queue of `len` tracks was requested.
-    pub fn note_queue_sent(&mut self, len: usize) {
-        self.queued = len;
+    /// Record the queue that was just handed to the engine.
+    ///
+    /// The whole record, not merely its length: the engine echoes no event for
+    /// [`SetQueue`](baz_core::protocol::Command::SetQueue), so this is the only
+    /// account of what will play next that exists anywhere in the process (see
+    /// the module's queue note). The previous queue's position goes with it —
+    /// a position into a list that has been replaced means nothing.
+    pub fn note_queue_sent(&mut self, queue: QueueVm) {
+        self.queue = Some(queue);
+        self.queue_position = None;
         self.failed = 0;
     }
 
@@ -790,6 +891,9 @@ impl PlayerState {
         self.now_playing_path = None;
         self.pending = false;
         self.signal = None;
+        // The list of what we queued is our own memory and stays true; where
+        // the engine was in it is a fact only a running engine can supply.
+        self.queue_position = None;
         self.reset_progress();
         // The volume itself survives — it is engine state, and the last
         // reading remains the honest answer to "where is the fader" — but a
@@ -1139,6 +1243,71 @@ impl PlayerState {
         })
     }
 
+    /// The queue panel's render-ready state, or `None` when nothing has been
+    /// queued in this session — in which case the panel says so rather than
+    /// drawing an empty list.
+    ///
+    /// # What this deliberately does not offer
+    ///
+    /// A *view*, and only a view. Every control a queue usually carries needs
+    /// an engine command that does not exist, and inventing a front-end
+    /// imitation of one would be exactly the dishonesty the module's rules
+    /// exist to prevent. Precisely:
+    ///
+    /// - **Click a row to jump to it** wants something like
+    ///   `Command::JumpTo { position: usize }` (the queue-relative sibling of
+    ///   `Seek`, which is track-relative). The protocol has
+    ///   [`Next`](baz_core::protocol::Command::Next) and
+    ///   [`Previous`](baz_core::protocol::Command::Previous) and nothing that
+    ///   names a position, so reaching row 9 means eight `Next`s — eight
+    ///   starts, eight `SignalPath` reports, and eight tracks of audio briefly
+    ///   reaching the sink. That is not a jump.
+    /// - **Remove a track** and **reorder the queue** want a `SetQueue` that
+    ///   *keeps playing*. Today's is documented to stop: "any playback in
+    ///   progress stops (the engine emits `Stopped`)". So the obvious
+    ///   implementation — re-send the queue minus one track — would silence
+    ///   the music to delete a track the listener was not listening to.
+    ///
+    /// Each of those is one engine command away from being a small view
+    /// change here, and until that command exists the rows are text.
+    #[must_use]
+    pub fn queue_list(&self) -> Option<QueueList> {
+        let queue = self.queue.as_ref()?;
+        let playing = self.playing_row();
+        let rows = queue
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| QueueRow {
+                position: index + 1,
+                title: item.title.clone(),
+                artist: item.artist.clone(),
+                duration: item.duration.map(vm::format_duration).unwrap_or_default(),
+                state: match playing {
+                    Some(current) if current == index => QueueRowState::Playing,
+                    Some(current) if index < current => QueueRowState::Played,
+                    _ => QueueRowState::Upcoming,
+                },
+            })
+            .collect();
+        Some(QueueList {
+            album: queue.album.clone(),
+            artist: queue.artist.clone(),
+            summary: queue_summary(queue, playing),
+            rows,
+        })
+    }
+
+    /// Which row of the recorded queue the engine is playing, reconciled
+    /// against the path it named (module docs; [`QueueVm::playing`] carries the
+    /// rule). Requires both an engine-reported position and a current track,
+    /// so a stopped or replaced session marks nothing.
+    fn playing_row(&self) -> Option<usize> {
+        let queue = self.queue.as_ref()?;
+        let path = self.now_playing_path.as_deref()?;
+        queue.playing(self.queue_position?, path)
+    }
+
     /// The position under the pointer while a scrub is engaged.
     fn scrub_ms(&self) -> Option<u64> {
         let gesture = self.gesture.filter(|gesture| gesture.scrubbing)?;
@@ -1272,7 +1441,13 @@ impl PlayerState {
     /// queue to (re)start when stopped.
     #[must_use]
     pub fn play_pause_enabled(&self) -> bool {
-        self.engine_ready() && (self.queued > 0 || self.phase != Phase::Stopped)
+        self.engine_ready() && (self.queued() > 0 || self.phase != Phase::Stopped)
+    }
+
+    /// How many tracks are in the queue we last sent.
+    #[must_use]
+    pub fn queued(&self) -> usize {
+        self.queue.as_ref().map_or(0, QueueVm::len)
     }
 
     /// Whether Next does anything (it is a documented engine no-op while
@@ -1371,6 +1546,30 @@ impl PlayerState {
             n => Some(format!("{n} tracks skipped")),
         }
     }
+}
+
+/// The queue panel's one-line reading.
+///
+/// While something is playing it counts: `3 of 12` — the position the listener
+/// wants at a glance, and the one number the panel adds to what the bottom bar
+/// already says. Otherwise it states the size, because "0 of 12" would be a
+/// position that does not exist.
+///
+/// The total time is appended when there is one to state. A queue of tracks
+/// the scan read no duration for says nothing rather than `0:00`, on the same
+/// principle as the `--:--` the seek bar shows for an undeclared length: an
+/// unknown is not a zero.
+fn queue_summary(queue: &QueueVm, playing: Option<usize>) -> String {
+    let count = match playing {
+        Some(index) => format!("{} of {}", index + 1, queue.len()),
+        None if queue.len() == 1 => "1 track".to_owned(),
+        None => format!("{} tracks", queue.len()),
+    };
+    let total = queue.total_time();
+    if total == Duration::ZERO {
+        return count;
+    }
+    format!("{count} · {}", vm::format_duration(total))
 }
 
 /// A position in `0..=total` from a `0.0..=1.0` fraction, clamped at both
@@ -1547,9 +1746,41 @@ mod tests {
         }
     }
 
+    /// A queue record of `len` tracks, drawn from the shelf fixture's own
+    /// files so the paths the state machine remembers are the ones
+    /// [`started`] names, and padded with distinct synthetic files when a test
+    /// wants a longer queue than the fixture holds.
+    fn queue_of(len: usize) -> QueueVm {
+        let albums = albums();
+        let mut items: Vec<vm::QueueItemVm> = albums
+            .iter()
+            .flat_map(AlbumVm::all_tracks)
+            .map(|track| vm::QueueItemVm {
+                title: track.title.clone(),
+                artist: track.artist.clone(),
+                duration: track.duration,
+                path: track.path.clone(),
+            })
+            .collect();
+        for extra in items.len()..len {
+            items.push(vm::QueueItemVm {
+                title: format!("Filler {extra}"),
+                artist: None,
+                duration: Some(Duration::from_secs(100)),
+                path: PathBuf::from(format!("/m/filler/{extra}.flac")),
+            });
+        }
+        items.truncate(len);
+        QueueVm {
+            album: Some("Geogaddi".to_owned()),
+            artist: "Boards of Canada".to_owned(),
+            items,
+        }
+    }
+
     fn ready_with_queue(len: usize) -> PlayerState {
         let mut player = PlayerState::new(Availability::Ready);
-        player.note_queue_sent(len);
+        player.note_queue_sent(queue_of(len));
         player
     }
 
@@ -1636,7 +1867,7 @@ mod tests {
         assert_eq!(player.skipped_note().as_deref(), Some("2 tracks skipped"));
 
         // A fresh queue request resets the count.
-        player.note_queue_sent(1);
+        player.note_queue_sent(queue_of(1));
         assert!(player.skipped_note().is_none());
     }
 
@@ -3364,5 +3595,223 @@ mod tests {
         assert_eq!(stray.album, None);
         assert_eq!(stray.track_number, None);
         assert_eq!(stray.track_artist, None);
+    }
+
+    // -----------------------------------------------------------------
+    // The queue panel's reading
+    // -----------------------------------------------------------------
+
+    /// The queue as `play_album` builds it: Geogaddi's two tracks, whose paths
+    /// are the ones [`started`] names.
+    fn geogaddi_queue() -> QueueVm {
+        vm::album_queue(&albums()[0], None)
+    }
+
+    fn states(list: &QueueList) -> Vec<QueueRowState> {
+        list.rows.iter().map(|row| row.state).collect()
+    }
+
+    #[test]
+    fn a_player_that_has_queued_nothing_has_no_queue_to_show() {
+        let player = PlayerState::new(Availability::Ready);
+        assert!(player.queue_list().is_none());
+        assert_eq!(player.queued(), 0);
+        assert!(
+            !player.play_pause_enabled(),
+            "nothing queued and nothing playing: the toggle can do nothing"
+        );
+    }
+
+    /// A queue that has been sent but not started lists everything as
+    /// upcoming, numbered from one, and counts rather than claiming a
+    /// position — "0 of 12" is not a place.
+    #[test]
+    fn a_queued_but_unstarted_queue_lists_everything_as_upcoming() {
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(geogaddi_queue());
+        let list = player.queue_list().expect("a queue was sent");
+
+        assert_eq!(list.album.as_deref(), Some("Geogaddi"));
+        assert_eq!(list.artist, "Boards of Canada");
+        assert_eq!(list.summary, "2 tracks · 6:40");
+        assert_eq!(
+            list.rows.iter().map(|row| row.position).collect::<Vec<_>>(),
+            vec![1, 2],
+            "the panel numbers from one"
+        );
+        assert_eq!(
+            list.rows
+                .iter()
+                .map(|r| r.title.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Ready Lets Go", "Music Is Math"]
+        );
+        assert_eq!(list.rows[0].duration, "3:20");
+        assert_eq!(
+            states(&list),
+            vec![QueueRowState::Upcoming, QueueRowState::Upcoming]
+        );
+        assert_eq!(player.queued(), 2);
+        assert!(player.play_pause_enabled(), "a queue makes Play meaningful");
+    }
+
+    /// The marking comes from `TrackStarted` and moves with it: everything
+    /// behind the playing row is played, everything ahead is upcoming, and the
+    /// summary counts the position.
+    #[test]
+    fn the_playing_row_is_marked_from_track_started_and_moves_with_it() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(geogaddi_queue());
+
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        let list = player.queue_list().expect("a queue");
+        assert_eq!(
+            states(&list),
+            vec![QueueRowState::Playing, QueueRowState::Upcoming]
+        );
+        assert_eq!(list.summary, "1 of 2 · 6:40");
+
+        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+        let list = player.queue_list().expect("a queue");
+        assert_eq!(
+            states(&list),
+            vec![QueueRowState::Played, QueueRowState::Playing]
+        );
+        assert_eq!(list.summary, "2 of 2 · 6:40");
+    }
+
+    /// The engine's position is believed only when the path at it agrees. A
+    /// `TrackStarted` naming a file this queue does not hold marks no row —
+    /// never row zero by default.
+    #[test]
+    fn a_track_this_queue_does_not_hold_marks_nothing() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(geogaddi_queue());
+        player.apply(&started("/m/strays/a.wav", 0), &albums);
+
+        let list = player.queue_list().expect("a queue");
+        assert_eq!(
+            states(&list),
+            vec![QueueRowState::Upcoming, QueueRowState::Upcoming],
+            "an unknown track must not mark the row its position points at"
+        );
+        assert_eq!(list.summary, "2 tracks · 6:40");
+    }
+
+    /// Position and path disagreeing — an event from the queue before last —
+    /// resolves by path, because the path is the track's identity.
+    #[test]
+    fn a_stale_position_is_corrected_by_the_path_it_arrived_with() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(geogaddi_queue());
+        // The engine says position 0; the file it names is the queue's second.
+        player.apply(&started("/m/boc/geogaddi/02.flac", 0), &albums);
+        assert_eq!(
+            states(&player.queue_list().expect("a queue")),
+            vec![QueueRowState::Played, QueueRowState::Playing]
+        );
+    }
+
+    /// A session ending keeps the queue — the engine keeps it too, and a later
+    /// Play starts from the top — but nothing in it is playing, so no row is
+    /// marked.
+    #[test]
+    fn ending_a_session_keeps_the_queue_and_marks_no_row() {
+        let albums = albums();
+        for ending in [Event::QueueEnded, Event::Stopped] {
+            let mut player = PlayerState::new(Availability::Ready);
+            player.note_queue_sent(geogaddi_queue());
+            player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+            player.apply(&ending, &albums);
+
+            let list = player
+                .queue_list()
+                .expect("the queue survives the session that played it");
+            assert_eq!(
+                states(&list),
+                vec![QueueRowState::Upcoming, QueueRowState::Upcoming],
+                "{ending:?} left a row marked"
+            );
+            assert_eq!(list.summary, "2 tracks · 6:40");
+            assert_eq!(player.queued(), 2);
+        }
+    }
+
+    /// A new queue replaces the list outright, and takes the old position with
+    /// it: a position into a list that no longer exists means nothing.
+    #[test]
+    fn a_fresh_queue_replaces_the_list_and_forgets_the_position() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(geogaddi_queue());
+        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+
+        player.note_queue_sent(vm::album_queue(&albums[1], None));
+        let list = player.queue_list().expect("the new queue");
+        assert_eq!(list.album.as_deref(), Some("Untitled"));
+        assert_eq!(list.rows.len(), 1);
+        assert_eq!(states(&list), vec![QueueRowState::Upcoming]);
+        assert_eq!(
+            list.summary, "1 track · 3:20",
+            "one track is a track, not tracks"
+        );
+    }
+
+    /// A gone engine cannot say where playback is, so the marking clears —
+    /// while the record of what *we* asked for, which is our own memory and
+    /// still true, stays.
+    #[test]
+    fn a_closed_engine_keeps_the_list_and_drops_the_marking() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(geogaddi_queue());
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        player.engine_closed();
+
+        let list = player.queue_list().expect("what we queued is still true");
+        assert_eq!(
+            states(&list),
+            vec![QueueRowState::Upcoming, QueueRowState::Upcoming]
+        );
+    }
+
+    /// A queue of tracks the scan read no duration for states no total, on the
+    /// same principle as the seek bar's `--:--`: an unknown is not a zero.
+    #[test]
+    fn a_queue_with_no_durations_claims_no_total() {
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(QueueVm {
+            album: None,
+            artist: vm::UNKNOWN_ARTIST.to_owned(),
+            items: vec![vm::QueueItemVm {
+                title: "stream.mp3".to_owned(),
+                artist: None,
+                duration: None,
+                path: PathBuf::from("/m/stream.mp3"),
+            }],
+        });
+        let list = player.queue_list().expect("a queue");
+        assert_eq!(list.summary, "1 track");
+        assert_eq!(list.album, None);
+        assert_eq!(list.rows[0].duration, "", "no duration, not 0:00");
+    }
+
+    /// A seek restarts the current track, and the `TrackStarted` it produces
+    /// must not move the marking off the row that is playing.
+    #[test]
+    fn a_seek_within_the_playing_track_leaves_the_marking_where_it_was() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(geogaddi_queue());
+        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+        // The engine restarts the same file at the same position after a seek.
+        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+        assert_eq!(
+            states(&player.queue_list().expect("a queue")),
+            vec![QueueRowState::Played, QueueRowState::Playing]
+        );
     }
 }

@@ -70,6 +70,27 @@
 //! goes out is the idempotent `SetMute { muted }` the protocol asks for
 //! rather than a toggle two front ends could disagree about.
 //!
+//! # Panels
+//!
+//! `Q` shows and hides the play queue, and <kbd>Ctrl</kbd>+<kbd>B</kbd>
+//! (<kbd>Cmd</kbd>+<kbd>B</kbd>) hides the right-hand rail outright and brings
+//! it back. Both resolve to the same messages the on-screen affordances send —
+//! the top bar's Queue toggle and each panel's ✕ — so there is no keyboard-only
+//! capability here, exactly as with the transport.
+//!
+//! `Q` is bare because it is a *view* key like `/`: it interrupts nothing, it
+//! is reversible by pressing it again, and a modifier on a key you will press
+//! dozens of times a session is a tax with no safety to buy. It is also free —
+//! foobar2000 and `MusicBee` both put queue-adjacent commands on it, and nothing
+//! in baz wanted `q`.
+//!
+//! <kbd>Ctrl</kbd>+<kbd>B</kbd> is the sidebar reflex from every editor
+//! written this decade, and it earns its modifier for the opposite reason: it
+//! is the *layout* key, the one that changes how much room the shelf gets, and
+//! those are conventionally modified. What comes back is what was dismissed
+//! (see [`crate::panels`]), so the pair is a true toggle rather than a
+//! destructive close.
+//!
 //! **The `XF86AudioRaiseVolume` family is deliberately not bound.** The
 //! transport media keys are bound (below) because `MediaPlayPause` means one
 //! thing everywhere; the volume keys do not. On every desktop they mean *the
@@ -146,6 +167,11 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Named(key::Named::ArrowDown) if bare => Some(Message::VolumeStep(-1)),
         Key::Character("m" | "M") if bare || shift => Some(Message::ToggleMute),
 
+        // Panels. `Q` shows what is playing next; Ctrl+B (Cmd+B) takes the
+        // whole rail away and gives it back (module docs).
+        Key::Character("q" | "Q") if bare || shift => Some(Message::ToggleQueue),
+        Key::Character("b" | "B") if command => Some(Message::TogglePanels),
+
         // Search. `/` is the reflex from every pager and browser; Ctrl+F
         // (Cmd+F) is the reflex from every document. Shift is tolerated on
         // `/` because plenty of layouts need it to type the character.
@@ -153,7 +179,7 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Character("f" | "F") if command => Some(Message::FocusSearch),
 
         // Unchanged from the first keyboard pass: clear the search, else
-        // close the side panel.
+        // close what the rail is showing.
         Key::Named(key::Named::Escape) if bare => Some(Message::EscapePressed),
 
         // Media keys, for the machines that deliver them to the focused
@@ -233,6 +259,8 @@ mod tests {
             (named(key::Named::ArrowDown), none()),
             (ch("n"), none()),
             (ch("m"), none()),
+            (ch("q"), none()),
+            (ch("b"), Modifiers::COMMAND),
             (ch("/"), none()),
             (ch("f"), Modifiers::COMMAND),
             (named(key::Named::Escape), none()),
@@ -344,6 +372,32 @@ mod tests {
         );
     }
 
+    /// `Q` shows and hides the queue, in either case, with no modifier — a
+    /// view key, like `/`.
+    #[test]
+    fn q_toggles_the_queue_panel() {
+        assert_eq!(bind(&ch("q"), none()).as_deref(), Some("ToggleQueue"));
+        assert_eq!(
+            bind(&ch("Q"), Modifiers::SHIFT).as_deref(),
+            Some("ToggleQueue")
+        );
+    }
+
+    /// Ctrl+B (Cmd+B) is the layout key: it hides the rail and brings it back.
+    /// Bare `b` types a `b`.
+    #[test]
+    fn ctrl_b_hides_and_restores_the_rail() {
+        assert_eq!(
+            bind(&ch("b"), Modifiers::COMMAND).as_deref(),
+            Some("TogglePanels")
+        );
+        assert_eq!(
+            bind(&ch("B"), Modifiers::COMMAND).as_deref(),
+            Some("TogglePanels")
+        );
+        assert_eq!(bind(&ch("b"), none()), None);
+    }
+
     #[test]
     fn search_focus_has_two_spellings() {
         assert_eq!(bind(&ch("/"), none()).as_deref(), Some("FocusSearch"));
@@ -417,6 +471,10 @@ mod tests {
             (ch("n"), Modifiers::ALT),
             (ch("m"), Modifiers::COMMAND),
             (ch("m"), Modifiers::ALT),
+            (ch("q"), Modifiers::COMMAND),
+            (ch("q"), Modifiers::ALT),
+            (ch("b"), Modifiers::ALT),
+            (ch("b"), Modifiers::COMMAND | Modifiers::SHIFT),
             (ch("/"), Modifiers::COMMAND),
             (ch("f"), Modifiers::ALT),
             (named(key::Named::Escape), Modifiers::COMMAND),
@@ -444,7 +502,6 @@ mod tests {
             named(key::Named::F1),
             named(key::Named::MediaTrackPrevious),
             ch("a"),
-            ch("q"),
             ch("z"),
             ch("1"),
             ch("."),

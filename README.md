@@ -40,7 +40,9 @@ The full vision, competitive analysis, and staged scope live in
 | <kbd>↑</kbd> <kbd>↓</kbd> | volume up / down, one step (~1 dB at the top of the fader) |
 | <kbd>M</kbd> | mute / unmute |
 | <kbd>/</kbd>, or <kbd>Ctrl</kbd>+<kbd>F</kbd> | focus the search field |
-| <kbd>Esc</kbd> | clear the search, else close the album panel |
+| <kbd>Q</kbd> | show / hide the play queue |
+| <kbd>Ctrl</kbd>+<kbd>B</kbd> | hide the side panel, or bring it back |
+| <kbd>Esc</kbd> | clear the search, else close the open panel |
 
 Media keys (play/pause, next, stop) work too — on Linux they usually arrive
 over MPRIS rather than as key presses, which is the same thing by a different

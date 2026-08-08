@@ -133,7 +133,10 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
             .font(theme::MEDIUM)
             .wrapping(text::Wrapping::None),
     );
-    let selected = shelf.selected == Some(album.id);
+    // Selected *and on screen*: a tile whose panel is hidden behind the queue,
+    // or dismissed outright, must not keep claiming the selection styling —
+    // the highlight says "that panel is showing this album".
+    let selected = shelf.panels.showing_album(album.id);
     button(
         column![
             sleeve,

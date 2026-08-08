@@ -46,10 +46,11 @@ use iced::{Element, Size, Subscription, Task, window};
 use lru::LruCache;
 
 use crate::mpris::Mpris;
+use crate::panels::{Panels, Rail};
 use crate::playback::{Playback, PlayerEvent};
 use crate::player::{Availability, PlayerState};
 use crate::scan::ScanUpdate;
-use crate::views::side_panel::PANEL_W;
+use crate::theme::PANEL_W;
 use crate::{art, config, keys, mpris, player, scan, shelf, theme, views, vm};
 
 /// Approximate top-bar height, used only for the pre-first-scroll estimate
@@ -121,8 +122,16 @@ pub(crate) enum Message {
     SetupSubmit,
     /// Shelf: search text changed.
     SearchChanged(String),
-    /// Esc anywhere: clear the search, else close the side panel.
+    /// Esc anywhere: clear the search, else close what the rail is showing.
     EscapePressed,
+    /// Top bar's Queue toggle, or `Q`: show the play queue, or put back
+    /// whatever it was covering (see [`crate::panels`]).
+    ToggleQueue,
+    /// Ctrl+B: dismiss the right-hand rail and give the shelf its width back,
+    /// or bring back the panel that was dismissed.
+    TogglePanels,
+    /// A panel's ✕: close whichever panel the rail is showing.
+    ClosePanel,
     /// Shelf scrolled; carries the real viewport geometry.
     Scrolled(Viewport),
     /// Window resized (approximate grid geometry until the next scroll).
@@ -589,13 +598,16 @@ impl App {
         let Some(album) = state.albums.iter().find(|album| album.id == id) else {
             return;
         };
-        let paths = vm::album_queue(album, state.edition_choice.get(&id).copied());
-        if paths.is_empty() {
+        let queue = vm::album_queue(album, state.edition_choice.get(&id).copied());
+        if queue.is_empty() {
             return;
         }
-        let queued = paths.len();
+        // One construction, two uses: the payload the engine is sent and the
+        // list the queue panel shows come from the same value, so they cannot
+        // describe different music (see [`vm::QueueVm`]).
+        let paths = queue.paths();
         if self.playback.send(Command::SetQueue { paths }) && self.playback.send(Command::Play) {
-            self.player.note_queue_sent(queued);
+            self.player.note_queue_sent(queue);
             self.player.note_transport_sent();
         } else {
             self.player.engine_closed();
@@ -687,8 +699,10 @@ pub(crate) struct Shelf {
     pub(crate) visible: Vec<usize>,
     /// The live search text.
     pub(crate) query: String,
-    /// The album whose side panel is open, if any.
-    pub(crate) selected: Option<u64>,
+    /// What the right-hand rail is showing, and what it would show — the
+    /// album selection included, since selection and visibility are one
+    /// question (see [`crate::panels`]).
+    pub(crate) panels: Panels,
     /// Which format of an album the user picked, for albums where they
     /// picked one. Absent = the ranked-best edition (see
     /// [`vm::selected_edition`]).
@@ -756,7 +770,7 @@ impl Shelf {
             visible: (0..albums.len()).collect(),
             albums,
             query: String::new(),
-            selected: None,
+            panels: Panels::new(),
             edition_choice: HashMap::new(),
             thumbs: LruCache::new(
                 NonZeroUsize::new(art::THUMB_CACHE_ENTRIES).unwrap_or(NonZeroUsize::MIN),
@@ -792,10 +806,7 @@ impl Shelf {
             }
             Message::EscapePressed => {
                 if self.query.is_empty() {
-                    if self.selected.take().is_some() {
-                        self.grid_size.width += PANEL_W;
-                    }
-                    Task::none()
+                    self.reflow(Panels::close)
                 } else {
                     self.query.clear();
                     self.refilter();
@@ -815,15 +826,15 @@ impl Shelf {
             }
             Message::WindowResized(size) => {
                 // Estimate until the next scroll event reports real bounds.
-                let panel = if self.selected.is_some() {
-                    PANEL_W
-                } else {
-                    0.0
-                };
-                self.grid_size =
-                    Size::new(size.width - panel, (size.height - TOP_BAR_H).max(100.0));
+                self.grid_size = Size::new(
+                    size.width - rail_width(&self.panels),
+                    (size.height - TOP_BAR_H).max(100.0),
+                );
                 self.request_visible_thumbs()
             }
+            Message::ToggleQueue => self.reflow(Panels::toggle_queue),
+            Message::TogglePanels => self.reflow(Panels::toggle_hidden),
+            Message::ClosePanel => self.reflow(Panels::close),
             Message::AlbumClicked(id) => {
                 let now = Instant::now();
                 let double = self
@@ -831,32 +842,19 @@ impl Shelf {
                     .take()
                     .is_some_and(|(last, at)| last == id && now.duration_since(at) <= DOUBLE_CLICK);
                 if double {
-                    // Second press of a double-click. The first press
-                    // already ran the selection toggle, so just make sure
-                    // the album ends up selected (re-select if the first
-                    // press toggled it *off*), then hand play upward.
-                    if self.selected != Some(id) {
-                        if self.selected.is_none() {
-                            self.grid_size.width -= PANEL_W;
-                        }
-                        self.selected = Some(id);
-                    }
-                    return Task::batch([
-                        self.request_visible_thumbs(),
-                        Task::done(Message::PlayAlbum(id)),
-                    ]);
+                    // Second press of a double-click. The first press already
+                    // ran the selection toggle, so just make sure the album
+                    // ends up on screen (re-select if the first press toggled
+                    // it *off*), then hand play upward.
+                    let task = if self.panels.showing_album(id) {
+                        Task::none()
+                    } else {
+                        self.reflow(|panels| panels.select(id))
+                    };
+                    return Task::batch([task, Task::done(Message::PlayAlbum(id))]);
                 }
                 self.last_click = Some((id, now));
-                if self.selected == Some(id) {
-                    self.selected = None;
-                    self.grid_size.width += PANEL_W;
-                } else {
-                    if self.selected.is_none() {
-                        self.grid_size.width -= PANEL_W;
-                    }
-                    self.selected = Some(id);
-                }
-                self.request_visible_thumbs()
+                self.reflow(|panels| panels.select(id))
             }
             Message::EditionSelected(id, key) => {
                 // Pure view state: the track list and the *next* queue follow
@@ -879,6 +877,28 @@ impl Shelf {
             Message::ScanTick => self.drain_scan(),
             _ => Task::none(),
         }
+    }
+
+    /// Apply a panel transition and keep the grid's width estimate in step
+    /// with it.
+    ///
+    /// Every change to what the rail is showing goes through here, which is
+    /// what makes the reflow a single fact rather than a rule repeated at each
+    /// call site (it was, and one of the copies was already wrong: Escape used
+    /// to widen the grid whether or not the panel it closed had been on
+    /// screen). The width moves by exactly one [`PANEL_W`] and only when the
+    /// rail's *occupancy* changes — swapping the album panel for the queue
+    /// moves nothing, because both are that wide (see [`crate::panels`]).
+    ///
+    /// The estimate is adjusted rather than recomputed so that the real
+    /// viewport bounds a scroll event last reported are not thrown away; the
+    /// next [`Message::Scrolled`] replaces it with measured geometry either
+    /// way.
+    fn reflow(&mut self, transition: impl FnOnce(&mut Panels)) -> Task<Message> {
+        let before = rail_width(&self.panels);
+        transition(&mut self.panels);
+        self.grid_size.width += before - rail_width(&self.panels);
+        self.request_visible_thumbs()
     }
 
     /// Recompute `visible` for the current query (shelf order preserved —
@@ -1017,25 +1037,52 @@ impl Shelf {
         Task::batch(tasks)
     }
 
-    /// The shelf screen: the top bar over the grid, with the side panel
-    /// beside it when an album is selected. Composition only — the surfaces
+    /// The shelf screen: the top bar over the grid, with the rail's panel
+    /// beside it when one is showing. Composition only — the surfaces
     /// themselves are [`crate::views`].
+    ///
+    /// One rail, one panel: the album panel and the queue occupy the same
+    /// slot, so this is a three-way choice rather than a stack of optional
+    /// columns, and the shelf's width has exactly two values.
     fn view<'a>(&'a self, player: &'a PlayerState) -> Element<'a, Message> {
-        let body: Element<'_, Message> = match self.selected_album() {
-            Some(album) => row![
+        let rail: Option<Element<'_, Message>> = match self.panels.rail() {
+            None => None,
+            Some(Rail::Queue) => Some(views::queue_panel::view(player)),
+            // A selection whose album vanished under a rescan renders no
+            // panel rather than an empty one; the next scroll event squares
+            // the grid estimate up.
+            Some(Rail::Album) => self
+                .selected_album()
+                .map(|album| views::side_panel::view(self, album, player)),
+        };
+        let body: Element<'_, Message> = match rail {
+            Some(panel) => row![
                 views::shelf::view(self, player),
                 vertical_rule(1).style(theme::hairline),
-                views::side_panel::view(self, album, player)
+                panel
             ]
             .into(),
             None => views::shelf::view(self, player),
         };
-        column![views::top_bar::view(self), body].into()
+        column![views::top_bar::view(self, player), body].into()
     }
 
     fn selected_album(&self) -> Option<&vm::AlbumVm> {
-        let id = self.selected?;
+        let id = self.panels.selected()?;
         self.albums.iter().find(|album| album.id == id)
+    }
+}
+
+/// How much width the right-hand rail is taking from the shelf.
+///
+/// The one place pixels meet [`crate::panels`]'s pure state machine: the
+/// machine answers *whether* a panel is showing, and both panels are
+/// [`PANEL_W`] wide, so this is the whole conversion.
+fn rail_width(panels: &Panels) -> f32 {
+    if panels.rail().is_some() {
+        PANEL_W
+    } else {
+        0.0
     }
 }
 
@@ -1130,6 +1177,65 @@ mod tests {
         for (request, expected) in cases {
             assert_eq!(format!("{:?}", message_for(request)), expected);
         }
+    }
+
+    /// The reflow, in the one place its arithmetic lives: the shelf loses
+    /// exactly one panel width when the rail becomes occupied, gets it back
+    /// when the rail empties, and neither notices nor moves when the rail
+    /// swaps one panel for the other.
+    #[test]
+    fn the_rail_costs_the_shelf_one_panel_width_and_a_swap_costs_nothing() {
+        let mut panels = Panels::new();
+        assert!(rail_width(&panels).abs() < f32::EPSILON, "closed: no cost");
+
+        panels.select(1);
+        assert!((rail_width(&panels) - PANEL_W).abs() < f32::EPSILON);
+
+        panels.toggle_queue();
+        assert!(
+            (rail_width(&panels) - PANEL_W).abs() < f32::EPSILON,
+            "album -> queue is a swap, not a second panel"
+        );
+        panels.select(2);
+        assert!((rail_width(&panels) - PANEL_W).abs() < f32::EPSILON);
+
+        panels.toggle_hidden();
+        assert!(
+            rail_width(&panels).abs() < f32::EPSILON,
+            "hiding gives the width back"
+        );
+        panels.toggle_hidden();
+        assert!((rail_width(&panels) - PANEL_W).abs() < f32::EPSILON);
+        panels.close();
+        assert!(rail_width(&panels).abs() < f32::EPSILON);
+    }
+
+    /// Every panel affordance the interface offers resolves to the same
+    /// message the keyboard sends — the transport's "one path per intention"
+    /// rule, applied to the rail.
+    #[test]
+    fn the_panel_controls_and_their_keys_are_the_same_press() {
+        use iced::keyboard::{Key, Modifiers};
+
+        let from_key = keys::binding_for(
+            &Key::Character("q".into()),
+            Modifiers::empty(),
+            keys::Focus::Elsewhere,
+        );
+        assert_eq!(
+            format!("{from_key:?}"),
+            format!("{:?}", Some(Message::ToggleQueue))
+        );
+
+        let from_key = keys::binding_for(
+            &Key::Character("b".into()),
+            Modifiers::COMMAND,
+            keys::Focus::Elsewhere,
+        );
+        assert_eq!(
+            format!("{from_key:?}"),
+            format!("{:?}", Some(Message::TogglePanels))
+        );
     }
 
     /// The bottom bar's toggle and MPRIS `PlayPause` are literally the same
