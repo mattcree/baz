@@ -124,7 +124,7 @@ pub(crate) fn view(
                     .padding(theme::scroll_gutter())
                 )
                 .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
-                .style(move |_theme, status| theme::scrollbar(room, status)),
+                .style(move |_theme, status| theme::scrollbar(room, room.plinth_lit, status)),
             ]
             .spacing(theme::GAP_SM)
             .into()
@@ -156,7 +156,7 @@ fn header_row() -> Element<'static, Message> {
             .font(theme::MEDIUM)
             .color(room.paper),
         Space::with_width(Length::Fill),
-        close_button("Close queue", Message::CloseQueue),
+        close_button(room.plinth_lit, "Close queue", Message::CloseQueue),
     ]
     .align_y(iced::Alignment::Center)
     .into()
@@ -389,7 +389,7 @@ fn remove_slot(index: usize, offered: bool) -> Element<'static, Message> {
             .width(Length::Fixed(theme::STEPPER_HIT))
             .height(Length::Fixed(theme::STEPPER_HIT))
             .padding(0)
-            .style(move |_theme, status| theme::transport(room, status))
+            .style(move |_theme, status| theme::transport(room, room.plinth_lit, status))
             .on_press(Message::RemoveQueued(index)),
         text("Remove from the queue")
             .size(theme::SIZE_CAPTION)

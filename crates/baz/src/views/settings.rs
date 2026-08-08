@@ -92,7 +92,7 @@ pub(crate) fn view(player: &PlayerState, window_width: f32) -> Element<'_, Messa
                 .padding(theme::scroll_gutter()),
         )
         .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
-        .style(move |_theme, status| theme::scrollbar(room, status))
+        .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
         .height(Length::Fill),
     )
     .width(Length::Fixed(content_width(window_width, beside_the_list)))
@@ -179,7 +179,7 @@ fn header() -> Element<'static, Message> {
     // every navigation.
     .height(Length::Fixed(theme::TRANSPORT_HIT))
     .padding(theme::pad(0.0, theme::GAP_SM))
-    .style(|_theme, status| theme::word_button(room, status))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
     .on_press(Message::ToggleSettings);
     column![
         container(
@@ -200,7 +200,7 @@ fn header() -> Element<'static, Message> {
             .align_y(iced::Alignment::Center),
         )
         .padding(theme::pad(theme::GAP_SM + 2.0, theme::GAP_LG)),
-        horizontal_rule(1).style(move |_theme| theme::hairline(room)),
+        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
     ]
     .into()
 }
@@ -367,8 +367,9 @@ fn section_heading(name: &'static str, sentence: &'static str) -> Element<'stati
 /// what the inspector's rule against the shelf does.
 fn readout_block(lines: Vec<(String, iced::Color)>) -> Element<'static, Message> {
     let room = theme::active();
-    let mut block = column![horizontal_rule(1).style(move |_theme| theme::hairline(room))]
-        .spacing(theme::GAP_SM);
+    let mut block =
+        column![horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall))]
+            .spacing(theme::GAP_SM);
     let mut readings = column![].spacing(theme::GAP_XXS);
     for (line, ink) in lines {
         readings = readings.push(
@@ -484,7 +485,7 @@ fn stepper(glyph: &'static str, enabled: bool, message: Message) -> Element<'sta
     .width(Length::Fixed(theme::STEPPER_HIT))
     .height(Length::Fixed(theme::STEPPER_HIT))
     .padding(0)
-    .style(move |_theme, status| theme::transport(room, status))
+    .style(move |_theme, status| theme::transport(room, room.wall, status))
     .on_press_maybe(enabled.then_some(message))
     .into()
 }

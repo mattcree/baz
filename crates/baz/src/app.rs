@@ -1700,7 +1700,7 @@ impl Shelf {
         let body: Element<'_, Message> = match inspector {
             Some(panel) => row![
                 views::shelf::view(self, player),
-                vertical_rule(1).style(move |_theme| theme::hairline(room)),
+                vertical_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
                 panel
             ]
             .into(),

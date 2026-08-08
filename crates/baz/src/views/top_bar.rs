@@ -94,7 +94,7 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
                 .align_y(iced::Alignment::Center),
         )
         .padding(theme::pad(theme::GAP_SM + 2.0, theme::GAP_LG)),
-        horizontal_rule(1).style(move |_theme| theme::hairline(room)),
+        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
     ]
     .into()
 }
@@ -135,7 +135,7 @@ fn settings_toggle() -> Element<'static, Message> {
     // aligned, and the difference is exactly what "clunky" describes.
     .height(Length::Fixed(theme::TRANSPORT_HIT))
     .padding(theme::pad(0.0, theme::GAP_SM))
-    .style(|_theme, status| theme::word_button(room, status))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
     .on_press(Message::ToggleSettings)
     .into()
 }

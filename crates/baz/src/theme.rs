@@ -278,18 +278,68 @@ const LAMP_WASH_A: f32 = 0.10;
 const LAMP_WASH_PRESS_A: f32 = 0.20;
 
 impl Palette {
-    /// Hairline border: findable when you look, invisible when you don't.
-    /// The room's ink at [`HAIRLINE_A`].
+    /// `ink` at `opacity` over `ground`, **as an opaque colour** — the fix for
+    /// the single largest visual defect in the product
+    /// (`docs/design/05-toolkit-and-visual-gap.md` D1).
+    ///
+    /// # Why an opaque colour and not an alpha
+    ///
+    /// **CSS composites `rgba()` in sRGB. iced composites in linear light.**
+    /// `iced_graphics-0.13.0/src/color.rs:33` packs every colour through
+    /// `into_linear()` before it reaches the shader; the GPU blends
+    /// source-over in linear space and the sRGB surface encodes on write. Every
+    /// number in this room's spec was written in the first model and drawn in
+    /// the second.
+    ///
+    /// Measured off the committed renders, predicted to the byte in all three
+    /// channels: `hairline` asked for 7 % and drew `#454442`, which **reads as
+    /// ink 26 %** — 3.7× its specified weight. `hairline_strong` 15 % drew
+    /// `#63615D`, ink 39 %. `paper_ring` 45 % drew `#A3A099`, ink 68 %. Every
+    /// separator, every control edge, the focus ring, the scrollbar and the
+    /// selection wash were all one to two ink-steps too heavy at once. Nothing
+    /// was individually broken; everything was one notch loud, which is the
+    /// whole of *"it doesn't look amazing"*.
+    ///
+    /// And it **inverts between rooms**: on Reading Room's light ground the same
+    /// 7 % draws `#E7E4DD`, which reads as ink **4 %** — half its weight instead
+    /// of four times it. So one token drew a shout in the dark room and a
+    /// whisper in the light one, and the "one token, four rooms" abstraction the
+    /// whole palette indirection was built for did not hold.
+    ///
+    /// An **opaque** colour is immune to the blend space by construction: there
+    /// is no blend. So every mark below is composited *here*, in sRGB, in the
+    /// model its number was written in, and handed to the renderer as a colour
+    /// rather than as an instruction. It costs one parameter — the ground the
+    /// mark lands on — which every call site already knows.
+    ///
+    /// The alternative was iced's `web-colors` feature, and it is rejected: it
+    /// is a whole-renderer switch that also changes the surface format, the
+    /// image-atlas format and glyphon's colour mode, so it would change how
+    /// **album art** renders. Fixing chrome by changing how the works are drawn
+    /// is not a fix.
     #[must_use]
-    pub const fn hairline(&self) -> Color {
-        alpha(self.paper, HAIRLINE_A)
+    pub fn ink_over(ink: Color, ground: Color, opacity: f32) -> Color {
+        let mix = |over: f32, under: f32| opacity.mul_add(over - under, under);
+        Color {
+            r: mix(ink.r, ground.r),
+            g: mix(ink.g, ground.g),
+            b: mix(ink.b, ground.b),
+            a: 1.0,
+        }
+    }
+
+    /// Hairline border on `ground`: findable when you look, invisible when you
+    /// don't. The room's ink at [`HAIRLINE_A`], composited by [`Palette::ink_over`].
+    #[must_use]
+    pub fn hairline(&self, ground: Color) -> Color {
+        Self::ink_over(self.paper, ground, HAIRLINE_A)
     }
 
     /// The hairline, firmer — a selected control's edge, the playing row's
     /// edge. The room's ink at [`HAIRLINE_STRONG_A`].
     #[must_use]
-    pub const fn hairline_strong(&self) -> Color {
-        alpha(self.paper, HAIRLINE_STRONG_A)
+    pub fn hairline_strong(&self, ground: Color) -> Color {
+        Self::ink_over(self.paper, ground, HAIRLINE_STRONG_A)
     }
 
     /// Keyboard focus, on the focused `text_input`'s border and nowhere else.
@@ -299,8 +349,8 @@ impl Palette {
     /// launch — so an amber focus ring made the first frame baz ever drew a
     /// lit lamp with nothing playing.
     #[must_use]
-    pub const fn paper_ring(&self) -> Color {
-        alpha(self.paper, self.ring_alpha)
+    pub fn paper_ring(&self, ground: Color) -> Color {
+        Self::ink_over(self.paper, ground, self.ring_alpha)
     }
 
     /// Selected text in a `text_input`.
@@ -311,8 +361,8 @@ impl Palette {
     /// their own ink — which is why the contrast test measures the *ink on the
     /// composited wash* rather than the wash itself.
     #[must_use]
-    pub const fn select_wash(&self) -> Color {
-        alpha(self.paper, SELECT_WASH_A)
+    pub fn select_wash(&self, ground: Color) -> Color {
+        Self::ink_over(self.paper, ground, SELECT_WASH_A)
     }
 
     /// The accent as a glow: the playing sleeve's halo, and nothing else.
@@ -323,27 +373,27 @@ impl Palette {
 
     /// An icon button's hover wash — the room's ink at [`INK_WASH_A`].
     #[must_use]
-    pub const fn ink_wash(&self) -> Color {
-        alpha(self.paper, INK_WASH_A)
+    pub fn ink_wash(&self, ground: Color) -> Color {
+        Self::ink_over(self.paper, ground, INK_WASH_A)
     }
 
     /// An icon button's pressed wash — the room's ink at [`INK_WASH_PRESS_A`].
     #[must_use]
-    pub const fn ink_wash_press(&self) -> Color {
-        alpha(self.paper, INK_WASH_PRESS_A)
+    pub fn ink_wash_press(&self, ground: Color) -> Color {
+        Self::ink_over(self.paper, ground, INK_WASH_PRESS_A)
     }
 
     /// The primary action's hovered ground — the accent at [`LAMP_WASH_A`].
     #[must_use]
-    pub const fn lamp_wash(&self) -> Color {
-        alpha(self.lamp, LAMP_WASH_A)
+    pub fn lamp_wash(&self, ground: Color) -> Color {
+        Self::ink_over(self.lamp, ground, LAMP_WASH_A)
     }
 
     /// The primary action's pressed ground — the accent at
     /// [`LAMP_WASH_PRESS_A`].
     #[must_use]
-    pub const fn lamp_wash_press(&self) -> Color {
-        alpha(self.lamp, LAMP_WASH_PRESS_A)
+    pub fn lamp_wash_press(&self, ground: Color) -> Color {
+        Self::ink_over(self.lamp, ground, LAMP_WASH_PRESS_A)
     }
 
     /// A group or section heading: the room's quietest voice, and the only
@@ -906,7 +956,11 @@ pub const VOLUME_BLOCK_W: f32 = TRANSPORT_HIT + GAP_SM + VOLUME_W;
 /// — findable when you look for it, invisible when you are not.
 #[must_use]
 pub fn detent_ink(p: &Palette, engaged: bool) -> Color {
-    if engaged { p.paper } else { p.hairline() }
+    if engaged {
+        p.paper
+    } else {
+        p.hairline(p.recess)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1106,7 +1160,7 @@ pub fn list_scrollbar() -> scrollable::Scrollbar {
 /// stock blue-grey iced draws otherwise is the one thing on screen that is not
 /// from this palette.
 #[must_use]
-pub fn scrollbar(p: &Palette, status: scrollable::Status) -> scrollable::Style {
+pub fn scrollbar(p: &Palette, on: Color, status: scrollable::Status) -> scrollable::Style {
     let active = matches!(
         status,
         scrollable::Status::Hovered {
@@ -1122,9 +1176,9 @@ pub fn scrollbar(p: &Palette, status: scrollable::Status) -> scrollable::Style {
         border: Border::default(),
         scroller: scrollable::Scroller {
             color: if active {
-                p.hairline_strong()
+                p.hairline_strong(on)
             } else {
-                p.hairline()
+                p.hairline(on)
             },
             border: Border {
                 color: Color::TRANSPARENT,
@@ -1145,18 +1199,19 @@ pub fn scrollbar(p: &Palette, status: scrollable::Status) -> scrollable::Style {
 /// tick in paper ink.
 ///
 /// No accent. Arming clipping prevention is a *setting*, not playback truth,
-/// and the lamp is reserved (see [`panel_toggle`]); a checked box says so with
+/// and the lamp is reserved (see [`segment`]); a checked box says so with
 /// the surface step and the hairline the room already uses for "selected".
 #[must_use]
 pub fn check(p: &Palette, status: checkbox::Status) -> checkbox::Style {
     let (background, border_color) = match status {
         checkbox::Status::Active { is_checked } => (
             if is_checked { p.plinth_lit } else { p.recess },
-            p.hairline_strong(),
+            p.hairline_strong(p.plinth_lit),
         ),
-        checkbox::Status::Hovered { .. } => (p.plinth_lit, p.hairline_strong()),
+        checkbox::Status::Hovered { .. } => (p.plinth_lit, p.hairline_strong(p.plinth_lit)),
         checkbox::Status::Disabled { is_checked } => {
-            (if is_checked { p.plinth } else { p.recess }, p.hairline())
+            let box_ground = if is_checked { p.plinth } else { p.recess };
+            (box_ground, p.hairline(box_ground))
         }
     };
     let disabled = matches!(status, checkbox::Status::Disabled { .. });
@@ -1182,7 +1237,7 @@ pub fn check(p: &Palette, status: checkbox::Status) -> checkbox::Style {
 /// this function can see resolves to one number on one ramp, which is what
 /// lets a transition interpolate it later without any of the callers changing
 /// (`docs/design/04-fluidity.md`). The two readings it *cannot* see —
-/// [`GLYPH_OPACITY_HOVER`] and [`GLYPH_OPACITY_PRESS`] — are on the same ramp
+/// [`GLYPH_OPACITY_HOVER`] and the pressed reading beside it — are on the same ramp
 /// and named for the same reason.
 #[must_use]
 pub fn glyph_opacity(enabled: bool, pending: bool) -> f32 {
@@ -1317,7 +1372,7 @@ pub fn tile_rule(p: &Palette, hovered: bool, selected: bool) -> container::Style
     let ink = if selected {
         p.paper_faint
     } else if hovered {
-        p.hairline_strong()
+        p.hairline_strong(p.wall)
     } else {
         Color::TRANSPARENT
     };
@@ -1407,10 +1462,10 @@ pub fn lamp_dot(p: &Palette) -> container::Style {
 /// move the glyph under the pointer by a pixel, in the bar, where nothing may
 /// move.
 #[must_use]
-pub fn transport(p: &Palette, status: button::Status) -> button::Style {
+pub fn transport(p: &Palette, on: Color, status: button::Status) -> button::Style {
     let (background, text_color) = match status {
-        button::Status::Hovered => (p.ink_wash(), p.paper),
-        button::Status::Pressed => (p.ink_wash_press(), p.paper),
+        button::Status::Hovered => (p.ink_wash(on), p.paper),
+        button::Status::Pressed => (p.ink_wash_press(on), p.paper),
         button::Status::Disabled => (Color::TRANSPARENT, p.paper_muted),
         button::Status::Active => (Color::TRANSPARENT, p.paper),
     };
@@ -1442,10 +1497,10 @@ pub fn transport(p: &Palette, status: button::Status) -> button::Style {
 /// Chrome recedes; the word is the control. Geometry is identical in all four
 /// states.
 #[must_use]
-pub fn word_button(p: &Palette, status: button::Status) -> button::Style {
+pub fn word_button(p: &Palette, on: Color, status: button::Status) -> button::Style {
     let (background, text_color) = match status {
-        button::Status::Hovered => (p.ink_wash(), p.paper),
-        button::Status::Pressed => (p.ink_wash_press(), p.paper),
+        button::Status::Hovered => (p.ink_wash(on), p.paper),
+        button::Status::Pressed => (p.ink_wash_press(on), p.paper),
         button::Status::Disabled => (Color::TRANSPARENT, p.paper_muted),
         button::Status::Active => (Color::TRANSPARENT, p.paper_dim),
     };
@@ -1479,9 +1534,9 @@ pub fn word_button(p: &Palette, status: button::Status) -> button::Style {
 pub fn primary(p: &Palette, status: button::Status) -> button::Style {
     let (background, border, text_color) = match status {
         button::Status::Active => (Color::TRANSPARENT, p.lamp, p.paper),
-        button::Status::Hovered => (p.lamp_wash(), p.lamp_bright, p.paper),
-        button::Status::Pressed => (p.lamp_wash_press(), p.lamp_deep, p.paper),
-        button::Status::Disabled => (Color::TRANSPARENT, p.hairline(), p.paper_muted),
+        button::Status::Hovered => (p.lamp_wash(p.plinth), p.lamp_bright, p.paper),
+        button::Status::Pressed => (p.lamp_wash_press(p.plinth), p.lamp_deep, p.paper),
+        button::Status::Disabled => (Color::TRANSPARENT, p.hairline(p.plinth), p.paper_muted),
     };
     button::Style {
         background: Some(Background::Color(background)),
@@ -1512,9 +1567,9 @@ pub fn primary(p: &Palette, status: button::Status) -> button::Style {
 #[must_use]
 pub fn input(p: &Palette, status: text_input::Status) -> text_input::Style {
     let border_color = match status {
-        text_input::Status::Focused => p.paper_ring(),
-        text_input::Status::Hovered => p.hairline_strong(),
-        text_input::Status::Active | text_input::Status::Disabled => p.hairline(),
+        text_input::Status::Focused => p.paper_ring(p.recess),
+        text_input::Status::Hovered => p.hairline_strong(p.recess),
+        text_input::Status::Active | text_input::Status::Disabled => p.hairline(p.recess),
     };
     text_input::Style {
         background: Background::Color(p.recess),
@@ -1526,7 +1581,7 @@ pub fn input(p: &Palette, status: text_input::Status) -> text_input::Style {
         icon: p.paper_faint,
         placeholder: p.paper_faint,
         value: p.paper,
-        selection: p.select_wash(),
+        selection: p.select_wash(p.recess),
     }
 }
 
@@ -1549,7 +1604,7 @@ pub fn seek(p: &Palette, status: slider::Status) -> slider::Style {
             backgrounds: (Background::Color(fill), Background::Color(p.recess)),
             width: RAIL,
             border: Border {
-                color: p.hairline(),
+                color: p.hairline(p.recess),
                 width: 1.0,
                 radius: (RAIL / 2.0).into(),
             },
@@ -1574,7 +1629,7 @@ pub fn seek_inert(p: &Palette, _status: slider::Status) -> slider::Style {
             backgrounds: (Background::Color(p.recess), Background::Color(p.recess)),
             width: RAIL,
             border: Border {
-                color: p.hairline(),
+                color: p.hairline(p.recess),
                 width: 1.0,
                 radius: (RAIL / 2.0).into(),
             },
@@ -1637,7 +1692,7 @@ fn volume_style(p: &Palette, fill: Color) -> slider::Style {
             backgrounds: (Background::Color(fill), Background::Color(p.recess)),
             width: RAIL,
             border: Border {
-                color: p.hairline(),
+                color: p.hairline(p.recess),
                 width: 1.0,
                 radius: (RAIL / 2.0).into(),
             },
@@ -1659,7 +1714,7 @@ pub fn segmented(p: &Palette) -> container::Style {
     container::Style {
         background: Some(Background::Color(p.recess)),
         border: Border {
-            color: p.hairline(),
+            color: p.hairline(p.recess),
             width: 1.0,
             radius: RADIUS_CTRL.into(),
         },
@@ -1679,7 +1734,7 @@ pub fn preview_tip(p: &Palette) -> container::Style {
         background: Some(Background::Color(p.plinth_lit)),
         text_color: Some(p.paper_dim),
         border: Border {
-            color: p.hairline_strong(),
+            color: p.hairline_strong(p.plinth_lit),
             width: 1.0,
             radius: RADIUS_CHIP.into(),
         },
@@ -1709,7 +1764,7 @@ pub fn segment(p: &Palette, status: button::Status, selected: bool) -> button::S
         text_color,
         border: Border {
             color: if selected {
-                p.hairline_strong()
+                p.hairline_strong(p.plinth_lit)
             } else {
                 Color::TRANSPARENT
             },
@@ -1747,11 +1802,17 @@ pub fn bar(p: &Palette) -> container::Style {
     }
 }
 
-/// Hairline rules dividing chrome from shelf.
+/// Hairline rules dividing chrome from shelf, drawn on `on`.
+///
+/// The ground is a parameter because a rule is an **opaque** colour now, not an
+/// alpha the renderer blends — see [`Palette::ink_over`] for why. The three
+/// structural rules land on three different planes (the wall under the top bar,
+/// the wall above the now-playing bar, the panel inside the inspector), and a
+/// hairline pre-composited over the wrong one is visibly the wrong hairline.
 #[must_use]
-pub fn hairline(p: &Palette) -> rule::Style {
+pub fn hairline(p: &Palette, on: Color) -> rule::Style {
     rule::Style {
-        color: p.hairline(),
+        color: p.hairline(on),
         width: 1,
         radius: 0.0.into(),
         fill_mode: FillMode::Full,
@@ -1770,7 +1831,7 @@ pub fn tooltip(p: &Palette) -> container::Style {
         background: Some(Background::Color(p.plinth_lit)),
         text_color: Some(p.paper_dim),
         border: Border {
-            color: p.hairline_strong(),
+            color: p.hairline_strong(p.plinth_lit),
             width: 1.0,
             radius: RADIUS_CHIP.into(),
         },
@@ -1886,7 +1947,7 @@ pub fn track_row(p: &Palette, status: button::Status, playing: bool) -> button::
         text_color: p.paper,
         border: Border {
             color: if playing {
-                p.hairline_strong()
+                p.hairline_strong(p.plinth_lit)
             } else {
                 Color::TRANSPARENT
             },
@@ -2058,7 +2119,7 @@ pub fn popover(p: &Palette) -> container::Style {
     container::Style {
         background: Some(Background::Color(p.plinth_lit)),
         border: Border {
-            color: p.hairline_strong(),
+            color: p.hairline_strong(p.plinth_lit),
             width: 1.0,
             radius: RADIUS_CTRL.into(),
         },
@@ -2088,7 +2149,7 @@ pub fn popover(p: &Palette) -> container::Style {
 /// number in all four states, and `bottom_bar.rs` pins that.
 ///
 /// No accent: opening a popover is a *view* choice, not a claim about what is
-/// playing (the same argument [`panel_toggle`] makes).
+/// playing (the same argument [`segment`] makes).
 #[must_use]
 pub fn now_playing(p: &Palette, status: button::Status, open: bool) -> button::Style {
     let background = if open {
@@ -2105,7 +2166,7 @@ pub fn now_playing(p: &Palette, status: button::Status, open: bool) -> button::S
         text_color: p.paper,
         border: Border {
             color: if open {
-                p.hairline_strong()
+                p.hairline_strong(p.plinth_lit)
             } else {
                 Color::TRANSPARENT
             },
@@ -2153,7 +2214,7 @@ pub const HALO_BLUR: f32 = 24.0;
 /// right-aligned*).
 ///
 /// 48 holds `1:59:59` — seven glyphs of which five are figures at
-/// [`DIGIT_EM`] — with room for the two colons, which is every duration a track
+/// the face's real digit advance — with room for the two colons, which is every duration a track
 /// can honestly have. Plex Sans's digits are tabular, so the slot is exact
 /// rather than approximately right.
 pub const DURATION_W: f32 = 48.0;
@@ -2660,7 +2721,17 @@ mod tests {
             let p = room.palette();
             let rest = detent_ink(p, false);
             let engaged = detent_ink(p, true);
-            assert!(engaged.a > rest.a || engaged.r > rest.r * 3.0);
+            // Both readings are **opaque** now (the marks are pre-composited,
+            // see `Palette::ink_over`), so the difference between them is a
+            // difference in light rather than in alpha — and it has to be a
+            // large one, because "at unity" and "a pixel below unity" are told
+            // apart on sight and nothing else.
+            let step = (luminance(engaged) + 0.05) / (luminance(rest) + 0.05);
+            assert!(
+                !(0.5..=2.0).contains(&step),
+                "{}: the detent's engaged reading is {step:.2}× its resting one",
+                p.name
+            );
             for ink in [rest, engaged] {
                 assert!(!p.is_accent(ink), "{}: the detent is the accent", p.name);
                 assert!(
@@ -2704,7 +2775,7 @@ mod tests {
     #[test]
     fn an_icon_button_wears_no_chrome_at_rest() {
         let p = active();
-        let rest = transport(p, button::Status::Active);
+        let rest = transport(p, p.recess, button::Status::Active);
         assert_eq!(
             from_background(rest.background),
             vec![Color::TRANSPARENT],
@@ -2721,19 +2792,30 @@ mod tests {
         // long as a pointer crosses it is the clunk this removes. And press is
         // *not* the recess — the bar is the recess, so that read as a hole.
         for (status, expected) in [
-            (button::Status::Hovered, p.ink_wash()),
-            (button::Status::Pressed, p.ink_wash_press()),
+            (button::Status::Hovered, p.ink_wash(p.recess)),
+            (button::Status::Pressed, p.ink_wash_press(p.recess)),
         ] {
-            let style = transport(p, status);
+            let style = transport(p, p.recess, status);
             assert_eq!(from_background(style.background), vec![expected]);
-            assert!(expected.a < 0.2, "a wash is a wash: {expected:?} is a fill");
-            assert_ne!(expected, p.recess, "a pressed button is not a hole");
+            // A wash is a wash: the mark is *between* its ground and the room's
+            // ink, far nearer the ground. It is an opaque colour rather than an
+            // alpha (`Palette::ink_over`), so "how strong" is a distance now
+            // rather than a number that can be read off the token.
+            let reach = (expected.r - p.recess.r) / (p.paper.r - p.recess.r);
+            assert!(reach < 0.2, "a wash is a wash: {expected:?} is a fill");
+            assert_ne!(expected, p.recess, "a hovered button is not invisible");
+            assert_ne!(expected, p.plinth, "a hovered button is not a panel");
             assert_eq!(style.border.color, Color::TRANSPARENT);
         }
+        // A press reads as one step firmer than a hover — never as a hole
+        // punched in the bar, which is what a `recess` fill was.
         const { assert!(INK_WASH_PRESS_A > INK_WASH_A) }
+        let hovered = from_background(transport(p, p.recess, button::Status::Hovered).background);
+        let pressed = from_background(transport(p, p.recess, button::Status::Pressed).background);
+        assert!(pressed[0].r > hovered[0].r && hovered[0].r > p.recess.r);
 
         // Disabled is ink alone — no wash under a control that cannot act.
-        let dead = transport(p, button::Status::Disabled);
+        let dead = transport(p, p.recess, button::Status::Disabled);
         assert_eq!(from_background(dead.background), vec![Color::TRANSPARENT]);
 
         // **The three readings of a control are three readings.** This is the
@@ -2765,7 +2847,7 @@ mod tests {
             button::Status::Pressed,
             button::Status::Disabled,
         ] {
-            let style = transport(p, status);
+            let style = transport(p, p.recess, status);
             assert!((style.border.width - 1.0).abs() < f32::EPSILON);
             assert!((style.border.radius.top_left - RADIUS_CTRL).abs() < f32::EPSILON);
             assert_eq!(style.shadow, Shadow::default());
@@ -2967,7 +3049,8 @@ mod tests {
     }
 
     /// **An opacity is a colour once it is drawn.** `over` composited under
-    /// `under`, source-over, in the space the renderer blends in.
+    /// `under`, source-over, **in linear light — the space the renderer
+    /// actually blends in**.
     ///
     /// This is the whole of ADR-0017 §1.6's second extension. A token
     /// expressed as an alpha is not measurable against a floor until it has
@@ -2976,13 +3059,33 @@ mod tests {
     /// which is exactly the failure the critique's "ink opacity is the
     /// hierarchy" would have shipped (its 40 % tier lands between 2.09 : 1 and
     /// 3.24 : 1 across the four rooms).
+    ///
+    /// **It blended the sRGB components** under a doc comment promising the
+    /// renderer's space, which is the CSS model and not this renderer's
+    /// (`docs/design/05-toolkit-and-visual-gap.md` D1). So the contrast suite
+    /// was measuring a picture the application never drew — conservative for
+    /// ink-on-surface legibility, and blind to every hairline, ring and wash,
+    /// which were all one to two ink-steps louder than the numbers said. The
+    /// transfer functions are `linear`'s and its inverse; `iced_core-0.13.2`'s
+    /// `Color::into_linear` is the same curve.
     fn composite(over: Color, under: Color) -> Color {
         let a = over.a.clamp(0.0, 1.0);
+        let blend =
+            |over: f32, under: f32| encode(a.mul_add(linear(over) - linear(under), linear(under)));
         Color {
-            r: over.r * a + under.r * (1.0 - a),
-            g: over.g * a + under.g * (1.0 - a),
-            b: over.b * a + under.b * (1.0 - a),
+            r: blend(over.r, under.r),
+            g: blend(over.g, under.g),
+            b: blend(over.b, under.b),
             a: 1.0,
+        }
+    }
+
+    /// One channel of linear light, sRGB-encoded — the inverse of [`linear`].
+    fn encode(channel: f32) -> f32 {
+        if channel <= 0.003_130_8 {
+            channel * 12.92
+        } else {
+            1.055f32.mul_add(channel.powf(1.0 / 2.4), -0.055)
         }
     }
 
@@ -3097,10 +3200,6 @@ mod tests {
                 ("alert", p.alert, TEXT),
                 ("paper_muted", p.paper_muted, MARK),
                 ("lamp", p.lamp, MARK),
-                // The alpha-expressed marks, composited before measuring.
-                ("paper_ring", p.paper_ring(), MARK),
-                ("hairline", p.hairline(), MARK),
-                ("hairline_strong", p.hairline_strong(), MARK),
                 ("lamp_glow", p.lamp_glow(), MARK),
             ];
             for (ink_name, ink, floor) in inks {
@@ -3124,7 +3223,7 @@ mod tests {
             // The selection wash is exempt as a *mark* and measured as a
             // *ground*: what a user reads is the value's ink on the wash, and
             // the wash lands over the input well.
-            let selected = composite(p.select_wash(), p.recess);
+            let selected = p.select_wash(p.recess);
             let on_selection = contrast(p.paper, selected);
             assert!(
                 on_selection >= TEXT,
@@ -3152,7 +3251,125 @@ mod tests {
                     p.name
                 );
             }
+
+            every_precomposited_mark_clears_its_floor(p, &surfaces);
+            every_precomposited_mark_is_what_the_renderer_draws(p, &surfaces);
         }
+    }
+
+    /// **The pre-composited marks, measured where they are drawn.**
+    ///
+    /// These four are no longer room-level inks: an alpha over a ground was
+    /// drawing at three to four times its specified weight in the dark room and
+    /// half of it in the light one, because iced blends in linear light and the
+    /// numbers were written for CSS's sRGB blend
+    /// ([`Palette::ink_over`]). Each is now an *opaque* colour computed from the
+    /// surface it lands on, so a sweep over every surface would be measuring
+    /// colours that never meet — the mark and its ground arrive together or not
+    /// at all.
+    fn every_precomposited_mark_clears_its_floor(
+        p: &Palette,
+        surfaces: &[(&'static str, Color); 4],
+    ) {
+        /// The floor for a non-text mark, restated here because the sweep this
+        /// law was carved out of holds its own copy.
+        const MARK: f32 = 3.0;
+
+        for &(surface_name, surface) in surfaces {
+            // `hairline` and `hairline_strong` are on the exemption list — they
+            // exist to be locatable and are never read, and are governed by the
+            // oklch-L step law instead (ADR-0017 §1.6). `paper_ring` is not:
+            // it is the only focus affordance iced 0.13 can draw, so a keyboard
+            // user who cannot find it has no other way to know where the
+            // keyboard is.
+            let ring = p.paper_ring(surface);
+            let ratio = contrast(ring, surface);
+            assert!(
+                ratio >= MARK,
+                "{}: paper_ring on {surface_name} is {ratio:.2} : 1, below its \
+                 {MARK} : 1 floor",
+                p.name
+            );
+            // And the two exempt marks still have to be *there*: an edge that
+            // composited to its own ground would be no edge at all, which is
+            // the failure mode the pre-compositing arithmetic could introduce.
+            for (name, mark) in [
+                ("hairline", p.hairline(surface)),
+                ("hairline_strong", p.hairline_strong(surface)),
+            ] {
+                assert!(
+                    (mark.r - surface.r).abs() > 0.004,
+                    "{}: {name} on {surface_name} composites to its own ground",
+                    p.name
+                );
+            }
+        }
+    }
+
+    /// **The drawn value, not the requested one.**
+    ///
+    /// A regression in the blend space is invisible by construction — the old
+    /// test composited in sRGB under a doc comment promising the renderer's
+    /// space, and it passed for the whole of the defect's life. So this pins
+    /// what the renderer *puts on the glass*: an opaque mark is immune to the
+    /// blend space, and that immunity is the thing being asserted.
+    fn every_precomposited_mark_is_what_the_renderer_draws(
+        p: &Palette,
+        surfaces: &[(&'static str, Color); 4],
+    ) {
+        for &(surface_name, surface) in surfaces {
+            for (mark_name, mark) in [
+                ("hairline", p.hairline(surface)),
+                ("hairline_strong", p.hairline_strong(surface)),
+                ("ink_wash", p.ink_wash(surface)),
+                ("ink_wash_press", p.ink_wash_press(surface)),
+                ("lamp_wash", p.lamp_wash(surface)),
+                ("paper_ring", p.paper_ring(surface)),
+                ("select_wash", p.select_wash(surface)),
+            ] {
+                assert!(
+                    (mark.a - 1.0).abs() < f32::EPSILON,
+                    "{}: {mark_name} on {surface_name} is still an alpha, so \
+                         what the renderer draws is not what this test measures",
+                    p.name
+                );
+                // Blending it again — in *either* space — changes nothing,
+                // which is the whole property an opaque mark buys.
+                let redrawn = composite(mark, surface);
+                for (a, b) in [
+                    (mark.r, redrawn.r),
+                    (mark.g, redrawn.g),
+                    (mark.b, redrawn.b),
+                ] {
+                    assert!((a - b).abs() < 0.001, "{}: {mark_name} moved", p.name);
+                }
+            }
+            // And the weight is the weight the spec asked for: the mark
+            // sits between its ground and the room's ink, at the fraction
+            // the token names, measured on the encoded ramp the numbers
+            // were written on.
+            let hair = p.hairline(surface);
+            let want = HAIRLINE_A.mul_add(p.paper.r - surface.r, surface.r);
+            assert!(
+                (hair.r - want).abs() < 0.002,
+                "{}: hairline on {surface_name} draws {:.3}, specified {want:.3}",
+                p.name,
+                hair.r
+            );
+        }
+    }
+
+    /// The two ink corrections and the elevation counter-example, kept beside
+    /// the law they exist to justify.
+    #[test]
+    fn the_shipped_corrections_are_the_failures_this_test_exists_for() {
+        /// The floor for text, restated: these are the two failures the floors
+        /// above exist to catch, so they are measured against the same numbers.
+        const TEXT: f32 = 4.5;
+        /// The floor for a non-text mark.
+        const MARK: f32 = 3.0;
+        /// The smallest elevation step the eye reads as a step.
+        const STEP_L: f32 = 0.03;
 
         // And the two corrections, pinned as corrections: the values v0.1
         // shipped fail the floors above, so this test would have caught them.
@@ -3247,8 +3464,11 @@ mod tests {
                 painted.push(("tile", button_colors(&tile(p, status, selected))));
                 painted.push(("segment", button_colors(&segment(p, status, selected))));
             }
-            painted.push(("transport", button_colors(&transport(p, status))));
-            painted.push(("word_button", button_colors(&word_button(p, status))));
+            painted.push(("transport", button_colors(&transport(p, p.recess, status))));
+            painted.push((
+                "word_button",
+                button_colors(&word_button(p, p.wall, status)),
+            ));
             painted.push(("primary", button_colors(&primary(p, status))));
             for open in [false, true] {
                 painted.push(("now_playing", button_colors(&now_playing(p, status, open))));
@@ -3303,7 +3523,7 @@ mod tests {
                 is_vertical_scrollbar_dragged: true,
             },
         ] {
-            let style = scrollbar(p, status);
+            let style = scrollbar(p, p.wall, status);
             painted.push((
                 "scrollbar",
                 vec![
@@ -3338,7 +3558,7 @@ mod tests {
         painted.push(("bar", container_colors(&bar(p))));
         painted.push(("popover", container_colors(&popover(p))));
         painted.push(("tooltip", container_colors(&tooltip(p))));
-        painted.push(("hairline", vec![hairline(p).color]));
+        painted.push(("hairline", vec![hairline(p, p.wall).color]));
         painted.push((
             "detent_ink",
             vec![detent_ink(p, false), detent_ink(p, true)],

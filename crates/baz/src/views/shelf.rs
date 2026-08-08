@@ -87,6 +87,7 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a,
         hang.spacer_height(total_rows - end_row),
     )));
 
+    let room = theme::active();
     scrollable(
         container(grid)
             .width(Length::Fill)
@@ -94,6 +95,14 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a,
     )
     .id(scroll_id())
     .on_scroll(Message::Scrolled)
+    // **The wall's own scrollbar.** This `scrollable` carried no style at all,
+    // so the one down the side of the collection — the longest, most-seen piece
+    // of chrome in the product — was iced's stock light-grey bar with a rail
+    // behind it, drawn in no palette baz owns
+    // (`docs/design/05-toolkit-and-visual-gap.md` D6). `theme::scrollbar` has
+    // existed the whole time, draws no rail, and its own doc comment names this
+    // exact failure.
+    .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
     .width(Length::Fill)
     .height(Length::Fill)
     .into()

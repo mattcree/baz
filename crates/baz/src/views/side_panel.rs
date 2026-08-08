@@ -132,7 +132,7 @@ pub(crate) fn view<'a>(
     // control in one place whichever is on screen.
     let header_row = row![
         Space::with_width(Length::Fill),
-        close_button("Close the album panel", Message::ClosePanel),
+        close_button(room.plinth, "Close the album panel", Message::ClosePanel),
     ]
     .align_y(iced::Alignment::Center);
     let mut content =
@@ -200,7 +200,7 @@ fn track_list<'a>(
             .padding(theme::scroll_gutter()),
     )
     .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
-    .style(move |_theme, status| theme::scrollbar(room, status))
+    .style(move |_theme, status| theme::scrollbar(room, room.plinth, status))
     .height(Length::Fill)
     .into()
 }
@@ -214,7 +214,7 @@ fn track_list<'a>(
 /// [`theme::primary`], where the argument for an outline rather than an amber
 /// slab lives.
 ///
-/// The glyph is [`room.paper`] rather than amber, and that is a deviation
+/// The glyph is the room's primary ink rather than amber, and that is a deviation
 /// from `.interface-design/system.md` §5 taken deliberately and cheaply:
 /// [`crate::icon`] rasterises one sprite sheet in one ink, so a second colour
 /// costs a second sheet and names an amber token in a module the accent
@@ -332,7 +332,7 @@ fn details<'a>(album: &'a vm::AlbumVm, edition: Option<&'a vm::EditionVm>) -> El
         );
     }
     column![
-        horizontal_rule(1).style(move |_theme| theme::hairline(room)),
+        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.plinth)),
         text("Details")
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)

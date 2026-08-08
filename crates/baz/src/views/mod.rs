@@ -110,7 +110,17 @@ pub(crate) fn gradient_block(album_id: u64, size: f32) -> Element<'static, Messa
 ///
 /// The tooltip opens *below* the button rather than above it: these sit in a
 /// surface's top row, where there is nothing above to open into.
-pub(crate) fn close_button(label: &'static str, message: Message) -> Element<'static, Message> {
+///
+/// `on` is the surface the ✕ stands on. An icon button's hover mark is an
+/// **opaque** pre-composite now rather than an alpha the renderer blends
+/// ([`theme::Palette::ink_over`]), so the one control that appears on two
+/// different planes — the inspector's panel and the popover's float — has to be
+/// told which one it is on.
+pub(crate) fn close_button(
+    on: iced::Color,
+    label: &'static str,
+    message: Message,
+) -> Element<'static, Message> {
     let room = theme::active();
     let mark = container(
         iced_image(icon::handle(icon::Glyph::Close))
@@ -127,7 +137,7 @@ pub(crate) fn close_button(label: &'static str, message: Message) -> Element<'st
             .width(Length::Fixed(theme::TRANSPORT_HIT))
             .height(Length::Fixed(theme::TRANSPORT_HIT))
             .padding(0)
-            .style(move |_theme, status| theme::transport(room, status))
+            .style(move |_theme, status| theme::transport(room, on, status))
             .on_press(message),
         text(label)
             .size(theme::SIZE_CAPTION)

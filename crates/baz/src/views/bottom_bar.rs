@@ -94,7 +94,7 @@ pub(crate) fn view(player: &PlayerState, queue_open: bool) -> Element<'_, Messag
     .spacing(theme::GAP_LG)
     .align_y(iced::Alignment::Center);
     column![
-        horizontal_rule(1).style(move |_theme| theme::hairline(room)),
+        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
         container(bar)
             .width(Length::Fill)
             .padding(theme::pad(theme::GAP_MD, theme::GAP_LG))
@@ -418,7 +418,7 @@ fn glyph_button(
         .width(Length::Fixed(theme::TRANSPORT_HIT))
         .height(Length::Fixed(theme::TRANSPORT_HIT))
         .padding(0)
-        .style(move |_theme, status| theme::transport(room, status))
+        .style(move |_theme, status| theme::transport(room, room.recess, status))
         .on_press_maybe(enabled.then_some(message));
     tooltip(
         control,
