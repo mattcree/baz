@@ -13,7 +13,6 @@ use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf, scroll_id};
 use crate::player::PlayerState;
-use crate::rail::RailSlot;
 use crate::shelf::{Grid, Run, Shelves};
 use crate::spine::{Slot, Spine};
 use crate::views::gradient_block;
@@ -353,12 +352,15 @@ fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
 /// one of them saying `ARTIST → S` and the other saying nothing, is one strip
 /// too many.
 ///
-/// # It magnifies under the pointer
+/// # It magnifies under the pointer, and it fits itself
 ///
-/// The drawing, the fisheye and the hit lane are [`Spine`]'s — a hand-built
-/// widget, because a letter's size is layout and no style function can touch
-/// layout. This function still owns everything the rail *says*: what the
-/// entries are, which one is current, and what fits.
+/// The drawing, the fisheye, the hit lane **and the elision** are [`Spine`]'s
+/// — a hand-built widget, because a letter's size is layout and no style
+/// function can touch layout, and because only the widget knows the height
+/// the lane really has (fitting the rail up here against `grid_size`'s
+/// estimated height is exactly how it once overflowed the window; see
+/// [`Spine`]'s docs). This function owns everything the rail *says*: what the
+/// entries are, and which one the wall is standing on.
 fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
     let runs = shelves.runs();
     let headers: Vec<vm::GroupHeaderVm> = runs
@@ -370,38 +372,27 @@ fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
     // Where the wall is: the shelf at the top of the viewport, mapped onto the
     // rail's own list. This is the *only* thing the rail reads about scroll
     // position, and it reads it rather than remembering it.
+    //
+    // **The last present entry at or before the shelf you are on** — which is
+    // the exact entry for the keys where every shelf has one, and the letter
+    // of the run you are in for GENRE, where several shelves share an initial.
+    // (`None < Some(_)`, so the comparison needs the presence guard.)
     let here = shelves.run_at(shelf.scroll_offset);
-    let focus = here.and_then(|run| entries.iter().position(|entry| entry.shelf == Some(run)));
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "a slot count floored from a non-negative viewport height"
-    )]
-    let capacity = (shelf.grid_size.height.max(0.0) / theme::RAIL_PITCH).floor() as usize;
-
-    let slots: Vec<Slot> = rail::elide(&entries, capacity, focus)
-        .into_iter()
-        .map(|slot| match slot {
-            RailSlot::Gap => Slot {
-                label: rail::GAP_MARK.to_owned(),
-                shelf: None,
-                current: false,
-            },
-            RailSlot::Entry(index) => entries.get(index).map_or_else(
-                || Slot {
-                    label: String::new(),
-                    shelf: None,
-                    current: false,
-                },
-                |entry| Slot {
-                    label: entry.label.clone(),
-                    shelf: entry.shelf,
-                    current: entry.present() && entry.shelf == here,
-                },
-            ),
+    let current = here.and_then(|run| {
+        entries
+            .iter()
+            .rposition(|entry| entry.present() && entry.shelf <= Some(run))
+    });
+    let slots: Vec<Slot> = entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| Slot {
+            label: entry.label.clone(),
+            shelf: entry.shelf,
+            current: Some(index) == current,
         })
         .collect();
-    Spine::new(slots, theme::active(), Message::RailJumped).into()
+    Spine::new(slots, current, theme::active(), Message::RailJumped).into()
 }
 
 /// The shelf with nothing to show: a zero-result search, the first moments of

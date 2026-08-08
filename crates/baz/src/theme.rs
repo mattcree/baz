@@ -1030,15 +1030,17 @@ pub const RAIL_PITCH: f32 = RAIL_LINE_H + GAP_SM;
 /// How large the fisheye grows the rail entry under the pointer, as a factor
 /// of its rest size (ADR-0020's amendment: pointer-derived deformation).
 ///
-/// **1.9, and a bound chose it rather than taste**: at 1.9 the swollen entry's
-/// type stands at `MAGNIFY_MAX × SIZE_HEADING` = 19 px — still inside one
-/// [`RAIL_PITCH`], so the largest letter the fisheye ever makes can overdraw
-/// its neighbours' *air* but never their ink, and the strip never has to move
-/// a slot to make room (nothing in the lane displaces; that is the whole
-/// deformation contract). 2.0 — the dock's own ceiling — is the first value to
-/// break that bound. Judged against real renders at 1280 and 1920
+/// **2.5 — the dock's own territory.** It shipped at 1.9 first, bounded by the
+/// fixed pitch so that no glyph left its slot; the owner's desktop verdict was
+/// that 1.9 *"reads too subtle"*, and going dramatic means adopting the dock's
+/// other half: the strip **displaces** as well as scales ([`magnify_shift`]),
+/// so the swollen letters have room because their neighbours were pushed
+/// aside, not because a cap kept them small. What bounds 2.5 now is the lane's
+/// width: the widest letter at the peak measures ~26 px against the 60 px ink
+/// lane (asserted in `font.rs`), and the peak line box (30 px) stays inside
+/// the spread pitch beside it. Judged against real renders at 1280 and 1920
 /// (docs/design/impl/index-magnification/).
-pub const MAGNIFY_MAX: f32 = 1.9;
+pub const MAGNIFY_MAX: f32 = 2.5;
 
 /// How far the fisheye's swell reaches: the rest distance (logical px, along
 /// the strip) at which an entry stands at rest again — **60**, three slots
@@ -1046,12 +1048,24 @@ pub const MAGNIFY_MAX: f32 = 1.9;
 ///
 /// The dock's feel is a generous peak with a *local* skirt: at three slots the
 /// letter under the pointer has two visibly-swollen neighbours each side
-/// (≈1.7× and ≈1.2×), and the fourth letter out has not moved — the
-/// deformation reads as a lens passing over the strip rather than the strip
-/// breathing. At two and a half slots the second neighbour barely moved
-/// (≈1.09×) and the lens read as a single popped letter; wider than three and
-/// half the alphabet stirs. Judged on the captures beside [`MAGNIFY_MAX`]'s.
+/// (≈2.1× and ≈1.4× at the 2.5 peak), and the fourth letter out has not moved
+/// — the deformation reads as a lens passing over the strip rather than the
+/// strip breathing. Narrower pops single letters; wider stirs half the
+/// alphabet. Judged on the captures beside [`MAGNIFY_MAX`]'s.
 pub const MAGNIFY_REACH: f32 = 3.0 * RAIL_PITCH;
+
+/// How far the fisheye pushes the rest of the strip out of the lens's way:
+/// the displacement of everything at or beyond [`MAGNIFY_REACH`] — **45**,
+/// the area under the falloff's hump, `(MAGNIFY_MAX − 1) × MAGNIFY_REACH / 2`.
+///
+/// This is the number the lane budgets for: [`crate::views::shelf`] sizes the
+/// rail's elision capacity against `height − 2 × MAGNIFY_SPREAD`, so a strip
+/// the capacity admitted always has this much air at each end and the lens can
+/// push the strip's extremes without pushing any letter out of the lane. (A
+/// strip that fits *without* elision may have less air; [`magnify_shift`]'s
+/// callers cap the shift at the air that exists, and the spread degrades
+/// before a letter ever clips.)
+pub const MAGNIFY_SPREAD: f32 = (MAGNIFY_MAX - 1.0) * MAGNIFY_REACH / 2.0;
 
 /// The fisheye's falloff: how large a rail entry stands, as a factor of its
 /// rest size, given how far its rest centre is from the pointer.
@@ -1063,9 +1077,9 @@ pub const MAGNIFY_REACH: f32 = 3.0 * RAIL_PITCH;
 ///
 /// Pure, and **a function of the pointer rather than of time** (ADR-0020
 /// §Amendment): given the same distance it returns the same scale forever.
-/// Distances are measured to the slot's *rest* centre — the strip's slots
-/// never move, so the mapping from pointer to deformation has no feedback
-/// through the deformed geometry and a resting pointer draws a stable frame.
+/// Distances are measured to the slot's *rest* centre, so the mapping from
+/// pointer to deformation has no feedback through the deformed geometry and a
+/// resting pointer draws a stable frame.
 #[must_use]
 pub fn magnify(distance: f32) -> f32 {
     let distance = distance.abs();
@@ -1074,6 +1088,37 @@ pub fn magnify(distance: f32) -> f32 {
     }
     let wave = (std::f32::consts::PI * distance / MAGNIFY_REACH).cos();
     (MAGNIFY_MAX - 1.0).mul_add(0.5 * (wave + 1.0), 1.0)
+}
+
+/// The fisheye's displacement: how far a rail entry stands from its rest
+/// centre, given how far that centre is from the pointer — **the integral of
+/// [`magnify`]`− 1`**, which is the dock's own mechanism. Each gap between
+/// two entries stretches by exactly the mean magnification across it, so the
+/// swollen letters sit in room their neighbours vacated and the drawn pitch
+/// under the lens is the scaled pitch.
+///
+/// Signed and odd: an entry below the pointer moves down, one above moves up,
+/// the entry exactly under the pointer does not move at all (`shift(0) = 0` —
+/// the lens is anchored on the pointer, not sliding past it). Saturates at
+/// ±[`MAGNIFY_SPREAD`] beyond the reach: the far field shifts as one piece,
+/// which is what keeps the strip's *spacing* at rest out there.
+///
+/// Two properties the widget leans on, both asserted in the tests:
+///
+/// - **monotone**: `d + shift(d)` is strictly increasing (its derivative is
+///   `magnify(d) ≥ 1`), so displaced entries keep their order and can never
+///   cross;
+/// - **hit-order preserving**: `|d + shift(d)|` grows with `|d|`, so the
+///   entry whose *displaced* centre is nearest the pointer is exactly the one
+///   whose rest centre is — the press math and the lens agree on the winner
+///   by construction, not by coordination.
+#[must_use]
+pub fn magnify_shift(distance: f32) -> f32 {
+    let reach = distance.abs().min(MAGNIFY_REACH);
+    let wave = (std::f32::consts::PI * reach / MAGNIFY_REACH).sin();
+    let area = (MAGNIFY_MAX - 1.0)
+        * (MAGNIFY_REACH / (2.0 * std::f32::consts::PI)).mul_add(wave, reach / 2.0);
+    area.copysign(distance)
 }
 
 /// The letter-spacing baz applies to a heading, as the string it is spelled
@@ -3872,11 +3917,51 @@ mod tests {
         assert!((magnify(MAGNIFY_REACH) - 1.0).abs() < 1e-6);
         assert!((magnify(MAGNIFY_REACH - 0.25) - 1.0).abs() < 1e-4);
         assert!((magnify(4096.0) - 1.0).abs() < f32::EPSILON);
-        // The bound that chose MAGNIFY_MAX: the swollen type stays inside one
-        // pitch, so magnification overdraws air and never ink.
-        const { assert!(MAGNIFY_MAX * SIZE_HEADING < RAIL_PITCH) }
         // The reach is slots, not an unrelated number: three each side.
         const { assert!(MAGNIFY_REACH == 3.0 * RAIL_PITCH) }
+    }
+
+    /// **The displacement is the falloff's integral, measured as one**: the
+    /// dock's mechanism is that each gap stretches by the magnification across
+    /// it, and every property the widget leans on follows from that.
+    #[test]
+    fn the_fisheye_displaces_by_the_area_under_its_own_falloff() {
+        // Anchored: the entry under the pointer does not move, and the lens
+        // has no upstream side.
+        assert!(magnify_shift(0.0).abs() < 1e-6);
+        for distance in [3.0, 17.0, 41.0, MAGNIFY_REACH, 200.0] {
+            assert!((magnify_shift(distance) + magnify_shift(-distance)).abs() < 1e-4);
+        }
+        // The integral relation itself, checked numerically: over any small
+        // step, the shift grows by the mean of `magnify − 1` across it.
+        let mut distance = 0.0;
+        while distance < MAGNIFY_REACH {
+            let step = 0.25;
+            let grew = magnify_shift(distance + step) - magnify_shift(distance);
+            let mean = f32::midpoint(magnify(distance), magnify(distance + step)) - 1.0;
+            assert!(
+                (grew - mean * step).abs() < 1e-3,
+                "at {distance}: the shift grew {grew}, the falloff says {}",
+                mean * step
+            );
+            distance += step;
+        }
+        // Monotone, order-preserving, and hit-order preserving: the displaced
+        // position `d + shift(d)` strictly grows, so entries never cross and
+        // the nearest displaced centre is the nearest rest centre.
+        let mut previous = f32::MIN;
+        let mut d = -(MAGNIFY_REACH + 40.0);
+        while d <= MAGNIFY_REACH + 40.0 {
+            let displaced = d + magnify_shift(d);
+            assert!(displaced > previous, "entries cross at {d}");
+            previous = displaced;
+            d += 0.5;
+        }
+        // Saturation: everything at or beyond the reach moves as one piece, by
+        // exactly the budgeted spread.
+        assert!((magnify_shift(MAGNIFY_REACH) - MAGNIFY_SPREAD).abs() < 1e-3);
+        assert!((magnify_shift(4096.0) - MAGNIFY_SPREAD).abs() < 1e-3);
+        const { assert!(MAGNIFY_SPREAD == (MAGNIFY_MAX - 1.0) * MAGNIFY_REACH / 2.0) }
     }
 
     /// The tracking is inserted **between** characters and nowhere else.
