@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2560" height="580" viewBox="0 0 2560 580">
+<title>baz now-playing bar @2x, with its reserved slots</title>
+
+<rect x="0.00" y="0.00" width="2560.00" height="580.00" fill="#0C0D0E"/>
+<rect x="0.00" y="0.00" width="2560.00" height="580.00" fill="#0C0D0E"/>
+<g transform="scale(2)">
+<rect x="0.00" y="0.00" width="1280.00" height="102.00" fill="#060708"/>
+<line x1="0.00" y1="0.50" x2="1280.00" y2="0.50" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.07"/>
+<rect x="584.00" y="12.00" width="32.00" height="32.00" fill="#141517" rx="4"/>
+<rect x="584.00" y="12.00" width="32" height="32" rx="4" fill="none" stroke="#E8E4DB" stroke-opacity="0.07" stroke-width="1"/>
+<path d="M607.36,22.40 L601.60,28.00 L607.36,33.60 Z" fill="#E8E4DB" fill-opacity="1.0"/>
+<path d="M602.40,22.40 L596.64,28.00 L602.40,33.60 Z" fill="#E8E4DB" fill-opacity="1.0"/>
+<rect x="594.24" y="22.40" width="1.76" height="11.20" fill="#E8E4DB" fill-opacity="1.0"/>
+<rect x="624.00" y="12.00" width="32.00" height="32.00" fill="#141517" rx="4"/>
+<rect x="624.00" y="12.00" width="32" height="32" rx="4" fill="none" stroke="#E8E4DB" stroke-opacity="0.07" stroke-width="1"/>
+<rect x="634.24" y="21.60" width="4.00" height="12.80" fill="#E8E4DB" fill-opacity="1.0"/>
+<rect x="641.76" y="21.60" width="4.00" height="12.80" fill="#E8E4DB" fill-opacity="1.0"/>
+<rect x="664.00" y="12.00" width="32.00" height="32.00" fill="#141517" rx="4"/>
+<rect x="664.00" y="12.00" width="32" height="32" rx="4" fill="none" stroke="#E8E4DB" stroke-opacity="0.07" stroke-width="1"/>
+<path d="M672.64,22.40 L678.40,28.00 L672.64,33.60 Z" fill="#E8E4DB" fill-opacity="1.0"/>
+<path d="M677.60,22.40 L683.36,28.00 L677.60,33.60 Z" fill="#E8E4DB" fill-opacity="1.0"/>
+<rect x="685.76" y="22.40" width="1.76" height="11.20" fill="#E8E4DB" fill-opacity="1.0"/>
+<rect x="510.00" y="76.00" width="260.00" height="4.00" fill="#141517" rx="2.0"/>
+<rect x="510.00" y="76.00" width="93.60" height="4.00" fill="#E3A14E" rx="2.0"/>
+<circle cx="603.60" cy="78.00" r="5.00" fill="#E3A14E"/>
+<text x="502.00" y="82.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1" text-anchor="end">2:31</text>
+<text x="778.00" y="82.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">7:04</text>
+<rect x="647.20" y="52.00" width="48.00" height="15.00" fill="#1C1D20" rx="3"/>
+<rect x="647.20" y="52.00" width="48" height="15" rx="3" fill="none" stroke="#E8E4DB" stroke-opacity="0.15"/>
+<text x="671.20" y="63.00" font-family="IBM Plex Sans" font-size="11" font-weight="400" fill="#ABA8A1" text-anchor="middle">4:23</text>
+<text x="24.00" y="35.70" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Roygbiv</text>
+<text x="24.00" y="53.90" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">Boards of Canada</text>
+<text x="24.00" y="76.10" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">3 / 12</text>
+<text x="1256.00" y="26.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">bit-perfect</text>
+<rect x="1120.00" y="46.00" width="32.00" height="32.00" fill="#141517" rx="4"/>
+<rect x="1120.00" y="46.00" width="32" height="32" rx="4" fill="none" stroke="#E8E4DB" stroke-opacity="0.07"/>
+<path d="M1130.00,59.00 L1134.00,59.00 L1139.00,54.00 L1139.00,70.00 L1134.00,65.00 L1130.00,65.00 Z" fill="#E8E4DB"/>
+<rect x="1160.00" y="60.00" width="96.00" height="4.00" fill="#141517" rx="2.0"/>
+<rect x="1160.00" y="60.00" width="74.88" height="4.00" fill="#888680" rx="2.0"/>
+<circle cx="1234.88" cy="62.00" r="5.00" fill="#888680"/>
+<rect x="1255.00" y="53.00" width="2.00" height="5.00" fill="#E8E4DB" fill-opacity="0.21000000000000002"/>
+</g>
+<text x="40.00" y="248.00" font-family="IBM Plex Sans" font-size="18" font-weight="400" fill="#ABA8A1">Nothing in the bar is sized to its content. Every slot is a token wide enough for its worst case, measured in IBM Plex Sans.</text>
+<text x="40.00" y="282.00" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#6C6A66">TOKEN</text>
+<text x="340.00" y="282.00" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#6C6A66" text-anchor="end">RESERVED</text>
+<text x="420.00" y="282.00" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#6C6A66">WORST CASE</text>
+<text x="840.00" y="282.00" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#6C6A66" text-anchor="end">MEASURED</text>
+<text x="940.00" y="282.00" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#6C6A66">NOTE</text>
+<line x1="40.00" y1="292.50" x2="2520.00" y2="292.50" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.07"/>
+<text x="40.00" y="314.00" font-family="IBM Plex Sans" font-size="15" font-weight="500" fill="#E8E4DB">POSITION_W</text>
+<text x="340.00" y="314.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1" text-anchor="end">56 px</text>
+<text x="420.00" y="314.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1">199 / 240</text>
+<text x="840.00" y="314.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680" text-anchor="end">53.46 px</text>
+<text x="940.00" y="314.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680">new — the queue readout the IA adds</text>
+<text x="40.00" y="340.00" font-family="IBM Plex Sans" font-size="15" font-weight="500" fill="#E8E4DB">STAMP_W</text>
+<text x="340.00" y="340.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1" text-anchor="end">52 px</text>
+<text x="420.00" y="340.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1">10:00:00</text>
+<text x="840.00" y="340.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680" text-anchor="end">50.21 px</text>
+<text x="940.00" y="340.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680">unchanged — and the mono face could not hold this at 52</text>
+<text x="40.00" y="366.00" font-family="IBM Plex Sans" font-size="15" font-weight="500" fill="#E8E4DB">SEEK_W</text>
+<text x="340.00" y="366.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1" text-anchor="end">260 px</text>
+<text x="420.00" y="366.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1">—</text>
+<text x="840.00" y="366.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680" text-anchor="end">—</text>
+<text x="940.00" y="366.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680">unchanged — a map of the track, not a gauge</text>
+<text x="40.00" y="392.00" font-family="IBM Plex Sans" font-size="15" font-weight="500" fill="#E8E4DB">SEEK_ROW_W</text>
+<text x="340.00" y="392.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1" text-anchor="end">380 px</text>
+<text x="420.00" y="392.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1">—</text>
+<text x="840.00" y="392.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680" text-anchor="end">—</text>
+<text x="940.00" y="392.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680">SEEK_W + 2 × (STAMP_W + GAP_SM)</text>
+<text x="40.00" y="418.00" font-family="IBM Plex Sans" font-size="15" font-weight="500" fill="#E8E4DB">PREVIEW_H</text>
+<text x="340.00" y="418.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1" text-anchor="end">15 px</text>
+<text x="420.00" y="418.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1">—</text>
+<text x="840.00" y="418.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680" text-anchor="end">—</text>
+<text x="940.00" y="418.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680">the hover lane, reserved whether or not anything hovers</text>
+<text x="40.00" y="444.00" font-family="IBM Plex Sans" font-size="15" font-weight="500" fill="#E8E4DB">SIGNAL_W</text>
+<text x="340.00" y="444.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1" text-anchor="end">96 px</text>
+<text x="420.00" y="444.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1">192 → 176.4 kHz</text>
+<text x="840.00" y="444.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680" text-anchor="end">92.38 px</text>
+<text x="940.00" y="444.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680">was 120</text>
+<text x="40.00" y="470.00" font-family="IBM Plex Sans" font-size="15" font-weight="500" fill="#E8E4DB">LEVEL_W</text>
+<text x="340.00" y="470.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1" text-anchor="end">48 px</text>
+<text x="420.00" y="470.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1">-18.1 dB</text>
+<text x="840.00" y="470.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680" text-anchor="end">43.34 px</text>
+<text x="940.00" y="470.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680">was 62</text>
+<text x="40.00" y="496.00" font-family="IBM Plex Sans" font-size="15" font-weight="500" fill="#E8E4DB">PREVIEW_W</text>
+<text x="340.00" y="496.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1" text-anchor="end">48 px</text>
+<text x="420.00" y="496.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1">0:00:00 + 2 × GAP_XS</text>
+<text x="840.00" y="496.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680" text-anchor="end">47.42 px</text>
+<text x="940.00" y="496.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680">was 58</text>
+<text x="40.00" y="522.00" font-family="IBM Plex Sans" font-size="15" font-weight="500" fill="#E8E4DB">VOLUME_BLOCK_W</text>
+<text x="340.00" y="522.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1" text-anchor="end">136 px</text>
+<text x="420.00" y="522.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1">—</text>
+<text x="840.00" y="522.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680" text-anchor="end">—</text>
+<text x="940.00" y="522.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680">TRANSPORT_HIT + GAP_SM + VOLUME_W</text>
+<text x="40.00" y="548.00" font-family="IBM Plex Sans" font-size="15" font-weight="500" fill="#E8E4DB">BAR_H</text>
+<text x="340.00" y="548.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1" text-anchor="end">102 px</text>
+<text x="420.00" y="548.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#ABA8A1">—</text>
+<text x="840.00" y="548.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680" text-anchor="end">—</text>
+<text x="940.00" y="548.00" font-family="IBM Plex Sans" font-size="15" font-weight="400" fill="#888680">1 + 12 + 32 + 8 + 15 + 22 + 12 — identical in every state</text>
+</svg>

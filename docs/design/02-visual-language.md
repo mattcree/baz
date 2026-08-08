@@ -1,927 +1,990 @@
 # baz — Visual Language
 
-> The definitive specification for how baz looks. Written 2026-08-08 against
-> `crates/baz/src/theme.rs` at `1919193`, the vision's fifth pillar
-> ("presentation that honors the artwork"), and the personas in
+> The definitive specification for how baz looks. **Revision 2, 2026-08-08**,
+> under the **gallery / archive** direction, superseding the "listening room"
+> of revision 1. Written against `crates/baz/src/theme.rs`,
+> `crates/baz/src/font.rs`, `crates/baz/src/art.rs`, the information
+> architecture in `01-ux-audit-and-ia.md`, the vision's fifth pillar
+> ("presentation that honours the artwork"), and the personas in
 > `docs/research/05-personas.md`.
 >
-> **This document is a specification, not code.** Every number in it is either
-> a token that already exists in `theme.rs` — kept deliberately, so the spec
-> and the code share one vocabulary — or a change, marked **CHANGE** with the
-> reason and the evidence. Screenshots of the current build and mockups of the
-> target are in `docs/design/visual/`.
+> **This document is a specification, not code.** Every number is either a
+> token that already exists — kept deliberately, so the spec and the code share
+> one vocabulary — or a change, marked **CHANGE** with the reason and the
+> evidence. The condensed version future work reads first is
+> `.interface-design/system.md`. The pictures are in `visual/gallery/`.
 
 ---
 
-## 0. How this document was checked
+## 0. What changed, and why
 
-Every claim about how baz looks today was made against the real binary, not
-from reading the source. `docs/design/visual/00-` … `08-current-*.png` are the
-shipped app rendered on a private headless display against a throwaway library
-of 32 albums and 285 tracks with generated cover art in six different visual
-idioms, built **without** `device-output` so nothing could make a sound.
+The owner reviewed the shipped UI: *"our current design has some slightly off
+stuff in terms of proportion, fonts (some weird monospace looking fonts which
+are lame)"*, and chose **gallery / archive** — near-black, generous negative
+space, album art treated as artwork with room to breathe, chrome almost absent
+— over the shipped "listening room" and a hi-fi-faceplate option. He also chose
+**no monospace at all**.
 
-That build has one consequence worth stating up front: with
-`Availability::NotBuilt`, `app.rs` hides the now-playing bar entirely, so
-**there is no screenshot of the bottom bar**. It is specified here and drawn in
-`mock-now-playing.svg` instead.
+Revision 1's *method* stands and most of its *findings* stand. Its **direction**
+does not. What survives, what is superseded, and what is new:
+
+| Revision 1 said | Status | Why |
+|---|---|---|
+| The listening room: warm charcoal walls, amber lamp | **SUPERSEDED** (§1) | Direction change. The room becomes a neutral-cool near-black hang; the ink becomes archival mount board. |
+| baz has no typeface; bundle IBM Plex | **SHIPPED, and now reduced** (§3) | Correct and done. Five faces become three: `MONO` and `SERIF` are deleted. |
+| Every figure that changes in place is set in `MONO` | **SUPERSEDED and disproved** (§3) | Plex Sans's digits are tabular by default — *measured*. The mono was never needed. |
+| The covers float; give them a contact shadow | **SUPERSEDED and disproved** (§4.3) | *Measured*: on near-black a black shadow is a 1.04 : 1 rounding error. All shadows are deleted; the halo is the only one left. |
+| A fixed 240 px grid in a variable window is the proportion bug | **UPHELD, and re-solved** (§2) | Still the bug. Revision 1's `floor`-based fix produced too few columns at narrow widths and too-small art at wide ones; §2 replaces it. |
+| `PAPER_FAINT` / `PAPER_MUTED` were below their contrast floors | **UPHELD; values re-derived** (§5.2) | Re-computed against the new surfaces. They land within two bytes of revision 1's — and the one pairing revision 1 had to excuse as a rounding case now passes outright. |
+| One accent, reserved for playback truth | **UPHELD** (§5.3) | Unchanged in meaning. One use is tightened: Play album stops being a solid amber slab. |
+| The lamp takes its hue from the playing sleeve | **UPHELD and promoted** (§1.2) | Still the signature, now half of a larger one. |
+| The accent cuts: focus ring, scanning note | **SHIPPED** | Already in `theme.rs`. |
+| `SIZE_TITLE` 22, `SIZE_HERO` 32 | **UPHELD** (§3.2) | The reasons still hold; no reason to churn the numbers again. |
+| The serif, in exactly two places | **SUPERSEDED** (§3.3) | Revision 1 nominated it as the first thing to cut if the design needed disciplining. This is that moment. |
+| `THUMB_PX` stays 256; revisit later | **SUPERSEDED** (§4.2) | The new grid draws art up to 320 px, so 256 would upscale. 320, with the cache arithmetic re-done. |
+| The now-playing bar is the best thing in the product | **UPHELD** (§6.5) | Its geometry is untouched. Four reserved slots shrink to their measured worst case. |
+| Motion is 0 ms | **UPHELD** (§7) | |
 
 ---
 
 ## 1. Direction
 
-**The listening room, after dark, with the lamp on.**
+**A record archive after closing time. The works are lit; the room is not.**
 
-baz is a dim room with a wall of records in it. The walls are warm charcoal —
-never the blue-grey of a stock dark theme — because the covers are the only
-thing in the room allowed to have colour, and ten thousand of them supply more
-than enough. The text is warm off-white, the weight of liner-note paper. There
-is exactly one accent, an amplifier's lamp amber, and it is spent only on what
-is true about the music *right now*: which record is playing, and where in it
-the needle is. Everything else — every control, every setting, every count,
-every state — is made of surface, edge and ink. The room is quiet so that the
-records are loud.
+baz is a hang, not a dashboard. The wall is near-black and *neutral-cool* — the
+matte paint of a black-cube gallery. Not the warm charcoal of a listening room,
+which was the previous direction, and not the blue-grey of a stock dark theme.
+The type is warm ivory, the colour of archival mount board. **The room is cold
+and the paper is warm**, which is what a gallery actually looks like at night,
+and it is the single decision that keeps a near-black grid from reading as
+every other media app.
 
-**Who it is for.** People who own their music: Marta, who has spent years
-tagging 40,000 tracks and wants the work to look like a collection rather than
-a spreadsheet; Devon, who plays albums front to back and wants the sleeve at a
-size worth looking at; Karl, who wants to be told the truth about the signal
-path in the quietest possible voice. Not Spotify users. Nobody here is being
-sold anything, discovered to, or recommended at.
+There is one light in the room and it is pointed at one thing: the record that
+is playing. Everything else — every control, count, setting, state — is made of
+surface, edge and ink. The room is quiet so the records are loud.
 
-**What it deliberately is not.**
+**Who it is for.** Marta, whose 40 000 tracks should look like a collection
+rather than a spreadsheet; Devon, who plays albums front to back and wants the
+sleeve at a size worth looking at; Karl, who wants to be told the truth about
+the signal path in the quietest possible voice. Nobody here is being sold
+anything, discovered to, or recommended at.
 
-- **Not a streaming client.** No blue. No algorithmic rows, no "made for you",
-  no rounded-square artwork, no colour-washed backgrounds sampled from the
-  cover, no play button hovering over the art.
-- **Not a skeuomorphic hi-fi.** No wood, no brushed metal, no VU needles, no
-  knurled knobs, no drawn shelf. This is the answer to the open question in
-  `VISION.md` ("how far to lean into shelf skeuomorphism"): **not at all.** A
-  drawn shelf is a texture competing with ten thousand textures the user
-  already owns. The covers are the only material in the room; the tactility
-  comes from how they are lit and where they cast their shadow, not from
-  furniture drawn behind them.
-- **Not a broadsheet.** No hairline editorial grid, no numbered eyebrows, no
-  rules dividing everything from everything. This is a room, not a page.
+### 1.1 The domain this came out of
 
-### 1.1 What is kept, and what is sharpened
+Not "dark music app". The world of a print archive and its reading room:
 
-The "listening room" is right and it stays. It was a good first pass and the
-palette rationale in `theme.rs` is sound. Three things are wrong with the
-result, and they are the whole of this redesign.
+- **the hang** — the arrangement of works on a wall; the distance between them
+  is a curatorial decision, never leftover space;
+- **the wall label** — the small card beside a work: title, maker, date,
+  medium. Small, quiet, always in the same place, never *on* the work;
+- **the picture light** — the one warm lamp aimed at a piece; the only light in
+  the room that is *pointed* at something;
+- **the reading room** — where you are given one item at a time, at a table,
+  and everything else stays in the stacks;
+- **the condition report** — the archivist's honest note about what the object
+  actually is (`FLAC · 16-bit · 44.1 kHz`, `bit-perfect`). Never a sales pitch;
+- **the shelfmark** — figures, quietly set, in a fixed column, proving the
+  thing is catalogued and findable.
 
-**1. baz has no typeface.** It borrows one. `Font::DEFAULT` in iced 0.13 is
-`Family::SansSerif` — a *generic* family that each platform resolves for
-itself — and baz then asks that unknown family for `Weight::Medium` and
-`Weight::Semibold`. When the resolved family has no such face, the fallback
-lands somewhere else entirely. On the test machine it lands on a **monospace**:
-in `01-current-shelf.png` every tile title is monospaced while every artist
-line beneath it is proportional, and in `00-current-first-run.png` the product's
-one line of copy — *Where's your music?* — is set in a typewriter face. This is
-not a taste problem, it is the reason baz reads as alpha-tier, and it is also a
-correctness problem: baz will look like a different product on every machine.
-`icon.rs` already rejected system glyphs on exactly this ground ("a player
-should look the same everywhere"). §2.2 fixes it.
+**The colour world**, walked rather than named: matte hanging-wall black; the
+shadow gap where the wall meets the floor; **archival mount board**, a warm
+ivory that is a *material* rather than "white text"; **graphite**, the pencil
+the accession number is written in; the picture light's narrow tungsten pool;
+and the sleeves, which supply every other colour in the room.
 
-**2. The covers float.** Every sleeve carries a card shadow — offset 3, blur 8,
-45% black — which is the shadow of something hovering above a surface, not of
-something standing on one. Combined with a fixed 240 px grid centred in the
-window, leaving dead gutters at both edges, the shelf reads as a table of
-thumbnails. §3 and §4.2 fix it: a contact shadow, and a grid that fills the
-window.
+### 1.2 The signature — the picture light and its label
 
-**3. The lamp is on when nothing is playing.** The accent is documented as
-"reserved for playback truth" and is then spent on input focus, on the scanning
-note, and on the primary action. The search field takes focus at launch, so
-**the first frame baz ever draws is an amber-ringed box with no music playing**
-(`01-current-shelf.png`). A reserved signal that appears before there is
-anything to signal is not reserved. §2.1 cuts it back to four uses — all of
-them the playhead — and one argued exception.
+Two halves of one component.
 
-### 1.2 The signature
+**The light.** One accent, reserved for playback truth, whose **hue is read
+from the playing sleeve** — lightness and chroma fixed at the coordinates of
+amber, so a white sleeve cannot produce a white lamp and a fluorescent one
+cannot produce a fluorescent lamp. It is always recognisably the same lamp with
+a different record in front of it. Amber is the default and the fallback. Only
+the hue is data. (Revision 1's §3.3, carried forward unchanged; the extraction
+method is §4.4 here.)
 
-**The lamp takes the colour of the record that is on.**
+**The label.** Every album in baz is captioned by a **wall label**: a
+fixed-height, left-aligned, two-line block set beneath the work and never on
+it. The same object at four scales. When the work is playing, the label's first
+line carries the lamp dot and the work carries the halo.
 
-There is exactly one accent on screen, it means one thing, and its *hue* is
-read from the playing album's cover. Lightness and chroma are fixed, so it is
-always recognisably the same lamp — a white sleeve cannot produce a white lamp
-and a fluorescent sleeve cannot produce a fluorescent one. Only the hue is
-data. Amber is the default and the fallback.
+Five concrete places the signature appears, each locatable in a screenshot:
 
-This is the answer to "should baz do palette extraction" (§3.3). It costs the
-single-accent discipline nothing — there is still one accent, reserved to the
-same one thing — and it makes the room respond to the collection instead of
-imposing on it. It is also the only place in this document where anything is
-allowed to be derived from artwork.
+1. **the shelf tile** — label under every sleeve; playing gains dot + halo
+   (`visual/gallery/01-shelf-1280.png`, column 2);
+2. **the album inspector header** — the same label, larger, plus the catalogue
+   line and the condition report (`03-album-inspector.png`);
+3. **the now-playing bar's left zone** — the same label at bar scale, plus the
+   `3 / 12` position slot. *The bar is a wall label for what is sounding*
+   (`04-now-playing-bar.png`);
+4. **Up-next popover rows** — one-line labels; the playing row's dot replaces
+   its number in a column that never changes width;
+5. **the seek groove** — the light laid flat: elapsed fill and knob take the
+   lamp hue, and the elapsed stamp warms while a seek is in flight.
+
+Plus **Play album**, the only control in baz outlined in the accent — the
+switch that turns the picture light on.
+
+### 1.3 Why this is not the near-black grid every media app converges on
+
+Gallery/archive is the least inherently distinctive of the three directions
+offered: a dark grid of covers is what everyone builds. The palette does not
+make it specific; **what is in it** does. Three defaults rejected, and what
+replaces each:
+
+| The default | What baz does instead |
+|---|---|
+| A uniform card grid with a fixed cell and a play button appearing over the art on hover | **No cell.** The art absorbs all spare width (§2). Nothing is ever drawn on top of a sleeve. Hover is a rule under the *label*. |
+| Chrome washed in a colour sampled from the current cover | One hue, from one cover, for one 6 px dot / 4 px rail / halo. **If the wall ever changes colour, this feature has been implemented wrongly.** |
+| A monospaced "data" face for the technical bits — the thing the owner actually complained about | Proportional everywhere, with alignment *measured* rather than substituted for (§3). |
+
+And one structural claim that no other player makes:
+
+> **The shelf contains exactly two kinds of thing: artwork and type.**
+
+No cards, no borders, no radii, no shadows, no badges, no overlays, no
+separators, no scrim. Squint at `02-shelf-1920.png`: you read a rhythm of small
+bright label blocks in regular columns, with images floating above them, and
+exactly one warm glow. **The grid's structure is carried by the labels, not by
+the sleeves' edges** — which is what lets a near-black cover merge into a
+near-black wall without the wall falling apart. That merge is visible in
+`02-shelf-1920.png` (*In Rainbows*, row 1) and it is accepted, deliberately:
+it is what a hang looks like at night, and the covers that vanish are the ones
+whose designers chose black.
 
 ---
 
-## 2. Tokens
+## 2. Proportion — the owner's first complaint, and a real bug
 
-The token sheet is drawn in `visual/tokens.svg`.
+### 2.1 The bug
 
-### 2.1 Palette
+`shelf.rs` lays out a **fixed 240 px cell** (`CELL_W`), containing a **fixed
+208 px sleeve** (`ART_PX`), in a block centred inside a variable window with
+`GRID_PADDING` 24. The art therefore never grows, and everything the window
+does not divide evenly pools as dead gutter at the edges:
 
-Hex values are the exact sRGB of the `f32` constants in `theme.rs` (rounded to
-the nearest byte), so this table and that file are one decision.
-
-| Token | Hex | Role | May be used for | May **not** be used for |
+| Window | Columns | Art | Block | Dead gutter |
 |---|---|---|---|---|
-| `WALL` | `#131110` | the room behind the covers | app background, top bar | anything raised |
-| `RECESS` | `#0D0B0A` | inset chrome, *below* the wall | now-playing bar, input wells, groove troughs, the sleeve's backing plate | text, raised surfaces |
-| `CARD` | `#1B1816` | one step above the wall | hovered tile, resting control, panel/settings surface | selection |
-| `CARD_HIGH` | `#221F1C` | one step above `CARD` | selected tile, selected segment, playing row, hovered control | anything at rest |
-| `HAIRLINE` | `#EDE3D9` @ 8% | findable when you look, invisible when you don't | every resting border, every rule, the resting scrollbar, the resting detent | text |
-| `HAIRLINE_STRONG` | `#EDE3D9` @ 17% | the same edge, firmer | selection edges, hovered controls, hovered scrollbar | a decorative outline |
-| `PAPER` | `#EAE6E0` | primary text | titles, track names, live control ink, the engaged detent | large fills |
-| `PAPER_DIM` | `#A8A29A` | secondary text | artists, one-sentence explanations, hovered fader ink | numbers that change in place |
-| `PAPER_FAINT` | **`#8A857C`** ⟵ CHANGE | tertiary text | counts, durations, hints, signal notes, resting fader ink | primary labels |
-| `PAPER_MUTED` | **`#6E6A62`** ⟵ CHANGE | set but not sounding | the muted fader, a stepper at the end of its travel | text a user must read |
-| `PAPER_RING` | **`#EAE6E0` @ 45%** ⟵ NEW | keyboard focus | the focused `text_input`'s border | anything else |
-| `SELECT_WASH` | **`#EAE6E0` @ 18%** ⟵ NEW | selected text | `text_input` selection | backgrounds |
-| `LAMP` | `#E3A14E` | **the accent** | see §2.1.1 — and nothing else | see §2.1.1 |
-| `LAMP_BRIGHT` | `#F1B362` | the accent, hovered | the seek fill and knob under the pointer; the Play button hovered | a resting state |
-| `LAMP_DEEP` | `#C7883D` | the accent, held | the seek fill while dragged; the Play button pressed | a resting state |
-| `LAMP_GLOW` | **`#E3A14E` @ 45%** ⟵ CHANGE (was 30%) | the halo | the playing sleeve's glow | fills, borders, text |
-| `LAMP_INK` | `#1B140B` | ink on the lamp | the Play button's label and triangle | anything on a dark ground |
-| `ALERT` | `#D9776B` | problems, stated quietly | the top bar's problem note, first-run errors | anything that is merely unusual |
-| `SUCCESS` | `#86A97C` | success | *nothing yet — keep the slot, do not invent a use* | decoration |
-| `SHELF_SHADOW` | **`#000000` @ 55%, offset (0, 5), blur 14** ⟵ CHANGE | the contact shadow | artwork, at every size | any other widget |
+| 1280, no inspector | 5 | 208 | 1200 | 32 px |
+| **922** (1280 with the inspector open) | 3 | 208 | 720 | **154 px** — 77 px of nothing at each edge |
+| 1920, no inspector | 7 | 208 | 1680 | 192 px |
+| 2560 | 10 | 208 | 2400 | 112 px |
 
-`LAMP_SOFT` (`LAMP` @ 55%) is **deleted**: its only use was the focus ring,
-which becomes `PAPER_RING`.
+Under a gallery direction — fewer, larger works with air between them — this is
+exactly backwards: it produces *more* covers, each *smaller*, with the air
+swept into a pile at the window's edge.
 
-#### 2.1.1 The accent discipline
+### 2.2 The hang
 
-**Playback truth** is a fact about the audio the engine is producing *right
-now*: which album is sounding, which track within it, and where the playhead
-is in that track. Nothing else qualifies — not what is queued, not what is
-selected, not what has focus, not what the scanner is doing, not how a gain
-stage is configured, not whether a device can follow the sample rate.
+**One number drives the grid.** `HANG` = 40 px is the distance from a work to
+its neighbour **and** from a work to the edge of the wall. The art absorbs all
+remaining width up to `ART_MAX`; only past that do the margins absorb it.
 
-`LAMP` (and its `BRIGHT`/`DEEP`/`GLOW`/`INK` relatives) may appear in exactly
-these places, and nowhere else:
+```
+HANG        = 40            # GAP_XXL — the grid's one spacing token
+ART_MIN     = 240           # a sleeve is never drawn smaller
+ART_MAX     = 320           # == art::THUMB_PX — and nothing ever upscales
+ART_TARGET  = 272           # the size the wall wants
 
-1. **The playing album's halo** — `LAMP_GLOW`, on artwork at any size.
-2. **The playing dot** — a `DOT` (6 px) circle, beside the playing album's
-   title on a tile and in the number column of the playing queue or track row.
-3. **The seek groove** — the elapsed fill and its knob.
-4. **A seek in flight** — the elapsed timestamp warms to `LAMP` while a
-   position has been asked for and not yet confirmed. A position being asked
-   for is a claim about the playhead.
-5. **The primary Play action** — the one exception, argued below.
+columns(w)  = clamp( round((w + HANG) / (ART_TARGET + HANG)),
+                     1,
+                     max(1, floor((w - HANG) / (ART_MIN + HANG))) )
 
-It may **not** appear on: input focus, text selection, the scanning note, tile
-or row selection, panel toggles, the edition selector, the ReplayGain mode
-selector, the volume fader, the unity detent, hover previews, tooltips,
-scrollbars, checkboxes, steppers, the wordmark, or any readout whatsoever.
+art(w)      = min(ART_MAX, (w - (columns + 1) * HANG) / columns)
 
-**The exception, argued.** Play is the control that *creates* playback truth;
-it is the only control in the product that does. It appears at most once per
-screen, and it is the only lamp-*filled* rectangle anywhere in baz — every
-other amber is a 6 px dot, a 4 px rail, or a glow. If that ever stops being
-true, the exception is revoked and Play becomes a `PAPER`-outlined button.
+gutter(w)   = columns > 1 ? (w - 2*HANG - columns*art) / (columns - 1) : 0
+              # clamped to 2*HANG; any surplus goes to the margins, block centred
 
-**Two cuts from the current build**, both fixing a lamp that is on when nothing
-is playing:
+row_h(w)    = art(w) + GAP_LG + LABEL_H + HANG          # = art(w) + 92.4
+```
 
-- **Focus ring**: `LAMP_SOFT` → `PAPER_RING`. Where the keyboard is has nothing
-  to do with where the music is, and the search field is focused on launch.
-- **Scanning note**: `LAMP` → `PAPER_DIM`, and it loses the mono face it shares
-  with the counts so it reads as a sentence fragment rather than a figure. A
-  scan is the library working, not the music.
+Two properties worth naming, because they are what makes this a system rather
+than a formula:
 
-#### 2.1.2 Contrast
+1. **Whenever the art is not capped, `gutter == HANG` exactly.** The
+   arithmetic puts every spare pixel into the artwork, so **dead gutter is
+   0 px at every width**. That is the whole of the proportion fix, in one
+   number.
+2. **`ART_MAX = 4/3 × ART_MIN`, deliberately.** At every column-count change
+   the art hands off from its largest to its smallest — 320 → 240 — at exactly
+   one width per transition, with no width at which the grid is ambiguous.
 
-WCAG 2.1 contrast ratio against each of the four surfaces a token can land on,
-computed rather than estimated. Two tokens fail today and are changed above;
-the numbers are here so the change is checkable.
+**Rounding, not flooring**, is the second half of the fix. Revision 1 chose the
+column count by `floor` against a minimum, which pins the art near its floor
+and gets *worse* on bigger screens (7 columns at 208 px on a 1920 window).
+Rounding against a *target* keeps the art in a narrow band around 272 at every
+width — 240 to 320 across a 640 → 2560 range.
 
-| Foreground | on `WALL` | on `CARD` | on `RECESS` | on `CARD_HIGH` | Floor | Verdict |
-|---|---|---|---|---|---|---|
-| `PAPER` | 15.1 | 14.2 | 15.8 | 13.2 | 4.5 | pass |
-| `PAPER_DIM` | 7.4 | 7.0 | 7.8 | 6.5 | 4.5 | pass |
-| `PAPER_FAINT` **old** `#726D66` | **3.7** | **3.4** | **3.8** | **3.2** | 4.5 | **fail** |
-| `PAPER_FAINT` **new** `#8A857C` | 5.1 | 4.8 | 5.4 | 4.5 | 4.5 | pass |
-| `PAPER_MUTED` **old** `#4A4743` | **2.0** | **1.9** | **2.1** | **1.8** | 3.0 (non-text) | **fail** |
-| `PAPER_MUTED` **new** `#6E6A62` | 3.5 | 3.3 | 3.7 | 3.1 | 3.0 | pass |
-| `LAMP` | 8.5 | 8.0 | 8.9 | 7.4 | 3.0 | pass |
-| `ALERT` | 6.1 | 5.7 | 6.4 | 5.3 | 4.5 | pass |
-| `LAMP_INK` on `LAMP` | — | — | — | — (8.2) | 4.5 | pass |
+### 2.3 Worked, so the change is checkable
 
-`PAPER_FAINT` carries durations, counts, the signal note and every hint in the
-product — the whole of Karl's readout vocabulary — and at 3.4 : 1 on the panel
-it is below AA. The new value is the same hue, lightened until it clears 4.5 : 1
-on every surface it can sit on.
+| Shelf width | Columns | Art | Gutter | Margin | Row pitch | Today | Today's dead gutter |
+|---|---|---|---|---|---|---|---|
+| 640 | 2 | 260 | 40 | 40 | 352.4 | 2 × 208 | 112 px |
+| 760 | 2 | 320 | 40 | 40 | 412.4 | 2 × 208 | 232 px |
+| 860 | 2 | 320 | 80 | 70 | 412.4 | 3 × 208 | 92 px |
+| **922** (1280 − inspector) | 3 | **254** | 40 | 40 | 346.4 | 3 × 208 | **154 px** |
+| 1120 | 3 | 320 | 40 | 40 | 412.4 | 4 × 208 | 112 px |
+| 1160 | 4 | 240 | 40 | 40 | 332.4 | 4 × 208 | 152 px |
+| **1280** (no inspector) | **4** | **270** | 40 | 40 | 362.4 | 5 × 208 | 32 px |
+| 1500 (1920 − inspector) | 5 | 252 | 40 | 40 | 344.4 | 6 × 208 | 12 px |
+| **1920** (no inspector) | **6** | **273.3** | 40 | 40 | 365.7 | 7 × 208 | 192 px |
+| 2560 | 8 | 275 | 40 | 40 | 367.4 | 10 × 208 | 112 px |
 
-`PAPER_MUTED` is not text a user must read (it is the muted fader and a stepper
-at the end of its travel), so the 3 : 1 non-text floor applies — but 1.9 : 1 is
-below even that, which means the position the listener chose is effectively
-invisible while muted, and restoring it is the entire reason mute keeps the
-fader where it is. The new value clears 3 : 1 everywhere while staying plainly
-quieter than a live control.
+Drawn at 1280 in `visual/gallery/01-shelf-1280.png` and at 1920 in
+`02-shelf-1920.png`, with the computed figures printed into each picture.
 
-Both changes keep the invariants `theme.rs` already asserts:
-`PAPER_MUTED.r < PAPER_FAINT.r` (0.431 < 0.541) and
-`PAPER_MUTED.r > RECESS.r * 2.0` (0.431 > 0.102). In `f32` terms the new
-constants are `PAPER_FAINT = (0.541, 0.522, 0.486)` and
-`PAPER_MUTED = (0.431, 0.416, 0.384)`.
+**The one discontinuity, stated rather than hidden.** Between 1120 and 1160 px
+the grid goes from three 320 px sleeves to four 240 px ones. Every column grid
+jumps somewhere; these numbers make the jump exactly the 4/3 ratio the tokens
+were chosen for, and put it at one width rather than smeared across a band.
 
-iced 0.13 publishes no accessibility tree, so contrast and hit-target size are
-the only accessibility guarantees baz can currently make. That is a reason to
-honour them exactly, not a reason to shrug.
+### 2.4 What "generous negative space" means, in numbers
 
-### 2.2 Type
+Honestly, and it is not what it sounds like. Art coverage per cell is
+essentially unchanged — 64.9 % today (208² in 240 × 284), 64.5 % at 1280 under
+the new grid (270² in 310 × 362.4). **The generosity is not proportional, it is
+distributional:**
 
-#### 2.2.1 baz must bundle its typeface
+- **Dead gutter goes from 32–192 px to 0 px at every width.** Every spare pixel
+  is between two works instead of pooled at the window's edge.
+- **The works get larger, everywhere.** At 1280: 208 → 270 px, **+30 % on the
+  edge and +68 % in area**. At 922 (inspector open): 208 → 254, +22 %. At no
+  width in the table does a sleeve get smaller than it is today.
+- **Fewer of them.** 5 → 4 columns at 1280, 7 → 6 at 1920. This is the
+  direction's request taken literally.
+- **The vertical rhythm becomes the horizontal one.** The gap between rows is
+  `HANG`, the same 40 px as the gap between columns, so the wall reads as a
+  field rather than as stacked strips. Today the row gap is implicit in
+  `CELL_H` and does not match anything.
 
-**Decision: embed the faces and set them as the application default.**
+### 2.5 The caption block, and what it costs
 
-The evidence is §1.1(1) and the screenshots. The mechanism is already in
-iced 0.13 and costs no new crate: `include_bytes!` each face, hand the bytes to
-`iced::application(…).font(…)` (verified present in `iced` 0.13.1
-`src/application.rs:208`; `Settings::fonts` is the same thing by another
-route), and name the family with `.default_font(Font::with_name("IBM Plex
-Sans"))`. `theme::MEDIUM` / `SEMIBOLD` / `MONO` then become that family at the
-weight asked for, with a real face behind each. No generic families, no weight
-fallback roulette.
+The label is **two independent one-line lanes**, not one two-line box —
+revision 1's `CAPTION_LINE_H` reasoning, kept verbatim, because it is right:
+`Wrapping::None` does not stop iced 0.13 breaking a long paragraph, so inside a
+single box a long title would push the artist line out of the very slot
+reserved to keep it still.
 
-Line heights in §2.2.2 are `text(…).line_height(LineHeight::Relative(f))`,
-which iced 0.13 exposes (`iced_core` 0.13.2 `src/widget/text.rs:107`); baz
-currently takes the toolkit default of `Relative(1.3)` everywhere, which
-`theme::LINE_HEIGHT` already names.
+```
+LABEL_LINE_H = SIZE_BODY × 1.40 = 18.2
+LABEL_H      = 2 × LABEL_LINE_H = 36.4
+```
 
-**The family: the IBM Plex superfamily** — Plex Sans, Plex Mono, Plex Serif.
-Three reasons, none of them fashion:
+**CHANGE** from `SIZE_BODY × LINE_HEIGHT` (16.9 / 33.8): the line height is now
+set per type token (§3.2) rather than taking iced's 1.3 default everywhere.
 
-1. **The Sans and the Mono are drawn together.** baz sets every figure that
-   changes in place in a monospace (see below). Today that means Liberation
-   Mono digits sitting inside a sentence set in the system sans — two
-   unrelated voices in one line, visible in every screenshot's `2022 · 8
-   tracks · 47:21`. Plex Mono shares Plex Sans's x-height, stem weight and
-   terminal treatment, so the same line reads as one typeface with two
-   settings.
-2. **It has the weights baz asks for.** Regular, Medium and SemiBold all exist
-   as real faces, so nothing synthesises and nothing falls back.
-3. **It comes from the right world.** Plex was drawn for technical
-   documentation and machine interfaces; its squared terminals and open
-   apertures read as instrument panel rather than web app, which is the room
-   this product is in.
+Gap from work to label: `GAP_LG` 16 (**CHANGE**, was `GAP_MD` 12) — a label
+hangs clear of its work.
 
-**Licence and size.** OFL-1.1: redistributable, GPL-compatible, requires the
-licence text be shipped and the Reserved Font Name not be reused for modified
-copies. Five faces are needed (Sans Regular / Medium / SemiBold, Mono Regular,
-Serif SemiBold): ≈ 800 KB unsubsetted, ≈ 250 KB subset to Latin plus the
-punctuation baz actually uses (`·` `—` `→` `−` `…` `“” ‘’`).
+**The year is dropped from the shelf label** (upheld from revision 1). At rest
+the wall answers *what do I own*; `which pressing` is the inspector's catalogue
+line. Two facts per label is a wall of records; three is a table.
 
-**The objection, answered.** `icon.rs` rejected an icon font partly because it
-"adds a binary asset with its own license to vet and subset". That argument was
-right for three glyphs and is wrong here: the whole interface's voice is at
-stake, and the alternative is not "no asset" but "a different product on every
-machine" — which the same module rejected for the same glyphs.
+### 2.6 `THUMB_PX`, and what it costs the cache
 
-**Fallback if the asset is refused.** Name concrete families per platform
-rather than the generic (`Segoe UI` / `SF Pro Text` / `Cantarell`), and
-**never ask for a weight above Regular** — take emphasis from ink and size
-instead. baz then looks different on each platform but at least looks
-deliberate on each. This is strictly worse and should not be chosen quietly.
+`ART_MAX` is 320, so `art::THUMB_PX` must become **320** (**CHANGE**, was 256)
+or every sleeve above 256 px would upscale and soften — which the new grid
+produces at almost every width.
 
-#### 2.2.2 The scale
+**Invariant, and it should be asserted in code: `ART_MAX == THUMB_PX`. No
+artwork in baz is ever drawn larger than its source.**
 
-Sizes are `theme.rs`'s, unchanged except where marked. Line heights are given
-as `LineHeight::Relative`, which iced 0.13's `text` accepts.
+Recomputed from `art.rs`'s own derivation, at the same 150 MiB budget:
 
-| Token | px | line-height | weight | face | Used for |
-|---|---|---|---|---|---|
-| `SIZE_CAPTION` | 11 | 1.45 (≈16) | Regular | Sans | tooltips, hover tips, footnotes |
-| `SIZE_META` | 12 | 1.35 (≈16) | Regular | Sans, or **Mono for figures** | captions, durations, counts, notes, control labels |
-| `SIZE_BODY` | 13 | 1.40 (≈18) | Regular / Medium | Sans | tile titles, track titles, button labels |
-| `SIZE_EMPHASIS` | 15 | 1.35 (≈20) | Regular / Medium | Sans | section headings, empty-state lines, panel artist |
-| `SIZE_TITLE` | **22** ⟵ CHANGE (was 19) | 1.20 (≈26) | SemiBold | **Serif** | the album's title |
-| `SIZE_HERO` | **32** ⟵ CHANGE (was 28) | 1.15 (≈37) | SemiBold | **Serif** | the first-run question |
-
-`SIZE_TITLE` moves 19 → 22 because it names the subject of the whole surface
-and 19 px is a heading, not a title. `SIZE_HERO` moves 28 → 32 for the same
-reason on a screen that contains nothing else.
-
-#### 2.2.3 The serif, and where it is allowed
-
-The serif appears in **exactly two places**: the album title on the album
-surface, and the first-run question. Both are "the thing itself" rather than
-chrome — a record's name, and the product's single line of copy. Sleeve
-typography is overwhelmingly serif or display; UI sans is what a settings
-dialog looks like. This is the one deliberate accessory in the design, and if
-one thing has to be cut to keep the design disciplined, it is this.
-
-Everything the software says *about itself* — Settings, Queue, ReplayGain, Play
-album, every label, every note — is Sans. No exceptions.
-
-#### 2.2.4 Figures
-
-iced 0.13 exposes no OpenType feature control, so there is no `tnum` and no way
-to ask a proportional face for tabular figures.
-
-**The rule: every figure that changes in place is set in `MONO`.** That is
-already baz's practice and it stays. It covers timestamps, durations, track
-numbers, queue positions, dB values, sample rates, and the counts line —
-anything whose digits tick or whose value is driven by a control.
-
-Figures that do **not** change in place — a year in a tile caption, a count
-inside a sentence — may be Sans. The distinction is whether a digit changing
-would move a neighbour.
-
-What bundling the family buys here is that the mono no longer looks borrowed.
-
-### 2.3 Spacing
-
-Base unit 4. `theme.rs`'s scale, plus one name for a number the shelf already
-uses.
-
-| Token | px | Used for |
+| `THUMB_PX` | Worst-case entry | Entries at 150 MiB |
 |---|---|---|
-| `GAP_XXS` | 2 | lines within one block (title over artist) |
-| `GAP_XS` | 4 | caption to title, dot to label, row padding |
-| `GAP_SM` | 8 | siblings within a group |
-| `GAP_MD` | 12 | groups within a surface |
-| `GAP_LG` | 16 | surface padding, bar gutters |
-| `GAP_XL` | 24 | screen-level breathing room, panel padding, settings sections |
-| `GAP_XXL` | **32** ⟵ NEW name for an existing number | the art-to-art gutter, the shelf's outer padding |
+| 256 | 256 × 256 × 4 = 262 144 B = 256 KiB | **600** |
+| **320** | 320 × 320 × 4 = 409 600 B = 400 KiB | **384** |
 
-Padding is symmetric unless a token says otherwise. The two asymmetric
-paddings in the product are both deliberate and both already exist:
-`scroll_gutter()` (right only, reserving the scrollbar lane) and the tile's
-horizontal pad (centring art in its cell).
+**−36.0 % capacity, +56 % bytes per entry.** (Revision 1 quoted "+37 %,
+600 → 375" for this change; 375 was wrong — 150 MiB ÷ 400 KiB is exactly 384.)
 
-### 2.4 Radii
+**The budget stays at 150 MiB.** 384 entries is roughly **8× the live widget
+count**: at 1920 the shelf shows 6 columns over `ceil(922 / 365.7) + 1` = 4
+visible rows plus 2 × `OVERSCAN_ROWS`, i.e. ~48 tiles. The LRU exists to make a
+fling meet decoded art, and 384 entries covers 64 rows — about 23 000 px of
+scroll — before it recycles.
 
-| Token | px | Applies to |
-|---|---|---|
-| — | **0** | **artwork, always** |
-| `RADIUS_SEGMENT` | 4 | a segment inside its well, the playing queue row, a checkbox |
-| `RADIUS_CHIP` | 4 | hover tips, tooltips |
-| `RADIUS_CTRL` | 6 | buttons, inputs, segmented wells, steppers |
-| `RADIUS_TILE` | 10 | the tile's hover/selection card |
-| `DOT / 2` | 3 | the playing dot |
-
-Artwork is square-cornered because iced 0.13 cannot round or clip an `image`,
-and because a record sleeve has square corners. The constraint and the truth
-agree; design *with* it rather than apologising for it. Nothing in this
-document asks for a rounded cover.
-
-The nesting rule holds throughout: an inner shape is one step tighter than the
-well containing it (segment 4 inside well 6), so the inner shape nests rather
-than straining against the edge.
-
-### 2.5 Elevation and borders
-
-**One depth strategy, committed to:** hairline borders plus whisper-quiet
-surface steps, and **exactly one shadow in the entire product**.
-
-- Surface order, darkest to lightest: `RECESS` < `WALL` < `CARD` < `CARD_HIGH`.
-  Each step is 2–3 points of luminance. You should feel the hierarchy without
-  being able to point at the edge.
-- Borders are 1 px, `HAIRLINE` at rest and `HAIRLINE_STRONG` when a thing is
-  selected or hovered. iced's `Border` is four-sided only, so any single line
-  (the rule under the top bar, the rule above the now-playing bar) is a `rule`
-  widget, not a border. This is already how it is built.
-- **The shadow is reserved for artwork.** No shadows on cards, buttons,
-  panels, tooltips, popovers or rows. A shadow in baz means "this is a physical
-  object"; only the sleeves are.
-
-### 2.6 Motion
-
-**Every state change in baz takes 0 ms.**
-
-This is a decision, not an omission. iced 0.13 ships no animation runtime;
-producing a transition means driving state from a `window::frames()`
-subscription, which redraws continuously whether or not anything is moving.
-baz measures its startup in hundreds of milliseconds and its memory in a
-150 MiB thumbnail budget; spending idle frames on a fade would be spending the
-thing the product is *for*.
-
-**Permitted movement** — two things, and neither is animation:
-
-1. The seek fill and the elapsed timestamp advancing with playback. That is
-   data arriving.
-2. Scrolling, which the toolkit drives from the input device.
-
-**Never animated, at any iced version:**
-
-- the now-playing bar's geometry (§4.6);
-- the shelf grid — no stagger, no pop-in, no fade as thumbnails decode; a
-  thumbnail replacing its placeholder is an instant swap;
-- album art — no crossfade, no Ken Burns, no zoom;
-- anything that would require a redraw while the window is idle.
-
-**If iced gains an animation runtime**, exactly three things may animate, and
-all three must degrade to instant:
-
-| What | Duration | Easing |
-|---|---|---|
-| the tile hover card's opacity | 90 ms | ease-out |
-| a panel's open/close | 140 ms | ease-out |
-| the lamp's hue when the playing album changes | 200 ms | linear — a lamp warming |
-
-No spring, no bounce, no overshoot anywhere. This is a room, not a toy.
+**What this does not fix, stated plainly.** The cache is DPI-blind. On a 2×
+display a 320 logical px tile still wants 640 device px and gets 320. 320 is
+chosen because it is the largest *logical* size the layout can produce, so at
+1× nothing upscales; the honest fix is a DPI-aware cache and it is not this
+document's.
 
 ---
 
-## 3. Album art
+## 3. Type — proportional everywhere
 
-Art is the product. Everything in §2 exists to get out of its way.
+### 3.1 The monospace is deleted, and it was never needed
 
-### 3.1 Sizes
+Revision 1's rule was: *iced 0.13 exposes no OpenType feature control, so there
+is no `tnum`; therefore every figure that changes in place is set in `MONO`.*
+The premise is true. The conclusion does not follow, and the difference is
+worth measuring rather than assuming.
+
+**Many grotesques ship tabular figures by default.** IBM Plex Sans is one.
+
+Measured two ways — first by reading `hmtx` directly (the same tables the
+hand-written TrueType reader in `crates/baz/src/font.rs` parses), then by
+shaping through HarfBuzz with default features on (`calt`, `liga`, `kern`
+applied), which is what cosmic-text does behind `iced::widget::text`:
+
+| Face | Digit advances `0`–`9` | Distinct widths | Tabular by default |
+|---|---|---|---|
+| IBM Plex Sans **Regular** | 600 / 1000 em, every digit | 1 | **yes** |
+| IBM Plex Sans **Medium** | 600 / 1000 em, every digit | 1 | **yes** |
+| IBM Plex Sans **SemiBold** | 600 / 1000 em, every digit | 1 | **yes** |
+| IBM Plex Serif SemiBold | 600 / 1000 em, every digit | 1 | yes |
+| IBM Plex **Mono** Regular | 600 / 1000 em (every glyph) | 1 | yes |
+
+The Sans's digit advance is **identical to the Mono's**, in all three weights.
+There is no kerning between digits and no default-on substitution that touches
+them. Shaped end to end:
+
+| String | String | Sans Regular | Δ |
+|---|---|---|---|
+| `0:00:00` | `9:59:59` | 43.008 px each at `SIZE_META` | **0.000 px** |
+| `1:23:45` | `8:07:02` | 43.008 px each | 0.000 px |
+| `999` | `111` | 21.600 px each | 0.000 px |
+| `-18.1 dB` | `-60.0 dB` | 47.280 px each | 0.000 px |
+| `12 / 32 albums` | `11 / 11 albums` | 81.660 px each | 0.000 px |
+
+**So `MONO` is deleted.** The alignment it was standing in for is a property of
+the Sans. Nothing in baz needs a second face to keep a column straight. The
+specimen is `visual/gallery/05-figures-specimen.png`.
+
+Three consequences beyond taste:
+
+1. **A latent clip is fixed.** `STAMP_W` is 52 px. `10:00:00` measures 57.60 px
+   in Plex Mono — the shipped build **cannot** hold a ten-hour track — and
+   50.21 px in Plex Sans, which it can.
+2. **Every reserved slot gets narrower**, because Sans is proportional
+   everywhere the string is not a digit (§3.4).
+3. **`theme.rs`'s `MONO_EM` const survives as `DIGIT_EM`**, still 0.6, and is
+   now a property of the face baz actually sets its figures in rather than of a
+   second face it also had to ship.
+
+### 3.2 The scale
+
+Sizes are `theme.rs`'s. Line heights are `LineHeight::Relative`, which iced
+0.13's `text` accepts; baz currently takes the toolkit default of 1.3
+everywhere.
+
+| Token | px | line-height | weight | Used for |
+|---|---|---|---|---|
+| `SIZE_CAPTION` | 11 | 1.45 | Regular | tooltips, hover tips, footnotes |
+| `SIZE_META` | 12 | 1.35 | Regular | label line 2, durations, counts, notes, control labels |
+| `SIZE_BODY` | 13 | 1.40 | Regular / Medium | label line 1, track titles, button labels |
+| `SIZE_EMPHASIS` | 15 | 1.35 | Regular / Medium | section headings, empty-state lines, inspector artist |
+| `SIZE_TITLE` | **22** (revision 1's change, upheld) | 1.20 | SemiBold | the album's title |
+| `SIZE_HERO` | **32** (revision 1's change, upheld) | 1.15 | SemiBold | the first-run question |
+
+**Emphasis comes from weight, ink and size only.** iced 0.13 exposes no
+letter-spacing, no small caps and no OpenType features, so nothing in this
+system may be specified in terms of them. A wall label would normally be
+letterspaced; baz's cannot be, and pretending otherwise in a mockup would be
+specifying something the toolkit cannot draw.
+
+### 3.3 The serif is deleted too
+
+Revision 1 gave Plex Serif SemiBold exactly two jobs — the album title and the
+first-run question — and said: *"this is the one deliberate accessory in the
+design, and if one thing has to be cut to keep the design disciplined, it is
+this."*
+
+This is that moment, for a reason the new direction supplies. The gallery's
+whole thesis is that **the room supplies nothing and the work supplies
+everything**. A display face is the room supplying personality. The album title
+becomes Plex Sans SemiBold at 22.
+
+**The bundle, restated.** Three faces instead of five:
+
+| Face | Bytes |
+|---|---|
+| `IBMPlexSans-Regular.ttf` | 200 500 |
+| `IBMPlexSans-Medium.ttf` | 202 460 |
+| `IBMPlexSans-SemiBold.ttf` | 202 632 |
+| **Total** | **605 592** |
+| *Removed:* `IBMPlexMono-Regular.ttf` | −173 052 |
+| *Removed:* `IBMPlexSerif-SemiBold.ttf` | −222 876 |
+| **Saved** | **395 928 bytes (39.5 %)** |
+
+Licensing is unchanged and already cleared: OFL-1.1, verbatim upstream, hashes
+and provenance in `crates/baz/assets/fonts/README.md`, `OFL.txt` committed.
+Nothing here is a *new* face, so nothing here needs a new licence review —
+which is the argument for solving the figure problem inside the family baz
+already ships rather than auditioning a replacement.
+
+**If Plex Sans had lacked tabular digits**, the fallback would have been stated
+here rather than wished away: right-aligned duration and timestamp columns
+(ragged-left reads fine editorially — it is how a bibliography sets page
+numbers), fixed-width reserved slots for every ticking figure, and an explicit
+list of where a width jiggle is tolerable. Two of those three are specified
+anyway (§3.4, §3.5), because they are good practice independent of the face.
+
+### 3.4 Reserved slots, re-derived from the real advances
+
+Revision 1 found `theme.rs`'s slot assertions had guessed 0.5 em against an
+actual 0.6 em. The same discipline applies here: every slot is re-measured in
+the face that will draw it, at the size it uses.
+
+| Token | Today | Sans px | Mono px | **New** | Worst case | Slack |
+|---|---|---|---|---|---|---|
+| `STAMP_W` | 52 | 50.21 | 57.60 | **52** | `10:00:00` | 1.79 |
+| `SIGNAL_W` | 120 | 92.38 | 108.00 | **96** | `192 → 176.4 kHz` | 3.62 |
+| `LEVEL_W` | 62 | 43.34 | 52.80 | **48** | `-18.1 dB` | 4.66 |
+| `PREVIEW_W` | 58 | 39.42 + 2 × `GAP_XS` | 46.20 | **48** | `0:00:00` + padding | 0.58 |
+| `SETTING_VALUE_W` | 68 | 56.89 | 64.80 | **60** | `+20.00 dB` | 3.11 |
+| `TRACK_NO_W` | 24 | 21.60 | 21.60 | **24** | `999` | 2.40 |
+| `POSITION_W` | — | 53.46 | 64.80 | **56** | `199 / 240` | 2.54 |
+
+`POSITION_W` is new: the `3 / 12` readout the IA adds to the bar's left zone
+(`01-ux-audit-and-ia.md` §3.4). It is sized for a three-figure queue; a
+four-figure one (`9999 / 9999`, 67.86 px) would clip, which is a deliberate
+bound — no album has 1000 tracks and a whole-library shuffle queue is a
+different surface's problem.
+
+**The test in `font.rs` does not change shape, only its inputs.**
+`every_reserved_slot_holds_its_worst_case_in_the_bundled_face` already parses
+these very bytes and measures these very strings; it switches from `mono()` to
+`sans()`, gains `10:00:00` and `199 / 240`, and keeps its 1 px `SLACK`. Do not
+ship the face reduction without it.
+
+### 3.5 The one place a proportional face can still jiggle
+
+Measured, at `SIZE_META`:
+
+| Glyph | Advance |
+|---|---|
+| `-` hyphen-minus U+002D | 0.399 em (4.79 px) |
+| `+` plus U+002B | 0.600 em (7.20 px) |
+| `−` minus U+2212 | 0.600 em (7.20 px) |
+
+So `-20.00 dB` measures **54.48 px** and `+20.00 dB` **56.89 px** — a 2.4 px
+shift in a right-aligned slot's *left* edge as the ReplayGain pre-amp steps
+through zero.
+
+- **The fix.** `replaygain::format_centidb` emits **U+2212** for negatives.
+  `−20.00 dB` and `+20.00 dB` then measure **56.89 px each**, exactly.
+  (`theme.rs` already specifies U+2212 for the stepper's own `−` glyph, "matches
+  `+` in width and height" — this makes the *formatter* agree with the
+  control.) Its unit tests assert the ASCII form and must be updated together.
+- **The residual, accepted.** Unsigned `0.00 dB` is 7.2 px narrower than a
+  signed value. One value, at one point in the travel, changing only when a
+  human presses a stepper, in a slot whose right edge is pinned. Padding a
+  phantom sign column to hide it would be worse than the thing it hides.
+- **Never acceptable, anywhere:** a figure that ticks with playback. Elapsed,
+  remaining, seek preview, level tip, queue position, track duration. All are
+  fixed-digit-count strings and Plex Sans makes them exact to 0.000 px.
+- **The standing rule.** **Figure columns are right-aligned**, in fixed slots.
+  Ragged-left reads fine editorially, and the pinned edge is the one the eye
+  follows down a column.
+
+---
+
+## 4. Album art
+
+Art is the product. Everything else exists to get out of its way.
+
+### 4.1 Sizes
 
 | Surface | Edge (logical px) | Source |
 |---|---|---|
-| shelf tile | **200 – 256, computed per window width** (§4.2) | 256² LRU thumbnail |
-| album surface, two-column | **min(420, 40% of surface width)**, never below 240 | same |
-| album surface, one-column | min(container − 2·`GAP_XL`, 480) | same |
+| shelf tile | **240 – 320, computed per shelf width** (§2.2) | 320² LRU thumbnail |
+| album inspector | `min(column − 2 × GAP_XL, 320)`, **left-aligned** in the column | same |
 | now-playing bar | **none** | — |
 
-Three notes.
+**The inspector's sleeve is left-aligned, not centred**, flush with the label
+beneath it and with the track list below that — a flush-left hang. It is capped
+at `ART_MAX` so the *no artwork upscales* invariant holds on every surface, not
+just the shelf.
 
-**The bar carries no artwork.** It is 102 px tall and pixel-stable; a 78 px
-thumbnail in it would be too small to honour anything and would put a second
-copy of the playing cover on a screen that already has the real one, haloed, in
-the shelf. What is playing is said in words there, and shown in the shelf.
-
-**The upper bound is the cache, not taste.** `art::THUMB_PX` is 256, so art
-above 256 logical px upscales and softens. On a 2× display even a 256 px tile
-is drawn from a 256 px source and is already soft. Raising `THUMB_PX` to 320
-would cost 37% of the LRU's capacity (600 → 375 entries at the same 150 MiB
-budget). **Recommendation: keep 256 for now**, and revisit when the cache is
-DPI-aware rather than trading capacity for sharpness blindly.
+**The bar carries no artwork.** Revision 1 argued this from pixel budget; the
+better argument is the direction's: **in a gallery the label does not reproduce
+the work.** What is playing is said in words in the bar and shown, haloed, in
+the shelf.
 
 **Nothing is ever drawn on top of a sleeve.** No play overlay on hover, no
 badge, no duration chip, no gradient scrim, no selection tint. Even the playing
-mark sits beside the caption, off the art. The only thing that touches the art
-is light around it.
+mark sits beside the label, off the art. The only thing that touches artwork is
+light around it.
 
-### 3.2 When art is missing
+### 4.2 Depth, and why the contact shadow is deleted
 
-Keep the deterministic gradient (`vm::gradient_colors`, hash → HSL). Two
-changes.
+Revision 1 diagnosed the sleeves as "floating" and prescribed a tighter, lower,
+darker contact shadow so a sleeve would stand on the shelf rather than hover
+above it. Under a near-black wall that prescription does not work, and the
+measurement says so:
 
-**Quieten it.** Today the placeholder samples S ∈ [0.35, 0.70] and L ∈ [0.22,
-0.50], which produces blocks that out-shout real covers — a wall where the
-*missing* art is the loudest thing on it is backwards. **CHANGE** to
-S ∈ [0.10, 0.28], L ∈ [0.14, 0.28]. A missing sleeve should read as absence,
-not as an abstract cover.
+| Shadow | Composited over `WALL` `#0C0D0E` | Contrast |
+|---|---|---|
+| black @ 45 % | `#070708` | **1.04 : 1** |
+| black @ 55 % | `#050606` | 1.04 : 1 |
+| black @ 65 % | `#040505` | 1.05 : 1 |
 
-**Give it a letterform.** The album title's first character, set in the Serif
-at **0.28 × the art edge**, `PAPER` at **12%** opacity, optically centred. One
-`text` widget, no new glyph work. A blank gradient says nothing; a letter says
-"this is a sleeve with no picture" and gives the eye something to sort by while
-scrolling.
+**On near-black, a drop shadow is not a design tool; it is a rounding error.**
+There is no luminance left to remove. Making it darker, larger or softer moves
+the number in the third decimal place.
 
-The gradient stays deterministic per album id, so the same missing album is the
-same colour every launch — that consistency is what lets Marta recognise a hole
-in her collection by sight.
+So: **`SHADOW` is deleted, and nothing in the shelf has any shadow at all.**
+The single shadow primitive left in the product is the playing halo, and it is
+not elevation — it is light.
 
-### 3.3 Colour from art: yes, in exactly one place
+**Depth strategy, committed to: surface-step elevation.** Four planes, whisper
+quiet in bytes (8 apart) and plainly felt in linear light:
 
-The research is right that palette extraction is cheap and proven. It is also
-how every streaming client ends up washing its chrome in whatever hue the
-current cover happens to have, which destroys the neutral room the covers need.
+| Surface | Hex | Linear L | Step | Role |
+|---|---|---|---|---|
+| `RECESS` | `#060708` | 0.00208 | — | the shadow gap: bar, input wells, groove troughs |
+| `WALL` | `#0C0D0E` | 0.00398 | ×1.91 | the hanging wall |
+| `PLINTH` ⟵ was `CARD` | `#141517` | 0.00747 | ×1.88 | inspector column, popover, resting control |
+| `PLINTH_LIT` ⟵ was `CARD_HIGH` | `#1C1D20` | 0.01230 | ×1.65 | selected segment, playing row, hovered control |
 
-**baz extracts one colour, from one cover, for one purpose: the lamp.**
+**Two tokens are renamed** (**CHANGE**): `CARD` → `PLINTH`, `CARD_HIGH` →
+`PLINTH_LIT`. "Card" is web-app vocabulary and, under this direction, a lie —
+there are no cards. A plinth is the thing a work stands on. Every other token
+name (`WALL`, `RECESS`, `PAPER*`, `LAMP*`, `HAIRLINE*`) already belongs to a
+place rather than to a scale and is kept, so this is a two-line rename rather
+than a vocabulary rewrite that would collide with the IA work in flight.
 
-- **Source.** The already-decoded ≤ 256² RGBA thumbnail sitting in the LRU. No
-  new decode, no new I/O, no new dependency.
+**Hairlines** appear in exactly three roles — the rule under the top bar, the
+rule above the now-playing bar, and the rule dividing the inspector from the
+shelf — plus the tile's own hover/selection rule (§6.1) and control borders.
+`HAIRLINE` = `PAPER` @ **7 %** and `HAIRLINE_STRONG` = `PAPER` @ **15 %**
+(**CHANGE**, was 8 % / 17 %): the same alpha over a darker ground is a larger
+step, so holding the *perceived* weight means lowering the number. iced's
+`Border` is four-sided, so every single line is a `rule` widget — already how
+the bars are built.
+
+### 4.3 When art is missing
+
+Keep the deterministic gradient (`vm::gradient_colors`, hash → HSL), with
+revision 1's two changes, one of them re-tuned for the darker wall:
+
+- **Quieten it.** Today it samples S ∈ [0.35, 0.70], L ∈ [0.22, 0.50], which
+  out-shouts real covers. **CHANGE** to **S ∈ [0.10, 0.28], L ∈ [0.16, 0.30]**
+  — revision 1's range with the floor lifted from 0.14, because against
+  `#0C0D0E` a placeholder at L 0.14 barely clears the wall and a missing sleeve
+  should read as absence, not as a hole.
+- **Give it a letterform.** The album title's first character at **0.28 × the
+  art edge**, `PAPER` at 12 %, optically centred — now in **Sans SemiBold**,
+  the serif having been deleted. One `text` widget.
+
+Deterministic per album id, so the same missing album is the same colour every
+launch; that consistency is what lets Marta recognise a hole in her collection
+by sight.
+
+### 4.4 Colour from art: yes, in exactly one place
+
+Unchanged from revision 1 and restated because it is the signature.
+
+- **Source.** The already-decoded ≤ 320² RGBA thumbnail in the LRU. No new
+  decode, no new I/O, no new dependency.
 - **Method.** A 4 × 4 × 4 RGB histogram (64 bins) over every fourth pixel
-  (≈ 4,000 samples). Convert bin centroids to a perceptual space; discard bins
-  below 0.04 chroma, below 0.25 lightness, or above 0.85 lightness. Take the
-  most populous survivor. If none survives, use amber.
+  (~6 400 samples at 320²). Convert bin centroids to a perceptual space;
+  discard bins below 0.04 chroma, below 0.25 lightness, or above 0.85
+  lightness. Take the most populous survivor; if none survives, amber.
 - **The constraint that makes it a design.** **Only the hue survives.**
-  Lightness is forced to 0.72 and chroma to 0.13 — the coordinates of `LAMP`
-  itself. It is the same lamp with a different record in front of it, never a
-  different lamp.
+  Lightness is forced to 0.72 and chroma to 0.13 — the coordinates of `LAMP`.
 - **Where it lands.** The halo, the playing dot, the seek fill and knob, and
-  the Play button's fill; `LAMP_INK` is recomputed as the same hue at
-  lightness 0.12. Nothing else.
-- **When.** Once per *track change*, not per frame. Sub-millisecond.
-- **What it costs the single-accent discipline.** Nothing. There is still
-  exactly one accent on screen and it still means exactly one thing. The rule
-  is unchanged; only its hue is data.
+  Play album's border and triangle. Nothing else.
+- **When.** Once per *track change*. Sub-millisecond.
 - **What it must never do.** Tint a surface, a border, body text, a control, or
-  the artwork itself. If the wall changes colour, this feature has been
-  implemented wrongly.
-- **Shipping.** `LAMP` becomes a function of the playing album rather than a
-  constant, defaulting to `#E3A14E`. Ship the function returning the constant
-  first; the extraction is then a one-file change that redesigns nothing. A
-  setting turns it off; amber is the off state.
-
-### 3.4 Making a wall of covers feel like a collection
-
-Five moves, in order of how much they matter.
-
-1. **Fill the window.** A fixed 240 px grid centred in a variable window leaves
-   dead gutters — 220 px of nothing at 940 px wide with a panel open. A record
-   wall goes to the edges. §4.2 makes the cell width a function of the
-   viewport.
-2. **Ground the covers.** `SHELF_SHADOW`: tighter, lower, darker than the
-   current card shadow, so a sleeve stands on the shelf instead of hovering
-   above it. This is where the tactility comes from, and it is the whole of the
-   answer to "how much skeuomorphism".
-3. **Quieten the captions.** Title in `PAPER` Medium, artist in `PAPER_FAINT`
-   — and **drop the year** (**CHANGE**). At rest the shelf answers "what do I
-   own"; the year answers "which pressing", which is a question the album
-   surface already answers. Fifteen captions each carrying three facts is a
-   table; fifteen carrying two is a wall of records with labels.
-4. **Give the art more room.** Minimum 200 px, up to 256 (§4.2), against 208
-   fixed today.
-5. **Put nothing between the covers.** No borders, no cards at rest, no
-   separators, no badges, no hover overlays. The gutter is empty wall.
-
-Judge these against `visual/01-current-shelf.png` (before) and
-`visual/mock-shelf.svg` (after).
+  the artwork. **If the wall changes colour, this has been implemented
+  wrongly.**
+- **Shipping.** `LAMP` becomes a function of the playing album defaulting to
+  `#E3A14E`. Ship the function returning the constant first; the extraction is
+  then a one-file change that redesigns nothing. A setting turns it off; amber
+  is the off state.
 
 ---
 
-## 4. Components
+## 5. Tokens
 
-Each spec gives the states, the measurements, and — because the information
-architecture is being revisited in parallel and the right-hand rail may not
-survive — **what the component needs from whatever contains it**, rather than
-assuming today's layout.
+### 5.1 The palette
 
-Every component is drawn in `visual/mock-states.svg`.
+| Token | Hex | Role | May **not** be used for |
+|---|---|---|---|
+| `RECESS` | **`#060708`** ⟵ CHANGE | shadow gap: bar, input wells, groove troughs, sleeve backing | text, raised surfaces |
+| `WALL` | **`#0C0D0E`** ⟵ CHANGE | the hanging wall | anything raised |
+| `PLINTH` | **`#141517`** ⟵ CHANGE + RENAME | inspector column, popover, resting control | the shelf |
+| `PLINTH_LIT` | **`#1C1D20`** ⟵ CHANGE + RENAME | selected segment, playing row, hovered control | anything at rest |
+| `HAIRLINE` | **`PAPER` @ 7 %** ⟵ CHANGE | the structural rules, a hovered label's rule, resting control borders | decoration, tile edges |
+| `HAIRLINE_STRONG` | **`PAPER` @ 15 %** ⟵ CHANGE | selected control edges, the playing row's edge | a resting border |
+| `PAPER` | **`#E8E4DB`** ⟵ CHANGE | primary text | large fills |
+| `PAPER_DIM` | **`#ABA8A1`** ⟵ CHANGE | secondary text | figures that tick |
+| `PAPER_FAINT` | **`#888680`** ⟵ CHANGE | tertiary text, **the selected tile's rule** | primary labels |
+| `PAPER_MUTED` | **`#6C6A66`** ⟵ CHANGE | set but not sounding | text a user must read |
+| `PAPER_RING` | `PAPER` @ 45 % | keyboard focus, `text_input` only | anything else |
+| `SELECT_WASH` | `PAPER` @ 18 % | `text_input` selection | backgrounds |
+| `LAMP` | `#E3A14E` | **the accent** — §5.3 | see §5.3 |
+| `LAMP_BRIGHT` | `#F1B362` | the accent, hovered | a resting state |
+| `LAMP_DEEP` | `#C7883D` | the accent, held | a resting state |
+| `LAMP_GLOW` | `LAMP` @ 45 %, **blur 24** ⟵ CHANGE | the playing sleeve's halo | fills, borders, text |
+| `LAMP_WASH` | **`LAMP` @ 10 % / 20 %** ⟵ NEW | Play album, hovered / pressed | any resting state |
+| `ALERT` | `#D9776B` | problems, stated quietly | anything merely unusual |
+| `SUCCESS` | `#86A97C` | *nothing yet — keep the slot* | decoration |
 
-### 4.1 Album tile
+**Deleted:** `SHADOW` (§4.2), `RADIUS_TILE` (§5.4), `LAMP_INK` (§5.3 — nothing
+sits *on* the accent any more), `MONO` and `SERIF` (§3).
 
-**Needs from its container:** a cell of the width the grid computes; nothing
-else. It is self-contained.
+**One board at four levels of light.** `PAPER_DIM`, `PAPER_FAINT` and
+`PAPER_MUTED` are the same r : g : b ratios as `PAPER`, scaled down, so the ink
+family is one material rather than four greys that drifted apart. (The shipped
+ramp drifts warmer as it darkens; against a *cool* wall that reads yellowish.)
+Each value is the **smallest** point on that ramp clearing its floor on every
+surface it can land on, with 0.1 of margin.
+
+### 5.2 Contrast, re-derived against the gallery surfaces
+
+WCAG 2.1, computed rather than estimated. Floors are 4.5 : 1 for anything a
+user has to read and 3 : 1 for a non-text mark whose job is to be locatable.
+
+| Ink | on `RECESS` | on `WALL` | on `PLINTH` | on `PLINTH_LIT` | Floor | |
+|---|---|---|---|---|---|---|
+| `PAPER` `#E8E4DB` | 15.89 | 15.33 | 14.40 | 13.28 | 4.5 | pass |
+| `PAPER_DIM` `#ABA8A1` | 8.49 | 8.20 | 7.70 | 7.10 | 4.5 | pass |
+| `PAPER_FAINT` `#888680` | 5.54 | 5.34 | 5.02 | **4.63** | 4.5 | pass |
+| `PAPER_MUTED` `#6C6A66` | 3.74 | 3.60 | 3.39 | 3.12 | 3.0 | pass |
+| `LAMP` `#E3A14E` | 9.10 | 8.78 | 8.24 | 7.60 | 3.0 | pass |
+| `ALERT` `#D9776B` | 6.53 | 6.30 | 5.92 | 5.46 | 4.5 | pass |
+
+**The interesting result, reported honestly.** Re-derived independently on the
+new ink ramp against the new surfaces, `PAPER_FAINT` and `PAPER_MUTED` land
+within two bytes of revision 1's values (`#888680` vs `#8A857C`; `#6C6A66` vs
+`#6E6A62`). The near-black wall does not demand different inks. What it does
+change is the margin at the top of the range: revision 1's `PAPER_FAINT` on
+`CARD_HIGH` computed to **4.483**, which `theme.rs`'s contrast test has to
+excuse by comparing at the one-decimal precision WCAG publishes (its `ROUNDING`
+constant, with a comment naming the pairing). On `PLINTH_LIT` the same ink
+measures **4.63**.
+
+> **The rounding excuse in `every_ink_clears_its_contrast_floor_on_every_surface_it_lands_on` can be deleted.** No pairing in the gallery palette needs it.
+
+The invariants `theme.rs` already asserts are kept:
+`PAPER_MUTED.r < PAPER_FAINT.r` (0.424 < 0.533) and
+`PAPER_MUTED.r > RECESS.r × 2.0` (0.424 > 0.047). In `f32`:
+`PAPER = (0.910, 0.894, 0.859)`, `PAPER_DIM = (0.671, 0.659, 0.631)`,
+`PAPER_FAINT = (0.533, 0.525, 0.502)`, `PAPER_MUTED = (0.424, 0.416, 0.400)`,
+`WALL = (0.047, 0.051, 0.055)`, `RECESS = (0.024, 0.027, 0.031)`,
+`PLINTH = (0.078, 0.082, 0.090)`, `PLINTH_LIT = (0.110, 0.114, 0.125)`.
+
+The two corrections revision 1 pinned as *corrections* stay pinned: the v0.1
+values still fail, and the test that says so still passes.
+
+iced 0.13 publishes no accessibility tree, so contrast and hit-target size are
+the only accessibility guarantees baz can make. That is a reason to honour them
+exactly, not a reason to shrug.
+
+### 5.3 The accent discipline
+
+**Playback truth** is a fact about the audio the engine is producing *right
+now*: which album is sounding, which track within it, and where the playhead
+is. Nothing else qualifies — not what is queued, not what is selected, not what
+has focus, not what the scanner is doing, not how a gain stage is configured.
+
+`LAMP` and its relatives may appear in exactly these places:
+
+1. **the playing album's halo** — `LAMP_GLOW`, on artwork at any size;
+2. **the playing dot** — `DOT` 6 px, in a wall label's first line or in a
+   row's number column;
+3. **the seek groove** — the elapsed fill and its knob;
+4. **a seek in flight** — the elapsed stamp warms to `LAMP` while a position
+   has been asked for and not yet confirmed;
+5. **Play album** — its 1 px border and its play triangle.
+
+It may **not** appear on: input focus, text selection, the scanning note, tile
+hover or selection, the queue popover's header or its opening affordance's
+active state, the Settings nav's current section, the Previous button, panel
+toggles, the edition or ReplayGain selectors, the volume fader, the unity
+detent, hover previews, tooltips, scrollbars, checkboxes, steppers, the
+wordmark, or any readout whatsoever.
+
+#### The exception is revoked, and replaced by a rule
+
+Revision 1 permitted one solid amber rectangle — Play album — and argued it,
+with an escape clause: *"If that ever stops being true, the exception is revoked
+and Play becomes a `PAPER`-outlined button."*
+
+Drawing it under the gallery direction is what revoked it. With the tile cards,
+the radii, the shadows, the mono and the serif all gone, a full-width amber slab
+became the loudest thing on screen and it was **not** the artwork. The mockup
+made that unarguable.
+
+**CHANGE:** Play album is `LAMP`-outlined, not `LAMP`-filled. 1 px `LAMP`
+border, `LAMP` play triangle, `PAPER` SemiBold label, no fill at rest;
+`LAMP_WASH` at 10 % hovered and 20 % pressed, with the border moving to
+`LAMP_BRIGHT` / `LAMP_DEEP`. Height `TRANSPORT_HIT` 32, full column width.
+
+This buys a rule with no exceptions, which is worth more than an exception with
+a good argument:
+
+> **Amber is never an opaque fill.** It appears only as a ≤ 6 px mark, a 4 px
+> rail, a 1 px line, or light.
+
+`LAMP_INK` had exactly one use — the label on the amber fill — so it is
+deleted, and with it the `LAMP_INK on LAMP` row of the contrast test.
+`the_lamp_is_spent_only_on_playback_truth`'s `PERMITTED` list keeps all four
+names; `primary` still paints the accent, as a border rather than a background,
+and the test's `button_colors` sweep already inspects `border.color`.
+
+### 5.4 Spacing and radii
+
+Base unit 4. The shipped ladder, plus one name for the grid's number.
+
+| Token | px | Used for |
+|---|---|---|
+| `GAP_XXS` | 2 | lines within one block |
+| `GAP_XS` | 4 | dot to label, row padding, chip padding |
+| `GAP_SM` | 8 | siblings within a group |
+| `GAP_MD` | 12 | groups within a surface |
+| `GAP_LG` | 16 | surface padding, bar gutters, **work → label** |
+| `GAP_XL` | 24 | panel padding, settings sections, bar outer gutters |
+| `HANG` | **40** ⟵ NEW | work-to-work **and** work-to-wall-edge (§2.2) |
+
+Radii come down, because an archive is rectilinear:
+
+| Token | px | Applies to |
+|---|---|---|
+| — | **0** | **artwork, always**, and every rule |
+| `RADIUS_SEGMENT` | **3** ⟵ CHANGE (was 4) | a segment inside its well, a checkbox, a queue/track row |
+| `RADIUS_CHIP` | **3** ⟵ CHANGE (was 4) | hover tips, tooltips |
+| `RADIUS_CTRL` | **4** ⟵ CHANGE (was 6) | buttons, inputs, wells, steppers, the popover |
+| `DOT / 2` | 3 | the playing dot |
+| `RADIUS_TILE` | **deleted** | the shelf has no rectangles that are not artwork |
+
+The nesting rule holds: an inner shape is one step tighter than the well
+containing it (segment 3 inside well 4).
+
+---
+
+## 6. Components
+
+Each spec gives the states, the measurements, and **what the component needs
+from whatever contains it** — the IA restructure is in flight, so nothing here
+assumes today's layout.
+
+### 6.1 Album tile — the wall label
+
+**Needs from its container:** a column of the width the hang computes. Nothing
+else.
 
 | Part | Spec |
 |---|---|
-| art | `ART` × `ART` square, radius 0, `RECESS` backing plate, `SHELF_SHADOW` |
-| gap art → caption | `GAP_MD` (12) |
-| title | `SIZE_BODY` / 1.40 Medium `PAPER`, `Wrapping::None`, clipped |
+| art | `art(w)` square, radius 0, **no shadow, no card, nothing behind it** |
+| gap art → label | `GAP_LG` (16) |
+| title | `SIZE_BODY` / 1.40 Medium `PAPER`, `Wrapping::None`, clipped at one lane |
 | gap | `GAP_XXS` (2) |
 | artist | `SIZE_META` / 1.35 Regular `PAPER_FAINT`, `Wrapping::None`, clipped |
-| cell padding | `GAP_MD` vertical; horizontal = (cell − art) / 2 |
+| label block | `LABEL_H` 36.4, left-aligned to the art's left edge |
 | hit target | the whole cell |
 
-**States** — the card is drawn behind the whole cell, inset `GAP_MD` around the
-art:
+**States — the shelf's entire state vocabulary is a rule under the label:**
 
-| State | Card | Border | Art | Caption |
-|---|---|---|---|---|
-| rest | none | none | `SHELF_SHADOW` | as above |
-| hover | `CARD`, `RADIUS_TILE` | none | unchanged | unchanged |
-| pressed | *identical to hover* | | | |
-| selected (its detail surface is showing this album) | `CARD_HIGH`, `RADIUS_TILE` | `HAIRLINE_STRONG` 1 px | unchanged | unchanged |
-| playing | composes with any of the above | | `LAMP_GLOW` halo **instead of** `SHELF_SHADOW`, blur 16, offset 0 | `DOT` lamp dot + `GAP_XS` before the title |
+| State | Mark |
+|---|---|
+| rest | none |
+| hover | artist lifts `PAPER_FAINT` → `PAPER_DIM`, **plus a 1 px `HAIRLINE_STRONG` rule under the label**, art-width, `GAP_XS` below |
+| pressed | identical to hover |
+| selected (the inspector is showing this album) | **a 2 px `PAPER_FAINT` rule under the label**, art-width |
+| playing | composes with any of the above: `LAMP_GLOW` halo, blur 24, offset 0 + `DOT` before the title, `GAP_XS` |
+
+This directly answers the audit's §1.2 finding that *"in a screenshot you cannot
+tell which tile is selected and which is merely under the pointer"*. Hover and
+selection are now 1 px hairline versus 2 px paper — a 2× thickness and roughly
+4× ink jump apart, and neither is a card, a border, a radius or the accent. It
+supersedes `SELECTION_EDGE` (the 2 px tile border a parallel pass added), which
+is deleted along with the tile's background entirely: `theme::tile` collapses to
+"no background, no border, ever".
 
 Pressed is deliberately identical to hover: a distinct press state on a control
 whose click lasts ~100 ms is a flicker, and the feedback the user wants is the
-panel opening.
+inspector opening.
 
-`LAMP_GLOW` rises from 30% to 45% (**CHANGE**) because at 200–256 px the 30%
-halo is not visible against `WALL` — the mark that says "this one" has to
-actually be a mark.
+**`LAMP_GLOW`'s blur rises 16 → 24** (**CHANGE**). It is now the only shadow in
+the product, so it can afford the room, and at 240–320 px sleeves a 16 px blur
+is a thin rim rather than a light.
 
-### 4.2 Shelf grid
+### 6.2 Album inspector
 
-**CHANGE: the cell width becomes a function of the viewport.**
+**Needs from its container:** the width band the IA specifies —
+`clamp(0.28 × W, 340, 420)` — a scroll region, and below 700 px of window
+height the whole panel scrolls rather than only the list.
 
-```
-GRID_PAD  = GAP_XXL (32)          # was 24
-GUTTER    = GAP_XXL (32)          # the art-to-art gap, unchanged in value
-ART_MIN   = 200
-ART_MAX   = 256                   # = art::THUMB_PX; above this the art upscales
-
-columns(w) = max(1, floor((w - 2*GRID_PAD + GUTTER) / (ART_MIN + GUTTER)))
-art(w)     = min(ART_MAX, (w - 2*GRID_PAD - (columns(w)-1)*GUTTER) / columns(w))
-gutter(w)  = columns(w) > 1
-             ? (w - 2*GRID_PAD - columns(w)*art(w)) / (columns(w) - 1)
-             : GUTTER
-cell_h(w)  = art(w) + GAP_MD + 36 + GAP_XL     # art + gap + caption + row gap
-```
-
-Worked, so the change is checkable:
-
-| Viewport | Columns | Art | Gutter | Row height | Today |
-|---|---|---|---|---|---|
-| 1280 (no panel) | 5 | 217 | 33 | 289 | 5 × 208, 284 |
-| 940 (panel open) | 3 | 256 | 54 | 328 | 3 × 208, 284 |
-| 640 (minimum) | 2 | 256 | 64 | 328 | 2 × 208 |
-| 2560 | 10 | 220 | 33 | 292 | 10 × 208 |
-
-The art never shrinks below today's 208 at any width that mattered, the grid
-always reaches both edges, and the column counts are unchanged — so the shelf
-gains sharpness and loses dead space without showing fewer records.
-
-**Cost to the code**, stated honestly: `crates/baz/src/shelf.rs`'s `CELL_W` /
-`CELL_H` / `ART_PX` constants become functions of the viewport width, and
-`spacer_height` and `visible_rows` must take the derived row height. The
-virtualization is otherwise untouched — same widget count per frame, same
-overscan, arithmetic per layout pass rather than per tile. The existing test
-`the_shelf_virtualizes_at_both_of_the_rails_two_widths` should keep its shape
-and gain the new expected column counts.
-
-**Scrollbar.** Apply `theme::scrollbar` and `theme::list_scrollbar` to the
-shelf as well as the rail lists (**CHANGE**). Today the shelf uses iced's
-default, and in `01-current-shelf.png` it is the brightest object on screen —
-a stock blue-grey bar in a room that has no blue in it.
-
-**Empty and loading:** §4.10.
-
-### 4.3 Album surface
-
-**Needs from its container:** ≥ 720 px total width with ≥ 360 px beside the
-art for the two-column form; a scroll region for the track list. Below 720 px
-it reflows to one column — art, then header, then list — rather than shrinking
-the art. **The art never goes below 240 px on any surface.** Nothing here
-depends on the surface being a right-hand rail.
-
-Drawn full-width in `visual/mock-album-detail.svg`, precisely because it must
-not assume the rail.
+Background `PLINTH`, `GAP_XL` padding, a 1 px `HAIRLINE` vertical rule against
+the shelf.
 
 | Part | Spec |
 |---|---|
-| art | §3.1; `LAMP_GLOW` halo when this album is playing, `SHELF_SHADOW` otherwise |
-| playing line (only when playing) | `DOT` + `SIZE_META` Mono `PAPER_DIM`, e.g. `Playing · track 3 of 8`, below the art |
-| title | `SIZE_TITLE` (22) / 1.20 SemiBold **Serif** `PAPER` — wraps freely, this is the one thing on the surface allowed to |
+| sleeve | `min(column − 2 × GAP_XL, ART_MAX)`, **left-aligned**, halo only when *this* album is playing |
+| title | `SIZE_TITLE` 22 / 1.20 SemiBold `PAPER`, capped at two lines |
 | artist | `SIZE_EMPHASIS` / 1.35 `PAPER_DIM` |
-| meta | `SIZE_META` Mono `PAPER_FAINT` — `year · n tracks · total`, describing the **selected edition**, not the album |
-| encoding | `SIZE_META` Mono `PAPER_FAINT` — `FLAC · 16-bit · 44.1 kHz`, only when the scan read one |
-| edition selector | §4.7, only when `editions.len() > 1` |
-| Play album | §4.7, the only lamp-filled control |
-| track list | §4.4, capped at **600 px** of reading width |
-| gaps | `GAP_MD` between blocks, `GAP_XL` around the surface |
+| catalogue line | `SIZE_META` `PAPER_FAINT` — `1992 · 13 tracks · 45:35`, describing the **selected edition** |
+| condition report | `SIZE_META` `PAPER_FAINT` — `FLAC · 16-bit · 44.1 kHz`, only when the scan read one |
+| edition selector | §6.6, only when `editions.len() > 1` |
+| Play album | §5.3 |
+| track list | §6.3, reading width capped at 600 px |
+| gaps | `GAP_MD` between blocks |
 
-**The reading column is capped, not stretched.** A track list run out to a
-1280 px window's edge puts half a screen of nothing between a title and its
-duration, which is exactly the spreadsheet the shelf exists to avoid.
+Drawn in `visual/gallery/03-album-inspector.png` — deliberately showing an
+album that is **selected but not playing**, with a *different* album playing in
+the shelf beside it, because selection and playback are different facts and the
+inspector has to be able to show one without the other.
 
-### 4.4 Track and queue rows
+### 6.3 Track and queue rows
 
-One component, two uses. **Needs from its container:** ≥ 300 px of width (24
-number + 8 + title ≥ 180 + 8 + duration 44 + 10 scrollbar lane) and a scroll
-region. It works in a rail, a drawer, a sheet or a page.
+One component, two uses (the inspector's list and the Up-next popover's).
+**Needs from its container:** ≥ 300 px of width and a scroll region.
 
 | Part | Spec |
 |---|---|
-| number column | `TRACK_NO_W` (24), right-aligned, `SIZE_META` Mono `PAPER_FAINT` |
+| number column | `TRACK_NO_W` 24, **right-aligned**, `SIZE_META` `PAPER_FAINT` |
 | title | `SIZE_BODY` / 1.40, `Wrapping::None` |
-| artist (when the album's track artists vary, or the queue row has one) | `SIZE_META` `PAPER_DIM` beneath the title, `GAP_XXS` |
-| duration | `SIZE_META` Mono `PAPER_FAINT`, right |
-| row padding | `pad(GAP_XS, GAP_XS)` |
-| list gutter | `scroll_gutter()` — `SCROLLBAR_LANE` (10) on the right, reserved whether or not the list scrolls |
+| artist (when track artists vary) | `SIZE_META` `PAPER_DIM` beneath, `GAP_XXS` |
+| duration | `SIZE_META` `PAPER_FAINT`, **right-aligned** |
+| row padding | `pad(GAP_XS, GAP_XS)`, `RADIUS_SEGMENT` 3 |
+| list gutter | `scroll_gutter()` — `SCROLLBAR_LANE` 10, reserved whether or not the list scrolls |
 
-**States:**
-
-| State | Number column | Title ink | Title weight | Row |
-|---|---|---|---|---|
-| upcoming / plain | position | `PAPER` | Regular | none |
-| played | position | `PAPER_FAINT` | Regular | none |
-| playing | **`DOT` lamp dot**, replacing the number | `PAPER` | Medium | `CARD_HIGH`, `RADIUS_SEGMENT`, `HAIRLINE_STRONG` 1 px |
-| not interactive (v0.1) | — | — | — | **no hover affordance, no pointer cursor** |
+| State | Number column | Title ink | Row |
+|---|---|---|---|
+| upcoming | position | `PAPER` | none |
+| played | position | `PAPER_FAINT` | none |
+| hovered | position | `PAPER` | `PLINTH` |
+| playing | **`DOT` lamp dot**, replacing the number | `PAPER` Medium | `PLINTH_LIT` + `HAIRLINE_STRONG` |
 
 The dot replaces the number rather than joining it, in a column that is
-`TRACK_NO_W` wide either way, so a track starting moves no text. An affordance
-that does nothing is a lie: rows gain hover and a pointer cursor on the day the
-engine gains a "jump to queue position" command, and not before.
+`TRACK_NO_W` wide either way, so a track starting moves no text.
 
-### 4.5 Transport controls
+### 6.4 Up next popover
 
-| Part | Spec |
-|---|---|
-| glyph box | `ICON_PX` (16) square, rasterised from polygons (`icon.rs`) |
-| hit target | `TRANSPORT_HIT` (32) square, fixed in both axes |
-| chrome | `CARD` + `HAIRLINE` 1 px, `RADIUS_CTRL` |
-| hover | `CARD_HIGH` + `HAIRLINE_STRONG` |
-| pressed | `RECESS` + `HAIRLINE_STRONG` |
-| disabled | `CARD` + `HAIRLINE`, glyph at `GLYPH_OPACITY_DISABLED` (0.45) |
-| pending (command sent, not yet confirmed) | **ink only**: glyph at `GLYPH_OPACITY_PENDING` (0.55). No size, weight, colour or shape may vary with `pending` |
-| name | a tooltip — iced 0.13 publishes no accessibility tree, so this *is* the accessible name |
+**Needs from its container:** anchoring above the now-playing bar. Per the IA:
+`POPOVER_W` 360, max height 0.6 × window, `GAP_LG` above the bar and from the
+right edge.
 
-**No new icons are required by this document.** Anything added later must be
-expressible as closed polygons in a unit square (`icon.rs` can only rasterise
-that), which rules out strokes, arcs of significant radius, and anything with a
-line cap.
+Surface `PLINTH_LIT`, 1 px `HAIRLINE_STRONG`, `RADIUS_CTRL` 4, **no shadow**
+(§4.2 deleted them; the surface step and the edge are the separation) and **no
+scrim** — dimming ten thousand covers to show twelve rows is the exact mistake
+this palette exists to avoid. No arrow or notch: iced's borders are four-sided.
 
-### 4.6 The now-playing bar
+Header `Up next` at `SIZE_EMPHASIS` with a ✕ right; summary `3 of 12 · 51:20`
+at `SIZE_META` `PAPER_FAINT`; then §6.3's rows with a per-row ✕ on hover.
+**The header and the affordance's active state are not amber** (§5.3).
 
-**Three zones on one vertical centre line**: what is playing (left, fill,
-clipped), transport over the groove (centre, fixed column), signal note and
-volume (right, fill, right-aligned, clipped).
+### 6.5 The now-playing bar
 
-**Height: exactly 102 px in every state.**
+**Unchanged geometry. Height exactly 102 px in every state.**
 
 ```
   1  rule (HAIRLINE)
  12  GAP_MD padding
  32  TRANSPORT_HIT
   8  GAP_SM
- 15  PREVIEW_H          — the hover-preview lane, reserved whether or not
-                          anything is hovering
+ 15  PREVIEW_H          — reserved whether or not anything is hovering
  22  RAIL_HIT           — RAIL (4) + 2 × HIT_SLOP (9)
  12  GAP_MD padding
 ---
 102
 ```
 
-**How the design preserves pixel stability** — the invariants this spec is
-accountable for:
+Three zones on one centre line, drawn at 2× in
+`visual/gallery/04-now-playing-bar.png` with every slot called out.
 
-1. **Nothing in the bar is sized to its content.** `STAMP_W` 52, `SEEK_W` 260,
-   `SEEK_ROW_W` 380, `SIGNAL_W` 120, `VOLUME_W` 96, `VOLUME_BLOCK_W` 136,
-   `PREVIEW_W` 58, `LEVEL_W` 62 — every one a token, every one wide enough for
-   its worst case (`h:mm:ss`, `192 → 176.4 kHz`, `-18.1 dB`).
+**Left.** The wall label at bar scale — title `SIZE_BODY` Medium `PAPER` over
+artist `SIZE_META` `PAPER_DIM`, `GAP_XXS` — plus the new `POSITION_W` 56 slot
+carrying `3 / 12`, the block optically centred in the bar's height. The zone
+takes a **maximum** width rather than pure `Fill` (the IA's §4.3 fix), so at
+760 px the title clips as designed instead of breaking to three lines.
+
+**Centre.** Previous · Play/Pause · Next over the seek groove, in a fixed
+`SEEK_ROW_W` 380 column. Previous is new (the IA's step 5); it costs 40 px in a
+column with 268 px spare.
+
+**Right.** `SIGNAL_W` 96 then `VOLUME_BLOCK_W` 136, right-aligned, `GAP_XL`
+from the window edge (**CHANGE**, was `GAP_LG`, and the detent sat one pixel
+from the glass).
+
+**What keeps it pixel-stable**, and the invariants this spec is accountable
+for, unchanged from revision 1 except in their numbers:
+
+1. **Nothing in the bar is sized to its content.** Every slot is a token wide
+   enough for its worst case, measured (§3.4).
 2. **Slots exist whether or not they have anything to say.** The seek row is
-   reserved with no track loaded; the signal note's 120 px is reserved when the
-   chain is ordinary; the preview lane is reserved when the pointer is
-   elsewhere. A note *appearing* moves nothing.
+   reserved with no track loaded; `SIGNAL_W` is reserved when the chain is
+   ordinary; the preview lane is reserved when the pointer is elsewhere.
 3. **State changes touch ink, never geometry.** Pending is an opacity. Mute is
-   a glyph swap inside a fixed box plus an ink change. The seek knob is the
-   only thing in the bar permitted to change size (5 → 7 px), and only because
-   nothing is drawn beside it; the volume knob may not, because it would drag
-   the unity detent with it and a detent that moves is not a detent.
-4. **Nothing this document adds goes in the bar.** No artwork, no extra
-   controls, no readouts.
-5. **The one new risk is the bundled typeface** (§2.2): a different face has
-   different figure widths, and every fixed slot in this bar was sized against
-   the old one. Mitigation: keep the existing arithmetic assertions in
-   `theme.rs`, and add one that measures the rendered advance width of
-   `"0:00:00"` and `"-18.1 dB"` in the bundled Mono at `SIZE_META` /
-   `SIZE_CAPTION` against `STAMP_W` and `LEVEL_W`. Do not ship the font change
-   without it.
+   a glyph swap in a fixed box. The seek knob is the only thing permitted to
+   change size (5 → 7); the volume knob may not, because it would drag the
+   unity detent and a detent that moves is not a detent.
+4. **The face change is the risk, and the test is the answer.** Four slots
+   shrink; `font.rs`'s advance-width test measures each against the face that
+   will draw it. Do not ship the change without it.
 
-**Left zone.** Title `SIZE_BODY` Medium `PAPER` over artist `SIZE_META`
-`PAPER_DIM`, `GAP_XXS` between, neither wrapping, the zone clipping. With no
-engine or nothing playing, one line of `SIZE_META` `PAPER_FAINT` stating the
-fact plainly.
+### 6.6 Controls
 
-**Right zone.** The signal note (§4.9) then the volume block, right-aligned so
-even the rarely-seen skipped-files note grows leftward into the gutter. The
-fader sits beside the note that says whether the path is bit-exact because the
-fader is the one control that can take it out of bit-exactness; the adjacency
-is the explanation.
+**Grooves.** Both are `groove::Groove`. `RAIL` 4 in a `RECESS` trough, radius
+`RAIL / 2`, **no border** (**CHANGE** — one fewer hairline; the trough's own
+surface step is the edge). Seek: `LAMP` → `LAMP_BRIGHT` hovered → `LAMP_DEEP`
+dragged, knob `KNOB` 5 → `KNOB_ACTIVE` 7; unfilled and knobless at undeclared
+length. Volume: `PAPER_FAINT` → `PAPER_DIM`, `PAPER_MUTED` muted, `RECESS` with
+no engine, knob never changes size. Unity detent `DETENT_W` 2 × `DETENT_H` 5
+lifted `DETENT_GAP` 2 clear of the knob, `HAIRLINE` at rest and **`PAPER` when
+engaged** — a five-fold ink jump on a 2 px mark. Never amber: unity is a
+property of the control, not a claim about the music.
 
-### 4.7 The two grooves
+**Segmented control** (edition selector, ReplayGain mode). `RECESS` well,
+`RADIUS_CTRL` 4, `HAIRLINE` 1 px, `SEGMENT_INSET` 2; segments `RADIUS_SEGMENT`
+3, `Length::Fill`, `SIZE_META` Medium. Selected `PLINTH_LIT` +
+`HAIRLINE_STRONG` + `PAPER`; unselected no background + `PAPER_DIM`; hovered
+`PLINTH` + `PAPER`. Never amber.
 
-Both are `groove::Groove`. Rail `RAIL` (4) tall, `RECESS` trough, `HAIRLINE`
-1 px border, radius `RAIL / 2`. Cursor: `Pointer` when live, `Grabbing` while
-held, `None` when inert.
+**Transport.** `ICON_PX` 16 glyph in a `TRANSPORT_HIT` 32 square. `PLINTH` +
+`HAIRLINE` at rest, `PLINTH_LIT` + `HAIRLINE_STRONG` hovered, `RECESS` pressed,
+`GLYPH_OPACITY_DISABLED` 0.45 disabled, `GLYPH_OPACITY_PENDING` 0.55 pending —
+**ink only**; no size, weight, colour or shape may vary with `pending`. A
+tooltip is the accessible name, because iced publishes no accessibility tree.
 
-**Seek — the accent applies, because position is playback truth.**
+**Stepper.** `STEPPER_HIT` 24 square, `RADIUS_CTRL` 4, `PLINTH` + `HAIRLINE`;
+glyph `SIZE_BODY`, `−` is U+2212, `PAPER` live / `PAPER_MUTED` at the end of
+travel; value in `SETTING_VALUE_W` **60**, right-aligned.
 
-| State | Fill | Knob radius |
+**Checkbox.** `SIZE_BODY` 13 box at `RADIUS_SEGMENT` 3, `RECESS` unchecked /
+`PLINTH_LIT` checked, `HAIRLINE_STRONG` border, tick in `PAPER`. Never amber.
+
+**Search field.** `RECESS` well, `RADIUS_CTRL` 4, `pad(GAP_SM, GAP_MD)`,
+`SIZE_BODY`, 360 px in the top bar, plus the inline ✕ the IA specifies.
+Placeholder `PAPER_FAINT`, value `PAPER`, selection `SELECT_WASH`. Border
+`HAIRLINE` at rest, `HAIRLINE_STRONG` hovered, `PAPER_RING` focused.
+
+### 6.7 Status readouts
+
+Every readout obeys four rules: **no icon, no background, no border, never the
+accent.** One that can appear and disappear lives in a fixed-width slot so its
+arrival moves nothing. All of them are now Sans (§3.1); the *only* change from
+revision 1's table is that "Mono" becomes "Sans" throughout.
+
+| Readout | Ink | Notes |
 |---|---|---|
-| rest | `LAMP` | `KNOB` (5) |
-| hover | `LAMP_BRIGHT` | `KNOB_ACTIVE` (7) |
-| dragged | `LAMP_DEEP` | `KNOB_ACTIVE` (7) |
-| undeclared length | trough only, no fill | 0 — and the widget refuses the pointer and leaves the cursor alone |
+| counts (`24 albums · 287 tracks`) | `PAPER_FAINT` | right-aligned in the top bar |
+| filtered counts (`1 / 24 albums`) | `PAPER_FAINT` | |
+| scanning | `PAPER_DIM` | a scan is the library working, not the music |
+| files skipped | `PAPER_FAINT` | |
+| problem | `ALERT` | quietly; no klaxon, no icon |
+| signal path (`48 → 44.1 kHz`, `bit-perfect`) | `PAPER_FAINT` | `SIGNAL_W` 96, right-aligned, tooltip carries one plain sentence |
+| queue position (`3 / 12`) | `PAPER_FAINT` | `POSITION_W` 56 |
+| ReplayGain readout (`−7.24 dB`) | `PAPER` over a `PAPER_FAINT` detail line | `GAP_XXS` between |
 
-The elapsed timestamp warms to `LAMP` while a seek is in flight and cools the
-moment the engine confirms.
+**The conversion and bit-perfect notes get identical treatment** — same size,
+weight, ink and slot — so neither can read as the other's verdict. Karl can
+find them; nobody else will ever notice them arrive. This is the single most
+important tone decision in the product and it must not be "improved" with a
+colour, a badge or a lock icon.
 
-**Volume — the accent does not apply, because a setting is not the music.**
-
-| State | Fill and knob | Knob radius |
-|---|---|---|
-| rest | `PAPER_FAINT` | `KNOB` (5) |
-| hover / dragged | `PAPER_DIM` | `KNOB` (5) — **never changes** |
-| muted | `PAPER_MUTED` — the chosen position stays visible | `KNOB` |
-| no engine | `RECESS` — the groove and its detent keep their place | `KNOB` |
-
-**The unity detent.** `DETENT_W` (2) × `DETENT_H` (5), at the top of the
-travel, lifted `DETENT_GAP` (2) above the rail so it clears the knob rather
-than hiding under it. Ink: `HAIRLINE` at rest, **`PAPER` when the handle is on
-it** — a five-fold jump in weight on a 2 px mark, which is what makes "at
-unity" and "one pixel below unity" different on sight. Deliberately not amber:
-unity is a property of the control, not a claim about the music.
-
-**Hover preview.** A `PREVIEW_W`/`LEVEL_W`-wide tip in `CARD_HIGH` with a
-`HAIRLINE_STRONG` edge and `RADIUS_CHIP` corners, `SIZE_CAPTION` Mono
-`PAPER_DIM`, floating in the reserved lane above the groove, centred on the
-pointer and clamped to stay whole. Not amber: a preview is a position being
-*considered*, which is neither truth nor a request.
-
-### 4.8 Controls
-
-**Segmented control** (edition selector, ReplayGain mode — the same control,
-because it answers the same question: *which one of these few*).
-
-| Part | Spec |
-|---|---|
-| well | `RECESS`, `RADIUS_CTRL`, `HAIRLINE` 1 px, `SEGMENT_INSET` (2) padding |
-| segment | `RADIUS_SEGMENT` (4), `pad(GAP_XS, GAP_SM)`, `Length::Fill` — equal widths |
-| label | `SIZE_META` Medium |
-| selected | `CARD_HIGH` + `HAIRLINE_STRONG` + `PAPER` |
-| unselected | no background + `PAPER_DIM` |
-| hovered (unselected) | `CARD` + `PAPER` |
-| disabled | as unselected, no press |
-
-Never amber: choosing a format or a gain mode is a view, not a claim about what
-is playing.
-
-**Primary action** (Play album). `LAMP` fill, `RADIUS_CTRL`, `LAMP_INK` label
-at `SIZE_BODY` SemiBold with the play triangle at `ICON_PX` beside it,
-`pad(GAP_SM, 0)` and `Length::Fill` within its column. Hover `LAMP_BRIGHT`,
-press `LAMP_DEEP`, disabled `CARD` + `PAPER_FAINT`. **At most one per screen.**
-
-**Panel/view toggle** (Queue, Settings). Identical to a segment: label-only at
-rest in `PAPER_DIM`, `CARD_HIGH` + `HAIRLINE_STRONG` when its surface is open.
-Fixed width (`QUEUE_TOGGLE_W` 92) so gaining a count in the label — `Queue`
-→ `Queue · 12` — moves nothing beside it.
-
-**Stepper** (`−` / `+` beside a numeric setting).
-
-| Part | Spec |
-|---|---|
-| button | `STEPPER_HIT` (24) square, `RADIUS_CTRL`, `CARD` + `HAIRLINE` — the transport's chrome in a smaller square |
-| glyph | `SIZE_BODY` Mono, `−` is U+2212 (matches `+` in width and height), `PAPER` live / `PAPER_MUTED` at the end of travel |
-| value | `SETTING_VALUE_W` (68), right-aligned, `SIZE_META` Mono `PAPER` |
-| row | label (`SIZE_META` `PAPER_DIM`) — fill — value — `−` — `+`, `GAP_SM` |
-
-Smaller than `TRANSPORT_HIT` on purpose: a setting is adjusted deliberately and
-rarely; play and pause are hit in a hurry. A stepper at the end of its travel
-renders disabled rather than absorbing the press, and the fixed value slot is
-what stops a repeated press moving the button out from under the pointer.
-
-**Checkbox.** `SIZE_BODY` (13) box at `RADIUS_SEGMENT`, `RECESS` unchecked /
-`CARD_HIGH` checked, `HAIRLINE_STRONG` border, tick in `PAPER`, label
-`SIZE_META` `PAPER`, `GAP_SM` between. Disabled: `PAPER_MUTED` throughout.
-Never amber.
-
-### 4.9 Search field and status readouts
-
-**Search field.** `RECESS` well, `RADIUS_CTRL`, `pad(GAP_SM, GAP_MD)`,
-`SIZE_BODY`, width 360 in the top bar. Placeholder `PAPER_FAINT`, value
-`PAPER`, selection **`SELECT_WASH`** (**CHANGE**, was `LAMP_GLOW`).
-
-| State | Border |
-|---|---|
-| rest | `HAIRLINE` |
-| hover | `HAIRLINE_STRONG` |
-| focused | **`PAPER_RING`** (**CHANGE**, was `LAMP_SOFT`) |
-
-**Status readouts.** Every readout in baz obeys four rules: no icon, no
-background, no border, and never the accent. A readout that can appear and
-disappear lives in a fixed-width slot so its arrival moves nothing.
-
-| Readout | Face | Ink | Notes |
-|---|---|---|---|
-| counts (`32 albums · 285 tracks`) | `SIZE_META` Mono | `PAPER_FAINT` | |
-| filtered counts (`12 / 32 albums`) | `SIZE_META` Mono | `PAPER_FAINT` | |
-| scanning | `SIZE_META` **Sans** | **`PAPER_DIM`** | **CHANGE**, was Mono `LAMP` |
-| files skipped | `SIZE_META` Mono | `PAPER_FAINT` | |
-| problem | `SIZE_META` Sans | `ALERT` | quietly; no klaxon, no icon |
-| signal path (`48 → 44.1 kHz`, `bit-perfect`) | `SIZE_META` Mono | `PAPER_FAINT` | in `SIGNAL_W` (120), right-aligned, tooltip carries one plain sentence |
-| ReplayGain readout (`-7.24 dB`) | `SIZE_META` Mono | `PAPER` over a `PAPER_FAINT` detail line | `GAP_XXS` between |
-
-**The conversion and bit-perfect notes are deliberately quiet, and the two get
-identical treatment.** `48 → 44.1 kHz` and `bit-perfect` are the same size, the
-same weight, the same ink and the same slot, so neither can read as the other's
-verdict. Karl can find them; nobody else will ever notice them arrive. This is
-the single most important tone decision in the product and it must not be
-"improved" with a colour, a badge or a lock icon.
-
-### 4.10 Settings surface
-
-The section shape is the template for every setting baz will ever have.
-
-```
-heading    SIZE_EMPHASIS / 1.35 Medium  PAPER
-sentence   SIZE_META     / 1.35         PAPER_DIM     one sentence, what it is for
-controls   GAP_SM between them
-note       SIZE_META     / 1.35         PAPER_FAINT   in a slot of SETTING_NOTE_H
-readout    value SIZE_META Mono PAPER   over   detail SIZE_META PAPER_FAINT
-```
-
-- Sections are separated by `GAP_XL` (24) and live in one scroll with
-  `scroll_gutter()`.
-- **The note's slot is reserved, not fitted** (`SETTING_NOTE_H` = 2 ×
-  `SIZE_META` × `LINE_HEIGHT` = 31.2). The sentence changes with the setting;
-  a slot that grew would push the controls below it down by a line the moment
-  somebody pressed a segment — taking a control out from under the pointer
-  that had just chosen it.
-- **A section may not** use the accent, use an icon, use colour to encode a
-  value, or change height when its value changes.
-- **A readout appears only when there is something true to report.** ReplayGain
-  set to Off states no figure at all, because the engine performs no ReplayGain
-  arithmetic in that mode and `0.00 dB` would describe arithmetic that is not
-  happening.
-- Controls that cannot act render disabled rather than pretending.
-
-**Needs from its container:** ≥ 320 px of content width (the segmented control
-with three labels is the widest thing in it) and a scroll region. Nothing about
-the section assumes a rail.
-
-### 4.11 Empty, loading and first-run
+### 6.8 Empty, loading and first-run
 
 **baz has no spinner and no progress bar, anywhere.** During a scan the shelf
-filling with covers *is* the progress indicator — that is the first-run promise
-in `05-personas.md` §4, and a bar counting to 100% next to it would be
-admitting the shelf is not enough.
-
-Empty states are quiet centred text, never an illustration and never a call to
-action: an empty queue is the ordinary state of a player nobody has pressed
-play on, not a problem to solve.
+filling with covers *is* the progress indicator. Empty states are quiet centred
+text, never an illustration and never a call to action.
 
 | Surface | Line (`SIZE_EMPHASIS` `PAPER_DIM`) | Hint (`SIZE_META` `PAPER_FAINT`) |
 |---|---|---|
@@ -930,144 +993,194 @@ play on, not a problem to solve.
 | search, no match | Nothing matches “…” | Esc clears the search |
 | queue, nothing queued | Nothing queued | Play an album and it appears here |
 
-Both lines are centred, `GAP_SM` apart, in the surface's full area.
-
-**First run.** One question, one field, one footnote, centred in an otherwise
-empty `WALL`.
-
-| Part | Spec |
-|---|---|
-| wordmark | `baz`, `SIZE_EMPHASIS` Mono **`PAPER_FAINT`** (**CHANGE**, was `LAMP` — nothing is playing, so the lamp is off) |
-| question | `Where's your music?`, `SIZE_HERO` (32) / 1.15 SemiBold **Serif** `PAPER` |
-| sub | `Point baz at a folder — the shelf fills as it scans.`, `SIZE_EMPHASIS` `PAPER_DIM` |
-| field | 460 wide, `pad(GAP_SM + 2, GAP_MD)`, `SIZE_EMPHASIS`, §4.9 |
-| error | `SIZE_META` `ALERT` |
-| footnote | `SIZE_CAPTION` `PAPER_FAINT` |
-| gaps | `GAP_SM` within the heading block, `GAP_XL` between blocks |
-
-The serif question is the first thing anyone ever sees of baz, and it is the
-only place other than an album title that the serif is allowed. That is the
-whole of baz's branding: a well-set question in a dark room.
+**First run.** One question, one field, one footnote, centred on an otherwise
+empty `WALL`. Wordmark `baz` at `SIZE_EMPHASIS` `PAPER_FAINT` — deliberately
+**unlit**, because nothing is playing, which is the product teaching what lit
+means before it ever means anything. Question `Where's your music?` at
+`SIZE_HERO` 32 / 1.15 **SemiBold Sans** (**CHANGE** — the serif is deleted).
+Sub-line `SIZE_EMPHASIS` `PAPER_DIM`; field 460 px; error `ALERT`; footnote
+`SIZE_CAPTION` `PAPER_FAINT`; `GAP_SM` within the heading block and `GAP_XL`
+between blocks. Plus the folder picker and drop target the IA's step 12 adds.
 
 ---
 
-## 5. What iced 0.13 forces, and the fallback in each case
+## 7. Motion
+
+**Every state change in baz takes 0 ms.** iced 0.13 ships no animation runtime;
+producing a transition means driving state from a `window::frames()`
+subscription, which redraws whether or not anything is moving. baz measures its
+startup in hundreds of milliseconds and its memory in a 150 MiB thumbnail
+budget.
+
+**Permitted movement**, neither of which is animation: the seek fill and the
+elapsed stamp advancing with playback (data arriving), and scrolling.
+
+**Never animated, at any version:** the bar's geometry; the shelf grid — no
+stagger, no pop-in, no fade as thumbnails decode, a thumbnail replacing its
+placeholder is an instant swap; album art; anything requiring a redraw while
+the window is idle.
+
+**If iced gains a runtime**, exactly three things may animate and all three must
+degrade to instant: the tile's hover rule 90 ms ease-out; a panel or popover
+140 ms ease-out; the lamp's hue on track change 200 ms linear — a lamp warming.
+No spring, no bounce, no overshoot.
+
+---
+
+## 8. What iced 0.13 forces
 
 | The design wants | iced 0.13 | Fallback taken here |
 |---|---|---|
-| rounded or clipped artwork | `image` cannot be clipped or rounded | **square sleeves, embraced** — records are square; nothing in this document asks otherwise |
-| a hover zoom on a cover | no per-widget transform in the tree; `Transformation` is translate + uniform scale only | the hover card *behind* the art is the affordance |
-| an icon set | none ships | polygons in `icon.rs`; **this document adds no new icon**, and any future one must be closed polygons in a unit square (no strokes, no caps, no true arcs) |
-| a single-sided border | `Border` is four-sided | `rule` widgets for single lines — already how the top and bottom bars are built |
-| a focus ring on buttons | buttons take no keyboard focus | `PAPER_RING` applies to `text_input` only; tooltips carry every icon-only control's name |
-| tabular figures | no OpenType feature control, no `tnum` | Mono for every figure that changes in place (§2.2.4) |
-| transitions | no animation runtime; a `frames()` subscription redraws while idle | **0 ms everywhere** (§2.6), with the three permitted animations specified for whenever the runtime arrives |
-| pointer capture during a drag | none — `Grab`/`Grabbing` are cursor pictures | already solved in `groove.rs`: end the gesture on `CursorLeft` / `Unfocused`, and commit rather than cancel |
-| text ellipsis | `text` has no ellipsis mode | `Wrapping::None` clips; every clipping slot has a fixed width so the clip is predictable |
-| radial gradients / blur / backdrop | linear gradients on `container` backgrounds only | the placeholder's linear gradient; nothing else needs one |
-| shadow spread | `Shadow` has colour, offset, blur — no spread | tuned via blur (`SHELF_SHADOW`, `LAMP_GLOW`) |
-| an accessibility tree | none | contrast floors (§2.1.2) and hit targets are the guarantees baz *can* make, so they are honoured exactly |
+| rounded or clipped artwork | `image` cannot be clipped or rounded | square sleeves, embraced — records are square |
+| **tabular figures** | no OpenType feature control, no `tnum` | **not needed** — Plex Sans's digits are tabular by default (§3.1) |
+| letter-spacing, small caps | neither is exposed | emphasis is weight, ink and size only |
+| a hover zoom on a cover | no per-widget transform | the rule under the label is the affordance |
+| an icon set | none ships | closed polygons in a unit square (`icon.rs`); the IA adds exactly one glyph (Previous, a mirror of Next) |
+| a single-sided border | `Border` is four-sided | `rule` widgets — already how the bars are built |
+| a focus ring on buttons | buttons take no keyboard focus | `PAPER_RING` on `text_input` only; tooltips name icon-only controls |
+| transitions | no runtime; `frames()` redraws while idle | 0 ms everywhere (§7) |
+| pointer capture during a drag | none | end the gesture on `CursorLeft` / `Unfocused` and commit (`groove.rs`) |
+| text ellipsis | no ellipsis mode | `Wrapping::None` clips; every clipping slot has a fixed width |
+| radial gradients / blur / backdrop | linear gradients on containers only | the placeholder's gradient; nothing else needs one |
+| shadow spread | `Shadow` has colour, offset, blur only | tuned via blur — and there is exactly one shadow left (`LAMP_GLOW`) |
+| an accessibility tree | none | contrast floors (§5.2) and hit targets are the guarantees baz *can* make |
 
 ---
 
-## 6. Performance
-
-Performance is a design constraint here, not an afterthought. What this
-document costs:
+## 9. Performance
 
 | Change | Per-frame cost | Other cost |
 |---|---|---|
-| bundled typeface | none | ≈ 250 KB (Latin subset) or ≈ 800 KB binary; one font load at startup |
-| flexible cell width | none — arithmetic per layout pass, not per tile; the widget count per frame is unchanged (~40 live tiles) | `shelf.rs` constants become functions |
-| contact shadow, brighter halo | none — the same `Shadow` primitive, drawn in the same quad pass | none |
-| art-derived lamp | none | one 4k-sample histogram per **track change**; sub-millisecond; no new decode, no new I/O, no new crate |
-| quieter placeholder + letterform | one extra `text` widget per art-less tile | none |
-| shelf scrollbar styling | none | none |
+| three faces instead of five | none | **−395 928 bytes** of binary; one font load at startup |
+| the hang (fluid cell width) | none — arithmetic per layout pass, not per tile; widget count per frame unchanged | `shelf.rs`'s `CELL_W` / `CELL_H` / `ART_PX` become functions of shelf width |
+| `THUMB_PX` 256 → 320 | none | LRU **600 → 384 entries** at the same 150 MiB (§2.6) |
+| no shadow on tiles | **one fewer quad per tile** | none |
+| the label's hover/selection rule | one `rule` widget on at most two tiles at a time | none |
+| quieter placeholder + letterform | one extra `text` per art-less tile | none |
+| art-derived lamp | none | one histogram per **track change**; sub-millisecond |
 
 **Forbidden by this specification, on performance grounds:** blur or backdrop
 effects of any kind; any per-frame animation or idle redraw; artwork above
-`THUMB_PX` in the shelf; per-tile gradients; shadows on anything that is not
-artwork.
+`THUMB_PX`; per-tile gradients; shadows on anything that is not the playing
+halo.
 
 ---
 
-## 7. A light variant
+## 10. A light variant
 
-Dark-first is correct for this audience and this room. What a light variant
-would actually take, so the cost is known rather than guessed:
+**Recommendation: still defer.** Dark-first is right for this audience, and the
+gallery direction makes the case stronger, not weaker — the whole design rests
+on the works being the only lit things in the room.
 
-**Mechanical (about half a day).** Every `pub const Color` in `theme.rs`
-becomes a field on a `Palette` struct resolved once at startup, and the ~20
-style functions read from it instead of from module constants. `theme.rs` is
-already the single source of every value, so nothing outside it changes.
-
-**Not mechanical — three judgement calls that are real design work:**
+Two of revision 1's three judgement calls survive verbatim and one gets harder:
 
 1. **The halo stops working.** Amber glow on a paper ground has almost no
-   contrast. The playing mark would have to become something else — a filled
-   amber bar down the sleeve's left edge, or a heavier dot — which means the
-   "this one" signal is *different* between themes, not merely recoloured.
-2. **The sleeves need an edge.** On `WALL` a dark cover is separated from the
-   room by its own shadow. On paper, dark covers punch and pale covers
-   disappear, so every sleeve needs a 1 px `HAIRLINE` the dark variant
-   deliberately does not have — which changes the "nothing between the covers"
-   rule the shelf is built on.
-3. **The inks are new values, not inversions.** Roughly: ink `#1A1714` on paper
-   `#F4F1EC`, dim `#5E574E`, faint `#7C746A`, and `LAMP` must darken to about
-   `#A9670F` to clear 4.5 : 1 on paper — at which point it is no longer an
-   amplifier lamp, it is amber ink, and §1.2's derived-hue lamp needs a second
-   lightness target.
+   contrast; the "this one" signal would have to become a different mark
+   between themes, not a recoloured one.
+2. **The sleeves need an edge.** On paper, dark covers punch and pale covers
+   disappear, so every sleeve needs a hairline the dark variant deliberately
+   does not have — which breaks §1.3's "artwork and type, nothing else".
+3. **New, and worse than revision 1 knew.** The *inverse* of §4.2 is also true:
+   on a paper ground a shadow works and a surface step barely does. A light
+   variant would have to switch depth strategies, not just values — which is
+   the definition of a second design.
 
-**Recommendation: defer.** Do it when someone asks for it, with the three
-decisions above made explicitly. Do not ship a light theme that is the dark one
-with the numbers flipped.
+Mechanically it is still half a day: every `pub const Color` becomes a field on
+a `Palette` resolved at startup. The design work is the three above. Do not ship
+a light theme that is the dark one with the numbers flipped.
 
 ---
 
-## 8. Adoption order
+## 11. Adoption order
 
-Each step is independently shippable and independently revertible.
+The IA restructure (`01-ux-audit-and-ia.md` §5) is in flight in a parallel
+agent's hands. **This spec lands on top of that work, and must not fight it.**
+The ordering below is chosen so that every step either touches files the IA
+work has already finished with, or touches only `theme.rs` values that the IA
+work reads but never writes.
 
-1. **The typeface** (§2.2) — the single biggest step from alpha-tier to
-   designed, and the one whose absence is visible in every screenshot. Ship it
-   with the bottom-bar slot-width test (§4.6.5).
-2. **The accent cuts** (§2.1.1) — focus ring, scanning note. Two lines.
-3. **The contrast fixes** (§2.1.2) — two constants.
-4. **The shadow and halo** (§2.1, §4.1) — three numbers.
-5. **The shelf grid** (§4.2) and the shelf scrollbar — the only change that
-   touches geometry code.
-6. **Captions and the placeholder** (§3.2, §3.4.3).
-7. **`SIZE_TITLE` / `SIZE_HERO` and the serif** (§2.2.2–3).
-8. **The derived lamp** (§3.3) — last, because it is the only one that is a
-   feature rather than a restyle, and because everything above must be true
-   before it means anything.
+**Rule of engagement:** the IA owns *structure* — which surfaces exist, what
+they contain, how they are dismissed. This document owns *values* — colour,
+size, spacing, face. Where a step needs both, it is sequenced after the IA step
+that creates the surface.
+
+### Phase A — pure value changes, safe at any time
+
+Nothing here moves a widget; all of it is `theme.rs` constants and one asset
+directory. Each is independently shippable and revertible.
+
+| # | Change | Touches | Why here |
+|---|---|---|---|
+| **A1** | **Delete `MONO`.** Retarget `font.rs`'s slot test from `mono()` to `sans()`; add `10:00:00`; rename `MONO_EM` → `DIGIT_EM`. Remove `IBMPlexMono-Regular.ttf` and its README row. | `font.rs`, `theme.rs`, views naming `theme::MONO` | The owner's actual complaint, and the change with the most visible effect per line. Proven by a test before anything else moves. |
+| **A2** | **Delete `SERIF`.** It is `#[expect(dead_code)]` today, so this is a deletion with no call sites. | `font.rs`, `theme.rs` | Free, and it halves the remaining asset question. |
+| **A3** | **The surfaces**: `WALL`, `RECESS`, four new values; `CARD` → `PLINTH`, `CARD_HIGH` → `PLINTH_LIT` (a mechanical rename). | `theme.rs` + a `sed` over views | The direction change, in eight constants. **Sequence after the IA's step 8**, which is the last one to move view code between files. |
+| **A4** | **The inks and hairlines**: `PAPER`, `PAPER_DIM`, `PAPER_FAINT`, `PAPER_MUTED`, `HAIRLINE`, `HAIRLINE_STRONG`. Delete the `ROUNDING` excuse from the contrast test. | `theme.rs` | Must follow A3 — the ratios are computed against A3's surfaces. |
+| **A5** | **Radii and line heights**: `RADIUS_CTRL` 4, `RADIUS_SEGMENT` 3, `RADIUS_CHIP` 3; per-token line heights; delete `RADIUS_TILE`. | `theme.rs`, views setting `.line_height(…)` | Independent of everything above. |
+| **A6** | **The reserved slots**: `SIGNAL_W` 96, `LEVEL_W` 48, `PREVIEW_W` 48, `SETTING_VALUE_W` 60; add `POSITION_W` 56. `format_centidb` emits U+2212. | `theme.rs`, `replaygain.rs` + its tests | Must follow A1 (the measurements are in Sans). **Sequence after the IA's step 10**, which is the last one to touch bar geometry. |
+
+### Phase B — the shelf, which is where the direction becomes visible
+
+| # | Change | Touches | Why here |
+|---|---|---|---|
+| **B1** | **Delete the tile's chrome.** `theme::tile` → no background, no border, ever. Delete `SHADOW` and `SELECTION_EDGE`; `sleeve()` loses its shadow. | `theme.rs`, `views/shelf.rs` | Strictly a deletion, and it must land before B2 or the mock and the build disagree about what a tile is. |
+| **B2** | **The label's rule** — 1 px `HAIRLINE_STRONG` on hover, 2 px `PAPER_FAINT` on selection; the artist's hover ink lift; `LABEL_H` 36.4; `GAP_LG` from art to label. | `views/shelf.rs`, `theme.rs` | Restores the two states B1 removed, in the new vocabulary. **Sequence after the IA's step 2**, which owns the caption block's height. |
+| **B3** | **The hang** — `HANG`, `ART_MIN`, `ART_MAX`, `ART_TARGET`; `columns` / `art` / `gutter` / `row_h` as functions of shelf width. Extend `the_shelf_virtualizes_at_both_of_the_rails_two_widths` to the width *band*. | `shelf.rs` (pure, tested), `views/shelf.rs` | The only change that touches geometry code. **Sequence after the IA's step 9**, which sets the inspector's width band — the hang is a function of what that leaves. |
+| **B4** | **`THUMB_PX` 320** and the `THUMB_CACHE_ENTRIES` re-derivation to 384. Assert `ART_MAX == THUMB_PX`. | `art.rs` | Must follow B3, or the cache grows for art that has not arrived yet. |
+| **B5** | **`LAMP_GLOW` blur 24**; the shelf's scrollbar takes `theme::scrollbar`. | `theme.rs`, `views/shelf.rs` | Two numbers. |
+
+### Phase C — the surfaces the IA is still building
+
+Each of these is a *style* for a surface the IA creates. They land **with** the
+IA step that creates the surface, not before it.
+
+| # | Change | Lands with |
+|---|---|---|
+| **C1** | Play album: `LAMP`-outlined, `LAMP_WASH` hover/press; delete `LAMP_INK` and the `LAMP_INK on LAMP` contrast row. | any time after A3 — it is one style function |
+| **C2** | The inspector's flush-left sleeve capped at `ART_MAX`, the catalogue and condition lines, the two-line title cap. | IA step 9 |
+| **C3** | The popover's `PLINTH_LIT` surface, `RADIUS_CTRL` 4, no shadow, no scrim. | IA step 6 |
+| **C4** | The Settings place's section list and 640 px content cap in the new inks. | IA step 8 |
+| **C5** | First run: Sans SemiBold hero, unlit wordmark. | IA step 12 |
+| **C6** | The placeholder's quieter gradient and its letterform. | any time after A2 |
+| **C7** | The derived lamp (§4.4) — **last**, because it is the only item that is a feature rather than a restyle, and everything above must be true before it means anything. | after all of the above |
+
+### What must not regress, and how to know
+
+- `every_ink_clears_its_contrast_floor_on_every_surface_it_lands_on` — extend
+  the surface list to the renamed tokens; **delete `ROUNDING`**.
+- `the_lamp_is_spent_only_on_playback_truth` — `PERMITTED` is unchanged; check
+  it still sees `primary` painting the accent now that it is a border.
+- `every_reserved_slot_holds_its_worst_case_in_the_bundled_face` — retarget to
+  the Sans, add `10:00:00` and `199 / 240`, keep the 1 px slack.
+- `the_shelf_virtualizes_at_both_of_the_rails_two_widths` — becomes a sweep
+  over the width band, asserting `gutter == HANG` wherever art is uncapped and
+  `ART_MIN ≤ art ≤ ART_MAX` everywhere.
+- `a_setting_note_still_wraps_inside_its_two_reserved_lines` — unchanged in
+  shape; the Sans is already what it measures.
 
 ---
 
-## 9. The pictures
+## 12. The pictures
 
-In `docs/design/visual/`. The `*-current-*.png` files are the shipped binary;
-the `mock-*` files are this specification drawn to its own tokens.
+In `visual/gallery/`. Drawn to this document's own tokens by `render.py`, which
+computes the hang with §2.2's arithmetic verbatim — so the column counts and
+art sizes in the pictures are derived, not eyeballed, and a picture that
+disagrees with the shipped app means one of the two is wrong.
 
 | File | What it is |
 |---|---|
-| `00-current-first-run.png` | before — the first-run screen, hero line in a fallback monospace |
-| `01-current-shelf.png` | before — the shelf; note the fallback faces, the dead gutters, the stock scrollbar, and the amber focus ring with nothing playing |
-| `02-current-shelf-hover.png` | before — tile hover |
-| `03-current-album-panel.png` | before — the album panel in the 340 px rail |
-| `04-current-queue-empty.png` | before — the queue's empty state |
-| `05-current-settings-panel.png` | before — the settings panel and the ReplayGain section |
-| `06-current-search-results.png` | before — a narrowing search |
-| `07-current-search-empty.png` | before — no matches |
-| `08-current-shelf-scrolled.png` | before — deeper into the collection |
-| `tokens.svg` / `.png` | the palette, the type scale, the spacing and radii |
-| `mock-shelf.svg` / `.png` | after — the shelf, with one album playing and one hovered |
-| `mock-album-detail.svg` / `.png` | after — the album surface, drawn full-width so it assumes no container |
-| `mock-now-playing.svg` / `.png` | after — the bar at 2×, with its reserved slots called out |
-| `mock-states.svg` / `.png` | after — every component in every state |
+| `01-shelf-1280.svg` / `.png` | the shelf at 1280 — 4 × 270 px, gutter 40, dead gutter 0. Four tile states named in place: rest, playing (halo + dot), hovered (rule + ink lift), and a paper-pale sleeve for the other extreme |
+| `02-shelf-1920.svg` / `.png` | the shelf at 1920 — 6 × 273 px. The wide-window proportion, the squint test, and a near-black sleeve merging into the wall as designed |
+| `03-album-inspector.svg` / `.png` | 1280 with the inspector open — shelf 922 → 3 × 254 px. The inspector's album is *selected but not playing* while a different one plays in the shelf |
+| `04-now-playing-bar.svg` / `.png` | the bar at 2×, with every reserved slot, its worst-case string and its measured width |
+| `05-figures-specimen.svg` / `.png` | the proof that deleting the mono costs nothing: digit advance boxes in all three weights, a real duration column, stacked timestamps, and the one jiggle named |
+| `render.py` | the generator; `python3 docs/design/visual/gallery/render.py` |
 
-The mockups embed the real generated fixture cover art, so the wall of covers
-can be judged rather than imagined. Their font stack names IBM Plex first; the
-committed PNG renders fall back to what the build host had installed (Adwaita
-Sans, Source Code Pro, Liberation Serif), so treat the PNGs as correct for
-layout, colour and size, and the SVGs as correct for type.
+The PNGs are rendered with the **real bundled faces** installed into a scratch
+`HOME`, so the type in them is IBM Plex Sans and not a host fallback. (The
+revision-1 mockups in `visual/` could not claim this and said so; treat them as
+the previous iteration.)
+
+The revision-1 pictures stay in `visual/` — the `*-current-*.png` files are
+still the only photographs of the shipped binary, and the `mock-*` files are
+the superseded direction, kept so the change can be judged rather than
+asserted.

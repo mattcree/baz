@@ -1,0 +1,460 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+<title>baz shelf @ 1920px</title>
+<defs><clipPath id="shelfclip"><rect x="0" y="57" width="1920" height="921"/></clipPath><clipPath id="clip0"><rect x="40.00" y="97.00" width="273.33" height="273.33"/></clipPath><clipPath id="lab12"><rect x="40.00" y="386.33" width="273.33" height="36.40"/></clipPath><clipPath id="clip1"><rect x="353.33" y="97.00" width="273.33" height="273.33"/></clipPath><clipPath id="lab13"><rect x="353.33" y="386.33" width="273.33" height="36.40"/></clipPath><clipPath id="clip2"><rect x="666.67" y="97.00" width="273.33" height="273.33"/></clipPath><clipPath id="lab14"><rect x="666.67" y="386.33" width="273.33" height="36.40"/></clipPath><clipPath id="clip3"><rect x="980.00" y="97.00" width="273.33" height="273.33"/></clipPath><clipPath id="lab15"><rect x="980.00" y="386.33" width="273.33" height="36.40"/></clipPath><filter id="halo4" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="12.0"/></filter><clipPath id="clip4"><rect x="1293.33" y="97.00" width="273.33" height="273.33"/></clipPath><linearGradient id="grad4" x1="0" y1="0" x2="0.6" y2="1"><stop offset="0" stop-color="#2E8A5B"/><stop offset="1" stop-color="#0D2019"/></linearGradient><clipPath id="lab16"><rect x="1293.33" y="386.33" width="273.33" height="36.40"/></clipPath><clipPath id="clip5"><rect x="1606.67" y="97.00" width="273.33" height="273.33"/></clipPath><clipPath id="lab17"><rect x="1606.67" y="386.33" width="273.33" height="36.40"/></clipPath><clipPath id="clip6"><rect x="40.00" y="462.73" width="273.33" height="273.33"/></clipPath><clipPath id="lab18"><rect x="40.00" y="752.07" width="273.33" height="36.40"/></clipPath><clipPath id="clip7"><rect x="353.33" y="462.73" width="273.33" height="273.33"/></clipPath><clipPath id="lab19"><rect x="353.33" y="752.07" width="273.33" height="36.40"/></clipPath><clipPath id="clip8"><rect x="666.67" y="462.73" width="273.33" height="273.33"/></clipPath><clipPath id="lab20"><rect x="666.67" y="752.07" width="273.33" height="36.40"/></clipPath><clipPath id="clip9"><rect x="980.00" y="462.73" width="273.33" height="273.33"/></clipPath><clipPath id="lab21"><rect x="980.00" y="752.07" width="273.33" height="36.40"/></clipPath><clipPath id="clip10"><rect x="1293.33" y="462.73" width="273.33" height="273.33"/></clipPath><clipPath id="lab22"><rect x="1293.33" y="752.07" width="273.33" height="36.40"/></clipPath><clipPath id="clip11"><rect x="1606.67" y="462.73" width="273.33" height="273.33"/></clipPath><clipPath id="lab23"><rect x="1606.67" y="752.07" width="273.33" height="36.40"/></clipPath><clipPath id="clip12"><rect x="40.00" y="828.47" width="273.33" height="273.33"/></clipPath><clipPath id="lab24"><rect x="40.00" y="1117.80" width="273.33" height="36.40"/></clipPath><clipPath id="clip13"><rect x="353.33" y="828.47" width="273.33" height="273.33"/></clipPath><linearGradient id="grad13" x1="0" y1="0" x2="0.6" y2="1"><stop offset="0" stop-color="#2E8A5B"/><stop offset="1" stop-color="#0D2019"/></linearGradient><clipPath id="lab25"><rect x="353.33" y="1117.80" width="273.33" height="36.40"/></clipPath><clipPath id="clip14"><rect x="666.67" y="828.47" width="273.33" height="273.33"/></clipPath><clipPath id="lab26"><rect x="666.67" y="1117.80" width="273.33" height="36.40"/></clipPath><clipPath id="clip15"><rect x="980.00" y="828.47" width="273.33" height="273.33"/></clipPath><clipPath id="lab27"><rect x="980.00" y="1117.80" width="273.33" height="36.40"/></clipPath><clipPath id="clip16"><rect x="1293.33" y="828.47" width="273.33" height="273.33"/></clipPath><clipPath id="lab28"><rect x="1293.33" y="1117.80" width="273.33" height="36.40"/></clipPath><clipPath id="clip17"><rect x="1606.67" y="828.47" width="273.33" height="273.33"/></clipPath><clipPath id="lab29"><rect x="1606.67" y="1117.80" width="273.33" height="36.40"/></clipPath><clipPath id="clip18"><rect x="40.00" y="1194.20" width="273.33" height="273.33"/></clipPath><clipPath id="lab30"><rect x="40.00" y="1483.53" width="273.33" height="36.40"/></clipPath><clipPath id="clip19"><rect x="353.33" y="1194.20" width="273.33" height="273.33"/></clipPath><clipPath id="lab31"><rect x="353.33" y="1483.53" width="273.33" height="36.40"/></clipPath><clipPath id="clip20"><rect x="666.67" y="1194.20" width="273.33" height="273.33"/></clipPath><clipPath id="lab32"><rect x="666.67" y="1483.53" width="273.33" height="36.40"/></clipPath><clipPath id="clip21"><rect x="980.00" y="1194.20" width="273.33" height="273.33"/></clipPath><linearGradient id="grad21" x1="0" y1="0" x2="0.6" y2="1"><stop offset="0" stop-color="#B9B2A4"/><stop offset="1" stop-color="#E4E0D6"/></linearGradient><clipPath id="lab33"><rect x="980.00" y="1483.53" width="273.33" height="36.40"/></clipPath><clipPath id="clip22"><rect x="1293.33" y="1194.20" width="273.33" height="273.33"/></clipPath><clipPath id="lab34"><rect x="1293.33" y="1483.53" width="273.33" height="36.40"/></clipPath><clipPath id="clip23"><rect x="1606.67" y="1194.20" width="273.33" height="273.33"/></clipPath><clipPath id="lab35"><rect x="1606.67" y="1483.53" width="273.33" height="36.40"/></clipPath></defs>
+<rect x="0.00" y="0.00" width="1920.00" height="1080.00" fill="#0C0D0E"/>
+<rect x="0.00" y="0.00" width="1920.00" height="56.00" fill="#0C0D0E"/>
+<line x1="0.00" y1="56.50" x2="1920.00" y2="56.50" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.07"/>
+<rect x="24.00" y="14.00" width="360.00" height="28.00" fill="#060708" rx="4"/>
+<line x1="24.50" y1="14.50" x2="24.50" y2="41.50" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.07"/>
+<rect x="24.00" y="14.00" width="360" height="28" rx="4" fill="none" stroke="#E8E4DB" stroke-opacity="0.07" stroke-width="1"/>
+<text x="36.00" y="32.00" font-family="IBM Plex Sans" font-size="13" font-weight="400" fill="#888680">Search your collection</text>
+<text x="1896.00" y="32.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1" text-anchor="end">Settings</text>
+<text x="1816.00" y="32.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">24 albums · 287 tracks</text>
+<g clip-path="url(#shelfclip)">
+<g clip-path="url(#clip0)">
+<rect x="40.00" y="97.00" width="273.33" height="273.33" fill="#12303F"/>
+<path d="M40.00,370.33 L313.33,97.00 L313.33,370.33 Z" fill="#2F7E9E"/>
+<path d="M40.00,97.00 L209.47,97.00 L40.00,266.47 Z" fill="#EDE0C4" fill-opacity="0.55"/>
+</g>
+<g clip-path="url(#lab12)">
+<text x="40.00" y="399.44" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Music Has the Right to Children</text>
+<text x="40.00" y="417.27" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Boards of Canada</text>
+</g>
+<g clip-path="url(#clip1)">
+<rect x="353.33" y="97.00" width="273.33" height="273.33" fill="#3A2A05"/>
+<rect x="353.33" y="97.00" width="273.33" height="273.33" fill="#D0961A" fill-opacity="0.35"/>
+<circle cx="525.94" cy="280.82" r="53.79" fill="#FFF3D2" fill-opacity="0.88"/>
+</g>
+<g clip-path="url(#lab13)">
+<text x="353.33" y="399.44" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Selected Ambient Works 85–92</text>
+<text x="353.33" y="417.27" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">Aphex Twin</text>
+</g>
+<line x1="353.33" y1="427.23" x2="626.67" y2="427.23" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.15"/>
+<g clip-path="url(#clip2)">
+<rect x="666.67" y="97.00" width="273.33" height="273.33" fill="#0A1A1E"/>
+<rect x="666.67" y="97.00" width="273.33" height="34.17" fill="#3FB0AD" fill-opacity="0.6285000000000001"/>
+<rect x="666.67" y="131.17" width="273.33" height="34.17" fill="#E6FBF7" fill-opacity="0.28200000000000003"/>
+<rect x="666.67" y="165.33" width="273.33" height="34.17" fill="#3FB0AD" fill-opacity="0.48550000000000004"/>
+<rect x="666.67" y="199.50" width="273.33" height="34.17" fill="#3FB0AD" fill-opacity="0.6890000000000001"/>
+<rect x="666.67" y="233.67" width="273.33" height="34.17" fill="#E6FBF7" fill-opacity="0.3425"/>
+<rect x="666.67" y="267.83" width="273.33" height="34.17" fill="#3FB0AD" fill-opacity="0.546"/>
+<rect x="666.67" y="302.00" width="273.33" height="34.17" fill="#3FB0AD" fill-opacity="0.1995"/>
+<rect x="666.67" y="336.17" width="273.33" height="34.17" fill="#E6FBF7" fill-opacity="0.403"/>
+</g>
+<g clip-path="url(#lab14)">
+<text x="666.67" y="399.44" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Spirit of Eden</text>
+<text x="666.67" y="417.27" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Talk Talk</text>
+</g>
+<g clip-path="url(#clip3)">
+<rect x="980.00" y="97.00" width="273.33" height="273.33" fill="#08090B"/>
+<rect x="980.00" y="97.00" width="273.33" height="34.17" fill="#191B20" fill-opacity="0.183"/>
+<rect x="980.00" y="131.17" width="273.33" height="34.17" fill="#191B20" fill-opacity="0.3865"/>
+<rect x="980.00" y="165.33" width="273.33" height="34.17" fill="#3A3E46" fill-opacity="0.59"/>
+<rect x="980.00" y="199.50" width="273.33" height="34.17" fill="#191B20" fill-opacity="0.2435"/>
+<rect x="980.00" y="233.67" width="273.33" height="34.17" fill="#191B20" fill-opacity="0.44700000000000006"/>
+<rect x="980.00" y="267.83" width="273.33" height="34.17" fill="#3A3E46" fill-opacity="0.6505000000000001"/>
+<rect x="980.00" y="302.00" width="273.33" height="34.17" fill="#191B20" fill-opacity="0.30400000000000005"/>
+<rect x="980.00" y="336.17" width="273.33" height="34.17" fill="#191B20" fill-opacity="0.5075"/>
+</g>
+<g clip-path="url(#lab15)">
+<text x="980.00" y="399.44" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">In Rainbows</text>
+<text x="980.00" y="417.27" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Radiohead</text>
+</g>
+<rect x="1293.33" y="97.00" width="273.33" height="273.33" fill="#E3A14E" fill-opacity="0.45" filter="url(#halo4)"/>
+<g clip-path="url(#clip4)">
+<rect x="1293.33" y="97.00" width="273.33" height="273.33" fill="#0D2019"/>
+<rect x="1293.33" y="97.00" width="273.33" height="273.33" fill="url(#grad4)"/>
+<rect x="1326.13" y="261.00" width="136.67" height="5.47" fill="#DCF0D6" fill-opacity="0.8"/>
+<rect x="1326.13" y="277.40" width="90.20" height="5.47" fill="#DCF0D6" fill-opacity="0.5"/>
+</g>
+<circle cx="1296.33" cy="395.62" r="3.00" fill="#E3A14E"/>
+<g clip-path="url(#lab16)">
+<text x="1303.33" y="399.44" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Untrue</text>
+<text x="1293.33" y="417.27" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Burial</text>
+</g>
+<g clip-path="url(#clip5)">
+<rect x="1606.67" y="97.00" width="273.33" height="273.33" fill="#1A0B12"/>
+<circle cx="1761.15" cy="283.63" r="221.40" fill="#8E2E6B" fill-opacity="0.1"/>
+<circle cx="1761.15" cy="283.63" r="196.80" fill="#F6DCEF" fill-opacity="0.16"/>
+<circle cx="1761.15" cy="283.63" r="172.20" fill="#8E2E6B" fill-opacity="0.22"/>
+<circle cx="1761.15" cy="283.63" r="147.60" fill="#F6DCEF" fill-opacity="0.28"/>
+<circle cx="1761.15" cy="283.63" r="123.00" fill="#8E2E6B" fill-opacity="0.33999999999999997"/>
+<circle cx="1761.15" cy="283.63" r="98.40" fill="#F6DCEF" fill-opacity="0.4"/>
+<circle cx="1761.15" cy="283.63" r="73.80" fill="#8E2E6B" fill-opacity="0.45999999999999996"/>
+<circle cx="1761.15" cy="283.63" r="49.20" fill="#F6DCEF" fill-opacity="0.52"/>
+<circle cx="1761.15" cy="283.63" r="24.60" fill="#8E2E6B" fill-opacity="0.58"/>
+</g>
+<g clip-path="url(#lab17)">
+<text x="1606.67" y="399.44" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Loveless</text>
+<text x="1606.67" y="417.27" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">My Bloody Valentine</text>
+</g>
+<g clip-path="url(#clip6)">
+<rect x="40.00" y="462.73" width="273.33" height="273.33" fill="#5A2408"/>
+<path d="M40.00,736.07 L313.33,462.73 L313.33,736.07 Z" fill="#E0692A"/>
+<path d="M40.00,462.73 L209.47,462.73 L40.00,632.20 Z" fill="#FFE3C4" fill-opacity="0.55"/>
+</g>
+<g clip-path="url(#lab18)">
+<text x="40.00" y="765.17" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">The Disintegration Loops</text>
+<text x="40.00" y="783.01" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">William Basinski</text>
+</g>
+<g clip-path="url(#clip7)">
+<rect x="353.33" y="462.73" width="273.33" height="273.33" fill="#E4E0D6"/>
+<rect x="353.33" y="462.73" width="273.33" height="34.17" fill="#B9B2A4" fill-opacity="0.1555"/>
+<rect x="353.33" y="496.90" width="273.33" height="34.17" fill="#2A2723" fill-opacity="0.359"/>
+<rect x="353.33" y="531.07" width="273.33" height="34.17" fill="#B9B2A4" fill-opacity="0.5625"/>
+<rect x="353.33" y="565.23" width="273.33" height="34.17" fill="#B9B2A4" fill-opacity="0.216"/>
+<rect x="353.33" y="599.40" width="273.33" height="34.17" fill="#2A2723" fill-opacity="0.4195"/>
+<rect x="353.33" y="633.57" width="273.33" height="34.17" fill="#B9B2A4" fill-opacity="0.623"/>
+<rect x="353.33" y="667.73" width="273.33" height="34.17" fill="#B9B2A4" fill-opacity="0.27649999999999997"/>
+<rect x="353.33" y="701.90" width="273.33" height="34.17" fill="#2A2723" fill-opacity="0.48"/>
+</g>
+<g clip-path="url(#lab19)">
+<text x="353.33" y="765.17" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Endtroducing.....</text>
+<text x="353.33" y="783.01" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">DJ Shadow</text>
+</g>
+<g clip-path="url(#clip8)">
+<rect x="666.67" y="462.73" width="273.33" height="273.33" fill="#E4E0D6"/>
+<rect x="666.67" y="462.73" width="273.33" height="54.67" fill="#B9B2A4" fill-opacity="0.4085"/>
+<rect x="666.67" y="517.40" width="273.33" height="54.67" fill="#B9B2A4" fill-opacity="0.612"/>
+<rect x="666.67" y="572.07" width="273.33" height="54.67" fill="#2A2723" fill-opacity="0.2655"/>
+<rect x="666.67" y="626.73" width="273.33" height="54.67" fill="#B9B2A4" fill-opacity="0.469"/>
+<rect x="666.67" y="681.40" width="273.33" height="54.67" fill="#B9B2A4" fill-opacity="0.6725000000000001"/>
+</g>
+<g clip-path="url(#lab20)">
+<text x="666.67" y="765.17" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Homogenic</text>
+<text x="666.67" y="783.01" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Björk</text>
+</g>
+<g clip-path="url(#clip9)">
+<rect x="980.00" y="462.73" width="273.33" height="273.33" fill="#1A0B12"/>
+<rect x="980.00" y="462.73" width="273.33" height="34.17" fill="#8E2E6B" fill-opacity="0.524"/>
+<rect x="980.00" y="496.90" width="273.33" height="34.17" fill="#8E2E6B" fill-opacity="0.1775"/>
+<rect x="980.00" y="531.07" width="273.33" height="34.17" fill="#F6DCEF" fill-opacity="0.381"/>
+<rect x="980.00" y="565.23" width="273.33" height="34.17" fill="#8E2E6B" fill-opacity="0.5845"/>
+<rect x="980.00" y="599.40" width="273.33" height="34.17" fill="#8E2E6B" fill-opacity="0.238"/>
+<rect x="980.00" y="633.57" width="273.33" height="34.17" fill="#F6DCEF" fill-opacity="0.4415"/>
+<rect x="980.00" y="667.73" width="273.33" height="34.17" fill="#8E2E6B" fill-opacity="0.645"/>
+<rect x="980.00" y="701.90" width="273.33" height="34.17" fill="#8E2E6B" fill-opacity="0.2985"/>
+</g>
+<g clip-path="url(#lab21)">
+<text x="980.00" y="765.17" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Blue Lines</text>
+<text x="980.00" y="783.01" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Massive Attack</text>
+</g>
+<g clip-path="url(#clip10)">
+<rect x="1293.33" y="462.73" width="273.33" height="273.33" fill="#08090B"/>
+<circle cx="1316.11" cy="531.07" r="10.02" fill="#3A3E46" fill-opacity="0.37"/>
+<circle cx="1316.11" cy="576.62" r="10.02" fill="#3A3E46" fill-opacity="0.37"/>
+<circle cx="1316.11" cy="622.18" r="10.02" fill="#3A3E46" fill-opacity="0.37"/>
+<circle cx="1316.11" cy="667.73" r="10.02" fill="#3A3E46" fill-opacity="0.37"/>
+<circle cx="1361.67" cy="485.51" r="10.02" fill="#3A3E46" fill-opacity="0.37"/>
+<circle cx="1361.67" cy="576.62" r="10.02" fill="#3A3E46" fill-opacity="0.47"/>
+<circle cx="1361.67" cy="622.18" r="10.02" fill="#3A3E46" fill-opacity="0.52"/>
+<circle cx="1361.67" cy="667.73" r="10.02" fill="#3A3E46" fill-opacity="0.5700000000000001"/>
+<circle cx="1361.67" cy="713.29" r="10.02" fill="#3A3E46" fill-opacity="0.12"/>
+<circle cx="1407.22" cy="485.51" r="10.02" fill="#3A3E46" fill-opacity="0.37"/>
+<circle cx="1407.22" cy="531.07" r="10.02" fill="#3A3E46" fill-opacity="0.47"/>
+<circle cx="1407.22" cy="622.18" r="10.02" fill="#3A3E46" fill-opacity="0.16999999999999998"/>
+<circle cx="1407.22" cy="667.73" r="10.02" fill="#3A3E46" fill-opacity="0.27"/>
+<circle cx="1407.22" cy="713.29" r="10.02" fill="#3A3E46" fill-opacity="0.37"/>
+<circle cx="1452.78" cy="485.51" r="10.02" fill="#3A3E46" fill-opacity="0.37"/>
+<circle cx="1452.78" cy="531.07" r="10.02" fill="#3A3E46" fill-opacity="0.52"/>
+<circle cx="1452.78" cy="576.62" r="10.02" fill="#3A3E46" fill-opacity="0.16999999999999998"/>
+<circle cx="1452.78" cy="667.73" r="10.02" fill="#3A3E46" fill-opacity="0.47"/>
+<circle cx="1452.78" cy="713.29" r="10.02" fill="#3A3E46" fill-opacity="0.12"/>
+<circle cx="1498.33" cy="485.51" r="10.02" fill="#3A3E46" fill-opacity="0.37"/>
+<circle cx="1498.33" cy="531.07" r="10.02" fill="#3A3E46" fill-opacity="0.5700000000000001"/>
+<circle cx="1498.33" cy="576.62" r="10.02" fill="#3A3E46" fill-opacity="0.27"/>
+<circle cx="1498.33" cy="622.18" r="10.02" fill="#3A3E46" fill-opacity="0.47"/>
+<circle cx="1498.33" cy="713.29" r="10.02" fill="#3A3E46" fill-opacity="0.37"/>
+<circle cx="1543.89" cy="531.07" r="10.02" fill="#3A3E46" fill-opacity="0.12"/>
+<circle cx="1543.89" cy="576.62" r="10.02" fill="#3A3E46" fill-opacity="0.37"/>
+<circle cx="1543.89" cy="622.18" r="10.02" fill="#3A3E46" fill-opacity="0.12"/>
+<circle cx="1543.89" cy="667.73" r="10.02" fill="#3A3E46" fill-opacity="0.37"/>
+</g>
+<g clip-path="url(#lab22)">
+<text x="1293.33" y="765.17" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Ágætis byrjun</text>
+<text x="1293.33" y="783.01" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Sigur Rós</text>
+</g>
+<g clip-path="url(#clip11)">
+<rect x="1606.67" y="462.73" width="273.33" height="273.33" fill="#1B1030"/>
+<circle cx="1629.44" cy="485.51" r="10.02" fill="#EFE6FF" fill-opacity="0.27"/>
+<circle cx="1629.44" cy="531.07" r="10.02" fill="#EFE6FF" fill-opacity="0.27"/>
+<circle cx="1629.44" cy="576.62" r="10.02" fill="#EFE6FF" fill-opacity="0.27"/>
+<circle cx="1629.44" cy="622.18" r="10.02" fill="#EFE6FF" fill-opacity="0.27"/>
+<circle cx="1629.44" cy="713.29" r="10.02" fill="#EFE6FF" fill-opacity="0.27"/>
+<circle cx="1675.00" cy="531.07" r="10.02" fill="#EFE6FF" fill-opacity="0.32"/>
+<circle cx="1675.00" cy="576.62" r="10.02" fill="#EFE6FF" fill-opacity="0.37"/>
+<circle cx="1675.00" cy="622.18" r="10.02" fill="#EFE6FF" fill-opacity="0.42"/>
+<circle cx="1675.00" cy="667.73" r="10.02" fill="#EFE6FF" fill-opacity="0.47"/>
+<circle cx="1720.56" cy="485.51" r="10.02" fill="#EFE6FF" fill-opacity="0.27"/>
+<circle cx="1720.56" cy="576.62" r="10.02" fill="#EFE6FF" fill-opacity="0.47"/>
+<circle cx="1720.56" cy="622.18" r="10.02" fill="#EFE6FF" fill-opacity="0.5700000000000001"/>
+<circle cx="1720.56" cy="667.73" r="10.02" fill="#EFE6FF" fill-opacity="0.16999999999999998"/>
+<circle cx="1720.56" cy="713.29" r="10.02" fill="#EFE6FF" fill-opacity="0.27"/>
+<circle cx="1766.11" cy="485.51" r="10.02" fill="#EFE6FF" fill-opacity="0.27"/>
+<circle cx="1766.11" cy="531.07" r="10.02" fill="#EFE6FF" fill-opacity="0.42"/>
+<circle cx="1766.11" cy="622.18" r="10.02" fill="#EFE6FF" fill-opacity="0.22"/>
+<circle cx="1766.11" cy="667.73" r="10.02" fill="#EFE6FF" fill-opacity="0.37"/>
+<circle cx="1766.11" cy="713.29" r="10.02" fill="#EFE6FF" fill-opacity="0.52"/>
+<circle cx="1811.67" cy="485.51" r="10.02" fill="#EFE6FF" fill-opacity="0.27"/>
+<circle cx="1811.67" cy="531.07" r="10.02" fill="#EFE6FF" fill-opacity="0.47"/>
+<circle cx="1811.67" cy="576.62" r="10.02" fill="#EFE6FF" fill-opacity="0.16999999999999998"/>
+<circle cx="1811.67" cy="667.73" r="10.02" fill="#EFE6FF" fill-opacity="0.5700000000000001"/>
+<circle cx="1811.67" cy="713.29" r="10.02" fill="#EFE6FF" fill-opacity="0.27"/>
+<circle cx="1857.22" cy="485.51" r="10.02" fill="#EFE6FF" fill-opacity="0.27"/>
+<circle cx="1857.22" cy="531.07" r="10.02" fill="#EFE6FF" fill-opacity="0.52"/>
+<circle cx="1857.22" cy="576.62" r="10.02" fill="#EFE6FF" fill-opacity="0.27"/>
+<circle cx="1857.22" cy="622.18" r="10.02" fill="#EFE6FF" fill-opacity="0.52"/>
+<circle cx="1857.22" cy="713.29" r="10.02" fill="#EFE6FF" fill-opacity="0.52"/>
+</g>
+<g clip-path="url(#lab23)">
+<text x="1606.67" y="765.17" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">For Alto</text>
+<text x="1606.67" y="783.01" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Anthony Braxton</text>
+</g>
+<g clip-path="url(#clip12)">
+<rect x="40.00" y="828.47" width="273.33" height="273.33" fill="#1A0B12"/>
+<rect x="40.00" y="828.47" width="273.33" height="273.33" fill="#8E2E6B" fill-opacity="0.35"/>
+<circle cx="183.64" cy="1008.59" r="53.66" fill="#F6DCEF" fill-opacity="0.88"/>
+</g>
+<g clip-path="url(#lab24)">
+<text x="40.00" y="1130.90" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Rings of Saturn</text>
+<text x="40.00" y="1148.74" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Nala Sinephro</text>
+</g>
+<g clip-path="url(#clip13)">
+<rect x="353.33" y="828.47" width="273.33" height="273.33" fill="#0D2019"/>
+<rect x="353.33" y="828.47" width="273.33" height="273.33" fill="url(#grad13)"/>
+<rect x="386.13" y="992.47" width="136.67" height="5.47" fill="#DCF0D6" fill-opacity="0.8"/>
+<rect x="386.13" y="1008.87" width="90.20" height="5.47" fill="#DCF0D6" fill-opacity="0.5"/>
+</g>
+<g clip-path="url(#lab25)">
+<text x="353.33" y="1130.90" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">A Love Supreme</text>
+<text x="353.33" y="1148.74" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">John Coltrane</text>
+</g>
+<g clip-path="url(#clip14)">
+<rect x="666.67" y="828.47" width="273.33" height="273.33" fill="#1A0B12"/>
+<rect x="666.67" y="828.47" width="273.33" height="30.37" fill="#8E2E6B" fill-opacity="0.194"/>
+<rect x="666.67" y="858.84" width="273.33" height="30.37" fill="#8E2E6B" fill-opacity="0.3975"/>
+<rect x="666.67" y="889.21" width="273.33" height="30.37" fill="#F6DCEF" fill-opacity="0.601"/>
+<rect x="666.67" y="919.58" width="273.33" height="30.37" fill="#8E2E6B" fill-opacity="0.2545"/>
+<rect x="666.67" y="949.95" width="273.33" height="30.37" fill="#8E2E6B" fill-opacity="0.4580000000000001"/>
+<rect x="666.67" y="980.32" width="273.33" height="30.37" fill="#F6DCEF" fill-opacity="0.6615000000000001"/>
+<rect x="666.67" y="1010.69" width="273.33" height="30.37" fill="#8E2E6B" fill-opacity="0.315"/>
+<rect x="666.67" y="1041.06" width="273.33" height="30.37" fill="#8E2E6B" fill-opacity="0.5185"/>
+<rect x="666.67" y="1071.43" width="273.33" height="30.37" fill="#F6DCEF" fill-opacity="0.172"/>
+</g>
+<g clip-path="url(#lab26)">
+<text x="666.67" y="1130.90" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Talkie Walkie</text>
+<text x="666.67" y="1148.74" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Air</text>
+</g>
+<g clip-path="url(#clip15)">
+<rect x="980.00" y="828.47" width="273.33" height="273.33" fill="#3A0F18"/>
+<rect x="980.00" y="828.47" width="273.33" height="273.33" fill="#B02B3C" fill-opacity="0.35"/>
+<circle cx="1105.87" cy="989.32" r="91.14" fill="#F2D9C6" fill-opacity="0.88"/>
+</g>
+<g clip-path="url(#lab27)">
+<text x="980.00" y="1130.90" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Geogaddi</text>
+<text x="980.00" y="1148.74" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Boards of Canada</text>
+</g>
+<g clip-path="url(#clip16)">
+<rect x="1293.33" y="828.47" width="273.33" height="273.33" fill="#E4E0D6"/>
+<circle cx="1389.44" cy="1007.88" r="221.40" fill="#B9B2A4" fill-opacity="0.1"/>
+<circle cx="1389.44" cy="1007.88" r="196.80" fill="#2A2723" fill-opacity="0.16"/>
+<circle cx="1389.44" cy="1007.88" r="172.20" fill="#B9B2A4" fill-opacity="0.22"/>
+<circle cx="1389.44" cy="1007.88" r="147.60" fill="#2A2723" fill-opacity="0.28"/>
+<circle cx="1389.44" cy="1007.88" r="123.00" fill="#B9B2A4" fill-opacity="0.33999999999999997"/>
+<circle cx="1389.44" cy="1007.88" r="98.40" fill="#2A2723" fill-opacity="0.4"/>
+<circle cx="1389.44" cy="1007.88" r="73.80" fill="#B9B2A4" fill-opacity="0.45999999999999996"/>
+<circle cx="1389.44" cy="1007.88" r="49.20" fill="#2A2723" fill-opacity="0.52"/>
+<circle cx="1389.44" cy="1007.88" r="24.60" fill="#B9B2A4" fill-opacity="0.58"/>
+</g>
+<g clip-path="url(#lab28)">
+<text x="1293.33" y="1130.90" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Kid A</text>
+<text x="1293.33" y="1148.74" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Radiohead</text>
+</g>
+<g clip-path="url(#clip17)">
+<rect x="1606.67" y="828.47" width="273.33" height="273.33" fill="#0A1A1E"/>
+<rect x="1606.67" y="828.47" width="273.33" height="273.33" fill="#3FB0AD" fill-opacity="0.35"/>
+<circle cx="1810.71" cy="965.00" r="68.31" fill="#E6FBF7" fill-opacity="0.88"/>
+</g>
+<g clip-path="url(#lab29)">
+<text x="1606.67" y="1130.90" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Vespertine</text>
+<text x="1606.67" y="1148.74" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Björk</text>
+</g>
+<g clip-path="url(#clip18)">
+<rect x="40.00" y="1194.20" width="273.33" height="273.33" fill="#0A1A1E"/>
+<path d="M40.00,1467.53 L313.33,1194.20 L313.33,1467.53 Z" fill="#3FB0AD"/>
+<path d="M40.00,1194.20 L209.47,1194.20 L40.00,1363.67 Z" fill="#E6FBF7" fill-opacity="0.55"/>
+</g>
+<g clip-path="url(#lab30)">
+<text x="40.00" y="1496.64" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Third</text>
+<text x="40.00" y="1514.47" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Portishead</text>
+</g>
+<g clip-path="url(#clip19)">
+<rect x="353.33" y="1194.20" width="273.33" height="273.33" fill="#1A0B12"/>
+<rect x="353.33" y="1194.20" width="273.33" height="27.33" fill="#F6DCEF" fill-opacity="0.634"/>
+<rect x="353.33" y="1221.53" width="273.33" height="27.33" fill="#8E2E6B" fill-opacity="0.2875"/>
+<rect x="353.33" y="1248.87" width="273.33" height="27.33" fill="#8E2E6B" fill-opacity="0.491"/>
+<rect x="353.33" y="1276.20" width="273.33" height="27.33" fill="#F6DCEF" fill-opacity="0.6945"/>
+<rect x="353.33" y="1303.53" width="273.33" height="27.33" fill="#8E2E6B" fill-opacity="0.348"/>
+<rect x="353.33" y="1330.87" width="273.33" height="27.33" fill="#8E2E6B" fill-opacity="0.5515000000000001"/>
+<rect x="353.33" y="1358.20" width="273.33" height="27.33" fill="#F6DCEF" fill-opacity="0.205"/>
+<rect x="353.33" y="1385.53" width="273.33" height="27.33" fill="#8E2E6B" fill-opacity="0.4085"/>
+<rect x="353.33" y="1412.87" width="273.33" height="27.33" fill="#8E2E6B" fill-opacity="0.612"/>
+<rect x="353.33" y="1440.20" width="273.33" height="27.33" fill="#F6DCEF" fill-opacity="0.2655"/>
+</g>
+<g clip-path="url(#lab31)">
+<text x="353.33" y="1496.64" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Mezzanine</text>
+<text x="353.33" y="1514.47" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Massive Attack</text>
+</g>
+<g clip-path="url(#clip20)">
+<rect x="666.67" y="1194.20" width="273.33" height="273.33" fill="#1B1030"/>
+<circle cx="760.15" cy="1359.62" r="221.40" fill="#6B44C8" fill-opacity="0.1"/>
+<circle cx="760.15" cy="1359.62" r="196.80" fill="#EFE6FF" fill-opacity="0.16"/>
+<circle cx="760.15" cy="1359.62" r="172.20" fill="#6B44C8" fill-opacity="0.22"/>
+<circle cx="760.15" cy="1359.62" r="147.60" fill="#EFE6FF" fill-opacity="0.28"/>
+<circle cx="760.15" cy="1359.62" r="123.00" fill="#6B44C8" fill-opacity="0.33999999999999997"/>
+<circle cx="760.15" cy="1359.62" r="98.40" fill="#EFE6FF" fill-opacity="0.4"/>
+<circle cx="760.15" cy="1359.62" r="73.80" fill="#6B44C8" fill-opacity="0.45999999999999996"/>
+<circle cx="760.15" cy="1359.62" r="49.20" fill="#EFE6FF" fill-opacity="0.52"/>
+<circle cx="760.15" cy="1359.62" r="24.60" fill="#6B44C8" fill-opacity="0.58"/>
+</g>
+<g clip-path="url(#lab32)">
+<text x="666.67" y="1496.64" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">The K&amp;D Sessions</text>
+<text x="666.67" y="1514.47" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Kruder &amp; Dorfmeister</text>
+</g>
+<g clip-path="url(#clip21)">
+<rect x="980.00" y="1194.20" width="273.33" height="273.33" fill="#E4E0D6"/>
+<rect x="980.00" y="1194.20" width="273.33" height="273.33" fill="url(#grad21)"/>
+<rect x="1012.80" y="1358.20" width="136.67" height="5.47" fill="#2A2723" fill-opacity="0.8"/>
+<rect x="1012.80" y="1374.60" width="90.20" height="5.47" fill="#2A2723" fill-opacity="0.5"/>
+</g>
+<g clip-path="url(#lab33)">
+<text x="980.00" y="1496.64" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Music for Airports</text>
+<text x="980.00" y="1514.47" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Brian Eno</text>
+</g>
+<g clip-path="url(#clip22)">
+<rect x="1293.33" y="1194.20" width="273.33" height="273.33" fill="#3A0F18"/>
+<circle cx="1308.52" cy="1209.39" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1308.52" cy="1239.76" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1308.52" cy="1270.13" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1308.52" cy="1330.87" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1308.52" cy="1361.24" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1308.52" cy="1391.61" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1308.52" cy="1421.98" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1338.89" cy="1209.39" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1338.89" cy="1239.76" r="6.68" fill="#F2D9C6" fill-opacity="0.22"/>
+<circle cx="1338.89" cy="1270.13" r="6.68" fill="#F2D9C6" fill-opacity="0.27"/>
+<circle cx="1338.89" cy="1300.50" r="6.68" fill="#F2D9C6" fill-opacity="0.32"/>
+<circle cx="1338.89" cy="1361.24" r="6.68" fill="#F2D9C6" fill-opacity="0.42"/>
+<circle cx="1338.89" cy="1391.61" r="6.68" fill="#F2D9C6" fill-opacity="0.47"/>
+<circle cx="1338.89" cy="1421.98" r="6.68" fill="#F2D9C6" fill-opacity="0.52"/>
+<circle cx="1338.89" cy="1452.35" r="6.68" fill="#F2D9C6" fill-opacity="0.5700000000000001"/>
+<circle cx="1369.26" cy="1239.76" r="6.68" fill="#F2D9C6" fill-opacity="0.27"/>
+<circle cx="1369.26" cy="1270.13" r="6.68" fill="#F2D9C6" fill-opacity="0.37"/>
+<circle cx="1369.26" cy="1300.50" r="6.68" fill="#F2D9C6" fill-opacity="0.47"/>
+<circle cx="1369.26" cy="1330.87" r="6.68" fill="#F2D9C6" fill-opacity="0.5700000000000001"/>
+<circle cx="1369.26" cy="1391.61" r="6.68" fill="#F2D9C6" fill-opacity="0.27"/>
+<circle cx="1369.26" cy="1421.98" r="6.68" fill="#F2D9C6" fill-opacity="0.37"/>
+<circle cx="1369.26" cy="1452.35" r="6.68" fill="#F2D9C6" fill-opacity="0.47"/>
+<circle cx="1399.63" cy="1209.39" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1399.63" cy="1270.13" r="6.68" fill="#F2D9C6" fill-opacity="0.47"/>
+<circle cx="1399.63" cy="1300.50" r="6.68" fill="#F2D9C6" fill-opacity="0.12"/>
+<circle cx="1399.63" cy="1330.87" r="6.68" fill="#F2D9C6" fill-opacity="0.27"/>
+<circle cx="1399.63" cy="1361.24" r="6.68" fill="#F2D9C6" fill-opacity="0.42"/>
+<circle cx="1399.63" cy="1421.98" r="6.68" fill="#F2D9C6" fill-opacity="0.22"/>
+<circle cx="1399.63" cy="1452.35" r="6.68" fill="#F2D9C6" fill-opacity="0.37"/>
+<circle cx="1430.00" cy="1209.39" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1430.00" cy="1239.76" r="6.68" fill="#F2D9C6" fill-opacity="0.37"/>
+<circle cx="1430.00" cy="1300.50" r="6.68" fill="#F2D9C6" fill-opacity="0.27"/>
+<circle cx="1430.00" cy="1330.87" r="6.68" fill="#F2D9C6" fill-opacity="0.47"/>
+<circle cx="1430.00" cy="1361.24" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1430.00" cy="1391.61" r="6.68" fill="#F2D9C6" fill-opacity="0.37"/>
+<circle cx="1430.00" cy="1452.35" r="6.68" fill="#F2D9C6" fill-opacity="0.27"/>
+<circle cx="1460.37" cy="1209.39" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1460.37" cy="1239.76" r="6.68" fill="#F2D9C6" fill-opacity="0.42"/>
+<circle cx="1460.37" cy="1270.13" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1460.37" cy="1330.87" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1460.37" cy="1361.24" r="6.68" fill="#F2D9C6" fill-opacity="0.42"/>
+<circle cx="1460.37" cy="1391.61" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1460.37" cy="1421.98" r="6.68" fill="#F2D9C6" fill-opacity="0.42"/>
+<circle cx="1490.74" cy="1209.39" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1490.74" cy="1239.76" r="6.68" fill="#F2D9C6" fill-opacity="0.47"/>
+<circle cx="1490.74" cy="1270.13" r="6.68" fill="#F2D9C6" fill-opacity="0.27"/>
+<circle cx="1490.74" cy="1300.50" r="6.68" fill="#F2D9C6" fill-opacity="0.5700000000000001"/>
+<circle cx="1490.74" cy="1361.24" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1490.74" cy="1391.61" r="6.68" fill="#F2D9C6" fill-opacity="0.47"/>
+<circle cx="1490.74" cy="1421.98" r="6.68" fill="#F2D9C6" fill-opacity="0.27"/>
+<circle cx="1490.74" cy="1452.35" r="6.68" fill="#F2D9C6" fill-opacity="0.5700000000000001"/>
+<circle cx="1521.11" cy="1239.76" r="6.68" fill="#F2D9C6" fill-opacity="0.52"/>
+<circle cx="1521.11" cy="1270.13" r="6.68" fill="#F2D9C6" fill-opacity="0.37"/>
+<circle cx="1521.11" cy="1300.50" r="6.68" fill="#F2D9C6" fill-opacity="0.22"/>
+<circle cx="1521.11" cy="1330.87" r="6.68" fill="#F2D9C6" fill-opacity="0.5700000000000001"/>
+<circle cx="1521.11" cy="1391.61" r="6.68" fill="#F2D9C6" fill-opacity="0.27"/>
+<circle cx="1521.11" cy="1421.98" r="6.68" fill="#F2D9C6" fill-opacity="0.12"/>
+<circle cx="1521.11" cy="1452.35" r="6.68" fill="#F2D9C6" fill-opacity="0.47"/>
+<circle cx="1551.48" cy="1209.39" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1551.48" cy="1270.13" r="6.68" fill="#F2D9C6" fill-opacity="0.47"/>
+<circle cx="1551.48" cy="1300.50" r="6.68" fill="#F2D9C6" fill-opacity="0.37"/>
+<circle cx="1551.48" cy="1330.87" r="6.68" fill="#F2D9C6" fill-opacity="0.27"/>
+<circle cx="1551.48" cy="1361.24" r="6.68" fill="#F2D9C6" fill-opacity="0.16999999999999998"/>
+<circle cx="1551.48" cy="1421.98" r="6.68" fill="#F2D9C6" fill-opacity="0.47"/>
+<circle cx="1551.48" cy="1452.35" r="6.68" fill="#F2D9C6" fill-opacity="0.37"/>
+</g>
+<g clip-path="url(#lab34)">
+<text x="1293.33" y="1496.64" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Substrata</text>
+<text x="1293.33" y="1514.47" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Biosphere</text>
+</g>
+<g clip-path="url(#clip23)">
+<rect x="1606.67" y="1194.20" width="273.33" height="273.33" fill="#5A2408"/>
+<circle cx="1766.18" cy="1381.49" r="221.40" fill="#E0692A" fill-opacity="0.1"/>
+<circle cx="1766.18" cy="1381.49" r="196.80" fill="#FFE3C4" fill-opacity="0.16"/>
+<circle cx="1766.18" cy="1381.49" r="172.20" fill="#E0692A" fill-opacity="0.22"/>
+<circle cx="1766.18" cy="1381.49" r="147.60" fill="#FFE3C4" fill-opacity="0.28"/>
+<circle cx="1766.18" cy="1381.49" r="123.00" fill="#E0692A" fill-opacity="0.33999999999999997"/>
+<circle cx="1766.18" cy="1381.49" r="98.40" fill="#FFE3C4" fill-opacity="0.4"/>
+<circle cx="1766.18" cy="1381.49" r="73.80" fill="#E0692A" fill-opacity="0.45999999999999996"/>
+<circle cx="1766.18" cy="1381.49" r="49.20" fill="#FFE3C4" fill-opacity="0.52"/>
+<circle cx="1766.18" cy="1381.49" r="24.60" fill="#E0692A" fill-opacity="0.58"/>
+</g>
+<g clip-path="url(#lab35)">
+<text x="1606.67" y="1496.64" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">76:14</text>
+<text x="1606.67" y="1514.47" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">Global Communication</text>
+</g>
+</g>
+<rect x="1910.00" y="97.00" width="6.00" height="180.00" fill="#E8E4DB" fill-opacity="0.07" rx="3"/>
+<rect x="0.00" y="978.00" width="1920.00" height="102.00" fill="#060708"/>
+<line x1="0.00" y1="978.50" x2="1920.00" y2="978.50" stroke="#E8E4DB" stroke-width="1" stroke-opacity="0.07"/>
+<rect x="904.00" y="990.00" width="32.00" height="32.00" fill="#141517" rx="4"/>
+<rect x="904.00" y="990.00" width="32" height="32" rx="4" fill="none" stroke="#E8E4DB" stroke-opacity="0.07" stroke-width="1"/>
+<path d="M927.36,1000.40 L921.60,1006.00 L927.36,1011.60 Z" fill="#E8E4DB" fill-opacity="1.0"/>
+<path d="M922.40,1000.40 L916.64,1006.00 L922.40,1011.60 Z" fill="#E8E4DB" fill-opacity="1.0"/>
+<rect x="914.24" y="1000.40" width="1.76" height="11.20" fill="#E8E4DB" fill-opacity="1.0"/>
+<rect x="944.00" y="990.00" width="32.00" height="32.00" fill="#141517" rx="4"/>
+<rect x="944.00" y="990.00" width="32" height="32" rx="4" fill="none" stroke="#E8E4DB" stroke-opacity="0.07" stroke-width="1"/>
+<rect x="954.24" y="999.60" width="4.00" height="12.80" fill="#E8E4DB" fill-opacity="1.0"/>
+<rect x="961.76" y="999.60" width="4.00" height="12.80" fill="#E8E4DB" fill-opacity="1.0"/>
+<rect x="984.00" y="990.00" width="32.00" height="32.00" fill="#141517" rx="4"/>
+<rect x="984.00" y="990.00" width="32" height="32" rx="4" fill="none" stroke="#E8E4DB" stroke-opacity="0.07" stroke-width="1"/>
+<path d="M992.64,1000.40 L998.40,1006.00 L992.64,1011.60 Z" fill="#E8E4DB" fill-opacity="1.0"/>
+<path d="M997.60,1000.40 L1003.36,1006.00 L997.60,1011.60 Z" fill="#E8E4DB" fill-opacity="1.0"/>
+<rect x="1005.76" y="1000.40" width="1.76" height="11.20" fill="#E8E4DB" fill-opacity="1.0"/>
+<rect x="830.00" y="1054.00" width="260.00" height="4.00" fill="#141517" rx="2.0"/>
+<rect x="830.00" y="1054.00" width="93.60" height="4.00" fill="#E3A14E" rx="2.0"/>
+<circle cx="923.60" cy="1056.00" r="5.00" fill="#E3A14E"/>
+<text x="822.00" y="1060.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1" text-anchor="end">2:31</text>
+<text x="1098.00" y="1060.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">7:04</text>
+<rect x="967.20" y="1030.00" width="48.00" height="15.00" fill="#1C1D20" rx="3"/>
+<rect x="967.20" y="1030.00" width="48" height="15" rx="3" fill="none" stroke="#E8E4DB" stroke-opacity="0.15"/>
+<text x="991.20" y="1041.00" font-family="IBM Plex Sans" font-size="11" font-weight="400" fill="#ABA8A1" text-anchor="middle">4:23</text>
+<text x="24.00" y="1013.70" font-family="IBM Plex Sans" font-size="13" font-weight="500" fill="#E8E4DB">Roygbiv</text>
+<text x="24.00" y="1031.90" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#ABA8A1">Boards of Canada</text>
+<text x="24.00" y="1054.10" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680">3 / 12</text>
+<text x="1896.00" y="1004.00" font-family="IBM Plex Sans" font-size="12" font-weight="400" fill="#888680" text-anchor="end">bit-perfect</text>
+<rect x="1760.00" y="1024.00" width="32.00" height="32.00" fill="#141517" rx="4"/>
+<rect x="1760.00" y="1024.00" width="32" height="32" rx="4" fill="none" stroke="#E8E4DB" stroke-opacity="0.07"/>
+<path d="M1770.00,1037.00 L1774.00,1037.00 L1779.00,1032.00 L1779.00,1048.00 L1774.00,1043.00 L1770.00,1043.00 Z" fill="#E8E4DB"/>
+<rect x="1800.00" y="1038.00" width="96.00" height="4.00" fill="#141517" rx="2.0"/>
+<rect x="1800.00" y="1038.00" width="74.88" height="4.00" fill="#888680" rx="2.0"/>
+<circle cx="1874.88" cy="1040.00" r="5.00" fill="#888680"/>
+<rect x="1895.00" y="1031.00" width="2.00" height="5.00" fill="#E8E4DB" fill-opacity="0.21000000000000002"/>
+<text x="40.00" y="84.00" font-family="IBM Plex Sans" font-size="11" font-weight="400" fill="#6C6A66">shelf 1920 px  →  6 × 273 px · gutter 40 · margin 40 · row pitch 365.7  ·  dead gutter 0</text>
+</svg>
