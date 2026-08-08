@@ -56,11 +56,21 @@ next commit.
 - **Incremental scanning**: a file whose (mtime, size) stamp is unchanged is not
   reopened. Measured over 10 000 synthetic tagged files, scan 61.2 ms → 10.3 ms
   and a whole warm launch 83.4 ms → 11.6 ms (ADR-0010, schema v4).
-- **Removal by positive confirmation only.** A row is deleted only when the walk
-  saw something, the path is under the root just scanned, no ancestor directory
+- **Removal by positive confirmation only.** A row is deleted only when the
+  walk saw something, the row names a root whose walk produced something this
+  pass (ADR-0022 replaced the old path-prefix gate), no ancestor directory
   failed to be read, and the filesystem confirms the file is gone. The stated
   price: deleting a whole album *folder* leaves its rows, because from below
   that is indistinguishable from an unmounted share.
+- **A native folder picker, and the NAS as a first-class folder** (ADR-0023).
+  The Settings place's add-a-folder row gains `Browse…` — the desktop's own
+  directory dialog via the XDG portal on Linux (`rfd` 0.17, portal-only: no
+  gtk, one new crate) — beside the typed path, which stays: a dialog cannot
+  name an unmounted share. A typed path is now statted off the UI thread, so
+  a dead network mount can no longer stall the event loop at the moment of
+  adding it; and the unavailable-root lifecycle (unmount → nothing removed →
+  remount → same rows, same stamps, same first-seen, no duplicates) is pinned
+  by tests at both the worker and the library layer.
 
 **Playback**
 

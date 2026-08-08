@@ -33,7 +33,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -410,6 +410,23 @@ pub(crate) enum Message {
     MusicFolderInput(String),
     /// Settings place: add the folder in the field, if it is one.
     AddMusicFolder,
+    /// Settings place: open the system folder picker — the desktop portal's
+    /// dialog on Linux (ADR-0023). The dialog blocks a pool thread, never the
+    /// event loop; the wall keeps drawing behind it.
+    PickMusicFolder,
+    /// The folder picker closed: the folder chosen, or `None` when the dialog
+    /// was dismissed. Dismissal decided nothing and therefore changes nothing —
+    /// not even the typed path waiting in the field.
+    MusicFolderPicked(Option<PathBuf>),
+    /// The off-thread look at a submitted path came back: the directory it
+    /// named, or the words for why it is not one.
+    ///
+    /// Between [`Message::AddMusicFolder`] and this, the path was statted on
+    /// the blocking pool rather than the UI thread. That split is the NAS
+    /// honesty ADR-0023 asks of the *typed* door: a dead network mount answers
+    /// `stat` in minutes, not milliseconds, and the event loop must never be
+    /// the thing waiting on it.
+    MusicFolderChecked(Result<PathBuf, String>),
     /// Settings place: the **first** press of a folder's Remove. Arms the
     /// confirmation and does nothing else — see `views::settings::folder_block`
     /// for why removing is two presses.
@@ -2626,7 +2643,14 @@ impl Shelf {
                 self.folder_input.clone_from(value);
                 self.folder_error = None;
             }
-            Message::AddMusicFolder => return Some(self.add_root()),
+            Message::AddMusicFolder => return Some(self.submit_folder_input()),
+            Message::PickMusicFolder => return Some(pick_folder()),
+            Message::MusicFolderPicked(choice) => {
+                return Some(self.folder_picked(choice.clone()));
+            }
+            Message::MusicFolderChecked(result) => {
+                return Some(self.folder_checked(result.clone()));
+            }
             // The first press arms; the second acts. See
             // `views::settings::folder_block` for why it is two.
             Message::ConfirmRemoveMusicFolder(index) => {
@@ -2674,35 +2698,77 @@ impl Shelf {
         }
     }
 
-    /// Add the folder in the Settings field and scan it.
+    /// Send the typed path off to be looked at, coming back as
+    /// [`Message::MusicFolderChecked`].
     ///
-    /// The same validation the first-run screen applies, in the same words: a
-    /// path that is not a directory is refused with the reason, and nothing
-    /// moves. A folder already held is not added twice — it would be walked
-    /// twice for one set of rows.
-    fn add_root(&mut self) -> Task<Message> {
+    /// The look itself — one `stat` — happens on the blocking pool, because the
+    /// paths people type here are exactly the ones a dialog cannot offer: the
+    /// share that is configured but not mounted, the drive that is sometimes
+    /// plugged in. Against a dead hard mount that `stat` can sit for minutes,
+    /// and it used to sit on the UI thread.
+    fn submit_folder_input(&mut self) -> Task<Message> {
         let dir = expand_tilde(self.folder_input.trim());
         if dir.as_os_str().is_empty() {
             return Task::none();
         }
-        if !dir.is_dir() {
-            self.folder_error = Some(format!("`{}` is not a directory", dir.display()));
+        Task::perform(check_folder(dir), Message::MusicFolderChecked)
+    }
+
+    /// What the folder picker's closing means: a chosen folder joins the
+    /// list; a dismissal is not a decision and touches nothing.
+    ///
+    /// A picked folder skips the `stat` the typed door needs — the dialog
+    /// walked the real filesystem to offer it, which is better evidence than a
+    /// fresh stat, and re-checking would put an avoidable filesystem wait back
+    /// on this thread.
+    fn folder_picked(&mut self, choice: Option<PathBuf>) -> Task<Message> {
+        match choice {
+            None => Task::none(),
+            Some(dir) => self.accept_folder(dir),
+        }
+    }
+
+    /// What the off-thread look at a typed path came back to: the same words
+    /// the first-run screen uses when the path is not a directory, or the
+    /// acceptance every added folder goes through.
+    fn folder_checked(&mut self, result: Result<PathBuf, String>) -> Task<Message> {
+        match result {
+            Ok(dir) => {
+                let task = self.accept_folder(dir);
+                // The field empties only when its path was taken. A refused
+                // path (already here) stays put to be corrected, rather than
+                // making somebody retype the long half of a NAS path.
+                if self.folder_error.is_none() {
+                    self.folder_input.clear();
+                }
+                task
+            }
+            Err(reason) => {
+                self.folder_error = Some(reason);
+                Task::none()
+            }
+        }
+    }
+
+    /// Hold `dir`, remember it, and scan it — the one acceptance path both
+    /// doors (the typed path and the picker) land in.
+    ///
+    /// A folder already held is refused rather than added twice — it would be
+    /// walked twice for one set of rows ([`folder_refusal`] holds the words).
+    fn accept_folder(&mut self, dir: PathBuf) -> Task<Message> {
+        if let Some(refusal) = folder_refusal(&self.roots, &dir) {
+            self.folder_error = Some(refusal);
             return Task::none();
         }
-        if self.roots.contains(&dir) {
-            self.folder_error = Some(format!("`{}` is already here", dir.display()));
-            return Task::none();
-        }
-        self.folder_input.clear();
         self.folder_error = None;
         self.folder_pending_removal = None;
-        self.roots.push(dir.clone());
-        persist_roots(&self.roots);
         // A folder added now may hold rows an older baz left rootless — the
         // pre-v8 population this is the only cure for. Claim them before the
         // scan, so the walk that follows can prune them if they are gone.
         adopt_roots(&mut self.library, std::slice::from_ref(&dir));
         println!("[config] holding {}", dir.display());
+        self.roots.push(dir);
+        persist_roots(&self.roots);
         // Incremental, not forced: a folder that overlaps one baz already holds
         // must not cost a re-read of every file in it.
         self.start_scan(scan::ScanMode::Incremental);
@@ -3080,6 +3146,68 @@ fn persist_roots(roots: &[PathBuf]) {
     persist(|config| config.music_dirs = roots.to_vec());
 }
 
+/// Why `dir` cannot join `roots`, in the words the Settings place shows — or
+/// `None` when it can.
+///
+/// The one decision [`Shelf::accept_folder`] makes that is not an effect, held
+/// apart so the refusal and its words are pinned by test. Everything after a
+/// `None` here is effects: the push, the config write, the adoption, the scan.
+fn folder_refusal(roots: &[PathBuf], dir: &Path) -> Option<String> {
+    roots
+        .iter()
+        .any(|held| held == dir)
+        .then(|| format!("`{}` is already here", dir.display()))
+}
+
+/// Ask the filesystem whether `dir` is a directory — on the blocking pool,
+/// never the UI thread.
+///
+/// This is the typed door's half of ADR-0023's NAS honesty: `stat` against a
+/// dead network mount does not fail, it *waits*, for however long the mount's
+/// timeouts say — and a wait belongs to a pool thread that has nothing else to
+/// do. The words on refusal are the first-run screen's, unchanged.
+async fn check_folder(dir: PathBuf) -> Result<PathBuf, String> {
+    let looked = tokio::task::spawn_blocking(move || {
+        if dir.is_dir() {
+            Ok(dir)
+        } else {
+            Err(format!("`{}` is not a directory", dir.display()))
+        }
+    })
+    .await;
+    // A pool that cannot run a closure is a torn-down runtime; answer in the
+    // error slot the field already has rather than panicking mid-shutdown.
+    looked.unwrap_or_else(|err| Err(format!("could not look at that path: {err}")))
+}
+
+/// Open the system folder picker and come back as
+/// [`Message::MusicFolderPicked`].
+///
+/// **The one function that touches `rfd`**, kept to the size a thing the tests
+/// cannot reach has to stay (ADR-0023): everything before it is message
+/// plumbing and everything after it is [`Shelf::accept_folder`], both covered.
+/// `FileDialog::pick_folder` blocks until the dialog closes — on Linux it is
+/// one D-Bus round-trip to the desktop portal — so it runs on the blocking
+/// pool and the event loop never waits on a human deciding.
+///
+/// On a desktop with no portal service the call returns `None` at once, which
+/// lands as a dismissal: nothing moves, and the typed path beside the control
+/// still reaches everything the dialog would have.
+fn pick_folder() -> Task<Message> {
+    Task::perform(
+        async {
+            match tokio::task::spawn_blocking(|| rfd::FileDialog::new().pick_folder()).await {
+                Ok(choice) => choice,
+                Err(err) => {
+                    println!("[config] folder picker failed: {err}");
+                    None
+                }
+            }
+        },
+        Message::MusicFolderPicked,
+    )
+}
+
 /// Claim the index's rootless rows for the folders baz holds — schema v8's
 /// backfill, made from the one place that knows both halves (ADR-0022).
 ///
@@ -3231,6 +3359,48 @@ fn expand_tilde(input: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The one non-effect decision on the add-a-folder path (ADR-0023): a
+    /// folder already held is refused with its words, anything else may join.
+    /// Both doors — the typed path and the picker — land on this exact check.
+    #[test]
+    fn a_folder_already_held_is_refused_and_a_new_one_is_not() {
+        let roots = vec![PathBuf::from("/m"), PathBuf::from("/mnt/nas/Music")];
+        assert_eq!(
+            folder_refusal(&roots, Path::new("/mnt/nas/Music")),
+            Some("`/mnt/nas/Music` is already here".to_owned())
+        );
+        assert_eq!(folder_refusal(&roots, Path::new("/mnt/nas")), None);
+        assert_eq!(folder_refusal(&[], Path::new("/m")), None);
+    }
+
+    /// The typed door's validation, off the UI thread: a directory passes, a
+    /// file and an absent path are refused in the first-run screen's words.
+    /// (The *pool* is the point — see [`check_folder`] — but the verdicts are
+    /// what this pins.)
+    #[test]
+    fn check_folder_tells_a_directory_from_everything_else() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("track.flac");
+        std::fs::write(&file, b"x").expect("write");
+        let missing = dir.path().join("not-here");
+
+        assert_eq!(
+            runtime.block_on(check_folder(dir.path().to_path_buf())),
+            Ok(dir.path().to_path_buf())
+        );
+        assert_eq!(
+            runtime.block_on(check_folder(file.clone())),
+            Err(format!("`{}` is not a directory", file.display()))
+        );
+        assert_eq!(
+            runtime.block_on(check_folder(missing.clone())),
+            Err(format!("`{}` is not a directory", missing.display()))
+        );
+    }
 
     #[test]
     fn tilde_expansion() {

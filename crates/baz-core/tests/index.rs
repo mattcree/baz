@@ -4009,3 +4009,115 @@ fn forgetting_a_root_takes_its_rows_and_leaves_a_nested_roots_alone() {
     assert_eq!(reopened.len(), 1);
     assert_eq!(reopened.root_stats(Path::new("/m/Live")).tracks, 1);
 }
+
+/// A real, tiny, valid WAV at `path` (parents created) — for the one test in
+/// this file whose subject is the filesystem coming and going, which synthetic
+/// [`TrackMeta`] cannot rehearse.
+fn real_wav(path: &Path) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("mkdir");
+    }
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 8_000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(path, spec).expect("wav");
+    writer.write_sample(0i16).expect("sample");
+    writer.finalize().expect("finalize");
+}
+
+/// **ADR-0022's NAS guarantee, walked through at the library level** (pinned
+/// while ADR-0023 made network folders a first-class ask): an unavailable
+/// folder is a *refusal to walk*, never an empty walk — so a correct caller
+/// holds no removal list and the rows stand — and the remount restores the
+/// same rows as the same rows: stamps identical, first-seen identical, count
+/// identical, no duplicates.
+#[test]
+fn an_unmounted_folder_keeps_its_rows_and_the_remount_restores_them_unchanged() {
+    use baz_core::library::{ScanEntry, scan, scan_incremental};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let root = dir.path().join("NAS");
+    real_wav(&root.join("Artist/Album/01.wav"));
+    real_wav(&root.join("Artist/Album/02.wav"));
+
+    // The first scan, as a launch runs it: walk the folder, record what it
+    // held under it, note when the pass finished.
+    let mut library = Library::open(&db).expect("open");
+    let read: Vec<TrackMeta> = scan(&root)
+        .expect("walk")
+        .filter_map(|entry| match entry {
+            ScanEntry::Track(meta) => Some(meta),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(read.len(), 2, "the fixture holds two files");
+    library.add_tracks_under(Some(&root), read).expect("add");
+    library.record_scan(&root, 1_000).expect("record");
+
+    let held = library.known_files();
+    let first_seen: Vec<Option<i64>> = library
+        .albums()
+        .iter()
+        .map(|album| album.first_seen_ns)
+        .collect();
+    assert_eq!(library.root_stats(&root).tracks, 2);
+
+    // The unmount: the whole tree stops resolving, exactly as a share's path
+    // does when the mount goes.
+    let parked = dir.path().join("parked");
+    std::fs::rename(&root, &parked).expect("unmount");
+    assert!(
+        scan(&root).is_err(),
+        "an absent folder is a refusal to walk, not an empty walk"
+    );
+    // The refusal *is* the guarantee: no walk means no entries, and no
+    // entries means nothing a caller could hand `remove_tracks`. The rows,
+    // their root, and the folder's scan record all stand.
+    assert_eq!(library.len(), 2);
+    assert_eq!(library.root_stats(&root).tracks, 2);
+    assert_eq!(library.root_stats(&root).last_scan_ns, Some(1_000));
+
+    // The remount: the same tree returns under the same name, and the stamps
+    // survived it — every file is reported unchanged, not rediscovered.
+    std::fs::rename(&parked, &root).expect("remount");
+    let entries: Vec<ScanEntry> = scan_incremental(&root, &held).expect("walk").collect();
+    assert_eq!(entries.len(), 2);
+    assert!(
+        entries
+            .iter()
+            .all(|entry| matches!(entry, ScanEntry::Unchanged { .. })),
+        "unchanged stamps: {entries:?}"
+    );
+
+    // And even the pass that re-reads everything (a force sync) is an upsert,
+    // not an arrival: same count, same stamps, same first-seen.
+    let reread: Vec<TrackMeta> = scan(&root)
+        .expect("walk")
+        .filter_map(|entry| match entry {
+            ScanEntry::Track(meta) => Some(meta),
+            _ => None,
+        })
+        .collect();
+    library
+        .add_tracks_under(Some(&root), reread)
+        .expect("re-add");
+    assert_eq!(library.len(), 2, "no duplicates");
+    assert_eq!(
+        library.known_files(),
+        held,
+        "same paths, same stamps, same recorded root"
+    );
+    assert_eq!(
+        library
+            .albums()
+            .iter()
+            .map(|album| album.first_seen_ns)
+            .collect::<Vec<_>>(),
+        first_seen,
+        "returning is not arriving: first-seen stands"
+    );
+}

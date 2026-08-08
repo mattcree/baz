@@ -78,6 +78,13 @@ toml = { version = "1.1.4", default-features = false, features = ["parse", "disp
 # crates and no duplicate D-Bus stack. Move to 5 when iced's transitive copy
 # does. Rationale in full: crates/baz/src/mpris/mod.rs.
 zbus = "4.4"
+# Native directory picker (MIT). On Linux the `xdg-portal` backend speaks the
+# desktop portal over D-Bus — the same mechanism a Flatpak would be forced to
+# use, and the GNOME/KDE-native dialog for free — with **no** gtk-sys and no
+# async-runtime coupling: rfd 0.17 dropped ashpd, so the portal call is its own
+# small D-Bus client driven by `pollster::block_on`. The `gtk3` fallback
+# feature stays off deliberately. See ADR-0023 for the graph audit.
+rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
 rtrb = "0.3"        # lock-free SPSC ring buffer, no hand-rolled unsafe here (MIT OR Apache-2.0)
 rubato = "0.16"     # windowed-sinc sample-rate conversion (MIT)
 cpal = "0.16"       # shared-mode device output, optional feature `device-output` (Apache-2.0)
