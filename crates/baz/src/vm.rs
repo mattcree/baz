@@ -611,6 +611,8 @@ pub fn format_duration(duration: Duration) -> String {
 
 #[cfg(test)]
 mod tests {
+    use baz_core::replaygain::ReplayGainTags;
+
     use super::*;
 
     fn meta(artist: &str, album: &str, title: &str, track: u32) -> TrackMeta {
@@ -630,6 +632,7 @@ mod tests {
             sample_rate: None,
             bitrate: None,
             stamp: None,
+            replay_gain: ReplayGainTags::default(),
         }
     }
 

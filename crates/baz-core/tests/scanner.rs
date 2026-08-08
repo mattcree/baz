@@ -19,6 +19,7 @@ use baz_core::library::{
     AudioFormat, FileStamp, KnownFiles, ScanEntry, ScanError, TrackMeta, is_confirmed_gone, scan,
     scan_incremental,
 };
+use baz_core::replaygain::ReplayGainTags;
 use lofty::config::WriteOptions;
 use lofty::prelude::*;
 use lofty::tag::{ItemKey, ItemValue, Tag, TagItem, TagType};
@@ -287,6 +288,28 @@ fn ilst_text(fourcc: [u8; 4], text: &str) -> Vec<u8> {
     atom(fourcc, &atom(*b"data", &payload))
 }
 
+/// An iTunes **freeform** metadata item: the `----` atom, carrying a `mean`
+/// (the namespace, always `com.apple.iTunes` in practice), a `name` (the key)
+/// and a `data` payload.
+///
+/// This is where MP4 keeps ReplayGain — there is no well-known atom for it —
+/// so writing the boxes out by hand is what makes the MP4 ReplayGain test a
+/// real container test rather than a second Vorbis test in disguise.
+fn ilst_freeform(name: &str, text: &str) -> Vec<u8> {
+    let full = |fourcc: [u8; 4], body: &[u8]| {
+        let mut payload = 0_u32.to_be_bytes().to_vec(); // version 0, no flags
+        payload.extend_from_slice(body);
+        atom(fourcc, &payload)
+    };
+    let mut payload = full(*b"mean", b"com.apple.iTunes");
+    payload.extend_from_slice(&full(*b"name", name.as_bytes()));
+    let mut data = 1_u32.to_be_bytes().to_vec(); // type set 0, type 1: UTF-8
+    data.extend_from_slice(&0_u32.to_be_bytes()); // locale
+    data.extend_from_slice(text.as_bytes());
+    payload.extend_from_slice(&atom(*b"data", &data));
+    atom(*b"----", &payload)
+}
+
 /// A minimal but structurally valid `.m4a`: `ftyp`, a sound `trak` with the
 /// `mdhd` timing lofty needs, and a `udta/meta/ilst` tag block. Written so
 /// the MP4 side of album-artist reading — the `aART` atom — is tested
@@ -296,6 +319,17 @@ fn ilst_text(fourcc: [u8; 4], text: &str) -> Vec<u8> {
 /// reports no bit depth — which is exactly how the scanner classifies an
 /// `.m4a` as AAC rather than ALAC (`docs/adr/0007-album-editions.md`).
 fn write_m4a(root: &Path, relative: &str, tags: &[([u8; 4], &str)]) -> PathBuf {
+    let items: Vec<Vec<u8>> = tags
+        .iter()
+        .map(|(fourcc, value)| ilst_text(*fourcc, value))
+        .collect();
+    write_m4a_items(root, relative, &items)
+}
+
+/// [`write_m4a`] with the `ilst` items supplied whole, for the freeform atoms
+/// ([`ilst_freeform`]) that [`write_m4a`]'s four-character-code shorthand
+/// cannot express.
+fn write_m4a_items(root: &Path, relative: &str, items: &[Vec<u8>]) -> PathBuf {
     const TIMESCALE: u32 = 44_100;
     let path = root.join(relative);
     make_dirs(&path);
@@ -323,8 +357,8 @@ fn write_m4a(root: &Path, relative: &str, tags: &[([u8; 4], &str)]) -> PathBuf {
     let trak = atom(*b"trak", &atom(*b"mdia", &mdia));
 
     let mut ilst = Vec::new();
-    for (fourcc, value) in tags {
-        ilst.extend_from_slice(&ilst_text(*fourcc, value));
+    for item in items {
+        ilst.extend_from_slice(item);
     }
     let mut meta = Vec::new();
     meta.extend_from_slice(&0_u32.to_be_bytes()); // full-atom version/flags
@@ -1281,4 +1315,181 @@ fn a_stamp_read_from_the_filesystem_is_stable() {
             "of_path must agree with the metadata the platform reports"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// ReplayGain (docs/adr/0013-replaygain.md)
+// ---------------------------------------------------------------------------
+
+/// The figures a real ReplayGain scanner writes into a FLAC's Vorbis comments,
+/// read back through the public scan API.
+///
+/// Written with `lofty`'s own `ItemKey` mapping — the same door a scanner uses
+/// — so this asserts the Vorbis-comment path end to end rather than a string
+/// the test invented.
+#[test]
+fn replay_gain_is_read_from_vorbis_comments() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_flac(
+        dir.path(),
+        "Stan Rogers/Northwest Passage/01 - Passage.flac",
+    );
+    let mut tag = Tag::new(TagType::VorbisComments);
+    tag.set_artist("Stan Rogers".to_owned());
+    tag.insert_text(ItemKey::ReplayGainTrackGain, "-7.75 dB".to_owned());
+    tag.insert_text(ItemKey::ReplayGainTrackPeak, "0.988525".to_owned());
+    tag.insert_text(ItemKey::ReplayGainAlbumGain, "-9.20 dB".to_owned());
+    tag.insert_text(ItemKey::ReplayGainAlbumPeak, "1.001221".to_owned());
+    // What every scanner also writes, and what must not be mistaken for a gain.
+    tag.insert_unchecked(TagItem::new(
+        ItemKey::Unknown("REPLAYGAIN_REFERENCE_LOUDNESS".to_owned()),
+        ItemValue::Text("89.0 dB".to_owned()),
+    ));
+    tag.save_to_path(&path, WriteOptions::default())
+        .expect("write vorbis comments");
+
+    let t = only_track(dir.path());
+    assert_eq!(t.format, Some(AudioFormat::Flac), "a real FLAC container");
+    assert_eq!(
+        t.replay_gain,
+        ReplayGainTags {
+            track_gain_centidb: Some(-775),
+            track_peak_micro: Some(988_525),
+            album_gain_centidb: Some(-920),
+            album_peak_micro: Some(1_001_221),
+        }
+    );
+}
+
+/// The `ID3v2` form: `TXXX` frames whose description is the ReplayGain key.
+/// lofty writes exactly that for these `ItemKey`s on an MP3, which is what
+/// makes this a genuine `ID3v2` test rather than a third Vorbis one.
+#[test]
+fn replay_gain_is_read_from_id3v2_txxx_frames() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_mp3(dir.path(), "Big Star/Radio City/01 - O My Soul.mp3");
+    let mut tag = Tag::new(TagType::Id3v2);
+    tag.set_artist("Big Star".to_owned());
+    tag.insert_text(ItemKey::ReplayGainTrackGain, "+2.34 dB".to_owned());
+    tag.insert_text(ItemKey::ReplayGainTrackPeak, "0.500000".to_owned());
+    tag.save_to_path(&path, WriteOptions::default())
+        .expect("write id3v2");
+
+    let t = only_track(dir.path());
+    assert_eq!(t.format, Some(AudioFormat::Mp3), "a real MPEG container");
+    assert_eq!(
+        t.replay_gain,
+        ReplayGainTags {
+            track_gain_centidb: Some(234),
+            track_peak_micro: Some(500_000),
+            album_gain_centidb: None,
+            album_peak_micro: None,
+        }
+    );
+}
+
+/// The MP4 form: `----` freeform atoms under `com.apple.iTunes`, written into
+/// the fixture as raw boxes so the atom layout itself is under test.
+#[test]
+fn replay_gain_is_read_from_mp4_freeform_atoms() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let dir_path = dir.path();
+    write_m4a_items(
+        dir_path,
+        "[GST] Cookie\'s Bustle/As For Dreams.m4a",
+        &[
+            ilst_text(*b"\xa9ART", "Kouhei Okamura"),
+            ilst_freeform("replaygain_track_gain", "-4.07 dB"),
+            ilst_freeform("replaygain_track_peak", "0.977000"),
+            ilst_freeform("replaygain_album_gain", "-5.10 dB"),
+            ilst_freeform("replaygain_album_peak", "1.010000"),
+        ],
+    );
+
+    let t = only_track(dir_path);
+    assert_eq!(t.format, Some(AudioFormat::Aac));
+    assert_eq!(
+        t.replay_gain,
+        ReplayGainTags {
+            track_gain_centidb: Some(-407),
+            track_peak_micro: Some(977_000),
+            album_gain_centidb: Some(-510),
+            album_peak_micro: Some(1_010_000),
+        }
+    );
+}
+
+/// The Opus-style integer form in Vorbis comments on a file that is not Opus —
+/// which is where it actually turns up, `.opus` not being scanned at all.
+/// It carries no peak, and it is shifted onto ReplayGain's own reference.
+#[test]
+fn the_r128_integer_form_is_read_from_vorbis_comments() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_flac(dir.path(), "R128/Album/01 - Track.flac");
+    let mut tag = Tag::new(TagType::VorbisComments);
+    tag.set_artist("Someone".to_owned());
+    // No standard blesses these keys, so lofty leaves them unmapped and
+    // `insert_unchecked` writes them verbatim — exactly how a real R128-era
+    // tagger's output reaches the scanner.
+    tag.insert_unchecked(TagItem::new(
+        ItemKey::Unknown("R128_TRACK_GAIN".to_owned()),
+        ItemValue::Text("-2321".to_owned()),
+    ));
+    tag.insert_unchecked(TagItem::new(
+        ItemKey::Unknown("R128_ALBUM_GAIN".to_owned()),
+        ItemValue::Text("-1792".to_owned()),
+    ));
+    tag.save_to_path(&path, WriteOptions::default())
+        .expect("write vorbis comments");
+
+    let t = only_track(dir.path());
+    assert_eq!(
+        t.replay_gain,
+        ReplayGainTags {
+            track_gain_centidb: Some(-407),
+            track_peak_micro: None,
+            album_gain_centidb: Some(-200),
+            album_peak_micro: None,
+        }
+    );
+}
+
+/// A file with no ReplayGain reads back empty — the ordinary state of a
+/// library nothing has ever scanned, and never a claim that the track needs no
+/// gain.
+#[test]
+fn a_file_with_no_replay_gain_tags_reports_none() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_wav(dir.path(), "Big Star/Radio City/03 - Back of a Car.wav");
+    assert!(only_track(dir.path()).replay_gain.is_empty());
+}
+
+/// Hostile values in a real file: the scan completes, the track is kept, the
+/// unusable figures read as absent, and the usable one survives. A malformed
+/// tag must never abort a scan or poison the row it is on.
+#[test]
+fn malformed_replay_gain_tags_neither_panic_nor_fail_the_scan() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_flac(dir.path(), "Broken/Album/01 - Track.flac");
+    let mut tag = Tag::new(TagType::VorbisComments);
+    tag.set_artist("Someone".to_owned());
+    tag.insert_text(ItemKey::ReplayGainTrackGain, "very loud indeed".to_owned());
+    tag.insert_text(ItemKey::ReplayGainTrackPeak, "-1".to_owned());
+    tag.insert_text(ItemKey::ReplayGainAlbumGain, "1e30 dB".to_owned());
+    tag.insert_text(ItemKey::ReplayGainAlbumPeak, "0.750000".to_owned());
+    tag.save_to_path(&path, WriteOptions::default())
+        .expect("write vorbis comments");
+
+    let t = only_track(dir.path());
+    assert_eq!(t.artist.as_deref(), Some("Someone"), "the row survives");
+    assert_eq!(
+        t.replay_gain,
+        ReplayGainTags {
+            track_gain_centidb: None,
+            track_peak_micro: None,
+            album_gain_centidb: None,
+            album_peak_micro: Some(750_000),
+        },
+        "one good figure among four bad ones is still read"
+    );
 }

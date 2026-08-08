@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use baz_core::index::{AlbumArtist, IndexError, Library};
 use baz_core::library::{AudioFormat, FileStamp, TrackMeta};
+use baz_core::replaygain::ReplayGainTags;
 
 /// A fully-`None` track except for its path — the shape a tagless file with
 /// an uninformative folder layout produces.
@@ -27,6 +28,7 @@ fn bare(path: &str) -> TrackMeta {
         sample_rate: None,
         bitrate: None,
         stamp: None,
+        replay_gain: ReplayGainTags::default(),
     }
 }
 
@@ -976,13 +978,13 @@ fn a_v1_database_migrates_in_place_without_losing_anything() {
     let library = Library::open(&db).expect("a v1 database must open");
     assert_eq!(library.len(), 4, "every v1 row survives the upgrade");
 
-    // The schema really did move — and all the way, v1 → v2 → v3 → v4,
+    // The schema really did move — and all the way, v1 → v2 → … → v5,
     // because migrations chain rather than jumping.
     let conn = rusqlite::Connection::open(&db).expect("raw open");
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
 
     let by_path = |needle: &str| {
         library
@@ -1195,7 +1197,7 @@ fn a_v2_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
 
     let by_path = |needle: &str| {
         library
@@ -1546,7 +1548,7 @@ fn a_v3_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
 
     let by_path = |needle: &str| {
         library
@@ -1810,4 +1812,239 @@ fn removal_matches_non_utf8_paths_exactly() {
 
     assert_eq!(library.remove_tracks([&raw]).expect("remove"), 1);
     assert!(library.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Schema v5: the ReplayGain figures a file already carries (ADR-0013).
+// ---------------------------------------------------------------------------
+
+/// Build a genuine v4 database with the v4 schema and v4 `INSERT`s only — no
+/// baz code involved, exactly as [`write_v3_database`] does for its own
+/// version. This is the shape of the `library.db` an installed baz leaves on
+/// disk today, contents included, plus the file stamps v4 added.
+fn write_v4_database(db: &std::path::Path) {
+    let conn = rusqlite::Connection::open(db).expect("create v4 db");
+    conn.execute_batch(
+        "
+        BEGIN;
+        CREATE TABLE tracks (
+            id           INTEGER PRIMARY KEY,
+            path         BLOB NOT NULL UNIQUE,
+            artist       TEXT,
+            album        TEXT,
+            title        TEXT,
+            track        INTEGER,
+            disc         INTEGER,
+            year         INTEGER,
+            duration_ns  INTEGER,
+            format       TEXT,
+            bit_depth    INTEGER,
+            sample_rate  INTEGER,
+            bitrate      INTEGER,
+            album_artist TEXT,
+            compilation  INTEGER,
+            mtime_ns     INTEGER,
+            file_size    INTEGER
+        ) STRICT;
+        PRAGMA user_version = 4;
+        COMMIT;
+        ",
+    )
+    .expect("v4 schema");
+
+    for (n, row) in v3_rows().into_iter().enumerate() {
+        conn.execute(
+            "INSERT INTO tracks
+                 (path, artist, album, title, track, disc, year, duration_ns,
+                  format, bit_depth, sample_rate, bitrate, album_artist,
+                  compilation, mtime_ns, file_size)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                     ?14, ?15)",
+            rusqlite::params![
+                // The platform's own path encoding, not UTF-8: a `library.db`
+                // is a per-machine cache and Windows stores UTF-16LE, so a
+                // fixture that hard-coded bytes would only be a *Unix* v4
+                // database (see `stored_path_bytes`).
+                stored_path_bytes(row.path),
+                row.artist,
+                row.album,
+                row.title,
+                row.track,
+                row.year,
+                row.duration_ns,
+                row.format,
+                row.bit_depth,
+                row.sample_rate,
+                row.bitrate,
+                row.album_artist,
+                row.compilation,
+                // A real stamp per row, so the v5 upgrade can be shown not to
+                // disturb the one thing v4 added.
+                1_700_000_000_000_000_000_i64 + i64::try_from(n).expect("five rows"),
+                40_000_000_i64 + i64::try_from(n).expect("five rows"),
+            ],
+        )
+        .expect("insert v4 row");
+    }
+}
+
+#[test]
+fn a_v4_database_migrates_in_place_without_losing_anything() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    write_v4_database(&db);
+
+    let library = Library::open(&db).expect("a v4 database must open");
+    assert_eq!(library.len(), 5, "every v4 row survives the upgrade");
+
+    let conn = rusqlite::Connection::open(&db).expect("raw open");
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("user_version");
+    assert_eq!(version, 5);
+
+    let by_path = |needle: &str| {
+        library
+            .tracks()
+            .find(|t| t.path.to_string_lossy().contains(needle))
+            .cloned()
+            .unwrap_or_else(|| panic!("{needle} must survive"))
+    };
+
+    // Every v4 column is intact — text, numbers, Unicode, the ADR-0008
+    // columns, and the ADR-0010 stamp.
+    let unicode = by_path("Größenwahn");
+    assert_eq!(unicode.artist.as_deref(), Some("Größenwahn"));
+    assert_eq!(unicode.album.as_deref(), Some("Debüt"));
+    assert_eq!(unicode.title.as_deref(), Some("Ærø — 序曲"));
+    assert_eq!(unicode.track, Some(3));
+    assert_eq!(unicode.disc, Some(1));
+    assert_eq!(unicode.year, Some(1999));
+    assert_eq!(unicode.duration, Some(Duration::new(215, 123_456_789)));
+    assert_eq!(unicode.format, Some(AudioFormat::Wav));
+    assert_eq!(unicode.bit_depth, Some(24));
+    assert_eq!(unicode.sample_rate, Some(96_000));
+    assert_eq!(unicode.bitrate, Some(4_608));
+    assert_eq!(unicode.album_artist.as_deref(), Some("Various Artists"));
+    assert_eq!(unicode.compilation, Some(true));
+
+    let soundtrack = by_path("Main Menu.flac");
+    assert_eq!(soundtrack.album_artist.as_deref(), Some("RODIK"));
+    assert_eq!(soundtrack.compilation, None, "NULL is not Some(false)");
+
+    // The stamps v4 wrote are untouched, so the upgrade does not cost a
+    // listener the incremental scan they already paid for.
+    assert_eq!(
+        library
+            .known_files()
+            .values()
+            .filter(|s| s.is_some())
+            .count(),
+        5,
+        "every v4 stamp survives, so the next scan is still incremental"
+    );
+
+    // The new columns are NULL for every row: nothing already in a v4
+    // database implies a ReplayGain figure, and computing one means an EBU
+    // R128 analysis pass that cannot happen inside a migration.
+    for track in library.tracks() {
+        assert!(
+            track.replay_gain.is_empty(),
+            "{}: an upgraded row declares no ReplayGain",
+            track.path.display()
+        );
+    }
+
+    // Grouping is *exactly* the pre-v5 behaviour — the upgrade adds a column,
+    // never changes what the shelf shows.
+    let albums = library.albums();
+    let passage = albums
+        .iter()
+        .find(|a| a.title == Some("Northwest Passage"))
+        .expect("the double rip");
+    assert_eq!(passage.artist, AlbumArtist::Named("Stan Rogers"));
+    assert_eq!(passage.editions.len(), 2);
+    let gamerip: Vec<_> = albums
+        .iter()
+        .filter(|a| a.title == Some("Cookie's Bustle OST (gamerip)"))
+        .collect();
+    assert_eq!(gamerip.len(), 1, "still one entry, two editions");
+    assert_eq!(gamerip[0].artist, AlbumArtist::Named("RODIK"));
+    assert_eq!(gamerip[0].editions.len(), 2);
+}
+
+/// A rescan after the upgrade fills the new columns, and they are durable.
+/// That is what makes the NULLs self-healing rather than permanent.
+#[test]
+fn the_first_rescan_after_a_v4_upgrade_stores_replay_gain() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    write_v4_database(&db);
+
+    let mut library = Library::open(&db).expect("open migrates to v5");
+    let tags = ReplayGainTags {
+        track_gain_centidb: Some(-775),
+        track_peak_micro: Some(988_525),
+        album_gain_centidb: Some(-920),
+        album_peak_micro: Some(1_001_221),
+    };
+    let rescanned: Vec<TrackMeta> = library
+        .tracks()
+        .cloned()
+        .map(|meta| TrackMeta {
+            replay_gain: tags,
+            ..meta
+        })
+        .collect();
+    library.add_tracks(rescanned).expect("rescan batch");
+    assert_eq!(library.len(), 5, "an upsert, not a duplicate");
+
+    drop(library);
+    let reopened = Library::open(&db).expect("reopen");
+    assert!(reopened.tracks().all(|t| t.replay_gain == tags));
+}
+
+/// The extremes of both units survive a real database file, and a column baz
+/// never writes into degrades to "the file did not say" rather than failing
+/// the open.
+#[test]
+fn replay_gain_round_trips_through_a_real_database_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let original = TrackMeta {
+        replay_gain: ReplayGainTags {
+            track_gain_centidb: Some(i16::MIN),
+            track_peak_micro: Some(u32::MAX),
+            album_gain_centidb: Some(i16::MAX),
+            album_peak_micro: Some(0),
+        },
+        ..track("/m/loud.flac", "Karl", "Signal Chain", "Test Tone", 1)
+    };
+    {
+        let mut library = Library::open(&db).expect("open");
+        library.add_tracks(vec![original.clone()]).expect("add");
+    }
+    let reopened = Library::open(&db).expect("reopen");
+    assert_eq!(reopened.tracks().next().expect("one track"), &original);
+    drop(reopened);
+
+    // A value no baz could have written — a corrupt database, or one from a
+    // future with a wider unit. It must read as absent, not abort the open.
+    let conn = rusqlite::Connection::open(&db).expect("raw open");
+    conn.execute(
+        "UPDATE tracks SET rg_track_gain_centidb = 99999, rg_album_peak_micro = -1",
+        [],
+    )
+    .expect("corrupt the row");
+    drop(conn);
+
+    let library = Library::open(&db).expect("a corrupt figure must not fail the open");
+    let stored = library.tracks().next().expect("one track");
+    assert_eq!(stored.replay_gain.track_gain_centidb, None);
+    assert_eq!(stored.replay_gain.album_peak_micro, None);
+    assert_eq!(
+        stored.replay_gain.track_peak_micro,
+        Some(u32::MAX),
+        "the untouched figures are unaffected"
+    );
 }

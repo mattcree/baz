@@ -303,6 +303,30 @@
   `Media*` key names are bound in `keys.rs`, which covers a focused window;
   SMTC (Windows) and `MPNowPlayingInfoCenter` (macOS) are not.
 
+## ReplayGain
+
+- ~~**No ReplayGain at all.**~~ — **closed for the reading half (ADR-0013).**
+  baz honours the `REPLAYGAIN_*` figures files already carry, in off / track /
+  album modes with a pre-amp and clipping prevention, applied through the same
+  gain stage as the volume and reported through the same `VolumePath`.
+- **No ReplayGain *scanning*.** baz cannot produce the tags, only read them, so
+  a library that has never been through foobar2000, `rsgain`, `loudgain` or
+  `metaflac` gets nothing from the feature — and is played exactly as stored
+  rather than guessed at, which is what the no-ReplayGain pre-amp's default of
+  0 dB guarantees. Producing them means an EBU R128 loudness meter, a true-peak
+  meter, a scan UI with progress and cancellation, and **writing to the
+  listener's music files**, which baz has never done. `docs/ENGINEERING.md`
+  already names the acceptance criterion: validation against the EBU R128 test
+  vectors.
+- **The clipping check trusts the declared *sample* peak.** That is what
+  ReplayGain 2.0 scanners write, and it is what the tags can support;
+  inter-sample (true-peak) overshoot after reconstruction is not modelled, and
+  there is no limiter riding the gain. A true-peak check needs the audio, so it
+  belongs with the scanning work above.
+- **A file with an album gain but no track gain is treated as untagged in track
+  mode.** Deliberate (ADR-0013 §3) and vanishingly rare; noted so the asymmetry
+  is a decision on record rather than an oversight.
+
 ## Bigger chapters (see `VISION.md` staging)
 
 ReplayGain scanning, cue sheets, watch folders, batch tag editing, exclusive

@@ -19,7 +19,10 @@ use baz_core::playback::{AudioSource, BoundaryPolicy, CHANNELS, EngineConfig};
 // real failure; the headless build never constructs one.
 #[cfg(feature = "device-output")]
 use baz_core::playback::PlaybackError;
-use baz_core::protocol::{Command, ConversionReason, Event, SignalChain, VolumePath};
+use baz_core::protocol::{
+    Command, ConversionReason, Event, ReplayGainMode, ReplayGainSource, SignalChain, VolumePath,
+};
+use baz_core::replaygain::MAX_PREAMP_CENTIDB;
 use baz_core::volume::{MAX_POSITION, RAMP_MS, Volume, VolumeState};
 
 /// Test tone parameters (arbitrary; equality checks are exact either way).
@@ -74,6 +77,12 @@ struct Fixtures {
     head_44k: PathBuf,
     tail_48k: PathBuf,
     dc: PathBuf,
+    /// ReplayGain-tagged fixtures (ADR-0013). Same audio as their untagged
+    /// twins, so the reference decodes below are their ground truth too.
+    rg_a: PathBuf,
+    rg_b: PathBuf,
+    rg_single: PathBuf,
+    rg_clip: PathBuf,
     /// Reference decodes (interleaved stereo f32).
     a_ref: Vec<f32>,
     b_ref: Vec<f32>,
@@ -144,6 +153,112 @@ fn write_dc_wav(path: &Path) {
     w.finalize().expect("finalize wav");
 }
 
+/// An `ID3v2.4` size field: seven bits per byte, high bit clear.
+fn syncsafe(n: usize) -> [u8; 4] {
+    [
+        u8::try_from((n >> 21) & 0x7f).expect("masked to 7 bits"),
+        u8::try_from((n >> 14) & 0x7f).expect("masked to 7 bits"),
+        u8::try_from((n >> 7) & 0x7f).expect("masked to 7 bits"),
+        u8::try_from(n & 0x7f).expect("masked to 7 bits"),
+    ]
+}
+
+/// An `ID3v2.4` tag of `TXXX` (user-defined text) frames, laid out from the
+/// specification: a `TXXX` identifier, a syncsafe size, two flag bytes, then a
+/// UTF-8 encoding byte, the description, a NUL, and the value.
+///
+/// Written out by hand rather than by a tag library, on purpose. `TXXX` with a
+/// `REPLAYGAIN_*` description is *the* way `ID3v2` carries ReplayGain, and
+/// building the frames from their published layout makes this fixture ground
+/// truth rather than a round trip through the crate under test. Symphonia's
+/// probe consumes a leading `ID3v2` element before handing the rest of the
+/// stream to the container reader, which is what lets a WAV — the one fixture
+/// format these tests can synthesize exactly — carry ReplayGain at all.
+fn id3v2_txxx(frames: &[(&str, &str)]) -> Vec<u8> {
+    let mut body = Vec::new();
+    for (description, value) in frames {
+        let mut content = vec![0x03_u8]; // text encoding: UTF-8
+        content.extend_from_slice(description.as_bytes());
+        content.push(0);
+        content.extend_from_slice(value.as_bytes());
+        body.extend_from_slice(b"TXXX");
+        body.extend_from_slice(&syncsafe(content.len()));
+        body.extend_from_slice(&[0, 0]); // frame flags
+        body.extend_from_slice(&content);
+    }
+    let mut tag = Vec::new();
+    tag.extend_from_slice(b"ID3");
+    tag.extend_from_slice(&[0x04, 0x00]); // version 2.4.0
+    tag.push(0x00); // flags
+    tag.extend_from_slice(&syncsafe(body.len()));
+    tag.extend_from_slice(&body);
+    tag
+}
+
+/// Prepend an `ID3v2` ReplayGain tag to an existing fixture, leaving its audio
+/// byte-for-byte untouched.
+fn tag_with_replay_gain(path: &Path, frames: &[(&str, &str)]) {
+    let audio = std::fs::read(path).expect("read fixture");
+    let mut bytes = id3v2_txxx(frames);
+    bytes.extend_from_slice(&audio);
+    std::fs::write(path, bytes).expect("write tagged fixture");
+}
+
+/// The four ReplayGain fixtures, written and tagged.
+///
+/// They carry the same audio as their untagged twins (`a`, `b`, `dc`), so those
+/// reference decodes are their ground truth too and any difference in the
+/// delivered stream is the gain and nothing else.
+fn write_replay_gain_fixtures(dir: &Path) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+    let rg_a = dir.join("rg_track_a_5s.wav");
+    let rg_b = dir.join("rg_track_b_1s.wav");
+    let rg_single = dir.join("rg_single_3s.wav");
+    let rg_clip = dir.join("rg_clip_3s.wav");
+    write_sine_wav(&rg_a, A_FRAMES, 0.0);
+    write_sine_wav(&rg_b, B_FRAMES, 0.0);
+    write_dc_wav(&rg_single);
+    write_dc_wav(&rg_clip);
+    // Tracks A and B share one album gain and album peak — they are an album —
+    // while their track gains differ, so album mode and track mode are
+    // distinguishable from the delivered samples alone.
+    tag_with_replay_gain(
+        &rg_a,
+        &[
+            ("REPLAYGAIN_TRACK_GAIN", "-6.02 dB"),
+            ("REPLAYGAIN_TRACK_PEAK", "0.500000"),
+            ("REPLAYGAIN_ALBUM_GAIN", "-3.00 dB"),
+            ("REPLAYGAIN_ALBUM_PEAK", "0.500000"),
+        ],
+    );
+    tag_with_replay_gain(
+        &rg_b,
+        &[
+            ("REPLAYGAIN_TRACK_GAIN", "+2.50 dB"),
+            ("REPLAYGAIN_TRACK_PEAK", "0.500000"),
+            ("REPLAYGAIN_ALBUM_GAIN", "-3.00 dB"),
+            ("REPLAYGAIN_ALBUM_PEAK", "0.500000"),
+        ],
+    );
+    // A single downloaded track: no album figures to be relative to.
+    tag_with_replay_gain(
+        &rg_single,
+        &[
+            ("REPLAYGAIN_TRACK_GAIN", "-4.00 dB"),
+            ("REPLAYGAIN_TRACK_PEAK", "0.500000"),
+        ],
+    );
+    // A gain the declared peak has no room for: +12 dB against a peak of 0.5,
+    // which leaves 6.02 dB of headroom.
+    tag_with_replay_gain(
+        &rg_clip,
+        &[
+            ("REPLAYGAIN_TRACK_GAIN", "+12.00 dB"),
+            ("REPLAYGAIN_TRACK_PEAK", "0.500000"),
+        ],
+    );
+    (rg_a, rg_b, rg_single, rg_clip)
+}
+
 fn fixtures() -> &'static Fixtures {
     static FIXTURES: OnceLock<Fixtures> = OnceLock::new();
     FIXTURES.get_or_init(|| {
@@ -157,6 +272,7 @@ fn fixtures() -> &'static Fixtures {
         let tail_48k = dir.join("tail_4s_48k.wav");
         let dc = dir.join("dc_3s.wav");
         write_dc_wav(&dc);
+        let (rg_a, rg_b, rg_single, rg_clip) = write_replay_gain_fixtures(&dir);
         write_sine_wav(&a, A_FRAMES, 0.0);
         write_sine_wav(&b, B_FRAMES, 0.0);
         write_chirp_wav(&chirp);
@@ -194,6 +310,10 @@ fn fixtures() -> &'static Fixtures {
             head_44k,
             tail_48k,
             dc,
+            rg_a,
+            rg_b,
+            rg_single,
+            rg_clip,
             a_ref,
             b_ref,
             chirp_ref,
@@ -245,9 +365,10 @@ fn next_event(events: &Receiver<Event>) -> Event {
 }
 
 /// The next event that is not a readout — [`Event::Progress`],
-/// [`Event::SignalPath`] or [`Event::VolumeChanged`].
+/// [`Event::SignalPath`], [`Event::VolumeChanged`] or
+/// [`Event::ReplayGainChanged`].
 ///
-/// All three are continuous or incidental *descriptions* of playback rather
+/// All four are continuous or incidental *descriptions* of playback rather
 /// than transport transitions, and all interleave with everything by design;
 /// the tests that assert the *transport* vocabulary's ordering therefore step
 /// over them. Each has its own contract and its own tests below — none is going
@@ -255,7 +376,10 @@ fn next_event(events: &Receiver<Event>) -> Event {
 fn next_transport_event(events: &Receiver<Event>) -> Event {
     loop {
         match next_event(events) {
-            Event::Progress { .. } | Event::SignalPath { .. } | Event::VolumeChanged { .. } => {}
+            Event::Progress { .. }
+            | Event::SignalPath { .. }
+            | Event::VolumeChanged { .. }
+            | Event::ReplayGainChanged { .. } => {}
             other => return other,
         }
     }
@@ -2232,4 +2356,617 @@ fn previous_while_stopped_is_a_no_op() {
         &f.b_ref,
         "a no-op Previous must not have disturbed the queue",
     );
+}
+
+// ---------------------------------------------------------------------------
+// ReplayGain (ADR-0013)
+// ---------------------------------------------------------------------------
+
+/// The linear gain a figure in hundredths of a decibel means, from the
+/// definition of the decibel and nothing else: `amplitude = 10^(dB/20)`.
+///
+/// Written here so the sample assertions below are anchored to the physical
+/// definition rather than to whatever `baz_core` computed
+/// (`docs/ENGINEERING.md`: tests are written to specification). The one place
+/// it is checked against a *number* rather than against the engine is
+/// [`the_gain_conversion_is_the_decibel_definition`], immediately below.
+#[allow(clippy::cast_possible_truncation)] // the sink's sample type is f32
+fn amplitude_of(centidb: i16) -> f32 {
+    10f64.powf(f64::from(centidb) / 2000.0) as f32
+}
+
+/// The decibel is a definition, not a convention: −6.02 dB halves an
+/// amplitude, +6.02 dB doubles it, and 0 dB is exactly one. If this drifts,
+/// every assertion below is measuring the wrong thing.
+#[test]
+#[allow(clippy::float_cmp)]
+fn the_gain_conversion_is_the_decibel_definition() {
+    assert_eq!(amplitude_of(0), 1.0, "0 dB is exactly unity");
+    assert!((amplitude_of(-602) - 0.5).abs() < 1e-4);
+    assert!((amplitude_of(602) - 2.0).abs() < 1e-3);
+    assert!((amplitude_of(-2000) - 0.1).abs() < 1e-5);
+}
+
+/// The default ReplayGain settings with `mode` selected — what a front end
+/// sends when the listener picks a mode and touches nothing else.
+fn replay_gain(mode: ReplayGainMode) -> Command {
+    Command::SetReplayGain {
+        mode,
+        preamp_centidb: 0,
+        no_tag_preamp_centidb: 0,
+        prevent_clipping: true,
+    }
+}
+
+/// Drain the event channel until a [`Event::ReplayGainChanged`] arrives,
+/// returning its fields. Transport events are ignored: this asks *what did the
+/// engine decide*, not in what order it said everything.
+fn next_replay_gain(events: &Receiver<Event>) -> (ReplayGainSource, i16, bool) {
+    loop {
+        if let Event::ReplayGainChanged {
+            source,
+            applied_centidb,
+            clipping_prevented,
+            ..
+        } = next_event(events)
+        {
+            return (source, applied_centidb, clipping_prevented);
+        }
+    }
+}
+
+/// **Mode `off` is bit-identical to a baz with no ReplayGain at all.**
+///
+/// The claim ADR-0013 makes about its own default, asserted against the
+/// existing bit-exactness ground truth: a *tagged* file played with ReplayGain
+/// off delivers exactly the reference decode of the same audio, sample for
+/// sample. Off is not "a gain of 0 dB that rounds to nothing" — the engine
+/// performs no arithmetic, and `assert_samples_eq` is exact.
+///
+/// Both halves are checked, because they catch different mistakes: the tagged
+/// fixture proves that tags present in a file change nothing while off, and
+/// the untagged gapless pair proves that switching ReplayGain *on* over a
+/// library that has never been scanned changes nothing either.
+#[test]
+fn replay_gain_off_delivers_a_bit_identical_stream() {
+    let f = fixtures();
+    let tagged_off = play_with_volume(
+        std::slice::from_ref(&f.rg_a),
+        f.a_ref.len(),
+        &[replay_gain(ReplayGainMode::Off)],
+    );
+    assert_samples_eq(&tagged_off, &f.a_ref, "tagged fixture, ReplayGain off");
+
+    // And with no command sent at all — the default is off.
+    let untouched = play_with_volume(std::slice::from_ref(&f.rg_a), f.a_ref.len(), &[]);
+    assert_samples_eq(&untouched, &f.a_ref, "tagged fixture, default settings");
+}
+
+/// **An untagged library is untouched even with ReplayGain on**, in every
+/// mode — pinned against the gapless bit-exactness fixture, not a new one.
+///
+/// This is the no-ReplayGain pre-amp's default of zero, seen from the outside:
+/// a listener who switches ReplayGain on before ever running a scanner gets the
+/// same stream they had, and ADR-0009's guarantee is intact for that library.
+#[test]
+fn an_untagged_queue_is_untouched_in_every_mode() {
+    let f = fixtures();
+    let mut want = f.a_ref.clone();
+    want.extend_from_slice(&f.b_ref);
+    for mode in [ReplayGainMode::Track, ReplayGainMode::Album] {
+        let out = play_with_volume(
+            &[f.a.clone(), f.b.clone()],
+            want.len(),
+            &[replay_gain(mode)],
+        );
+        assert_samples_eq(&out, &want, "untagged gapless queue with ReplayGain on");
+    }
+}
+
+/// **A tagged track is scaled by exactly its tagged figure**, every sample.
+///
+/// The fixture's tag says `-6.02 dB`; the delivered stream must be the
+/// reference decode times `10^(-6.02/20)`, asserted with `==` because f32
+/// multiplication is deterministic and the expected gain is derived from the
+/// definition of the decibel rather than from the engine.
+#[test]
+#[allow(clippy::float_cmp)] // exactness is the assertion
+fn a_tagged_track_is_scaled_by_exactly_its_tagged_gain() {
+    let f = fixtures();
+    let gain = amplitude_of(-602);
+    let out = play_with_volume(
+        std::slice::from_ref(&f.rg_a),
+        f.a_ref.len(),
+        &[replay_gain(ReplayGainMode::Track)],
+    );
+    assert_eq!(out.len(), f.a_ref.len(), "scaling must not drop a sample");
+    let want: Vec<f32> = f.a_ref.iter().map(|s| s * gain).collect();
+    assert_samples_eq(&out, &want, "track-gain output");
+    assert!(
+        gain < 1.0 && out.iter().zip(&f.a_ref).any(|(o, r)| o != r),
+        "the fixture must actually be attenuated, or this proves nothing"
+    );
+}
+
+/// **Album mode uses the album gain, and falls back to the track gain when
+/// there is no album value** — both asserted on samples.
+#[test]
+fn album_mode_uses_the_album_gain_and_falls_back_to_the_track_gain() {
+    let f = fixtures();
+    // rg_a declares ALBUM_GAIN -3.00 dB and TRACK_GAIN -6.02 dB, so the two
+    // modes are distinguishable from the audio.
+    let album = play_with_volume(
+        std::slice::from_ref(&f.rg_a),
+        f.a_ref.len(),
+        &[replay_gain(ReplayGainMode::Album)],
+    );
+    let want: Vec<f32> = f.a_ref.iter().map(|s| s * amplitude_of(-300)).collect();
+    assert_samples_eq(&album, &want, "album-gain output");
+
+    // rg_single declares only a track gain: album mode falls back to it rather
+    // than leaving a lone downloaded track unnormalised.
+    let fallback = play_with_volume(
+        std::slice::from_ref(&f.rg_single),
+        f.dc_ref.len(),
+        &[replay_gain(ReplayGainMode::Album)],
+    );
+    let want: Vec<f32> = f.dc_ref.iter().map(|s| s * amplitude_of(-400)).collect();
+    assert_samples_eq(&fallback, &want, "album mode falling back to track gain");
+}
+
+/// **Clipping prevention reduces a gain the declared peak has no room for**,
+/// and the delivered samples stay inside full scale.
+///
+/// The fixture is a constant at exactly its declared peak (0.5) and asks for
+/// +12 dB, which would deliver 1.99. The rule cuts the gain to `-20·log₁₀(peak)`
+/// rounded *down*, so the loudest delivered sample is at or below 1.0 — checked
+/// as a property of the audio, not of the reported number.
+#[test]
+fn clipping_prevention_cuts_a_gain_the_peak_has_no_room_for() {
+    let f = fixtures();
+    let out = play_with_volume(
+        std::slice::from_ref(&f.rg_clip),
+        f.dc_ref.len(),
+        &[replay_gain(ReplayGainMode::Track)],
+    );
+    assert_eq!(out.len(), f.dc_ref.len());
+    let peak = out.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    assert!(
+        peak <= 1.0,
+        "clipping prevention must keep the stream inside full scale: {peak}"
+    );
+    // 0.5 leaves 6.0206 dB of headroom, floored to 6.02 dB — so the fixture is
+    // delivered just under full scale rather than merely somewhere below it.
+    assert!(
+        peak > 0.999,
+        "the cut must not be more than necessary: {peak}"
+    );
+    let want: Vec<f32> = f.dc_ref.iter().map(|s| s * amplitude_of(602)).collect();
+    assert_samples_eq(&out, &want, "clip-limited output");
+
+    // With prevention disarmed the full +12 dB is applied, and it does clip.
+    let unlimited = play_with_volume(
+        std::slice::from_ref(&f.rg_clip),
+        f.dc_ref.len(),
+        &[Command::SetReplayGain {
+            mode: ReplayGainMode::Track,
+            preamp_centidb: 0,
+            no_tag_preamp_centidb: 0,
+            prevent_clipping: false,
+        }],
+    );
+    let peak = unlimited.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    assert!(
+        peak > 1.9,
+        "unarmed, the tags are honoured in full — including over full scale: {peak}"
+    );
+}
+
+/// **The pre-amp adds to a tagged gain; the no-ReplayGain pre-amp applies
+/// instead when the file declares none.** Two settings, two fixtures, samples
+/// either way.
+#[test]
+fn the_two_pre_amps_apply_to_the_cases_they_are_for() {
+    let f = fixtures();
+    let settings = Command::SetReplayGain {
+        mode: ReplayGainMode::Track,
+        preamp_centidb: 200,
+        no_tag_preamp_centidb: -500,
+        prevent_clipping: true,
+    };
+    // Tagged: -4.00 dB + 2.00 dB of pre-amp.
+    let tagged = play_with_volume(
+        std::slice::from_ref(&f.rg_single),
+        f.dc_ref.len(),
+        std::slice::from_ref(&settings),
+    );
+    let want: Vec<f32> = f.dc_ref.iter().map(|s| s * amplitude_of(-200)).collect();
+    assert_samples_eq(&tagged, &want, "tagged track with a pre-amp");
+
+    // Untagged: the *other* pre-amp, and not the first one.
+    let untagged = play_with_volume(
+        std::slice::from_ref(&f.dc),
+        f.dc_ref.len(),
+        std::slice::from_ref(&settings),
+    );
+    let want: Vec<f32> = f.dc_ref.iter().map(|s| s * amplitude_of(-500)).collect();
+    assert_samples_eq(&untagged, &want, "untagged track, no-ReplayGain pre-amp");
+}
+
+/// **Volume and ReplayGain compose, and are applied exactly once.**
+///
+/// The engine multiplies the two gains together and scales each sample by the
+/// *product* — one multiply, not two stages. The distinction is observable in
+/// f32: `s·(v·g)` and `(s·v)·g` round differently for some samples, and the
+/// test asserts the first *and* proves the fixture can tell them apart, so
+/// "once" is a measured property rather than a claim about the source.
+#[test]
+#[allow(clippy::float_cmp)] // exactness is the assertion
+fn volume_and_replay_gain_compose_into_exactly_one_multiply() {
+    let f = fixtures();
+    let volume = Volume::new(618).amplitude();
+    let gain = amplitude_of(-602);
+    let combined = volume * gain;
+
+    let out = play_with_volume(
+        std::slice::from_ref(&f.rg_a),
+        f.a_ref.len(),
+        &[
+            replay_gain(ReplayGainMode::Track),
+            Command::SetVolume { position: 618 },
+        ],
+    );
+    assert_eq!(out.len(), f.a_ref.len());
+
+    let mut discriminating = false;
+    for (i, (got, source)) in out.iter().zip(&f.a_ref).enumerate() {
+        assert_eq!(
+            *got,
+            source * combined,
+            "sample {i}: the two gains must arrive as one multiply"
+        );
+        if (source * volume) * gain != source * combined {
+            discriminating = true;
+        }
+    }
+    assert!(
+        discriminating,
+        "the fixture must contain samples that distinguish one multiply from \
+         two, or this test would pass against either implementation"
+    );
+}
+
+/// **Both gains are really present**: the combined stream is neither of the two
+/// single-gain streams, and is not either gain applied twice.
+#[test]
+fn neither_gain_is_dropped_nor_applied_twice() {
+    let f = fixtures();
+    let volume = Volume::new(618).amplitude();
+    let gain = amplitude_of(-602);
+    let out = play_with_volume(
+        std::slice::from_ref(&f.rg_a),
+        f.a_ref.len(),
+        &[
+            replay_gain(ReplayGainMode::Track),
+            Command::SetVolume { position: 618 },
+        ],
+    );
+    let sample = |scale: f32| -> Vec<f32> { f.a_ref.iter().map(|s| s * scale).collect() };
+    for (what, wrong) in [
+        ("the volume alone", sample(volume)),
+        ("the ReplayGain alone", sample(gain)),
+        ("the ReplayGain twice", sample(volume * gain * gain)),
+        ("the volume twice", sample(volume * volume * gain)),
+        ("neither", f.a_ref.clone()),
+    ] {
+        assert_ne!(out, wrong, "the delivered stream must not be {what}");
+    }
+}
+
+/// **The gain follows the track across a boundary**, and does so from the
+/// boundary's own first sample.
+///
+/// Track mode over a two-track album whose tracks declare different gains: the
+/// first track's steady state is its own gain, the second track's steady state
+/// is *its* own gain, and the change happens at the splice rather than a pump
+/// block late. The engine caps every pump read at the next boundary precisely
+/// so this is true.
+///
+/// The transition itself is a slew ([`RAMP_MS`]) rather than a step, so the
+/// assertion is on the two steady states and on where the ramp begins — the
+/// same shape as the mid-playback volume test above.
+#[test]
+fn the_gain_follows_the_track_across_a_boundary() {
+    let f = fixtures();
+    let boundary = f.a_ref.len();
+    let mut want_len = boundary;
+    want_len += f.b_ref.len();
+    let out = play_with_volume(
+        &[f.rg_a.clone(), f.rg_b.clone()],
+        want_len,
+        &[replay_gain(ReplayGainMode::Track)],
+    );
+    assert_eq!(out.len(), want_len, "gapless still delivers every sample");
+
+    let first = amplitude_of(-602);
+    let second = amplitude_of(250);
+    // The whole of track A is at A's gain: the ramp into it happened before a
+    // single sample was delivered (nothing was audible yet), so there is no
+    // transition to exclude at the front.
+    let want_a: Vec<f32> = f.a_ref.iter().map(|s| s * first).collect();
+    assert_samples_eq(&out[..boundary], &want_a, "track A at its own gain");
+
+    // Track B's steady state, past the slew. `RAMP_MS` at `RATE` bounds it.
+    let ramp = ms_to_frames(u64::from(RAMP_MS) + 5, RATE) * CHANNELS;
+    let want_b: Vec<f32> = f.b_ref[ramp..].iter().map(|s| s * second).collect();
+    assert_samples_eq(&out[boundary + ramp..], &want_b, "track B at its own gain");
+    assert!(
+        second > first,
+        "the two tracks must ask for different gains, or this proves nothing"
+    );
+}
+
+/// **In album mode an album has one gain, so a boundary inside it has no
+/// transition at all** — which is the property album mode exists to provide.
+#[test]
+fn album_mode_holds_one_gain_across_the_whole_album() {
+    let f = fixtures();
+    let mut want: Vec<f32> = f.a_ref.iter().map(|s| s * amplitude_of(-300)).collect();
+    want.extend(f.b_ref.iter().map(|s| s * amplitude_of(-300)));
+    let out = play_with_volume(
+        &[f.rg_a.clone(), f.rg_b.clone()],
+        want.len(),
+        &[replay_gain(ReplayGainMode::Album)],
+    );
+    assert_samples_eq(&out, &want, "one album, one gain, no ramp at the splice");
+}
+
+/// **The honesty readout, per mode.** ReplayGain is a software gain, so when it
+/// is active and not unity the path is [`VolumePath::SoftwareGain`] — reported
+/// through the *existing* mechanism, with the volume still at unity.
+///
+/// This is the ADR-0013 amendment to ADR-0011 in one test: the question a front
+/// end asks is still `path.is_transparent()`, and it still gets the right
+/// answer.
+#[test]
+fn an_active_replay_gain_reports_a_software_gain_path_at_unity_volume() {
+    let f = fixtures();
+    let (engine, events, _output) =
+        spawn_offline(fast_config(), f.a_ref.len()).expect("spawn engine");
+    // Nothing playing yet, and off: the path is untouched and the readout says
+    // so on both channels.
+    assert_eq!(engine.volume().path, VolumePath::Unity);
+    assert!(engine.volume().path.is_transparent());
+    assert_eq!(engine.replay_gain().settings.mode, ReplayGainMode::Off);
+    assert_eq!(
+        engine.replay_gain().applied.source,
+        ReplayGainSource::Disabled
+    );
+
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.rg_a.clone()],
+        })
+        .expect("send");
+    engine
+        .send(replay_gain(ReplayGainMode::Track))
+        .expect("send");
+    // Switching the mode on is news even before anything plays: the settings
+    // changed, so the engine confirms them.
+    let (source, applied, clipped) = next_replay_gain(&events);
+    assert_eq!(
+        (source, applied, clipped),
+        (ReplayGainSource::NoTag, 0, false),
+        "nothing is playing, so nothing has a ReplayGain figure yet"
+    );
+    assert!(
+        engine.volume().path.is_transparent(),
+        "a mode with nothing to apply it to changes no samples"
+    );
+
+    engine.send(Command::Play).expect("send");
+    // Once the track's audio starts, its tags resolve and the path moves.
+    let (source, applied, clipped) = next_replay_gain(&events);
+    assert_eq!(
+        (source, applied, clipped),
+        (ReplayGainSource::Track, -602, false)
+    );
+    let state = engine.replay_gain();
+    assert_eq!(state.applied.gain_centidb, -602);
+    assert!(!state.applied.is_transparent());
+    let volume = engine.volume();
+    assert_eq!(
+        (volume.volume, volume.muted, volume.path),
+        (Volume::UNITY, false, VolumePath::SoftwareGain),
+        "the volume is untouched at unity, and the path still tells the truth"
+    );
+    assert!(
+        !engine.volume().path.is_transparent(),
+        "an active ReplayGain is not a bit-exact path, and says so"
+    );
+
+    // And switching it back off restores the untouched path.
+    engine.send(replay_gain(ReplayGainMode::Off)).expect("send");
+    let (source, applied, _) = next_replay_gain(&events);
+    assert_eq!((source, applied), (ReplayGainSource::Disabled, 0));
+    engine.shutdown();
+}
+
+/// The readout for each mode over the same tagged album track, including the
+/// clipping-prevention flag — the fields a front end renders.
+#[test]
+fn the_readout_reports_the_source_and_figure_for_each_mode() {
+    let f = fixtures();
+    let cases: &[(&PathBuf, ReplayGainMode, ReplayGainSource, i16, bool)] = &[
+        (
+            &f.rg_a,
+            ReplayGainMode::Track,
+            ReplayGainSource::Track,
+            -602,
+            false,
+        ),
+        (
+            &f.rg_a,
+            ReplayGainMode::Album,
+            ReplayGainSource::Album,
+            -300,
+            false,
+        ),
+        (
+            &f.rg_single,
+            ReplayGainMode::Album,
+            ReplayGainSource::TrackFallback,
+            -400,
+            false,
+        ),
+        (
+            &f.dc,
+            ReplayGainMode::Track,
+            ReplayGainSource::NoTag,
+            0,
+            false,
+        ),
+        (
+            &f.rg_clip,
+            ReplayGainMode::Track,
+            ReplayGainSource::Track,
+            602,
+            true,
+        ),
+    ];
+    for (path, mode, want_source, want_centidb, want_clipped) in cases {
+        let (engine, events, _output) =
+            spawn_offline(fast_config(), 4 * CHANNELS).expect("spawn engine");
+        engine
+            .send(Command::SetQueue {
+                paths: vec![(*path).clone()],
+            })
+            .expect("send");
+        engine.send(replay_gain(*mode)).expect("send");
+        engine.send(Command::Play).expect("send");
+        // The first report is the settings change (nothing playing yet); the
+        // one that matters is the track's, which follows its first samples.
+        let mut got = next_replay_gain(&events);
+        while got.0 == ReplayGainSource::NoTag && *want_source != ReplayGainSource::NoTag {
+            got = next_replay_gain(&events);
+        }
+        assert_eq!(
+            got,
+            (*want_source, *want_centidb, *want_clipped),
+            "{} in {mode:?}",
+            path.display()
+        );
+        engine.shutdown();
+    }
+}
+
+/// Redundant settings emit nothing, like every other command in this protocol —
+/// so an arriving [`Event::ReplayGainChanged`] is always news.
+#[test]
+fn redundant_replay_gain_commands_are_silent() {
+    let f = fixtures();
+    let (engine, events, _output) =
+        spawn_offline(fast_config(), 4 * CHANNELS).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.dc.clone()],
+        })
+        .expect("send");
+    engine
+        .send(replay_gain(ReplayGainMode::Track))
+        .expect("send");
+    let _ = next_replay_gain(&events);
+    // The same settings again: nothing changed, so nothing is said.
+    engine
+        .send(replay_gain(ReplayGainMode::Track))
+        .expect("send");
+    assert_no_event_within(&events, Duration::from_millis(150));
+    engine.shutdown();
+}
+
+/// The settings survive everything the transport does — they are engine state,
+/// exactly as the volume is.
+#[test]
+fn replay_gain_settings_survive_the_transport() {
+    let f = fixtures();
+    let (engine, events, _output) =
+        spawn_offline(paced_config(), f.a_ref.len() + f.b_ref.len()).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.rg_a.clone(), f.rg_b.clone()],
+        })
+        .expect("send");
+    let settings = Command::SetReplayGain {
+        mode: ReplayGainMode::Album,
+        preamp_centidb: 150,
+        no_tag_preamp_centidb: -250,
+        prevent_clipping: false,
+    };
+    engine.send(settings.clone()).expect("send");
+    engine.send(Command::Play).expect("send");
+    loop {
+        if matches!(next_event(&events), Event::TrackStarted { .. }) {
+            break;
+        }
+    }
+
+    for command in [
+        Command::Pause,
+        Command::Play,
+        Command::Seek { position_ms: 500 },
+        Command::Next,
+        Command::Previous,
+        Command::Stop,
+    ] {
+        engine.send(command.clone()).expect("send");
+        thread::sleep(Duration::from_millis(20));
+        let state = engine.replay_gain();
+        assert_eq!(
+            (
+                state.settings.mode,
+                state.settings.preamp_centidb,
+                state.settings.no_tag_preamp_centidb,
+                state.settings.prevent_clipping,
+            ),
+            (ReplayGainMode::Album, 150, -250, false),
+            "the settings must survive {command:?}"
+        );
+    }
+    engine.shutdown();
+}
+
+/// Out-of-range pre-amps clamp rather than being rejected, and the engine
+/// reports the clamped values it will actually use.
+#[test]
+fn out_of_range_pre_amps_clamp_and_are_reported_clamped() {
+    let (engine, events, _output) = spawn_offline(fast_config(), 4 * CHANNELS).expect("spawn");
+    engine
+        .send(Command::SetReplayGain {
+            mode: ReplayGainMode::Track,
+            preamp_centidb: i16::MAX,
+            no_tag_preamp_centidb: i16::MIN,
+            prevent_clipping: true,
+        })
+        .expect("send");
+    let event = next_event(&events);
+    let Event::ReplayGainChanged {
+        preamp_centidb,
+        no_tag_preamp_centidb,
+        applied_centidb,
+        ..
+    } = event
+    else {
+        panic!("expected a ReplayGainChanged, got {event:?}");
+    };
+    assert_eq!(preamp_centidb, MAX_PREAMP_CENTIDB);
+    assert_eq!(no_tag_preamp_centidb, -MAX_PREAMP_CENTIDB);
+    assert_eq!(
+        applied_centidb, -MAX_PREAMP_CENTIDB,
+        "nothing is playing, so the no-ReplayGain pre-amp is what applies"
+    );
+    assert_eq!(
+        engine.replay_gain().settings.preamp_centidb,
+        MAX_PREAMP_CENTIDB
+    );
+    engine.shutdown();
 }

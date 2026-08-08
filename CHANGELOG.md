@@ -40,7 +40,7 @@ next commit.
 - Persistent library index in SQLite (bundled, so no system library is
   required), with an in-RAM corpus for search. Schema versioning via
   `user_version` with migrations tested against databases built by older schema
-  SQL rather than by baz itself; currently at v4.
+  SQL rather than by baz itself; currently at v5.
 - Search across the whole library as you type, over a memchr-backed substring
   scan.
 - Albums grouped by **album artist**, not track artist, so a soundtrack or
@@ -85,6 +85,18 @@ next commit.
   exactly unity the samples reach the sink with no copy and no arithmetic, so
   bit-exactness at full volume is a property of the control flow rather than of
   floating-point luck. Reported honestly through `VolumePath` (ADR-0011).
+- **ReplayGain**, read from the tags files already carry — `REPLAYGAIN_*` in
+  Vorbis comments, `ID3v2` `TXXX` frames, MP4 freeform atoms and APE items, plus
+  the Opus-style `R128_*` integer form — in **off / track / album** modes with a
+  pre-amp, a separate pre-amp for files that carry none, and clipping prevention
+  from the declared peaks. Album mode falls back to a track's own gain when the
+  file declares no album value, and an untagged file is played exactly as stored
+  by default, so switching ReplayGain on cannot alter a library nothing has
+  scanned. It shares the volume's gain stage — one multiply per sample for both
+  — and changes on the track boundary's own first sample. Reported through the
+  same `VolumePath` the volume uses, because there is one gain stage and one
+  answer to "is this bit-exact" (ADR-0013, schema v5).
+  baz reads these figures; it does not compute them.
 - Command/event protocol between the engine and any front end, with the wire
   format pinned by test.
 
@@ -219,8 +231,16 @@ next commit.
   fixing it means changing a seek path five formats share.
 - Deleting an entire album folder leaves its rows in the index (see Removal,
   above).
-- No ReplayGain, no playlists, no cue sheets, no watch folders, no tag editing,
-  no application icon, and no exclusive-mode output (which is also what puts
-  hardware volume out of reach). `docs/BACKLOG.md` is the honest list.
+- **No ReplayGain *scanning*.** baz honours the tags a file already has; it
+  cannot produce them. A library that has never been through foobar2000,
+  `rsgain` or `loudgain` gets no normalisation from baz, and is played exactly
+  as stored rather than guessed at (ADR-0013).
+- **ReplayGain's clipping check uses the declared *sample* peak**, which is
+  what ReplayGain 2.0 scanners write. Inter-sample (true-peak) overshoot after
+  reconstruction is not modelled, and there is no limiter: if the gain has to
+  be cut, the whole track's gain is cut rather than ridden.
+- No playlists, no cue sheets, no watch folders, no tag editing, no application
+  icon, and no exclusive-mode output (which is also what puts hardware volume
+  out of reach). `docs/BACKLOG.md` is the honest list.
 
 [Unreleased]: https://github.com/mattcree/baz/commits/main

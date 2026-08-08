@@ -65,6 +65,16 @@
 //! front end. The short version: a linear-amplitude control feels wrong to a
 //! human, so the correction has to happen somewhere, and if it happened in the
 //! front ends they would disagree with each other.
+//!
+//! # ReplayGain on the wire: integer centidecibels
+//!
+//! [`Command::SetReplayGain`]'s pre-amps and
+//! [`Event::ReplayGainChanged`]'s applied figure are `i16` **centidecibels** —
+//! hundredths of a decibel, zero meaning unity — for the third time on the
+//! same argument: one canonical JSON encoding, and the enums keep their `Eq`.
+//! 0.01 dB is finer than the two decimal places the `"-7.75 dB"` tag
+//! convention itself carries, so nothing is lost by not being a float.
+//! [`crate::replaygain`] owns the unit and everything computed from it.
 
 use std::path::PathBuf;
 
@@ -176,6 +186,53 @@ pub enum Command {
     SetMute {
         /// Whether output is silenced.
         muted: bool,
+    },
+    /// Configure ReplayGain: which of a track's tagged gains to honour, the two
+    /// pre-amps, and whether to stay below full scale (ADR-0013).
+    ///
+    /// Absolute and idempotent, like [`Command::Seek`] and
+    /// [`Command::SetMute`] and for the same reason: a command that carries the
+    /// whole setting cannot desynchronize from a front end that missed an
+    /// event. Sending the settings the engine already has emits nothing.
+    ///
+    /// # What it does and does not do
+    ///
+    /// baz **reads** the `REPLAYGAIN_*` (and Opus-style `R128_*`) tags files
+    /// already carry and applies them. It does not *compute* them: there is no
+    /// analysis pass here, so a library nothing has ever scanned is unaffected
+    /// by this command except through
+    /// [`no_tag_preamp_centidb`](Self::SetReplayGain::no_tag_preamp_centidb),
+    /// which is zero by default.
+    ///
+    /// # Honesty
+    ///
+    /// ReplayGain is a software gain. Whenever it resolves to anything other
+    /// than unity the sample stream is being scaled, and
+    /// [`Event::VolumeChanged`]'s [`VolumePath`] says so — baz has **one**
+    /// gain stage and one readout for it, so a front end asks
+    /// [`VolumePath::is_transparent`] exactly as it did before ReplayGain
+    /// existed. [`Event::ReplayGainChanged`] adds the ReplayGain-specific
+    /// detail (which figure, how much, whether clipping prevention bit); it
+    /// does not carry a second, parallel notion of fidelity.
+    SetReplayGain {
+        /// Which of a track's figures to use, or [`ReplayGainMode::Off`].
+        mode: ReplayGainMode,
+        /// Added to whatever gain the tags asked for, in hundredths of a
+        /// decibel. Clamped to
+        /// ±[`MAX_PREAMP_CENTIDB`](crate::replaygain::MAX_PREAMP_CENTIDB).
+        preamp_centidb: i16,
+        /// Applied instead, in hundredths of a decibel, when a file carries no
+        /// usable ReplayGain at all. Clamped the same way.
+        ///
+        /// **Zero is the documented default**: an untagged file is then played
+        /// exactly as stored, so switching ReplayGain on cannot quieten a
+        /// library that has never been through a scanner, and such a track
+        /// keeps ADR-0009's untouched path.
+        no_tag_preamp_centidb: i16,
+        /// Whether to reduce a gain that would push the file's declared peak
+        /// above full scale. On by default; the exact rule is documented on
+        /// [`ReplayGainSettings::resolve`](crate::replaygain::ReplayGainSettings::resolve).
+        prevent_clipping: bool,
     },
 }
 
@@ -319,6 +376,130 @@ pub enum Event {
         /// Where the volume is being applied.
         path: VolumePath,
     },
+    /// The ReplayGain settings, and what they resolved to for the track now
+    /// playing (ADR-0013).
+    ///
+    /// # Cadence
+    ///
+    /// Emitted whenever any of it changes, which is two separate occasions:
+    /// an accepted [`Command::SetReplayGain`], and a **track boundary** at
+    /// which the new track's tags resolve to a different figure. In album mode
+    /// across an album the second never happens — every track shares one album
+    /// gain — so an album states its ReplayGain once, exactly as
+    /// [`Event::SignalPath`] states its format once. Redundant commands emit
+    /// nothing.
+    ///
+    /// # Reading it
+    ///
+    /// The first four fields are the confirmed settings, echoed back: a front
+    /// end should follow them rather than its own optimistic copy, so two
+    /// front ends on one engine agree. The last three describe the *current
+    /// track*: `source` says which figure the number came from (including
+    /// [`ReplayGainSource::NoTag`], the file declared none, and
+    /// [`ReplayGainSource::Disabled`], the feature is off),
+    /// `applied_centidb` is the gain in hundredths of a decibel with zero
+    /// meaning unity, and `clipping_prevented` says the tags asked for more
+    /// than the declared peak had room for.
+    ///
+    /// # This event does not carry the fidelity readout
+    ///
+    /// Deliberately. baz has one software gain stage, the volume and
+    /// ReplayGain both feed it, and [`Event::VolumeChanged`]'s [`VolumePath`]
+    /// is where that stage reports itself — before ReplayGain existed and
+    /// after. A non-unity `applied_centidb` is therefore always accompanied by
+    /// a `VolumeChanged` whose `path` is [`VolumePath::SoftwareGain`], and
+    /// [`VolumePath::is_transparent`] remains the whole question. Adding a
+    /// second "is this bit-exact" flag here would have given a front end two
+    /// answers to reconcile, which is how the two come to disagree.
+    ///
+    /// **This is information, not a warning**, on exactly the terms
+    /// [`Event::SignalPath`] and [`Event::VolumeChanged`] set out. ReplayGain
+    /// is a correctness feature a listener asked for; nothing here is a fault
+    /// condition and nothing here should be styled as one.
+    ReplayGainChanged {
+        /// Which of a track's figures is being used, or
+        /// [`ReplayGainMode::Off`].
+        mode: ReplayGainMode,
+        /// The pre-amp for tagged files, in hundredths of a decibel, as the
+        /// engine clamped it.
+        preamp_centidb: i16,
+        /// The pre-amp for untagged files, in hundredths of a decibel, as the
+        /// engine clamped it.
+        no_tag_preamp_centidb: i16,
+        /// Whether clipping prevention is armed.
+        prevent_clipping: bool,
+        /// Where the applied gain came from.
+        source: ReplayGainSource,
+        /// The gain actually applied to the current track, in hundredths of a
+        /// decibel. Zero means unity, and unity means no arithmetic.
+        applied_centidb: i16,
+        /// Whether the applied gain is lower than the tags asked for because
+        /// the full figure would have exceeded full scale.
+        clipping_prevented: bool,
+    },
+}
+
+/// Which of a track's ReplayGain figures to honour, in
+/// [`Command::SetReplayGain`].
+///
+/// The three-mode vocabulary every player that implements ReplayGain uses, and
+/// the one a foobar2000 refugee expects to find. See
+/// [`ReplayGainSettings::resolve`](crate::replaygain::ReplayGainSettings::resolve)
+/// for the exact selection rule, fallbacks included.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplayGainMode {
+    /// Do not apply ReplayGain. **The default**, for the reason ADR-0009 makes
+    /// the bit-perfect path the default: a player that has not been told to
+    /// change the samples does not change them.
+    ///
+    /// Off is not "a gain of 0 dB that happens to be inaudible" — the engine
+    /// performs no ReplayGain arithmetic at all, so the delivered stream is
+    /// bit-identical to a baz built before ReplayGain existed.
+    #[default]
+    Off,
+    /// Normalise each track to the reference loudness independently, using its
+    /// `REPLAYGAIN_TRACK_GAIN`. What a shuffled queue of unrelated tracks
+    /// wants: every track arrives at the same loudness.
+    Track,
+    /// Normalise each *album* as a whole, using its `REPLAYGAIN_ALBUM_GAIN`, so
+    /// that the level differences its mastering engineer put between its tracks
+    /// survive. What an album — and especially a continuous one — wants.
+    ///
+    /// Falls back to the track gain for a file that declares no album value;
+    /// see [`ReplayGainSource::TrackFallback`].
+    Album,
+}
+
+/// Where the gain in [`Event::ReplayGainChanged`] came from.
+///
+/// Modelled as a state rather than an `Option`, for [`SignalChain`]'s reason:
+/// "the file has no ReplayGain", "ReplayGain is switched off" and "album mode
+/// found only a track gain" are three different facts about the system, and a
+/// front end that wants to explain itself needs to tell them apart.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplayGainSource {
+    /// ReplayGain is [`ReplayGainMode::Off`]. The gain is unity and no
+    /// arithmetic happens.
+    #[default]
+    Disabled,
+    /// The track's own `REPLAYGAIN_TRACK_GAIN`.
+    Track,
+    /// The album's `REPLAYGAIN_ALBUM_GAIN`.
+    Album,
+    /// Album mode, but the file declares no album gain — so its track gain was
+    /// used instead. The ordinary reading for a single downloaded track, which
+    /// has no album to be relative to.
+    TrackFallback,
+    /// The file declares no usable ReplayGain at all, so the "no ReplayGain"
+    /// pre-amp applies (zero by default, i.e. the file is played as stored).
+    ///
+    /// This is the reading for an unscanned library, and it is not a failure:
+    /// baz reads ReplayGain, it does not compute it.
+    NoTag,
 }
 
 /// What sits between the decoded file and the output, in
@@ -432,8 +613,8 @@ pub enum ConversionReason {
     FixedOutputRate,
 }
 
-/// Where the volume is being applied, in [`Event::VolumeChanged`] — and
-/// therefore whether the sample stream is still literally untouched.
+/// Where baz's software gain stage is applied, in [`Event::VolumeChanged`] —
+/// and therefore whether the sample stream is still literally untouched.
 ///
 /// This is the ADR-0011 half of the fidelity readout, and it exists for one
 /// reason: **software gain is not bit-exact, and saying otherwise would be the
@@ -441,6 +622,18 @@ pub enum ConversionReason {
 /// scaling costs ~1 ULP of a 24-bit mantissa — around −140 dBFS, inaudible by
 /// any measure a listener could apply — but "inaudible" and "identical" are
 /// different claims and only one of them is true.
+///
+/// # It covers ReplayGain too (ADR-0013)
+///
+/// ADR-0011 introduced this type for the volume, which was then the only gain
+/// baz applied. ReplayGain is a second *input* to the same stage — one fader,
+/// one multiply per sample, the product of the two — so this type answers for
+/// that stage as a whole rather than gaining a sibling. Concretely: with the
+/// volume at unity and a ReplayGain of −7.75 dB in effect, the path is
+/// [`Self::SoftwareGain`], because it is. The ReplayGain-specific detail
+/// travels on [`Event::ReplayGainChanged`], which deliberately carries **no**
+/// fidelity field of its own — two answers to one question is how two answers
+/// come to disagree.
 ///
 /// # Tone
 ///
@@ -454,18 +647,25 @@ pub enum ConversionReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VolumePath {
-    /// No gain stage at all: the volume is at unity and unmuted, so the engine
-    /// performs no arithmetic on the samples — not even a multiply by one (see
-    /// [`crate::volume`] for why the difference is structural and not
-    /// pedantry). This is the state in which ADR-0009's bit-perfect claim is
-    /// unqualified.
+    /// No gain stage at all: the volume is at unity and unmuted **and**
+    /// ReplayGain is contributing nothing, so the engine performs no arithmetic
+    /// on the samples — not even a multiply by one (see [`crate::volume`] for
+    /// why the difference is structural and not pedantry). This is the state in
+    /// which ADR-0009's bit-perfect claim is unqualified.
     Unity,
     /// baz scales every sample by an f32 multiply on its way to the output.
-    /// The ordinary state for any volume other than unity, and for mute.
+    /// The ordinary state for any volume other than unity, for mute, and for
+    /// any ReplayGain figure other than 0.00 dB (ADR-0013).
     SoftwareGain,
     /// The output device is carrying the volume in its own attenuator and the
     /// sample stream reaches it unscaled — bit-exact, with the volume applied
     /// downstream of everything baz does.
+    ///
+    /// Reported only when baz itself scales nothing. A device attenuator can
+    /// carry the volume but not a ReplayGain figure, so an active,
+    /// non-unity ReplayGain reads as [`Self::SoftwareGain`] even on a sink
+    /// that took the volume — the samples are being multiplied, and that is
+    /// what this type answers.
     ///
     /// Reachable through [`Sink::set_device_volume`](crate::playback::Sink::set_device_volume),
     /// which **no backend baz ships implements**: shared-mode output has no
@@ -478,9 +678,13 @@ pub enum VolumePath {
 }
 
 impl VolumePath {
-    /// Whether the volume stage leaves the sample stream untouched — true for
+    /// Whether baz's gain stage leaves the sample stream untouched — true for
     /// [`Self::Unity`] and [`Self::DeviceAttenuator`], false for
     /// [`Self::SoftwareGain`].
+    ///
+    /// Since ADR-0013 this covers ReplayGain as well as the volume, because
+    /// they are the same stage; a front end that already asked this question
+    /// keeps getting the right answer without knowing ReplayGain exists.
     ///
     /// Combine with [`SignalChain::Direct`] for the whole bit-exactness
     /// question; the method exists so a front end asks about the property it
@@ -518,6 +722,24 @@ mod tests {
             Command::SetVolume { position: 1000 },
             Command::SetMute { muted: true },
             Command::SetMute { muted: false },
+            Command::SetReplayGain {
+                mode: ReplayGainMode::Off,
+                preamp_centidb: 0,
+                no_tag_preamp_centidb: 0,
+                prevent_clipping: true,
+            },
+            Command::SetReplayGain {
+                mode: ReplayGainMode::Track,
+                preamp_centidb: 300,
+                no_tag_preamp_centidb: -450,
+                prevent_clipping: false,
+            },
+            Command::SetReplayGain {
+                mode: ReplayGainMode::Album,
+                preamp_centidb: -1_200,
+                no_tag_preamp_centidb: 0,
+                prevent_clipping: true,
+            },
         ]
     }
 
@@ -598,6 +820,61 @@ mod tests {
                 position: 750,
                 muted: false,
                 path: VolumePath::DeviceAttenuator,
+            },
+        ]
+        .into_iter()
+        .chain(sample_replay_gain_events())
+        .collect()
+    }
+
+    /// The [`Event::ReplayGainChanged`] samples, one per [`ReplayGainSource`].
+    /// Split from [`sample_events`] only to keep either function readable.
+    fn sample_replay_gain_events() -> Vec<Event> {
+        vec![
+            Event::ReplayGainChanged {
+                mode: ReplayGainMode::Off,
+                preamp_centidb: 0,
+                no_tag_preamp_centidb: 0,
+                prevent_clipping: true,
+                source: ReplayGainSource::Disabled,
+                applied_centidb: 0,
+                clipping_prevented: false,
+            },
+            Event::ReplayGainChanged {
+                mode: ReplayGainMode::Track,
+                preamp_centidb: 0,
+                no_tag_preamp_centidb: 0,
+                prevent_clipping: true,
+                source: ReplayGainSource::Track,
+                applied_centidb: -775,
+                clipping_prevented: false,
+            },
+            Event::ReplayGainChanged {
+                mode: ReplayGainMode::Album,
+                preamp_centidb: 600,
+                no_tag_preamp_centidb: -300,
+                prevent_clipping: true,
+                source: ReplayGainSource::Album,
+                applied_centidb: 104,
+                clipping_prevented: true,
+            },
+            Event::ReplayGainChanged {
+                mode: ReplayGainMode::Album,
+                preamp_centidb: 0,
+                no_tag_preamp_centidb: 0,
+                prevent_clipping: true,
+                source: ReplayGainSource::TrackFallback,
+                applied_centidb: 233,
+                clipping_prevented: false,
+            },
+            Event::ReplayGainChanged {
+                mode: ReplayGainMode::Track,
+                preamp_centidb: 0,
+                no_tag_preamp_centidb: -500,
+                prevent_clipping: true,
+                source: ReplayGainSource::NoTag,
+                applied_centidb: -500,
+                clipping_prevented: false,
             },
         ]
     }
@@ -688,6 +965,52 @@ mod tests {
             (
                 serde_json::to_string(&Command::SetMute { muted: false }).expect("serialize"),
                 r#"{"cmd":"set_mute","muted":false}"#,
+            ),
+        ];
+        for (got, want) in cases {
+            assert_eq!(got, want);
+        }
+    }
+
+    /// [`Command::SetReplayGain`]'s bytes, pinned — every mode, and both signs
+    /// of a pre-amp. Split from its sibling above for the reason the volume
+    /// event was: one test listing every variant of a growing enum outgrows
+    /// what is readable, not because the contract is any weaker.
+    #[test]
+    fn replay_gain_command_wire_format_is_stable() {
+        let cases: Vec<(String, &str)> = vec![
+            (
+                // The default state: off, no pre-amp, clipping prevention
+                // armed. Zero encodes as `0`, never `0.0` or `-0` — the
+                // centidecibel choice is what makes this assertable.
+                serde_json::to_string(&Command::SetReplayGain {
+                    mode: ReplayGainMode::Off,
+                    preamp_centidb: 0,
+                    no_tag_preamp_centidb: 0,
+                    prevent_clipping: true,
+                })
+                .expect("serialize"),
+                r#"{"cmd":"set_replay_gain","mode":"off","preamp_centidb":0,"no_tag_preamp_centidb":0,"prevent_clipping":true}"#,
+            ),
+            (
+                serde_json::to_string(&Command::SetReplayGain {
+                    mode: ReplayGainMode::Track,
+                    preamp_centidb: 300,
+                    no_tag_preamp_centidb: -450,
+                    prevent_clipping: false,
+                })
+                .expect("serialize"),
+                r#"{"cmd":"set_replay_gain","mode":"track","preamp_centidb":300,"no_tag_preamp_centidb":-450,"prevent_clipping":false}"#,
+            ),
+            (
+                serde_json::to_string(&Command::SetReplayGain {
+                    mode: ReplayGainMode::Album,
+                    preamp_centidb: -1_200,
+                    no_tag_preamp_centidb: 0,
+                    prevent_clipping: true,
+                })
+                .expect("serialize"),
+                r#"{"cmd":"set_replay_gain","mode":"album","preamp_centidb":-1200,"no_tag_preamp_centidb":0,"prevent_clipping":true}"#,
             ),
         ];
         for (got, want) in cases {
@@ -912,6 +1235,90 @@ mod tests {
                 })
                 .expect("serialize"),
                 r#"{"event":"volume_changed","position":750,"muted":false,"path":"device_attenuator"}"#,
+            ),
+        ];
+        for (got, want) in cases {
+            assert_eq!(got, want);
+        }
+    }
+
+    /// [`Event::ReplayGainChanged`]'s bytes, pinned — one per
+    /// [`ReplayGainSource`], because the source is the field a front end
+    /// switches on.
+    #[test]
+    fn replay_gain_event_wire_format_is_stable() {
+        let cases: Vec<(String, &str)> = vec![
+            (
+                // Off: unity, and the engine touches nothing.
+                serde_json::to_string(&Event::ReplayGainChanged {
+                    mode: ReplayGainMode::Off,
+                    preamp_centidb: 0,
+                    no_tag_preamp_centidb: 0,
+                    prevent_clipping: true,
+                    source: ReplayGainSource::Disabled,
+                    applied_centidb: 0,
+                    clipping_prevented: false,
+                })
+                .expect("serialize"),
+                r#"{"event":"replay_gain_changed","mode":"off","preamp_centidb":0,"no_tag_preamp_centidb":0,"prevent_clipping":true,"source":"disabled","applied_centidb":0,"clipping_prevented":false}"#,
+            ),
+            (
+                // The conventional `"-7.75 dB"` track gain, as an integer.
+                serde_json::to_string(&Event::ReplayGainChanged {
+                    mode: ReplayGainMode::Track,
+                    preamp_centidb: 0,
+                    no_tag_preamp_centidb: 0,
+                    prevent_clipping: true,
+                    source: ReplayGainSource::Track,
+                    applied_centidb: -775,
+                    clipping_prevented: false,
+                })
+                .expect("serialize"),
+                r#"{"event":"replay_gain_changed","mode":"track","preamp_centidb":0,"no_tag_preamp_centidb":0,"prevent_clipping":true,"source":"track","applied_centidb":-775,"clipping_prevented":false}"#,
+            ),
+            (
+                // The case clipping prevention exists for: the tags plus the
+                // pre-amp asked for more than the album peak had room for.
+                serde_json::to_string(&Event::ReplayGainChanged {
+                    mode: ReplayGainMode::Album,
+                    preamp_centidb: 600,
+                    no_tag_preamp_centidb: -300,
+                    prevent_clipping: true,
+                    source: ReplayGainSource::Album,
+                    applied_centidb: 104,
+                    clipping_prevented: true,
+                })
+                .expect("serialize"),
+                r#"{"event":"replay_gain_changed","mode":"album","preamp_centidb":600,"no_tag_preamp_centidb":-300,"prevent_clipping":true,"source":"album","applied_centidb":104,"clipping_prevented":true}"#,
+            ),
+            (
+                // Album mode on a single track that has no album gain.
+                serde_json::to_string(&Event::ReplayGainChanged {
+                    mode: ReplayGainMode::Album,
+                    preamp_centidb: 0,
+                    no_tag_preamp_centidb: 0,
+                    prevent_clipping: true,
+                    source: ReplayGainSource::TrackFallback,
+                    applied_centidb: 233,
+                    clipping_prevented: false,
+                })
+                .expect("serialize"),
+                r#"{"event":"replay_gain_changed","mode":"album","preamp_centidb":0,"no_tag_preamp_centidb":0,"prevent_clipping":true,"source":"track_fallback","applied_centidb":233,"clipping_prevented":false}"#,
+            ),
+            (
+                // An unscanned file: the "no ReplayGain" pre-amp, and nothing
+                // else. A reader must be able to tell this from `disabled`.
+                serde_json::to_string(&Event::ReplayGainChanged {
+                    mode: ReplayGainMode::Track,
+                    preamp_centidb: 0,
+                    no_tag_preamp_centidb: -500,
+                    prevent_clipping: true,
+                    source: ReplayGainSource::NoTag,
+                    applied_centidb: -500,
+                    clipping_prevented: false,
+                })
+                .expect("serialize"),
+                r#"{"event":"replay_gain_changed","mode":"track","preamp_centidb":0,"no_tag_preamp_centidb":-500,"prevent_clipping":true,"source":"no_tag","applied_centidb":-500,"clipping_prevented":false}"#,
             ),
         ];
         for (got, want) in cases {

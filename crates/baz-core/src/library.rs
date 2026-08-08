@@ -61,6 +61,8 @@ use lofty::file::{FileType, TaggedFile};
 use lofty::prelude::*;
 use lofty::tag::{ItemKey, Tag};
 
+use crate::replaygain::{ReplayGainReader, ReplayGainTags};
+
 pub mod inference;
 
 /// File extensions (ASCII case-insensitive, without the dot) the scanner
@@ -368,6 +370,25 @@ pub struct TrackMeta {
     /// It describes the *file*, not the work — like the four encoding fields
     /// above, and unlike them it is not read from the file's contents at all.
     pub stamp: Option<FileStamp>,
+    /// The ReplayGain figures the file already carries, if any (ADR-0013).
+    ///
+    /// Read, never computed: baz honours `REPLAYGAIN_TRACK_GAIN` and its
+    /// siblings where a scanner has written them, from Vorbis comments, ID3v2
+    /// `TXXX` frames, MP4 freeform atoms and APE items alike — plus the
+    /// Opus-style `R128_*` integer form where that is all a file has. An
+    /// analysis pass that *produces* these numbers is separate, larger work
+    /// that does not exist yet.
+    ///
+    /// All-`None` ([`ReplayGainTags::is_empty`]) is the ordinary state of a
+    /// library nothing has ever scanned, and it means "the file did not say" —
+    /// never "this track needs no gain". What the engine does with that is
+    /// [`ReplayGainSettings::resolve`](crate::replaygain::ReplayGainSettings::resolve)'s
+    /// no-tag rule.
+    ///
+    /// Integers rather than floats, for the three reasons
+    /// [`crate::replaygain`] gives — one of which is that this struct keeps its
+    /// `Eq`.
+    pub replay_gain: ReplayGainTags,
 }
 
 /// One result from a running scan: a successfully read track, or a per-file
@@ -708,8 +729,51 @@ fn build_meta(
         sample_rate: nonzero(properties.sample_rate()),
         bitrate: nonzero(properties.audio_bitrate()),
         stamp,
+        replay_gain: tag.map_or_else(ReplayGainTags::default, replay_gain),
         path,
     }
+}
+
+/// The ReplayGain figures a tag carries, whatever the container calls them.
+///
+/// Two passes, because lofty splits the keys into two worlds and both matter:
+///
+/// 1. **The mapped keys.** lofty already understands the four standard
+///    spellings across every container baz reads — Vorbis
+///    `REPLAYGAIN_TRACK_GAIN`, ID3v2 `TXXX:REPLAYGAIN_TRACK_GAIN`, MP4
+///    `----:com.apple.iTunes:replaygain_track_gain`, APE
+///    `REPLAYGAIN_TRACK_GAIN` — and folds them onto one [`ItemKey`]. Asking for
+///    the `ItemKey` is therefore the whole of the container-specific work, and
+///    the canonical name is handed to the parser alongside the value.
+/// 2. **The unmapped keys**, for the one form no standard blesses and lofty
+///    therefore leaves as [`ItemKey::Unknown`]: the Opus-style `R128_TRACK_GAIN`
+///    integer, which turns up in Vorbis comments on FLAC and Ogg files written
+///    by R128-era tools even though `.opus` itself is not scanned.
+///
+/// Recognition, parsing and precedence all live in [`crate::replaygain`], so a
+/// file means the same thing to the scanner as it does to the playback path —
+/// which reads the same tags through Symphonia rather than lofty.
+fn replay_gain(tag: &Tag) -> ReplayGainTags {
+    const MAPPED: [(&str, ItemKey); 4] = [
+        ("REPLAYGAIN_TRACK_GAIN", ItemKey::ReplayGainTrackGain),
+        ("REPLAYGAIN_TRACK_PEAK", ItemKey::ReplayGainTrackPeak),
+        ("REPLAYGAIN_ALBUM_GAIN", ItemKey::ReplayGainAlbumGain),
+        ("REPLAYGAIN_ALBUM_PEAK", ItemKey::ReplayGainAlbumPeak),
+    ];
+    let mut reader = ReplayGainReader::default();
+    for (name, key) in MAPPED {
+        if let Some(value) = tag.get_string(&key) {
+            reader.absorb(name, value);
+        }
+    }
+    for item in tag.items() {
+        if let ItemKey::Unknown(key) = item.key()
+            && let Some(value) = item.value().text()
+        {
+            reader.absorb(key, value);
+        }
+    }
+    reader.finish()
 }
 
 /// Which codec a file carries, from what lofty already parsed — which is a

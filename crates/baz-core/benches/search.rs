@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use baz_core::index::Library;
 use baz_core::library::TrackMeta;
+use baz_core::replaygain::ReplayGainTags;
 use criterion::{Criterion, criterion_group, criterion_main};
 
 const ADJECTIVES: &[&str] = &[
@@ -98,6 +99,7 @@ fn synthetic_tracks() -> Vec<TrackMeta> {
                     sample_rate: Some(44_100),
                     bitrate: Some(900),
                     stamp: None,
+                    replay_gain: ReplayGainTags::default(),
                 });
             }
         }

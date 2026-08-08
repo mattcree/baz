@@ -86,9 +86,10 @@ use std::time::Duration;
 use rusqlite::{Connection, params};
 
 use crate::library::{AudioFormat, FileStamp, KnownFiles, TrackMeta};
+use crate::replaygain::ReplayGainTags;
 
 /// The schema version this build reads and writes (`PRAGMA user_version`).
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 /// Rows per write transaction in [`Library::add_tracks`]. A scan yields tens
 /// of thousands of tracks; committing in batches keeps any single
@@ -151,15 +152,35 @@ const SCHEMA_V4_COLUMNS: &str = "
     ALTER TABLE tracks ADD COLUMN file_size INTEGER; -- bytes
 ";
 
+/// Version 5: the ReplayGain figures a file already carries
+/// (`docs/adr/0013-replaygain.md`). Four more nullable columns, added rather
+/// than rebuilt, exactly as v2, v3 and v4 were.
+///
+/// Integer columns, in the units [`crate::replaygain`] argues for: gains in
+/// hundredths of a decibel, peaks in millionths of full scale. A `REAL` column
+/// would have stored a value the tag never carried that much precision for,
+/// and would have cost [`TrackMeta`] its `Eq`.
+///
+/// The transaction and the `user_version` bump are applied by
+/// [`migrate_v4_to_v5`].
+const SCHEMA_V5_COLUMNS: &str = "
+    ALTER TABLE tracks ADD COLUMN rg_track_gain_centidb INTEGER; -- 0.01 dB
+    ALTER TABLE tracks ADD COLUMN rg_track_peak_micro   INTEGER; -- 1e-6 FS
+    ALTER TABLE tracks ADD COLUMN rg_album_gain_centidb INTEGER; -- 0.01 dB
+    ALTER TABLE tracks ADD COLUMN rg_album_peak_micro   INTEGER; -- 1e-6 FS
+";
+
 /// Insert-or-replace by path: a rescan of the same file updates its metadata
 /// instead of failing the batch or duplicating the track.
 const UPSERT_TRACK: &str = "
     INSERT INTO tracks
         (path, artist, album, title, track, disc, year, duration_ns,
          format, bit_depth, sample_rate, bitrate, album_artist, compilation,
-         mtime_ns, file_size)
+         mtime_ns, file_size,
+         rg_track_gain_centidb, rg_track_peak_micro,
+         rg_album_gain_centidb, rg_album_peak_micro)
     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-            ?15, ?16)
+            ?15, ?16, ?17, ?18, ?19, ?20)
     ON CONFLICT(path) DO UPDATE SET
         artist = excluded.artist,
         album = excluded.album,
@@ -175,13 +196,19 @@ const UPSERT_TRACK: &str = "
         album_artist = excluded.album_artist,
         compilation = excluded.compilation,
         mtime_ns = excluded.mtime_ns,
-        file_size = excluded.file_size
+        file_size = excluded.file_size,
+        rg_track_gain_centidb = excluded.rg_track_gain_centidb,
+        rg_track_peak_micro = excluded.rg_track_peak_micro,
+        rg_album_gain_centidb = excluded.rg_album_gain_centidb,
+        rg_album_peak_micro = excluded.rg_album_peak_micro
 ";
 
 const SELECT_ALL_TRACKS: &str = "
     SELECT path, artist, album, title, track, disc, year, duration_ns,
            format, bit_depth, sample_rate, bitrate, album_artist, compilation,
-           mtime_ns, file_size
+           mtime_ns, file_size,
+           rg_track_gain_centidb, rg_track_peak_micro,
+           rg_album_gain_centidb, rg_album_peak_micro
     FROM tracks
 ";
 
@@ -336,6 +363,10 @@ impl Library {
                         meta.compilation,
                         meta.stamp.map(|stamp| stamp.mtime_ns),
                         meta.stamp.and_then(|stamp| i64::try_from(stamp.size).ok()),
+                        meta.replay_gain.track_gain_centidb,
+                        meta.replay_gain.track_peak_micro,
+                        meta.replay_gain.album_gain_centidb,
+                        meta.replay_gain.album_peak_micro,
                     ])?;
                 }
             }
@@ -943,7 +974,7 @@ impl ArtistKey {
 /// `user_version`, so versions chain automatically: a v3 adds a `2 => ...`
 /// arm and bumps [`SCHEMA_VERSION`], nothing else.
 ///
-/// A brand-new database walks the *whole* chain (0 → v1 → … → v4) rather
+/// A brand-new database walks the *whole* chain (0 → v1 → … → v5) rather
 /// than being stamped with the current schema directly. That costs a few
 /// statements once, and buys the guarantee that a freshly created database
 /// and an upgraded one are byte-identical in shape — no class of "works on a
@@ -957,6 +988,7 @@ fn migrate(conn: &Connection) -> Result<(), IndexError> {
             1 => migrate_v1_to_v2(conn)?,
             2 => migrate_v2_to_v3(conn)?,
             3 => migrate_v3_to_v4(conn)?,
+            4 => migrate_v4_to_v5(conn)?,
             SCHEMA_VERSION => return Ok(()),
             found => return Err(IndexError::SchemaTooNew { found }),
         }
@@ -1032,6 +1064,38 @@ fn migrate_v3_to_v4(conn: &Connection) -> Result<(), IndexError> {
     let tx = conn.unchecked_transaction()?;
     tx.execute_batch(SCHEMA_V4_COLUMNS)?;
     tx.pragma_update(None, "user_version", 4)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// v4 → v5: add the ReplayGain columns (ADR-0013).
+///
+/// `NULL` for every existing row, and the only honest value. A ReplayGain
+/// figure lives in the file's tags and nowhere else — nothing already in the
+/// database implies one, and *computing* one means an EBU R128 analysis pass
+/// over every track, which is separate work that does not exist yet and could
+/// certainly not happen inside a migration. The v2 backfill had a file
+/// extension to read; there is no equivalent here.
+///
+/// `NULL` is self-healing rather than permanent, exactly as v2's, v3's and
+/// v4's gaps were: baz rescans its music folder at every start and
+/// [`Library::add_tracks`] upserts, so the first scan after the upgrade fills
+/// in every surviving file's real ReplayGain. That scan is incremental (v4), so
+/// an unchanged file is *not* re-read and keeps its NULLs — which is correct
+/// and not a bug: an unchanged file is one whose tags have not moved, and a
+/// listener who runs a ReplayGain scanner over their library changes the files,
+/// which moves their stamps, which is what makes baz re-read them. Until then
+/// [`ReplayGainSource::NoTag`](crate::protocol::ReplayGainSource::NoTag) is the
+/// honest reading and the no-ReplayGain pre-amp (zero by default) is what
+/// applies, so the upgrade cannot change what anything sounds like.
+///
+/// The `ALTER TABLE`s and the `user_version` bump are one transaction
+/// (SQLite's DDL is transactional), so an interrupted upgrade leaves a v4
+/// database that the next open migrates again.
+fn migrate_v4_to_v5(conn: &Connection) -> Result<(), IndexError> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(SCHEMA_V5_COLUMNS)?;
+    tx.pragma_update(None, "user_version", 5)?;
     tx.commit()?;
     Ok(())
 }
@@ -1114,6 +1178,35 @@ fn row_to_meta(row: &rusqlite::Row<'_>) -> Result<TrackMeta, IndexError> {
         album_artist: row.get(12)?,
         compilation: row.get(13)?,
         stamp: row_to_stamp(row)?,
+        replay_gain: row_to_replay_gain(row)?,
+    })
+}
+
+/// The [`ReplayGainTags`] a row carries (schema v5), `None` per field for a
+/// pre-v5 row or a file that declared nothing.
+///
+/// A stored value outside the range its unit can hold degrades to `None` — the
+/// same "this file did not say" a missing column gives — rather than failing
+/// the open. Nothing baz writes can land outside the range; a value that has
+/// is a corrupt database, and refusing to open a listener's whole library over
+/// one bad integer would be the wrong trade (`AudioFormat::from_code` makes the
+/// same call for the same reason).
+fn row_to_replay_gain(row: &rusqlite::Row<'_>) -> Result<ReplayGainTags, IndexError> {
+    let gain = |column: usize| -> Result<Option<i16>, IndexError> {
+        Ok(row
+            .get::<_, Option<i64>>(column)?
+            .and_then(|v| i16::try_from(v).ok()))
+    };
+    let peak = |column: usize| -> Result<Option<u32>, IndexError> {
+        Ok(row
+            .get::<_, Option<i64>>(column)?
+            .and_then(|v| u32::try_from(v).ok()))
+    };
+    Ok(ReplayGainTags {
+        track_gain_centidb: gain(16)?,
+        track_peak_micro: peak(17)?,
+        album_gain_centidb: gain(18)?,
+        album_peak_micro: peak(19)?,
     })
 }
 
@@ -1232,6 +1325,7 @@ mod tests {
             sample_rate: None,
             bitrate: None,
             stamp: None,
+            replay_gain: ReplayGainTags::default(),
         }
     }
 
