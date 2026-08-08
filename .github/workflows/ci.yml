@@ -48,7 +48,11 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --all-features
+      # --no-fail-fast: cargo stops at the first failing test binary, so a
+      # crashing suite can hide failures in every suite that sorts after it
+      # (an access violation in `engine` masked broken `index` tests for
+      # several merges). A green tick must mean every suite passed.
+      - run: cargo test --workspace --all-features --no-fail-fast
 
   docs:
     name: rustdoc

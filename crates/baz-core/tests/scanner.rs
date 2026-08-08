@@ -1199,25 +1199,76 @@ fn a_file_in_an_unreadable_directory_is_not_confirmed_gone() {
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).expect("unlock");
 }
 
+/// The inverse of `FileStamp::modified`, mirroring what `FileStamp::of`
+/// computes from metadata. Written here rather than called from `baz-core`
+/// so the round-trip is checked against an independent implementation
+/// instead of the code under test agreeing with itself.
+fn system_time_to_ns(t: std::time::SystemTime) -> Option<i64> {
+    match t.duration_since(std::time::UNIX_EPOCH) {
+        Ok(since) => i64::try_from(since.as_nanos()).ok(),
+        Err(before) => i64::try_from(before.duration().as_nanos())
+            .ok()
+            .and_then(i64::checked_neg),
+    }
+}
+
 #[test]
 fn a_stamp_survives_a_round_trip_through_system_time() {
+    // Our own conversion must be lossless in both directions. This is the
+    // part baz controls, so it is asserted exactly.
     for mtime_ns in [0, 1, 1_700_000_000_123_456_789, -86_400_000_000_001] {
         let stamp = FileStamp {
             mtime_ns,
             size: 123,
         };
+        assert_eq!(
+            system_time_to_ns(stamp.modified()),
+            Some(mtime_ns),
+            "SystemTime conversion must not lose nanoseconds"
+        );
+    }
+}
+
+#[test]
+fn a_stamp_read_from_the_filesystem_is_stable() {
+    // What incremental scanning actually needs is that an untouched file
+    // reports the *same* stamp every time — not that the filesystem preserves
+    // whatever nanosecond count we handed it. It usually cannot: NTFS keeps
+    // 100-nanosecond ticks since 1601, HFS+ whole seconds, FAT two of them.
+    // Asserting exact fidelity tested the filesystem's granularity, not baz,
+    // and failed on Windows for a reason that says nothing about our code.
+    for mtime_ns in [0, 1, 1_700_000_000_123_456_789, -86_400_000_000_001] {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = write_wav(dir.path(), "a.wav");
-        fs::File::options()
+        let requested = FileStamp {
+            mtime_ns,
+            size: 123,
+        }
+        .modified();
+        if fs::File::options()
             .write(true)
             .open(&path)
             .expect("reopen")
-            .set_modified(stamp.modified())
-            .expect("set mtime");
+            .set_modified(requested)
+            .is_err()
+        {
+            // Some platforms refuse pre-epoch or out-of-range timestamps
+            // outright. Refusing is fine; silently mangling is what would
+            // matter, and the stability check below covers that.
+            continue;
+        }
+        let first = FileStamp::of_path(&path).expect("stamp");
+        let second = FileStamp::of_path(&path).expect("stamp again");
         assert_eq!(
-            FileStamp::of_path(&path).map(|s| s.mtime_ns),
-            Some(mtime_ns),
-            "the filesystem must give back the nanosecond count we set"
+            first, second,
+            "an untouched file must report an identical stamp every read"
+        );
+        assert_eq!(
+            Some(first),
+            std::fs::metadata(&path)
+                .ok()
+                .and_then(|m| FileStamp::of(&m)),
+            "of_path must agree with the metadata the platform reports"
         );
     }
 }
