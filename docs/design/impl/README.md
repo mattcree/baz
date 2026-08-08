@@ -1,0 +1,99 @@
+# Increments 1–5 — rendered evidence
+
+Pixel evidence for the first five increments of
+[`../01-ux-audit-and-ia.md`](../01-ux-audit-and-ia.md) §5. Every image is the
+real binary, captured the way [§0.2](../01-ux-audit-and-ia.md#02-how-the-screenshots-were-made)
+specifies and nothing was touched that this work did not start:
+
+- a private `Xvfb :141` at 1400×1000, `env -u WAYLAND_DISPLAY
+  WINIT_UNIX_BACKEND=x11`; the app opens at its shipped 1280×860 and there is
+  no window manager to move it;
+- scratch `HOME` **and** scratch `XDG_DATA_HOME` / `XDG_CONFIG_HOME` /
+  `XDG_CACHE_HOME` / `XDG_STATE_HOME`, so the maintainer's library database and
+  config were never opened;
+- a throwaway 18-album / 109-track fixture of generated covers and **digitally
+  silent** FLAC, never `~/Music`;
+- captures targeted at *this* process's window by pid, never "the active
+  window";
+- the build carries `device-output` — the transport is what three of the five
+  increments are about — so the private `HOME` also carries an `.asoundrc`
+  routing ALSA's default PCM to the `null` device. Two independent guarantees
+  of silence: every sample is a zero, and the sink discards it.
+
+One consequence of the null sink is worth stating because it is visible in the
+frames: it accepts writes as fast as they arrive, so playback free-wheels at
+roughly ten times real time. That is why the elapsed timestamps advance faster
+than the interval between captures, and why a queue left alone walks forward
+through its tracks. Nothing about the marking depends on it — the dot follows
+`TrackStarted` either way.
+
+## The frames
+
+| Image | What it shows |
+|---|---|
+| [`01-shelf.png`](01-shelf.png) | **Increment 2 and 5.** Five columns at 1280 px. Every artist line sits on one baseline: *Selected Ambient Works 85-92* and *Music Has the Right to Children* clip at one line instead of pushing their artist line down. The bar carries `⏮ ⏵ ⏭` with Previous inert, because nothing is playing. |
+| [`02-column-hold-during.png`](02-column-hold-during.png) | **Increment 3, mid-gesture.** One press on a tile; the inspector is up and the grid is *still laid out at five columns*. |
+| [`03-column-hold-after.png`](03-column-hold-after.png) | The same click 400 ms later: the reflow to three columns lands. Deferred, never cancelled. |
+| [`04-doubleclick-plays.png`](04-doubleclick-plays.png) | **Increment 3, the repair.** A double-click on column 3 of row 0 — the case the audit filmed failing ([`12-doubleclick-reflow.png`](../audit/12-doubleclick-reflow.png)) — now plays. The tile is haloed and dotted, the inspector marks the sounding track, the bar names it. |
+| [`05-inspector-playing.png`](05-inspector-playing.png) | **Increments 1 and 4.** A click on the fifth track row started the album there (`SetQueue` + `JumpTo`, since the engine held nothing). The lamp dot sits in the 24 px number column, the row is carded, and the title takes the medium weight the bar gives the same string. |
+| [`06-inspector-jumped.png`](06-inspector-jumped.png) | **Increment 4, the case worth having.** A click on row 1 while row 5 played: the engine already held this album, so this is `JumpTo` alone. The engine trace shows `queue #4` then `queue #0` with nothing between — a jump, not five skips. |
+| [`07-shelf-1000.png`](07-shelf-1000.png) | The second width: 1000×760, two columns, the block still anchored to its columns rather than to its contents. |
+| [`08-bar-stopped.png`](08-bar-stopped.png) · [`09-bar-playing.png`](09-bar-playing.png) · [`10-bar-paused.png`](10-bar-paused.png) · [`11-bar-seek-hover.png`](11-bar-seek-hover.png) | **Increment 5.** The bottom bar in four of its states, cropped to the same 1280×104 region of the window. |
+| [`12-bar-states-stacked.png`](12-bar-states-stacked.png) | The four stacked, for reading the transport row down a single column. |
+| [`13-bar-diff-playing-vs-paused.png`](13-bar-diff-playing-vs-paused.png) · [`14-bar-diff-stopped-vs-playing.png`](14-bar-diff-stopped-vs-playing.png) | Difference images, auto-levelled. Everything that lights up is *inside* a slot that was reserved for it. |
+
+## What increment 3 does *not* fix, stated rather than implied
+
+The audit's frame was a double-click on the **fifth** tile of row 0. Holding
+the column count does not rescue that particular tile at 1280 px, and no
+arithmetic in the grid could: five columns put it at x 1000–1240, and the
+inspector the first press opens occupies x 940–1280. The tile does not move —
+it is *covered*. A second press there lands on the panel because the panel is
+there.
+
+What the hold does fix is every tile that remains in the shelf's own width, and
+that is where the failure actually lived: without it, column 3 regrouped to row
+1 column 0, so the second press selected a different album and nothing played.
+[`04-doubleclick-plays.png`](04-doubleclick-plays.png) is that case, working.
+
+One residual is visible if you compare [`01-shelf.png`](01-shelf.png) with
+[`02-column-hold-during.png`](02-column-hold-during.png): the block shifts left
+by 16 px during the hold, because the grid is *centred* in the shelf viewport
+and the viewport narrowed. Sixteen pixels is well inside a 240 px tile, so it
+breaks no gesture — and it disappears when the rail does, in increments 6–8.
+
+## The pixel-stability measurement
+
+The bar gained a control, so its promise — *nothing moves as the music moves* —
+was re-measured rather than assumed. Two readings, over six states (stopped,
+playing, after Previous, paused, seek-hovered, resumed):
+
+**The transport row's ink occupies exactly the same pixels in every state.**
+Thresholded bounding box of the row, in the same crop:
+
+```
+bar-1-stopped            112x32+2+6
+bar-2-playing            112x32+2+6
+bar-3-after-previous     112x32+2+6
+bar-4-paused             112x32+2+6
+bar-5-seek-hover         112x32+2+6
+bar-6-resumed            112x32+2+6
+```
+
+112 = 3 × `TRANSPORT_HIT` 32 + 2 × `GAP_SM` 8 — the three buttons and the two
+gaps, to the pixel, whether the middle glyph is play or pause and whether the
+outer two are live or inert.
+
+**The bar's top edge does not move.** Sampled at x = 300 (a column with no
+content in any state), the hairline is at row 2 of the crop and `RECESS` begins
+at row 3 — in all six. A bar whose height varied with the transport would slide
+that hairline.
+
+The differing-pixel counts, playing versus each state, land where they should:
+
+```
+bar-3-after-previous       429 px  seek fill only (the position moved)
+bar-4-paused               562 px  the toggle's glyph box + the seek fill
+bar-5-seek-hover         1 687 px  the reserved preview lane + the fill
+bar-1-stopped            4 241 px  title, timestamps and groove appear at all
+```

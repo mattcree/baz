@@ -130,7 +130,7 @@ pub(crate) struct TrackInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[expect(
     clippy::struct_excessive_bools,
-    reason = "the five flags are MPRIS's five Can* properties, one for one; folding them into a \
+    reason = "the six flags are MPRIS's six Can* properties, one for one; folding them into a \
               state machine would put a translation between the spec and the wire, which is \
               exactly what this struct exists to avoid"
 )]
@@ -149,6 +149,15 @@ pub(crate) struct Snapshot {
     pub(crate) muted: bool,
     /// `CanGoNext`.
     pub(crate) can_go_next: bool,
+    /// `CanGoPrevious`.
+    ///
+    /// Reported rather than pinned to `false` since the transport gained a
+    /// Previous button: the engine's `Command::Previous` was always there, and
+    /// what was missing was anything to send it. It tracks
+    /// [`PlayerState::previous_enabled`] — a running queue can always go back,
+    /// because at the head of the queue, and past three seconds into any
+    /// track, `Previous` restarts what is playing rather than doing nothing.
+    pub(crate) can_go_previous: bool,
     /// `CanPlay`.
     pub(crate) can_play: bool,
     /// `CanPause`.
@@ -172,6 +181,7 @@ impl Default for Snapshot {
             volume_position: MAX_POSITION,
             muted: false,
             can_go_next: false,
+            can_go_previous: false,
             can_play: false,
             can_pause: false,
             can_seek: false,
@@ -225,6 +235,7 @@ impl Snapshot {
             volume_position: player.volume().position(),
             muted: player.muted(),
             can_go_next: player.next_enabled(),
+            can_go_previous: player.previous_enabled(),
             can_play: player.play_pause_enabled(),
             // Pause is a documented engine no-op while stopped, so offering
             // it then would be an offer we cannot honour.
@@ -533,6 +544,7 @@ mod tests {
         assert!(!snapshot.can_play);
         assert!(!snapshot.can_pause);
         assert!(!snapshot.can_go_next);
+        assert!(!snapshot.can_go_previous);
         assert!(!snapshot.can_seek);
 
         // Playing a track of known length: everything is possible.
@@ -542,6 +554,7 @@ mod tests {
         assert!(snapshot.can_play);
         assert!(snapshot.can_pause);
         assert!(snapshot.can_go_next);
+        assert!(snapshot.can_go_previous);
         assert!(snapshot.can_seek);
 
         // Stopped with a queue still loaded: Play can restart it, but there
@@ -551,6 +564,10 @@ mod tests {
         assert!(snapshot.can_play);
         assert!(!snapshot.can_pause);
         assert!(!snapshot.can_go_next);
+        assert!(
+            !snapshot.can_go_previous,
+            "a relative command has nothing to be relative to while stopped"
+        );
         assert!(!snapshot.can_seek);
     }
 

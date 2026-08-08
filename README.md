@@ -37,6 +37,7 @@ The full vision, competitive analysis, and staged scope live in
 | <kbd>←</kbd> <kbd>→</kbd> | seek 5 s back / forward |
 | <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> | seek 30 s back / forward |
 | <kbd>N</kbd>, or <kbd>Ctrl</kbd>+<kbd>→</kbd> | next track |
+| <kbd>Ctrl</kbd>+<kbd>←</kbd> | previous track — or restart this one, if you are more than 3 s in |
 | <kbd>↑</kbd> <kbd>↓</kbd> | volume up / down, one step (~1 dB at the top of the fader) |
 | <kbd>M</kbd> | mute / unmute |
 | <kbd>/</kbd>, or <kbd>Ctrl</kbd>+<kbd>F</kbd> | focus the search field |
@@ -45,7 +46,7 @@ The full vision, competitive analysis, and staged scope live in
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> | hide the side panel, or bring it back |
 | <kbd>Esc</kbd> | clear the search, else close the open panel |
 
-Media keys (play/pause, next, stop) work too — on Linux they usually arrive
+Media keys (play/pause, previous, next, stop) work too — on Linux they usually arrive
 over MPRIS rather than as key presses, which is the same thing by a different
 road. The *volume* media keys are deliberately left alone: on every desktop
 they mean the system's volume, and baz's fader is baz's own.

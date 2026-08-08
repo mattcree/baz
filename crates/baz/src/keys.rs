@@ -47,6 +47,27 @@
 //! from the first; 6× reads as a different gesture, where 2× would just feel
 //! like an unreliable 5.
 //!
+//! # Previous
+//!
+//! <kbd>Ctrl</kbd>+<kbd>←</kbd> (<kbd>Cmd</kbd>+<kbd>←</kbd>) is Previous, the
+//! exact mirror of the <kbd>Ctrl</kbd>+<kbd>→</kbd> that was already Next. The
+//! symmetry is the argument: the arrow cluster's two horizontal keys seek, and
+//! the same two under the transport modifier step tracks, so a hand that knows
+//! one knows the other. It is also the only spelling this command gets a bare
+//! key for — `p` is not the reflex `n` is, and it is one slip away from a
+//! *play* the transport already binds to Space.
+//!
+//! `MediaTrackPrevious` joins the media-key family below for the reason the
+//! rest of them are there: on the machines that deliver it to the window
+//! rather than to a shortcut daemon it means one thing, and it is the same
+//! thing everywhere. Leaving it unbound while `MediaTrackNext` worked was an
+//! artefact of the engine having no `Previous` command to send, which it now
+//! does (ADR-0014's siblings; the command itself predates it).
+//!
+//! Both resolve to [`Message::PreviousTrack`] — the same message the bottom
+//! bar's new `|◀` sends and the same one MPRIS's `Previous` maps to, so the
+//! rule that no shortcut can do what no control can do still holds.
+//!
 //! Seeks are relative to the position the seek bar is *showing* (a scrub
 //! under the pointer, else a seek awaiting confirmation, else the engine's
 //! last report — [`crate::player`] pins that precedence), so holding Right
@@ -163,8 +184,10 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Named(key::Named::Space) | Key::Character(" ") if bare => Some(Message::PlayPause),
         Key::Character("n" | "N") if bare || shift => Some(Message::NextTrack),
         // Ctrl+Right (Cmd+Right on macOS) is the second spelling of Next, for
-        // hands that never leave the arrow cluster.
+        // hands that never leave the arrow cluster — and Ctrl+Left is its
+        // mirror, Previous (module docs).
         Key::Named(key::Named::ArrowRight) if command => Some(Message::NextTrack),
+        Key::Named(key::Named::ArrowLeft) if command => Some(Message::PreviousTrack),
 
         // Seeking. Shift widens the step; nothing else may ride along.
         Key::Named(key::Named::ArrowRight) if bare => Some(Message::SeekBy(SEEK_STEP_MS)),
@@ -203,6 +226,7 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         // listening.
         Key::Named(key::Named::MediaPlayPause) => Some(Message::PlayPause),
         Key::Named(key::Named::MediaTrackNext) => Some(Message::NextTrack),
+        Key::Named(key::Named::MediaTrackPrevious) => Some(Message::PreviousTrack),
         Key::Named(key::Named::MediaStop) => Some(Message::Stop),
         Key::Named(key::Named::Play) => Some(Message::Play),
         Key::Named(key::Named::Pause) => Some(Message::Pause),
@@ -268,6 +292,7 @@ mod tests {
             (named(key::Named::ArrowLeft), Modifiers::SHIFT),
             (named(key::Named::ArrowRight), Modifiers::SHIFT),
             (named(key::Named::ArrowRight), Modifiers::COMMAND),
+            (named(key::Named::ArrowLeft), Modifiers::COMMAND),
             (named(key::Named::ArrowUp), none()),
             (named(key::Named::ArrowDown), none()),
             (ch("n"), none()),
@@ -280,6 +305,7 @@ mod tests {
             (named(key::Named::Escape), none()),
             (named(key::Named::MediaPlayPause), none()),
             (named(key::Named::MediaTrackNext), none()),
+            (named(key::Named::MediaTrackPrevious), none()),
         ];
         for (key, modifiers) in &every_bound_key {
             assert!(
@@ -372,17 +398,61 @@ mod tests {
         );
     }
 
-    /// Ctrl+Right is Next, not a 5-second seek: the modified arm must win.
+    /// Ctrl+Right is Next and Ctrl+Left is Previous, not 5-second seeks: the
+    /// modified arms must win over the bare ones for both arrows.
     #[test]
-    fn ctrl_right_is_next_not_a_seek() {
+    fn the_modified_arrows_step_tracks_rather_than_seeking() {
         assert_eq!(
             bind(&named(key::Named::ArrowRight), Modifiers::COMMAND).as_deref(),
             Some("NextTrack")
         );
-        // Ctrl+Left is nothing — there is no Previous in the engine protocol.
         assert_eq!(
-            bind(&named(key::Named::ArrowLeft), Modifiers::COMMAND),
+            bind(&named(key::Named::ArrowLeft), Modifiers::COMMAND).as_deref(),
+            Some("PreviousTrack")
+        );
+        // …and the bare and Shift arms still seek, so the modifier is the
+        // whole of the difference.
+        assert_eq!(
+            bind(&named(key::Named::ArrowLeft), none()).as_deref(),
+            Some("SeekBy(-5000)")
+        );
+        assert_eq!(
+            bind(&named(key::Named::ArrowLeft), Modifiers::SHIFT).as_deref(),
+            Some("SeekBy(-30000)")
+        );
+    }
+
+    /// Previous has two spellings and both suppress under a focused field —
+    /// the focus rule is not relaxed for the newest binding.
+    #[test]
+    fn previous_has_two_spellings_and_neither_survives_a_focused_field() {
+        for (key, modifiers) in [
+            (named(key::Named::ArrowLeft), Modifiers::COMMAND),
+            (named(key::Named::MediaTrackPrevious), none()),
+        ] {
+            assert_eq!(
+                bind(&key, modifiers).as_deref(),
+                Some("PreviousTrack"),
+                "{key:?} + {modifiers:?} should be Previous"
+            );
+            assert!(
+                binding_for(&key, modifiers, Focus::TextField).is_none(),
+                "{key:?} + {modifiers:?} must belong to the focused field"
+            );
+        }
+        // Ctrl+Left is the whole binding: an extra modifier is not it, and a
+        // bare Left is a seek (asserted above), not a track step.
+        assert_eq!(
+            bind(
+                &named(key::Named::ArrowLeft),
+                Modifiers::COMMAND | Modifiers::SHIFT
+            ),
             None
+        );
+        assert_eq!(
+            bind(&named(key::Named::ArrowLeft), Modifiers::ALT),
+            None,
+            "Alt+Left is the browser's Back, not baz's Previous"
         );
     }
 
@@ -462,6 +532,10 @@ mod tests {
             Some("NextTrack")
         );
         assert_eq!(
+            bind(&named(key::Named::MediaTrackPrevious), none()).as_deref(),
+            Some("PreviousTrack")
+        );
+        assert_eq!(
             bind(&named(key::Named::MediaStop), none()).as_deref(),
             Some("Stop")
         );
@@ -526,7 +600,6 @@ mod tests {
             named(key::Named::End),
             named(key::Named::PageUp),
             named(key::Named::F1),
-            named(key::Named::MediaTrackPrevious),
             ch("a"),
             ch("z"),
             ch("1"),

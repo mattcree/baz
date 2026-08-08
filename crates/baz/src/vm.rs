@@ -456,6 +456,41 @@ impl QueueVm {
         }
         self.items.iter().position(|item| item.path == path)
     }
+
+    /// Whether this queue is **exactly** `tracks`: the same files, in the same
+    /// order, and no others.
+    ///
+    /// The question the album inspector asks before it marks a row — *is the
+    /// album I am showing the queue that is playing?* — and the one a click on
+    /// a track row asks before it decides whether a re-queue is needed
+    /// (ADR-0014's `JumpTo`-alone case). Both need the same answer, so it is
+    /// one function.
+    ///
+    /// **Whole-list, in order, and nothing weaker.** The two near-misses are
+    /// exactly the ones a listener can produce by accident, and each must
+    /// answer *no*:
+    ///
+    /// - **The same album from a different edition.** A queue built from the
+    ///   FLAC rip and an inspector showing the MP3 rip list the same titles in
+    ///   the same order and share not one path. Marking a row there would put
+    ///   the dot on a file that is not sounding, and jumping would address a
+    ///   position in a queue the engine does not hold.
+    /// - **A prefix or a superset.** A queue is a play order, so "these tracks
+    ///   are among those" is not the same fact as "this is what is queued", and
+    ///   only the second one licenses an index.
+    ///
+    /// A queue that lists one file twice is compared position by position like
+    /// any other, so the repetition is preserved rather than collapsed — which
+    /// is what lets [`Self::playing`] go on distinguishing the two occurrences.
+    #[must_use]
+    pub fn holds_exactly(&self, tracks: &[TrackVm]) -> bool {
+        self.items.len() == tracks.len()
+            && self
+                .items
+                .iter()
+                .zip(tracks)
+                .all(|(item, track)| item.path == track.path)
+    }
 }
 
 /// The album's play queue: the **selected edition**'s tracks in the side
@@ -1178,6 +1213,83 @@ mod tests {
         // With no usable position, the first occurrence is the answer.
         assert_eq!(queue.playing(7, &path), Some(0));
         assert_eq!(queue.total_time(), Duration::from_secs(120));
+    }
+
+    /// The album inspector's question — *is what I am listing the queue that
+    /// is playing?* — with the two near-misses that must answer `false`.
+    #[test]
+    fn a_queue_holds_an_edition_exactly_or_not_at_all() {
+        let album = two_edition_album();
+        let flac = selected_edition(&album, None).expect("the default edition");
+        let mp3 = selected_edition(&album, Some(EditionKey(Some(AudioFormat::Mp3))))
+            .expect("the MP3 edition");
+
+        // The queue that was built from this edition holds it, exactly.
+        let queued = album_queue(&album, None);
+        assert!(queued.holds_exactly(&flac.tracks));
+
+        // The same album, the same titles, the same order — and a different
+        // set of files. The inspector must not mark a row from this queue.
+        assert!(
+            !queued.holds_exactly(&mp3.tracks),
+            "a different edition is a different queue"
+        );
+        assert!(
+            !album_queue(&album, Some(EditionKey(Some(AudioFormat::Mp3))))
+                .holds_exactly(&flac.tracks)
+        );
+
+        // A prefix is not the queue: "these are among those" licenses no index.
+        assert!(!queued.holds_exactly(&flac.tracks[..1]));
+        // Nor is a superset.
+        let mut longer = flac.tracks.clone();
+        longer.push(mp3.tracks[0].clone());
+        assert!(!queued.holds_exactly(&longer));
+        // Nor the same files in a different order.
+        let mut reversed = flac.tracks.clone();
+        reversed.reverse();
+        assert!(!queued.holds_exactly(&reversed));
+
+        // An empty queue holds an empty list and nothing else.
+        let empty = QueueVm {
+            album: None,
+            artist: UNKNOWN_ARTIST.to_owned(),
+            items: Vec::new(),
+        };
+        assert!(empty.holds_exactly(&[]));
+        assert!(!empty.holds_exactly(&flac.tracks));
+        assert!(!queued.holds_exactly(&[]));
+    }
+
+    /// A file listed twice is two entries, and the comparison keeps them —
+    /// which is what lets [`QueueVm::playing`] go on telling them apart.
+    #[test]
+    fn a_repeated_track_is_compared_position_by_position() {
+        let track = |path: &str| TrackVm {
+            number: Some(1),
+            title: "Loop".to_owned(),
+            artist: None,
+            duration: Some(Duration::from_secs(60)),
+            path: PathBuf::from(path),
+        };
+        let listed = vec![track("/m/a/1.flac"), track("/m/a/1.flac")];
+        let item = |path: &str| QueueItemVm {
+            title: "Loop".to_owned(),
+            artist: None,
+            duration: Some(Duration::from_secs(60)),
+            path: PathBuf::from(path),
+        };
+        let queue = QueueVm {
+            album: Some("Loop".to_owned()),
+            artist: "A".to_owned(),
+            items: vec![item("/m/a/1.flac"), item("/m/a/1.flac")],
+        };
+        assert!(queue.holds_exactly(&listed));
+        // The repetition is not collapsed: one entry is not two.
+        assert!(!queue.holds_exactly(&listed[..1]));
+        // And the queue still distinguishes the two occurrences by position.
+        assert_eq!(queue.playing(1, &listed[1].path), Some(1));
+        assert_eq!(queue.playing(0, &listed[0].path), Some(0));
     }
 
     #[test]

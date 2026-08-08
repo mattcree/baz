@@ -156,6 +156,7 @@ fn serve(updates: &Receiver<Update>, requests: UnboundedSender<Request>) {
             volume: (previous.volume_position, previous.muted)
                 != (current.volume_position, current.muted),
             can_go_next: previous.can_go_next != current.can_go_next,
+            can_go_previous: previous.can_go_previous != current.can_go_previous,
             can_play: previous.can_play != current.can_play,
             can_pause: previous.can_pause != current.can_pause,
             can_seek: previous.can_seek != current.can_seek,
@@ -180,6 +181,7 @@ struct Changed {
     metadata: bool,
     volume: bool,
     can_go_next: bool,
+    can_go_previous: bool,
     can_play: bool,
     can_pause: bool,
     can_seek: bool,
@@ -200,6 +202,9 @@ fn emit(player: &Player, context: &SignalContext<'static>, changed: &Changed) {
     }
     if changed.can_go_next {
         let _ = zbus::block_on(player.can_go_next_changed(context));
+    }
+    if changed.can_go_previous {
+        let _ = zbus::block_on(player.can_go_previous_changed(context));
     }
     if changed.can_play {
         let _ = zbus::block_on(player.can_play_changed(context));
@@ -321,9 +326,9 @@ impl Player {
         self.ask(Request::Next);
     }
 
-    /// A documented no-op: `baz-core`'s protocol has no previous command, and
-    /// `CanGoPrevious` says so.
-    fn previous(&self) {}
+    fn previous(&self) {
+        self.ask(Request::Previous);
+    }
 
     fn pause(&self) {
         self.ask(Request::Pause);
@@ -446,10 +451,9 @@ impl Player {
         self.snapshot.can_go_next
     }
 
-    /// There is no previous command in the engine protocol.
-    #[zbus(property(emits_changed_signal = "const"))]
+    #[zbus(property)]
     fn can_go_previous(&self) -> bool {
-        false
+        self.snapshot.can_go_previous
     }
 
     #[zbus(property)]

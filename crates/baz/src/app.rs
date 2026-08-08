@@ -59,8 +59,16 @@ use crate::{art, config, keys, mpris, player, scan, shelf, theme, views, vm};
 const TOP_BAR_H: f32 = 56.0;
 /// Initial window size.
 const WINDOW: Size = Size::new(1280.0, 860.0);
-/// Two clicks on the same tile within this window play the album.
-const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+
+/// How often the grid checks whether its held column count has expired.
+///
+/// Subscribed **only** while a hold stands (see [`shelf::ColumnHold`]), which
+/// is at most [`shelf::DOUBLE_CLICK`] after a tile click, so this is a handful
+/// of ticks per click and nothing at all the rest of the time. Coarse on
+/// purpose: the hold's job is to survive one gesture, and the reflow landing a
+/// few tens of milliseconds late is invisible where landing 300 ms early
+/// broke a documented one.
+const COLUMN_HOLD_TICK: Duration = Duration::from_millis(40);
 
 /// The shelf scrollable's id — the update loop scrolls it back to the top
 /// when the query changes, and [`crate::views::shelf`] attaches it.
@@ -141,17 +149,30 @@ pub(crate) enum Message {
     /// Window resized (approximate grid geometry until the next scroll).
     WindowResized(Size),
     /// An album tile was clicked (toggles selection / side panel; a second
-    /// click within [`DOUBLE_CLICK`] plays the album).
+    /// click within [`shelf::DOUBLE_CLICK`] plays the album).
     AlbumClicked(u64),
+    /// The grid's held column count may have expired — ticked only while one
+    /// is held (see [`shelf::ColumnHold`]).
+    ColumnHoldTick,
     /// Queue the album's tracks and play (side-panel Play, tile
     /// double-click).
     PlayAlbum(u64),
+    /// A track row of the album inspector was clicked: play that album from
+    /// that row (`album id`, zero-based row). One message for both of
+    /// ADR-0014's cases — which commands go out is
+    /// [`PlayerState::play_from`](crate::player::PlayerState::play_from)'s
+    /// decision, not the view's.
+    PlayTrack(u64, usize),
     /// Side panel: a different format of the selected album was picked.
     EditionSelected(u64, vm::EditionKey),
     /// Bottom bar, Space, or MPRIS `PlayPause`: play/pause toggle.
     PlayPause,
     /// Bottom bar, `N`, or MPRIS `Next`: skip to the next queued track.
     NextTrack,
+    /// Bottom bar, Ctrl+`←`, or MPRIS `Previous`: step back a track, or
+    /// restart the current one — the engine's three-second rule decides which,
+    /// and the front end deliberately holds no opinion about it.
+    PreviousTrack,
     /// MPRIS `Play` (or a `Play` media key): start or resume — *not* a
     /// toggle. There is no on-screen control for it; the toggle covers both
     /// directions, where a desktop media widget asks for one specifically.
@@ -346,7 +367,10 @@ impl App {
         // resolves to "tell the state machine, maybe tell the engine", so it
         // is answered first and separately rather than as nine more arms
         // below.
-        if self.update_volume(&message) || self.update_replay_gain(&message) {
+        if self.update_volume(&message)
+            || self.update_replay_gain(&message)
+            || self.update_transport(&message)
+        {
             return Task::none();
         }
         match message {
@@ -369,35 +393,8 @@ impl App {
                 self.play_album(id);
                 Task::none()
             }
-            Message::PlayPause => {
-                // The same reading the glyph is drawn from, so a press asks
-                // for exactly what the button was showing (Play also resumes
-                // a paused engine, so a stale read is still safe).
-                let command = match self.player.play_pause() {
-                    player::PlayPause::Pause => Command::Pause,
-                    player::PlayPause::Play => Command::Play,
-                };
-                self.send_transport(command);
-                Task::none()
-            }
-            Message::NextTrack => {
-                self.send_transport(Command::Next);
-                Task::none()
-            }
-            // Play/Pause/Stop have no button of their own; a desktop media
-            // widget (and a media key) asks for a direction rather than a
-            // toggle, and they take the same path to the engine as the
-            // toggle does.
-            Message::Play => {
-                self.send_transport(Command::Play);
-                Task::none()
-            }
-            Message::Pause => {
-                self.send_transport(Command::Pause);
-                Task::none()
-            }
-            Message::Stop => {
-                self.send_transport(Command::Stop);
+            Message::PlayTrack(id, row) => {
+                self.play_track(id, row);
                 Task::none()
             }
             Message::SeekBy(delta_ms) => {
@@ -596,6 +593,40 @@ impl App {
         }
     }
 
+    /// Answer a transport message, reporting whether it was one.
+    ///
+    /// The six of them are one small machine, exactly as the volume's nine and
+    /// ReplayGain's four are: each resolves to a single
+    /// [`Command`] and goes out through
+    /// [`Self::send_transport`], and none of them touches a single thing the
+    /// interface displays — the state machine follows the engine's confirming
+    /// event and nothing else (`player.rs`'s honesty rule).
+    ///
+    /// Play, Pause and Stop have no button of their own: a desktop media
+    /// widget (and a media key) asks for a *direction* rather than a toggle,
+    /// where the bar's control covers both. Previous, Next and the toggle do,
+    /// and they arrive here from the button, the keyboard and MPRIS as the
+    /// same message.
+    fn update_transport(&mut self, message: &Message) -> bool {
+        let command = match *message {
+            // The same reading the glyph is drawn from, so a press asks for
+            // exactly what the button was showing (Play also resumes a paused
+            // engine, so a stale read is still safe).
+            Message::PlayPause => match self.player.play_pause() {
+                player::PlayPause::Pause => Command::Pause,
+                player::PlayPause::Play => Command::Play,
+            },
+            Message::NextTrack => Command::Next,
+            Message::PreviousTrack => Command::Previous,
+            Message::Play => Command::Play,
+            Message::Pause => Command::Pause,
+            Message::Stop => Command::Stop,
+            _ => return false,
+        };
+        self.send_transport(command);
+        true
+    }
+
     /// Answer a volume message, reporting whether it was one.
     ///
     /// Every arm follows the same shape as the seek bar's: the state machine
@@ -717,6 +748,69 @@ impl App {
         self.publish_mpris(false);
     }
 
+    /// Play `id` from row `row` of its selected edition — a click on a track
+    /// row of the album inspector (ADR-0014, and §3.2 step 4 of the UX spec).
+    ///
+    /// The decision this spends is
+    /// [`PlayerState::play_from`](crate::player::PlayerState::play_from)'s and
+    /// it is made from the queue the engine is *known* to hold:
+    ///
+    /// - **It already holds this album** — one
+    ///   [`JumpTo`](Command::JumpTo). Nothing is re-queued, so the run the
+    ///   listener is in the middle of is not replaced to move within it, and
+    ///   no `Stopped` interrupts it.
+    /// - **It does not** — [`SetQueue`](Command::SetQueue) then `JumpTo`. The
+    ///   `SetQueue` stops what was playing, which is what the listener asked
+    ///   for by pointing at a different album, and the `JumpTo` is what makes
+    ///   the click land on the row rather than at the top.
+    ///
+    /// Nothing on screen moves here. The dot follows `TrackStarted` exactly as
+    /// it does for every other way of starting a track — never the click, per
+    /// ADR-0014's front-end contract.
+    fn play_track(&mut self, id: u64, row: usize) {
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        let Some(album) = state.albums.iter().find(|album| album.id == id) else {
+            return;
+        };
+        let chosen = state.edition_choice.get(&id).copied();
+        let Some(edition) = vm::selected_edition(album, chosen) else {
+            return;
+        };
+        // The list the row was drawn from and the list that would be queued
+        // come from the same `selected_edition`, so "is this album the queue"
+        // is asked about exactly what the user clicked.
+        let Some(decision) = self.player.play_from(&edition.tracks, row) else {
+            return;
+        };
+        let position = match decision {
+            player::PlayFrom::Jump { position } => position,
+            player::PlayFrom::Requeue { position } => {
+                let queue = vm::album_queue(album, chosen);
+                if queue.is_empty() {
+                    return;
+                }
+                let paths = queue.paths();
+                if !self.playback.send(Command::SetQueue { paths }) {
+                    self.player.engine_closed();
+                    return;
+                }
+                self.player.note_queue_sent(queue);
+                position
+            }
+        };
+        if self.playback.send(Command::JumpTo { position }) {
+            self.player.note_transport_sent();
+        } else {
+            self.player.engine_closed();
+        }
+        // A queue where there was none moves `CanPlay`, exactly as in
+        // `play_album`, and that is the one MPRIS-visible change that arrives
+        // without an engine event.
+        self.publish_mpris(false);
+    }
+
     /// Send a transport command, marking it pending on acceptance and
     /// downgrading to engine-closed state when the channel is gone.
     fn send_transport(&mut self, command: Command) {
@@ -764,10 +858,17 @@ impl App {
             subs.push(window::frames().map(|_| Message::FirstFrame));
         }
         // The scan channel is drained on a coarse tick — batching by design.
-        if let Screen::Shelf(state) = &self.screen
-            && state.scanning
-        {
-            subs.push(iced::time::every(Duration::from_millis(100)).map(|_| Message::ScanTick));
+        if let Screen::Shelf(state) = &self.screen {
+            if state.scanning {
+                subs.push(iced::time::every(Duration::from_millis(100)).map(|_| Message::ScanTick));
+            }
+            // Only while a tile click is holding the grid's columns still, and
+            // never otherwise: the hold's expiry is the one layout change with
+            // no input behind it, so it is the one thing that needs a clock to
+            // notice it. (See [`shelf::ColumnHold`].)
+            if state.column_hold.holding() {
+                subs.push(iced::time::every(COLUMN_HOLD_TICK).map(|_| Message::ColumnHoldTick));
+            }
         }
         Subscription::batch(subs)
     }
@@ -836,6 +937,10 @@ pub(crate) struct Shelf {
     last_scan_log: Instant,
     /// Last tile click, for double-click-to-play detection.
     last_click: Option<(u64, Instant)>,
+    /// The column count pinned across the reflow a tile click causes, so the
+    /// tile does not move between the two presses of a double-click (see
+    /// [`shelf::ColumnHold`]).
+    pub(crate) column_hold: shelf::ColumnHold,
 }
 
 impl Shelf {
@@ -885,6 +990,7 @@ impl Shelf {
             grid_size: Size::new(WINDOW.width, WINDOW.height - TOP_BAR_H),
             last_scan_log: Instant::now(),
             last_click: None,
+            column_hold: shelf::ColumnHold::default(),
         };
         let task = Task::batch([
             text_input::focus(search_id()),
@@ -930,6 +1036,10 @@ impl Shelf {
                     size.width - rail_width(&self.panels),
                     (size.height - TOP_BAR_H).max(100.0),
                 );
+                // Dragging the window's edge is not the gesture the hold
+                // protects, and holding a stale count through a resize would
+                // draw columns the window no longer has room for.
+                self.column_hold.release();
                 self.request_visible_thumbs()
             }
             Message::ToggleQueue => self.reflow(Panels::toggle_queue),
@@ -938,10 +1048,9 @@ impl Shelf {
             Message::ClosePanel => self.reflow(Panels::close),
             Message::AlbumClicked(id) => {
                 let now = Instant::now();
-                let double = self
-                    .last_click
-                    .take()
-                    .is_some_and(|(last, at)| last == id && now.duration_since(at) <= DOUBLE_CLICK);
+                let double = self.last_click.take().is_some_and(|(last, at)| {
+                    last == id && now.duration_since(at) <= shelf::DOUBLE_CLICK
+                });
                 if double {
                     // Second press of a double-click. The first press already
                     // ran the selection toggle, so just make sure the album
@@ -950,12 +1059,20 @@ impl Shelf {
                     let task = if self.panels.showing_album(id) {
                         Task::none()
                     } else {
-                        self.reflow(|panels| panels.select(id))
+                        self.reflow_holding_columns(now, |panels| panels.select(id))
                     };
                     return Task::batch([task, Task::done(Message::PlayAlbum(id))]);
                 }
                 self.last_click = Some((id, now));
-                self.reflow(|panels| panels.select(id))
+                self.reflow_holding_columns(now, |panels| panels.select(id))
+            }
+            Message::ColumnHoldTick => {
+                if self.column_hold.expire(Instant::now()) {
+                    // The gesture is over: let the reflow the click deferred
+                    // actually land, and fetch art for whatever it revealed.
+                    return self.request_visible_thumbs();
+                }
+                Task::none()
             }
             Message::EditionSelected(id, key) => {
                 // Pure view state: the track list and the *next* queue follow
@@ -995,11 +1112,64 @@ impl Shelf {
     /// viewport bounds a scroll event last reported are not thrown away; the
     /// next [`Message::Scrolled`] replaces it with measured geometry either
     /// way.
+    /// A hold, if one stands, is dropped here: it exists to protect one
+    /// pointer gesture, and every route into this function that is not that
+    /// gesture (Escape, the ✕, `Q`, `Ctrl`+`B`) is a deliberate request to see
+    /// the layout change now. [`Self::reflow_holding_columns`] re-takes it
+    /// afterwards for the one route that is.
     fn reflow(&mut self, transition: impl FnOnce(&mut Panels)) -> Task<Message> {
         let before = rail_width(&self.panels);
         transition(&mut self.panels);
         self.grid_size.width += before - rail_width(&self.panels);
+        self.column_hold.release();
         self.request_visible_thumbs()
+    }
+
+    /// A *tile click's* reflow: the panel transition, and then the column hold
+    /// that keeps the grid still for the rest of the gesture.
+    ///
+    /// This is the whole of the double-click repair. The audit caught the
+    /// defect on camera: a double-click on the fifth tile of row 0, where the
+    /// first press opened the rail, the shelf reflowed from five columns to
+    /// three, the second press landed 180 px from where the tile now was, and
+    /// **nothing played** — while the panel that had just opened said
+    /// "double-click a tile to play" at the bottom of it. It worked for the
+    /// first column and failed for the last, on arithmetic the user cannot
+    /// see.
+    ///
+    /// The hold is taken only when the rail's *occupancy* actually changed,
+    /// because that is the only case in which the grid's width moves: swapping
+    /// the album panel for the queue costs no reflow (both are one
+    /// [`PANEL_W`]), and a click that changed nothing has nothing to protect.
+    /// Everything else about the reflow — including the width arithmetic
+    /// itself — is untouched; it is deferred by up to
+    /// [`shelf::DOUBLE_CLICK`], never cancelled.
+    fn reflow_holding_columns(
+        &mut self,
+        now: Instant,
+        transition: impl FnOnce(&mut Panels),
+    ) -> Task<Message> {
+        // Read the count the grid is *currently* laying out with, before the
+        // transition (and before `reflow` drops any hold that stands).
+        let held = self.columns();
+        let occupied = self.panels.rail().is_some();
+        let task = self.reflow(transition);
+        if self.panels.rail().is_some() != occupied {
+            self.column_hold.hold(held, now);
+        }
+        task
+    }
+
+    /// The column count the grid lays out with: what the viewport measures,
+    /// unless a tile click is holding it still (see [`shelf::ColumnHold`]).
+    ///
+    /// One answer, read by the view that draws the rows and by the thumbnail
+    /// prefetch that decides which of them to decode art for — a prefetch
+    /// working from a different grid than the one on screen would request the
+    /// wrong tiles for exactly the 400 ms the hold lasts.
+    pub(crate) fn columns(&self) -> usize {
+        self.column_hold
+            .columns(shelf::columns(self.grid_size.width))
     }
 
     /// Recompute `visible` for the current query (shelf order preserved —
@@ -1102,7 +1272,7 @@ impl Shelf {
     /// neither cached, in flight, nor known-absent. Ported from the spike;
     /// `get` (not `peek`) refreshes LRU recency for visible entries.
     fn request_visible_thumbs(&mut self) -> Task<Message> {
-        let cols = shelf::columns(self.grid_size.width);
+        let cols = self.columns();
         let rows = shelf::total_rows(self.visible.len(), cols);
         let (first_row, end_row) =
             shelf::visible_rows(self.scroll_offset, self.grid_size.height, rows);
@@ -1201,6 +1371,7 @@ fn message_for(request: mpris::Request) -> Message {
         mpris::Request::PlayPause => Message::PlayPause,
         mpris::Request::Stop => Message::Stop,
         mpris::Request::Next => Message::NextTrack,
+        mpris::Request::Previous => Message::PreviousTrack,
         mpris::Request::SeekBy(delta_ms) => Message::SeekBy(delta_ms),
         mpris::Request::SeekTo(position_ms) => Message::SeekTo(position_ms),
         mpris::Request::SetVolume(position) => Message::SetVolume(position),
@@ -1304,6 +1475,7 @@ mod tests {
             (mpris::Request::PlayPause, "PlayPause"),
             (mpris::Request::Stop, "Stop"),
             (mpris::Request::Next, "NextTrack"),
+            (mpris::Request::Previous, "PreviousTrack"),
             (mpris::Request::SeekBy(-5_000), "SeekBy(-5000)"),
             (mpris::Request::SeekTo(30_000), "SeekTo(30000)"),
             (mpris::Request::Raise, "Raise"),
@@ -1397,6 +1569,84 @@ mod tests {
         assert_eq!(
             format!("{from_key:?}"),
             format!("{:?}", Some(message_for(mpris::Request::Next)))
+        );
+
+        // Previous, the newest of them, arrives by all three roads: the bar's
+        // button sends `PreviousTrack` directly, and these two must be it too.
+        let from_key = keys::binding_for(
+            &Key::Named(key::Named::ArrowLeft),
+            Modifiers::COMMAND,
+            keys::Focus::Elsewhere,
+        );
+        assert_eq!(
+            format!("{from_key:?}"),
+            format!("{:?}", Some(message_for(mpris::Request::Previous)))
+        );
+        assert_eq!(
+            format!("{from_key:?}"),
+            format!("{:?}", Some(Message::PreviousTrack))
+        );
+    }
+
+    /// The hold that repairs double-click-to-play, exercised through the state
+    /// the update loop actually keeps: the column count the grid lays out with
+    /// does not move while a click's gesture could still be completed by a
+    /// second press, and does move once it cannot.
+    ///
+    /// The timing rule itself is `shelf::ColumnHold`'s and is tested there;
+    /// what is pinned here is that `app.rs` spends it on the *same* answer the
+    /// grid and the thumbnail prefetch both read.
+    #[test]
+    fn a_tile_click_holds_the_grids_columns_for_the_double_click_window() {
+        let now = Instant::now();
+        let mut panels = Panels::new();
+        let mut hold = shelf::ColumnHold::default();
+
+        // The shipped window with the rail closed: five columns.
+        let mut width = WINDOW.width;
+        let columns = |hold: shelf::ColumnHold, width: f32| hold.columns(shelf::columns(width));
+        assert_eq!(columns(hold, width), 5);
+
+        // A tile click opens the inspector. The shelf's width drops by one
+        // panel — which on its own is a five-to-three reflow, and the tile the
+        // pointer is over moves 180 px.
+        let pinned = columns(hold, width);
+        let occupied = panels.rail().is_some();
+        panels.select(1);
+        width -= rail_width(&panels);
+        assert_eq!(shelf::columns(width), 3, "the measured grid did reflow");
+        assert_ne!(panels.rail().is_some(), occupied);
+        hold.hold(pinned, now);
+
+        // …and the grid keeps laying out five, so the second press of the
+        // double-click lands on the tile it was aimed at.
+        assert_eq!(columns(hold, width), 5);
+        assert!(hold.holding(), "the app ticks while this stands");
+        assert!(!hold.expire(now + shelf::DOUBLE_CLICK / 2));
+        assert_eq!(columns(hold, width), 5);
+
+        // Once a second press could no longer be part of the gesture, the
+        // reflow the click asked for lands — deferred, never cancelled.
+        assert!(hold.expire(now + shelf::DOUBLE_CLICK));
+        assert_eq!(columns(hold, width), 3);
+        assert!(!hold.holding(), "and the tick subscription goes away");
+    }
+
+    /// A swap costs no reflow, so it takes no hold: the album panel giving way
+    /// to the queue moves nothing, and holding there would delay a layout
+    /// change that never happens.
+    #[test]
+    fn a_panel_swap_moves_no_tile_and_so_holds_nothing() {
+        let mut panels = Panels::new();
+        panels.select(1);
+        let before = rail_width(&panels);
+        let occupied = panels.rail().is_some();
+        panels.toggle_queue();
+        assert!((rail_width(&panels) - before).abs() < f32::EPSILON);
+        assert_eq!(
+            panels.rail().is_some(),
+            occupied,
+            "occupancy is the condition the hold is taken on"
         );
     }
 }

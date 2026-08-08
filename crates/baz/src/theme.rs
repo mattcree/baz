@@ -514,7 +514,8 @@ pub fn tile(status: button::Status, selected: bool) -> button::Style {
     if selected {
         style.background = Some(Background::Color(CARD_HIGH));
         style.border.color = HAIRLINE_STRONG;
-        style.border.width = 1.0;
+        // Two pixels, not one: see [`SELECTION_EDGE`].
+        style.border.width = SELECTION_EDGE;
     } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
         style.background = Some(Background::Color(CARD));
     }
@@ -890,6 +891,117 @@ pub fn tooltip(_theme: &Theme) -> container::Style {
             radius: RADIUS_CHIP.into(),
         },
         ..container::Style::default()
+    }
+}
+
+// ===========================================================================
+// UX redesign, increments 1–5 (docs/design/01-ux-audit-and-ia.md §5)
+//
+// Appended as one block, at the end, deliberately: a parallel pass is
+// rewriting the type stack and two contrast pairs above, and everything that
+// pass touches is a *value* while everything here is a new name. Nothing in
+// this section changes an existing token; the one edit made above it is a
+// single line in `tile`, where the audit's "hover and selection are nearly the
+// same mark" finding is spent (§4.4).
+// ===========================================================================
+
+/// Border width of a **selected** shelf tile (logical px).
+///
+/// Two, where hover is none and the surface step between the two states is one
+/// [`CARD`] → [`CARD_HIGH`] tick. The audit's finding was that in a still
+/// frame you cannot tell which tile is selected and which is merely under the
+/// pointer — one surface step and a 1 px hairline apart is below the threshold
+/// at which two states read as two states.
+///
+/// Doubling the edge is the smallest change that separates them, and it stays
+/// inside the depth strategy: no shadow (reserved for artwork), no accent (
+/// reserved for playback truth), no second surface step. It costs nothing in
+/// layout either — iced draws a border inside the widget's bounds, so the
+/// tile's [`crate::shelf::CELL_W`] pitch is untouched.
+pub const SELECTION_EDGE: f32 = 2.0;
+
+/// Height of a shelf tile's caption block: **exactly two lines** at
+/// [`SIZE_BODY`] (logical px).
+///
+/// Reserved rather than content-driven, which is the whole of the fix for the
+/// audit's loudest complaint about the shelf: a two-line title used to push
+/// its artist line down, so in one row four artists sat on one baseline and a
+/// fifth sat 17 px lower. In a grid whose job is calm repetition that is the
+/// most visible thing on screen after the art itself.
+///
+/// Two lines is the budget the caption actually needs — a title (clipped at
+/// one line) over an `artist · year` line — and [`crate::shelf::CELL_H`]
+/// already has the room, so nothing about the tile pitch moves. It is the same
+/// reserved-slot rule as [`SETTING_NOTE_H`], [`SIGNAL_W`] and [`STAMP_W`]:
+/// the space is always there and what varies is only what is in it.
+///
+/// Measured at [`SIZE_BODY`] for both lines even though the second is set at
+/// [`SIZE_META`]: the block has to hold the *taller* possibility on each line,
+/// and a slot sized to the smaller one would clip the moment a caption line
+/// was set in body text.
+pub const CAPTION_H: f32 = 2.0 * CAPTION_LINE_H;
+
+/// One line of a shelf tile's caption (logical px) — the lane the title gets,
+/// and the lane the artist gets.
+///
+/// The block is reserved as **two independent one-line lanes** rather than as
+/// one two-line box, and that is the difference between fixing the defect and
+/// moving it. `Wrapping::None` does not stop iced 0.13 breaking a long
+/// paragraph (the same toolkit behaviour the audit caught in the bottom bar at
+/// narrow widths, §1.5), so a title too long for its width still lays out two
+/// lines — and inside a single two-line box it would push the artist out of
+/// the bottom of the very slot that was reserved to keep it still.
+///
+/// Given a lane of its own, the title clips at exactly one line and **the
+/// artist line sits on the same baseline on every tile of every row**, which
+/// is the property §4.4 of the design spec is actually asking for. A clipped
+/// title is the affordable failure here: the sleeve above it is the
+/// identification a shelf is built on, and the album panel one click away
+/// carries the whole string.
+pub const CAPTION_LINE_H: f32 = SIZE_BODY * LINE_HEIGHT;
+
+/// A track row in the album inspector: invisible at rest, a quiet card under
+/// the pointer, and the playing row carded exactly as the queue's is.
+///
+/// The row became a control when clicking it started meaning "play from here"
+/// (ADR-0014's `JumpTo`), and this is the affordance that admits it. Until
+/// then the rows carried none — deliberately, because "an affordance that does
+/// nothing is a lie" — so gaining one is the visible half of gaining the
+/// behaviour, and it is the same rule read forwards.
+///
+/// The playing row's treatment is [`queue_row`]'s, token for token, because
+/// the two surfaces are now listing the same twelve rows with the same mark on
+/// the same one; a listener who has seen the queue must not have to learn the
+/// inspector separately. Hover sits one surface step below it, so "the pointer
+/// is here" and "this is what is sounding" stay distinguishable — the same
+/// separation [`SELECTION_EDGE`] buys the shelf.
+///
+/// No accent anywhere: the lamp dot in the number column is the playback
+/// truth, and a row that also washed amber would spend the signal twice.
+#[must_use]
+pub fn track_row(status: button::Status, playing: bool) -> button::Style {
+    let background = match (playing, status) {
+        // The playing row keeps its card whatever the pointer is doing, and
+        // lifts no further under it: it is already the emphasised row.
+        (true, _) => Some(CARD_HIGH),
+        (false, button::Status::Hovered | button::Status::Pressed) => Some(CARD),
+        (false, button::Status::Active | button::Status::Disabled) => None,
+    };
+    button::Style {
+        background: background.map(Background::Color),
+        // The row's inks are set per-line by the view (a played row is fainter
+        // than an upcoming one), so the button contributes none of its own.
+        text_color: PAPER,
+        border: Border {
+            color: if playing {
+                HAIRLINE_STRONG
+            } else {
+                Color::TRANSPARENT
+            },
+            width: 1.0,
+            radius: RADIUS_SEGMENT.into(),
+        },
+        shadow: Shadow::default(),
     }
 }
 

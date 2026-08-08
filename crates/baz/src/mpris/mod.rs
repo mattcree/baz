@@ -86,12 +86,29 @@
 //! `org.mpris.MediaPlayer2.baz.instance<pid>`, so two copies can run without
 //! either of them going silent.
 //!
+//! # `Previous`
+//!
+//! Served, and `CanGoPrevious` reports rather than refuses. This was once the
+//! first entry under "deliberately not implemented", on the grounds that
+//! advertising a control we cannot honour is worse than not having one — and
+//! the grounds were right while they lasted: the front end had no button, no
+//! key, and nothing to send. The gap was never in the protocol.
+//! `Command::Previous` has always been there, with the engine's
+//! restart-versus-step-back rule (three seconds in) already specified, and now
+//! there is a `|◀` beside the play button, <kbd>Ctrl</kbd>+<kbd>←</kbd>, and
+//! this. All three are the same [`Message`](crate::app::Message), so the lock
+//! screen's Previous and the bar's are one press.
+//!
+//! `CanGoPrevious` follows
+//! [`PlayerState::previous_enabled`](crate::player::PlayerState::previous_enabled),
+//! which is `CanGoNext`'s condition — both are relative commands and both are
+//! documented engine no-ops while stopped. It is not `CanGoNext`'s *value*,
+//! though, and the difference is real: `Next` runs out at the end of a queue
+//! while `Previous` never does, because at the head of the queue it restarts
+//! the track rather than declining.
+//!
 //! # What is deliberately not implemented
 //!
-//! - **`Previous` / `CanGoPrevious`**: `baz-core`'s protocol has no previous
-//!   command, so `CanGoPrevious` is `false` and `Previous` does nothing.
-//!   Advertising a control we cannot honour is the one thing worse than not
-//!   having it.
 //! - **`SupportedUriSchemes` / `SupportedMimeTypes`**: both empty, because
 //!   `OpenUri` returns `NotSupported`. baz plays what it scanned; opening an
 //!   arbitrary URI is a feature, not a property, and listing schemes we
@@ -215,6 +232,9 @@ pub(crate) enum Request {
     Stop,
     /// `Next`.
     Next,
+    /// `Previous` — step back, or restart the current track (the engine's
+    /// three-second rule decides which, and it is the engine's to decide).
+    Previous,
     /// `Seek(offset)`, converted to whole milliseconds; may be negative.
     SeekBy(i64),
     /// `SetPosition`, already checked against the current track id and

@@ -101,6 +101,8 @@ pub enum Glyph {
     Pause,
     /// Next: a triangle against a bar.
     Next,
+    /// Previous: [`Self::Next`] mirrored — a bar against a triangle.
+    Previous,
     /// Speaker, sounding: the cone with two waves off it.
     Speaker,
     /// Speaker, muted: the same cone with a cross where the waves were.
@@ -124,6 +126,20 @@ const PAUSE: &[Outline] = &[
 const NEXT: &[Outline] = &[
     &[(0.20, 0.15), (0.20, 0.85), (0.62, 0.50)],
     &[(0.66, 0.15), (0.80, 0.15), (0.80, 0.85), (0.66, 0.85)],
+];
+
+/// Previous — [`NEXT`] reflected in the box's vertical centre line, vertex for
+/// vertex (`x → 1 − x`): the bar first, then a triangle running back into it.
+///
+/// A *mirror*, not a second drawing, and the tests hold it to that: the pair
+/// sit side by side in the transport, and a Previous whose bar were a pixel
+/// thicker or whose apex sat a pixel lower would read as two glyphs from two
+/// different sets. Reflecting the same numbers is also what makes the pair
+/// symmetric about the play button between them, which is the shape every
+/// listener already knows.
+const PREVIOUS: &[Outline] = &[
+    &[(0.20, 0.15), (0.34, 0.15), (0.34, 0.85), (0.20, 0.85)],
+    &[(0.80, 0.15), (0.80, 0.85), (0.38, 0.50)],
 ];
 
 /// The speaker's cone — the duct and the flare as one closed outline, shared
@@ -201,10 +217,11 @@ const CLOSE: &[Outline] = &[
 
 impl Glyph {
     /// Every glyph, in sprite-sheet order.
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Play,
         Self::Pause,
         Self::Next,
+        Self::Previous,
         Self::Speaker,
         Self::SpeakerMuted,
         Self::Close,
@@ -217,6 +234,7 @@ impl Glyph {
             Self::Play => PLAY,
             Self::Pause => PAUSE,
             Self::Next => NEXT,
+            Self::Previous => PREVIOUS,
             Self::Speaker => SPEAKER,
             Self::SpeakerMuted => SPEAKER_MUTED,
             Self::Close => CLOSE,
@@ -229,9 +247,10 @@ impl Glyph {
             Self::Play => 0,
             Self::Pause => 1,
             Self::Next => 2,
-            Self::Speaker => 3,
-            Self::SpeakerMuted => 4,
-            Self::Close => 5,
+            Self::Previous => 3,
+            Self::Speaker => 4,
+            Self::SpeakerMuted => 5,
+            Self::Close => 6,
         }
     }
 
@@ -271,7 +290,7 @@ impl From<PlayPause> for Glyph {
 /// Caching matters beyond the arithmetic — `image::Handle::from_rgba` mints
 /// a fresh id per call, and a fresh id per frame would churn the renderer's
 /// texture atlas. These ids live as long as the process.
-static SHEET: LazyLock<[image::Handle; 6]> = LazyLock::new(|| {
+static SHEET: LazyLock<[image::Handle; 7]> = LazyLock::new(|| {
     let ink = rgb(theme::GLYPH);
     Glyph::ALL.map(|glyph| image::Handle::from_rgba(RASTER_PX, RASTER_PX, rasterize(glyph, ink)))
 });
@@ -484,6 +503,68 @@ mod tests {
             0,
             "the triangle has already tapered by there"
         );
+    }
+
+    /// Previous is a bar against a triangle: the same five runs across the
+    /// middle as [`Glyph::Next`], read the other way, and the bar on the left.
+    #[test]
+    fn previous_is_a_bar_against_a_triangle() {
+        let pixels = rasterize(Glyph::Previous, [255, 255, 255]);
+        let mid = RASTER_PX / 2;
+        let row: Vec<bool> = (0..RASTER_PX)
+            .map(|column| alpha(&pixels, column, mid) > 0)
+            .collect();
+        let runs = row.chunk_by(|a, b| a == b).count();
+        assert_eq!(runs, 5, "expected gap/bar/gap/triangle/gap");
+        // The bar is full height where the triangle has already tapered to its
+        // apex — the property that makes the shape read as "skip back" rather
+        // than as a play button with a line beside it. Probe the first solid
+        // run rather than a magic column, mirroring the Next assertion.
+        let solid: Vec<u32> = (0..RASTER_PX).filter(|&c| row[c as usize]).collect();
+        let bar = *solid.first().expect("the bar has some width") + 1;
+        assert!(bar < mid, "the bar sits left of centre");
+        let near_top = RASTER_PX / 5;
+        assert!(alpha(&pixels, bar, near_top) > 0, "the bar reaches the top");
+        assert_eq!(
+            alpha(&pixels, mid, near_top),
+            0,
+            "the triangle has already tapered by there"
+        );
+        // Vertically symmetric about the centre line, like every other glyph.
+        for column in 0..RASTER_PX {
+            for row in 0..RASTER_PX / 2 {
+                assert_eq!(
+                    alpha(&pixels, column, row),
+                    alpha(&pixels, column, RASTER_PX - 1 - row),
+                    "previous is not symmetric at {column},{row}"
+                );
+            }
+        }
+    }
+
+    /// Previous is [`Glyph::Next`] mirrored, pixel for pixel.
+    ///
+    /// The strongest form of "the pair reads as one set": not merely similar
+    /// proportions, but the same coverage reflected in the sprite's vertical
+    /// centre line. The rasterizer samples symmetrically about that line, so
+    /// an exact equality is available here and is worth taking — it is what
+    /// would catch a nudge to one outline that was not made to the other.
+    #[test]
+    fn previous_is_next_reflected() {
+        let next = rasterize(Glyph::Next, [255, 255, 255]);
+        let previous = rasterize(Glyph::Previous, [255, 255, 255]);
+        for row in 0..RASTER_PX {
+            for column in 0..RASTER_PX {
+                assert_eq!(
+                    alpha(&next, column, row),
+                    alpha(&previous, RASTER_PX - 1 - column, row),
+                    "previous is not next mirrored at {column},{row}"
+                );
+            }
+        }
+        // …and it is genuinely a different sprite, or the assertion above
+        // would be satisfied by an accidentally symmetric glyph.
+        assert_ne!(next, previous);
     }
 
     #[test]

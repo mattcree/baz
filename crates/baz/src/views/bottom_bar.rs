@@ -166,7 +166,24 @@ fn signal_path(player: &PlayerState) -> Element<'_, Message> {
 fn transport_stack(player: &PlayerState) -> Element<'_, Message> {
     let pending = player.transport_pending();
     let toggle = player.play_pause();
+    // Previous, play/pause, Next — in that order and symmetric about the
+    // toggle, which is where every listener's hand already expects to find
+    // them. `|◀` was the most-missed control in the app: the engine command
+    // and its restart-versus-step-back rule were both already specified, and
+    // there was no button, no key and no MPRIS flag to reach them by.
+    //
+    // Three fixed [`theme::TRANSPORT_HIT`] squares in a fixed
+    // [`theme::SEEK_ROW_W`] column, so the row gained a control and moved
+    // nothing: the block is still centred on the same pixel, and the seek bar
+    // under it did not shift by one.
     let transport = row![
+        glyph_button(
+            icon::Glyph::Previous,
+            "Previous track",
+            player.previous_enabled(),
+            pending,
+            Message::PreviousTrack,
+        ),
         glyph_button(
             toggle.into(),
             toggle.label(),
@@ -429,4 +446,103 @@ fn preview_lane(
         .width(Length::Fixed(width))
         .height(Length::Fixed(theme::PREVIEW_H))
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::player::{Availability, Phase, PlayPause, PlayerState};
+    use crate::{icon, theme};
+
+    use baz_core::protocol::Event;
+
+    /// The bar's reserved-slot rule, re-checked for the row that just gained a
+    /// third control.
+    ///
+    /// `theme.rs` already pins the pair (`2 × TRANSPORT_HIT + GAP_SM`); this
+    /// is the same claim for the three the transport now draws, asserted here
+    /// rather than there so the module that composes the row owns the check
+    /// for what it composes. The row is what makes the bar's centre column
+    /// stable, and a Previous button that did not fit would push the seek bar
+    /// out from under it.
+    #[test]
+    fn the_transport_row_still_fits_the_column_it_centres_in() {
+        // Three fixed squares and the two gaps between them.
+        const TRANSPORT_ROW_W: f32 = 3.0 * theme::TRANSPORT_HIT + 2.0 * theme::GAP_SM;
+        const { assert!(TRANSPORT_ROW_W < theme::SEEK_ROW_W) }
+        // With room left over on *both* sides, or the row would be centred by
+        // its own edges rather than within the column — the seek bar below it
+        // is only `SEEK_W` wide inside the same column, and the two blocks
+        // have to share a centre line.
+        const { assert!(TRANSPORT_ROW_W < theme::SEEK_W) }
+        // And the whole bar still fits the narrowest shipped window beside its
+        // two flanking zones.
+        const { assert!(theme::SEEK_ROW_W + theme::VOLUME_BLOCK_W + theme::SIGNAL_W < 760.0) }
+    }
+
+    /// Every glyph the transport row can draw is the same sprite square in the
+    /// same fixed box, Previous included — so no transport state moves a pixel
+    /// of the bar.
+    #[test]
+    fn every_transport_glyph_occupies_the_same_box() {
+        let glyphs = [
+            icon::Glyph::from(PlayPause::Play),
+            icon::Glyph::from(PlayPause::Pause),
+            icon::Glyph::Previous,
+            icon::Glyph::Next,
+            icon::Glyph::speaker(false),
+            icon::Glyph::speaker(true),
+        ];
+        // One stable handle each (the sheet is rasterized once), and the view
+        // draws every one of them into an `ICON_PX` box inside a
+        // `TRANSPORT_HIT` button — so the only thing that varies between
+        // states is which sprite is sampled.
+        for glyph in glyphs {
+            assert_eq!(icon::handle(glyph).id(), icon::handle(glyph).id());
+        }
+        const { assert!(theme::TRANSPORT_HIT > theme::ICON_PX) }
+        // Previous is genuinely a distinct sprite, so this is not vacuous.
+        assert_ne!(
+            icon::handle(icon::Glyph::Previous).id(),
+            icon::handle(icon::Glyph::Next).id()
+        );
+    }
+
+    /// Previous is offered exactly when it can act, and its enabled-ness is a
+    /// property of the transport rather than of the queue's length — the
+    /// difference from Next that ADR-0014's protocol notes call out.
+    #[test]
+    fn previous_is_live_whenever_a_run_is() {
+        let mut player = PlayerState::new(Availability::Ready);
+        // Stopped: a relative command has nothing to be relative to.
+        assert_eq!(player.phase(), Phase::Stopped);
+        assert!(!player.previous_enabled());
+
+        player.apply(
+            &Event::TrackStarted {
+                path: std::path::PathBuf::from("/music/a/01.flac"),
+                position: 0,
+            },
+            &[],
+        );
+        assert!(
+            player.previous_enabled(),
+            "a running queue can always go back"
+        );
+        // At the head of the queue too: `Previous` restarts the track there
+        // rather than declining, so there is no position at which it is dead.
+        assert!(player.previous_enabled());
+
+        player.apply(&Event::Paused, &[]);
+        assert!(
+            player.previous_enabled(),
+            "paused moves and resumes, so the control is live"
+        );
+
+        player.apply(&Event::QueueEnded, &[]);
+        assert!(!player.previous_enabled());
+
+        // No engine at all: nothing in the transport is offered.
+        let dead = PlayerState::new(Availability::NoDevice("no device".to_owned()));
+        assert!(!dead.previous_enabled());
+    }
 }

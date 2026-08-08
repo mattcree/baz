@@ -638,6 +638,40 @@ pub struct QueueList {
     pub rows: Vec<QueueRow>,
 }
 
+/// What a click on a track row of an album has to send to play from there.
+///
+/// Two answers, because ADR-0014 gives two commands and the difference is
+/// audible. Which one applies is a question about the *queue the engine
+/// holds*, not about the transport, so it is decided by
+/// [`PlayerState::play_from`] from event-derived state and the request-side
+/// queue record — never guessed at the call site.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlayFrom {
+    /// The engine is already holding exactly this album, so the click is a
+    /// move within it: [`JumpTo`](baz_core::protocol::Command::JumpTo) alone.
+    ///
+    /// This is the case worth having. `JumpTo` keeps the queue the listener
+    /// built, works from every transport state including stopped, and — unlike
+    /// a re-queue — does not restart the run they are in the middle of.
+    Jump {
+        /// Zero-based queue position to play.
+        position: usize,
+    },
+    /// The engine is holding something else (or nothing): the album has to be
+    /// queued first, so this is
+    /// [`SetQueue`](baz_core::protocol::Command::SetQueue) and then
+    /// `JumpTo`.
+    ///
+    /// `SetQueue` is documented to stop what is playing, which is exactly
+    /// right here — the listener asked for a different album — and the
+    /// `JumpTo` that follows is what makes the click land on the row they
+    /// pointed at rather than at the top of the album.
+    Requeue {
+        /// Zero-based position within the album to play once it is queued.
+        position: usize,
+    },
+}
+
 /// The chain the engine last reported, exactly as [`Event::SignalPath`]
 /// stated it: what the file is, what the output is running at, and what (if
 /// anything) sits between them.
@@ -1364,6 +1398,72 @@ impl PlayerState {
         queue.playing(self.queue_position?, path)
     }
 
+    /// Which row of `tracks` is sounding — `None` unless those tracks are
+    /// **exactly** the queue that is playing.
+    ///
+    /// This is what lets the album inspector carry the lamp dot the queue
+    /// panel carries, which is the whole of "the inspector is a now-playing
+    /// view of an album": for the only queue baz can build today, the album
+    /// listed and the album queued are the same twelve rows, and the one thing
+    /// the inspector failed to say was which of them was sounding.
+    ///
+    /// Two conditions, and both are load-bearing:
+    ///
+    /// 1. **The listed tracks are the queue** ([`QueueVm::holds_exactly`]) —
+    ///    so an inspector showing a *different edition* of the album that is
+    ///    playing marks nothing, rather than putting the dot on a file the
+    ///    engine is not reading.
+    /// 2. **Something is actually playing** ([`Self::playing_row`]) — engine
+    ///    truth from [`Event::TrackStarted`], reconciled against the recorded
+    ///    queue by path. A stopped or ended run marks no row, exactly as the
+    ///    queue panel does.
+    ///
+    /// The index is a position in the queue, and the queue *is* the list, so
+    /// it is a row of `tracks` by construction — including when the album
+    /// lists one file twice, where the two occurrences stay distinguishable
+    /// because neither side collapses them.
+    #[must_use]
+    pub fn playing_row_in(&self, tracks: &[vm::TrackVm]) -> Option<usize> {
+        if !self.queue.as_ref()?.holds_exactly(tracks) {
+            return None;
+        }
+        self.playing_row()
+    }
+
+    /// What a click on row `row` of `tracks` has to send (ADR-0014).
+    ///
+    /// `None` when the row is not in the list at all — a click on a stale
+    /// picture asks for nothing rather than for something else.
+    ///
+    /// The decision is one question: **is the engine already holding exactly
+    /// this album?** If it is, the click is a move within the queue the
+    /// listener already has, and
+    /// [`JumpTo`](baz_core::protocol::Command::JumpTo) alone is both
+    /// sufficient and the only answer that does not disturb the queue —
+    /// `SetQueue` would stop the music to hand the engine the list it is
+    /// already playing. If it is not, the album has to be queued before a
+    /// position in it means anything, so the pair goes out.
+    ///
+    /// Note what is deliberately *not* consulted: the transport. `JumpTo`
+    /// starts a stopped engine, moves and resumes a paused one, and restarts
+    /// the row it is aimed at — so a queue that has ended still takes a plain
+    /// jump, and nothing here needs to know which of those it is asking for.
+    #[must_use]
+    pub fn play_from(&self, tracks: &[vm::TrackVm], row: usize) -> Option<PlayFrom> {
+        if row >= tracks.len() {
+            return None;
+        }
+        let held = self
+            .queue
+            .as_ref()
+            .is_some_and(|queue| queue.holds_exactly(tracks));
+        Some(if held {
+            PlayFrom::Jump { position: row }
+        } else {
+            PlayFrom::Requeue { position: row }
+        })
+    }
+
     /// The position under the pointer while a scrub is engaged.
     fn scrub_ms(&self) -> Option<u64> {
         let gesture = self.gesture.filter(|gesture| gesture.scrubbing)?;
@@ -1510,6 +1610,23 @@ impl PlayerState {
     /// stopped).
     #[must_use]
     pub fn next_enabled(&self) -> bool {
+        self.engine_ready() && self.phase != Phase::Stopped
+    }
+
+    /// Whether Previous does anything.
+    ///
+    /// The same condition as [`Self::next_enabled`], and for the same reason:
+    /// both are *relative* commands and both are documented engine no-ops
+    /// while stopped, because there is no current track to step from.
+    ///
+    /// It is not the same *availability*, though, and the protocol says so:
+    /// `Next` runs out at the end of the queue, while `Previous` has no
+    /// position at which it does nothing — at the head of the queue, and past
+    /// [`PREVIOUS_RESTART_MS`](baz_core::engine::PREVIOUS_RESTART_MS) into any
+    /// track, it restarts what is playing. So a running queue can advertise
+    /// this unconditionally, which is what `CanGoPrevious` now reports.
+    #[must_use]
+    pub fn previous_enabled(&self) -> bool {
         self.engine_ready() && self.phase != Phase::Stopped
     }
 
@@ -3891,5 +4008,166 @@ mod tests {
             states(&player.queue_list().expect("a queue")),
             vec![QueueRowState::Played, QueueRowState::Playing]
         );
+    }
+
+    /// The album inspector's dot: it marks the sounding row of the list it is
+    /// showing, and only when that list is the queue that is sounding.
+    #[test]
+    fn the_inspector_marks_a_row_only_when_it_is_listing_the_playing_queue() {
+        let albums = albums();
+        let listed = &albums[0].editions[0].tracks;
+        let other = &albums[1].editions[0].tracks;
+
+        // Nothing queued at all: nothing to mark.
+        let mut player = PlayerState::new(Availability::Ready);
+        assert_eq!(player.playing_row_in(listed), None);
+
+        // Queued but not started — the queue is recorded, the engine has
+        // confirmed nothing. Marking here would be the optimistic reading the
+        // module's honesty rule forbids.
+        player.note_queue_sent(geogaddi_queue());
+        assert_eq!(player.playing_row_in(listed), None);
+
+        // Playing track 2 of the album the inspector is showing.
+        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+        assert_eq!(player.playing_row_in(listed), Some(1));
+        // The queue panel and the inspector agree, row for row — they are two
+        // views of one list and must never mark different ones.
+        assert_eq!(
+            states(&player.queue_list().expect("a queue")),
+            vec![QueueRowState::Played, QueueRowState::Playing]
+        );
+
+        // A *different* album's inspector marks nothing, even though the same
+        // engine is playing.
+        assert_eq!(player.playing_row_in(other), None);
+
+        // And the run ending un-marks it: a stopped queue has no sounding row.
+        player.apply(&Event::QueueEnded, &albums);
+        assert_eq!(player.playing_row_in(listed), None);
+    }
+
+    /// The near-miss the comparison exists for: the same album, playing, with
+    /// the inspector switched to a format the engine is not reading.
+    #[test]
+    fn a_different_edition_of_the_playing_album_marks_nothing() {
+        let mut albums = albums();
+        // The album is owned twice — the FLAC rip and an MP3 rip of the same
+        // two tracks, same titles, same order, different files.
+        albums[0].editions.push(edition(
+            Some(AudioFormat::Mp3),
+            vec![
+                track("/m/boc/geogaddi/mp3/01.mp3", "Ready Lets Go", 1),
+                track("/m/boc/geogaddi/mp3/02.mp3", "Music Is Math", 2),
+            ],
+        ));
+        let flac = &albums[0].editions[0].tracks;
+        let mp3 = &albums[0].editions[1].tracks;
+
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(vm::album_queue(&albums[0], None));
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+
+        // The edition that is playing marks its row…
+        assert_eq!(player.playing_row_in(flac), Some(0));
+        // …and the one that is not marks nothing, rather than putting the dot
+        // on a file the engine is not reading.
+        assert_eq!(player.playing_row_in(mp3), None);
+        // The album is still the playing album — the *shelf* highlight is a
+        // different, coarser question, and it still answers yes.
+        assert_eq!(player.playing_album(), Some(11));
+    }
+
+    /// A queue that lists one file twice marks the occurrence the engine
+    /// named, not merely the first one that matches.
+    #[test]
+    fn a_track_listed_twice_is_marked_where_the_engine_says_it_is() {
+        let repeated = track("/m/boc/geogaddi/01.flac", "Ready Lets Go", 1);
+        let album = AlbumVm {
+            id: 33,
+            title: Some("Loop".into()),
+            artist: AlbumArtistVm::Named("Boards of Canada".into()),
+            track_artists_vary: false,
+            year: None,
+            first_track: repeated.path.clone(),
+            editions: vec![edition(
+                Some(AudioFormat::Flac),
+                vec![repeated.clone(), repeated.clone()],
+            )],
+        };
+        let listed = &album.editions[0].tracks;
+        let albums = vec![album.clone()];
+
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(vm::album_queue(&album, None));
+
+        // The engine names position 1, and the path there matches, so the
+        // second occurrence is marked — not the first.
+        player.apply(&started("/m/boc/geogaddi/01.flac", 1), &albums);
+        assert_eq!(player.playing_row_in(listed), Some(1));
+
+        // And position 0 marks the first, on the same file.
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        assert_eq!(player.playing_row_in(listed), Some(0));
+
+        // A position the queue cannot honour falls back to the first
+        // occurrence — `QueueVm::playing`'s rule, unchanged by the inspector.
+        player.apply(&started("/m/boc/geogaddi/01.flac", 9), &albums);
+        assert_eq!(player.playing_row_in(listed), Some(0));
+    }
+
+    /// The decision a click on a track row makes: `JumpTo` alone when the
+    /// engine is already holding this album, `SetQueue` + `JumpTo` when it is
+    /// not (ADR-0014).
+    #[test]
+    fn clicking_a_row_jumps_when_the_album_is_the_queue_and_requeues_when_it_is_not() {
+        let albums = albums();
+        let listed = &albums[0].editions[0].tracks;
+        let other = &albums[1].editions[0].tracks;
+
+        // Nothing queued: the album has to be handed over before a position
+        // in it means anything.
+        let mut player = PlayerState::new(Availability::Ready);
+        assert_eq!(
+            player.play_from(listed, 1),
+            Some(PlayFrom::Requeue { position: 1 })
+        );
+
+        // This album is the queue: a plain jump, which is the case worth
+        // having — no `SetQueue`, so no `Stopped`, so the run is not replaced
+        // in order to move within it.
+        player.note_queue_sent(geogaddi_queue());
+        assert_eq!(
+            player.play_from(listed, 1),
+            Some(PlayFrom::Jump { position: 1 })
+        );
+        // Including the row that is already playing: `JumpTo` restarts it,
+        // which is plainly what clicking it means.
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        assert_eq!(
+            player.play_from(listed, 0),
+            Some(PlayFrom::Jump { position: 0 })
+        );
+
+        // A different album, while this one plays: requeue, then jump.
+        assert_eq!(
+            player.play_from(other, 0),
+            Some(PlayFrom::Requeue { position: 0 })
+        );
+
+        // The transport is deliberately not consulted. A queue that has ended
+        // is still the queue the engine holds, so the click is still a jump —
+        // `JumpTo` starts a stopped engine at the position it names.
+        player.apply(&Event::QueueEnded, &albums);
+        assert_eq!(player.phase(), Phase::Stopped);
+        assert_eq!(
+            player.play_from(listed, 1),
+            Some(PlayFrom::Jump { position: 1 })
+        );
+
+        // A row that is not in the list asks for nothing at all, rather than
+        // for a position the engine would answer with `QueueEnded`.
+        assert_eq!(player.play_from(listed, listed.len()), None);
+        assert_eq!(player.play_from(&[], 0), None);
     }
 }

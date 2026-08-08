@@ -23,11 +23,24 @@ const TILE_PAD_V: f32 = theme::GAP_MD;
 /// [`geometry`](crate::shelf)). The grid block is centered in the viewport;
 /// spacers are width-shrunk so the column keeps the rows' width and partial
 /// last rows stay left-aligned within the shelf.
+///
+/// Each row is [`geometry::block_width`] wide — the width the *columns* take,
+/// not the width the items in that row happen to fill. That is what keeps a
+/// filtered shelf anchored: narrowing 29 albums to 1 used to teleport the
+/// survivor from the first column position to the middle of the window,
+/// because the row it was in was only as wide as itself and the block was
+/// centred on that. The block is now the same width whatever survives, so the
+/// result stays where its column is. It is also what keeps a partial *last*
+/// row left-aligned with the full rows above it.
+///
+/// The column count comes from [`Shelf::columns`], not from the viewport
+/// directly, so a tile click that opens the inspector does not reflow the grid
+/// out from under the double-click it might be the first half of.
 pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a, Message> {
     if shelf.visible.is_empty() {
         return empty_state(shelf);
     }
-    let cols = geometry::columns(shelf.grid_size.width);
+    let cols = shelf.columns();
     let total_rows = geometry::total_rows(shelf.visible.len(), cols);
     let (first_row, end_row) =
         geometry::visible_rows(shelf.scroll_offset, shelf.grid_size.height, total_rows);
@@ -46,7 +59,11 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a,
                 cells = cells.push(tile(shelf, album, player.playing_album() == Some(album.id)));
             }
         }
-        grid = grid.push(container(cells).height(Length::Fixed(CELL_H)));
+        grid = grid.push(
+            container(cells)
+                .width(Length::Fixed(geometry::block_width(cols)))
+                .height(Length::Fixed(CELL_H)),
+        );
     }
     grid = grid.push(Space::with_height(Length::Fixed(geometry::spacer_height(
         total_rows - end_row,
@@ -103,6 +120,14 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
 /// a soft shelf shadow) over a quiet two-line caption. The playing
 /// album swaps the shadow for a lamp-amber halo and gains a lamp dot by
 /// its title; selection and hover raise the tile's card.
+///
+/// The caption block is [`theme::CAPTION_H`] tall — **two lines, always** —
+/// rather than as tall as its contents. Content-driven, a title that took two
+/// lines pushed its artist line down and broke the baseline every other
+/// caption in the row sat on; in a grid whose whole job is calm repetition
+/// that was the loudest thing on screen after the artwork. Reserving the block
+/// costs nothing ([`CELL_H`] already had the room) and the title clips at one
+/// line instead, which is the failure the shelf can afford.
 fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<'a, Message> {
     let art: Element<'_, Message> = match shelf.thumbs.peek(&album.id) {
         Some(handle) => iced_image(handle.clone())
@@ -137,20 +162,34 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
     // or dismissed outright, must not keep claiming the selection styling —
     // the highlight says "that panel is showing this album".
     let selected = shelf.panels.showing_album(album.id);
+    // Two one-line lanes, not one two-line box: a title iced lays out over two
+    // lines despite `Wrapping::None` clips at its own lane's edge instead of
+    // pushing the artist out of the block that was reserved to hold it still
+    // (see [`theme::CAPTION_LINE_H`]). Both lanes are top-aligned so what
+    // survives a clip is the *first* line, not the middle of two.
+    let caption_lane = |content: Element<'a, Message>| {
+        container(content)
+            .width(Length::Fixed(ART_PX))
+            .height(Length::Fixed(theme::CAPTION_LINE_H))
+            .align_y(alignment::Vertical::Top)
+            .clip(true)
+    };
+    let caption_block = column![
+        caption_lane(title_row.into()),
+        caption_lane(
+            text(caption)
+                .size(theme::SIZE_META)
+                .color(theme::PAPER_DIM)
+                .wrapping(text::Wrapping::None)
+                .into(),
+        ),
+    ]
+    .width(Length::Fixed(ART_PX))
+    .height(Length::Fixed(theme::CAPTION_H));
     button(
-        column![
-            sleeve,
-            column![
-                title_row,
-                text(caption)
-                    .size(theme::SIZE_META)
-                    .color(theme::PAPER_DIM)
-                    .wrapping(text::Wrapping::None),
-            ]
-            .spacing(theme::GAP_XXS),
-        ]
-        .spacing(theme::GAP_SM)
-        .width(Length::Fixed(ART_PX)),
+        column![sleeve, caption_block]
+            .spacing(theme::GAP_SM)
+            .width(Length::Fixed(ART_PX)),
     )
     .width(Length::Fixed(CELL_W))
     .height(Length::Fixed(CELL_H))
