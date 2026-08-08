@@ -45,3 +45,10 @@ path = "fuzz_targets/replaygain_tags.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "history_line"
+path = "fuzz_targets/history_line.rs"
+test = false
+doc = false
+bench = false

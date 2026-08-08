@@ -128,6 +128,36 @@ next commit.
 - Command/event protocol between the engine and any front end, with the wire
   format pinned by test.
 
+**History**
+
+- **An append-only play-history ledger** at `$XDG_DATA_HOME/baz/history.tsv`,
+  beside the library and in plain text (ADR-0016). One tab-separated line per
+  play — `started_utc`, `played`/`skipped`, `listened_ms`, `track_ms`, path —
+  documented by a comment header inside the file itself, so it is greppable,
+  `awk`-able, backup-able and deletable without any tool knowing what baz is.
+  The file is **never rewritten**: no compaction, no rotation, no in-place
+  fixes. An interrupted append is closed off with a marker that cannot read
+  back as a record, and a reader stops at the last complete line, so a
+  truncated tail costs exactly itself and reading is safe while the engine
+  writes.
+- A play is **half the track, or four minutes, whichever comes first** — the
+  scrobbling convention, with two deliberate departures: no minimum track
+  length (that rule exists for public leaderboards, which baz does not have),
+  and skips are recorded as their own outcome rather than discarded. What is
+  counted is audio delivered, so pausing adds nothing and a seek inside a track
+  continues one play rather than starting another.
+- Written by **the engine**, never a front end, so a crashed front end loses
+  nothing and a second one cannot double-write; the append and its `fsync` run
+  on the ledger's own thread, never on the pump path. A front end's whole
+  involvement is `EngineHandle::set_history`, and the default is no ledger, so
+  nothing is written until one is opened.
+- `Event::PlayRecorded`, emitted **after** the line is in the file, and a typed
+  read API for the three surfaces the design names: per-track play counts and
+  dates, recency buckets (`THIS EVENING` → months → `NEVER`), and
+  least-recently-played weighting. Nothing else — history records, it never
+  performs. Scrobbling is out of scope and attaches downstream, as a consumer
+  of the event, never as a dependency of the ledger.
+
 **Interface**
 
 - The iced GUI (ADR-0005): first-run screen, album shelf with virtualized

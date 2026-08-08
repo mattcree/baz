@@ -653,6 +653,91 @@ pub enum Event {
         /// because it ran out of work.
         cancelled: bool,
     },
+    /// A play was written to the history ledger (ADR-0016).
+    ///
+    /// # What it means, precisely
+    ///
+    /// **The line is already in the file.** This event is emitted by the
+    /// ledger's writer thread *after* the record has been appended and synced,
+    /// which is the same state-before-event contract
+    /// [`Event::ReplayGainChanged`] follows: a front end that reacts to this by
+    /// re-reading [`History`](crate::history::History) always finds the play it
+    /// was just told about. A record that could not be written emits nothing —
+    /// there is no line to be news about.
+    ///
+    /// # Cadence and ordering
+    ///
+    /// One per play written, which is at most one per track. It is **not**
+    /// ordered against the transport events: a play ends when the next one
+    /// begins, so this typically arrives just after the
+    /// [`Event::TrackStarted`] of the track that displaced it, and after
+    /// [`Event::Stopped`] or [`Event::QueueEnded`] at the end of a run. A front
+    /// end must not use it to infer what is playing — that is
+    /// [`Event::TrackStarted`]'s job — only that the ledger grew.
+    ///
+    /// Nothing is emitted for a queue entry that delivered no audio: it was
+    /// never met, so nothing was recorded.
+    ///
+    /// # Reading it
+    ///
+    /// `outcome` is the whole of the play/skip judgement, made by
+    /// [`classify`](crate::history::classify) against
+    /// [`play_threshold_ms`](crate::history::play_threshold_ms) — half the
+    /// track or four minutes, whichever comes first. `listened_ms` is audio
+    /// actually delivered, not wall time and not a position: pausing adds
+    /// nothing to it, and hearing a passage twice counts it twice.
+    ///
+    /// **This is not a scrobble.** Scrobbling is an optional consumer of this
+    /// event and never a dependency of it (ADR-0016); the ledger is complete
+    /// whether or not anything is listening here.
+    PlayRecorded {
+        /// The file that was played.
+        path: PathBuf,
+        /// When its first audio was heard, in **seconds** since the Unix epoch
+        /// (UTC).
+        ///
+        /// Seconds rather than the milliseconds every other time in this
+        /// protocol carries, because this is a wall-clock instant rather than a
+        /// duration or a position: it is the number the ledger line holds, and
+        /// a front end renders it as a date. An integer for the reason every
+        /// number here is one (module docs).
+        started_unix_s: u64,
+        /// Milliseconds of this track's audio delivered to the output.
+        listened_ms: u64,
+        /// The track's own length in milliseconds, when the container declares
+        /// one. `None` for a stream that does not — a front end must render
+        /// that case rather than invent a duration, exactly as with
+        /// [`Event::Progress`].
+        track_ms: Option<u64>,
+        /// Whether it met the play threshold.
+        outcome: PlayOutcome,
+    },
+}
+
+/// Whether a play met the threshold, in [`Event::PlayRecorded`] and in the
+/// ledger (ADR-0016).
+///
+/// Two states rather than a `bool` for [`SignalChain`]'s reason: "played" and
+/// "skipped" are different facts about a listening session and a front end that
+/// wants to explain itself needs to name them, not negate one of them. The
+/// names are the words that appear in the file, so what a listener greps for is
+/// what the protocol says.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlayOutcome {
+    /// Heard for at least half the track, or four minutes, whichever came
+    /// first — [`play_threshold_ms`](crate::history::play_threshold_ms).
+    #[default]
+    Played,
+    /// Started and left before the threshold.
+    ///
+    /// Recorded, rather than discarded, and the argument for that is in
+    /// [`crate::history`]: it is the more honest half of the evidence, it is
+    /// what the pull's weighting and the inspector card actually want, and
+    /// `grep played` recovers the played-only view exactly, so it costs a
+    /// reader who does not want it nothing.
+    Skipped,
 }
 
 /// A request from a front end to the **ReplayGain analysis service**
@@ -1156,7 +1241,35 @@ mod tests {
         .into_iter()
         .chain(sample_replay_gain_events())
         .chain(sample_analysis_events())
+        .chain(sample_history_events())
         .collect()
+    }
+
+    /// The [`Event::PlayRecorded`] samples (ADR-0016).
+    fn sample_history_events() -> Vec<Event> {
+        vec![
+            Event::PlayRecorded {
+                path: PathBuf::from("/music/a.flac"),
+                started_unix_s: 1_786_000_000,
+                listened_ms: 231_480,
+                track_ms: Some(245_013),
+                outcome: PlayOutcome::Played,
+            },
+            Event::PlayRecorded {
+                path: PathBuf::from("/music/b.flac"),
+                started_unix_s: 1_786_000_251,
+                listened_ms: 9_200,
+                track_ms: Some(402_000),
+                outcome: PlayOutcome::Skipped,
+            },
+            Event::PlayRecorded {
+                path: PathBuf::from("/music/stream.mp3"),
+                started_unix_s: 0,
+                listened_ms: 240_000,
+                track_ms: None,
+                outcome: PlayOutcome::Played,
+            },
+        ]
     }
 
     /// The [`Event::ReplayGainChanged`] samples, one per [`ReplayGainSource`].
@@ -1956,6 +2069,59 @@ mod tests {
                 })
                 .expect("serialize"),
                 r#"{"event":"replay_gain_changed","mode":"track","preamp_centidb":0,"no_tag_preamp_centidb":-500,"prevent_clipping":true,"source":"no_tag","applied_centidb":-500,"clipping_prevented":false}"#,
+            ),
+        ];
+        for (got, want) in cases {
+            assert_eq!(got, want);
+        }
+    }
+
+    /// [`Event::PlayRecorded`]'s bytes, pinned (ADR-0016) — split from its
+    /// siblings above for the reason the others were: one test listing every
+    /// variant of a growing enum outgrows what is readable, not because the
+    /// contract is any weaker.
+    #[test]
+    fn play_recorded_wire_format_is_stable() {
+        let cases: Vec<(String, &str)> = vec![
+            (
+                // A play. The timestamp is whole seconds since the epoch —
+                // an integer, so the pinned bytes test the protocol rather
+                // than a date library's formatter.
+                serde_json::to_string(&Event::PlayRecorded {
+                    path: PathBuf::from("/music/a.flac"),
+                    started_unix_s: 1_786_000_000,
+                    listened_ms: 231_480,
+                    track_ms: Some(245_013),
+                    outcome: PlayOutcome::Played,
+                })
+                .expect("serialize"),
+                r#"{"event":"play_recorded","path":"/music/a.flac","started_unix_s":1786000000,"listened_ms":231480,"track_ms":245013,"outcome":"played"}"#,
+            ),
+            (
+                // A skip is a real outcome with its own name, not the absence
+                // of a play — and the name is the word that is in the file.
+                serde_json::to_string(&Event::PlayRecorded {
+                    path: PathBuf::from("/music/b.flac"),
+                    started_unix_s: 1_786_000_251,
+                    listened_ms: 9_200,
+                    track_ms: Some(402_000),
+                    outcome: PlayOutcome::Skipped,
+                })
+                .expect("serialize"),
+                r#"{"event":"play_recorded","path":"/music/b.flac","started_unix_s":1786000251,"listened_ms":9200,"track_ms":402000,"outcome":"skipped"}"#,
+            ),
+            (
+                // An undeclared track length is `null`, never a sentinel — the
+                // same rule `Event::Progress` follows.
+                serde_json::to_string(&Event::PlayRecorded {
+                    path: PathBuf::from("/music/stream.mp3"),
+                    started_unix_s: 0,
+                    listened_ms: 240_000,
+                    track_ms: None,
+                    outcome: PlayOutcome::Played,
+                })
+                .expect("serialize"),
+                r#"{"event":"play_recorded","path":"/music/stream.mp3","started_unix_s":0,"listened_ms":240000,"track_ms":null,"outcome":"played"}"#,
             ),
         ];
         for (got, want) in cases {

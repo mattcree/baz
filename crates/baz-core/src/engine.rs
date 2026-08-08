@@ -455,6 +455,44 @@
 //! - `track_ms` is `None` for a stream that declares no length. Progress is
 //!   still reported; there is simply no total to render against.
 //!
+//! # Play history
+//!
+//! ADR-0016 is the governing decision and [`crate::history`] holds the file
+//! format, the play/skip rule and the privacy stance. What belongs *here* is
+//! where a play begins and ends, what is counted, and why the writing happens
+//! in the engine at all.
+//!
+//! **Why here.** The engine is the only thing that knows what is reaching the
+//! output and for how long. A ledger written by a front end would lose an album
+//! to a crash and would be written twice by two front ends attached to one
+//! engine. A front end's whole involvement is [`EngineHandle::set_history`];
+//! the default is no ledger, so an engine nobody has handed one to writes
+//! nothing anywhere.
+//!
+//! **What a play is.** One play spans the time a track is *the track being
+//! delivered*. It opens when [`Event::TrackStarted`] fires for it and closes
+//! when anything displaces it: the next track, `Next`, `Previous`, `JumpTo`,
+//! `Stop`, the end of the queue, a queue edit that moves the transport, a
+//! sample-rate handover, or the engine shutting down. A **seek is the one
+//! exception** — it tears down and rebuilds a session, but the listener is
+//! still inside the same track, so the play carries across rather than being
+//! filed and started again.
+//!
+//! **What is counted.** Milliseconds of that track's *own audio delivered to
+//! the sink*, accumulated across every session the play spans, measured at the
+//! stream rate for "Elapsed time"'s reason. It is neither wall-clock time (a
+//! pause adds nothing) nor a position (seeking forward past a passage does not
+//! count it, and hearing one twice counts it twice). At a track boundary the
+//! count stops exactly at the boundary, never at whatever the pump had reached
+//! when the crossing was announced.
+//!
+//! **Realtime discipline.** The engine thread's entire cost is: one integer
+//! compare per per-track report pass (did the track change?), and — once per
+//! finished play, at most once per track — one mutex read of the ledger slot
+//! and one channel send. The `write` and the `fsync` happen on the ledger's own
+//! thread. Nothing here runs inside the pump itself, which stays the ring
+//! read and sink write it has always been.
+//!
 //! # Shutdown
 //!
 //! Dropping the [`EngineHandle`] (or calling [`EngineHandle::shutdown`])
@@ -481,6 +519,7 @@ use std::time::{Duration, Instant};
 
 use rtrb::RingBuffer;
 
+use crate::history::{HistoryLedger, PlayRecord, now_unix_s};
 #[cfg(feature = "device-output")]
 use crate::playback::OutputMode;
 #[cfg(feature = "device-output")]
@@ -567,6 +606,7 @@ pub struct EngineHandle {
     volume: Arc<SharedVolume>,
     replay_gain: Arc<SharedReplayGain>,
     computed_gains: Arc<Mutex<Option<Arc<dyn ComputedGains>>>>,
+    history: Arc<Mutex<Option<Arc<HistoryLedger>>>>,
 }
 
 /// A running count of the conversions the engine has performed, readable from
@@ -720,6 +760,44 @@ impl EngineHandle {
         *slot = gains;
     }
 
+    /// Give the engine a play-history ledger to append to, or `None` to detach
+    /// (ADR-0016).
+    ///
+    /// # Why the engine writes it, and a front end does not
+    ///
+    /// Because the engine is the only thing that knows what is reaching the
+    /// output and for how long, and because a record kept anywhere else would
+    /// be lost by exactly the events history most needs to survive: a front end
+    /// that crashes mid-album, and a second front end attached to the same
+    /// engine, which would otherwise file every play twice. A front end's whole
+    /// involvement in history is this one call.
+    ///
+    /// # When to call it
+    ///
+    /// Once at start-up, with
+    /// [`HistoryLedger::open_default`](crate::history::HistoryLedger::open_default)
+    /// — the ledger beside the library, in the user's own data directory. The
+    /// `Arc` should be kept: dropping the last one closes the ledger, which
+    /// drains and joins its writer thread.
+    ///
+    /// The default is `None`, so an engine nobody has handed a ledger to writes
+    /// nothing anywhere — which is what keeps the whole test suite, and any
+    /// embedder that has not opted in, from touching a file on disk.
+    ///
+    /// # What it costs the audio path
+    ///
+    /// Nothing. The engine thread reads this slot once per finished play — at
+    /// most once per track, between pump iterations, exactly where
+    /// [`Self::set_computed_gains`]'s snapshot is already read — and the append
+    /// and its `fsync` happen on the ledger's own thread.
+    pub fn set_history(&self, ledger: Option<Arc<HistoryLedger>>) {
+        let mut slot = self
+            .history
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot = ledger;
+    }
+
     /// Shut the engine down and wait for its threads to finish. Equivalent
     /// to dropping the handle; provided so intent reads explicitly.
     pub fn shutdown(self) {
@@ -793,6 +871,8 @@ pub fn spawn_offline(
     let loudness = Arc::clone(&replay_gain);
     let computed_gains: Arc<Mutex<Option<Arc<dyn ComputedGains>>>> = Arc::new(Mutex::new(None));
     let measured = Arc::clone(&computed_gains);
+    let history: Arc<Mutex<Option<Arc<HistoryLedger>>>> = Arc::new(Mutex::new(None));
+    let ledger = Arc::clone(&history);
     let thread = thread::Builder::new()
         .name("baz-engine".into())
         .spawn(move || {
@@ -807,6 +887,7 @@ pub fn spawn_offline(
                     volume: gain,
                     replay_gain: loudness,
                     computed_gains: measured,
+                    history: ledger,
                 },
                 OfflineSink::with_capacity(capacity_samples),
             );
@@ -822,6 +903,7 @@ pub fn spawn_offline(
             volume,
             replay_gain,
             computed_gains,
+            history,
         },
         event_rx,
         OfflineOutput { output: out_rx },
@@ -1018,6 +1100,8 @@ pub fn spawn_device_with(
     let loudness = Arc::clone(&replay_gain);
     let computed_gains: Arc<Mutex<Option<Arc<dyn ComputedGains>>>> = Arc::new(Mutex::new(None));
     let measured = Arc::clone(&computed_gains);
+    let history: Arc<Mutex<Option<Arc<HistoryLedger>>>> = Arc::new(Mutex::new(None));
+    let ledger = Arc::clone(&history);
     let thread = thread::Builder::new()
         .name("baz-engine".into())
         .spawn(move || {
@@ -1043,6 +1127,7 @@ pub fn spawn_device_with(
                             volume: gain,
                             replay_gain: loudness,
                             computed_gains: measured,
+                            history: ledger,
                         },
                         sink,
                     );
@@ -1061,6 +1146,7 @@ pub fn spawn_device_with(
         volume,
         replay_gain,
         computed_gains,
+        history,
     };
     match ack_rx.recv() {
         Ok(Ok(())) => Ok((handle, event_rx)),
@@ -1145,6 +1231,57 @@ struct Control<S: Sink> {
     /// implement the tempting shortcuts).
     scratch: Box<[f32]>,
     sink: S,
+    /// Where finished plays are appended, or `None` — the default, and the
+    /// state of an engine no front end has handed a ledger to (ADR-0016).
+    ///
+    /// Shared with [`EngineHandle::set_history`], which is the only writer, on
+    /// exactly the terms [`Self::computed_gains`] is: read on this thread once
+    /// per finished play, and **never** by the pump. Even the read is not the
+    /// write — this thread hands the record to the ledger's own thread and
+    /// returns, so no file I/O ever happens on the thread that runs the pump.
+    history: Arc<Mutex<Option<Arc<HistoryLedger>>>>,
+    /// The play being accumulated: the track whose audio is reaching the sink,
+    /// when it started, and how much of it has been heard so far.
+    play: Option<PlayInProgress>,
+    /// How much of the running (session, track) delivery segment has already
+    /// been folded into [`Self::play`].
+    ///
+    /// A session measures delivery from its current track's origin, and both
+    /// halves of that pair change under us — a track boundary moves the origin,
+    /// a seek replaces the session. Remembering what has been counted makes
+    /// [`Self::bank_listening`] idempotent, so it can be called at every point
+    /// a segment might be ending without any call site having to know whether
+    /// another one already did.
+    banked_ms: u64,
+    /// [`Session::starts`] as of the last time the ledger looked, so a track
+    /// change is one integer compare.
+    last_start: u64,
+    /// Set by a seek: the session about to start continues the play in
+    /// progress rather than beginning a new one.
+    ///
+    /// Seeking within a track is one listening act — the listener moved inside
+    /// something they are already hearing — but it is implemented as a fresh
+    /// session, which is indistinguishable from a restart without this flag.
+    /// Consumed by [`Self::start_session`], so it can never leak into the next
+    /// track.
+    resume_play: bool,
+}
+
+/// A play the engine is still accumulating (ADR-0016).
+///
+/// Becomes a [`PlayRecord`] when the track stops being the one being delivered
+/// — or nothing at all, if no audio ever reached the sink.
+#[derive(Debug)]
+struct PlayInProgress {
+    /// The file being played.
+    path: PathBuf,
+    /// When its first audio was heard, in seconds since the Unix epoch.
+    started_unix_s: u64,
+    /// What its container declares, when it declares anything.
+    track_ms: Option<u64>,
+    /// Milliseconds of its audio delivered so far, across every delivery
+    /// segment this play has been through.
+    listened_ms: u64,
 }
 
 /// The state an [`EngineHandle`] can read while the engine runs: the delivered
@@ -1161,6 +1298,7 @@ struct Observable {
     volume: Arc<SharedVolume>,
     replay_gain: Arc<SharedReplayGain>,
     computed_gains: Arc<Mutex<Option<Arc<dyn ComputedGains>>>>,
+    history: Arc<Mutex<Option<Arc<HistoryLedger>>>>,
 }
 
 impl<S: Sink> Control<S> {
@@ -1178,6 +1316,7 @@ impl<S: Sink> Control<S> {
             volume,
             replay_gain,
             computed_gains,
+            history,
         } = observable;
         let rg_settings = ReplayGainSettings::default();
         // `SharedReplayGain::default` already holds exactly this, so a handle
@@ -1210,6 +1349,11 @@ impl<S: Sink> Control<S> {
             // exactly enough and is allocated before any audio flows.
             scratch: vec![0.0; cfg.consumer_chunk_frames * CHANNELS].into_boxed_slice(),
             sink,
+            history,
+            play: None,
+            banked_ms: 0,
+            last_start: 0,
+            resume_play: false,
         }
     }
 
@@ -1237,10 +1381,132 @@ impl<S: Sink> Control<S> {
                 }
             }
         }
-        // Shutdown: dropping the session sets its stop flag and joins the
-        // producer (and its prefetch) — bounded, no leaked threads.
+        // Shutdown: the play in progress is finished listening to, so it is
+        // written before the session it was measured from goes away
+        // (ADR-0016). A front end closing is not a reason to lose the album
+        // somebody just heard.
+        self.end_play();
+        // Dropping the session sets its stop flag and joins the producer (and
+        // its prefetch) — bounded, no leaked threads.
         self.session = None;
         self.sink
+    }
+
+    /// Fold the audio the running session has delivered for the track it is on
+    /// into the play in progress (ADR-0016).
+    ///
+    /// **Idempotent**: it remembers how much of this delivery segment it has
+    /// already counted, so calling it twice counts nothing twice and calling it
+    /// on a session that has gone away counts nothing at all. That is what lets
+    /// every point where a session might be about to end call it without
+    /// knowing whether another one already has.
+    ///
+    /// Must be called *before* [`Session::report`] moves the track origin, and
+    /// before any session is dropped or replaced — after either, the delivered
+    /// count belongs to a different track.
+    fn bank_listening(&mut self) {
+        let delivered = self.session.as_ref().map_or(0, Session::delivered_ms);
+        let fresh = delivered.saturating_sub(self.banked_ms);
+        self.banked_ms = delivered;
+        if let Some(play) = self.play.as_mut() {
+            play.listened_ms = play.listened_ms.saturating_add(fresh);
+        }
+    }
+
+    /// Hand the play in progress to the ledger, if there is one and if anything
+    /// was heard (ADR-0016).
+    ///
+    /// Banks nothing itself: the caller has already done that, because *when*
+    /// to bank and *when* to close are different moments at a track boundary —
+    /// the audio belongs to the outgoing track, and by the time the incoming
+    /// one has been reported the origin has moved.
+    ///
+    /// The send is one channel push. The `write` and the `fsync` happen on the
+    /// ledger's own thread, so this stays what the engine thread is allowed to
+    /// do between pump iterations (`docs/ENGINEERING.md`).
+    fn close_play(&mut self) {
+        let Some(play) = self.play.take() else {
+            return;
+        };
+        let Some(record) = PlayRecord::new(
+            play.path,
+            play.started_unix_s,
+            play.listened_ms,
+            play.track_ms,
+        ) else {
+            return; // nothing was heard: nothing happened
+        };
+        let ledger = self
+            .history
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(ledger) = ledger {
+            ledger.record(record, Some(self.events.clone()));
+        }
+    }
+
+    /// Bank and close in one go — the ordinary "delivery has ended" path, for
+    /// every caller that is not standing at a track boundary.
+    fn end_play(&mut self) {
+        self.bank_listening();
+        self.close_play();
+    }
+
+    /// Emit the session's per-track events, keeping the ledger's notion of
+    /// which track is being delivered in step with them (ADR-0016).
+    ///
+    /// The one place [`Session::report`] is called, so that the bank-report-roll
+    /// order is stated once rather than at every call site. A `report` that
+    /// starts no track leaves the ledger untouched, which is the common case.
+    fn report_session(&mut self, flush: bool) {
+        // Before the report: everything delivered so far belongs to the track
+        // that is finishing, and `report` is about to move the origin.
+        self.bank_listening();
+        if let Some(session) = self.session.as_mut() {
+            session.report(&self.events, flush);
+        }
+        let starts = self
+            .session
+            .as_ref()
+            .map_or(self.last_start, Session::starts);
+        if starts == self.last_start {
+            return;
+        }
+        self.last_start = starts;
+        // A different track is now the one being delivered, so the delivery
+        // segment restarts at its origin and nothing of it has been banked.
+        self.banked_ms = 0;
+        let next = self.session.as_ref().and_then(Session::current_track);
+        self.roll_play(next);
+    }
+
+    /// Close the play in progress and open one for `next`, unless a seek said
+    /// the two are the same listening act (ADR-0016).
+    fn roll_play(&mut self, next: Option<(PathBuf, Option<u64>)>) {
+        let continues = self.resume_play
+            && match (self.play.as_ref(), next.as_ref()) {
+                (Some(play), Some((path, _))) => play.path == *path,
+                _ => false,
+            };
+        self.resume_play = false;
+        if continues {
+            // A seek landed back inside the track already being played: same
+            // play, new delivery segment. The declared length can only get
+            // better (the seek carried it across, or the new session's bound
+            // supplied one), so take it if there is one.
+            if let (Some(play), Some((_, track_ms))) = (self.play.as_mut(), next.as_ref()) {
+                play.track_ms = track_ms.or(play.track_ms);
+            }
+            return;
+        }
+        self.close_play();
+        self.play = next.map(|(path, track_ms)| PlayInProgress {
+            path,
+            started_unix_s: now_unix_s(),
+            track_ms,
+            listened_ms: 0,
+        });
     }
 
     /// One pump-and-report iteration of an active session.
@@ -1285,10 +1551,10 @@ impl<S: Sink> Control<S> {
         // a volume change becomes audible, which is what bounds "takes effect
         // promptly" at one pump iteration.
         self.fader.aim(self.volume.gain());
+        let chunk_samples = self.cfg.consumer_chunk_frames * CHANNELS;
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        let chunk_samples = self.cfg.consumer_chunk_frames * CHANNELS;
         let pumped = session.pump(
             &mut self.sink,
             chunk_samples,
@@ -1296,9 +1562,9 @@ impl<S: Sink> Control<S> {
             &mut self.fader,
             &mut self.scratch,
         );
-        session.report(&self.events, false);
-        if session.complete() {
-            if session.superseded() {
+        self.report_session(false);
+        if self.session.as_ref().is_some_and(Session::complete) {
+            if self.session.as_ref().is_some_and(Session::superseded) {
                 // Edited over, and it ran out of queue before it reached the
                 // cut: its last track was the last it had. Nothing is flushed —
                 // a report from its index space would name positions in a queue
@@ -1306,9 +1572,13 @@ impl<S: Sink> Control<S> {
                 self.hand_over_after_edit();
                 return;
             }
-            session.report(&self.events, true);
-            let resume_at = session.rate_change_at();
+            self.report_session(true);
+            let resume_at = self.session.as_ref().and_then(Session::rate_change_at);
+            // The last of this session's audio has been delivered; count it
+            // before the session it is counted from goes away (ADR-0016).
+            self.bank_listening();
             self.session = None; // joins the (already finished) producer
+            self.close_play();
             if let Some(next) = resume_at {
                 self.continue_at_new_rate(next);
                 return;
@@ -1322,7 +1592,7 @@ impl<S: Sink> Control<S> {
         }
         // Between pump iterations, never inside one: `pump` above is the
         // realtime-disciplined path and stays a ring read plus a sink write.
-        if session.progress_due() {
+        if self.session.as_mut().is_some_and(Session::progress_due) {
             self.emit_progress();
         }
         if pumped {
@@ -1741,6 +2011,10 @@ impl<S: Sink> Control<S> {
     /// call sites: leaving it out is precisely the "the skip feels late" bug
     /// ([`Sink::discard_buffered`]).
     fn abandon_for_move(&mut self) {
+        // Count what this session delivered before it goes away; whether the
+        // play *ends* here is [`Self::start_session`]'s question, because a
+        // seek is a move that does not end one (ADR-0016).
+        self.bank_listening();
         let Some(session) = self.session.take() else {
             return; // stopped: nothing to abandon
         };
@@ -1758,6 +2032,9 @@ impl<S: Sink> Control<S> {
     /// alike and differ on exactly the question of whose audio is still owed.
     fn hand_over_after_edit(&mut self) {
         let next = self.playing_index().map_or(0, |current| current + 1);
+        // The track this session was told to finish has been delivered in
+        // full — count it before the session goes away (ADR-0016).
+        self.bank_listening();
         self.session = None; // joins the (finished or aborted) producer
         self.sink.drain_buffered();
         self.start_session(next, 0, None);
@@ -1813,6 +2090,12 @@ impl<S: Sink> Control<S> {
             self.start_session(current + 1, 0, None);
             return;
         }
+        // Seeking inside a track is one listening act, not two: the play in
+        // progress carries across the new session rather than being written out
+        // and started again (ADR-0016). Without this, dragging the needle three
+        // times would file four half-listens where one person heard one album
+        // track.
+        self.resume_play = true;
         // The length carries over: it belongs to the track, not the session,
         // so the immediate Progress below can report a total straight away
         // instead of leaving the front end with a blank right-hand timestamp
@@ -1911,14 +2194,21 @@ impl<S: Sink> Control<S> {
     /// bufferful. (Pause takes a different path for exactly that reason —
     /// it keeps its buffer on purpose.)
     fn stop_session(&mut self) {
+        // Whatever has been heard is heard, and stopping is the end of hearing
+        // it: bank while the session is still here to be measured, and write
+        // the line (ADR-0016).
+        self.bank_listening();
         if let Some(session) = self.session.take() {
             drop(session);
+            self.close_play();
             self.sink.discard_buffered();
             let _ = self.events.send(Event::Stopped);
             // Nothing is being delivered, so nothing has a ReplayGain.
             self.settle_replay_gain(false);
         }
         self.paused = false;
+        // Stopping is not a seek: nothing is being continued.
+        self.resume_play = false;
     }
 
     /// Start a session at queue index `start`, beginning `seek_ms` into that
@@ -1931,6 +2221,16 @@ impl<S: Sink> Control<S> {
         // A new session numbers its tracks against the queue as it is now, so
         // any translation left over from an edit is spent (ADR-0014).
         self.edited_index = None;
+        // A session that starts a track from its beginning ends the play in
+        // progress; a session created by a *seek* continues it (ADR-0016).
+        // Either way the delivery segment restarts, and so does the session's
+        // own start counter.
+        let continues = std::mem::take(&mut self.resume_play);
+        if !continues {
+            self.close_play();
+        }
+        self.banked_ms = 0;
+        self.last_start = 0;
         // Nothing has been delivered yet, so a slew would only mean the first
         // 20 ms of the new position playing at the *old* gain. Land on the
         // current setting instead — which is also what makes "set the volume,
@@ -1938,6 +2238,10 @@ impl<S: Sink> Control<S> {
         self.fader.jump(self.volume.gain());
         if start >= self.queue.len() {
             self.position = 0;
+            // Nothing will start, so a seek's continuation has nowhere to land:
+            // the play in progress ends here rather than waiting for a track
+            // that is never coming (ADR-0016).
+            self.close_play();
             let _ = self.events.send(Event::QueueEnded);
             return;
         }
@@ -1950,6 +2254,9 @@ impl<S: Sink> Control<S> {
             self.cfg,
             self.exclusive,
         ));
+        // Re-armed only now that a session exists to carry the continuation to
+        // its first track start; [`Self::roll_play`] spends it there.
+        self.resume_play = continues;
     }
 }
 
@@ -2150,6 +2457,16 @@ struct Session {
     /// Engine-thread state only — the producer learns the answer from
     /// [`SessionShared::stream_rate`].
     rate_settled: bool,
+    /// How many [`Event::TrackStarted`]s this session has emitted (ADR-0016).
+    ///
+    /// A counter rather than a flag because the ledger's question is "did the
+    /// track being delivered change since I last looked", and one
+    /// [`Self::report`] call can start more than one track — a flush reports
+    /// every track whose bound is known, including any that decoded to nothing.
+    /// Comparing a counter across the call answers it in one integer compare
+    /// and cannot miss a change the way comparing [`Self::current`] would when
+    /// a queue repeats a file.
+    starts: u64,
 }
 
 impl Session {
@@ -2214,6 +2531,7 @@ impl Session {
             // resume asks for a reading), so the cadence starts disarmed.
             next_progress: usize::MAX,
             rate_settled: false,
+            starts: 0,
         }
     }
 
@@ -2286,6 +2604,54 @@ impl Session {
         // a few frames of the next track's audio into this track's count, and
         // "3:01 of 3:00" is a bug on screen.
         self.track_ms.map_or(elapsed, |total| elapsed.min(total))
+    }
+
+    /// Milliseconds of the **current track's own audio** this session has
+    /// delivered — what the history ledger counts (ADR-0016).
+    ///
+    /// [`Self::elapsed_ms`] with both of its presentation adjustments removed,
+    /// and the removals are the point. The seek offset is gone because a
+    /// listener who jumped to the last minute of a track has not thereby heard
+    /// the first three; the clamp to the declared length is gone because two
+    /// passes over the same passage are two passages heard, and a counter that
+    /// stopped at the track's length would quietly lose the second.
+    ///
+    /// It counts at the **stream** rate, for "Elapsed time"'s reason: the
+    /// stream rate is the rate the audio is actually being consumed at, and a
+    /// resampled track occupies a different number of frames than its file
+    /// says.
+    fn delivered_ms(&self) -> u64 {
+        // The reported track's audio ends where the next track's begins, and
+        // the delivery cursor reaches that boundary a beat before `report`
+        // announces the crossing: `report` starts a track once `pulled` is
+        // strictly *past* its bound, so there is one pump iteration in which
+        // `pulled` already holds a chunk of the next track while `track_origin`
+        // still names this one. Counting to `pulled` there would file a chunk
+        // of the next track against this one — 23 ms at the app's settings, and
+        // exactly the kind of quiet drift a ledger must not have.
+        let end = self
+            .reported_slot
+            .and_then(|slot| self.replay_gains.get(slot + 1))
+            .map_or(self.pulled, |next| next.start_sample.min(self.pulled));
+        let frames = (end.saturating_sub(self.track_origin) / CHANNELS) as u64;
+        let rate = self.shared.stream_rate.load(Ordering::Acquire);
+        if frames == 0 || rate == 0 {
+            0
+        } else {
+            frames_to_ms(frames, rate)
+        }
+    }
+
+    /// How many tracks this session has reported as started (ADR-0016).
+    fn starts(&self) -> u64 {
+        self.starts
+    }
+
+    /// The file this session is delivering and the length it declares — what
+    /// the ledger opens a play with. `None` before any track has started.
+    fn current_track(&self) -> Option<(PathBuf, Option<u64>)> {
+        self.reported_slot?; // nothing has been delivered, so nothing is playing
+        Some((self.queue.get(self.current)?.clone(), self.track_ms))
     }
 
     /// The current position reading, or `None` when audio has been delivered
@@ -2562,6 +2928,10 @@ impl Session {
                     self.reported_slot = self.active_slot;
                     self.track_origin = start_sample;
                     self.track_ms = self.durations[i];
+                    // The ledger's cue that the track being delivered changed
+                    // (ADR-0016). Counted here, beside the event, because this
+                    // is the one place a track becomes the current one.
+                    self.starts += 1;
                     // The chain follows the track it describes, and is stated
                     // only when it is news: identical for every track of an
                     // album, so an album says it once.

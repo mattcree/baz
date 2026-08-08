@@ -9,6 +9,16 @@ authors.workspace = true
 
 [dependencies]
 cpal = { workspace = true, optional = true }
+# XDG data-dir lookup for the play-history ledger, which lives beside the
+# library database (ADR-0016). Adds **no crate to the workspace lock**: `dirs`
+# is already there and already linked into every baz binary through
+# `crates/baz`, so this is a dependency *line*, the same cost `alsa` was in
+# ADR-0012. (`fuzz/Cargo.lock` is a separate lock that never saw `crates/baz`,
+# so it does grow — by `dirs` and its four transitive crates. No fuzz target
+# links them; they are graph, not binary.) The alternative — spelling the XDG
+# spec out with `std::env` — would have been right on Linux and wrong on
+# Windows and macOS, where the answer is not `$HOME/.local/share`.
+dirs = { workspace = true }
 lofty = { workspace = true }
 memchr = { workspace = true }
 rtrb = { workspace = true }
