@@ -656,6 +656,7 @@ mod tests {
             artist: Some(artist.to_owned()),
             album_artist: None,
             compilation: None,
+            genre: None,
             album: Some(album.to_owned()),
             title: Some(title.to_owned()),
             track: Some(track),

@@ -88,6 +88,7 @@ fn synthetic_tracks() -> Vec<TrackMeta> {
                     artist: Some(artist.clone()),
                     album_artist: Some(artist.clone()),
                     compilation: None,
+                    genre: Some("Rock".to_owned()),
                     album: Some(album.clone()),
                     title: Some(title),
                     track: Some(track_n),

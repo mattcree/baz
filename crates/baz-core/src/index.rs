@@ -75,21 +75,43 @@
 //! one track list per format the collector actually owns. The ranking that
 //! decides which edition is the default is documented on
 //! [`Album::editions`] and in `docs/adr/0007-album-editions.md`.
+//!
+//! # Group keys
+//!
+//! [`Library::shelves`] arranges those albums into the shelves the wall draws,
+//! under one [`GroupKey`] — ARTIST, YEAR, GENRE, ADDED or PLAYED
+//! (`docs/adr/0019-group-keys.md`, which amends ADR-0008). Each key is a
+//! *projection* of the same albums and never a filter: every album appears
+//! under every key, once, including the albums whose files declare nothing.
+//! Each [`Shelf`] carries the [`GroupHeader`] it draws, which is also the
+//! whole of what the index rail shows — so the rail is
+//! `shelves(key).iter().map(|s| s.header.label())` and never needs
+//! re-specifying when a key is added.
+//!
+//! Two of the keys read facts the schema had to grow (v7): `genre`, verbatim
+//! from the tags, and `first_seen_ns`, written once when a row is created and
+//! structurally unreachable by any later rescan. PLAYED reads the play-history
+//! ledger (`docs/adr/0018-play-history-ledger.md`) through
+//! [`Library::shelves_with_history`], and answers `NEVER PLAYED` for the whole
+//! library when there is no ledger — which is the true answer, not a
+//! placeholder. ADDED and PLAYED share the ledger's [`Recency`] vocabulary
+//! rather than defining a second one.
 
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::iter::Peekable;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, params};
 
+use crate::history::{History, Recency, bucket};
 use crate::library::{AudioFormat, FileStamp, KnownFiles, TrackMeta};
 use crate::replaygain::{ComputedGains, ComputedReplayGain, ReplayGainTags};
 
 /// The schema version this build reads and writes (`PRAGMA user_version`).
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 /// Rows per write transaction in [`Library::add_tracks`]. A scan yields tens
 /// of thousands of tracks; committing in batches keeps any single
@@ -206,6 +228,33 @@ const SCHEMA_V6_COLUMNS: &str = "
     ALTER TABLE tracks ADD COLUMN rg_computed_file_size          INTEGER; -- bytes
 ";
 
+/// Version 7: the two facts the GENRE and ADDED group keys are made of
+/// (`docs/adr/0018-group-keys.md`). Two more nullable columns, added rather
+/// than rebuilt, exactly as v2 – v6 were.
+///
+/// # Why `first_seen_ns` is not just another scanned column
+///
+/// It is the one column in `tracks` that a rescan must **never** rewrite.
+/// "When did this album arrive in my collection" is destroyed the moment a
+/// second scan touches it, and a scan runs at every launch — so the guarantee
+/// is made by the shape of [`UPSERT_TRACK`], which names `first_seen_ns` in
+/// its `INSERT` list and omits it from its `ON CONFLICT DO UPDATE` list. A
+/// row's first-seen is written once, when the row is created, and no later
+/// code path can move it. That is the same structural trick the `rg_computed_*`
+/// columns use (schema v6), for the same reason: a property held by the schema
+/// beats a property held by two writers agreeing to be careful.
+///
+/// It is nanoseconds since the Unix epoch, matching `mtime_ns` — the only
+/// other timestamp in the table — so the two are comparable without a
+/// conversion nobody would remember to write.
+///
+/// The transaction and the `user_version` bump are applied by
+/// [`migrate_v6_to_v7`].
+const SCHEMA_V7_COLUMNS: &str = "
+    ALTER TABLE tracks ADD COLUMN genre         TEXT;    -- verbatim from tags
+    ALTER TABLE tracks ADD COLUMN first_seen_ns INTEGER; -- ns since the epoch
+";
+
 /// Write one track's measured ReplayGain (schema v6).
 ///
 /// An `UPDATE` rather than an upsert on purpose: a measurement belongs to a
@@ -231,15 +280,21 @@ const STORE_COMPUTED_REPLAY_GAIN: &str = "
 /// is not a tag. A new row therefore gets `NULL` measurements, and an updated
 /// row keeps whatever it had — which, if the file really changed, is a stamp
 /// that no longer matches and so a measurement nothing will use.
+///
+/// **`first_seen_ns` is in the insert list and absent from the update list**
+/// (schema v7), which is the whole of how ADDED survives a rescan: the value
+/// is written when the row is created and there is no statement anywhere that
+/// can move it afterwards. See [`SCHEMA_V7_COLUMNS`].
 const UPSERT_TRACK: &str = "
     INSERT INTO tracks
         (path, artist, album, title, track, disc, year, duration_ns,
          format, bit_depth, sample_rate, bitrate, album_artist, compilation,
          mtime_ns, file_size,
          rg_track_gain_centidb, rg_track_peak_micro,
-         rg_album_gain_centidb, rg_album_peak_micro)
+         rg_album_gain_centidb, rg_album_peak_micro,
+         genre, first_seen_ns)
     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-            ?15, ?16, ?17, ?18, ?19, ?20)
+            ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
     ON CONFLICT(path) DO UPDATE SET
         artist = excluded.artist,
         album = excluded.album,
@@ -259,7 +314,8 @@ const UPSERT_TRACK: &str = "
         rg_track_gain_centidb = excluded.rg_track_gain_centidb,
         rg_track_peak_micro = excluded.rg_track_peak_micro,
         rg_album_gain_centidb = excluded.rg_album_gain_centidb,
-        rg_album_peak_micro = excluded.rg_album_peak_micro
+        rg_album_peak_micro = excluded.rg_album_peak_micro,
+        genre = excluded.genre
 ";
 
 const SELECT_ALL_TRACKS: &str = "
@@ -270,7 +326,8 @@ const SELECT_ALL_TRACKS: &str = "
            rg_album_gain_centidb, rg_album_peak_micro,
            rg_computed_track_gain_centidb, rg_computed_track_peak_micro,
            rg_computed_album_gain_centidb, rg_computed_album_peak_micro,
-           rg_computed_mtime_ns, rg_computed_file_size
+           rg_computed_mtime_ns, rg_computed_file_size,
+           genre, first_seen_ns
     FROM tracks
 ";
 
@@ -361,11 +418,15 @@ impl Library {
         self.index = SearchIndex::default();
         let mut stmt = self.conn.prepare(SELECT_ALL_TRACKS)?;
         let rows = stmt.query_and_then([], |row| {
-            Ok::<_, IndexError>((row_to_meta(row)?, row_to_computed(row)?))
+            Ok::<_, IndexError>((
+                row_to_meta(row)?,
+                row_to_computed(row)?,
+                row_to_first_seen(row)?,
+            ))
         })?;
         for row in rows {
-            let (meta, computed) = row?;
-            self.index.put(meta, computed);
+            let (meta, computed, first_seen) = row?;
+            self.index.put(meta, computed, first_seen);
         }
         self.index.rebuild_order();
         Ok(())
@@ -506,7 +567,13 @@ impl Library {
     {
         let mut iter = tracks.into_iter().peekable();
         let mut added = 0;
-        let result = self.insert_batches(&mut iter, &mut added);
+        // One clock reading for the whole call, not one per row: the tracks in
+        // a scan batch arrived together, and giving them timestamps that differ
+        // by the microseconds an insert takes would be precision the fact does
+        // not have. Only rows the database has never held will use it (see
+        // [`UPSERT_TRACK`]).
+        let now_ns = now_ns();
+        let result = self.insert_batches(&mut iter, &mut added, now_ns);
         // Re-sort exactly once whether or not a batch failed, so the index
         // order always matches what actually landed.
         self.index.rebuild_order();
@@ -517,6 +584,7 @@ impl Library {
         &mut self,
         iter: &mut Peekable<I>,
         added: &mut usize,
+        now_ns: i64,
     ) -> Result<(), IndexError>
     where
         I: Iterator<Item = TrackMeta>,
@@ -548,6 +616,8 @@ impl Library {
                         meta.replay_gain.track_peak_micro,
                         meta.replay_gain.album_gain_centidb,
                         meta.replay_gain.album_peak_micro,
+                        meta.genre,
+                        now_ns,
                     ])?;
                 }
             }
@@ -556,7 +626,7 @@ impl Library {
             // a failed batch never leaves ghost tracks in the index.
             *added += chunk.len();
             for meta in chunk {
-                self.index.insert(meta);
+                self.index.insert(meta, now_ns);
             }
         }
         Ok(())
@@ -717,6 +787,12 @@ impl Library {
     /// Each album is then split by codec into [`Album::editions`]: the same
     /// album ripped to FLAC *and* to MP3 is **one** entry with two editions,
     /// not two entries and not one entry with every track listed twice.
+    ///
+    /// This is the flat shelf, which is also exactly what
+    /// [`GroupKey::Artist`] arranges: `albums()` and
+    /// `shelves(GroupKey::Artist)` contain the same albums in the same order,
+    /// and the difference is only whether the A–Z breaks between them are
+    /// stated (`the_artist_key_is_the_flat_shelf_with_its_breaks_named`).
     #[must_use]
     pub fn albums(&self) -> Vec<Album<'_>> {
         let mut albums: Vec<Album<'_>> = Vec::new();
@@ -731,6 +807,8 @@ impl Library {
                     artist: AlbumArtist::of(&track.meta),
                     title: track.meta.album.as_deref(),
                     year: None,
+                    genre: None,
+                    first_seen_ns: None,
                     editions: Vec::new(),
                 });
             }
@@ -738,6 +816,13 @@ impl Library {
                 if album.year.is_none() {
                     album.year = track.meta.year;
                 }
+                if album.genre.is_none() {
+                    album.genre = track.meta.genre.as_deref();
+                }
+                album.first_seen_ns = match (album.first_seen_ns, track.first_seen) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (seen, None) | (None, seen) => seen,
+                };
                 album.push_track(&track.meta);
             }
         }
@@ -745,6 +830,352 @@ impl Library {
             album.editions.sort_by(rank_editions);
         }
         albums
+    }
+
+    /// The shelf view **arranged into the shelves the wall draws**, under one
+    /// [`GroupKey`] (ADR-0018, `docs/adr/0017-design-direction.md` step 4).
+    ///
+    /// Every album in the library appears in exactly one shelf, whatever the
+    /// key: a value nothing declares gets a shelf of its own rather than being
+    /// dropped, because a wall that silently omits your untagged records is a
+    /// wall you cannot trust. [`Shelf::header`] is the group header the shelf
+    /// draws and the index rail projects; it is derived from the key and the
+    /// data and holds no state of its own.
+    ///
+    /// [`GroupKey::Played`] answers from no ledger here — every album lands in
+    /// [`Recency::Never`] — because a [`Library`] holds none. Pass the play
+    /// history to [`Library::shelves_with_history`] to get the real answer.
+    #[must_use]
+    pub fn shelves(&self, key: GroupKey) -> Vec<Shelf<'_>> {
+        self.shelves_with_history(key, None)
+    }
+
+    /// [`Library::shelves`], reading [`GroupKey::Played`] from the play
+    /// history (ADR-0018).
+    ///
+    /// `history` is consulted **only** for [`GroupKey::Played`]; every other
+    /// key ignores it entirely, so a caller with no ledger loses nothing.
+    ///
+    /// `None` and an empty [`History`] are the same answer and both are
+    /// correct rather than degraded: the ledger is optional at runtime — it
+    /// writes nothing until a front end calls
+    /// [`EngineHandle::set_history`](crate::engine::EngineHandle::set_history)
+    /// — and "baz has no record of playing this" is a true statement about a
+    /// library nobody has played. PLAYED still draws one shelf, `NEVER
+    /// PLAYED`, holding everything.
+    ///
+    /// An album's last-played moment is the **most recent** of its tracks',
+    /// across every edition: playing one track off a record is a thing you did
+    /// with that record, and a listener looking for "what have I not touched in
+    /// a year" means the album, not each track separately.
+    #[must_use]
+    pub fn shelves_with_history(&self, key: GroupKey, history: Option<&History>) -> Vec<Shelf<'_>> {
+        let now = SystemTime::now();
+        let mut shelves: Vec<Shelf<'_>> = Vec::new();
+        let mut sorts: Vec<ShelfSort> = Vec::new();
+        let mut placed: HashMap<ShelfSort, usize> = HashMap::new();
+        for album in self.albums() {
+            let sort = ShelfSort::of(key, &album, now, history);
+            let index = match placed.entry(sort.clone()) {
+                Entry::Occupied(slot) => *slot.get(),
+                Entry::Vacant(slot) => {
+                    slot.insert(shelves.len());
+                    shelves.push(Shelf {
+                        header: GroupHeader::of(key, &album, now, history),
+                        albums: Vec::new(),
+                    });
+                    sorts.push(sort);
+                    shelves.len() - 1
+                }
+            };
+            shelves[index].albums.push(album);
+        }
+        // Sort the shelves, carrying their albums with them. `albums()` yields
+        // library order, so each shelf's contents are already in it and stay
+        // there — within a decade or a genre the wall reads alphabetically,
+        // which is the order every other view of this library uses.
+        let mut order: Vec<usize> = (0..shelves.len()).collect();
+        order.sort_by(|&a, &b| sorts[a].cmp(&sorts[b]));
+        let mut sorted: Vec<Option<Shelf<'_>>> = shelves.into_iter().map(Some).collect();
+        order
+            .into_iter()
+            .filter_map(|index| sorted[index].take())
+            .collect()
+    }
+}
+
+/// The axis the wall's shelves break on: one row of words, no menus
+/// (`docs/design/critique/02-surfaces.md`, ADR-0018).
+///
+/// Each key is a *projection* of the same albums, never a filter: every album
+/// the library holds appears under every key, in a different arrangement with
+/// different headers. That is what lets the index rail be a pure projection of
+/// the active key with no state of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum GroupKey {
+    /// Who the album is filed under — the grouping ADR-0008 decided, now one
+    /// key among several. Headers are A–Z (see [`Initial`]).
+    Artist,
+    /// Release year, shelved by decade (see [`GroupHeader::Decade`]).
+    Year,
+    /// Genre, **verbatim from the tags** (see [`GroupHeader::Genre`]).
+    Genre,
+    /// When the library first saw the album, in recency buckets (see
+    /// [`Recency`]).
+    Added,
+    /// When the album was last played, in recency buckets ending in
+    /// [`Recency::Never`].
+    Played,
+}
+
+impl GroupKey {
+    /// Every key, in the order the wall's row of words states them.
+    pub const ALL: [Self; 5] = [
+        Self::Artist,
+        Self::Year,
+        Self::Genre,
+        Self::Added,
+        Self::Played,
+    ];
+
+    /// The word the wall's group-key row shows. Typography — the design draws
+    /// this row in caps — is the view's business, not this module's.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Artist => "Artist",
+            Self::Year => "Year",
+            Self::Genre => "Genre",
+            Self::Added => "Added",
+            Self::Played => "Played",
+        }
+    }
+
+    /// The stable lowercase code for persisting which key is active. Never
+    /// change an existing code: it is on-disk data (config), and
+    /// [`GroupKey::from_code`] is its only reader.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Artist => "artist",
+            Self::Year => "year",
+            Self::Genre => "genre",
+            Self::Added => "added",
+            Self::Played => "played",
+        }
+    }
+
+    /// Parse a [`GroupKey::code`] back. An unrecognized code yields `None`, so
+    /// a config written by a newer baz falls back to a default rather than
+    /// failing a launch.
+    #[must_use]
+    pub fn from_code(code: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|key| key.code() == code)
+    }
+}
+
+/// One shelf on the wall: a group header and the albums under it.
+///
+/// Produced by [`Library::shelves`]. Borrows from the library; a snapshot to
+/// render, not a place to mutate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shelf<'a> {
+    /// The header this shelf draws, and the value the index rail projects.
+    pub header: GroupHeader<'a>,
+    /// The albums under it, in library order (album artist, then album).
+    /// Never empty — a shelf exists because an album landed on it.
+    pub albums: Vec<Album<'a>>,
+}
+
+/// The header a [`Shelf`] draws — one value per [`GroupKey`], derived from the
+/// data and holding no state of its own.
+///
+/// This is the whole of what the index rail shows, which is why the rail never
+/// needs re-specifying when a key is added: a rail is
+/// `shelves(key).iter().map(|s| s.header.label())`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupHeader<'a> {
+    /// [`GroupKey::Artist`] — the album artist's first letter, or one of the
+    /// two anonymous buckets. See [`Initial`].
+    Initial(Initial),
+    /// [`GroupKey::Year`] — the decade a release year falls in, as its first
+    /// year (`1994` shelves under `Some(1990)`). `None` is the shelf for
+    /// albums whose files declare no year.
+    Decade(Option<u32>),
+    /// [`GroupKey::Genre`] — the genre **exactly as the album's first track
+    /// spells it**, or `None` for albums whose files declare no genre.
+    ///
+    /// Shelves are keyed on the case-folded spelling, so `Rock` and `rock` are
+    /// one shelf — the same treatment artist and album titles have always had,
+    /// and the alternative is two shelves that read identically on screen.
+    /// Nothing else is touched: `Post-Rock`, `post rock` and
+    /// `Rock; Instrumental` are three genres, because the files say so. There
+    /// is no mapping table and there will not be one — see [`TrackMeta::genre`].
+    Genre(Option<&'a str>),
+    /// [`GroupKey::Added`] and [`GroupKey::Played`] — a recency bucket.
+    Recency(Recency),
+}
+
+impl<'a> GroupHeader<'a> {
+    /// The header's text.
+    ///
+    /// A [`String`] rather than a borrow because three of the four variants
+    /// have no stored string to lend. Typography — the design draws headers at
+    /// 9–10 px in caps — is the view's business; this is the value.
+    #[must_use]
+    pub fn label(&self) -> String {
+        match self {
+            Self::Initial(initial) => initial.label(),
+            Self::Decade(Some(decade)) => format!("{decade}s"),
+            Self::Decade(None) => "No year".to_owned(),
+            Self::Genre(Some(genre)) => (*genre).to_owned(),
+            Self::Genre(None) => "No genre".to_owned(),
+            Self::Recency(recency) => recency.label(),
+        }
+    }
+
+    /// The header one album lands under, for `key`.
+    fn of(key: GroupKey, album: &Album<'a>, now: SystemTime, history: Option<&History>) -> Self {
+        match key {
+            GroupKey::Artist => Self::Initial(Initial::of(album.artist)),
+            GroupKey::Year => Self::Decade(album.year.map(|year| year - year % 10)),
+            GroupKey::Genre => Self::Genre(album.genre),
+            GroupKey::Added => Self::Recency(added_recency(album.first_seen_ns, now)),
+            GroupKey::Played => Self::Recency(album.played_recency(history, now)),
+        }
+    }
+}
+
+/// The A–Z shelf an album's artist lands on, plus the two ends of the shelf
+/// that are not letters.
+///
+/// Variant order *is* shelf order, and it is the order
+/// [`Library::albums`] already sorts in (see `ArtistKey`): the unknowns first,
+/// then everything whose name starts with something that is not a letter, then
+/// the alphabet, then unnamed compilations. Both anonymous buckets sit at an
+/// end rather than in the middle of the alphabet where a sentinel string's
+/// letters would have landed them by accident.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Initial {
+    /// Albums with no artist of any kind — [`AlbumArtist::Unknown`].
+    Unknown,
+    /// A name that does not start with a letter: `10cc`, `!!!`, `¡Forward,
+    /// Russia!`. The design's `#` shelf.
+    Other,
+    /// The upper-cased first letter of a named album artist. Not restricted to
+    /// ASCII: `Ø` and `曲` get their own shelves, because a rail that folded
+    /// every script onto `#` would be unusable for the library that needs it
+    /// most.
+    Letter(char),
+    /// A compilation the files flagged but did not name —
+    /// [`AlbumArtist::Various`].
+    Various,
+}
+
+impl Initial {
+    /// The shelf a resolved album artist lands on.
+    #[must_use]
+    pub fn of(artist: AlbumArtist<'_>) -> Self {
+        match artist {
+            AlbumArtist::Unknown => Self::Unknown,
+            AlbumArtist::Various => Self::Various,
+            AlbumArtist::Named(name) => match name.chars().next() {
+                // `to_uppercase` can yield several characters (`ß` → `SS`);
+                // the first is the shelf, which is the one a reader looks for.
+                Some(first) if first.is_alphabetic() => {
+                    Self::Letter(first.to_uppercase().next().unwrap_or(first))
+                }
+                // An empty name cannot occur — `clean_str` drops blank tags —
+                // but `#` is the right answer if one ever does.
+                _ => Self::Other,
+            },
+        }
+    }
+
+    /// The header's text.
+    #[must_use]
+    pub fn label(self) -> String {
+        match self {
+            Self::Unknown => "Unknown".to_owned(),
+            Self::Other => "#".to_owned(),
+            Self::Letter(letter) => letter.to_string(),
+            Self::Various => "Various".to_owned(),
+        }
+    }
+}
+
+/// The moment now, in nanoseconds since the Unix epoch — what a new row's
+/// `first_seen_ns` is stamped with.
+///
+/// A clock before 1678 or after 2262 saturates rather than panicking: the
+/// consequence is a wrong recency bucket on a machine whose clock is absurd,
+/// which is strictly better than refusing to store a track.
+fn now_ns() -> i64 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(since) => i64::try_from(since.as_nanos()).unwrap_or(i64::MAX),
+        Err(before) => {
+            i64::try_from(before.duration().as_nanos()).map_or(i64::MIN, i64::saturating_neg)
+        }
+    }
+}
+
+/// The [`GroupKey::Added`] bucket for a first-seen timestamp, as of `now`.
+///
+/// The buckets are the ledger's ([`crate::history::Recency`]) rather than a
+/// second set of bands defined here. ADDED and PLAYED are drawn by the same
+/// rail, in the same lane, and two vocabularies that had to agree would
+/// eventually not.
+///
+/// `None` — a row from before schema v7 — is [`Recency::Unrecorded`], not
+/// [`Recency::Never`]: baz has no date for those files and declines to invent
+/// one (see [`migrate_v6_to_v7`]).
+fn added_recency(first_seen_ns: Option<i64>, now: SystemTime) -> Recency {
+    let Some(first_seen_ns) = first_seen_ns else {
+        return Recency::Unrecorded;
+    };
+    let then_s = first_seen_ns.max(0) / NANOS_PER_SECOND;
+    let now_s = i64::try_from(
+        now.duration_since(UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs()),
+    )
+    .unwrap_or(i64::MAX);
+    // A first-seen in the future — a clock corrected backwards since the scan
+    // — saturates to zero elapsed, which reads as the most recent bucket.
+    // That is the same rule `History::recency` follows for a play.
+    bucket(u64::try_from(now_s.saturating_sub(then_s)).unwrap_or(0))
+}
+
+/// Nanoseconds in a second, for turning `first_seen_ns` into the whole
+/// seconds the ledger's buckets are defined in.
+const NANOS_PER_SECOND: i64 = 1_000_000_000;
+
+/// The sort key of a shelf: what decides the order shelves appear in, kept
+/// beside the [`Shelf`] rather than derived from its header so that GENRE can
+/// sort case-folded while its header keeps the tag's own spelling.
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum ShelfSort {
+    /// [`GroupKey::Artist`]: variant order is shelf order.
+    Initial(Initial),
+    /// [`GroupKey::Year`]: `None` (no year declared) first, then ascending
+    /// decades. Unknowns at the front is the rule the whole index follows.
+    Decade(Option<u32>),
+    /// [`GroupKey::Genre`]: `None` (no genre declared) first, then the
+    /// case-folded name.
+    Genre(Option<String>),
+    /// [`GroupKey::Added`] / [`GroupKey::Played`]: variant order is shelf
+    /// order, newest first.
+    Recency(Recency),
+}
+
+impl ShelfSort {
+    fn of(key: GroupKey, album: &Album<'_>, now: SystemTime, history: Option<&History>) -> Self {
+        match key {
+            GroupKey::Artist => Self::Initial(Initial::of(album.artist)),
+            GroupKey::Year => Self::Decade(album.year.map(|year| year - year % 10)),
+            GroupKey::Genre => Self::Genre(album.genre.map(str::to_lowercase)),
+            GroupKey::Added => Self::Recency(added_recency(album.first_seen_ns, now)),
+            GroupKey::Played => Self::Recency(album.played_recency(history, now)),
+        }
     }
 }
 
@@ -834,6 +1265,32 @@ pub struct Album<'a> {
     pub title: Option<&'a str>,
     /// Release year: the first year any track on the album declares.
     pub year: Option<u32>,
+    /// Genre: the first genre any track on the album declares, **verbatim**
+    /// (see [`TrackMeta::genre`]), or `None` when no track declares one.
+    ///
+    /// First-declared rather than a consensus, exactly as `year` is. Tracks on
+    /// one album routinely disagree about genre — a compilation genuinely
+    /// spans several — and there is no answer to "which of these is the
+    /// album's genre" that is more honest than "the one the record's first
+    /// track claims". Refusing to answer when they differ would file most
+    /// compilations under no genre at all, which is the worse failure: the
+    /// GENRE key exists to show a listener what their tags actually say.
+    pub genre: Option<&'a str>,
+    /// When the library first saw this album, in nanoseconds since the Unix
+    /// epoch — the **earliest** first-seen among its tracks.
+    ///
+    /// Earliest rather than latest because the question ADDED asks is when the
+    /// record arrived, and a rip whose second disc landed a year after its
+    /// first is a record you have had for a year. The alternative — dating an
+    /// album by its newest track — would resurface a twenty-year-old album at
+    /// the top of the wall because one file was re-ripped, which is the
+    /// behaviour ADDED exists to *provide*, not to be fooled by.
+    ///
+    /// `None` when every track predates schema v7 — permanently, because no
+    /// later scan can discover when a file arrived. `docs/adr/0019-group-keys.md`
+    /// §5 records the three backfills that were considered and why each is a
+    /// lie.
+    pub first_seen_ns: Option<i64>,
     /// The formats this album is owned in, **best first** — never empty (an
     /// album exists because it has tracks, and every track lands in exactly
     /// one edition).
@@ -869,6 +1326,29 @@ impl<'a> Album<'a> {
     #[must_use]
     pub fn edition(&self, format: Option<AudioFormat>) -> Option<&Edition<'a>> {
         self.editions.iter().find(|e| e.format == format)
+    }
+
+    /// How long ago this album was last played, as of `now` — the
+    /// [`GroupKey::Played`] shelf it lands on.
+    ///
+    /// The **most recent** bucket over **every** track of **every** edition,
+    /// because the FLAC rip and the MP3 copy are one record: a listener who
+    /// played the phone copy last week has not gone a year without this album.
+    /// [`Recency`] is ordered most-recent-first, so "most recent" is `min`.
+    ///
+    /// No ledger, or a ledger with nothing about this album, is
+    /// [`Recency::Never`] — the true answer, not a fallback.
+    #[must_use]
+    pub fn played_recency(&self, history: Option<&History>, now: SystemTime) -> Recency {
+        let Some(history) = history else {
+            return Recency::Never;
+        };
+        self.editions
+            .iter()
+            .flat_map(|edition| edition.tracks.iter())
+            .map(|track| history.recency(&track.path, now))
+            .min()
+            .unwrap_or(Recency::Never)
     }
 
     /// File this track under its codec's edition, creating that edition on
@@ -1019,19 +1499,29 @@ impl SearchIndex {
     /// A measurement of a file that really changed is not lost either — it is
     /// simply stale, which [`ComputedReplayGain::figures_for`] already answers.
     ///
+    /// It also keeps whatever **first-seen** timestamp that entry carried, and
+    /// takes `now_ns` only for a path it has never held. This mirrors, in RAM,
+    /// the property [`UPSERT_TRACK`] holds in the database by naming
+    /// `first_seen_ns` in its `INSERT` list and omitting it from its update
+    /// list: a row's first-seen is written once and a rescan cannot move it.
+    /// The two halves have to agree, or the shelf would disagree with itself
+    /// across a restart.
+    ///
     /// Callers must [`SearchIndex::rebuild_order`] afterwards (batched).
-    fn insert(&mut self, meta: TrackMeta) {
-        let computed = self
+    fn insert(&mut self, meta: TrackMeta, now_ns: i64) {
+        let existing = self
             .by_path
             .get(&meta.path)
-            .and_then(|&index| self.tracks.get(index))
-            .map_or_else(ComputedReplayGain::default, |track| track.computed);
-        self.put(meta, computed);
+            .and_then(|&index| self.tracks.get(index));
+        let computed = existing.map_or_else(ComputedReplayGain::default, |track| track.computed);
+        let first_seen = existing.map_or(Some(now_ns), |track| track.first_seen);
+        self.put(meta, computed, first_seen);
     }
 
-    /// Insert a track together with the measurement recorded for it.
-    fn put(&mut self, meta: TrackMeta, computed: ComputedReplayGain) {
-        let entry = IndexedTrack::new(meta, computed);
+    /// Insert a track together with the measurement recorded for it and the
+    /// moment the library first saw it.
+    fn put(&mut self, meta: TrackMeta, computed: ComputedReplayGain, first_seen: Option<i64>) {
+        let entry = IndexedTrack::new(meta, computed, first_seen);
         match self.by_path.entry(entry.meta.path.clone()) {
             Entry::Occupied(slot) => {
                 let index = *slot.get();
@@ -1093,6 +1583,18 @@ struct IndexedTrack {
     /// is what reading a file's tags yields, and nothing that builds one has a
     /// measurement to put in it.
     computed: ComputedReplayGain,
+    /// When the library first stored this path, in nanoseconds since the Unix
+    /// epoch — the ADDED group key's whole input (ADR-0018).
+    ///
+    /// Kept here rather than inside [`TrackMeta`] for [`IndexedTrack::computed`]'s
+    /// reason, which applies more sharply: `TrackMeta` is what reading a file's
+    /// tags yields, and no file carries the date it entered somebody's
+    /// collection. Putting it on `TrackMeta` would also hand every rescan a
+    /// value to overwrite, which is precisely what must not be possible.
+    ///
+    /// `None` is a row written before schema v7 — permanently, and honestly:
+    /// see [`migrate_v6_to_v7`].
+    first_seen: Option<i64>,
     /// Case-folded `artist\nalbum artist\nalbum\ntitle` (the separator keeps
     /// a query from matching across field boundaries). The album-artist
     /// slot is left empty when it would only repeat the artist, which is the
@@ -1104,7 +1606,7 @@ struct IndexedTrack {
 }
 
 impl IndexedTrack {
-    fn new(meta: TrackMeta, computed: ComputedReplayGain) -> Self {
+    fn new(meta: TrackMeta, computed: ComputedReplayGain, first_seen: Option<i64>) -> Self {
         let artist = meta.artist.as_deref().map(str::to_lowercase);
         let album_artist = meta
             .album_artist
@@ -1130,6 +1632,7 @@ impl IndexedTrack {
         Self {
             meta,
             computed,
+            first_seen,
             haystack,
             key,
         }
@@ -1232,6 +1735,7 @@ fn migrate(conn: &Connection) -> Result<(), IndexError> {
             3 => migrate_v3_to_v4(conn)?,
             4 => migrate_v4_to_v5(conn)?,
             5 => migrate_v5_to_v6(conn)?,
+            6 => migrate_v6_to_v7(conn)?,
             SCHEMA_VERSION => return Ok(()),
             found => return Err(IndexError::SchemaTooNew { found }),
         }
@@ -1373,6 +1877,60 @@ fn migrate_v5_to_v6(conn: &Connection) -> Result<(), IndexError> {
     Ok(())
 }
 
+/// v6 → v7: add the genre and first-seen columns the GENRE and ADDED group
+/// keys are made of (ADR-0018).
+///
+/// `NULL` for every existing row, and for the two columns it means two
+/// different things — which is the interesting half of this migration.
+///
+/// **`genre` is `NULL` and self-healing**, exactly as v3's `album_artist` was
+/// and for the identical reason: a genre lives in the file's tags and nowhere
+/// else, nothing already in the database implies one, and an upgrade must not
+/// become a full library re-read at startup. baz rescans at every launch and
+/// [`Library::add_tracks`] upserts, so the first scan after the upgrade fills
+/// in every surviving file's real genre. That scan is incremental (v4), but a
+/// migrated row's stamp is not disturbed here, so — unlike v3, whose migrated
+/// rows had no stamp at all — an unchanged file is *not* re-read and keeps its
+/// `NULL` genre until something touches it. Until then GENRE files it under
+/// the untagged shelf, which is the honest answer to "what genre did this file
+/// declare" for a row nobody has read the genre of.
+///
+/// **`first_seen_ns` is `NULL` and stays `NULL` forever**, and that is
+/// deliberate rather than a gap. Three candidate backfills were considered and
+/// all three are lies:
+///
+/// - *Now.* Stamping the migration's own clock would file a listener's entire
+///   twenty-year collection under TODAY on the day they upgrade, and would then
+///   be indistinguishable, forever after, from an import that really did happen
+///   that day.
+/// - *`mtime_ns`.* A file's modification time is real evidence, but it is
+///   evidence about the *file*, not about when it entered the library: a
+///   ReplayGain scanner or a tag fix rewrites it, so a library that has been
+///   retagged would report itself as freshly imported. It is also `NULL` for
+///   every pre-v4 row.
+/// - *`id` order.* Row ids are an insertion sequence, not a clock, and they
+///   would order a library that was imported in one pass by nothing more
+///   meaningful than the directory walk.
+///
+/// So baz reports what it knows: it did not record when those files arrived,
+/// and [`Recency::Unrecorded`] says exactly that on the shelf. Everything
+/// scanned *after* the upgrade gets a real first-seen and appears under TODAY,
+/// which is the case ADDED exists for — "new rips appear under ADDED"
+/// (`docs/design/critique/02-surfaces.md`). The one thing a fabricated
+/// backfill would buy is a prettier first screen, at the cost of the only
+/// property the column has.
+///
+/// The `ALTER TABLE`s and the `user_version` bump are one transaction (SQLite's
+/// DDL is transactional), so an interrupted upgrade leaves a v6 database that
+/// the next open migrates again.
+fn migrate_v6_to_v7(conn: &Connection) -> Result<(), IndexError> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(SCHEMA_V7_COLUMNS)?;
+    tx.pragma_update(None, "user_version", 7)?;
+    tx.commit()?;
+    Ok(())
+}
+
 /// Fill `format` for existing rows from the file extension, where the
 /// extension settles the question by itself.
 ///
@@ -1450,9 +2008,17 @@ fn row_to_meta(row: &rusqlite::Row<'_>) -> Result<TrackMeta, IndexError> {
         bitrate: row.get(11)?,
         album_artist: row.get(12)?,
         compilation: row.get(13)?,
+        genre: row.get(26)?,
         stamp: row_to_stamp(row)?,
         replay_gain: row_to_replay_gain(row)?,
     })
+}
+
+/// The first-seen timestamp a row carries (schema v7), or `None` for a row
+/// written before the column existed — see [`migrate_v6_to_v7`] for why that
+/// `None` is permanent and honest rather than a gap waiting to be filled.
+fn row_to_first_seen(row: &rusqlite::Row<'_>) -> Result<Option<i64>, IndexError> {
+    Ok(row.get(27)?)
 }
 
 /// The [`ReplayGainTags`] a row carries (schema v5), `None` per field for a
@@ -1623,6 +2189,7 @@ mod tests {
             artist: None,
             album_artist: None,
             compilation: None,
+            genre: None,
             album: None,
             title: None,
             track: None,
@@ -1647,6 +2214,7 @@ mod tests {
                 ..bare_meta()
             },
             ComputedReplayGain::default(),
+            None,
         );
         assert_eq!(track.haystack, "größenwahn\n\nlive\n\n");
         // The separator keeps queries from matching across field boundaries.
@@ -1664,6 +2232,7 @@ mod tests {
                 ..bare_meta()
             },
             ComputedReplayGain::default(),
+            None,
         );
         assert!(
             soundtrack.haystack.contains("rodik"),
@@ -1680,6 +2249,7 @@ mod tests {
                 ..bare_meta()
             },
             ComputedReplayGain::default(),
+            None,
         );
         assert_eq!(ordinary.haystack, "stan rogers\n\nnorthwest passage\n\n");
     }

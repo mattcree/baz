@@ -745,6 +745,56 @@ fn only_track(root: &Path) -> TrackMeta {
     tracks.remove(0)
 }
 
+/// The genre is read, and read **verbatim** (ADR-0019): a messy tag reaches
+/// the shelf exactly as the file spells it — no normalisation, no mapping
+/// table, no splitting on the separator a tagger happened to use. The GENRE
+/// group key exists to show a listener what their files actually say.
+#[test]
+fn genre_is_read_verbatim_from_the_tag() {
+    for messy in [
+        "Post-Rock",
+        "post rock",
+        "Rock; Instrumental",
+        "Drum & Bass / Jungle",
+        "(17)",
+        "Chill\u{e5}",
+    ] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = write_flac(dir.path(), "Artist/Album/01 - Track.flac");
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.set_artist("Someone".to_owned());
+        tag.insert_text(ItemKey::Genre, messy.to_owned());
+        tag.save_to_path(&path, WriteOptions::default())
+            .expect("write vorbis comments");
+
+        assert_eq!(
+            only_track(dir.path()).genre.as_deref(),
+            Some(messy),
+            "`{messy}` must arrive on the shelf as `{messy}`"
+        );
+    }
+}
+
+/// A file with no genre tag says nothing, and the folder it sits in is not
+/// consulted: a directory name is evidence about artist and album, and
+/// evidence about nothing else.
+#[test]
+fn a_missing_genre_is_never_inferred_from_the_folder() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_flac(dir.path(), "Jazz/Kind of Blue/01 - So What.flac");
+    let mut tag = Tag::new(TagType::VorbisComments);
+    tag.set_artist("Miles Davis".to_owned());
+    // A blank genre is not a genre either — the same hygiene every other tag
+    // field gets.
+    tag.insert_text(ItemKey::Genre, "   ".to_owned());
+    tag.save_to_path(&path, WriteOptions::default())
+        .expect("write vorbis comments");
+
+    let t = only_track(dir.path());
+    assert_eq!(t.genre, None);
+    assert_eq!(t.artist.as_deref(), Some("Miles Davis"));
+}
+
 #[test]
 fn album_artist_is_read_from_vorbis_comments() {
     let dir = tempfile::tempdir().expect("tempdir");

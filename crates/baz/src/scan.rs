@@ -345,6 +345,7 @@ mod tests {
             artist: None,
             album_artist: None,
             compilation: None,
+            genre: None,
             album: None,
             title: None,
             track: Some(n),

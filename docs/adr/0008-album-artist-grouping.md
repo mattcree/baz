@@ -1,6 +1,18 @@
 # ADR-0008: Album artist — what makes one album one album
 
-**Status**: accepted (2026-08-07)
+**Status**: accepted (2026-08-07) · **amended by
+[ADR-0019](0019-group-keys.md)** (2026-08-08)
+
+> **Amended by ADR-0019 (2026-08-08).** Everything below still decides **what
+> one album is**, and nothing in it changed: the (album artist, album title)
+> key, the fallback chain, the `AlbumArtist` enum, the compilation flag, and
+> the shelf order that keeps both anonymous buckets at the ends. What changed
+> is that this grouping is no longer the *only* grouping. `Library::shelves`
+> arranges the same albums under one of five group keys — ARTIST, YEAR, GENRE,
+> ADDED, PLAYED — and ARTIST is this ADR's shelf with its A–Z breaks named.
+> `Library::albums()` keeps its signature and is the ARTIST projection
+> flattened, asserted rather than claimed. See
+> `docs/adr/0019-group-keys.md`; §5's schema is now v7 of 7.
 
 ## Context
 

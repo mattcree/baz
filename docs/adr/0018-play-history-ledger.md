@@ -1,6 +1,14 @@
 # ADR-0018: The play-history ledger — a plain append-only file, written by the engine, that nothing sends anywhere
 
-**Status**: accepted (2026-08-08) · first unit of the `docs/design/critique` build order, which puts history **before everything else** · introduces `baz_core::history` and `Event::PlayRecorded` · **not** a schema change: the ledger is deliberately not in `library.db` (see §3)
+**Status**: accepted (2026-08-08) · first unit of the `docs/design/critique` build order, which puts history **before everything else** · introduces `baz_core::history` and `Event::PlayRecorded` · **not** a schema change: the ledger is deliberately not in `library.db` (see §3) · `Recency` extended by [ADR-0019](0019-group-keys.md)
+
+> **Extended by ADR-0019 (2026-08-08).** `Recency` gained one variant and one
+> method, and is now the vocabulary of **both** recency group keys rather than
+> only PLAYED. `Recency::Unrecorded` (last in the order) is ADDED's bucket for
+> a library row that predates the first-seen column — distinct from `Never`,
+> which is the positive statement this ledger makes; `History::recency` never
+> returns it. `Recency::label()` is the group header's text. Nothing about the
+> file format, the writer, the reader or the three read surfaces changed.
 
 ## Context
 

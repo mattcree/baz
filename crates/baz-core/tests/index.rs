@@ -5,7 +5,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use baz_core::index::{AlbumArtist, IndexError, Library};
+use baz_core::history::{History, HistoryLedger, PlayRecord, Recency};
+use baz_core::index::{AlbumArtist, GroupHeader, GroupKey, IndexError, Library};
 use baz_core::library::{AudioFormat, FileStamp, TrackMeta};
 use baz_core::replaygain::{ComputedReplayGain, ReplayGainTags};
 
@@ -17,6 +18,7 @@ fn bare(path: &str) -> TrackMeta {
         artist: None,
         album_artist: None,
         compilation: None,
+        genre: None,
         album: None,
         title: None,
         track: None,
@@ -984,7 +986,7 @@ fn a_v1_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let by_path = |needle: &str| {
         library
@@ -1197,7 +1199,7 @@ fn a_v2_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let by_path = |needle: &str| {
         library
@@ -1548,7 +1550,7 @@ fn a_v3_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let by_path = |needle: &str| {
         library
@@ -1901,7 +1903,7 @@ fn a_v4_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let by_path = |needle: &str| {
         library
@@ -2148,7 +2150,7 @@ fn a_v5_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let by_path = |needle: &str| {
         library
@@ -2440,4 +2442,767 @@ fn a_measurement_for_an_unknown_path_is_ignored() {
         .expect("store");
     assert_eq!(written, 0);
     assert!(library.computed_gains().is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Group keys (ADR-0018): schema v7, and the five shelves the wall draws.
+// ---------------------------------------------------------------------------
+
+/// Seconds in a day — the unit the ledger counts in.
+const DAY_S: u64 = 24 * 60 * 60;
+
+/// The test's own clock in seconds, as the ledger records time.
+fn now_unix_s() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("a clock after 1970")
+        .as_secs()
+}
+
+/// The test's own clock, so nothing here depends on a baz-private helper.
+fn now_ns() -> i64 {
+    i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("a clock after 1970")
+            .as_nanos(),
+    )
+    .expect("a clock before 2262")
+}
+
+/// Build a genuine v6 database with the v6 schema and v6 `INSERT`s only — no
+/// baz code involved — so the v7 upgrade is proved against a database this
+/// build did not create.
+fn write_v6_database(db: &std::path::Path) {
+    let conn = rusqlite::Connection::open(db).expect("create v6 db");
+    conn.execute_batch(
+        "
+        BEGIN;
+        CREATE TABLE tracks (
+            id                             INTEGER PRIMARY KEY,
+            path                           BLOB NOT NULL UNIQUE,
+            artist                         TEXT,
+            album                          TEXT,
+            title                          TEXT,
+            track                          INTEGER,
+            disc                           INTEGER,
+            year                           INTEGER,
+            duration_ns                    INTEGER,
+            format                         TEXT,
+            bit_depth                      INTEGER,
+            sample_rate                    INTEGER,
+            bitrate                        INTEGER,
+            album_artist                   TEXT,
+            compilation                    INTEGER,
+            mtime_ns                       INTEGER,
+            file_size                      INTEGER,
+            rg_track_gain_centidb          INTEGER,
+            rg_track_peak_micro            INTEGER,
+            rg_album_gain_centidb          INTEGER,
+            rg_album_peak_micro            INTEGER,
+            rg_computed_track_gain_centidb INTEGER,
+            rg_computed_track_peak_micro   INTEGER,
+            rg_computed_album_gain_centidb INTEGER,
+            rg_computed_album_peak_micro   INTEGER,
+            rg_computed_mtime_ns           INTEGER,
+            rg_computed_file_size          INTEGER
+        ) STRICT;
+        PRAGMA user_version = 6;
+        COMMIT;
+        ",
+    )
+    .expect("v6 schema");
+
+    for (n, row) in v3_rows().into_iter().enumerate() {
+        let tagged = row.format == "flac";
+        let mtime = 1_700_000_000_000_000_000_i64 + i64::try_from(n).expect("five rows");
+        let size = 40_000_000_i64 + i64::try_from(n).expect("five rows");
+        conn.execute(
+            "INSERT INTO tracks
+                 (path, artist, album, title, track, disc, year, duration_ns,
+                  format, bit_depth, sample_rate, bitrate, album_artist,
+                  compilation, mtime_ns, file_size,
+                  rg_track_gain_centidb, rg_track_peak_micro,
+                  rg_album_gain_centidb, rg_album_peak_micro,
+                  rg_computed_track_gain_centidb, rg_computed_track_peak_micro,
+                  rg_computed_album_gain_centidb, rg_computed_album_peak_micro,
+                  rg_computed_mtime_ns, rg_computed_file_size)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+            rusqlite::params![
+                // The platform's own path encoding, not UTF-8: a `library.db`
+                // is a per-machine cache and Windows stores UTF-16LE, so a
+                // fixture that hard-coded bytes would only be a *Unix* v6
+                // database (see `stored_path_bytes`).
+                stored_path_bytes(row.path),
+                row.artist,
+                row.album,
+                row.title,
+                row.track,
+                row.year,
+                row.duration_ns,
+                row.format,
+                row.bit_depth,
+                row.sample_rate,
+                row.bitrate,
+                row.album_artist,
+                row.compilation,
+                mtime,
+                size,
+                tagged.then_some(-775_i64),
+                tagged.then_some(988_525_i64),
+                tagged.then_some(-920_i64),
+                tagged.then_some(1_001_221_i64),
+                // A real measurement on the FLAC rips, stamped to match their
+                // rows, so the upgrade can be shown not to disturb v6's own
+                // columns either.
+                tagged.then_some(412_i64),
+                tagged.then_some(750_000_i64),
+                tagged.then_some(318_i64),
+                tagged.then_some(910_000_i64),
+                tagged.then_some(mtime),
+                tagged.then_some(size),
+            ],
+        )
+        .expect("insert v6 row");
+    }
+}
+
+#[test]
+fn a_v6_database_migrates_in_place_without_losing_anything() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    write_v6_database(&db);
+
+    let library = Library::open(&db).expect("a v6 database must open");
+    assert_eq!(library.len(), 5, "every v6 row survives the upgrade");
+
+    let conn = rusqlite::Connection::open(&db).expect("raw open");
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("user_version");
+    assert_eq!(version, 7);
+
+    let by_path = |needle: &str| {
+        library
+            .tracks()
+            .find(|t| t.path.to_string_lossy().contains(needle))
+            .cloned()
+            .unwrap_or_else(|| panic!("{needle} must survive"))
+    };
+
+    // Every v6 column is intact — text, numbers, Unicode, the ADR-0008
+    // columns, the ADR-0010 stamp, the ADR-0013 tags and the ADR-0015
+    // measurement.
+    let unicode = by_path("Größenwahn");
+    assert_eq!(unicode.artist.as_deref(), Some("Größenwahn"));
+    assert_eq!(unicode.album.as_deref(), Some("Debüt"));
+    assert_eq!(unicode.title.as_deref(), Some("Ærø — 序曲"));
+    assert_eq!(unicode.track, Some(3));
+    assert_eq!(unicode.disc, Some(1));
+    assert_eq!(unicode.year, Some(1999));
+    assert_eq!(unicode.duration, Some(Duration::new(215, 123_456_789)));
+    assert_eq!(unicode.format, Some(AudioFormat::Wav));
+    assert_eq!(unicode.bit_depth, Some(24));
+    assert_eq!(unicode.sample_rate, Some(96_000));
+    assert_eq!(unicode.bitrate, Some(4_608));
+    assert_eq!(unicode.album_artist.as_deref(), Some("Various Artists"));
+    assert_eq!(unicode.compilation, Some(true));
+
+    let soundtrack = by_path("Main Menu.flac");
+    assert_eq!(soundtrack.album_artist.as_deref(), Some("RODIK"));
+    assert_eq!(soundtrack.compilation, None, "NULL is not Some(false)");
+    assert_eq!(soundtrack.replay_gain.track_gain_centidb, Some(-775));
+    assert_eq!(
+        library
+            .computed_replay_gain(&soundtrack.path)
+            .track_gain_centidb,
+        Some(412),
+        "the measurement v6 stored is still fresh for the same file"
+    );
+    assert_eq!(
+        library
+            .known_files()
+            .values()
+            .filter(|s| s.is_some())
+            .count(),
+        5,
+        "every v6 stamp survives, so the next scan is still incremental"
+    );
+
+    // The two new columns are NULL for every row, and they mean two different
+    // things. A genre lives in the file's tags and nowhere else, so nothing in
+    // a v6 database implies one...
+    for track in library.tracks() {
+        assert_eq!(
+            track.genre,
+            None,
+            "{}: an upgraded row declares no genre",
+            track.path.display()
+        );
+    }
+    assert_eq!(
+        library.shelves(GroupKey::Genre).len(),
+        1,
+        "so the whole upgraded library is on the untagged genre shelf"
+    );
+    // ...and baz genuinely does not know when these files arrived, so it says
+    // so rather than stamping them with the moment of the upgrade.
+    for album in library.albums() {
+        assert_eq!(album.first_seen_ns, None);
+    }
+    let added = library.shelves(GroupKey::Added);
+    assert_eq!(added.len(), 1);
+    assert_eq!(
+        added[0].header,
+        GroupHeader::Recency(Recency::Unrecorded),
+        "a migrated library is honest about not knowing, not reported as new"
+    );
+
+    // Grouping is *exactly* the pre-v7 behaviour — the upgrade adds columns,
+    // never changes what the shelf shows.
+    let albums = library.albums();
+    let passage = albums
+        .iter()
+        .find(|a| a.title == Some("Northwest Passage"))
+        .expect("the double rip");
+    assert_eq!(passage.artist, AlbumArtist::Named("Stan Rogers"));
+    assert_eq!(passage.editions.len(), 2);
+    let gamerip: Vec<_> = albums
+        .iter()
+        .filter(|a| a.title == Some("Cookie's Bustle OST (gamerip)"))
+        .collect();
+    assert_eq!(gamerip.len(), 1, "still one entry, two editions");
+    assert_eq!(gamerip[0].artist, AlbumArtist::Named("RODIK"));
+    assert_eq!(gamerip[0].editions.len(), 2);
+}
+
+/// The two v7 columns heal differently, and both behaviours are load-bearing.
+///
+/// A rescan fills `genre`, because a genre is a tag and a scan reads tags. It
+/// does **not** fill `first_seen_ns` for a row that was already there: "when
+/// did this arrive" is not a fact a rescan can discover, and the row predates
+/// the column.
+#[test]
+fn a_rescan_after_a_v6_upgrade_fills_the_genre_and_never_invents_a_first_seen() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    write_v6_database(&db);
+
+    let mut library = Library::open(&db).expect("open migrates to v7");
+    let rescanned: Vec<TrackMeta> = library
+        .tracks()
+        .cloned()
+        .map(|meta| TrackMeta {
+            genre: Some("Post-Rock".to_owned()),
+            ..meta
+        })
+        .collect();
+    library.add_tracks(rescanned).expect("rescan batch");
+    assert_eq!(library.len(), 5, "an upsert, not a duplicate");
+
+    drop(library);
+    let reopened = Library::open(&db).expect("reopen");
+    assert!(
+        reopened
+            .tracks()
+            .all(|t| t.genre.as_deref() == Some("Post-Rock")),
+        "the genre a rescan read is durable"
+    );
+    for album in reopened.albums() {
+        assert_eq!(
+            album.first_seen_ns, None,
+            "a rescan is not an arrival: the pre-v7 NULL stays NULL"
+        );
+    }
+    assert_eq!(
+        reopened.shelves(GroupKey::Added)[0].header,
+        GroupHeader::Recency(Recency::Unrecorded)
+    );
+}
+
+/// A track a v7 library has never seen is stamped on insert, and every later
+/// rescan of the same path leaves that stamp exactly where it was — across a
+/// restart, which is the case an in-RAM-only guarantee would miss.
+#[test]
+fn first_seen_is_written_once_and_no_rescan_can_move_it() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+
+    let mut library = Library::open(&db).expect("open");
+    library
+        .add_tracks([track(
+            "/m/a/b/01.flac",
+            "Stan Rogers",
+            "Fogarty's Cove",
+            "Fogarty's Cove",
+            1,
+        )])
+        .expect("first scan");
+    let first = library.albums()[0]
+        .first_seen_ns
+        .expect("a new row is stamped");
+    assert!(
+        (now_ns() - first).abs() < 60 * 1_000_000_000,
+        "and stamped with roughly now, not with the epoch"
+    );
+
+    // A rescan that changes the tags — the ordinary case after a tag fix.
+    library
+        .add_tracks([TrackMeta {
+            title: Some("Fogarty's Cove (2024 tag fix)".to_owned()),
+            genre: Some("Folk".to_owned()),
+            ..track("/m/a/b/01.flac", "Stan Rogers", "Fogarty's Cove", "x", 1)
+        }])
+        .expect("rescan");
+    assert_eq!(library.len(), 1);
+    assert_eq!(
+        library.albums()[0].first_seen_ns,
+        Some(first),
+        "a rescan rewrites the tags and never the arrival"
+    );
+
+    drop(library);
+    let reopened = Library::open(&db).expect("reopen");
+    assert_eq!(
+        reopened.albums()[0].first_seen_ns,
+        Some(first),
+        "and the database agrees with the in-RAM index across a restart"
+    );
+    assert_eq!(reopened.albums()[0].genre, Some("Folk"));
+}
+
+/// A track that arrives later gets its own stamp: ADDED is per row, not per
+/// library. And an album is dated by its *earliest* track, so a record you
+/// have owned for years does not become new because one more file of it
+/// landed.
+#[test]
+fn a_track_added_later_carries_a_later_first_seen() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks([track("/m/a/b/01.flac", "A", "First", "One", 1)])
+        .expect("first");
+    let first = library.albums()[0].first_seen_ns.expect("stamped");
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    library
+        .add_tracks([track("/m/c/d/01.flac", "C", "Second", "One", 1)])
+        .expect("second");
+    let albums = library.albums();
+    let second = albums
+        .iter()
+        .find(|a| a.title == Some("Second"))
+        .expect("second album")
+        .first_seen_ns
+        .expect("stamped");
+    assert!(second > first, "{second} must be later than {first}");
+
+    library
+        .add_tracks([track("/m/a/b/02.flac", "A", "First", "Two", 2)])
+        .expect("late track");
+    let albums = library.albums();
+    let grown = albums
+        .iter()
+        .find(|a| a.title == Some("First"))
+        .expect("first album");
+    assert_eq!(grown.first_seen_ns, Some(first));
+}
+
+/// ARTIST is the shelf ADR-0008 built, with its A–Z breaks stated. The albums
+/// and their order must be identical to `albums()`, or two views of one
+/// library would disagree.
+#[test]
+fn the_artist_key_is_the_flat_shelf_with_its_breaks_named() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks([
+            track(
+                "/m/1.flac",
+                "Stan Rogers",
+                "Fogarty's Cove",
+                "Fogarty's Cove",
+                1,
+            ),
+            track(
+                "/m/2.flac",
+                "10cc",
+                "Sheet Music",
+                "The Wall Street Shuffle",
+                1,
+            ),
+            track("/m/3.flac", "Sibylle Baier", "Colour Green", "Tonight", 1),
+            TrackMeta {
+                compilation: Some(true),
+                ..track("/m/4.flac", "Someone", "A Compilation", "Track", 1)
+            },
+            bare("/m/5.flac"),
+        ])
+        .expect("add");
+
+    let shelves = library.shelves(GroupKey::Artist);
+    let headers: Vec<String> = shelves.iter().map(|s| s.header.label()).collect();
+    assert_eq!(
+        headers,
+        ["Unknown", "#", "S", "Various"],
+        "unknowns first, then the non-letters, then the alphabet, then the \
+         unnamed compilations — the ends of the shelf ADR-0008 chose"
+    );
+    // Both Stan Rogers and Sibylle Baier are on the S shelf, alphabetically.
+    let letter_s = &shelves[2];
+    assert_eq!(letter_s.albums.len(), 2);
+    assert_eq!(letter_s.albums[0].title, Some("Colour Green"));
+    assert_eq!(letter_s.albums[1].title, Some("Fogarty's Cove"));
+
+    let flat: Vec<Option<&str>> = library.albums().iter().map(|a| a.title).collect();
+    let from_shelves: Vec<Option<&str>> = shelves
+        .iter()
+        .flat_map(|shelf| shelf.albums.iter().map(|a| a.title))
+        .collect();
+    assert_eq!(flat, from_shelves, "same albums, same order, breaks named");
+}
+
+/// Non-ASCII names get their own letter rather than being swept onto `#`: a
+/// rail that folded every script together would fail the library that needs
+/// it most.
+#[test]
+fn the_artist_rail_keeps_every_script_it_is_given() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks([
+            track(
+                "/m/1.flac",
+                "Ólafur Arnalds",
+                "Island Songs",
+                "Árbakkinn",
+                1,
+            ),
+            track("/m/2.flac", "曲人", "序曲", "序", 1),
+            track("/m/3.flac", "!!!", "Louden Up Now", "Me and Giuliani", 1),
+        ])
+        .expect("add");
+
+    let headers: Vec<String> = library
+        .shelves(GroupKey::Artist)
+        .iter()
+        .map(|s| s.header.label())
+        .collect();
+    assert_eq!(headers, ["#", "Ó", "曲"]);
+}
+
+/// YEAR shelves by decade, oldest first, with the albums that declare no year
+/// at the front — the same "unknowns surface rather than hide" rule the rest
+/// of the index follows.
+#[test]
+fn the_year_key_shelves_by_decade_with_the_undated_at_the_front() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks([
+            TrackMeta {
+                year: Some(1981),
+                ..track("/m/1.flac", "Stan Rogers", "Northwest Passage", "T", 1)
+            },
+            TrackMeta {
+                year: Some(1989),
+                ..track("/m/2.flac", "The Cure", "Disintegration", "T", 1)
+            },
+            TrackMeta {
+                year: Some(1990),
+                ..track("/m/3.flac", "Cocteau Twins", "Heaven or Las Vegas", "T", 1)
+            },
+            TrackMeta {
+                year: Some(2026),
+                ..track("/m/4.flac", "Nobody", "Brand New", "T", 1)
+            },
+            track("/m/5.flac", "Undated", "No Year At All", "T", 1),
+        ])
+        .expect("add");
+
+    let shelves = library.shelves(GroupKey::Year);
+    let headers: Vec<String> = shelves.iter().map(|s| s.header.label()).collect();
+    assert_eq!(headers, ["No year", "1980s", "1990s", "2020s"]);
+    assert_eq!(shelves[0].albums[0].title, Some("No Year At All"));
+    assert_eq!(shelves[1].albums.len(), 2, "1981 and 1989 share a decade");
+    assert_eq!(
+        shelves[1].header,
+        GroupHeader::Decade(Some(1980)),
+        "the header carries the decade, not a rendered string"
+    );
+}
+
+/// GENRE is verbatim. Messy tags show, honestly: there is no mapping table and
+/// nothing is merged that the files did not spell the same way.
+#[test]
+fn the_genre_key_shows_the_tags_exactly_as_they_are() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks([
+            TrackMeta {
+                genre: Some("Post-Rock".to_owned()),
+                ..track("/m/1.flac", "A", "One", "T", 1)
+            },
+            TrackMeta {
+                genre: Some("post rock".to_owned()),
+                ..track("/m/2.flac", "B", "Two", "T", 1)
+            },
+            TrackMeta {
+                genre: Some("Rock; Instrumental".to_owned()),
+                ..track("/m/3.flac", "C", "Three", "T", 1)
+            },
+            // Same genre, different capitalisation: one shelf, because two
+            // shelves that read identically on screen would be a bug rather
+            // than honesty. This is the case-folding artist and album titles
+            // already get, and it is the *only* thing done to a genre.
+            TrackMeta {
+                genre: Some("Folk".to_owned()),
+                ..track("/m/4.flac", "D", "Four", "T", 1)
+            },
+            TrackMeta {
+                genre: Some("folk".to_owned()),
+                ..track("/m/5.flac", "E", "Five", "T", 1)
+            },
+            track("/m/6.flac", "F", "Six", "T", 1),
+        ])
+        .expect("add");
+
+    let shelves = library.shelves(GroupKey::Genre);
+    let headers: Vec<String> = shelves.iter().map(|s| s.header.label()).collect();
+    assert_eq!(
+        headers,
+        [
+            "No genre",
+            "Folk",
+            "post rock",
+            "Post-Rock",
+            "Rock; Instrumental"
+        ],
+        "no normalisation, no mapping, no splitting on `;` — and the untagged \
+         shelf is at the front where it can be seen and fixed"
+    );
+    // The shelf that merged two spellings keeps the first one seen, verbatim.
+    assert_eq!(shelves[1].header, GroupHeader::Genre(Some("Folk")));
+    assert_eq!(shelves[1].albums.len(), 2);
+    assert_eq!(shelves[0].albums[0].title, Some("Six"));
+}
+
+/// An album's genre is the first its tracks declare, as its year is. A record
+/// whose tracks disagree still lands on a shelf rather than falling through to
+/// "no genre".
+#[test]
+fn an_album_takes_the_first_genre_its_tracks_declare() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks([
+            TrackMeta {
+                genre: None,
+                ..track("/m/1.flac", "A", "Mixed", "First", 1)
+            },
+            TrackMeta {
+                genre: Some("Dub".to_owned()),
+                ..track("/m/2.flac", "A", "Mixed", "Second", 2)
+            },
+            TrackMeta {
+                genre: Some("Ska".to_owned()),
+                ..track("/m/3.flac", "A", "Mixed", "Third", 3)
+            },
+        ])
+        .expect("add");
+    assert_eq!(library.albums()[0].genre, Some("Dub"));
+    let shelves = library.shelves(GroupKey::Genre);
+    assert_eq!(shelves.len(), 1);
+    assert_eq!(shelves[0].header, GroupHeader::Genre(Some("Dub")));
+}
+
+/// A real ledger file holding the given plays, read back through the real
+/// reader — no test double, so what PLAYED shelves is what a listener's own
+/// `history.tsv` would shelve.
+fn history_of(dir: &std::path::Path, plays: &[(&str, u64)]) -> History {
+    let path = dir.join("history.tsv");
+    {
+        let ledger = HistoryLedger::open(&path).expect("open ledger");
+        for (track, started_unix_s) in plays {
+            // Built through the ledger's own constructor, so the record is
+            // classified a play by the same rule real playback is.
+            let record = PlayRecord::new(
+                PathBuf::from(track),
+                *started_unix_s,
+                240_000,
+                Some(240_000),
+            )
+            .expect("a full listen is a play");
+            ledger.record(record, None);
+        }
+    }
+    History::read(&path).expect("read ledger")
+}
+
+/// Without a ledger, PLAYED is answerable and its answer is true: nothing has
+/// been played, so everything is on the NEVER PLAYED shelf.
+#[test]
+fn played_without_a_ledger_is_one_never_played_shelf() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks([
+            track("/m/1.flac", "A", "One", "T", 1),
+            track("/m/2.flac", "B", "Two", "T", 1),
+        ])
+        .expect("add");
+    // No ledger at all — which is every baz today, since `crates/baz` does not
+    // call `set_history` yet.
+    let shelves = library.shelves(GroupKey::Played);
+    assert_eq!(shelves.len(), 1);
+    assert_eq!(shelves[0].header, GroupHeader::Recency(Recency::Never));
+    assert_eq!(shelves[0].header.label(), "Never played");
+    assert_eq!(shelves[0].albums.len(), 2);
+
+    // A ledger that exists and is empty — a listener who has opened baz and
+    // not yet pressed play — is the same answer, and it is not a fallback:
+    // nothing has been played, so nothing has been played.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let empty = history_of(dir.path(), &[]);
+    assert_eq!(
+        library.shelves_with_history(GroupKey::Played, Some(&empty)),
+        shelves
+    );
+}
+
+/// With a ledger, PLAYED buckets by recency and still ends on NEVER PLAYED.
+/// An album's moment is the most recent of *any* of its tracks in *any*
+/// edition: playing the phone copy is playing the record.
+#[test]
+fn played_buckets_by_recency_and_ends_on_never() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks([
+            encoded(
+                "/m/FLAC/1.flac",
+                "Northwest Passage",
+                "T",
+                1,
+                AudioFormat::Flac,
+                900,
+            ),
+            encoded(
+                "/m/MP3/1.mp3",
+                "Northwest Passage",
+                "T",
+                1,
+                AudioFormat::Mp3,
+                320,
+            ),
+            track("/m/2.flac", "Aardvark", "Last Winter", "T", 1),
+            track("/m/3.flac", "Zebra", "Untouched", "T", 1),
+        ])
+        .expect("add");
+
+    let now = now_unix_s();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let history = history_of(
+        dir.path(),
+        &[
+            // Only the *lossy* edition was played, and only an hour ago.
+            ("/m/MP3/1.mp3", now - 3_600),
+            ("/m/2.flac", now - 200 * DAY_S),
+        ],
+    );
+
+    let shelves = library.shelves_with_history(GroupKey::Played, Some(&history));
+    let headers: Vec<String> = shelves.iter().map(|s| s.header.label()).collect();
+    assert_eq!(
+        headers,
+        ["This evening", "6 months ago", "Never played"],
+        "the ledger's own bucket vocabulary, in the ledger's own order"
+    );
+    assert_eq!(shelves[0].albums[0].title, Some("Northwest Passage"));
+    assert_eq!(shelves[1].albums[0].title, Some("Last Winter"));
+    assert_eq!(shelves[2].albums[0].title, Some("Untouched"));
+
+    // The history is consulted for PLAYED and for nothing else.
+    assert_eq!(
+        library.shelves_with_history(GroupKey::Artist, Some(&history)),
+        library.shelves(GroupKey::Artist)
+    );
+}
+
+/// Whatever the key, every album the library holds appears exactly once. A
+/// group key is a projection, never a filter — a wall that quietly dropped
+/// your untagged records would be a wall you could not trust.
+#[test]
+fn every_key_shelves_every_album_exactly_once() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks([
+            TrackMeta {
+                year: Some(1981),
+                genre: Some("Folk".to_owned()),
+                ..track("/m/1.flac", "Stan Rogers", "Northwest Passage", "T", 1)
+            },
+            track("/m/2.flac", "10cc", "Sheet Music", "T", 1),
+            bare("/m/3.flac"),
+            TrackMeta {
+                compilation: Some(true),
+                ..track("/m/4.flac", "Someone", "A Compilation", "T", 1)
+            },
+        ])
+        .expect("add");
+
+    let expected: Vec<Option<&str>> = library.albums().iter().map(|a| a.title).collect();
+    assert_eq!(expected.len(), 4);
+    for key in GroupKey::ALL {
+        let shelves = library.shelves(key);
+        assert!(!shelves.is_empty(), "{key:?} must draw at least one shelf");
+        let mut titles: Vec<Option<&str>> = shelves
+            .iter()
+            .flat_map(|shelf| {
+                assert!(!shelf.albums.is_empty(), "{key:?}: no empty shelves");
+                shelf.albums.iter().map(|a| a.title)
+            })
+            .collect();
+        titles.sort_unstable();
+        let mut wanted = expected.clone();
+        wanted.sort_unstable();
+        assert_eq!(titles, wanted, "{key:?} lost or duplicated an album");
+    }
+}
+
+/// ADDED and PLAYED speak the *same* vocabulary — the ledger's [`Recency`] —
+/// and the ADDED key needs exactly one bucket a play ledger never produces:
+/// `Unrecorded`, for a row that predates first-seen. The bands in between are
+/// `history::bucket`'s and are tested there rather than a second time here,
+/// which is the whole reason there is only one set of them.
+#[test]
+fn added_and_played_share_one_bucket_vocabulary() {
+    let mut fresh = Library::open_in_memory().expect("open");
+    fresh
+        .add_tracks([track("/m/1.flac", "A", "Just Imported", "T", 1)])
+        .expect("add");
+    assert_eq!(
+        fresh.shelves(GroupKey::Added)[0].header,
+        GroupHeader::Recency(Recency::ThisEvening),
+        "a folder imported a moment ago is on the most recent shelf"
+    );
+
+    // The one bucket ADDED needs that a play ledger never yields, and the one
+    // it must never be confused with.
+    assert_ne!(Recency::Unrecorded, Recency::Never);
+    assert!(
+        Recency::Never < Recency::Unrecorded,
+        "and a shelf baz knows nothing about sits behind one it does"
+    );
+    assert_eq!(Recency::Unrecorded.label(), "Not recorded");
+    assert_eq!(Recency::Never.label(), "Never played");
+}
+
+/// The persisted code for the active key round-trips, and a code from a newer
+/// baz degrades to `None` rather than failing a launch.
+#[test]
+fn group_key_codes_round_trip() {
+    for key in GroupKey::ALL {
+        assert_eq!(GroupKey::from_code(key.code()), Some(key));
+    }
+    let mut codes: Vec<&str> = GroupKey::ALL.iter().map(|k| k.code()).collect();
+    codes.sort_unstable();
+    codes.dedup();
+    assert_eq!(codes.len(), GroupKey::ALL.len());
+    assert_eq!(GroupKey::from_code("crates"), None);
+    assert_eq!(GroupKey::from_code(""), None);
+    assert_eq!(GroupKey::ALL[0].label(), "Artist");
 }

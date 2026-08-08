@@ -90,6 +90,42 @@ pub enum Recency {
     /// Never played. Not "no data": the ledger is the record of what was
     /// played, so a track absent from it was not played.
     Never,
+    /// **No moment was recorded at all** — the only bucket that is not about
+    /// listening, and the one the ADDED group key needs
+    /// (`docs/adr/0019-group-keys.md`).
+    ///
+    /// It is genuinely distinct from [`Self::Never`], which is a *positive*
+    /// statement the ledger can make: "this was not played". `Unrecorded` says
+    /// baz has no timestamp at all — an index row that predates the first-seen
+    /// column (schema v7), for which no honest date exists and none was
+    /// invented. Last in the order because a shelf you know nothing about
+    /// belongs behind every shelf you know something about.
+    ///
+    /// [`History::recency`] never returns it: a ledger absence is a `Never`.
+    Unrecorded,
+}
+
+impl Recency {
+    /// The group header this bucket draws, and the value the index rail
+    /// projects for the ADDED and PLAYED keys.
+    ///
+    /// Typography — the design draws headers at 9–10 px in caps — is the
+    /// view's business; this is the text.
+    #[must_use]
+    pub fn label(self) -> String {
+        match self {
+            Self::ThisEvening => "This evening".to_owned(),
+            Self::Today => "Today".to_owned(),
+            Self::ThisWeek => "This week".to_owned(),
+            Self::ThisMonth => "This month".to_owned(),
+            Self::MonthsAgo(1) => "1 month ago".to_owned(),
+            Self::MonthsAgo(months) => format!("{months} months ago"),
+            Self::YearsAgo(1) => "1 year ago".to_owned(),
+            Self::YearsAgo(years) => format!("{years} years ago"),
+            Self::Never => "Never played".to_owned(),
+            Self::Unrecorded => "Not recorded".to_owned(),
+        }
+    }
 }
 
 /// What the ledger says about one track — the inspector card's stamp.

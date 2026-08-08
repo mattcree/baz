@@ -333,6 +333,24 @@ pub struct TrackMeta {
     pub compilation: Option<bool>,
     /// Album title, from tags or else the parent directory.
     pub album: Option<String>,
+    /// Genre, **exactly as the file spells it** — Vorbis `GENRE`, ID3v2
+    /// `TCON`, MP4 `©gen`, APE `Genre`.
+    ///
+    /// Verbatim is the whole specification (`docs/adr/0018-group-keys.md`,
+    /// `docs/design/critique/02-surfaces.md`): no normalisation, no mapping
+    /// table, no splitting on `;` or `/`, no title-casing. A library that
+    /// carries `Post-Rock`, `post rock` and `Rock; Instrumental` shows three
+    /// genres, because it *has* three genre tags, and the GENRE group key
+    /// exists to let a listener see that and fix it in their tagger — the
+    /// library is a cache of what the files say, not a place we improve them
+    /// (`docs/research/05-personas.md`, principle 4).
+    ///
+    /// Never inferred from the folder structure: a directory name is evidence
+    /// about artist and album (people file by those) and evidence about
+    /// nothing else.
+    ///
+    /// `None` means the file did not say.
+    pub genre: Option<String>,
     /// Track title, from tags or else the filename.
     pub title: Option<String>,
     /// Track number within the disc, from tags or else the filename.
@@ -400,6 +418,15 @@ pub struct TrackMeta {
 /// One result from a running scan: a successfully read track, or a per-file
 /// failure reported as data (see the module docs on resilience).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Track is the overwhelmingly common variant — one per audio file, \
+              where Failed and Unchanged are the exceptions — and the value is \
+              yielded, matched and consumed immediately rather than stored in \
+              bulk. Boxing it to shrink the rare variants would put a heap \
+              allocation on the scan's per-file path to save nothing that is \
+              ever kept."
+)]
 pub enum ScanEntry {
     /// An audio file that was read successfully.
     Track(TrackMeta),
@@ -688,18 +715,23 @@ fn build_meta(
     let inferred = inference::infer_from_relative_path(relative);
 
     let tag = file.primary_tag().or_else(|| file.first_tag());
-    let (artist, album_artist, compilation, album, title, track, disc, year) = match tag {
+    let (artist, album_artist, compilation, album, genre, title, track, disc, year) = match tag {
         Some(tag) => (
             tag.artist().as_deref().and_then(clean_str),
             album_artist(tag),
             compilation_flag(tag),
             tag.album().as_deref().and_then(clean_str),
+            // Verbatim: `clean_str` only decides present-or-absent (a blank
+            // tag is not a genre), and changes no character of a value it
+            // keeps beyond the surrounding whitespace. See
+            // [`TrackMeta::genre`].
+            tag.genre().as_deref().and_then(clean_str),
             tag.title().as_deref().and_then(clean_str),
             nonzero(tag.track()),
             nonzero(tag.disk()),
             nonzero(tag.year()),
         ),
-        None => (None, None, None, None, None, None, None, None),
+        None => (None, None, None, None, None, None, None, None, None),
     };
 
     let properties = file.properties();
@@ -725,6 +757,9 @@ fn build_meta(
         album_artist,
         compilation,
         album: album.or(inferred.album),
+        // No inference: a folder name is evidence about who made a record and
+        // what it is called, and evidence about nothing else.
+        genre,
         title: title.or(inferred.title),
         track: track.or(inferred.track),
         disc,

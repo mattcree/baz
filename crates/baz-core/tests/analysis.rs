@@ -89,6 +89,7 @@ fn row(path: &Path, album: &str, title: &str, number: u32, format: AudioFormat) 
         artist: Some("Karl".to_owned()),
         album_artist: Some("Karl".to_owned()),
         compilation: None,
+        genre: None,
         album: Some(album.to_owned()),
         title: Some(title.to_owned()),
         track: Some(number),
