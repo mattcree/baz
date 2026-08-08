@@ -3,9 +3,21 @@
 //! read), the whole shelf lifecycle, and the honesty clause — nothing here
 //! ever writes a playlist file except the explicit save of an edit.
 
-use std::path::Path;
+use std::path::PathBuf;
 
 use baz_core::playlist::{Entry, Folder, Item, Playlist, PlaylistError};
+
+/// An absolute fixture path by the platform's own rule: `/music/a.flac` is
+/// drive-less — and therefore relative — on Windows, where the parser would
+/// resolve it and `save` would refuse it. See the twin helper in
+/// `playlist::tests`.
+fn track(path: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(format!("C:{path}"))
+    } else {
+        PathBuf::from(path)
+    }
+}
 
 /// The file a foobar2000/MusicBee refugee actually brings: CRLF, BOM,
 /// Windows-flavoured metadata, relative paths, a directive baz has never
@@ -14,13 +26,18 @@ use baz_core::playlist::{Entry, Folder, Item, Playlist, PlaylistError};
 fn a_foreign_playlist_reads_unedited_and_survives_a_baz_edit() {
     let dir = tempfile::tempdir().expect("tempdir");
     let folder = Folder::open(dir.path()).expect("open");
-    let source: &[u8] = b"\xef\xbb\xbf#EXTM3U\r\n\
+    let elsewhere = track("/music/elsewhere.flac");
+    let source: Vec<u8> = format!(
+        "\u{feff}#EXTM3U\r\n\
         #PLAYLIST:Sunday\r\n\
         #EXTINF:245,Talk Talk - Myrrhman\r\n\
         Talk Talk/01 Myrrhman.flac\r\n\
         #EXTINF:-1,Unknown Length\r\n\
-        /music/elsewhere.flac\r\n";
-    std::fs::write(dir.path().join("Sunday.m3u8"), source).expect("write");
+        {}\r\n",
+        elsewhere.display()
+    )
+    .into_bytes();
+    std::fs::write(dir.path().join("Sunday.m3u8"), &source).expect("write");
 
     let listed = folder.list().expect("list");
     assert_eq!(listed.len(), 1);
@@ -39,20 +56,17 @@ fn a_foreign_playlist_reads_unedited_and_survives_a_baz_edit() {
         entries[0].extinf.as_ref().map(|extinf| extinf.seconds),
         Some(Some(245))
     );
-    assert_eq!(entries[1].path, Path::new("/music/elsewhere.flac"));
+    assert_eq!(entries[1].path, elsewhere);
 
     // Reading changed nothing on disk.
-    assert_eq!(
-        std::fs::read(playlist.path()).expect("read"),
-        source.to_vec()
-    );
+    assert_eq!(std::fs::read(playlist.path()).expect("read"), source);
 
     // A user edit, saved: the strict subset is written, and the foreign
     // #PLAYLIST directive is still there — a rewrite never strips what it
     // did not understand.
     playlist
         .items_mut()
-        .push(Item::Entry(Entry::new("/music/added.flac")));
+        .push(Item::Entry(Entry::new(track("/music/added.flac"))));
     playlist.save().expect("save");
     let text = std::fs::read_to_string(playlist.path()).expect("read");
     assert!(text.starts_with("#EXTM3U\n"), "{text:?}");
@@ -92,8 +106,10 @@ fn the_shelf_lifecycle_end_to_end() {
     ));
 
     // Build tonight's list and save it — the one write there is.
-    for track in ["/music/a.flac", "/music/b.flac", "/music/a.flac"] {
-        evening.items_mut().push(Item::Entry(Entry::new(track)));
+    for path in ["/music/a.flac", "/music/b.flac", "/music/a.flac"] {
+        evening
+            .items_mut()
+            .push(Item::Entry(Entry::new(track(path))));
     }
     evening.save().expect("save");
 
@@ -102,7 +118,8 @@ fn the_shelf_lifecycle_end_to_end() {
     assert_eq!(evening.entries().count(), 3);
 
     // "38 of 40 · 2 missing": the caller judges, the partition reports.
-    let verdict = evening.partition(|path| path != Path::new("/music/b.flac"));
+    let missing = track("/music/b.flac");
+    let verdict = evening.partition(|path| path != missing.as_path());
     assert_eq!(verdict.playable.len(), 2);
     assert_eq!(verdict.missing.len(), 1);
 

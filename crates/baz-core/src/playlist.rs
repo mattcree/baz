@@ -809,6 +809,21 @@ mod tests {
         (dir, folder)
     }
 
+    /// An absolute fixture path *by the platform's own rule*. `/music/a.flac`
+    /// is absolute on unix but drive-less — and therefore relative — on
+    /// Windows, where `save` rightly refuses it; the same fixture gains `C:`
+    /// there. The third Windows-fixture lesson in this repo, after the
+    /// UTF-16LE stored paths and the FILETIME stamps: a fixture must satisfy
+    /// the property it claims on every platform CI runs, not just the one it
+    /// was written on.
+    fn track(path: &str) -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(format!("C:{path}"))
+        } else {
+            PathBuf::from(path)
+        }
+    }
+
     // ----- the folder ------------------------------------------------------
 
     #[test]
@@ -892,7 +907,8 @@ mod tests {
         let (_keep, folder) = folder();
         folder.create("A").expect("create");
         let mut b = folder.create("B").expect("create");
-        b.items_mut().push(Item::Entry(Entry::new("/music/b.flac")));
+        b.items_mut()
+            .push(Item::Entry(Entry::new(track("/music/b.flac"))));
         b.save().expect("save");
         let before = std::fs::read(b.path()).expect("read");
         assert!(matches!(
@@ -1001,7 +1017,7 @@ mod tests {
         let before = std::fs::read(playlist.path()).expect("read");
         playlist
             .items_mut()
-            .push(Item::Entry(Entry::new("/music/a.flac")));
+            .push(Item::Entry(Entry::new(track("/music/a.flac"))));
         assert_eq!(
             std::fs::read(playlist.path()).expect("read"),
             before,
@@ -1035,8 +1051,10 @@ mod tests {
     fn save_is_atomic_and_leaves_no_debris() {
         let (_keep, folder) = folder();
         let mut playlist = folder.create("Mix").expect("create");
-        for track in ["/music/a.flac", "/music/b.flac"] {
-            playlist.items_mut().push(Item::Entry(Entry::new(track)));
+        for path in ["/music/a.flac", "/music/b.flac"] {
+            playlist
+                .items_mut()
+                .push(Item::Entry(Entry::new(track(path))));
         }
         playlist.save().expect("save");
         let leftovers: Vec<_> = std::fs::read_dir(folder.dir())
@@ -1063,15 +1081,15 @@ mod tests {
         playlist.items_mut().clear();
         playlist
             .items_mut()
-            .push(Item::Entry(Entry::new("/music/line\nbreak.flac")));
+            .push(Item::Entry(Entry::new(track("/music/line\nbreak.flac"))));
         assert!(matches!(
             playlist.save(),
             Err(PlaylistError::UnwritableEntry { .. })
         ));
         playlist.items_mut().clear();
-        playlist
-            .items_mut()
-            .push(Item::Entry(Entry::new("/music/trailing space.flac ")));
+        playlist.items_mut().push(Item::Entry(Entry::new(track(
+            "/music/trailing space.flac ",
+        ))));
         assert!(matches!(
             playlist.save(),
             Err(PlaylistError::UnwritableEntry { .. })
@@ -1090,7 +1108,7 @@ mod tests {
         let mut playlist = folder.create("Mix").expect("create");
         playlist
             .items_mut()
-            .push(Item::Entry(Entry::new("/music/a.flac")));
+            .push(Item::Entry(Entry::new(track("/music/a.flac"))));
         playlist.save().expect("save");
         let playlist = Playlist::read(playlist.path()).expect("read");
         assert!(playlist.fingerprint().is_some());

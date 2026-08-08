@@ -529,13 +529,19 @@ mod tests {
     fn the_written_file_is_the_documented_subset() {
         let items = read(b"albums/one.flac\n#EXTINF:245,Talk Talk - Myrrhman\n~/two.flac\n");
         let text = String::from_utf8(render(&items)).expect("the written file is UTF-8");
-        // Header first, LF only, absolute paths, EXTINF where known.
+        // Header first, LF only, absolute paths, EXTINF where known. The
+        // expected paths are built by the same joins the parser performs,
+        // because on Windows a join writes a backslash and the assertion is
+        // about resolution, not about the platform's separator.
+        let one = Path::new(DIR).join("albums/one.flac");
+        let two = Path::new(HOME).join("two.flac");
         assert_eq!(
             text,
-            "#EXTM3U\n\
-             /music/playlists/albums/one.flac\n\
-             #EXTINF:245,Talk Talk - Myrrhman\n\
-             /home/matt/two.flac\n"
+            format!(
+                "#EXTM3U\n{}\n#EXTINF:245,Talk Talk - Myrrhman\n{}\n",
+                one.display(),
+                two.display()
+            )
         );
         assert!(!text.contains('\r'));
     }
