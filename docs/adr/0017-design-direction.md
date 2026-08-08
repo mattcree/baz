@@ -466,7 +466,7 @@ is ours restated and it is enforced in code already.
 | **History ledger** — append-only plain local file, one line per play, written from the first beta with zero UI | **Adopt, first.** Its sequencing claim is the strongest in any of the three documents and it is correct: `baz-core` has *no* history of any kind today (no play counts, no `last_played`, no timestamps), so it cannot be backfilled. PLAYED, the inspector card, the pull and shuffle weighting all feed on it. In flight in a parallel agent. |
 | **Shuffle draws only from what the wall shows; pool visible (non-pool covers dim to 35 %, next two draws carry faint ink rings)** | **Adopt.** A strictly better specification of `VISION.md` pillar 4, and it is nearly free: `vm::matching_album_ids()` already computes "what the wall shows". The code for the critique's rule exists under another name. |
 | **Group keys** — ARTIST / YEAR / GENRE / ADDED / PLAYED as one row of words, genre verbatim from tags | **Adopt.** It replaces "the shelf has one sort and no facets", which our own audit called an IA problem. **This is the largest breach of ADR-0006 in the plan** — see §5. |
-| **Index rail** — type-only lane, a pure projection of the active group key, no state of its own | **Adopt, and it supersedes `02` §2.8's spine index.** Ours was `#`+A–Z at `INDEX_W` 20 and had to be re-specified for every future grouping. The critique's derives from the key and therefore never needs re-specifying: ARTIST → A–Z, YEAR → decades, GENRE → names, ADDED/PLAYED → recency buckets. `INDEX_W` becomes 36 — **amended to 60**, see below. |
+| **Index rail** — type-only lane, a pure projection of the active group key, no state of its own | **Adopt, and it supersedes `02` §2.8's spine index.** Ours was `#`+A–Z at `INDEX_W` 20 and had to be re-specified for every future grouping. The critique's derives from the key and therefore never needs re-specifying: ARTIST → A–Z, YEAR → decades, GENRE → names — **amended to initials**, see below — ADDED/PLAYED → recency buckets. `INDEX_W` becomes 36 — **amended to 60**, see below. |
 | **The stack** — shift-click queues a sleeve or a track; ephemeral; clears when it ends; albums listed as albums | **Adopt**, with the numeral chip moved off the artwork into the wall label's first line (§1.4). Our queue is already one-list-with-a-cursor and `UpdateQueue` exists, so this is a view + `vm` change. |
 | **Lenses — Wall / Marquee**, keys 1/2 | **Adopt the lens. Reject the idle auto-switch.** The critique makes Marquee *"default after ~30 s idle while playing"*. Nothing in baz may change what is on screen without being asked — it is the "lobby" failure mode the critique itself names, arriving by itself, and it contradicts the refusal that nothing begins that the user did not begin. Marquee is a lens you press `2` for. |
 | **The pull** (`Ctrl+R`) — one sleeve weighted toward long-unplayed, in Marquee, nothing plays until Space | **Adopt**, after history and Marquee. Distinctive, cheap once the ledger exists, and it respects the friction budget by not playing anything. |
@@ -496,6 +496,37 @@ gutter, and the rail is the wall's own right-hand edge. `INDEX_LANE_W` is
 therefore **108** = `INDEX_CLEARANCE` 8 + `INDEX_W` 60 + `HANG` 40, where it was
 60. That is 48 px more off the wall, and it is the price of a rail that works
 for every arrangement rather than for two.
+
+#### Amendment — the rail's vocabulary, per key (the owner's "does it need to be there for all groupings?")
+
+The row above says GENRE → names, and shipping it proved that wrong. The
+owner's finding, verbatim: *"I dunno if the rail needs to be there for all
+types of grouping, since it goes off the edge of the screen."* Half of that was
+a capacity bug (the rail was fitted against an estimated height that ignored
+the bottom bar — fixed by making `spine.rs` elide inside its real bounds, and
+pinned by `the_rail_never_outgrows_the_lane_it_is_given`); the other half is a
+real design question, answered here per key rather than by keeping or killing
+the rail wholesale. The test an index must pass: **the reader can guess the
+vocabulary and its order without reading it** — that is what makes a rail
+aimable rather than merely present.
+
+| Key | Vocabulary | Verdict |
+|---|---|---|
+| ARTIST | `#` + `A`–`Z`, non-Latin initials where they sort | **Keep.** The universal index; 27 entries fit every window the wall ships at. |
+| YEAR | Decades between the collection's extremes | **Keep.** Already bounded (a century is ten entries), ordered, and guessable — "years overflow" cannot happen because the key never grouped by year. |
+| ADDED / PLAYED | The recency scale between the newest and oldest bucket | **Keep.** An ordered, enumerable scale (≤ ~50 entries at a 40-year ledger); when it elides, a `·` between `1 year ago` and `5 years ago` is *interpolable*, which is what makes an elided ordered scale still aimable. |
+| GENRE | ~~The names present~~ → **the initials of the names present**, on the `A`–`Z` frame, `No genre` as an occupied-only anonymous bucket | **Keep, with the vocabulary changed.** Names failed the guessability test outright: nobody can guess which of `Ambient · Jazz · Zeuhl` a library holds, and an elided run of dots between arbitrary words cannot be aimed at. Spellings live in an alphabet everyone knows; a letter jumps to the first genre spelled with it (`rail::genre`). |
+
+**Rejected: dropping the rail for GENRE** (or any key). ADR-0022 deleted the
+wall's scrollbar *because* the rail does every job a bar does and one more; a
+rail-less arrangement would be the one wall in baz with no position, no jump
+and no scroll affordance at all, and the lane's return to the wall would make
+arrangement switching re-hang the grid — legal, but a worse trade than an
+index that works. **Rejected: keeping genre names** — the owner's instinct was
+correct that the thing shipped was not earning its lane; the failure was the
+vocabulary, not the rail. **Untouched: ADR-0019 §4's refusal to invent a
+taxonomy** — an absent `B` on the genre rail states "no genre here starts with
+B", a fact about spellings, not a claim that some canonical B-genre exists.
 
 ---
 

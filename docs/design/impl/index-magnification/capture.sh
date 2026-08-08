@@ -81,15 +81,20 @@ run_at() {
   # The rail's ink hangs from x = W − HANG (40); a single letter is ~7 px wide,
   # so x = W − 44 rests on the letters themselves.
   local RAIL_X=$((W - 44)) EDGE_X=$((W - 2)) MID=$((H / 2))
-  shot() { sleep 0.9; magick import -window root "$OUT/$TAG-$1-${W}.png"
-           magick "$OUT/$TAG-$1-${W}.png" -crop "130x$((H))+$((W - 130))+0" "$OUT/$TAG-$1-${W}-rail.png"
+  crop() { magick "$OUT/$TAG-$1-${W}.png" -crop "170x$((H))+$((W - 170))+0" "$OUT/$TAG-$1-${W}-rail.png"
            echo "  shot $TAG-$1-${W}"; }
+  # The rest frame carries no cursor (`import`), so before/after rest frames
+  # diff on the surface alone; every hover frame carries the real cursor
+  # (`maim` draws it), because the shape of the hand over a jump is part of
+  # what these frames exist to prove.
+  shot()  { sleep 0.9; magick import -window root "$OUT/$TAG-$1-${W}.png"; crop "$1"; }
+  cshot() { sleep 0.9; maim "$OUT/$TAG-$1-${W}.png"; crop "$1"; }
   # Parked clear of the rail *and* the needle (see places/capture.sh).
-  xdotool mousemove $((W / 2)) 120;                       shot 01-rest
-  xdotool mousemove "$RAIL_X" "$MID";                     shot 02-hover-mid
-  xdotool mousemove "$RAIL_X" $((MID - H / 4));           shot 03-hover-upper
-  xdotool mousemove "$EDGE_X" "$MID";                     shot 04-hover-edge
-  xdotool mousemove "$RAIL_X" $((MID + H / 4));           shot 05-hover-lower
+  xdotool mousemove $((W / 2)) 120;                       shot  01-rest
+  xdotool mousemove "$RAIL_X" "$MID";                     cshot 02-hover-mid
+  xdotool mousemove "$RAIL_X" $((MID - H / 4));           cshot 03-hover-upper
+  xdotool mousemove "$EDGE_X" "$MID";                     cshot 04-hover-edge
+  xdotool mousemove "$RAIL_X" $((MID + H / 4));           cshot 05-hover-lower
 
   # Clean up **only what this script started**, by pid, never by name: the
   # owner runs his own baz.

@@ -31,7 +31,7 @@
 //! |---|---|---|
 //! | ARTIST | `#` and `A`–`Z`, always | The alphabet exists whether or not the collection uses it. Non-Latin initials ([`Initial::Letter`] is not ASCII-only) join it where they sort. |
 //! | YEAR | Every decade from the earliest to the latest present | A run of decades with a hole in it is a fact about the collection. |
-//! | GENRE | Exactly the genres present | **There is no universe of genres.** Genre is verbatim from the tags (ADR-0019 §4), so an "absent" genre is not a thing that exists; drawing one would mean inventing a taxonomy, which that ADR refuses forever. |
+//! | GENRE | The **initials** of the genres present, on the `A`–`Z` frame | **There is still no universe of genres** (ADR-0019 §4), and the rail does not draw one — it indexes their *spellings*, which live in an alphabet the reader already knows. The names themselves were the vocabulary at first, and failed as an index; see [`genre`]. |
 //! | ADDED / PLAYED | Every [`Recency`] bucket between the newest and the oldest present | The buckets are an ordered, enumerable scale, so a gap in it is real. |
 //!
 //! The two anonymous ARTIST buckets — `Unknown` and `Various` — are drawn only
@@ -104,7 +104,7 @@ pub fn entries(key: GroupKey, headers: &[GroupHeaderVm]) -> Vec<RailEntry> {
     match key {
         GroupKey::Artist => artist(headers),
         GroupKey::Year => year(headers),
-        GroupKey::Genre => present_only(headers),
+        GroupKey::Genre => genre(headers),
         GroupKey::Added | GroupKey::Played => recency(headers),
     }
 }
@@ -150,6 +150,100 @@ fn artist(headers: &[GroupHeaderVm]) -> Vec<RailEntry> {
             shelf,
         })
         .collect()
+}
+
+/// GENRE: **the initials of what the tags spell**, on the alphabet's frame —
+/// not the genre names themselves, and not a taxonomy.
+///
+/// The names were the vocabulary at first, and the owner's finding — *"I
+/// dunno if the rail needs to be there for all types of grouping"* — exposed
+/// why that failed §7.2's own premise: an index works when the reader can
+/// guess the vocabulary and its order without reading it. Nobody can guess
+/// which of `Ambient · Jazz · Zeuhl` a particular library holds, and once the
+/// list elides, the `·` marks between arbitrary words are not aimable — you
+/// cannot throw the pointer at a word you do not know is there. The
+/// *spellings*, though, live in an alphabet everyone knows: the genre rail
+/// speaks letters, exactly as ARTIST does, and a letter jumps to the first
+/// genre spelled with it. Bounded (≤ the alphabet plus the odd digit or
+/// non-Latin initial), guessable, and aimable.
+///
+/// **This invents no genre** — ADR-0019 §4's refusal stands untouched. An
+/// absent `B` in the muted ink states "no genre here starts with B", which is
+/// a fact about spellings, not a claim that some canonical B-genre exists.
+/// Initials outside `A`–`Z` (a `8-Bit`, a CJK tag) get their own entry where
+/// the wall sorts them, exactly as ARTIST's non-Latin initials do; and the
+/// `No genre` bucket follows the anonymous-bucket rule ARTIST's `Unknown`
+/// does — drawn only when occupied, as itself, at the front where the wall
+/// shelves it.
+fn genre(headers: &[GroupHeaderVm]) -> Vec<RailEntry> {
+    let mut entries: Vec<(usize, RailEntry)> = Vec::new();
+    // Present initials, in the wall's own order, first shelf of each run —
+    // deduplicated rather than run-collapsed, so a fold quirk that separated
+    // two same-initial genres could not mint the letter twice.
+    let mut letters: Vec<(char, usize)> = Vec::new();
+    for (shelf, header) in headers.iter().enumerate() {
+        if matches!(header, GroupHeaderVm::Genre(None)) {
+            entries.push((
+                0,
+                RailEntry {
+                    label: header.label(),
+                    shelf: Some(shelf),
+                },
+            ));
+            continue;
+        }
+        let Some(initial) = initial_of(&header.label()) else {
+            continue;
+        };
+        if !letters.iter().any(|(seen, _)| *seen == initial) {
+            letters.push((initial, shelf));
+        }
+    }
+    for (position, (letter, shelf)) in letters.iter().enumerate() {
+        entries.push((
+            (position + 1) * 2,
+            RailEntry {
+                label: letter.to_string(),
+                shelf: Some(*shelf),
+            },
+        ));
+    }
+    // The alphabet's holes, placed after the last present initial that folds
+    // before them — the same fill-the-holes rule `merge_headers` applies to
+    // decades, so the rail's order stays the wall's order with gaps drawn in.
+    for letter in 'A'..='Z' {
+        if letters.iter().any(|(seen, _)| *seen == letter) {
+            continue;
+        }
+        let order = letters
+            .iter()
+            .rposition(|(seen, _)| folds_before(*seen, letter))
+            .map_or(1, |position| (position + 1) * 2 + 1);
+        entries.push((
+            order,
+            RailEntry {
+                label: letter.to_string(),
+                shelf: None,
+            },
+        ));
+    }
+    entries.sort_by_key(|(order, _)| *order);
+    entries.into_iter().map(|(_, entry)| entry).collect()
+}
+
+/// A label's initial, uppercased — the letter the genre rail files it under.
+fn initial_of(label: &str) -> Option<char> {
+    label
+        .chars()
+        .next()
+        .and_then(|first| first.to_uppercase().next())
+}
+
+/// Whether initial `a` sorts before initial `b` on a case-folded wall —
+/// compared through their lowercase forms, which is the fold the shelf order
+/// itself uses (ADR-0019 §4).
+fn folds_before(a: char, b: char) -> bool {
+    a.to_lowercase().lt(b.to_lowercase())
 }
 
 /// YEAR: every decade between the earliest and the latest the collection has.
@@ -275,20 +369,26 @@ fn precedes(a: &GroupHeaderVm, b: &GroupHeaderVm) -> bool {
     }
 }
 
-/// Fit `entries` into `capacity` slots, keeping the first, the last and a
-/// window around `focus` (§7.2, ADR-0017 step 8: *long value sets elide to
-/// near-viewport entries plus first and last*).
+/// Fit a rail of `count` entries into `capacity` slots, keeping the first,
+/// the last and a window around `focus` (§7.2, ADR-0017 step 8: *long value
+/// sets elide to near-viewport entries plus first and last*).
 ///
 /// `focus` is where the wall is — the shelf at the top of the viewport — so
 /// what survives an elision is the part of the index you are standing in.
 /// `None` (an empty wall, or a shelf the rail has no entry for) centres the
 /// window, which is what a rail nobody has scrolled yet should show.
 ///
-/// The whole set is returned untouched whenever it fits, which is the ordinary
-/// case for ARTIST (27 entries) at any viewport a window can have.
+/// Takes the count rather than the entries because the count is all it reads
+/// — and because the caller with the *true* capacity is [`crate::spine`], at
+/// layout time, inside its real bounds. (The capacity used to be computed in
+/// the view from `Shelf::grid_size`, whose height is an estimate between
+/// scroll events that ignores the bottom bar — the rail it admitted was five
+/// slots too tall, which is the owner's "goes off the edge of the screen".)
+///
+/// The whole set is returned untouched whenever it fits, which is the
+/// ordinary case for ARTIST (27 entries) at any viewport a window can have.
 #[must_use]
-pub fn elide(entries: &[RailEntry], capacity: usize, focus: Option<usize>) -> Vec<RailSlot> {
-    let count = entries.len();
+pub fn elide(count: usize, capacity: usize, focus: Option<usize>) -> Vec<RailSlot> {
     if count == 0 || capacity == 0 {
         return Vec::new();
     }
@@ -425,18 +525,72 @@ mod tests {
         assert_eq!(rail.len(), 5);
     }
 
-    /// **GENRE draws exactly what the tags say** — no universe, no gaps, no
-    /// taxonomy (ADR-0019 §4).
+    /// **GENRE speaks initials, not names** — the vocabulary a reader can
+    /// guess — and a letter jumps to the *first* genre spelled with it.
     #[test]
-    fn the_genre_rail_invents_no_genre() {
+    fn the_genre_rail_speaks_initials_and_a_letter_jumps_to_its_first_genre() {
         let headers = [
             GroupHeaderVm::Genre(None),
+            GroupHeaderVm::Genre(Some("Ambient".to_owned())),
             GroupHeaderVm::Genre(Some("Post-Rock".to_owned())),
             GroupHeaderVm::Genre(Some("post rock".to_owned())),
+            GroupHeaderVm::Genre(Some("Prog".to_owned())),
         ];
         let rail = entries(GroupKey::Genre, &headers);
-        assert_eq!(labels(&rail), ["No genre", "Post-Rock", "post rock"]);
-        assert!(rail.iter().all(RailEntry::present), "genres have no gaps");
+        // The anonymous bucket first, as itself; then the alphabet — one P,
+        // however many genres spell themselves with it.
+        assert_eq!(rail.len(), 27, "{:?}", labels(&rail));
+        assert_eq!(rail[0].label, "No genre");
+        assert_eq!(rail[0].shelf, Some(0));
+        assert_eq!(labels(&rail)[1..4], ["A", "B", "C"]);
+        let a = rail.iter().find(|entry| entry.label == "A").expect("A");
+        assert_eq!(a.shelf, Some(1));
+        let p = rail.iter().find(|entry| entry.label == "P").expect("P");
+        assert_eq!(p.shelf, Some(2), "P jumps to the first P-genre");
+        // The alphabet's holes are drawn, muted — a fact about spellings, not
+        // an invented taxonomy (ADR-0019 §4's refusal stands).
+        assert!(absent(&rail).contains(&"B"));
+        assert_eq!(rail.iter().filter(|entry| entry.present()).count(), 3);
+        // No anonymous bucket on a fully-tagged library.
+        let tagged = entries(
+            GroupKey::Genre,
+            &[GroupHeaderVm::Genre(Some("Jazz".to_owned()))],
+        );
+        assert!(!labels(&tagged).contains(&"No genre"));
+    }
+
+    /// A genre whose spelling starts outside `A`–`Z` gets its own entry where
+    /// the wall sorts it — digits before the alphabet, CJK after — exactly as
+    /// ARTIST's non-Latin initials do.
+    #[test]
+    fn a_genre_initial_outside_the_alphabet_joins_where_it_sorts() {
+        let headers = [
+            GroupHeaderVm::Genre(Some("8-Bit".to_owned())),
+            GroupHeaderVm::Genre(Some("Jazz".to_owned())),
+            GroupHeaderVm::Genre(Some("演歌".to_owned())),
+        ];
+        let rail = entries(GroupKey::Genre, &headers);
+        assert_eq!(rail.len(), 28, "{:?}", labels(&rail));
+        assert_eq!(rail[0].label, "8");
+        assert_eq!(rail.last().map(|entry| entry.label.as_str()), Some("演"));
+        let j = rail.iter().find(|entry| entry.label == "J").expect("J");
+        assert_eq!(j.shelf, Some(1));
+    }
+
+    /// Sixty arbitrary genres still make an alphabet-sized rail: the whole
+    /// point of the initials vocabulary is that the index is bounded by the
+    /// spellings, not by the tags.
+    #[test]
+    fn sixty_genres_make_an_alphabet_not_a_list() {
+        let headers: Vec<GroupHeaderVm> = (0..60)
+            .map(|n| {
+                let letter = char::from(b'a' + u8::try_from(n % 26).expect("a letter"));
+                GroupHeaderVm::Genre(Some(format!("{letter}enre {n}")))
+            })
+            .collect();
+        let rail = entries(GroupKey::Genre, &headers);
+        assert_eq!(rail.len(), 26);
+        assert!(rail.iter().all(RailEntry::present));
     }
 
     /// ADDED / PLAYED draw the buckets the collection skipped, between the
@@ -483,21 +637,14 @@ mod tests {
     /// Elision keeps the first, the last and where you are.
     #[test]
     fn elision_keeps_the_ends_and_the_window_you_are_in() {
-        let rail: Vec<RailEntry> = (0..40)
-            .map(|n| RailEntry {
-                label: n.to_string(),
-                shelf: Some(n),
-            })
-            .collect();
-
         // It fits: nothing is elided and no gap is drawn.
-        let whole = elide(&rail, 40, Some(0));
+        let whole = elide(40, 40, Some(0));
         assert_eq!(whole.len(), 40);
         assert!(!whole.contains(&RailSlot::Gap));
 
         // It does not fit: first, gap, a window around the focus, gap, last —
         // and never more slots than the viewport has room for.
-        let slots = elide(&rail, 11, Some(20));
+        let slots = elide(40, 11, Some(20));
         assert_eq!(slots.len(), 11);
         assert_eq!(slots[0], RailSlot::Entry(0));
         assert_eq!(slots[1], RailSlot::Gap);
@@ -513,11 +660,11 @@ mod tests {
         assert!(window.contains(&20), "the focus survived: {window:?}");
 
         // At the top of the index there is no leading gap to draw…
-        let slots = elide(&rail, 11, Some(0));
+        let slots = elide(40, 11, Some(0));
         assert_eq!(slots[0], RailSlot::Entry(0));
         assert_ne!(slots[1], RailSlot::Gap);
         // …and at the bottom, no trailing one.
-        let slots = elide(&rail, 11, Some(39));
+        let slots = elide(40, 11, Some(39));
         assert_ne!(slots[slots.len() - 2], RailSlot::Gap);
         assert_eq!(slots[slots.len() - 1], RailSlot::Entry(39));
     }
@@ -527,15 +674,9 @@ mod tests {
     /// entry.
     #[test]
     fn elision_fits_whatever_room_it_is_given() {
-        let rail: Vec<RailEntry> = (0..64)
-            .map(|n| RailEntry {
-                label: n.to_string(),
-                shelf: Some(n),
-            })
-            .collect();
         for capacity in 0..80 {
             for focus in [Some(0), Some(31), Some(63), None] {
-                let slots = elide(&rail, capacity, focus);
+                let slots = elide(64, capacity, focus);
                 assert!(
                     slots.len() <= capacity.max(0),
                     "capacity {capacity}: {} slots",
@@ -563,6 +704,6 @@ mod tests {
             }
         }
         // Nothing to draw, whatever the room.
-        assert!(elide(&[], 20, None).is_empty());
+        assert!(elide(0, 20, None).is_empty());
     }
 }

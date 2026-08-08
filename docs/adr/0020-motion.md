@@ -79,9 +79,11 @@ here instead.
 5. **Pointer-derived deformation is permitted**, as a class distinct from the
    bounded tween, under its own discipline:
    - the deformed geometry is a **pure function of the current pointer
-     position** (`theme::magnify`, unit-tested: peak under the pointer,
-     monotone symmetric falloff, exact rest beyond its reach) — no clock, no
-     `Tween`, no subscription, no state, nothing to settle;
+     position** (`theme::magnify` for size, `theme::magnify_shift` — its
+     integral, the dock's own mechanism — for place; both unit-tested: peak
+     under the pointer, monotone symmetric falloff, exact rest beyond the
+     reach, displacement that preserves order and agrees with the hit test) —
+     no clock, no `Tween`, no subscription, no state, nothing to settle;
    - it costs frames only while the pointer moves, **by construction rather
      than by a guard**: iced 0.13 requests a redraw for every window event
      (`iced_winit::program`, unconditionally after event processing), the
@@ -90,19 +92,34 @@ here instead.
      pointer is a resting rail;
    - it may deform only the surface it magnifies: the lane's width, the wall's
      grid and every layout outside the widget are invariant (the width-algebra
-     tests hold, unmodified), and within the lane the slots' centres are fixed
-     — the lens scales letters about rest positions it never moves, which is
-     also what makes it feedback-free.
+     tests hold, unmodified). Within the lane the strip scales *and spreads*,
+     and both are functions of **rest** geometry — distances are measured to
+     centres the deformation itself never touches, so there is no feedback
+     through the deformed output and a resting pointer draws a stable frame.
+     The spread is bounded by the head-room the strip really has
+     (`theme::MAGNIFY_SPREAD`, which the rail's elision capacity reserves), so
+     the deformation cannot push anything out of its surface.
 6. **The snap back to rest on pointer-exit is a hard cut**, not a sixth tween.
    The deformation is the pointer's shadow on the strip; when the pointer
-   leaves, the input is gone and the next frame is the rest frame. A relaxation
-   tween here would attach a clock to the one motion class whose whole
-   argument is that it has none — and what the cut moves is small and local
-   (≤ 9 px of glyph growth, five letters, at the window's far edge, under the
-   hand that just left). The dock animates its own relaxation because its
-   icons *displace*; nothing in this rail moves, so there is no position to
-   ease home — only a size, and a size statement is exactly what this project's
-   hard cuts are for.
+   leaves, the input is gone and the next frame is the rest frame. A
+   relaxation tween here would attach a clock to the one motion class whose
+   whole argument is that it has none. The first shipped cut moved only glyph
+   sizes; with displacement the cut also moves positions — up to
+   `MAGNIFY_SPREAD` (45 px) at the strip's far ends — and the argument is
+   unchanged in kind: what eases in this product is *statements arriving*
+   (five tweens, each a state that became true), and the lens is not a state —
+   it is the hand's own shadow, at the window's far edge, under the pointer
+   that is leaving. Easing it home would animate the departure of an input
+   nobody is looking at by the time it matters; the dock eases its relaxation
+   because its lens is the OS's centrepiece, and this one is an index rail.
+7. **The deformation and the interaction must be one function.** Whatever the
+   lens magnifies most, the press fires and the hover marks: the winning slot
+   is the hit test's answer, the wash chip and the paper lift sit on exactly
+   that slot, and displacement provably cannot split them
+   (`|d + shift(d)|` grows with `|d|`, so the nearest displaced glyph is the
+   nearest rest slot — asserted in `spine.rs`'s tests). A deformation whose
+   optics and whose targets could disagree is forbidden in this class, because
+   it would aim the owner's hand at a letter the click will not take.
 
 One instance ships: the index rail (`spine.rs`). A second instance means
 re-arguing this amendment, not citing it.
