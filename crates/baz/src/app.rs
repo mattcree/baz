@@ -95,7 +95,14 @@ pub(crate) fn search_id() -> text_input::Id {
 /// and [`theme::SANS`] is named as the default so that a `text` widget with no
 /// font of its own gets a real face rather than the platform's guess at
 /// `Family::SansSerif` (see `font.rs` for what that guess used to cost).
+///
+/// **The room is resolved here too, and before anything draws** — the glyph
+/// sheet bakes the room's ink into a sprite on first use ([`crate::icon`]), so
+/// every read of `theme::active()` in the process has to see the same answer
+/// (ADR-0017 §1.5).
 pub fn run(started: Instant, cli_dir: Option<PathBuf>) -> iced::Result {
+    let room = theme::install();
+    println!("[startup] room: {}", room.name);
     let mut app = iced::application("baz", App::update, App::view)
         .subscription(App::subscription)
         .theme(|_| theme::theme())
@@ -1637,6 +1644,7 @@ impl Shelf {
     /// four-way one the rail needed, and the shelf's width still has exactly
     /// two values.
     fn view<'a>(&'a self, player: &'a PlayerState) -> Element<'a, Message> {
+        let room = theme::active();
         // A selection whose album vanished under a rescan renders no panel
         // rather than an empty one; the next scroll event squares the grid
         // estimate up.
@@ -1648,7 +1656,7 @@ impl Shelf {
         let body: Element<'_, Message> = match inspector {
             Some(panel) => row![
                 views::shelf::view(self, player),
-                vertical_rule(1).style(theme::hairline),
+                vertical_rule(1).style(move |_theme| theme::hairline(room)),
                 panel
             ]
             .into(),

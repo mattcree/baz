@@ -177,7 +177,12 @@ use crate::theme;
 /// How the groove is painted in each of its states. The same shape iced's
 /// own slider uses, so [`crate::theme`] keeps expressing the bar with
 /// `slider::Style` and this widget stays a drawing detail.
-type StyleFn = fn(&Theme, iced::widget::slider::Status) -> Style;
+///
+/// It takes a [`theme::Palette`] rather than iced's `Theme`, because that is
+/// what every style function in baz takes since ADR-0017 §1.5: the room is
+/// resolved at startup and carried, and iced's five-colour `Theme` never had
+/// anything this widget could ask it.
+type StyleFn = fn(&theme::Palette, iced::widget::slider::Status) -> Style;
 
 /// A marked position on the travel — the volume fader's unity detent.
 ///
@@ -211,6 +216,9 @@ pub struct Groove<'a, Message> {
     position: f32,
     width: Length,
     height: f32,
+    /// The room this groove is painted in, carried rather than looked up, so
+    /// the widget draws the same room the view that built it did.
+    palette: &'static theme::Palette,
     style: StyleFn,
     detent: Option<Detent>,
     pointers: Option<Pointers<'a, Message>>,
@@ -236,11 +244,12 @@ struct State {
 impl<'a, Message> Groove<'a, Message> {
     /// A groove whose handle sits at `position` (`0.0..=1.0`), painted by
     /// `style`. Inert until [`Self::on_pointer`] wires it up.
-    pub fn new(position: f32, style: StyleFn) -> Self {
+    pub fn new(position: f32, palette: &'static theme::Palette, style: StyleFn) -> Self {
         Self {
             position,
             width: Length::Fill,
             height: theme::RAIL_HIT,
+            palette,
             style,
             detent: None,
             pointers: None,
@@ -449,7 +458,7 @@ where
         &self,
         tree: &Tree,
         renderer: &mut Renderer,
-        theme: &Theme,
+        _theme: &Theme,
         _style: &renderer::Style,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
@@ -464,7 +473,7 @@ where
         } else {
             iced::widget::slider::Status::Active
         };
-        let style = (self.style)(theme, status);
+        let style = (self.style)(self.palette, status);
 
         let (handle_width, handle_height, handle_radius) = match style.handle.shape {
             HandleShape::Circle { radius } => (radius * 2.0, radius * 2.0, radius.into()),
@@ -522,7 +531,7 @@ where
                     },
                     ..renderer::Quad::default()
                 },
-                theme::detent_ink(detent.engaged),
+                theme::detent_ink(self.palette, detent.engaged),
             );
         }
         renderer.fill_quad(
@@ -642,7 +651,7 @@ mod tests {
         /// The seek bar, wired up.
         fn seek() -> Self {
             Self::new(
-                Groove::new(0.25, theme::seek)
+                Groove::new(0.25, &theme::CLOSING_TIME, theme::seek)
                     .width(Length::Fixed(WIDTH))
                     .height(HEIGHT)
                     .on_pointer(Msg::Press, Msg::Drag, Msg::Hover, Msg::Release, Msg::Exit),
@@ -653,7 +662,7 @@ mod tests {
         /// the fader adds, so "both bars" is a claim these tests can make.
         fn fader() -> Self {
             Self::new(
-                Groove::new(0.8, theme::volume)
+                Groove::new(0.8, &theme::CLOSING_TIME, theme::volume)
                     .width(Length::Fixed(WIDTH))
                     .height(HEIGHT)
                     .detent(Detent {
@@ -667,7 +676,7 @@ mod tests {
         /// A groove of undeclared length: no handlers, so no pointer.
         fn inert() -> Self {
             Self::new(
-                Groove::new(0.25, theme::seek_inert)
+                Groove::new(0.25, &theme::CLOSING_TIME, theme::seek_inert)
                     .width(Length::Fixed(WIDTH))
                     .height(HEIGHT),
             )

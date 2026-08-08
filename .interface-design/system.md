@@ -140,7 +140,29 @@ and the grid's margin when the art is at `ART_MAX` (§7).
 
 ## 4. Palette
 
-Hex is the exact sRGB of the `f32` constants, rounded to the nearest byte.
+**There is no longer one palette; there is a room.** ADR-0017 §1.5 adopts the
+four-room model, and build-plan step 2 has landed the mechanism: every value
+below is a field on `theme::Palette` rather than a `pub const Color`, and ~30
+style functions take a `&Palette`. Two rooms are defined.
+
+| Room | Wall | Ink | Accent | Status |
+|---|---|---|---|---|
+| **Closing Time** | `#0C0D0E` cool near-black | `#E8E4DB` warm ivory | amber `#E3A14E` | the room baz is |
+| **Reading Room** | `#EEEBE4` warm ivory | `#1E2226` cool near-black | oxblood `#A33E25` = `oklch(0.50 0.14 35)` | **defined, not selectable** |
+
+Reading Room's surfaces descend as they rise (`recess` `#FAF6EF` is the
+*lightest* plane, `plinth` `#E3DFD8` and `plinth_lit` `#D7D4CD` the raised
+ones), its ink ramp is `#1E2226` / `#393E42` / `#575B60` / `#70757B`, and its
+focus ring is the room's ink at **55 %** rather than 45 % — the one alpha a
+room sets for itself, because the same opacity over a lighter ground is a
+smaller step. It ships when §1.5's pale-sleeve-on-paper question has an answer
+that is not a border on artwork (step 20); until then `theme::follow` returns
+Closing Time for every desktop and `theme::READING_ROOM_SHIPS` is the whole of
+the gate. `BAZ_ROOM=reading-room` renders it for review and is a development
+hatch, not a product surface.
+
+The table below is **Closing Time**. Hex is the exact sRGB of the `f32`
+values, rounded to the nearest byte.
 
 | Token | Hex | Role | May **not** be used for |
 |---|---|---|---|
@@ -187,6 +209,31 @@ point on that ramp clearing its floor on every surface it can land on, with
 `PAPER_FAINT` on the top surface is **4.63**, not the 4.483-rounded-to-4.5 the
 previous pass had to name as an exception — so `theme.rs`'s `ROUNDING` excuse in
 the contrast test is deleted.
+
+**Two laws, over disjoint domains** (ADR-0017 §1.6), both asserted by
+`every_ink_and_every_surface_clears_its_floor`:
+
+1. **Surface against surface** is measured in **oklch L**, never in WCAG: the
+   wall on the plinth is 1.30 : 1 and that number carries no information.
+   Adjacent levels differ by **≥ 0.03 L** and no room's surfaces sit in the
+   **dead zone L .45–.58**. Closing Time steps +0.0311 / +0.0367 / +0.0360;
+   Reading Room −0.0338 / −0.0356 / −0.0345. (The dead zone is a rule about
+   rooms. An ink or an accent may live there, and Reading Room's oxblood, at
+   L 0.4997, does.)
+2. **Ink against surface** is measured in WCAG 2.1, and **opacity is
+   composited before the ratio is taken** — an alpha is a colour once it is
+   drawn, so a hierarchy expressed in opacity cannot hide an unreadable value
+   from a test that sees only opaque tokens.
+
+**The exemption list, by name**: `hairline`, `hairline_strong` and `lamp_glow`
+are non-text marks that exist only to be locatable and are never read, so the
+3 : 1 mark floor is the wrong instrument and the L-step law governs them
+instead. The needle's unfilled track and the index rail's absent letters join
+the list when steps 8 and 9 build them. `select_wash` is exempt as a *mark* and
+measured as a *ground*: what a user reads is `PAPER` on the composited wash
+(10.60 : 1 in Closing Time, 10.38 : 1 in Reading Room). Everything else keeps
+its floor. An exemption list you must add a name to is a rule; "WCAG is
+meaningless here" is not.
 
 ---
 

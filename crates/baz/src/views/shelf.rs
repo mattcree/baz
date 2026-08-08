@@ -84,6 +84,7 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a,
 /// The shelf with nothing to show: a zero-result search, the first
 /// moments of a scan, or a genuinely empty folder. Quiet text, no modal.
 fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
+    let room = theme::active();
     let query = shelf.query.trim();
     let (line, hint) = if query.is_empty() {
         if shelf.scanning {
@@ -107,7 +108,7 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
         text(line)
             .size(theme::SIZE_EMPHASIS)
             .line_height(theme::LEADING_EMPHASIS)
-            .color(theme::PAPER_DIM)
+            .color(room.paper_dim)
     ]
     .spacing(theme::GAP_SM)
     .align_x(iced::Alignment::Center);
@@ -116,7 +117,7 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
             text(hint)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_FAINT),
+                .color(room.paper_faint),
         );
     }
     container(content).center(Length::Fill).into()
@@ -135,6 +136,7 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
 /// costs nothing ([`CELL_H`] already had the room) and the title clips at one
 /// line instead, which is the failure the shelf can afford.
 fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<'a, Message> {
+    let room = theme::active();
     let art: Element<'_, Message> = match shelf.thumbs.peek(&album.id) {
         Some(handle) => iced_image(handle.clone())
             .width(Length::Fixed(ART_PX))
@@ -142,7 +144,7 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
             .into(),
         None => gradient_block(album.id, ART_PX),
     };
-    let sleeve = container(art).style(move |_theme| theme::sleeve(playing));
+    let sleeve = container(art).style(move |_theme| theme::sleeve(room, playing));
     let title = album.title.as_deref().unwrap_or("Unknown Album");
     // The *album* artist: one tile per album, captioned by whoever the
     // album is filed under, not by whichever composer happened to be
@@ -187,7 +189,7 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
             text(caption)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
-                .color(theme::PAPER_DIM)
+                .color(room.paper_dim)
                 .wrapping(text::Wrapping::None)
                 .into(),
         ),
@@ -202,7 +204,7 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
     .width(Length::Fixed(CELL_W))
     .height(Length::Fixed(CELL_H))
     .padding(theme::pad(TILE_PAD_V, TILE_PAD_H))
-    .style(move |_theme, status| theme::tile(status, selected))
+    .style(move |_theme, status| theme::tile(room, status, selected))
     .on_press(Message::AlbumClicked(album.id))
     .into()
 }
@@ -210,10 +212,11 @@ fn tile<'a>(shelf: &'a Shelf, album: &'a vm::AlbumVm, playing: bool) -> Element<
 /// The playing album's lamp dot: a small amber circle, the amplifier's
 /// power light.
 fn lamp_dot() -> Element<'static, Message> {
+    let room = theme::active();
     container(Space::new(
         Length::Fixed(theme::DOT),
         Length::Fixed(theme::DOT),
     ))
-    .style(theme::lamp_dot)
+    .style(move |_theme| theme::lamp_dot(room))
     .into()
 }
