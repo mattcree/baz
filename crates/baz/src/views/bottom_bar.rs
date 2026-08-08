@@ -68,6 +68,7 @@ pub(crate) fn view(player: &PlayerState, up_next_open: bool) -> Element<'_, Mess
         status = status.push(
             text(skipped)
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_FAINT),
         );
     }
@@ -149,6 +150,7 @@ fn up_next_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
         Some(note) => container(
             text(note)
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_FAINT)
                 .wrapping(text::Wrapping::None),
         )
@@ -160,6 +162,7 @@ fn up_next_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
         row![
             text("Up next")
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .font(theme::MEDIUM)
                 .wrapping(text::Wrapping::None),
             readout,
@@ -184,6 +187,7 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
     if let Some(note) = player.availability_note() {
         return text(note)
             .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
             .color(theme::PAPER_FAINT)
             .wrapping(text::Wrapping::None)
             .into();
@@ -191,6 +195,7 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
     let Some(now) = player.now_playing() else {
         return text("Nothing playing")
             .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
             .color(theme::PAPER_FAINT)
             .wrapping(text::Wrapping::None)
             .into();
@@ -198,6 +203,7 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
     let mut stack = column![
         text(now.title.as_str())
             .size(theme::SIZE_BODY)
+            .line_height(theme::LEADING_BODY)
             .font(theme::MEDIUM)
             .wrapping(text::Wrapping::None)
     ]
@@ -206,6 +212,7 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
         stack = stack.push(
             text(artist.as_str())
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_DIM)
                 .wrapping(text::Wrapping::None),
         );
@@ -238,6 +245,7 @@ fn signal_path(player: &PlayerState) -> Element<'_, Message> {
     let label = container(
         text(note.label)
             .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
             .color(theme::PAPER_FAINT)
             .wrapping(text::Wrapping::None),
     )
@@ -245,7 +253,9 @@ fn signal_path(player: &PlayerState) -> Element<'_, Message> {
     .align_x(alignment::Horizontal::Right);
     tooltip(
         label,
-        text(note.detail).size(theme::SIZE_CAPTION),
+        text(note.detail)
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
         tooltip::Position::Top,
     )
     .gap(theme::GAP_XS)
@@ -348,7 +358,9 @@ fn glyph_button(
         .on_press_maybe(enabled.then_some(message));
     tooltip(
         control,
-        text(label).size(theme::SIZE_CAPTION),
+        text(label)
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
         tooltip::Position::Top,
     )
     .gap(theme::GAP_XS)
@@ -497,6 +509,7 @@ fn seek_stamp(
         container(
             text(value)
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(color)
                 .wrapping(text::Wrapping::None)
         )
@@ -527,12 +540,16 @@ fn preview_lane(
     if let Some(preview) = preview {
         let offset = player::preview_offset(&preview, tip_width);
         lane = lane.push(Space::with_width(Length::Fixed(offset))).push(
-            container(text(preview.label).size(theme::SIZE_CAPTION))
-                .width(Length::Fixed(tip_width))
-                .height(Length::Fill)
-                .align_x(alignment::Horizontal::Center)
-                .align_y(alignment::Vertical::Center)
-                .style(theme::preview_tip),
+            container(
+                text(preview.label)
+                    .size(theme::SIZE_CAPTION)
+                    .line_height(theme::LEADING_CAPTION),
+            )
+            .width(Length::Fixed(tip_width))
+            .height(Length::Fill)
+            .align_x(alignment::Horizontal::Center)
+            .align_y(alignment::Vertical::Center)
+            .style(theme::preview_tip),
         );
     }
     container(lane)
@@ -633,9 +650,9 @@ mod tests {
         const TITLE_LANE: f32 = ZONE - theme::UP_NEXT_W - theme::GAP_SM;
         // The zone is also shorter than the centre column, so the control's
         // padding cannot be what sets the bar's height.
-        const LEFT_H: f32 = theme::SIZE_BODY * theme::LINE_HEIGHT
+        const LEFT_H: f32 = theme::SIZE_BODY * theme::LEADING_BODY
             + theme::GAP_XXS
-            + theme::SIZE_META * theme::LINE_HEIGHT
+            + theme::SIZE_META * theme::LEADING_META
             + 2.0 * theme::GAP_XS;
         const CENTRE_H: f32 = theme::TRANSPORT_HIT + theme::GAP_SM + theme::SEEK_ROW_H;
         const { assert!(TITLE_LANE > 200.0) }

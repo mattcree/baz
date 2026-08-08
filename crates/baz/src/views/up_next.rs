@@ -115,10 +115,12 @@ pub(crate) fn view(
                 column![
                     text(source)
                         .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
                         .color(theme::PAPER_DIM)
                         .wrapping(text::Wrapping::None),
                     text(list.summary)
                         .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
                         .color(theme::PAPER_FAINT),
                 ]
                 .spacing(theme::GAP_XXS),
@@ -160,6 +162,7 @@ fn header_row() -> Element<'static, Message> {
     row![
         text("Up next")
             .size(theme::SIZE_EMPHASIS)
+            .line_height(theme::LEADING_EMPHASIS)
             .font(theme::MEDIUM),
         Space::with_width(Length::Fill),
         close_button("Close up next", Message::CloseUpNext),
@@ -178,9 +181,11 @@ fn empty_state() -> Element<'static, Message> {
         column![
             text("Nothing queued")
                 .size(theme::SIZE_EMPHASIS)
+                .line_height(theme::LEADING_EMPHASIS)
                 .color(theme::PAPER_DIM),
             text("Play an album and it appears here")
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_FAINT),
         ]
         .spacing(theme::GAP_SM)
@@ -233,6 +238,7 @@ fn queue_row(
     } else {
         text(row_state.position.to_string())
             .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
             .color(theme::PAPER_FAINT)
             .into()
     };
@@ -241,6 +247,7 @@ fn queue_row(
     // the emphasis moves down the queue with the music.
     let heading = text(row_state.title)
         .size(theme::SIZE_BODY)
+        .line_height(theme::LEADING_BODY)
         .color(ink)
         .wrapping(text::Wrapping::None);
     let heading = if playing {
@@ -253,6 +260,7 @@ fn queue_row(
         title = title.push(
             text(artist)
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_DIM)
                 .wrapping(text::Wrapping::None),
         );
@@ -265,6 +273,7 @@ fn queue_row(
             container(title).width(Length::Fill),
             text(row_state.duration)
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_FAINT),
         ]
         .spacing(theme::GAP_SM)
@@ -316,7 +325,9 @@ fn remove_slot(index: usize, offered: bool) -> Element<'static, Message> {
             .padding(0)
             .style(theme::transport)
             .on_press(Message::RemoveQueued(index)),
-        text("Remove from the queue").size(theme::SIZE_CAPTION),
+        text("Remove from the queue")
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
         tooltip::Position::Left,
     )
     .gap(theme::GAP_XS)

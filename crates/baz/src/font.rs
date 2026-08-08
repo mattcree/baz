@@ -546,7 +546,7 @@ mod tests {
         // The width a wrapped line actually has: the panel, less its inset on
         // both sides, less the scrollbar lane the list keeps clear.
         let content_w = theme::PANEL_W - 2.0 * theme::GAP_XL - theme::SCROLLBAR_LANE;
-        let lines = theme::SETTING_NOTE_H / (theme::SIZE_META * theme::LINE_HEIGHT);
+        let lines = theme::SETTING_NOTE_H / (theme::SIZE_META * theme::LEADING_META);
         for mode in MODES {
             let note = mode_note(mode);
             let used = wrapped_lines(&sans, note, theme::SIZE_META, content_w);

@@ -106,6 +106,7 @@ pub(crate) fn view(player: &PlayerState, window_width: f32) -> Element<'_, Messa
         column![
             text(SECTIONS[0])
                 .size(theme::SIZE_EMPHASIS)
+                .line_height(theme::LEADING_EMPHASIS)
                 .font(theme::MEDIUM),
             content,
         ]
@@ -166,6 +167,7 @@ fn header() -> Element<'static, Message> {
     let back = button(
         text("‹ Library")
             .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
             .font(theme::MEDIUM)
             .wrapping(text::Wrapping::None),
     )
@@ -178,10 +180,12 @@ fn header() -> Element<'static, Message> {
                 back,
                 text("Settings")
                     .size(theme::SIZE_EMPHASIS)
+                    .line_height(theme::LEADING_EMPHASIS)
                     .font(theme::MEDIUM),
                 Space::with_width(Length::Fill),
                 text("Kept in config.toml, and remembered next time.")
                     .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
                     .color(theme::PAPER_FAINT)
                     .wrapping(text::Wrapping::None),
             ]
@@ -210,6 +214,7 @@ fn section_list() -> Element<'static, Message> {
             container(
                 text(*section)
                     .size(theme::SIZE_BODY)
+                    .line_height(theme::LEADING_BODY)
                     .font(theme::MEDIUM)
                     .wrapping(text::Wrapping::None),
             )
@@ -244,9 +249,11 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
     let mut section = column![
         text("ReplayGain")
             .size(theme::SIZE_EMPHASIS)
+            .line_height(theme::LEADING_EMPHASIS)
             .font(theme::MEDIUM),
         text("Play everything at the loudness its tags declare.")
             .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
             .color(theme::PAPER_DIM),
         mode_selector(state, live),
         // The mode's own sentence, in the quiet ink: present in every mode, so
@@ -259,6 +266,7 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
         container(
             text(state.mode_note())
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_FAINT),
         )
         .height(Length::Fixed(theme::SETTING_NOTE_H)),
@@ -286,6 +294,7 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
             checkbox("Keep peaks below full scale", state.prevent_clipping())
                 .size(theme::SIZE_BODY)
                 .text_size(theme::SIZE_META)
+                .text_line_height(theme::LEADING_META)
                 .spacing(theme::GAP_SM)
                 .style(theme::check)
                 .on_toggle_maybe(live.then_some(Message::ReplayGainPreventClipping)),
@@ -300,9 +309,11 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
             column![
                 text(readout.gain)
                     .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
                     .color(theme::PAPER),
                 text(readout.detail)
                     .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
                     .color(theme::PAPER_FAINT),
             ]
             .spacing(theme::GAP_XXS),
@@ -310,7 +321,12 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
     }
 
     if let Some(note) = player.availability_note() {
-        section = section.push(text(note).size(theme::SIZE_META).color(theme::PAPER_FAINT));
+        section = section.push(
+            text(note)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(theme::PAPER_FAINT),
+        );
     }
 
     section.into()
@@ -332,6 +348,7 @@ fn mode_selector(state: replaygain::ReplayGain, live: bool) -> Element<'static, 
                 container(
                     text(replaygain::mode_label(mode))
                         .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
                         .font(theme::MEDIUM)
                         .wrapping(text::Wrapping::None),
                 )
@@ -369,12 +386,14 @@ fn stepper_row(
     row![
         text(label)
             .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
             .color(theme::PAPER_DIM)
             .wrapping(text::Wrapping::None),
         Space::with_width(Length::Fill),
         container(
             text(value)
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER)
                 .wrapping(text::Wrapping::None)
         )
@@ -394,11 +413,16 @@ fn stepper_row(
 /// `+` in width and in height, and these two sit side by side.
 fn stepper(glyph: &'static str, enabled: bool, message: Message) -> Element<'static, Message> {
     button(
-        container(text(glyph).size(theme::SIZE_BODY).color(if enabled {
-            theme::PAPER
-        } else {
-            theme::PAPER_MUTED
-        }))
+        container(
+            text(glyph)
+                .size(theme::SIZE_BODY)
+                .line_height(theme::LEADING_BODY)
+                .color(if enabled {
+                    theme::PAPER
+                } else {
+                    theme::PAPER_MUTED
+                }),
+        )
         .width(Length::Fill)
         .height(Length::Fill)
         .align_x(alignment::Horizontal::Center)

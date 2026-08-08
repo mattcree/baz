@@ -206,18 +206,42 @@ pub const SHADOW: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.45);
 // Type scale
 // ---------------------------------------------------------------------------
 
+// Every size below carries its own line height, as a `LineHeight::Relative`
+// factor named beside it. baz used to take iced 0.13's toolkit default of 1.3
+// everywhere, which is a single compromise applied to type from 11 px to 28 px:
+// small type wants air and a heading wants none, and a caption set at the same
+// leading as a hero is why a two-line block can read as a paragraph. The pairs
+// are the type scale of `.interface-design/system.md` §8, and a `text` widget
+// that sets a size without its leading is a review-blocking defect for the same
+// reason a hardcoded colour is (ADR-0006).
+
 /// Hints and footnotes (11 px).
 pub const SIZE_CAPTION: f32 = 11.0;
+/// Leading for [`SIZE_CAPTION`]: the loosest in the scale, because the smallest
+/// type is the type that needs the air.
+pub const LEADING_CAPTION: f32 = 1.45;
 /// Metadata: captions, durations, status counts (12 px).
 pub const SIZE_META: f32 = 12.0;
+/// Leading for [`SIZE_META`].
+pub const LEADING_META: f32 = 1.35;
 /// Body: tile titles, track titles, control labels (13 px).
 pub const SIZE_BODY: f32 = 13.0;
+/// Leading for [`SIZE_BODY`] — and, through [`CAPTION_LINE_H`], the height of
+/// a wall label's line.
+pub const LEADING_BODY: f32 = 1.40;
 /// Emphasis: search text, panel artist, empty-state lines (15 px).
 pub const SIZE_EMPHASIS: f32 = 15.0;
+/// Leading for [`SIZE_EMPHASIS`].
+pub const LEADING_EMPHASIS: f32 = 1.35;
 /// Titles: the side panel's album title (19 px).
 pub const SIZE_TITLE: f32 = 19.0;
+/// Leading for [`SIZE_TITLE`]: tight, because a two-line album title is one
+/// object and should look like one.
+pub const LEADING_TITLE: f32 = 1.20;
 /// Hero: the first-run question (28 px).
 pub const SIZE_HERO: f32 = 28.0;
+/// Leading for [`SIZE_HERO`]: the tightest in the scale.
+pub const LEADING_HERO: f32 = 1.15;
 
 /// The UI face at Regular: baz's default font, and the family every weight
 /// below is a member of.
@@ -268,16 +292,21 @@ pub const GAP_LG: f32 = 16.0;
 /// 24 px — screen-level breathing room.
 pub const GAP_XL: f32 = 24.0;
 
-/// Corner radius for controls (buttons, inputs).
-pub const RADIUS_CTRL: f32 = 6.0;
-/// Corner radius of a segment inside the segmented control — one step
-/// tighter than its enclosing well, so the raised segment nests rather than
-/// straining against the edge.
-pub const RADIUS_SEGMENT: f32 = 4.0;
+// The radii come down across the board, because **an archive is rectilinear
+// and a sleeve has square corners** (`.interface-design/system.md` §6). Artwork
+// is radius 0 always, and every rule is too; what is left is barely rounded
+// rather than softly rounded, and the nesting rule still holds — 3 inside 4.
+
+/// Corner radius for controls (buttons, inputs, wells, steppers, the popover).
+/// **4**, down from 6.
+pub const RADIUS_CTRL: f32 = 4.0;
+/// Corner radius of a segment inside the segmented control, a checkbox, a
+/// queue or track row — one step tighter than the well enclosing it, so the
+/// raised segment nests rather than straining against the edge. **3**, down
+/// from 4.
+pub const RADIUS_SEGMENT: f32 = 3.0;
 /// Inset of the segmented control's well around its segments.
 pub const SEGMENT_INSET: f32 = 2.0;
-/// Corner radius for the tile's hover/selection card.
-pub const RADIUS_TILE: f32 = 10.0;
 /// Width of the album inspector, the column beside the shelf (logical px).
 ///
 /// **One number, and now for one surface.** It was one number for three — the
@@ -293,8 +322,9 @@ pub const PANEL_W: f32 = 340.0;
 /// for three figures at [`SIZE_META`], so a long queue's positions
 /// stay in their column.
 pub const TRACK_NO_W: f32 = 24.0;
-/// Corner radius for small floating chips (the seek preview tip).
-pub const RADIUS_CHIP: f32 = 4.0;
+/// Corner radius for small floating chips — the seek preview tip, the
+/// tooltips. **3**, down from 4.
+pub const RADIUS_CHIP: f32 = 3.0;
 /// Edge of the playing-album lamp dot (a [`RADIUS_CTRL`]-free circle).
 pub const DOT: f32 = 6.0;
 
@@ -469,9 +499,6 @@ pub const STEPPER_HIT: f32 = 24.0;
 /// driven, and a row that re-flowed under a repeated press would make the
 /// button move away from the pointer holding it.
 pub const SETTING_VALUE_W: f32 = 68.0;
-/// iced 0.13's default relative line height (`LineHeight::Relative(1.3)`),
-/// named here because a reserved text slot has to be measured in it.
-pub const LINE_HEIGHT: f32 = 1.3;
 /// Height reserved for a setting's explanatory note: **two** lines at
 /// [`SIZE_META`].
 ///
@@ -482,7 +509,7 @@ pub const LINE_HEIGHT: f32 = 1.3;
 /// pointer that just chose it. Two lines is the tallest note the panel's
 /// content width can produce (`a_setting_note_fits_the_slot_it_is_given`
 /// pins it), and the empty half-slot in the short cases costs nothing.
-pub const SETTING_NOTE_H: f32 = 2.0 * SIZE_META * LINE_HEIGHT;
+pub const SETTING_NOTE_H: f32 = 2.0 * SIZE_META * LEADING_META;
 
 /// The lane a scrolling list keeps clear for its scrollbar: padding on the
 /// right of the list's contents and nowhere else.
@@ -650,6 +677,14 @@ pub fn theme() -> Theme {
 /// A shelf tile's button chrome: invisible at rest (the sleeve leads),
 /// a quiet raised card on hover, one step higher plus a hairline edge when
 /// selected.
+///
+/// **Radius 0**, where the tile had a `RADIUS_TILE` of 10. That token is
+/// deleted: the shelf has no rectangles that are not artwork, and artwork is
+/// always square (`.interface-design/system.md` §6). What is left here is
+/// square-cornered chrome, which looks odd on purpose and briefly — B1 of the
+/// adoption order deletes the tile's background and border outright and gives
+/// hover and selection a rule under the *label* instead. This commit is values
+/// only, so it does not reach for that.
 #[must_use]
 pub fn tile(status: button::Status, selected: bool) -> button::Style {
     let mut style = button::Style {
@@ -658,7 +693,7 @@ pub fn tile(status: button::Status, selected: bool) -> button::Style {
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
-            radius: RADIUS_TILE.into(),
+            radius: 0.0.into(),
         },
         shadow: Shadow::default(),
     };
@@ -1098,7 +1133,12 @@ pub const CAPTION_H: f32 = 2.0 * CAPTION_LINE_H;
 /// title is the affordable failure here: the sleeve above it is the
 /// identification a shelf is built on, and the album panel one click away
 /// carries the whole string.
-pub const CAPTION_LINE_H: f32 = SIZE_BODY * LINE_HEIGHT;
+///
+/// **18.2 px**, where it was 16.9: the lane is set from the body text's own
+/// leading ([`LEADING_BODY`]) now that each type token carries one, instead of
+/// from the toolkit's 1.3 default. The block is therefore 36.4 rather than
+/// 33.8 — the number `.interface-design/system.md` §8 calls `LABEL_H`.
+pub const CAPTION_LINE_H: f32 = SIZE_BODY * LEADING_BODY;
 
 /// A track row — in the album inspector **and** in the **Up next** popover:
 /// invisible at rest, a quiet card under the pointer, and the playing row
@@ -1575,7 +1615,7 @@ mod tests {
         use crate::replaygain::{MODES, mode_note};
 
         // The slot is exactly two lines — not "about two".
-        assert!((SETTING_NOTE_H - 2.0 * SIZE_META * LINE_HEIGHT).abs() < f32::EPSILON);
+        assert!((SETTING_NOTE_H - 2.0 * SIZE_META * LEADING_META).abs() < f32::EPSILON);
         // The width a wrapped line actually has: the panel, less its inset on
         // both sides, less the scrollbar lane.
         let content_w = PANEL_W - 2.0 * GAP_XL - SCROLLBAR_LANE;
@@ -2126,6 +2166,47 @@ mod tests {
             "no view names the accent at all — the seek bar's in-flight \
              timestamp is supposed to, and this test just stopped meaning \
              anything"
+        );
+    }
+
+    /// **Every type size is drawn with its own leading.**
+    ///
+    /// The scale is six size/leading pairs (§8 of the design system), and the
+    /// pairing only exists if the views honour it: a `text` that sets
+    /// [`SIZE_CAPTION`] and leaves the line height alone gets iced 0.13's 1.3
+    /// default, which is the single compromise the per-token leadings were
+    /// introduced to replace. That is invisible in a screenshot of one line and
+    /// obvious in a block of three.
+    ///
+    /// Read from the sources for the same reason the accent's second test is:
+    /// no style function is involved, so nothing else can see it.
+    ///
+    /// The window is 80 characters because rustfmt will break the two calls
+    /// onto separate lines with indentation between them. One size in the
+    /// product is not type at all — `checkbox`'s `.size` is the *box*, and its
+    /// label is `.text_size` / `.text_line_height` — so a size followed
+    /// immediately by a `.text_size` is skipped rather than special-cased by
+    /// file name.
+    #[test]
+    fn every_type_size_a_view_sets_is_drawn_with_its_own_leading() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
+        let mut offenders: Vec<String> = Vec::new();
+        for path in rust_sources(&root) {
+            let source = std::fs::read_to_string(&path).expect("a source file baz ships");
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            for (at, _) in source.match_indices("theme::SIZE_") {
+                let window = &source[at..source.len().min(at + 80)];
+                if window.contains("theme::LEADING_") || window.contains(".text_size(") {
+                    continue;
+                }
+                offenders.push(format!("{name}: {}", window.lines().next().unwrap_or("")));
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "a type size is set without its line height: {offenders:#?}\nEvery \
+             size token in `theme` has a LEADING_ beside it; taking iced's 1.3 \
+             default instead is the compromise those pairs exist to replace."
         );
     }
 

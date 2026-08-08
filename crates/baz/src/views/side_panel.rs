@@ -141,6 +141,7 @@ pub(crate) fn view<'a>(
                 container(
                     text("Play album")
                         .size(theme::SIZE_BODY)
+                        .line_height(theme::LEADING_BODY)
                         .font(theme::MEDIUM),
                 )
                 .width(Length::Fill)
@@ -164,6 +165,7 @@ pub(crate) fn view<'a>(
     content = content.push(track_list(rows)).push(
         text(hint)
             .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION)
             .color(theme::PAPER_FAINT),
     );
 
@@ -230,17 +232,27 @@ fn album_header<'a>(
         meta.push(vm::format_duration(total));
     }
     let mut header = column![
-        text(title).size(theme::SIZE_TITLE).font(theme::SEMIBOLD),
+        text(title)
+            .size(theme::SIZE_TITLE)
+            .line_height(theme::LEADING_TITLE)
+            .font(theme::SEMIBOLD),
         text(artist)
             .size(theme::SIZE_EMPHASIS)
+            .line_height(theme::LEADING_EMPHASIS)
             .color(theme::PAPER_DIM),
         text(meta.join(" · "))
             .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
             .color(theme::PAPER_FAINT),
     ]
     .spacing(theme::GAP_XS);
     if let Some(line) = edition.and_then(vm::EditionVm::encoding_line) {
-        header = header.push(text(line).size(theme::SIZE_META).color(theme::PAPER_FAINT));
+        header = header.push(
+            text(line)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(theme::PAPER_FAINT),
+        );
     }
     header.into()
 }
@@ -265,6 +277,7 @@ fn edition_selector<'a>(
                 container(
                     text(edition.key.label())
                         .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
                         .font(theme::MEDIUM)
                         .wrapping(text::Wrapping::None),
                 )
@@ -315,6 +328,7 @@ fn track_row(
     } else {
         text(track.number.map(|n| n.to_string()).unwrap_or_default())
             .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
             .color(theme::PAPER_FAINT)
             .into()
     };
@@ -323,6 +337,7 @@ fn track_row(
     // agree about what is sounding.
     let heading = text(track.title.as_str())
         .size(theme::SIZE_BODY)
+        .line_height(theme::LEADING_BODY)
         .wrapping(text::Wrapping::None);
     let heading = if playing {
         heading.font(theme::MEDIUM)
@@ -334,6 +349,7 @@ fn track_row(
         title = title.push(
             text(artist)
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_DIM)
                 .wrapping(text::Wrapping::None),
         );
@@ -346,6 +362,7 @@ fn track_row(
             container(title).width(Length::Fill),
             text(duration)
                 .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
                 .color(theme::PAPER_FAINT),
         ]
         .spacing(theme::GAP_SM)
