@@ -8,16 +8,53 @@
 //! sleeves, low warm light. The chrome must recede so 10 000 covers — the
 //! actual interface — supply all the chroma; every surface is therefore a
 //! *warm* near-neutral (a hint of brown, never the blue-grey of a stock
-//! dark theme), and text is warm off-white like liner-note paper. The one
-//! accent is **lamp amber** — the power lamp / VU-meter glow of an
-//! amplifier — used only where playback truth lives: the playing album's
-//! halo and dot, the primary Play action, input focus, and the scanning
-//! note. Blue (every streaming app's accent) is deliberately absent.
+//! dark theme), and text is warm off-white like liner-note paper.
+//!
+//! # The accent discipline
+//!
+//! There is exactly one accent, **lamp amber** — the power lamp / VU-meter
+//! glow of an amplifier — and it means **playback truth**: a fact about the
+//! audio the engine is producing *right now*. Which album is sounding, which
+//! track within it, and where the playhead is in that track. Nothing else
+//! qualifies: not what is queued, not what is selected, not what has focus,
+//! not what the scanner is doing, not how a gain stage is configured.
+//!
+//! [`LAMP`] and its relatives may appear in exactly five places
+//! (`docs/design/02-visual-language.md` §2.1.1), and
+//! `the_lamp_is_spent_only_on_playback_truth` below is what enforces it rather
+//! than leaving it to be remembered:
+//!
+//! 1. the playing album's halo — [`sleeve`] with `playing`;
+//! 2. the playing dot — [`lamp_dot`], beside a tile's title or in a row's
+//!    number column;
+//! 3. the seek groove's elapsed fill and knob — [`seek`];
+//! 4. a seek in flight — the elapsed timestamp warms to [`LAMP`] while a
+//!    position has been asked for and not yet confirmed, because a position
+//!    being asked for is a claim about the playhead;
+//! 5. the primary Play action — [`primary`], the one argued exception: it is
+//!    the only control in the product that *creates* playback truth, it
+//!    appears at most once per screen, and it is the only lamp-*filled*
+//!    rectangle anywhere in baz.
+//!
+//! Two uses were **cut** in the redesign's first pass, both of them a lamp
+//! that was on when nothing was playing: input focus (now [`PAPER_RING`], and
+//! the search field takes focus at launch, so the first frame baz ever drew
+//! was an amber ring with no music), and the scanning note (now [`PAPER_DIM`]
+//! — a scan is the library working, not the music). Blue, every streaming
+//! app's accent, remains deliberately absent.
 //!
 //! Depth strategy: hairline borders plus whisper-quiet surface steps
 //! (`WALL` → `CARD` → `CARD_HIGH`, with `RECESS` for inset chrome), and one
 //! soft shadow under artwork so sleeves sit *on* the shelf. Corners: sleeves
 //! are square like the physical object; controls are gently rounded.
+//!
+//! # Contrast
+//!
+//! iced 0.13 publishes no accessibility tree, so contrast and hit-target size
+//! are the only accessibility guarantees baz can make — which is a reason to
+//! honour them exactly rather than a reason to shrug. Every ink-on-surface
+//! pairing the room can produce is computed and checked against its WCAG 2.1
+//! floor by `every_ink_clears_its_contrast_floor_on_every_surface_it_lands_on`.
 
 use std::sync::LazyLock;
 
@@ -48,25 +85,52 @@ pub const HAIRLINE_STRONG: Color = Color::from_rgba(0.93, 0.89, 0.85, 0.17);
 pub const PAPER: Color = Color::from_rgb(0.918, 0.902, 0.878);
 /// Secondary text: artists, captions, subtitles.
 pub const PAPER_DIM: Color = Color::from_rgb(0.659, 0.635, 0.604);
-/// Tertiary text: counts, durations, hints — present, never loud.
-pub const PAPER_FAINT: Color = Color::from_rgb(0.447, 0.427, 0.400);
-/// The accent: amplifier-lamp amber. Playback truth and primary action only.
+/// Tertiary text: counts, durations, hints, signal notes, the resting fader —
+/// present, never loud.
+///
+/// `#8A857C`. This carries the whole of baz's readout vocabulary, and the
+/// value it had through v0.1 (`#726D66`) measured **3.4 : 1** on the panel —
+/// below the 4.5 : 1 AA floor for text on every surface it can land on. The
+/// value here is the same hue lightened until it clears that floor everywhere
+/// (5.1 on `WALL`, 4.8 on `CARD`, 5.4 on `RECESS`, 4.5 on `CARD_HIGH`);
+/// `every_ink_clears_its_contrast_floor_on_every_surface_it_lands_on` is what
+/// keeps it there.
+pub const PAPER_FAINT: Color = Color::from_rgb(0.541, 0.522, 0.486);
+/// The accent: amplifier-lamp amber. **Playback truth only** — see the
+/// module's accent-discipline note for the five places it may appear.
 pub const LAMP: Color = Color::from_rgb(0.890, 0.631, 0.306);
-/// Lamp amber, brightened — primary-action hover.
+/// Lamp amber, brightened — the seek fill under the pointer, Play hovered.
 pub const LAMP_BRIGHT: Color = Color::from_rgb(0.945, 0.702, 0.384);
-/// Lamp amber, deepened — primary-action press.
+/// Lamp amber, deepened — the seek fill while dragged, Play pressed.
 pub const LAMP_DEEP: Color = Color::from_rgb(0.780, 0.533, 0.239);
-/// Lamp amber at half strength: input focus rings.
-pub const LAMP_SOFT: Color = Color::from_rgba(0.890, 0.631, 0.306, 0.55);
-/// Lamp amber as a glow: the playing sleeve's halo, text selection.
+/// Lamp amber as a glow: the playing sleeve's halo, and nothing else.
 pub const LAMP_GLOW: Color = Color::from_rgba(0.890, 0.631, 0.306, 0.30);
 /// Near-black ink for text sitting *on* the amber lamp.
 pub const LAMP_INK: Color = Color::from_rgb(0.106, 0.078, 0.043);
+/// Keyboard focus: paper at 45%, on the focused `text_input`'s border and
+/// nowhere else.
+///
+/// Deliberately **not** the accent. Where the keyboard is has nothing to do
+/// with where the music is, and the search field takes focus at launch — so
+/// an amber focus ring made the first frame baz ever drew a lit lamp with
+/// nothing playing.
+pub const PAPER_RING: Color = Color::from_rgba(0.918, 0.902, 0.878, 0.45);
+/// Selected text in a `text_input`: paper at 18%.
+///
+/// Also not the accent, and for the same reason as [`PAPER_RING`]: a
+/// selection is a fact about the keyboard, not about the music. A wash rather
+/// than a fill so the glyphs under it keep their own ink.
+pub const SELECT_WASH: Color = Color::from_rgba(0.918, 0.902, 0.878, 0.18);
 /// A control that is *set* but not currently sounding: the volume fader
-/// while muted. Dimmer than [`PAPER_FAINT`] and still plainly above
-/// [`RECESS`], so the position the listener chose stays readable while the
-/// control stops claiming to be audible.
-pub const PAPER_MUTED: Color = Color::from_rgb(0.290, 0.278, 0.263);
+/// while muted, or a stepper at the end of its travel.
+///
+/// `#6E6A62`. Not text a user must read, so the 3 : 1 non-text floor applies —
+/// but the value it had through v0.1 (`#4A4743`) measured **1.9 : 1**, below
+/// even that, which made the position the listener chose effectively invisible
+/// while muted. Restoring that position is the entire reason mute leaves the
+/// fader where it is. The value here clears 3 : 1 on every surface (3.5 / 3.3
+/// / 3.6 / 3.1) while staying plainly quieter than a live control.
+pub const PAPER_MUTED: Color = Color::from_rgb(0.431, 0.416, 0.384);
 /// Problems, stated quietly: a soft brick red, no alarm klaxon.
 pub const ALERT: Color = Color::from_rgb(0.851, 0.467, 0.420);
 /// Success (theme palette slot; nothing renders it directly yet).
@@ -91,20 +155,38 @@ pub const SIZE_TITLE: f32 = 19.0;
 /// Hero: the first-run question (28 px).
 pub const SIZE_HERO: f32 = 28.0;
 
+/// The UI face at Regular: baz's default font, and the family every weight
+/// below is a member of.
+///
+/// **Named, never generic.** `Font::DEFAULT` is `Family::SansSerif`, which
+/// each platform resolves for itself — and asking an unknown family for
+/// Medium or Semibold is how baz used to end up rendering tile titles in
+/// whatever the host's fallback chain reached for (a monospace, on the design
+/// audit's machine). The family is bundled: see [`crate::font`].
+pub const SANS: Font = Font::with_name(crate::font::SANS);
 /// Medium weight of the UI face — quiet prominence for titles and labels.
+/// A real drawn face in the bundled family, not a synthesised weight.
 pub const MEDIUM: Font = Font {
     weight: Weight::Medium,
-    ..Font::DEFAULT
+    ..SANS
 };
-/// Semibold weight of the UI face — headings only.
+/// Semibold weight of the UI face — headings only. Also a real drawn face.
 pub const SEMIBOLD: Font = Font {
     weight: Weight::Semibold,
-    ..Font::DEFAULT
+    ..SANS
 };
-/// Monospace for data: track numbers, durations, counts. iced 0.13 has no
-/// OpenType feature control (no `tnum`), so the monospace face *is* our
-/// tabular figures.
-pub const MONO: Font = Font::MONOSPACE;
+/// Monospace for data: track numbers, durations, counts, dB values, rates.
+/// iced 0.13 has no OpenType feature control (no `tnum`), so the monospace
+/// face *is* our tabular figures.
+///
+/// The **bundled** mono, not `Font::MONOSPACE` (which is the generic
+/// `Family::Monospace` the platform picks): Plex Mono shares Plex Sans's
+/// x-height, stem weight and terminal treatment, so a line like
+/// `2022 · 8 tracks · 47:21` reads as one typeface with two settings rather
+/// than as two unrelated voices. Its advance is uniform at 0.6 em, which is
+/// the number every reserved slot in the bottom bar is measured against —
+/// `crate::font`'s `every_reserved_slot_holds_its_worst_case_in_the_bundled_face`.
+pub const MONO: Font = Font::with_name(crate::font::MONO);
 
 // ---------------------------------------------------------------------------
 // Spacing (base unit 4) and shape
@@ -595,11 +677,23 @@ pub fn primary(_theme: &Theme, status: button::Status) -> button::Style {
 }
 
 /// Text inputs (search, first-run folder): an inset well with a hairline
-/// edge that warms to lamp amber on focus.
+/// edge that brightens to a paper ring on focus.
+///
+/// **Not lamp amber, on either the ring or the selection.** Both used to be —
+/// the ring at `LAMP` 55%, the selection at [`LAMP_GLOW`] — and since the
+/// search field takes focus at launch, the first frame baz ever drew was an
+/// amber-ringed box with no music playing. A reserved signal that appears
+/// before there is anything to signal is not reserved. Where the keyboard is,
+/// and what it has selected, are facts about the keyboard; the accent means
+/// playback truth (see the module's accent-discipline note).
+///
+/// iced 0.13's buttons take no keyboard focus, so this ring is the *only*
+/// focus affordance the toolkit can render; icon-only controls are named by
+/// tooltips instead ([`tooltip`]).
 #[must_use]
 pub fn input(_theme: &Theme, status: text_input::Status) -> text_input::Style {
     let border_color = match status {
-        text_input::Status::Focused => LAMP_SOFT,
+        text_input::Status::Focused => PAPER_RING,
         text_input::Status::Hovered => HAIRLINE_STRONG,
         text_input::Status::Active | text_input::Status::Disabled => HAIRLINE,
     };
@@ -613,7 +707,7 @@ pub fn input(_theme: &Theme, status: text_input::Status) -> text_input::Style {
         icon: PAPER_FAINT,
         placeholder: PAPER_FAINT,
         value: PAPER,
-        selection: LAMP_GLOW,
+        selection: SELECT_WASH,
     }
 }
 
@@ -893,6 +987,39 @@ pub fn tooltip(_theme: &Theme) -> container::Style {
     }
 }
 
+// ---------------------------------------------------------------------------
+// New tokens for surfaces landing in the visual redesign
+//
+// Deliberately parked at the end of the file rather than filed into the
+// sections above: the redesign lands as several independent passes over
+// different modules, and a token added here conflicts with nothing when two of
+// them meet. Move each one up into its proper section once the surface that
+// consumes it has shipped.
+// ---------------------------------------------------------------------------
+
+/// The serif, at `SemiBold` — the album's title and the first-run question, and
+/// **nothing else** (`docs/design/02-visual-language.md` §2.2.3).
+///
+/// Both are "the thing itself" rather than chrome: a record's name, and the
+/// product's single line of copy. Sleeve typography is overwhelmingly serif or
+/// display, where UI sans is what a settings dialog looks like. Everything baz
+/// says *about itself* — Settings, Queue, ReplayGain, Play album, every label,
+/// every note — stays [`SANS`]. No exceptions.
+///
+/// The face is bundled with the rest of the family ([`crate::font`]), so it
+/// resolves to a real drawn `SemiBold` rather than a synthesised one.
+#[expect(
+    dead_code,
+    reason = "the token lands with the typeface; the two surfaces that spend \
+              it — the album title and the first-run question — are step 7 of \
+              the redesign's adoption order and change no value here. Delete \
+              this attribute (the compiler will ask) when the first one ships."
+)]
+pub const SERIF: Font = Font {
+    weight: Weight::Semibold,
+    ..Font::with_name(crate::font::SERIF)
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -927,15 +1054,31 @@ mod tests {
         // And its width is the groove plus a fixed stamp on each side, so
         // the centre column never resizes as the digits tick.
         assert!((SEEK_ROW_W - (SEEK_W + 2.0 * (STAMP_W + GAP_SM))).abs() < f32::EPSILON);
-        // A stamp must hold `h:mm:ss` — seven monospace figures, which are
-        // around half an em wide at this size — without clipping.
-        const { assert!(STAMP_W > SIZE_META * 7.0 * 0.5) }
+        // A stamp must hold `h:mm:ss` — seven figures in the bundled mono,
+        // whose advance is [`MONO_EM`] of the size — without clipping.
+        const { assert!(STAMP_W > SIZE_META * 7.0 * MONO_EM) }
         // The signal-path slot is reserved on the same principle, and must
         // hold the longest chain a consumer device produces —
         // `192 → 176.4 kHz`, fifteen monospace figures — so that a note
         // appearing there moves nothing beside it.
-        const { assert!(SIGNAL_W > SIZE_META * 15.0 * 0.5) }
+        const { assert!(SIGNAL_W > SIZE_META * 15.0 * MONO_EM) }
     }
+
+    /// The advance width of one glyph in the bundled monospace, as a fraction
+    /// of the type size.
+    ///
+    /// **0.6, not the 0.5 these assertions used to guess with.** Before the
+    /// typeface was bundled the face was whatever the platform resolved
+    /// `Family::SansSerif`/`Family::Monospace` to, so the slot arithmetic here
+    /// could only be a conservative estimate; now the face ships with the
+    /// binary and the number is a property of a file we hash. The const
+    /// assertions below stay because they are cheap and they fail at compile
+    /// time, but the claim they stand for is *measured* — against these very
+    /// bytes, string by string — in
+    /// `crate::font`'s `every_reserved_slot_holds_its_worst_case_in_the_bundled_face`,
+    /// which is the test `docs/design/02-visual-language.md` §4.6 requires
+    /// before a font change may ship.
+    const MONO_EM: f32 = 0.6;
 
     /// The duration-column defect, as arithmetic: the lane a list keeps clear
     /// is exactly the lane its scrollbar occupies, and it is kept clear on the
@@ -983,9 +1126,9 @@ mod tests {
             inner > 200.0,
             "the lane left only {inner} px for a track title"
         );
-        // `-20.00 dB` is ten monospace figures at SIZE_META; the slot is
+        // `-20.00 dB` is nine monospace figures at SIZE_META; the slot is
         // fixed so a value changing cannot move the stepper beside it.
-        const { assert!(SETTING_VALUE_W > SIZE_META * 10.0 * 0.5) }
+        const { assert!(SETTING_VALUE_W > SIZE_META * 9.0 * MONO_EM) }
         // A stepper is smaller than the transport but still a real target.
         const { assert!(STEPPER_HIT < TRANSPORT_HIT && STEPPER_HIT >= ICON_PX) }
     }
@@ -994,10 +1137,12 @@ mod tests {
     /// fits it — otherwise the slot clips the words instead of the layout
     /// moving, which is the worse of the two failures it was chosen over.
     ///
-    /// Text measurement needs a renderer, so this is an arithmetic bound
-    /// rather than a shaping run: at [`SIZE_META`] the UI face averages well
-    /// under half an em per character, which is the same conservative figure
-    /// [`STAMP_W`] and [`SIGNAL_W`] are checked against above.
+    /// This is the arithmetic bound: at [`SIZE_META`] the bundled Sans
+    /// averages 0.42–0.46 em per character over these sentences, so half an em
+    /// is a conservative budget. The same claim is made *properly* — with the
+    /// face's own advance widths and a greedy word wrap — by `crate::font`'s
+    /// `a_setting_note_still_wraps_inside_its_two_reserved_lines`; this one
+    /// stays because it is the version that needs no asset.
     #[test]
     fn a_setting_note_fits_the_slot_it_is_given() {
         use crate::replaygain::{MODES, mode_note};
@@ -1077,8 +1222,8 @@ mod tests {
         assert!((VOLUME_BLOCK_W - (TRANSPORT_HIT + GAP_SM + VOLUME_W)).abs() < f32::EPSILON);
         assert!((VOLUME_ROW_H - (PREVIEW_H + VOLUME_HIT)).abs() < f32::EPSILON);
         // The level tip must hold `-18.1 dB` — eight monospace figures at
-        // caption size, around half an em each — without clipping.
-        const { assert!(LEVEL_W > SIZE_CAPTION * 8.0 * 0.5) }
+        // caption size — without clipping.
+        const { assert!(LEVEL_W > SIZE_CAPTION * 8.0 * MONO_EM) }
         // And the whole right-hand end has to fit beside the centre column
         // in the shipped window, or the zone would clip on launch.
         const { assert!(VOLUME_BLOCK_W + GAP_SM + SIGNAL_W < 1280.0 - SEEK_ROW_W) }
@@ -1144,5 +1289,418 @@ mod tests {
         const { assert!(TRANSPORT_HIT > ICON_PX) }
         // …and the pair of them fits inside the column they centre in.
         const { assert!(2.0 * TRANSPORT_HIT + GAP_SM < SEEK_ROW_W) }
+    }
+
+    // -----------------------------------------------------------------------
+    // Contrast
+    // -----------------------------------------------------------------------
+
+    /// One channel of an sRGB colour, linearised — the first half of WCAG
+    /// 2.1's relative-luminance definition.
+    ///
+    /// iced's `Color` components are already sRGB-encoded (the same assumption
+    /// [`crate::icon`] makes when it writes them straight into an
+    /// `Rgba8UnormSrgb` sprite), so they go into this transfer function as
+    /// they are.
+    fn linear(channel: f32) -> f32 {
+        if channel <= 0.040_45 {
+            channel / 12.92
+        } else {
+            ((channel + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    /// WCAG 2.1 relative luminance.
+    fn luminance(color: Color) -> f32 {
+        0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+    }
+
+    /// The WCAG 2.1 contrast ratio between two opaque colours.
+    fn contrast(foreground: Color, background: Color) -> f32 {
+        let (a, b) = (luminance(foreground), luminance(background));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    /// **The contrast test.** Every ink the room can put on every surface it
+    /// can land on, computed rather than estimated, against the floor that
+    /// applies to it.
+    ///
+    /// This exists because two tokens shipped below their floor for the whole
+    /// of v0.1 and nobody noticed: [`PAPER_FAINT`] at 3.4 : 1 on the panel —
+    /// carrying every duration, count, hint and signal note in the product —
+    /// and [`PAPER_MUTED`] at 1.9 : 1, which made the muted fader's position
+    /// effectively invisible. Both were corrected;
+    /// `docs/design/02-visual-language.md` §2.1.2 has the full table and the
+    /// argument, and this is what stops either drifting back.
+    ///
+    /// Floors are WCAG 2.1's: **4.5 : 1** for anything a user has to read,
+    /// **3 : 1** for a non-text mark whose job is to be locatable rather than
+    /// legible. Ratios are compared at the precision the specification
+    /// publishes them to — one decimal place — which matters for exactly one
+    /// pairing: `PAPER_FAINT` on `CARD_HIGH` computes to 4.483, published as
+    /// 4.5. Moving it further would mean re-deriving the palette, which this
+    /// change deliberately does not do; the pairing is a duration inside a
+    /// playing queue row, and it is named here rather than quietly rounded.
+    #[test]
+    fn every_ink_clears_its_contrast_floor_on_every_surface_it_lands_on() {
+        /// Half of the one-decimal precision the specification's table is
+        /// published to.
+        const ROUNDING: f32 = 0.05;
+        /// The AA floor for text.
+        const TEXT: f32 = 4.5;
+        /// The floor for a non-text mark.
+        const MARK: f32 = 3.0;
+
+        let surfaces = [
+            ("WALL", WALL),
+            ("CARD", CARD),
+            ("RECESS", RECESS),
+            ("CARD_HIGH", CARD_HIGH),
+        ];
+        // Every ink the theme paints, with the floor its *use* implies.
+        // `PAPER_MUTED` is the muted fader and a stepper at the end of its
+        // travel — a mark, not a sentence — so it takes the lower floor; the
+        // lamp is a fill and a dot, likewise.
+        let inks = [
+            ("PAPER", PAPER, TEXT),
+            ("PAPER_DIM", PAPER_DIM, TEXT),
+            ("PAPER_FAINT", PAPER_FAINT, TEXT),
+            ("ALERT", ALERT, TEXT),
+            ("PAPER_MUTED", PAPER_MUTED, MARK),
+            ("LAMP", LAMP, MARK),
+        ];
+        for (ink_name, ink, floor) in inks {
+            for (surface_name, surface) in surfaces {
+                let ratio = contrast(ink, surface);
+                assert!(
+                    ratio + ROUNDING >= floor,
+                    "{ink_name} on {surface_name} is {ratio:.2} : 1, below its \
+                     {floor} : 1 floor"
+                );
+            }
+        }
+
+        // The one ink that sits on the accent rather than on a surface: the
+        // Play button's label and triangle.
+        let on_lamp = contrast(LAMP_INK, LAMP);
+        assert!(
+            on_lamp >= TEXT,
+            "LAMP_INK on LAMP is {on_lamp:.2} : 1, below {TEXT} : 1"
+        );
+
+        // And the two corrections, pinned as corrections: the values v0.1
+        // shipped fail the floors above, so this test would have caught them.
+        let old_faint = Color::from_rgb(0.447, 0.427, 0.400);
+        let old_muted = Color::from_rgb(0.290, 0.278, 0.263);
+        assert!(
+            contrast(old_faint, CARD) < TEXT,
+            "the old PAPER_FAINT is supposed to be the failure this test exists for"
+        );
+        assert!(contrast(old_muted, CARD) < MARK);
+        assert!(
+            contrast(PAPER_FAINT, CARD) > contrast(old_faint, CARD),
+            "the correction must be lighter, not merely different"
+        );
+        assert!(contrast(PAPER_MUTED, CARD) > contrast(old_muted, CARD));
+
+        // The correction must not have cost the *ordering* the room is built
+        // on: faint is quieter than dim, muted is quieter than faint, and
+        // muted is still plainly above the groove it sits in.
+        assert!(contrast(PAPER, CARD) > contrast(PAPER_DIM, CARD));
+        assert!(contrast(PAPER_DIM, CARD) > contrast(PAPER_FAINT, CARD));
+        assert!(contrast(PAPER_FAINT, CARD) > contrast(PAPER_MUTED, CARD));
+    }
+
+    // -----------------------------------------------------------------------
+    // The accent discipline
+    // -----------------------------------------------------------------------
+
+    /// Whether `color` is the accent or one of its relatives.
+    ///
+    /// Membership of the amber family by value, rather than a hue test: the
+    /// tokens are constants, so what has to be prevented is a *style* reaching
+    /// for one of them, not a new colour that happens to be warm.
+    fn is_lamp(color: Color) -> bool {
+        [LAMP, LAMP_BRIGHT, LAMP_DEEP, LAMP_GLOW, LAMP_INK]
+            .iter()
+            .any(|amber| {
+                (amber.r - color.r).abs() < f32::EPSILON
+                    && (amber.g - color.g).abs() < f32::EPSILON
+                    && (amber.b - color.b).abs() < f32::EPSILON
+                    && (amber.a - color.a).abs() < f32::EPSILON
+            })
+    }
+
+    /// The colours in a `Background`, if it is a flat one.
+    fn from_background(background: Option<Background>) -> Vec<Color> {
+        match background {
+            Some(Background::Color(color)) => vec![color],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Every colour a `container` style paints.
+    fn container_colors(style: &container::Style) -> Vec<Color> {
+        let mut colors = from_background(style.background);
+        colors.extend(style.text_color);
+        colors.push(style.border.color);
+        colors.push(style.shadow.color);
+        colors
+    }
+
+    /// Every colour a `button` style paints.
+    fn button_colors(style: &button::Style) -> Vec<Color> {
+        let mut colors = from_background(style.background);
+        colors.push(style.text_color);
+        colors.push(style.border.color);
+        colors.push(style.shadow.color);
+        colors
+    }
+
+    /// Every colour a `slider` style paints.
+    fn slider_colors(style: &slider::Style) -> Vec<Color> {
+        let mut colors = from_background(Some(style.rail.backgrounds.0));
+        colors.extend(from_background(Some(style.rail.backgrounds.1)));
+        colors.push(style.rail.border.color);
+        colors.extend(from_background(Some(style.handle.background)));
+        colors.push(style.handle.border_color);
+        colors
+    }
+
+    /// Every style this module exposes, in every state it has, paired with the
+    /// colours it paints.
+    ///
+    /// Split out of the test below so the sweep can be read as a list of what
+    /// the room is made of, rather than as a hundred lines of setup. Anything
+    /// missing from here is invisible to the accent discipline — the length
+    /// assertion in the test is the crude guard against that.
+    fn every_painted_style() -> Vec<(&'static str, Vec<Color>)> {
+        let theme = theme();
+        let button_states = [
+            button::Status::Active,
+            button::Status::Hovered,
+            button::Status::Pressed,
+            button::Status::Disabled,
+        ];
+        let slider_states = [
+            slider::Status::Active,
+            slider::Status::Hovered,
+            slider::Status::Dragged,
+        ];
+        let mut painted: Vec<(&'static str, Vec<Color>)> = Vec::new();
+        for status in button_states {
+            for selected in [false, true] {
+                painted.push(("tile", button_colors(&tile(status, selected))));
+                painted.push(("segment", button_colors(&segment(status, selected))));
+                painted.push((
+                    "panel_toggle",
+                    button_colors(&panel_toggle(status, selected)),
+                ));
+            }
+            painted.push(("transport", button_colors(&transport(&theme, status))));
+            painted.push(("primary", button_colors(&primary(&theme, status))));
+        }
+        for status in slider_states {
+            painted.push(("seek", slider_colors(&seek(&theme, status))));
+            painted.push(("seek_inert", slider_colors(&seek_inert(&theme, status))));
+            painted.push(("volume", slider_colors(&volume(&theme, status))));
+            painted.push(("volume_muted", slider_colors(&volume_muted(&theme, status))));
+            painted.push(("volume_inert", slider_colors(&volume_inert(&theme, status))));
+        }
+        for status in [
+            text_input::Status::Active,
+            text_input::Status::Hovered,
+            text_input::Status::Focused,
+            text_input::Status::Disabled,
+        ] {
+            let style = input(&theme, status);
+            painted.push((
+                "input",
+                vec![
+                    style.border.color,
+                    style.icon,
+                    style.placeholder,
+                    style.value,
+                    style.selection,
+                ],
+            ));
+        }
+        for status in [
+            checkbox::Status::Active { is_checked: false },
+            checkbox::Status::Active { is_checked: true },
+            checkbox::Status::Hovered { is_checked: true },
+            checkbox::Status::Disabled { is_checked: true },
+        ] {
+            let style = check(&theme, status);
+            let mut colors = from_background(Some(style.background));
+            colors.push(style.icon_color);
+            colors.push(style.border.color);
+            colors.extend(style.text_color);
+            painted.push(("check", colors));
+        }
+        for status in [
+            scrollable::Status::Active,
+            scrollable::Status::Hovered {
+                is_horizontal_scrollbar_hovered: false,
+                is_vertical_scrollbar_hovered: true,
+            },
+            scrollable::Status::Dragged {
+                is_horizontal_scrollbar_dragged: false,
+                is_vertical_scrollbar_dragged: true,
+            },
+        ] {
+            let style = scrollbar(&theme, status);
+            painted.push((
+                "scrollbar",
+                vec![
+                    style.vertical_rail.scroller.color,
+                    style.vertical_rail.border.color,
+                ],
+            ));
+        }
+        painted.push(("sleeve(resting)", container_colors(&sleeve(false))));
+        painted.push(("sleeve(playing)", container_colors(&sleeve(true))));
+        painted.push(("lamp_dot", container_colors(&lamp_dot(&theme))));
+        painted.push(("segmented", container_colors(&segmented(&theme))));
+        painted.push(("preview_tip", container_colors(&preview_tip(&theme))));
+        painted.push(("panel", container_colors(&panel(&theme))));
+        painted.push(("queue_row(plain)", container_colors(&queue_row(false))));
+        painted.push(("queue_row(playing)", container_colors(&queue_row(true))));
+        painted.push(("bar", container_colors(&bar(&theme))));
+        painted.push(("tooltip", container_colors(&tooltip(&theme))));
+        painted.push(("hairline", vec![hairline(&theme).color]));
+        painted.push(("detent_ink", vec![detent_ink(false), detent_ink(true)]));
+        painted
+    }
+
+    /// **The accent-discipline test.** The lamp is spent on playback truth and
+    /// on nothing else, checked by painting every style this module exposes in
+    /// every state it has and looking at what came out.
+    ///
+    /// The four styles on the permitted list are the four in
+    /// `docs/design/02-visual-language.md` §2.1.1 that this module owns: the
+    /// playing sleeve's halo, the playing dot, the seek groove, and the
+    /// primary Play action. (The fifth permitted use — the elapsed timestamp
+    /// warming while a seek is in flight — is a view-level colour rather than
+    /// a style function, and is pinned by
+    /// `the_lamp_is_named_only_where_playback_truth_is_drawn` below.)
+    ///
+    /// Everything else in the room — focus, selection, panel toggles, the
+    /// edition and ReplayGain selectors, the volume fader, the unity detent,
+    /// tooltips, previews, scrollbars, checkboxes, steppers, tile and row
+    /// selection — is made of surface, edge and ink. This test is what makes
+    /// that a rule rather than a habit: adding an amber to any style below
+    /// fails it by name.
+    #[test]
+    fn the_lamp_is_spent_only_on_playback_truth() {
+        /// The styles §2.1.1 permits the accent in. Nothing may be added here
+        /// without the specification changing first.
+        const PERMITTED: [&str; 4] = ["sleeve(playing)", "lamp_dot", "seek", "primary"];
+
+        let painted = every_painted_style();
+        let mut seen_amber: Vec<&str> = Vec::new();
+        for (name, colors) in &painted {
+            let amber = colors.iter().copied().any(is_lamp);
+            assert!(
+                !amber || PERMITTED.contains(name),
+                "`{name}` paints the accent. The lamp means playback truth \
+                 (theme.rs's module docs, docs/design/02-visual-language.md \
+                 §2.1.1); this surface is not playback truth, so it wants a \
+                 surface step, a hairline, or a paper ink instead."
+            );
+            if amber {
+                seen_amber.push(name);
+            }
+        }
+        // The rule cuts both ways: a permitted use that stopped being amber
+        // would mean the one signal reserved for the music had quietly gone
+        // out, so each is asserted present rather than merely allowed.
+        for permitted in PERMITTED {
+            assert!(
+                seen_amber.contains(&permitted),
+                "`{permitted}` is supposed to be the accent and no longer paints it"
+            );
+        }
+        // The room is large: if the sweep ever stopped covering it, the test
+        // would pass vacuously.
+        assert!(
+            painted.len() > 40,
+            "only {} styles swept — did a style stop being covered?",
+            painted.len()
+        );
+    }
+
+    /// The other half of the discipline: the accent is not named outside this
+    /// module except where §2.1.1 permits it.
+    ///
+    /// The style sweep above cannot see a view that writes `theme::LAMP`
+    /// straight onto a `text`, which is exactly how the scanning note and the
+    /// first-run wordmark came to be amber with nothing playing. So this reads
+    /// the crate's own sources and checks who names an amber token.
+    ///
+    /// The single entry on the list is §2.1.1's fourth permitted use: the
+    /// elapsed timestamp warms to [`LAMP`] while a position has been asked for
+    /// and not yet confirmed, because a position being asked for is a claim
+    /// about the playhead. It cools the moment the engine answers.
+    #[test]
+    fn the_lamp_is_named_only_where_playback_truth_is_drawn() {
+        /// `src`-relative paths that may name an amber token, and why.
+        const PERMITTED: [&str; 1] = ["views/bottom_bar.rs"];
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut offenders: Vec<String> = Vec::new();
+        let mut permitted_seen = false;
+        for path in rust_sources(&root) {
+            let relative = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            // This module *defines* the tokens; the font module is asset
+            // bytes. Neither is a view.
+            if relative == "theme.rs" || relative == "font.rs" {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("a source file baz ships");
+            if !source.contains("theme::LAMP") {
+                continue;
+            }
+            if PERMITTED.contains(&relative.as_str()) {
+                permitted_seen = true;
+            } else {
+                offenders.push(relative);
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "{offenders:?} name the accent. The lamp means playback truth — \
+             which album is sounding, which track, and where the playhead is \
+             (docs/design/02-visual-language.md §2.1.1). A scan, a focus ring, \
+             a selection, a wordmark and a setting are none of those; they \
+             want PAPER_DIM, PAPER_RING, SELECT_WASH or a surface step."
+        );
+        assert!(
+            permitted_seen,
+            "no view names the accent at all — the seek bar's in-flight \
+             timestamp is supposed to, and this test just stopped meaning \
+             anything"
+        );
+    }
+
+    /// Every `.rs` file under `root`, recursively.
+    fn rust_sources(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut found = Vec::new();
+        let mut pending = vec![root.to_path_buf()];
+        while let Some(directory) = pending.pop() {
+            for entry in std::fs::read_dir(&directory).expect("baz's own source tree") {
+                let path = entry.expect("a readable directory entry").path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    found.push(path);
+                }
+            }
+        }
+        found
     }
 }

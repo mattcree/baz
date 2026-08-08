@@ -52,7 +52,7 @@ use crate::playback::{Playback, PlayerEvent};
 use crate::player::{Availability, PlayerState};
 use crate::scan::ScanUpdate;
 use crate::theme::PANEL_W;
-use crate::{art, config, keys, mpris, player, scan, shelf, theme, views, vm};
+use crate::{art, config, font, keys, mpris, player, scan, shelf, theme, views, vm};
 
 /// Approximate top-bar height, used only for the pre-first-scroll estimate
 /// of the grid viewport (real bounds arrive with every scroll event).
@@ -76,12 +76,22 @@ pub(crate) fn search_id() -> text_input::Id {
 
 /// Run the application. `started` is process start, for the
 /// startup-to-interactive log; `cli_dir` is the optional `baz [DIR]` arg.
+///
+/// The bundled typeface is installed here and nowhere else: every face in
+/// [`crate::font::FACES`] is handed to the toolkit before the window exists,
+/// and [`theme::SANS`] is named as the default so that a `text` widget with no
+/// font of its own gets a real face rather than the platform's guess at
+/// `Family::SansSerif` (see `font.rs` for what that guess used to cost).
 pub fn run(started: Instant, cli_dir: Option<PathBuf>) -> iced::Result {
-    iced::application("baz", App::update, App::view)
+    let mut app = iced::application("baz", App::update, App::view)
         .subscription(App::subscription)
         .theme(|_| theme::theme())
-        .window(window_settings())
-        .run_with(move || App::new(started, cli_dir))
+        .default_font(theme::SANS)
+        .window(window_settings());
+    for face in font::FACES {
+        app = app.font(face);
+    }
+    app.run_with(move || App::new(started, cli_dir))
 }
 
 /// The window's settings: its size, and on Linux the application id.

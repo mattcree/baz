@@ -45,11 +45,17 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a,
     .spacing(theme::GAP_SM)
     .align_y(iced::Alignment::Center);
     if shelf.scanning {
+        // Neither the accent nor the mono. A scan is the library working, not
+        // the music — the lamp means playback truth (`theme`'s
+        // accent-discipline note) and this note used to light it while nothing
+        // was playing. It loses the monospace face with it, because the mono
+        // is baz's tabular figures and this is a sentence fragment, not a
+        // figure: set beside the counts it shares a line with, it should read
+        // as prose next to numbers rather than as another readout.
         status = status.push(
             text("scanning…")
                 .size(theme::SIZE_META)
-                .font(theme::MONO)
-                .color(theme::LAMP),
+                .color(theme::PAPER_DIM),
         );
     }
     if shelf.files_skipped > 0 {

@@ -9,7 +9,8 @@
 //!
 //! The modules follow ADR-0006's three layers: pure state and logic
 //! (`vm`, `player`, `panels`, `replaygain`, `shelf`, `config`, `scan`, `art`,
-//! `mpris::state` — no iced imports), design tokens (`theme`), and view
+//! `mpris::state` — no iced imports), design tokens (`theme`, over the
+//! typeface `font` bundles), and view
 //! composition (`views/`,
 //! one module per surface) with the application shell that drives it
 //! (`app`, and beside it `keys` and `mpris`, which produce the shell's
@@ -24,6 +25,7 @@ use std::time::Instant;
 mod app;
 mod art;
 mod config;
+mod font;
 mod groove;
 mod icon;
 mod keys;
