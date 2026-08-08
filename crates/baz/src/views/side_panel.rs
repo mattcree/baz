@@ -63,6 +63,7 @@ use iced::widget::{
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
+use crate::motion::{Control, Ink};
 use crate::player::{Availability, PlayerState};
 use crate::views::{close_button, gradient_block};
 use crate::{icon, theme, vm};
@@ -80,9 +81,14 @@ pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     album: &'a vm::AlbumVm,
     player: &'a PlayerState,
+    ink: Ink,
+    lamp: f32,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let playing = player.playing_album() == Some(album.id);
+    // The same 200 ms warm the wall gives the sounding record, on the same
+    // tween — the inspector and the tile are two views of one lamp.
+    let warmth = if playing { lamp } else { 0.0 };
     let art_edge = theme::PANEL_W - 2.0 * PANEL_PAD;
     let art: Element<'_, Message> = match shelf.thumbs.peek(&album.id) {
         Some(handle) => iced_image(handle.clone())
@@ -90,7 +96,7 @@ pub(crate) fn view<'a>(
             .into(),
         None => gradient_block(album.id, art_edge),
     };
-    let sleeve = container(art).style(move |_theme| theme::sleeve(room, playing));
+    let sleeve = container(art).style(move |_theme| theme::sleeve(room, warmth));
     let chosen = shelf.edition_choice.get(&album.id).copied();
     let edition = vm::selected_edition(album, chosen);
     // A soundtrack grouped under one album artist keeps its per-cue
@@ -132,7 +138,14 @@ pub(crate) fn view<'a>(
     // control in one place whichever is on screen.
     let header_row = row![
         Space::with_width(Length::Fill),
-        close_button(room.plinth, "Close the album panel", Message::ClosePanel),
+        close_button(
+            room.plinth,
+            "Close the album panel",
+            Message::ClosePanel,
+            Control::CloseInspector,
+            ink,
+            1.0,
+        ),
     ]
     .align_y(iced::Alignment::Center);
     let mut content =

@@ -160,6 +160,30 @@ next commit.
 
 **Interface**
 
+- **Motion — five bounded transitions, and a clock that stops** (ADR-0020).
+  Every design document baz had written specified hard cuts everywhere, on a
+  premise that did not survive measurement: a transition was said to need a
+  `window::frames()` subscription "which redraws whether or not anything is
+  moving". That is true of an unconditional subscription and false of a bounded
+  one, and baz already shipped the bounded pattern twice. `crates/baz/src/motion.rs`
+  adds a 48-byte `Tween` — pure, iced-free, told the time rather than asking for
+  it, shaped like `shelf::GridHold` — and the shell subscribes to a timer **only
+  while something is moving**, which is asserted by a test rather than promised.
+  What moves: the icon-button ink fade (90 ms), the queue popover's arrival —
+  opacity and an 8 px rise (140 ms), the shelf tile's hover rule (90 ms, one
+  tween keyed by the hovered id, never one per tile), the album inspector's
+  width (150 ms), and the lamp warming when the light moves to another record
+  (200 ms linear). Nothing else: grid stagger, thumbnail fade-in, album-art
+  crossfades and any animation of the bar's geometry stay refused. The bottom
+  bar's pixel stability is unchanged and is now asserted *during* a transition
+  as well as at rest.
+- **Icon buttons answer the pointer.** Hovering a transport glyph used to change
+  the box around it and leave the mark byte-identical, because the glyph is a
+  rasterised sprite and a `button` style's `text_color` never reaches one — so
+  the hover and press arms of the transport style were dead code for all six
+  icon buttons in the product. The shell now holds which control the pointer is
+  on, and the ink ladder completes: **0.57 resting, 1.00 hovered, 0.75 held,
+  0.28 dead**, with 90 ms between the rungs.
 - **The wall has five arrangements, and it says where the breaks are.**
   ARTIST · YEAR · GENRE · ADDED · PLAYED as one row of words in the top bar —
   no menu, no dropdown, no chip around the live one; the active key is full

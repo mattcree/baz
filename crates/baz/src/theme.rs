@@ -371,10 +371,61 @@ impl Palette {
         alpha(self.lamp, LAMP_GLOW_A)
     }
 
+    /// The halo `warmth` of the way up — the lamp warming (ADR-0020 §2.5).
+    ///
+    /// **The light's strength, never its geometry.** The halo's blur is
+    /// [`HALO_BLUR`] in every frame of the warm; what moves is how much light
+    /// there is, which is what a filament coming up actually does and the only
+    /// reading of "a lamp warming" that leaves the sleeve exactly where it is.
+    /// At `warmth` 1 this is [`Palette::lamp_glow`], to the bit.
+    ///
+    /// It is the accent, deliberately and at every point of the ramp: the halo
+    /// is playback truth, which is the one thing the accent is for.
+    #[must_use]
+    pub fn lamp_glow_at(&self, warmth: f32) -> Color {
+        alpha(self.lamp, LAMP_GLOW_A * warmth.clamp(0.0, 1.0))
+    }
+
     /// An icon button's hover wash — the room's ink at [`INK_WASH_A`].
     #[must_use]
     pub fn ink_wash(&self, ground: Color) -> Color {
         Self::ink_over(self.paper, ground, INK_WASH_A)
+    }
+
+    /// A tile's hover rule, `strength` of the way in — the room's ink at
+    /// [`HAIRLINE_STRONG_A`] × `strength`, over `ground`.
+    ///
+    /// **Still an opaque pre-composite at every point of the fade**, which is
+    /// the property the whole [`Palette::ink_over`] correction bought: a
+    /// transition that expressed itself as an alpha would draw at three to four
+    /// times its weight in the dark room and half of it in the light one, and
+    /// the mid-flight frames would be wrong in a way no endpoint test could see.
+    /// At `strength` 1 this *is* [`Palette::hairline_strong`], to the bit.
+    #[must_use]
+    pub fn hover_rule(&self, ground: Color, strength: f32) -> Color {
+        Self::ink_over(
+            self.paper,
+            ground,
+            HAIRLINE_STRONG_A * strength.clamp(0.0, 1.0),
+        )
+    }
+
+    /// `from` a fraction `t` of the way to `to`, channel by channel.
+    ///
+    /// The one interpolation the room does, and it is between two inks that are
+    /// already on the same ramp ([`Palette::paper`] and its relatives are one
+    /// board at four levels of light), so a mixture of two of them is a point on
+    /// that ramp rather than a new colour. Opaque in, opaque out.
+    #[must_use]
+    pub fn mix(from: Color, to: Color, t: f32) -> Color {
+        let t = t.clamp(0.0, 1.0);
+        let blend = |a: f32, b: f32| t.mul_add(b - a, a);
+        Color {
+            r: blend(from.r, to.r),
+            g: blend(from.g, to.g),
+            b: blend(from.b, to.b),
+            a: blend(from.a, to.a),
+        }
     }
 
     /// An icon button's pressed wash — the room's ink at [`INK_WASH_PRESS_A`].
@@ -1126,30 +1177,39 @@ pub const TRANSPORT_HIT: f32 = 32.0;
 /// these four controls, because the mark is a rasterised sprite and a `button`
 /// style's `text_color` never reaches an `image`.
 pub const GLYPH_OPACITY: f32 = 0.57;
-/// Opacity of a glyph a control offers **only** under the pointer.
+/// Opacity of a glyph under the pointer — **the top of the ink ladder**.
 ///
-/// The queue rows' removal ✕ is the one control in baz that is drawn at all
-/// only while the pointer is on its row, so its resting weight *is* its hovered
-/// weight and this is the one place the value is reachable.
+/// A 3.3× step in relative luminance over [`GLYPH_OPACITY`] (0.238 → 0.777),
+/// against the *zero* the bar used to have. This one number is most of what
+/// makes the transport feel like it answers.
 ///
-/// Named here because they are the measured values and the transition unit
-/// will want them, and **not reachable from a style function**: iced 0.13 hands
-/// a widget
-/// its own hover status inside a *style* function, and a style function cannot
-/// reach into the `image` widget that draws the sprite. Hovering an icon button
-/// therefore lands on [`Palette::ink_wash`] — which is the critique's own
-/// specified hover mark (`hover = ink 6% overlay`) — and the glyph itself holds
-/// still.
+/// # It was unreachable, and now it is not
 ///
-/// Closing the gap means a `mouse_area` per icon button and a hovered-control
-/// id in the shell, the same mechanism the queue rows' ✕ and the shelf's tiles
-/// already use. It is worth doing when these become tweened values rather than
-/// branches; it is not worth a hovered-control registry to move an opacity by
-/// hand.
-/// (The pressed reading on the same ramp is **0.75**, named here in prose
-/// rather than as a constant because nothing can reach it at all — a press is
-/// not a state any part of baz can observe from outside the button.)
+/// iced 0.13 hands a widget its own hover status inside a *style* function, and
+/// a style function cannot reach into the `image` widget that draws the sprite —
+/// the glyph is a sheet rasterised once, inked at raster time, so
+/// [`transport`]'s `text_color` was **dead code** for every icon button in the
+/// product and the mark was byte-identical at rest and under the pointer
+/// (`docs/design/04-fluidity.md` §3.1 finding 2). All the hover feedback there
+/// was came from the button's own ground.
+///
+/// ADR-0020 §2.1 closes it: each icon button reports its own crossings with a
+/// `mouse_area`, the shell holds one [`crate::motion::Control`] id, and the
+/// image's opacity — which *is* reachable — carries the state. The same
+/// mechanism the queue rows' ✕ and the shelf's tiles already use.
 pub const GLYPH_OPACITY_HOVER: f32 = 1.0;
+/// Opacity of a glyph while the pointer is held down on it.
+///
+/// **0.75** — the ladder's fourth rung, and it removes light rather than adding
+/// a fill. A press that darkens the ground is unreadable against a near-black
+/// wall (the old pressed state painted the button in the bar's own colour, so it
+/// read as a *hole*); a press that takes the mark itself down a step is
+/// unambiguous, and it is the only reading available to a control whose whole
+/// paint is one sprite.
+///
+/// Between rest and hover on purpose: a press has to be visibly *not* the
+/// resting state, and visibly not the "you may" of a hover either.
+pub const GLYPH_OPACITY_PRESS: f32 = 0.75;
 /// Opacity of a glyph while its command is in flight: the whole of the
 /// pending affordance. A control that dims a little and comes back changes
 /// no size, no shape, and no meaning — which is the difference between an
@@ -1386,6 +1446,168 @@ pub fn glyph_opacity(enabled: bool, pending: bool) -> f32 {
     }
 }
 
+/// **The complete ink ladder for one icon button**, with the pointer's part of
+/// it `hover` of the way in.
+///
+/// [`glyph_opacity`] is this function at `hover` 0: the three readings a control
+/// has *without* a pointer. What ADR-0020 §2.1 adds is the two the pointer
+/// makes, and the ramp between them — 0.57 rest / 1.00 hover / 0.75 press /
+/// 0.28 disabled, with `hover` supplied by a 90 ms [`crate::motion::Tween`] so
+/// the step is a fade rather than a flicker.
+///
+/// Three properties worth stating, because each is a decision:
+///
+/// - **A dead control is dead at every value of `hover`.** The pointer crossing
+///   a Previous that cannot act must not lift it: an affordance that answers a
+///   hover is claiming it can be pressed.
+/// - **A pending control holds still too.** Waiting is a fact about a command in
+///   flight, and the ink is the whole of how it is stated
+///   ([`GLYPH_OPACITY_PENDING`]); letting a hover overwrite it would make
+///   "waiting" and "ready" the same reading in the one moment they differ.
+/// - **The press changes where the ramp is going, never where it is.** Pressing
+///   mid-fade re-aims the same tween at [`GLYPH_OPACITY_PRESS`] rather than
+///   jumping, so a press is continuous with the hover that preceded it.
+#[must_use]
+pub fn glyph_ink(enabled: bool, pending: bool, hover: f32, pressed: bool) -> f32 {
+    let resting = glyph_opacity(enabled, pending);
+    if !enabled || pending {
+        return resting;
+    }
+    let peak = if pressed {
+        GLYPH_OPACITY_PRESS
+    } else {
+        GLYPH_OPACITY_HOVER
+    };
+    hover.clamp(0.0, 1.0).mul_add(peak - resting, resting)
+}
+
+/// A colour at `fade` of its own opacity — the queue popover's arrival, and
+/// nothing else (ADR-0020 §2.2).
+///
+/// # The one place baz draws an alpha on purpose
+///
+/// Every *resting* mark in the room is an opaque pre-composite, because iced
+/// blends in linear light and the room's numbers were written for CSS's sRGB
+/// blend ([`Palette::ink_over`]). A popover arriving cannot be pre-composited:
+/// it floats over the wall, over ten thousand covers, over whatever the shelf is
+/// scrolled to, and there is no ground to composite against. So the arrival is
+/// an alpha, and the containment is that **`fade` 1 is the identity** — the
+/// popover baz ships is the popover this function returns once the tween
+/// settles, byte for byte (`the_popovers_arrival_lands_on_the_shipped_colours`).
+/// The two contrast laws govern what is at rest; a frame 70 ms into a 140 ms
+/// arrival is not at rest, and pretending to measure it against a ground nobody
+/// knows would be a false receipt rather than a stricter one.
+#[must_use]
+pub fn fade(color: Color, fade: f32) -> Color {
+    Color {
+        a: color.a * fade.clamp(0.0, 1.0),
+        ..color
+    }
+}
+
+/// A container style at `fade` of its opacity — its ground, its edge and its
+/// shadow together (see [`fade`]).
+#[must_use]
+pub fn fade_container(style: &container::Style, k: f32) -> container::Style {
+    container::Style {
+        background: style
+            .background
+            .map(|background| fade_background(background, k)),
+        border: Border {
+            color: fade(style.border.color, k),
+            ..style.border
+        },
+        shadow: Shadow {
+            color: fade(style.shadow.color, k),
+            ..style.shadow
+        },
+        text_color: style.text_color.map(|color| fade(color, k)),
+    }
+}
+
+/// A button style at `fade` of its opacity — the popover's rows and its ✕
+/// (see [`fade`]).
+#[must_use]
+pub fn fade_button(style: &button::Style, k: f32) -> button::Style {
+    button::Style {
+        background: style
+            .background
+            .map(|background| fade_background(background, k)),
+        text_color: fade(style.text_color, k),
+        border: Border {
+            color: fade(style.border.color, k),
+            ..style.border
+        },
+        shadow: Shadow {
+            color: fade(style.shadow.color, k),
+            ..style.shadow
+        },
+    }
+}
+
+/// A scrollbar at `fade` of its opacity — the popover's list arrives with the
+/// popover (see [`fade`]).
+#[must_use]
+pub fn fade_scrollable(style: &scrollable::Style, k: f32) -> scrollable::Style {
+    let rail = |rail: scrollable::Rail| scrollable::Rail {
+        background: rail
+            .background
+            .map(|background| fade_background(background, k)),
+        border: Border {
+            color: fade(rail.border.color, k),
+            ..rail.border
+        },
+        scroller: scrollable::Scroller {
+            color: fade(rail.scroller.color, k),
+            border: Border {
+                color: fade(rail.scroller.border.color, k),
+                ..rail.scroller.border
+            },
+        },
+    };
+    scrollable::Style {
+        container: fade_container(&style.container, k),
+        vertical_rail: rail(style.vertical_rail),
+        horizontal_rail: rail(style.horizontal_rail),
+        gap: style.gap.map(|background| fade_background(background, k)),
+    }
+}
+
+/// A ground at `k` of its opacity. A gradient is left alone: the one baz draws
+/// is a placeholder sleeve, and nothing in the arriving layer has one.
+fn fade_background(background: Background, k: f32) -> Background {
+    match background {
+        Background::Color(color) => Background::Color(fade(color, k)),
+        Background::Gradient(gradient) => Background::Gradient(gradient),
+    }
+}
+
+/// The inset the overlay layer keeps around the queue popover, with the
+/// popover `arriving` of the way in (ADR-0020 §2.2).
+///
+/// At rest — `arriving` 1 — this is [`GAP_LG`] on all four sides, which is what
+/// the popover has always had. During the arrival the popover sits up to
+/// [`crate::motion::POPOVER_RISE`] px lower, and the height that is taken off
+/// the bottom is **given back to the top**, so:
+///
+/// - the layer's inner height is [`GAP_LG`] × 2 less than its own in every
+///   frame, and a popover at its [`POPOVER_MAX_H`] ceiling cannot be squeezed
+///   into re-flowing its list as it rises;
+/// - the left and right insets never move, so the popover's right edge — the one
+///   it shares with the bar's right zone below it — is the same pixel throughout;
+/// - the popover only ever *approaches* its resting place from below. No frame
+///   of the flight is above where it lands, so nothing overshoots the bar.
+#[must_use]
+pub fn popover_pad(arriving: f32) -> Padding {
+    let rise = crate::motion::POPOVER_RISE * (1.0 - arriving.clamp(0.0, 1.0));
+    Padding {
+        top: GAP_LG + rise,
+        right: GAP_LG,
+        bottom: GAP_LG - rise,
+        left: GAP_LG,
+    }
+}
+
 /// The cursor over a live groove. `Pointer` — the pointing hand every
 /// platform uses for "this responds to a click" — because clicking the bar
 /// is the primary gesture here and dragging is the refinement, not the
@@ -1503,12 +1725,23 @@ pub fn tile(p: &Palette, _status: button::Status, _selected: bool) -> button::St
 /// The lane the rule sits in is reserved at [`SELECTION_EDGE`] whatever the
 /// state, so the thick mark, the thin one and no mark at all occupy the same
 /// pixels and a pointer crossing the wall moves nothing.
+/// # The hover half of it fades (ADR-0020 §2.3)
+///
+/// `hover` is a 90 ms [`crate::motion::Tween`], and **only the ink moves**: the
+/// rule is 1 px from the first frame of the fade to the last, because a rule
+/// whose *thickness* interpolated would spend most of the transition asking the
+/// rasteriser to draw two-thirds of a pixel, which is a blur rather than a thin
+/// line. A mark that is arriving should look like the mark it will be, quietly.
+///
+/// Selection does not fade. It is the result of a click — a decision, not a
+/// passage — and it wins over the hover ink at every value of `hover`, exactly
+/// as it did when hover was a boolean.
 #[must_use]
-pub fn tile_rule(p: &Palette, hovered: bool, selected: bool) -> container::Style {
+pub fn tile_rule(p: &Palette, hover: f32, selected: bool) -> container::Style {
     let ink = if selected {
         p.paper_faint
-    } else if hovered {
-        p.hairline_strong(p.wall)
+    } else if hover > 0.0 {
+        p.hover_rule(p.wall, hover)
     } else {
         Color::TRANSPARENT
     };
@@ -1520,15 +1753,34 @@ pub fn tile_rule(p: &Palette, hovered: bool, selected: bool) -> container::Style
 
 /// How thick a tile's [`tile_rule`] is drawn, in the [`SELECTION_EDGE`] lane
 /// reserved for it (logical px).
+///
+/// A whole number in every frame, fading or not — see [`tile_rule`].
 #[must_use]
-pub fn tile_rule_h(hovered: bool, selected: bool) -> f32 {
+pub fn tile_rule_h(hover: f32, selected: bool) -> f32 {
     if selected {
         SELECTION_EDGE
-    } else if hovered {
+    } else if hover > 0.0 {
         1.0
     } else {
         0.0
     }
+}
+
+/// A tile's caption ink, `hover` of the way from its resting weight to its
+/// hovered one.
+///
+/// The other half of ADR-0017 step 14's hover state, and the half that still
+/// reads when the rule is the thing your own hand is over: the artist line lifts
+/// one rung of the ink ramp. It lifts *with* the rule now rather than a frame
+/// before it, because both read the same tween.
+///
+/// Both ends are on the room's one ink ramp ([`Palette::paper`] and its
+/// relatives are one board at four levels of light), so every point between them
+/// is on that ramp too — the mixture cannot land on a colour the room does not
+/// own, and it cannot land below the floor either end clears.
+#[must_use]
+pub fn caption_ink(p: &Palette, hover: f32) -> Color {
+    Palette::mix(p.paper_faint, p.paper_dim, hover)
 }
 
 /// The artwork's backing: a [`Palette::recess`] square the sleeve sits in,
@@ -1542,11 +1794,19 @@ pub fn tile_rule_h(hovered: bool, selected: bool) -> f32 {
 /// The blur is [`HALO_BLUR`] 24, up from 16 (`.interface-design/system.md`
 /// §4): the halo is now the only light in the shelf rather than one of two
 /// shadows, and at 16 it read as a rim rather than as a room's worth of lamp.
+///
+/// # The lamp warms rather than switching (ADR-0020 §2.5)
+///
+/// `warmth` is a 200 ms **linear** [`crate::motion::Tween`] — 0 for a sleeve
+/// that is not sounding, 1 for one that is, and a filament coming up in between.
+/// It is the light's *strength*: the blur is [`HALO_BLUR`] in every frame and
+/// the sleeve does not move a pixel, so this is the one animation in the product
+/// that touches the accent and it still states nothing but playback truth.
 #[must_use]
-pub fn sleeve(p: &Palette, playing: bool) -> container::Style {
-    let shadow = if playing {
+pub fn sleeve(p: &Palette, warmth: f32) -> container::Style {
+    let shadow = if warmth > 0.0 {
         Shadow {
-            color: p.lamp_glow(),
+            color: p.lamp_glow_at(warmth),
             offset: Vector::ZERO,
             blur_radius: HALO_BLUR,
         }
@@ -2450,6 +2710,275 @@ pub const PLACEHOLDER_MIX: f32 = 0.62;
 mod tests {
     use super::*;
 
+    /// **The ink ladder, all four rungs** — the one ADR-0020 §2.1 completes by
+    /// giving the shell a hovered-control id (`docs/design/04-fluidity.md`
+    /// §3.1's prescription table).
+    ///
+    /// It is a ladder rather than four unrelated values: every rung has to be
+    /// distinguishable from the ones next to it, or the chrome's own failure —
+    /// rest and disabled drawn in *pixel-identical* paint — has simply moved
+    /// into the ink.
+    #[test]
+    fn the_icon_buttons_ink_ladder_has_four_distinguishable_rungs() {
+        let rest = glyph_ink(true, false, 0.0, false);
+        let hover = glyph_ink(true, false, 1.0, false);
+        let press = glyph_ink(true, false, 1.0, true);
+        let dead = glyph_ink(false, false, 0.0, false);
+        assert!((rest - 0.57).abs() < f32::EPSILON, "rest is {rest}");
+        assert!((hover - 1.00).abs() < f32::EPSILON, "hover is {hover}");
+        assert!((press - 0.75).abs() < f32::EPSILON, "press is {press}");
+        assert!((dead - 0.28).abs() < f32::EPSILON, "disabled is {dead}");
+        // Ordered, and by margins a listener can see: the whole complaint the
+        // ladder answers was that two of the readings were the same pixels.
+        assert!(dead < rest && rest < press && press < hover);
+        for (a, b) in [(dead, rest), (rest, press), (press, hover)] {
+            assert!(b - a > 0.15, "{a} and {b} are the same reading");
+        }
+    }
+
+    /// The fade between the rungs is a **ramp**, monotone and bounded, and the
+    /// two readings a pointer may not overwrite stay where they are.
+    #[test]
+    fn the_hover_fade_only_ever_moves_along_the_ladder() {
+        let mut previous = glyph_ink(true, false, 0.0, false);
+        for step in 0..=100_u8 {
+            let hover = f32::from(step) / 100.0;
+            let value = glyph_ink(true, false, hover, false);
+            assert!(
+                (0.0..=1.0).contains(&value),
+                "{hover}: {value} is not an alpha"
+            );
+            assert!(value >= previous, "{hover}: the ramp went backwards");
+            previous = value;
+            // A control that cannot act, and one that is waiting for the engine,
+            // are unmoved by a pointer crossing them: an affordance that answers
+            // a hover is claiming it can be pressed.
+            for pressed in [false, true] {
+                assert!(
+                    (glyph_ink(false, false, hover, pressed) - GLYPH_OPACITY_DISABLED).abs()
+                        < f32::EPSILON
+                );
+                assert!(
+                    (glyph_ink(true, true, hover, pressed) - GLYPH_OPACITY_PENDING).abs()
+                        < f32::EPSILON
+                );
+            }
+        }
+        // Out-of-range strengths clamp rather than escaping the ladder.
+        assert!((glyph_ink(true, false, -1.0, false) - GLYPH_OPACITY).abs() < f32::EPSILON);
+        assert!((glyph_ink(true, false, 9.0, false) - GLYPH_OPACITY_HOVER).abs() < f32::EPSILON);
+    }
+
+    /// **The bar's pixel stability, asserted during a transition and not only
+    /// at rest.**
+    ///
+    /// The one promise ADR-0020 could not be allowed to cost: a transition may
+    /// change ink, never the bar's geometry. Every number the bar is built from
+    /// is a constant here, and the only thing a tween reaches is an opacity —
+    /// which is checked by sweeping the whole ladder and asserting that what
+    /// comes out is an alpha and nothing else.
+    #[test]
+    fn no_value_a_transition_moves_can_reach_the_bars_geometry() {
+        for step in 0..=20_u8 {
+            let hover = f32::from(step) / 20.0;
+            for enabled in [false, true] {
+                for pending in [false, true] {
+                    for pressed in [false, true] {
+                        let ink = glyph_ink(enabled, pending, hover, pressed);
+                        assert!((0.0..=1.0).contains(&ink));
+                    }
+                }
+            }
+        }
+        // The hit target, the sprite box and the row they sit in are constants:
+        // there is no expression anywhere above that could vary one of them.
+        const { assert!(TRANSPORT_HIT == 32.0) }
+        const { assert!(ICON_PX == 16.0) }
+        const { assert!(SEEK_ROW_H == PREVIEW_H + RAIL_HIT) }
+        const { assert!(VOLUME_ROW_H == MUTE_TOP + TRANSPORT_HIT) }
+        // …and the popover the bar anchors rises in a layer whose inner height
+        // never changes, so the layer above the bar cannot push it either.
+        for step in 0..=20_u8 {
+            let arriving = f32::from(step) / 20.0;
+            let pad = popover_pad(arriving);
+            assert!(
+                (pad.top + pad.bottom - 2.0 * GAP_LG).abs() < f32::EPSILON,
+                "{arriving}: the rise changed the layer's height by {}",
+                pad.top + pad.bottom - 2.0 * GAP_LG
+            );
+            assert!((pad.left - GAP_LG).abs() < f32::EPSILON);
+            assert!(
+                (pad.right - GAP_LG).abs() < f32::EPSILON,
+                "{arriving}: the popover's right edge moved"
+            );
+            // It only ever approaches its resting place from below.
+            assert!(pad.bottom <= GAP_LG + f32::EPSILON);
+            assert!(pad.bottom >= GAP_LG - crate::motion::POPOVER_RISE - f32::EPSILON);
+        }
+        // And the arrival ends exactly where the popover has always sat.
+        let settled = popover_pad(1.0);
+        assert!((settled.top - GAP_LG).abs() < f32::EPSILON);
+        assert!((settled.bottom - GAP_LG).abs() < f32::EPSILON);
+    }
+
+    /// **A settled arrival is the shipped popover, byte for byte.**
+    ///
+    /// The containment on the one alpha baz draws on purpose ([`fade`]): the
+    /// two contrast laws govern what is at rest, and this is what makes "at
+    /// rest" mean the values those laws were measured on. It also pins that a
+    /// fade moves *only* opacity — a transition that shifted a hue would be
+    /// repainting the room rather than revealing it.
+    #[test]
+    fn the_popovers_arrival_lands_on_the_shipped_colours() {
+        for room in Room::ALL {
+            let p = room.palette();
+            let marks = [
+                p.paper,
+                p.paper_dim,
+                p.paper_faint,
+                p.paper_muted,
+                p.plinth,
+                p.plinth_lit,
+                p.lamp,
+                p.hairline(p.plinth_lit),
+            ];
+            for mark in marks {
+                let settled = fade(mark, 1.0);
+                assert!(
+                    (settled.r - mark.r).abs() < f32::EPSILON
+                        && (settled.g - mark.g).abs() < f32::EPSILON
+                        && (settled.b - mark.b).abs() < f32::EPSILON
+                        && (settled.a - mark.a).abs() < f32::EPSILON,
+                    "{}: a settled arrival is not the shipped colour",
+                    p.name
+                );
+                // Mid-flight it is the same colour at less of it, never a
+                // different colour.
+                for step in 0..=10_u8 {
+                    let k = f32::from(step) / 10.0;
+                    let mid = fade(mark, k);
+                    assert!((mid.r - mark.r).abs() < f32::EPSILON);
+                    assert!((mid.g - mark.g).abs() < f32::EPSILON);
+                    assert!((mid.b - mark.b).abs() < f32::EPSILON);
+                    assert!((mid.a - mark.a * k).abs() < f32::EPSILON);
+                }
+            }
+            // The whole popover, not only its inks: at rest every style it
+            // paints is the style it always painted.
+            let settled = fade_container(&popover(p), 1.0);
+            assert_eq!(container_colors(&settled), container_colors(&popover(p)));
+            for status in [
+                button::Status::Active,
+                button::Status::Hovered,
+                button::Status::Pressed,
+                button::Status::Disabled,
+            ] {
+                let row = track_row(p, status, true);
+                assert_eq!(button_colors(&fade_button(&row, 1.0)), button_colors(&row));
+            }
+        }
+    }
+
+    /// **The tile's hover mark fades in ink and never in geometry**, and every
+    /// point of the fade is an opaque pre-composite — the property the whole
+    /// [`Palette::ink_over`] correction bought, held through a transition.
+    #[test]
+    fn a_tiles_hover_rule_fades_its_ink_and_holds_its_thickness() {
+        for room in Room::ALL {
+            let p = room.palette();
+            // The two ends are exactly the marks the shelf shipped.
+            let full = p.hover_rule(p.wall, 1.0);
+            let strong = p.hairline_strong(p.wall);
+            assert!((full.r - strong.r).abs() < f32::EPSILON);
+            assert!((full.g - strong.g).abs() < f32::EPSILON);
+            assert!((full.b - strong.b).abs() < f32::EPSILON);
+            let none = p.hover_rule(p.wall, 0.0);
+            assert!(
+                (none.r - p.wall.r).abs() < f32::EPSILON,
+                "{}: an unhovered rule is not its own ground",
+                p.name
+            );
+
+            for step in 0..=20_u8 {
+                let hover = f32::from(step) / 20.0;
+                let mark = p.hover_rule(p.wall, hover);
+                assert!(
+                    (mark.a - 1.0).abs() < f32::EPSILON,
+                    "{}: a fading rule became an alpha, so what the renderer \
+                     draws is not what this test measures",
+                    p.name
+                );
+                // Thickness is a whole number in every frame: a rule drawn at
+                // two thirds of a pixel is a blur, not a thin line.
+                let thickness = tile_rule_h(hover, false);
+                assert!(
+                    thickness == 0.0 || (thickness - 1.0).abs() < f32::EPSILON,
+                    "{hover}: a {thickness} px rule"
+                );
+                // Selection does not fade — it is a click's result, not a
+                // passage — and it wins at every point of the hover.
+                assert!((tile_rule_h(hover, true) - SELECTION_EDGE).abs() < f32::EPSILON);
+                let selected = tile_rule(p, hover, true);
+                assert_eq!(
+                    container_colors(&selected),
+                    container_colors(&tile_rule(p, 0.0, true))
+                );
+                // The caption lifts on the same ramp, stays opaque, and stays
+                // on the room's own ink ramp between its two ends.
+                let caption = caption_ink(p, hover);
+                assert!((caption.a - 1.0).abs() < f32::EPSILON);
+                let between =
+                    |a: f32, b: f32, x: f32| x >= a.min(b) - 0.001 && x <= a.max(b) + 0.001;
+                assert!(between(p.paper_faint.r, p.paper_dim.r, caption.r));
+                assert!(between(p.paper_faint.g, p.paper_dim.g, caption.g));
+                assert!(between(p.paper_faint.b, p.paper_dim.b, caption.b));
+            }
+            assert_eq!(
+                format!("{:?}", caption_ink(p, 0.0)),
+                format!("{:?}", p.paper_faint),
+                "{}: a tile at rest is not the ink the shelf shipped",
+                p.name
+            );
+            assert_eq!(
+                format!("{:?}", caption_ink(p, 1.0)),
+                format!("{:?}", p.paper_dim)
+            );
+        }
+    }
+
+    /// The lamp warms to exactly the halo baz ships, and to nothing brighter.
+    #[test]
+    fn the_lamp_warms_to_the_halo_and_stops_there() {
+        for room in Room::ALL {
+            let p = room.palette();
+            let full = p.lamp_glow_at(1.0);
+            let shipped = p.lamp_glow();
+            assert!((full.a - shipped.a).abs() < f32::EPSILON);
+            assert!((p.lamp_glow_at(0.0).a).abs() < f32::EPSILON);
+            assert!(
+                (p.lamp_glow_at(2.0).a - shipped.a).abs() < f32::EPSILON,
+                "clamped"
+            );
+            // A warming halo is the *same light*, so the hue never moves — only
+            // how much of it there is.
+            for step in 0..=10_u8 {
+                let warmth = f32::from(step) / 10.0;
+                let glow = p.lamp_glow_at(warmth);
+                assert!((glow.r - p.lamp.r).abs() < f32::EPSILON);
+                assert!((glow.g - p.lamp.g).abs() < f32::EPSILON);
+                assert!((glow.b - p.lamp.b).abs() < f32::EPSILON);
+                assert!(glow.a <= shipped.a + f32::EPSILON);
+                // And the sleeve it lights does not move: the blur is the same
+                // number in every frame of the warm.
+                let lit = sleeve(p, warmth);
+                if warmth > 0.0 {
+                    assert!((lit.shadow.blur_radius - HALO_BLUR).abs() < f32::EPSILON);
+                }
+                assert_eq!(lit.shadow.offset, Vector::ZERO);
+            }
+        }
+    }
+
     #[test]
     fn a_pending_command_changes_the_glyph_ink_and_nothing_else() {
         // The pending affordance, pinned to the one property it is allowed
@@ -3173,11 +3702,11 @@ mod tests {
         // No artwork casts a shadow. The playing one is lit instead, and the
         // halo is the only shadow primitive left in the product.
         assert_eq!(
-            sleeve(p, false).shadow,
+            sleeve(p, 0.0).shadow,
             Shadow::default(),
             "a resting sleeve casts a shadow; on near-black that is a 1.04 : 1 rounding error"
         );
-        let halo = sleeve(p, true).shadow;
+        let halo = sleeve(p, 1.0).shadow;
         assert!(
             p.is_accent(halo.color),
             "the halo is the lamp or it is nothing"
@@ -3187,16 +3716,16 @@ mod tests {
 
         // The state vocabulary: two thicknesses and two inks, a 2× step apart,
         // and neither of them the accent.
-        assert!((tile_rule_h(false, false) - 0.0).abs() < f32::EPSILON);
-        assert!((tile_rule_h(true, false) - 1.0).abs() < f32::EPSILON);
-        assert!((tile_rule_h(false, true) - SELECTION_EDGE).abs() < f32::EPSILON);
+        assert!((tile_rule_h(0.0, false) - 0.0).abs() < f32::EPSILON);
+        assert!((tile_rule_h(1.0, false) - 1.0).abs() < f32::EPSILON);
+        assert!((tile_rule_h(0.0, true) - SELECTION_EDGE).abs() < f32::EPSILON);
         assert!(
-            tile_rule_h(false, true) >= 2.0 * tile_rule_h(true, false),
+            tile_rule_h(0.0, true) >= 2.0 * tile_rule_h(1.0, false),
             "hover and selection are nearly the same mark again"
         );
         // Selection outranks hover: pointing at a record you have already
         // opened must not un-mark it.
-        assert!((tile_rule_h(true, true) - SELECTION_EDGE).abs() < f32::EPSILON);
+        assert!((tile_rule_h(1.0, true) - SELECTION_EDGE).abs() < f32::EPSILON);
         // …and the lane is reserved at the thicker of the two, so no state of
         // a tile moves a pixel of the tile beside it.
         const { assert!(SELECTION_EDGE >= 2.0) }
@@ -3262,8 +3791,8 @@ mod tests {
             ("preview_tip", preview_tip(p)),
             ("segmented", segmented(p)),
             ("lamp_dot", lamp_dot(p)),
-            ("sleeve(resting)", sleeve(p, false)),
-            ("sleeve(playing)", sleeve(p, true)),
+            ("sleeve(resting)", sleeve(p, 0.0)),
+            ("sleeve(playing)", sleeve(p, 1.0)),
         ] {
             if style.shadow != Shadow::default() {
                 shadowed.push(name);
@@ -3827,8 +4356,11 @@ mod tests {
     /// workspace lints hold every function to.
     fn every_painted_surface(p: &Palette) -> Vec<(&'static str, Vec<Color>)> {
         let mut painted: Vec<(&'static str, Vec<Color>)> = Vec::new();
-        painted.push(("sleeve(resting)", container_colors(&sleeve(p, false))));
-        for hovered in [false, true] {
+        painted.push(("sleeve(resting)", container_colors(&sleeve(p, 0.0))));
+        // Every point of the hover fade, not only its ends: a transition is a
+        // hundred and fifty frames' worth of chances to paint something the
+        // discipline forbids, and mid-flight is exactly where nobody looks.
+        for hovered in [0.0, 0.25, 0.5, 0.75, 1.0] {
             for selected in [false, true] {
                 painted.push((
                     "tile_rule",
@@ -3836,7 +4368,11 @@ mod tests {
                 ));
             }
         }
-        painted.push(("sleeve(playing)", container_colors(&sleeve(p, true))));
+        // The lamp warming, swept the same way and permitted the same way: a
+        // halo half way up is still the halo (see [`Palette::lamp_glow_at`]).
+        for warmth in [0.25, 0.5, 0.75, 1.0] {
+            painted.push(("sleeve(playing)", container_colors(&sleeve(p, warmth))));
+        }
         painted.push(("lamp_dot", container_colors(&lamp_dot(p))));
         painted.push(("segmented", container_colors(&segmented(p))));
         painted.push(("preview_tip", container_colors(&preview_tip(p))));

@@ -14,7 +14,7 @@
 //! `views::bottom_bar` respectively.
 //!
 //! The modules follow ADR-0006's three layers: pure state and logic
-//! (`vm`, `player`, `place`, `selection`, `overlay`, `queue_edit`,
+//! (`vm`, `player`, `place`, `selection`, `overlay`, `motion`, `queue_edit`,
 //! `replaygain`, `shelf`, `config`, `scan`, `art`, `mpris::state` — no iced
 //! imports), design tokens (`theme`, over the typeface `font` bundles), and view
 //! composition (`views/`,
@@ -35,6 +35,7 @@ mod font;
 mod groove;
 mod icon;
 mod keys;
+mod motion;
 mod mpris;
 mod overlay;
 mod place;

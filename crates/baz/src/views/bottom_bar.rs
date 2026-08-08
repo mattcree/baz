@@ -29,11 +29,13 @@
 //! surface and a running commentary on the queue, and did not move a pixel.
 
 use iced::widget::{
-    Space, button, column, container, horizontal_rule, image as iced_image, row, text, tooltip,
+    Space, button, column, container, horizontal_rule, image as iced_image, mouse_area, row, text,
+    tooltip,
 };
 use iced::{Color, Element, Length, alignment};
 
 use crate::app::Message;
+use crate::motion::{Control, Ink};
 use crate::player::PlayerState;
 use crate::{groove, icon, player, theme};
 
@@ -67,7 +69,7 @@ use crate::{groove, icon, player, theme};
 /// leftward into the gutter instead of shifting anything beside it. Every
 /// glyph, position, and enabled-state comes from [`PlayerState`] —
 /// event-derived, tested in `player.rs`.
-pub(crate) fn view(player: &PlayerState, queue_open: bool) -> Element<'_, Message> {
+pub(crate) fn view(player: &PlayerState, queue_open: bool, ink: Ink) -> Element<'_, Message> {
     let room = theme::active();
     let mut status = row![]
         .spacing(theme::GAP_SM)
@@ -80,12 +82,12 @@ pub(crate) fn view(player: &PlayerState, queue_open: bool) -> Element<'_, Messag
                 .color(room.paper_faint),
         );
     }
-    status = status.push(signal_path(player)).push(volume(player));
+    status = status.push(signal_path(player)).push(volume(player, ink));
     let bar = row![
         container(now_playing_block(player, queue_open))
             .width(Length::Fill)
             .clip(true),
-        transport_stack(player),
+        transport_stack(player, ink),
         container(status)
             .width(Length::Fill)
             .align_x(alignment::Horizontal::Right)
@@ -334,7 +336,7 @@ fn signal_path(player: &PlayerState) -> Element<'_, Message> {
 /// row's space is *reserved* rather than dropped. The transport is the one
 /// thing in this bar that is always in the same place, and a bar that
 /// changed height the moment a track started would undo that.
-fn transport_stack(player: &PlayerState) -> Element<'_, Message> {
+fn transport_stack(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
     let pending = player.transport_pending();
     let toggle = player.play_pause();
     // Previous, play/pause, Next — in that order and symmetric about the
@@ -354,6 +356,8 @@ fn transport_stack(player: &PlayerState) -> Element<'_, Message> {
             player.previous_enabled(),
             pending,
             Message::PreviousTrack,
+            Control::Previous,
+            ink,
         ),
         glyph_button(
             toggle.into(),
@@ -361,6 +365,8 @@ fn transport_stack(player: &PlayerState) -> Element<'_, Message> {
             player.play_pause_enabled(),
             pending,
             Message::PlayPause,
+            Control::PlayPause,
+            ink,
         ),
         glyph_button(
             icon::Glyph::Next,
@@ -368,6 +374,8 @@ fn transport_stack(player: &PlayerState) -> Element<'_, Message> {
             player.next_enabled(),
             pending,
             Message::NextTrack,
+            Control::Next,
+            ink,
         ),
     ]
     .spacing(theme::GAP_SM);
@@ -390,7 +398,24 @@ fn transport_stack(player: &PlayerState) -> Element<'_, Message> {
 ///
 /// The size is fixed in both axes and the glyph is drawn into a box of its
 /// own, so swapping play for pause moves nothing. `pending` reaches the ink
-/// and only the ink (see [`theme::glyph_opacity`]).
+/// and only the ink (see [`theme::glyph_ink`]).
+///
+/// # The mark is the control, so the mark answers the pointer
+///
+/// The glyph is a rasterised sprite, and a `button` style's `text_color` never
+/// reaches one — which is why hovering an icon button used to change the box
+/// and leave the mark byte-identical (`docs/design/04-fluidity.md` §3.1). The
+/// lever that *does* reach it is the image's own opacity, so the button reports
+/// its own crossings through a `mouse_area` and the shell holds one
+/// [`Control`] id (ADR-0020 §2.1). The ink then rides a 90 ms tween up the
+/// ladder: 0.57 resting, 1.00 under the pointer, 0.75 held, 0.28 dead.
+///
+/// **The `mouse_area` is outside the button and only listens for crossings.**
+/// `button` captures the press itself, so an outer wrapper could not see one
+/// even if it asked; `CursorMoved` it ignores, which is exactly the event the
+/// crossings are made of. The press comes from the shell's raw event stream
+/// instead. Nothing about the button's own behaviour changes, and the hit target
+/// is the same [`theme::TRANSPORT_HIT`] square it always was.
 ///
 /// The tooltip is the control's accessible name. iced 0.13 publishes no
 /// accessibility tree and its buttons take no keyboard focus, so a hover
@@ -402,26 +427,33 @@ fn glyph_button(
     enabled: bool,
     pending: bool,
     message: Message,
+    control: Control,
+    ink: Ink,
 ) -> Element<'_, Message> {
     let room = theme::active();
     let mark = container(
         iced_image(icon::handle(glyph))
             .width(Length::Fixed(theme::ICON_PX))
             .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::glyph_opacity(enabled, pending)),
+            .opacity(theme::glyph_ink(
+                enabled,
+                pending,
+                ink.hover(control),
+                ink.pressed(control),
+            )),
     )
     .width(Length::Fill)
     .height(Length::Fill)
     .align_x(alignment::Horizontal::Center)
     .align_y(alignment::Vertical::Center);
-    let control = button(mark)
+    let control_widget = button(mark)
         .width(Length::Fixed(theme::TRANSPORT_HIT))
         .height(Length::Fixed(theme::TRANSPORT_HIT))
         .padding(0)
         .style(move |_theme, status| theme::transport(room, room.recess, status))
         .on_press_maybe(enabled.then_some(message));
-    tooltip(
-        control,
+    let named = tooltip(
+        control_widget,
         text(label)
             .size(theme::SIZE_CAPTION)
             .line_height(theme::LEADING_CAPTION),
@@ -429,8 +461,11 @@ fn glyph_button(
     )
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
+    .style(move |_theme| theme::tooltip(room));
+    mouse_area(named)
+        .on_enter(Message::ControlEntered(control))
+        .on_exit(Message::ControlLeft(control))
+        .into()
 }
 
 /// The seek bar: elapsed timestamp, groove, total timestamp — a row that
@@ -509,7 +544,7 @@ fn seek_bar(state: player::SeekBar) -> Element<'static, Message> {
 /// [`theme::volume`]. Muting swaps the glyph and the fader's ink and moves
 /// nothing at all — the block is [`theme::VOLUME_BLOCK_W`] × the sum of its
 /// reserved lanes in every state this control has.
-fn volume(player: &PlayerState) -> Element<'_, Message> {
+fn volume(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
     let room = theme::active();
     let state = player.volume_bar();
     let detent = groove::Detent {
@@ -554,6 +589,8 @@ fn volume(player: &PlayerState) -> Element<'_, Message> {
                 state.interactive,
                 state.mute_pending,
                 Message::ToggleMute,
+                Control::Mute,
+                ink,
             ),
         ],
         column![

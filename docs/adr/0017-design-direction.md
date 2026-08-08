@@ -473,8 +473,13 @@ Every superseded decision, the code that must change, and the honest cost.
 **Not superseded**, and defended above: Settings as a place (§1.3); captions at
 rest (§1.4); Previous and Next as buttons (§1.1); the search field (§1.2); the
 places/inspector/popover/bar model of ADR-0016 in full; the accent law; the
-four surface values; `02`'s hang arithmetic, reserved slots, three-face bundle
-and 0 ms motion.
+four surface values; `02`'s hang arithmetic, reserved slots and three-face
+bundle.
+
+**One row of this ADR has since been reversed.** *"Motion is 0 ms — UPHELD"* is
+amended by [ADR-0020](0020-motion.md): the premise it upheld was a factual error
+about `window::frames()` that this document inherited without checking, and five
+bounded transitions now ship. Every *prohibition* the row carried survives.
 
 **One item declined on cost rather than principle**, stated so it is not
 mistaken for an oversight: the critique bans radii outright. `02` already brought
@@ -639,7 +644,9 @@ request; removing one needs a decision record.
 - No view-options menus: no grid-size picker, no list-mode toggle, no column
   chooser, no sort dropdown.
 - Nothing at oklch L .45–.58 for a room; no borders on artwork; no shadows
-  except the playing halo; no motion — hard cuts by design.
+  except the playing halo; no motion that costs anything while nothing is
+  moving — five bounded transitions and no others ([ADR-0020](0020-motion.md),
+  which amends this line's "hard cuts by design").
 
 From the critique, **rejected** — recorded as rejected, with the argument, so
 the ledger's own rule is honoured:

@@ -112,9 +112,34 @@ its room. Nudge the room's lightness instead, or do not ship the room.
 
 **No shadows** except the playing halo, which is not elevation — it is light.
 
-**No motion.** Every state change takes 0 ms; hard cuts by design. The two
-permitted movements are not animation: the needle advancing with playback (data
-arriving) and scrolling.
+**No motion that costs anything when nothing is moving.**
+[ADR-0020](adr/0020-motion.md) amends this entry under the ledger's own rule —
+the old text said *"every state change takes 0 ms; hard cuts by design"*, and it
+rested on a premise that did not survive measurement: a transition was said to
+need a `window::frames()` subscription "which redraws whether or not anything is
+moving". A **bounded** subscription does not, and baz already shipped the
+pattern twice. `docs/design/04-fluidity.md` §1.4 carries the numbers: 0.0 % CPU
+and one frame in 3.88 s once the last tween settles.
+
+So **five** transitions may exist and no others, each expressible as a bounded
+tween: the icon-button ink fade (90 ms), the queue popover's arrival (140 ms),
+the shelf tile's hover rule (90 ms), the album inspector's width (150 ms), and
+the lamp warming when the light moves to another record (200 ms). Each degrades
+to a hard cut by passing a zero duration, which is how a *reduce motion* setting
+will be implemented.
+
+**Still refused, and these are refusals rather than omissions**: shelf-grid
+stagger or pop-in; any fade as a thumbnail decodes (a thumbnail replacing its
+placeholder stays an instant swap); album-art crossfades; **any animation of the
+bar's geometry**; springs, bounces and overshoot; and — the clause the rest hangs
+on — **anything requiring a redraw while the window is idle**, which is now a
+boolean the subscription reads and a test asserts rather than a promise.
+
+The two movements that were never animation are unchanged: the needle advancing
+with playback (data arriving) and scrolling.
+
+**Motion states what changed. It never decorates, and it never moves the
+transport.**
 
 ---
 

@@ -56,7 +56,11 @@ use crate::{rail, theme, vm};
 /// tile click that opens the inspector does not reflow the grid — nor resize
 /// every sleeve in it — out from under the double-click it might be the first
 /// half of.
-pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a, Message> {
+pub(crate) fn view<'a>(
+    shelf: &'a Shelf,
+    player: &'a PlayerState,
+    lamp: f32,
+) -> Element<'a, Message> {
     if shelf.visible.is_empty() {
         return empty_state(shelf);
     }
@@ -90,7 +94,7 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, player: &'a PlayerState) -> Element<'a,
             &mut drawn,
         );
         for r in first_row..end_row {
-            grid = grid.push(shelf_row(shelf, player, hang, *run, r));
+            grid = grid.push(shelf_row(shelf, player, hang, *run, r, lamp));
         }
         drawn += hang.spacer_height(end_row - first_row);
     }
@@ -144,6 +148,7 @@ fn shelf_row<'a>(
     hang: Grid,
     run: Run,
     row_index: usize,
+    lamp: f32,
 ) -> Element<'a, Message> {
     let mut cells = row![]
         .spacing(hang.gutter)
@@ -162,6 +167,7 @@ fn shelf_row<'a>(
                 hang,
                 album,
                 player.playing_album() == Some(album.id),
+                lamp,
             ));
         }
     }
@@ -529,6 +535,7 @@ fn tile<'a>(
     hang: Grid,
     album: &'a vm::AlbumVm,
     playing: bool,
+    lamp: f32,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let edge = hang.art;
@@ -539,7 +546,12 @@ fn tile<'a>(
             .into(),
         None => gradient_block(album.id, edge),
     };
-    let sleeve = container(art).style(move |_theme| theme::sleeve(room, playing));
+    // The halo warms over 200 ms when the light moves to this record, and is
+    // simply absent on every other tile (ADR-0020 §2.5). The **dot** does not
+    // fade: the halo is the light and the dot is the statement, and a statement
+    // that arrives gradually is a statement you are not sure was made.
+    let warmth = if playing { lamp } else { 0.0 };
+    let sleeve = container(art).style(move |_theme| theme::sleeve(room, warmth));
     let title = album.title.as_deref().unwrap_or("Unknown Album");
     // The *album* artist: one tile per album, captioned by whoever the
     // album is filed under, not by whichever composer happened to be
@@ -579,15 +591,14 @@ fn tile<'a>(
             .align_y(alignment::Vertical::Top)
             .clip(true)
     };
-    let hovered = shelf.hovered_album == Some(album.id);
+    // How far this tile's mark has travelled, from the shelf's one keyed tween
+    // (ADR-0020 §2.3). Zero for every tile the pointer is not on, which is all
+    // of them but one.
+    let hovered = shelf.tile_hover.strength(album.id);
     // The artist line lifts one rung of the ink ramp under the pointer — the
     // other half of ADR-0017 step 14's hover state, and the half that still
     // reads when the rule is the thing your own hand is over.
-    let caption_ink = if hovered {
-        room.paper_dim
-    } else {
-        room.paper_faint
-    };
+    let caption_ink = theme::caption_ink(room, hovered);
     let caption_block = column![
         caption_lane(title_row.into()),
         caption_lane(
@@ -644,7 +655,7 @@ const RULE_LANE_H: f32 = theme::GAP_XS + theme::SELECTION_EDGE;
 /// The lane is reserved rather than sized to the mark, which is the same
 /// fixed-slot rule the bottom bar's timestamps follow and the reason the mark
 /// can be 0, 1 or 2 px without a row of covers shifting under the pointer.
-fn state_rule(hovered: bool, selected: bool, edge: f32) -> Element<'static, Message> {
+fn state_rule(hovered: f32, selected: bool, edge: f32) -> Element<'static, Message> {
     let room = theme::active();
     let thickness = theme::tile_rule_h(hovered, selected);
     container(

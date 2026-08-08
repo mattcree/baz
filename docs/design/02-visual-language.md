@@ -1236,6 +1236,19 @@ between blocks. Plus the folder picker and drop target the IA's step 12 adds.
 
 ## 7. Motion
 
+> **Superseded in part by [ADR-0020](../adr/0020-motion.md) (2026-08-08).** The
+> premise below — that a transition means a `window::frames()` subscription
+> "which redraws whether or not anything is moving" — is true of an
+> *unconditional* subscription and false of a bounded one, and baz already
+> shipped the bounded pattern twice in `app.rs`. Measured in
+> [`04-fluidity.md`](04-fluidity.md) §1.4: **0.0 % CPU and one frame in 3.88 s**
+> once the last tween settles. Five bounded transitions now ship; every
+> prohibition in the paragraphs below survives unchanged, and the last of them —
+> *anything requiring a redraw while the window is idle* — is now enforced by a
+> test rather than by a rule. The section is left standing rather than edited
+> into silence because the mistake is instructive: a constraint was asserted
+> rather than measured, and three documents inherited it.
+
 **Every state change in baz takes 0 ms.** iced 0.13 ships no animation runtime;
 producing a transition means driving state from a `window::frames()`
 subscription, which redraws whether or not anything is moving. baz measures its
@@ -1268,7 +1281,7 @@ No spring, no bounce, no overshoot.
 | an icon set | none ships | closed polygons in a unit square (`icon.rs`); the IA adds exactly one glyph (Previous, a mirror of Next) |
 | a single-sided border | `Border` is four-sided | `rule` widgets — already how the bars are built |
 | a focus ring on buttons | buttons take no keyboard focus | `PAPER_RING` on `text_input` only; tooltips name icon-only controls |
-| transitions | no runtime; `frames()` redraws while idle | 0 ms everywhere (§7) |
+| transitions | no runtime; an *unconditional* `frames()` redraws while idle | five bounded tweens, and nothing else ([ADR-0020](../adr/0020-motion.md); §7 as amended) |
 | pointer capture during a drag | none | end the gesture on `CursorLeft` / `Unfocused` and commit (`groove.rs`) |
 | text ellipsis | no ellipsis mode | `Wrapping::None` clips; every clipping slot has a fixed width |
 | radial gradients / blur / backdrop | linear gradients on containers only | the placeholder's gradient; nothing else needs one |

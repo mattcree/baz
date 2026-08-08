@@ -51,6 +51,7 @@ use iced::widget::{
 use iced::{Element, Length, Size, Subscription, Task, alignment, window};
 use lru::LruCache;
 
+use crate::motion::{Control, Ink, Keyed, Tween};
 use crate::mpris::Mpris;
 use crate::overlay::{Overlay, Popover};
 use crate::place::Place;
@@ -59,7 +60,9 @@ use crate::player::{Availability, PlayerState};
 use crate::scan::ScanUpdate;
 use crate::selection::Selection;
 use crate::theme::PANEL_W;
-use crate::{art, config, font, keys, mpris, player, queue_edit, scan, shelf, theme, views, vm};
+use crate::{
+    art, config, font, keys, motion, mpris, player, queue_edit, scan, shelf, theme, views, vm,
+};
 
 /// Approximate top-bar height, used only for the pre-first-scroll estimate
 /// of the grid viewport (real bounds arrive with every scroll event).
@@ -331,6 +334,28 @@ pub(crate) enum Message {
     ScanTick,
     /// A frame was presented (subscribed only until first-frame is logged).
     FirstFrame,
+    /// Advance every transition that is running — subscribed **only** while one
+    /// is (see [`App::moving`] and ADR-0020).
+    MotionTick(Instant),
+    /// The pointer entered an icon button, so its glyph can take the ink a
+    /// hovered control is drawn in.
+    ///
+    /// The same toolkit limit [`Self::QueueRowEntered`] and [`Self::TileEntered`]
+    /// work around, in the last surface that still had it: a `button` style's
+    /// `text_color` cannot reach the rasterised sprite that *is* the control, so
+    /// the button reports its own crossings and the shell holds the one answer
+    /// (see [`crate::motion::Control`]).
+    ControlEntered(Control),
+    /// The pointer left an icon button. Carries which one, for the reason
+    /// [`Self::QueueRowLeft`] carries which row.
+    ControlLeft(Control),
+    /// The left button went down somewhere. Which control it went down *on* is
+    /// whichever one the pointer is already known to be over — a `button` with
+    /// an `on_press` captures the press before any wrapper can see it, so the
+    /// press is resolved against the hover rather than reported by the target.
+    PointerPressed,
+    /// The left button came up. Ends the press wherever it landed.
+    PointerReleased,
 }
 
 struct App {
@@ -381,6 +406,34 @@ struct App {
     /// was resolved for. Resolving it reads the album directory, so it is
     /// done once per track change rather than once per progress report.
     mpris_art: (u64, Option<String>),
+    /// Which icon button the pointer is on, and how far its ink has travelled
+    /// (ADR-0020 §2.1).
+    ///
+    /// **One tween for every icon button in the product**, keyed by which one is
+    /// under the pointer, for the reason the shelf keeps one for the whole wall:
+    /// at most one control is hovered, so a tween per control would be state
+    /// allocated for a condition all but one of them is never in.
+    ink: Keyed<Control>,
+    /// The icon button the pointer is *held down* on, if any.
+    ///
+    /// Not a tween: a press is a discrete act and the finger has already
+    /// arrived. It re-aims [`Self::ink`] rather than jumping the ink, so the
+    /// press is continuous with the hover that preceded it.
+    pressed_control: Option<Control>,
+    /// The queue popover's arrival: opacity and the 8 px rise, one tween
+    /// (ADR-0020 §2.2).
+    ///
+    /// **Arrival only.** A dismissal is a request to be rid of a surface, and a
+    /// surface that lingers for 140 ms after being dismissed is answering more
+    /// slowly than the press that dismissed it; ADR-0020 §2 names the arrival
+    /// and nothing else.
+    popover: Tween,
+    /// How far the lamp has warmed for the record that is sounding
+    /// (ADR-0020 §2.5).
+    ///
+    /// Linear, 200 ms, and restarted only when the light actually **moves** —
+    /// see [`Self::warm_lamp`].
+    warmth: Tween,
     /// The ReplayGain setting as it currently stands on disk.
     ///
     /// Kept so that persisting can be driven by the *engine's* confirmations
@@ -503,6 +556,10 @@ impl App {
             player,
             mpris,
             mpris_art: (0, None),
+            ink: Keyed::new(),
+            pressed_control: None,
+            popover: Tween::settled(0.0),
+            warmth: Tween::settled(0.0).with_curve(motion::Curve::Linear),
             saved_replay_gain,
         };
         // One publish before the first frame, so a desktop widget that asks
@@ -518,6 +575,9 @@ impl App {
         // resolves to "tell the state machine, maybe tell the engine", so it
         // is answered first and separately rather than as nine more arms
         // below.
+        if let Some(task) = self.update_motion(&message) {
+            return task;
+        }
         if self.update_volume(&message)
             || self.update_replay_gain(&message)
             || self.update_transport(&message)
@@ -553,16 +613,7 @@ impl App {
                     Screen::Setup(_) => Task::none(),
                 }
             }
-            Message::FirstFrame => {
-                if !self.first_frame_logged {
-                    self.first_frame_logged = true;
-                    println!(
-                        "[startup] startup-to-interactive: {:.1} ms",
-                        self.started.elapsed().as_secs_f64() * 1e3
-                    );
-                }
-                Task::none()
-            }
+            Message::FirstFrame => self.log_first_frame(),
             Message::SetupSubmit => self.submit_setup(),
             Message::Playback(event) => {
                 self.apply_player_event(event);
@@ -627,6 +678,111 @@ impl App {
         }
     }
 
+    /// Answer a pointer message that only motion cares about, reporting whether
+    /// it was one.
+    ///
+    /// Four messages and none of them touches anything but ink: this is the
+    /// hovered-control seam ADR-0020 §2.1 opens, and it is deliberately the
+    /// smallest thing that can close it — an id, a tween and a boolean. Nothing
+    /// downstream of here can move a pixel, which is why it is answered before
+    /// the machines that can.
+    fn update_motion(&mut self, message: &Message) -> Option<Task<Message>> {
+        let now = Instant::now();
+        match *message {
+            Message::MotionTick(at) => return Some(self.tick_motion(at)),
+            Message::ControlEntered(control) => self.ink.enter(control, motion::INK, now),
+            // Only if it is still the control that left, and dropping the press
+            // with it: a pointer that leaves a held button is no longer pressing
+            // it, which is the same reading `button` itself takes.
+            Message::ControlLeft(control) => {
+                if self.pressed_control == Some(control) {
+                    self.pressed_control = None;
+                }
+                self.ink.leave(control, motion::INK, now);
+            }
+            // A `button` with an `on_press` captures `ButtonPressed` before any
+            // wrapper sees it, so the press cannot be reported by its target;
+            // it is resolved against the control the pointer is already on,
+            // which is the same condition `button` applies to itself.
+            Message::PointerPressed => self.pressed_control = self.ink.key(),
+            Message::PointerReleased => self.pressed_control = None,
+            _ => return None,
+        }
+        Some(Task::none())
+    }
+
+    /// Log startup-to-interactive, once, on the first frame the window
+    /// presents. The `window::frames()` subscription that produces it is
+    /// dropped the moment this has run — the first bounded clock baz shipped,
+    /// and the pattern ADR-0020 generalises.
+    fn log_first_frame(&mut self) -> Task<Message> {
+        if !self.first_frame_logged {
+            self.first_frame_logged = true;
+            println!(
+                "[startup] startup-to-interactive: {:.1} ms",
+                self.started.elapsed().as_secs_f64() * 1e3
+            );
+        }
+        Task::none()
+    }
+
+    /// Advance every transition that is running.
+    ///
+    /// The one arm the whole of ADR-0020 needs in the update loop, and its
+    /// mirror is the guard in [`Self::subscription`]: this is called only while
+    /// [`Self::moving`] is true, and the last tick of the last tween is what
+    /// makes it false again.
+    fn tick_motion(&mut self, now: Instant) -> Task<Message> {
+        self.ink.tick(now);
+        self.popover.tick(now);
+        self.warmth.tick(now);
+        match &mut self.screen {
+            Screen::Setup(_) => Task::none(),
+            Screen::Shelf(state) => state.tick_motion(now),
+        }
+    }
+
+    /// **Is anything moving?** — the boolean the subscription reads, and the
+    /// whole of ADR-0020's idle-cost claim.
+    ///
+    /// False at rest, so the clock the transitions run on does not exist at
+    /// rest: no timer, no messages, no redraws, 0.0 % CPU
+    /// (`docs/design/04-fluidity.md` §1.4). Asserted rather than promised — see
+    /// `the_motion_clock_is_off_until_something_moves`.
+    fn moving(&self) -> bool {
+        self.ink.live()
+            || self.popover.live()
+            || self.warmth.live()
+            || match &self.screen {
+                Screen::Setup(_) => false,
+                Screen::Shelf(state) => state.moving(),
+            }
+    }
+
+    /// Start the lamp warming, if the light has somewhere to move to.
+    ///
+    /// **Only when the record under the lamp changes.** ADR-0020 §2.5 says "on
+    /// track change", and that is what this is: a track change *within* an album
+    /// leaves the light exactly where it is, so the tween is already at its
+    /// target, [`Tween::go`] settles immediately and asks for no clock. Taking
+    /// the halo to zero and back on every track boundary would be a flicker on a
+    /// record that never stopped playing — the transition would be announcing a
+    /// change the light did not make.
+    fn warm_lamp(&mut self, was: Option<u64>, now: Instant) {
+        let sounding = self.player.playing_album();
+        if sounding == was {
+            return;
+        }
+        if sounding.is_some() {
+            self.warmth.set(0.0);
+            self.warmth.go(1.0, motion::LAMP, now);
+        } else {
+            // Nothing is sounding: the light goes out with the music rather
+            // than dimming after it.
+            self.warmth.set(0.0);
+        }
+    }
+
     /// Answer an overlay message, reporting whether it was one.
     ///
     /// The **Queue** popover and everything a listener can do to a row of it,
@@ -640,9 +796,19 @@ impl App {
     /// shell where the layers are ([`Self::escape`]).
     fn update_overlay(&mut self, message: &Message) -> bool {
         match *message {
-            Message::ToggleQueue => self.overlay.toggle_queue(),
+            Message::ToggleQueue => {
+                self.overlay.toggle_queue();
+                // The arrival starts from nothing every time it opens, so the
+                // popover is never half-drawn on the frame it appears; putting
+                // it away is a cut (see [`Self::popover`]).
+                self.popover.set(0.0);
+                if self.overlay.is_open() {
+                    self.popover.go(1.0, motion::POPOVER, Instant::now());
+                }
+            }
             Message::CloseQueue => {
                 self.overlay.close();
+                self.popover.set(0.0);
                 // A popover that is gone has no row under the pointer, and the
                 // rows will not be there to report their own exit.
                 self.hovered_queue_row = None;
@@ -688,6 +854,7 @@ impl App {
     /// fix.)
     fn escape(&mut self) -> Task<Message> {
         if self.overlay.close() {
+            self.popover.set(0.0);
             return Task::none();
         }
         if self.place.is_settings() {
@@ -737,6 +904,10 @@ impl App {
         // events rather than assumed at request time.
         let seek_pending = self.player.seek_pending();
         let mut seek_confirmed = false;
+        // Which record the lamp is on, read *before* the event is folded in, so
+        // "the light moved" is a comparison rather than a guess (see
+        // [`Self::warm_lamp`]).
+        let lit = self.player.playing_album();
         match message {
             PlayerEvent::Engine(event) => {
                 match &event {
@@ -791,6 +962,7 @@ impl App {
                 self.player.engine_closed();
             }
         }
+        self.warm_lamp(lit, Instant::now());
         self.publish_mpris(seek_confirmed);
     }
 
@@ -1152,12 +1324,24 @@ impl App {
     /// Library's own state is not touched by the swap, so coming back restores
     /// the scroll, the query and the selection exactly.
     fn view(&self) -> Element<'_, Message> {
+        if std::env::var_os("BAZ_FRAME_LOG").is_some() {
+            println!(
+                "[frame] {:.3}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs_f64()
+            );
+        }
+        let ink = self.ink();
         let screen: Element<'_, Message> = match (&self.screen, self.place) {
             (Screen::Setup(setup), _) => return views::setup::view(setup),
             (Screen::Shelf(_), Place::Settings) => {
                 views::settings::view(&self.player, self.window.width)
             }
-            (Screen::Shelf(state), Place::Library) => state.view(&self.player),
+            (Screen::Shelf(state), Place::Library) => {
+                state.view(&self.player, ink, self.warmth.value())
+            }
         };
         // The persistent bottom bar lives under the shelf — unless this
         // build has no audio output at all, in which case playback UI is
@@ -1168,9 +1352,15 @@ impl App {
         }
         column![
             self.floating_over(screen),
-            views::bottom_bar::view(&self.player, self.overlay.is_open()),
+            views::bottom_bar::view(&self.player, self.overlay.is_open(), ink),
         ]
         .into()
+    }
+
+    /// What every icon button needs to know to ink itself: which one the
+    /// pointer is on, how far its fade has travelled, and whether it is held.
+    fn ink(&self) -> Ink {
+        Ink::new(self.ink, self.pressed_control)
     }
 
     /// Put the overlay layer over `place`, if anything is floating.
@@ -1200,11 +1390,14 @@ impl App {
         let Some(popover) = self.overlay.showing() else {
             return place;
         };
+        let arriving = self.popover.value();
         let content = match popover {
             Popover::QueuePanel => views::queue::view(
                 &self.player,
                 self.window.height * theme::POPOVER_MAX_H,
                 self.hovered_queue_row,
+                arriving,
+                self.ink(),
             ),
         };
         stack![
@@ -1215,7 +1408,14 @@ impl App {
                 .height(Length::Fill)
                 .align_x(alignment::Horizontal::Right)
                 .align_y(alignment::Vertical::Bottom)
-                .padding(theme::GAP_LG),
+                // **The rise is a swap between two paddings, never a change to
+                // their sum** (ADR-0020 §2.2): the layer the popover is aligned
+                // in keeps exactly the height it has at rest, so a popover tall
+                // enough to meet [`theme::POPOVER_MAX_H`] cannot re-flow its own
+                // list on the way up. The horizontal padding does not move at
+                // all, so the popover's right edge is the same pixel in every
+                // frame of the arrival.
+                .padding(theme::popover_pad(arriving)),
         ]
         .into()
     }
@@ -1229,6 +1429,17 @@ impl App {
                 iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
                     keys::binding_for(&key, modifiers, keys::Focus::from(status))
                 }
+                // The press an icon button's own wrapper can never see: a
+                // `button` with an `on_press` captures `ButtonPressed`, so the
+                // only place left to hear it is the raw stream — and here the
+                // *captured* status is the point rather than a problem, since a
+                // press on a control is exactly a press a control took.
+                iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                    iced::mouse::Button::Left,
+                )) => Some(Message::PointerPressed),
+                iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                    iced::mouse::Button::Left,
+                )) => Some(Message::PointerReleased),
                 _ => None,
             }),
             window::resize_events().map(|(_, size)| Message::WindowResized(size)),
@@ -1238,6 +1449,16 @@ impl App {
         // Frame events only until startup-to-interactive is logged.
         if !self.first_frame_logged {
             subs.push(window::frames().map(|_| Message::FirstFrame));
+        }
+        // **Only while something is moving, and never otherwise** — the whole
+        // of ADR-0020's cost argument, and structurally the same guard as the
+        // grid hold's below it. A subscription in iced 0.13 is a function of
+        // state: it is rebuilt after every update and the ones that went away
+        // are dropped, so the last tick of the last tween removes this timer and
+        // the event loop parks. (`docs/design/04-fluidity.md` §1.2 for the
+        // mechanism; §1.4 for the 0.0 % it measures.)
+        if self.moving() {
+            subs.push(iced::time::every(motion::TICK).map(|_| Message::MotionTick(Instant::now())));
         }
         // The scan channel is drained on a coarse tick — batching by design.
         if let Screen::Shelf(state) = &self.screen {
@@ -1369,8 +1590,40 @@ pub(crate) struct Shelf {
     /// The rule's lane is reserved whatever this says, so it changes what is
     /// drawn in it and never the geometry around it.
     pub(crate) hovered_album: Option<u64>,
+    /// How far the hovered tile's mark has travelled (ADR-0020 §2.3).
+    ///
+    /// **One tween for the whole wall, keyed by the hovered id — never one per
+    /// tile.** The shelf draws hundreds of tiles and at most one of them is
+    /// under the pointer, so a tween per tile would be state allocated for a
+    /// condition all but one of them is never in; and crossing the gutter from
+    /// one sleeve to the next hands the mark over rather than restarting it
+    /// (see [`crate::motion::Keyed`]).
+    pub(crate) tile_hover: Keyed<u64>,
     /// Last tile click, for double-click-to-play detection.
     last_click: Option<(u64, Instant)>,
+    /// The width of the window the shelf is laid out in.
+    ///
+    /// Held because the inspector's width is now a tween rather than a branch,
+    /// and the shelf's own width is the window's less whatever the inspector is
+    /// currently taking — which is a number that changes nine times over 150 ms
+    /// rather than once.
+    window_w: f32,
+    /// How much width the album inspector is taking, right now (ADR-0020 §2.4).
+    ///
+    /// Tweened between 0 and [`PANEL_W`], where it used to be one or the other.
+    /// See [`Shelf::wall_width`] for what it does to the grid, and
+    /// [`Shelf::tick_motion`] for how it and [`Shelf::grid_hold`] stay out of
+    /// each other's way.
+    pub(crate) panel: Tween,
+    /// Which album the inspector is *drawing*, which lags the selection by
+    /// exactly one closing tween.
+    ///
+    /// [`Selection`] answers "which album is the inspector for" and goes to
+    /// `None` the instant it is closed — correctly, because that is a fact about
+    /// the selection. The panel still has 150 ms of travel left at that point
+    /// and has to draw something while it makes it, so the shell remembers what
+    /// was in it until the column has actually gone.
+    panel_album: Option<u64>,
     /// The grid width pinned across the reflow a tile click causes, so the
     /// tile does not move — nor change size — between the two presses of a
     /// double-click (see [`shelf::GridHold`]).
@@ -1427,7 +1680,11 @@ impl Shelf {
             ),
             last_scan_log: Instant::now(),
             hovered_album: None,
+            tile_hover: Keyed::new(),
             last_click: None,
+            window_w: WINDOW.width,
+            panel: Tween::settled(0.0),
+            panel_album: None,
             grid_hold: shelf::GridHold::default(),
         };
         shelf.rebuild_shelves();
@@ -1481,13 +1738,16 @@ impl Shelf {
                 self.request_visible_thumbs()
             }
             Message::WindowResized(size) => {
+                self.window_w = size.width;
+                // **A resize is not a transition.** Dragging an edge is a
+                // continuous gesture the hand is still making, and a column
+                // easing toward a width the pointer is still changing would
+                // chase it. The tween jumps, which costs no clock.
+                self.panel.set(inspector_width(&self.selection));
                 // Estimate until the next scroll event reports real bounds.
                 // The rail's lane comes off here too, because the scrollable
                 // the next `Scrolled` will measure has already given it up.
-                self.grid_size = Size::new(
-                    size.width - inspector_width(&self.selection) - theme::INDEX_LANE_W,
-                    (size.height - TOP_BAR_H).max(100.0),
-                );
+                self.grid_size = Size::new(self.grid_width(), (size.height - TOP_BAR_H).max(100.0));
                 // Dragging the window's edge is not the gesture the hold
                 // protects, and holding a stale count through a resize would
                 // draw columns the window no longer has room for.
@@ -1517,6 +1777,7 @@ impl Shelf {
             }
             Message::TileEntered(id) => {
                 self.hovered_album = Some(id);
+                self.tile_hover.enter(id, motion::TILE, Instant::now());
                 Task::none()
             }
             // Only if it is still the tile that left: both messages are
@@ -1527,6 +1788,7 @@ impl Shelf {
                 if self.hovered_album == Some(id) {
                     self.hovered_album = None;
                 }
+                self.tile_hover.leave(id, motion::TILE, Instant::now());
                 Task::none()
             }
             Message::ColumnHoldTick => {
@@ -1633,11 +1895,85 @@ impl Shelf {
     /// layout change now. [`Self::reflow_holding_columns`] re-takes it
     /// afterwards for the one route that is.
     fn reflow(&mut self, transition: impl FnOnce(&mut Selection)) -> Task<Message> {
-        let before = inspector_width(&self.selection);
         transition(&mut self.selection);
-        self.grid_size.width += before - inspector_width(&self.selection);
+        // The width the column is *going* to: the tween carries it there over
+        // [`motion::PANEL`], and [`Self::wall_width`] is what the shelf gets in
+        // the meantime. The arithmetic is unchanged — it is still exactly one
+        // [`PANEL_W`], and still only when the column's occupancy moves — it is
+        // simply spent over nine frames instead of one.
+        self.panel.go(
+            inspector_width(&self.selection),
+            motion::PANEL,
+            Instant::now(),
+        );
+        // The album the column is *for*, which survives a hide (`Ctrl`+`B`)
+        // and outlives a close by exactly the length of the closing tween.
+        if self.selection.inspecting().is_some() {
+            self.panel_album = self.selection.selected();
+        }
+        self.grid_size.width = self.grid_width();
         self.grid_hold.release();
         self.request_visible_thumbs()
+    }
+
+    /// **The wall's width**: the window's, less whatever the inspector is
+    /// taking *at this instant*, less the hairline between them.
+    ///
+    /// The hairline is subtracted only while there is a column to divide from,
+    /// which is what makes the row add up to the window exactly at rest — the
+    /// wall used to take `Length::Fill` and get the same answer from the
+    /// toolkit, and it still gets the same answer once the tween has settled.
+    fn wall_width(&self) -> f32 {
+        let panel = self.panel.value();
+        let rule = if self.panel_album.is_some() { 1.0 } else { 0.0 };
+        (self.window_w - panel - rule).max(0.0)
+    }
+
+    /// **The grid's width**: the wall's, less the index rail's lane.
+    ///
+    /// The two are different numbers and the difference is the rail's
+    /// ([`theme::INDEX_LANE_W`]): the wall is what the shelf column occupies and
+    /// the grid is what the covers hang in. Every reflow writes this one, which
+    /// is what keeps the hang's arithmetic — and the rail's own `HANG` from the
+    /// last column — untouched by a column that is halfway open.
+    fn grid_width(&self) -> f32 {
+        (self.wall_width() - theme::INDEX_LANE_W).max(0.0)
+    }
+
+    /// Advance the shelf's own transitions.
+    ///
+    /// # The width tween and the grid hold do not fight
+    ///
+    /// They govern different things, which is why they can both be true at once:
+    /// the tween owns **the column's width**, and [`shelf::GridHold`] owns **the
+    /// width the grid lays out with**. A tile click starts both — the column
+    /// opens over 150 ms, and the hang is pinned to what it was when the click
+    /// landed for [`shelf::DOUBLE_CLICK`] 400 ms — so the panel slides in over a
+    /// shelf that does not move a sleeve, and the reflow lands once the gesture
+    /// can no longer be a double-click. Exactly the behaviour the hold was
+    /// written for, with the column's arrival no longer a jump.
+    ///
+    /// Every other route to a reflow (Escape, the ✕, `Ctrl`+`B`) drops the hold
+    /// and keeps the tween, so there the wall re-hangs *with* the column, over
+    /// the same 150 ms.
+    fn tick_motion(&mut self, now: Instant) -> Task<Message> {
+        self.tile_hover.tick(now);
+        if !self.panel.tick(now) && self.panel.value() <= 0.0 {
+            // The column has finished leaving, so there is nothing left to draw
+            // in it.
+            self.panel_album = None;
+        }
+        let width = self.grid_width();
+        if (self.grid_size.width - width).abs() < f32::EPSILON {
+            return Task::none();
+        }
+        self.grid_size.width = width;
+        self.request_visible_thumbs()
+    }
+
+    /// Whether the shelf still needs a clock (see [`App::moving`]).
+    fn moving(&self) -> bool {
+        self.tile_hover.live() || self.panel.live()
     }
 
     /// Hide the inspector, or bring it back — <kbd>Ctrl</kbd>+<kbd>B</kbd>.
@@ -1894,30 +2230,78 @@ impl Shelf {
     /// beside the shelf now, so this is a two-way choice rather than the
     /// four-way one the rail needed, and the shelf's width still has exactly
     /// two values.
-    fn view<'a>(&'a self, player: &'a PlayerState) -> Element<'a, Message> {
+    /// # The column is revealed, never compressed (ADR-0020 §2.4)
+    ///
+    /// The shelf is given an explicit [`Self::wall_width`] where it used to
+    /// take `Length::Fill`, and the inspector is put behind a
+    /// [`Self::revealing`] viewport for exactly as long as the tween runs. That
+    /// second half is not decoration: iced 0.13's flex layout hands each
+    /// non-fill child *the width that is left* (`iced_core-0.13.2`'s
+    /// `layout::flex`), so a panel simply given a narrower box **re-lays itself
+    /// out inside it** — which was measured, and which wrapped every track title
+    /// onto two lines and scaled the sleeve on every frame of the way in. That
+    /// is a worse thing than the jump it replaced.
+    ///
+    /// So the panel is always laid out at [`PANEL_W`] and a viewport uncovers it
+    /// from the right. Every element inside it is at its final x from the first
+    /// frame of the arrival to the last; nothing re-wraps, and no artwork is
+    /// scaled.
+    fn view<'a>(&'a self, player: &'a PlayerState, ink: Ink, lamp: f32) -> Element<'a, Message> {
         let room = theme::active();
         // A selection whose album vanished under a rescan renders no panel
         // rather than an empty one; the next scroll event squares the grid
         // estimate up.
         let inspector = self
-            .selection
-            .inspecting()
-            .and_then(|_| self.selected_album())
-            .map(|album| views::side_panel::view(self, album, player));
+            .panel_album()
+            .map(|album| views::side_panel::view(self, album, player, ink, lamp));
         let body: Element<'_, Message> = match inspector {
             Some(panel) => row![
-                views::shelf::view(self, player),
+                container(views::shelf::view(self, player, lamp))
+                    .width(Length::Fixed(self.wall_width())),
                 vertical_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
-                panel
+                Self::revealing(panel, self.panel.value()),
             ]
             .into(),
-            None => views::shelf::view(self, player),
+            None => views::shelf::view(self, player, lamp),
         };
         column![views::top_bar::view(self), body].into()
     }
 
-    fn selected_album(&self) -> Option<&vm::AlbumVm> {
-        let id = self.selection.selected()?;
+    /// The inspector, uncovered `width` px from its right edge.
+    ///
+    /// **At rest this is the panel itself and nothing else** — the `>=` returns
+    /// it untouched — so the settled composition is byte-identical to the one
+    /// baz shipped before there was any motion, and the endpoint every geometry
+    /// test measures is the endpoint those tests were written against. The
+    /// viewport exists only during the 150 ms of travel.
+    ///
+    /// It is a horizontal `scrollable` because that is the one thing in iced
+    /// 0.13 that lays a child out in *unbounded* space (`scrollable::layout`
+    /// passes `f32::INFINITY` on the scrolling axis), which is what makes this a
+    /// reveal rather than a squeeze. Anchored to the right, so what is uncovered
+    /// is the edge the column arrives from; the bar is a zero-width nothing,
+    /// because this is a window onto a fixed thing and not a control.
+    fn revealing(panel: Element<'_, Message>, width: f32) -> Element<'_, Message> {
+        if width >= PANEL_W {
+            return panel;
+        }
+        scrollable(panel)
+            .direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::new()
+                    .width(0.0)
+                    .scroller_width(0.0)
+                    .margin(0.0),
+            ))
+            .anchor_right()
+            .width(Length::Fixed(width.max(0.0)))
+            .height(Length::Fill)
+            .into()
+    }
+
+    /// The album the inspector is drawing, if the column is on screen at all —
+    /// which includes the 150 ms in which it is leaving.
+    fn panel_album(&self) -> Option<&vm::AlbumVm> {
+        let id = self.panel_album?;
         self.albums.iter().find(|album| album.id == id)
     }
 }
@@ -2429,6 +2813,180 @@ mod tests {
         assert_eq!(hang(hold, width).columns, 3);
         assert_ne!(hang(hold, width), before);
         assert!(!hold.holding(), "and the tick subscription goes away");
+    }
+
+    /// **No redraw while idle — asserted, not promised.**
+    ///
+    /// ADR-0020's whole cost argument is that the transition clock is a
+    /// *function of state*: [`App::moving`] and [`Shelf::moving`] between them
+    /// are the boolean [`App::subscription`] reads, so a false reading is a
+    /// timer that does not exist, no `MotionTick` messages, and — because iced
+    /// 0.13 requests a redraw per message batch — no frames. The decision
+    /// records this as a **test** rather than a promise, and this is it.
+    ///
+    /// Every one of the five transitions is started, checked live, and ticked
+    /// past its end; the clock has to be off before the first and off again
+    /// after the last.
+    #[test]
+    fn the_motion_clock_is_off_until_something_moves() {
+        let start = Instant::now();
+        let mut ink: Keyed<Control> = Keyed::new();
+        let mut popover = Tween::settled(0.0);
+        let mut warmth = Tween::settled(0.0).with_curve(motion::Curve::Linear);
+        let mut tile: Keyed<u64> = Keyed::new();
+        let mut panel = Tween::settled(0.0);
+        // The exact disjunction the two `moving` functions form between them.
+        macro_rules! moving {
+            () => {
+                ink.live() || popover.live() || warmth.live() || tile.live() || panel.live()
+            };
+        }
+
+        assert!(!moving!(), "a shell at rest keeps no clock");
+
+        // Each of the five in turn: it turns the clock on, and its own last
+        // tick turns it off again. Nothing else is running, so "the clock is
+        // still on" can only mean this transition did not stop.
+        ink.enter(Control::PlayPause, motion::INK, start);
+        assert!(moving!(), "the icon-button ink fade");
+        ink.tick(start + motion::INK);
+        assert!(!moving!());
+
+        popover.go(1.0, motion::POPOVER, start);
+        assert!(moving!(), "the queue popover's arrival");
+        popover.tick(start + motion::POPOVER);
+        assert!(!moving!());
+
+        tile.enter(7, motion::TILE, start);
+        assert!(moving!(), "the shelf tile's hover rule");
+        tile.tick(start + motion::TILE);
+        assert!(!moving!());
+
+        panel.go(PANEL_W, motion::PANEL, start);
+        assert!(moving!(), "the inspector's width");
+        panel.tick(start + motion::PANEL);
+        assert!(!moving!());
+
+        warmth.go(1.0, motion::LAMP, start);
+        assert!(moving!(), "the lamp warming");
+        warmth.tick(start + motion::LAMP);
+        assert!(!moving!());
+
+        // All five at once, and the clock stops with the *last* of them rather
+        // than the first: the lamp runs longest, so it is what keeps the timer
+        // alive after everything else has settled.
+        ink.enter(Control::Next, motion::INK, start);
+        popover.go(0.0, motion::POPOVER, start);
+        tile.enter(9, motion::TILE, start);
+        panel.go(0.0, motion::PANEL, start);
+        warmth.go(0.0, motion::LAMP, start);
+        for at in [motion::INK, motion::POPOVER, motion::PANEL] {
+            ink.tick(start + at);
+            popover.tick(start + at);
+            tile.tick(start + at);
+            panel.tick(start + at);
+            warmth.tick(start + at);
+            assert!(moving!(), "settled at {at:?} with the lamp still warming");
+        }
+        warmth.tick(start + motion::LAMP);
+        assert!(
+            !moving!(),
+            "the last tween settled and the clock did not stop"
+        );
+        // …and no later instant revives it, which is what makes the idle
+        // measurement an idle measurement.
+        for later in [motion::LAMP * 2, Duration::from_secs(30)] {
+            ink.tick(start + later);
+            popover.tick(start + later);
+            tile.tick(start + later);
+            panel.tick(start + later);
+            warmth.tick(start + later);
+            assert!(!moving!());
+        }
+    }
+
+    /// **The width tween and the held grid do not fight**, because they govern
+    /// different things.
+    ///
+    /// The brief for ADR-0020 §2.4 names this as the risk, and the resolution is
+    /// a separation rather than a compromise: the tween owns the *column's*
+    /// width, [`shelf::GridHold`] owns the width the *grid lays out with*. A
+    /// tile click starts both, and for the 150 ms the column takes to arrive the
+    /// hang does not move a sleeve — which is exactly what the hold was written
+    /// for, since the tile has to still be under the pointer for the second
+    /// press of a double-click.
+    #[test]
+    fn a_width_tween_and_a_held_grid_do_not_fight() {
+        let now = Instant::now();
+        let mut selection = Selection::new();
+        let mut hold = shelf::GridHold::default();
+        let mut panel = Tween::settled(0.0);
+        let window = WINDOW.width;
+        // What `Shelf::grid_width` computes, and what `Shelf::grid` lays out
+        // with once the hold has had its say.
+        let grid_width = |panel: Tween| window - panel.value() - 1.0 - theme::INDEX_LANE_W;
+        let hang =
+            |hold: shelf::GridHold, panel: Tween| shelf::Grid::new(hold.width(grid_width(panel)));
+
+        // The wall with nothing open, rail's lane included.
+        let before = hang(hold, panel);
+        assert_eq!(before.columns, 4);
+        // …and the wall with the column open, which is strictly narrower. The
+        // count is derived rather than written down: the rail's lane and the
+        // hang's arithmetic both feed it, and a test that hard-coded the answer
+        // would be asserting a number rather than the reflow.
+        let opened = shelf::Grid::new(window - PANEL_W - 1.0 - theme::INDEX_LANE_W);
+        assert!(
+            opened.columns < before.columns,
+            "the inspector is supposed to cost the wall a column"
+        );
+
+        // A tile click: the column starts arriving, and the hang is pinned.
+        let pinned = before.width;
+        selection.select(1);
+        panel.go(inspector_width(&selection), motion::PANEL, now);
+        hold.hold(pinned, now);
+
+        // Every frame of the arrival: the column has moved, and the grid has
+        // not — same count, same sleeve size, same tile under the pointer.
+        for step in 1..=9 {
+            let at = now + motion::PANEL * step / 9;
+            panel.tick(at);
+            assert!(hold.holding(), "the hold outlives the arrival");
+            assert!(!hold.expire(at), "…and by more than four times over");
+            assert_eq!(
+                hang(hold, panel),
+                before,
+                "the hang moved {step}/9 of the way through the column's arrival"
+            );
+        }
+        // The column is fully open well before the gesture window closes.
+        assert!(!panel.live());
+        assert!((panel.value() - PANEL_W).abs() < f32::EPSILON);
+        assert!(motion::PANEL < shelf::DOUBLE_CLICK);
+
+        // And the reflow still lands exactly when the gesture can no longer be
+        // a double-click — deferred, never cancelled.
+        assert!(hold.expire(now + shelf::DOUBLE_CLICK));
+        assert_eq!(hang(hold, panel), opened);
+        assert!(!hold.holding(), "and the tick subscription goes away");
+
+        // The other routes to a reflow drop the hold and keep the tween, so
+        // there the wall re-hangs *with* the column over the same 150 ms.
+        selection.close();
+        panel.go(inspector_width(&selection), motion::PANEL, now);
+        hold.release();
+        assert!(panel.live());
+        assert!(!hold.holding());
+        panel.tick(now + motion::PANEL / 2);
+        let midway = hang(hold, panel);
+        assert!(
+            midway.columns >= opened.columns && midway.columns <= before.columns,
+            "the hang passed through {} columns on the way back",
+            midway.columns
+        );
+        panel.tick(now + motion::PANEL);
+        assert_eq!(hang(hold, panel), before);
     }
 
     /// A swap costs no reflow, so it takes no hold: the inspector changing

@@ -54,10 +54,11 @@ pub(crate) mod shelf;
 pub(crate) mod side_panel;
 pub(crate) mod top_bar;
 
-use iced::widget::{Space, button, container, image as iced_image, text, tooltip};
+use iced::widget::{Space, button, container, image as iced_image, mouse_area, text, tooltip};
 use iced::{Color, Element, Length, alignment};
 
 use crate::app::Message;
+use crate::motion::{Control, Ink};
 use crate::{icon, theme, vm};
 
 /// A `size`×`size` block filled with the album's deterministic two-color
@@ -117,28 +118,38 @@ pub(crate) fn gradient_block(album_id: u64, size: f32) -> Element<'static, Messa
 /// ([`theme::Palette::ink_over`]), so the one control that appears on two
 /// different planes — the inspector's panel and the popover's float — has to be
 /// told which one it is on.
+/// `control` is which ✕ this is, so the shell can tell the two apart and fade
+/// exactly the one under the pointer (ADR-0020 §2.1); `fade` is the layer's own
+/// arrival, 1 for a layer that is simply there.
 pub(crate) fn close_button(
     on: iced::Color,
     label: &'static str,
     message: Message,
+    control: Control,
+    ink: Ink,
+    fade: f32,
 ) -> Element<'static, Message> {
     let room = theme::active();
     let mark = container(
         iced_image(icon::handle(icon::Glyph::Close))
             .width(Length::Fixed(theme::ICON_PX))
             .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::GLYPH_OPACITY),
+            .opacity(
+                theme::glyph_ink(true, false, ink.hover(control), ink.pressed(control)) * fade,
+            ),
     )
     .width(Length::Fill)
     .height(Length::Fill)
     .align_x(alignment::Horizontal::Center)
     .align_y(alignment::Vertical::Center);
-    tooltip(
+    let named = tooltip(
         button(mark)
             .width(Length::Fixed(theme::TRANSPORT_HIT))
             .height(Length::Fixed(theme::TRANSPORT_HIT))
             .padding(0)
-            .style(move |_theme, status| theme::transport(room, on, status))
+            .style(move |_theme, status| {
+                theme::fade_button(&theme::transport(room, on, status), fade)
+            })
             .on_press(message),
         text(label)
             .size(theme::SIZE_CAPTION)
@@ -147,6 +158,9 @@ pub(crate) fn close_button(
     )
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
+    .style(move |_theme| theme::tooltip(room));
+    mouse_area(named)
+        .on_enter(Message::ControlEntered(control))
+        .on_exit(Message::ControlLeft(control))
+        .into()
 }
