@@ -1096,6 +1096,52 @@ mod tests {
         );
     }
 
+    /// **The NAS lifecycle end to end through the worker** (ADR-0025's
+    /// verification of ADR-0022's guarantee): a root scanned while present,
+    /// unmounted out from under the index, and mounted back. The unmount is a
+    /// rename — the tree disappears wholesale, exactly as a share's mount
+    /// point path stops resolving — and it must cost the rows nothing; the
+    /// remount must hand them back as *unchanged*, never as new.
+    #[test]
+    fn an_unmounted_roots_rows_survive_and_come_back_unchanged() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("NAS");
+        let a = wav(&root, "Artist/Album/01.wav");
+        let b = wav(&root, "Artist/Album/02.wav");
+        let known = known_under(&root, [a.as_path(), b.as_path()]);
+
+        // The unmount.
+        let parked = dir.path().join("parked");
+        fs::rename(&root, &parked).expect("unmount");
+
+        let run = drive(&[root.as_path()], known.clone(), ScanMode::Incremental);
+        assert!(run.error.is_none(), "an unmounted share is not a failure");
+        assert_eq!(run.unavailable, vec![root.clone()]);
+        assert!(
+            run.removed.is_empty(),
+            "rows under an unmounted root are kept: {:?}",
+            run.removed
+        );
+        assert_eq!(run.done, Some((0, 0, 0, 0, 0, 1)));
+
+        // The remount: the same tree returns under the same name.
+        fs::rename(&parked, &root).expect("remount");
+
+        let run = drive(&[root.as_path()], known, ScanMode::Incremental);
+        assert!(run.unavailable.is_empty());
+        assert!(run.removed.is_empty(), "removed {:?}", run.removed);
+        assert!(
+            run.read().is_empty(),
+            "the stamps survived the round trip, so nothing is re-read — \
+             and nothing re-added, which is what makes duplicates impossible"
+        );
+        assert_eq!(
+            run.done,
+            Some((0, 0, 2, 0, 0, 0)),
+            "both rows return as unchanged, not as new"
+        );
+    }
+
     /// A row that names no root — every row in a pre-v8 index that no launch
     /// has adopted — is prunable by nobody, whatever the disk says.
     #[test]

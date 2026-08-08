@@ -301,6 +301,12 @@ takes no dialog dependency (`rfd` and the portal behind it are not in the
 graph); the first-run screen already asks for a typed path, and the two look the
 same for the same reason.
 
+> **Superseded in part by ADR-0025** (2026-08-09): `rfd` 0.17 dropped the
+> dependency weight this clause priced in — its portal backend costs one new
+> crate on Linux and no gtk — so the row gained a `Browse…` beside the well.
+> The typed path stays, now load-bearing for the folder a dialog cannot show
+> (an unmounted share); everything else in this section is unchanged.
+
 ## Consequences
 
 - The index knows which folder each track came from, and removal proves

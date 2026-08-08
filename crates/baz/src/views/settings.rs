@@ -605,12 +605,17 @@ fn folder_block(
     .into()
 }
 
-/// The add-a-folder row: a well and a word.
+/// The add-a-folder row: a well, its word, and the system picker beside them.
 ///
-/// A typed path rather than a system folder picker, and that is a constraint
-/// rather than a preference: baz takes no dialog dependency (`rfd` and the
-/// portal it talks to are not in the graph), and the first-run screen has asked
-/// for a typed path since v0.1. The two look the same for the same reason.
+/// **Two doors, and neither replaces the other** (ADR-0025). `Browse…` opens
+/// the desktop's own folder dialog — the portal on Linux, which is what makes
+/// it GNOME's dialog on GNOME and KDE's on KDE. The well takes a typed path,
+/// which the picker structurally cannot: a dialog offers only what the
+/// filesystem shows it, and the share a listener knows by heart but has not
+/// mounted today is exactly the folder worth configuring anyway. The refusals
+/// ledger's rule — every act a visible pointer target — is met by each door on
+/// its own, so losing the portal (a bare window manager, a broken service)
+/// costs a convenience and no capability.
 fn add_folder_row(input: &str) -> Element<'_, Message> {
     let room = theme::active();
     container(
@@ -626,6 +631,10 @@ fn add_folder_row(input: &str) -> Element<'_, Message> {
                 .width(Length::Fill)
                 .style(move |_theme, status| theme::input(room, status)),
             word_control("Add", !input.trim().is_empty(), Message::AddMusicFolder),
+            // The ellipsis is the convention meaning "a dialog follows"; the
+            // control itself decides nothing. Always enabled: there is no state
+            // in which choosing a folder is not allowed to begin.
+            word_control("Browse\u{2026}", true, Message::PickMusicFolder),
         ]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center),

@@ -274,11 +274,13 @@
   (`BAZ_OUTPUT`/`BAZ_OUTPUT_DEVICE` are still environment variables, ADR-0012),
   the boundary policy, and the enrichment toggles. Each is a section, not a
   design question.
-- **Music folders are typed, not picked.** The Settings place's add-a-folder
-  control is a text well, like the first-run screen it is the cousin of, because
-  baz takes no file-dialog dependency (`rfd` and the desktop portal behind it
-  are not in the graph). A native picker is what most people expect; it is a
-  reviewed dependency decision, not an oversight.
+- ~~**Music folders are typed, not picked.**~~ — **shipped** (ADR-0025). The
+  add-a-folder row now carries `Browse…`, the desktop's own picker through the
+  XDG portal (`rfd` 0.17, portal-only: one new crate on Linux, no gtk, deny
+  green). The text well stays beside it, load-bearing rather than legacy: a
+  dialog cannot name an unmounted share, and every act keeps a visible pointer
+  target when no portal service is running. The first-run screen still asks
+  for a typed path only.
 - **Music folders cannot be reordered in the interface.** The order is data
   (scan order, list order, and the order a nested pair is resolved in) and
   `config.toml` is editable by hand, but a drag handle is a control with its own
