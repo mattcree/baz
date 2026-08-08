@@ -1,5 +1,6 @@
-//! The persistent now-playing bar: current track, transport, seek row,
-//! volume — and, now, the door to what is next.
+//! The persistent now-playing bar: current track, transport, the two
+//! timestamps, volume, the door to what is next — and, flush on the window's
+//! bottom edge under all of it, the needle.
 //!
 //! # The left zone gained a door, and then stopped needing it
 //!
@@ -37,18 +38,23 @@ use iced::{Color, Element, Length, alignment};
 use crate::app::Message;
 use crate::motion::{Control, Ink};
 use crate::player::PlayerState;
-use crate::{groove, icon, player, theme};
+use crate::{groove, icon, needle, player, theme};
 
-/// The persistent now-playing bar, in three zones: the current track on the
-/// left, the transport centred over its seek bar in the middle, quiet status
-/// and the volume on the right.
+/// The persistent now-playing bar, in three zones — the current track and its
+/// timestamps on the left, the transport in the middle, quiet status and the
+/// volume on the right — with the needle under all three.
 ///
-/// The transport sits *above* the groove rather than beside it because that
-/// is where a listener looks for it — the controls and the position they act
-/// on read as one block, and the block is the only thing in the bar that is
-/// centred. The two flanking zones are equal-weight fills, which is what
-/// keeps the centre column optically centred no matter how long a track
-/// title runs; both clip rather than push.
+/// **The bar is 57 px and the needle is 2** (ADR-0017 step 10), where the bar
+/// alone was 105. The seek row is not deleted so much as *moved*: its job is
+/// stated better by a line that also says what the queue is shaped like, and
+/// `docs/REFUSALS.md` permits exactly that one move on this bar — a slot may be
+/// replaced by a better statement of the same fact, and none may be removed for
+/// tidiness. Every other slot is still here, and the two timestamps came with
+/// it into the left zone.
+///
+/// The two flanking zones are equal-weight fills, which is what keeps the
+/// centre column optically centred no matter how long a track title runs; both
+/// clip rather than push.
 ///
 /// The **volume goes at the far right**, with the signal-path readout
 /// immediately to its left. That is where a listener reaches for it, and the
@@ -58,8 +64,9 @@ use crate::{groove, icon, player, theme};
 /// no icon.
 ///
 /// Nothing in here changes size as playback moves. The centre column is
-/// [`theme::SEEK_ROW_W`] wide with fixed-width timestamps, the seek row's
-/// height is reserved even when there is nothing to seek, the signal-path
+/// [`theme::TRANSPORT_W`] wide, each timestamp sits in a fixed
+/// [`theme::STAMP_W`] slot that is there whether or not anything is playing,
+/// the signal-path
 /// slot is [`theme::SIGNAL_W`] wide whether or not it says anything, the
 /// volume block is [`theme::VOLUME_BLOCK_W`] wide in every state, and every
 /// glyph lives in a fixed box — so starting a track, crossing the hour mark,
@@ -87,7 +94,7 @@ pub(crate) fn view(player: &PlayerState, queue_open: bool, ink: Ink) -> Element<
         container(now_playing_block(player, queue_open))
             .width(Length::Fill)
             .clip(true),
-        transport_stack(player, ink),
+        transport_row(player, ink),
         container(status)
             .width(Length::Fill)
             .align_x(alignment::Horizontal::Right)
@@ -95,23 +102,107 @@ pub(crate) fn view(player: &PlayerState, queue_open: bool, ink: Ink) -> Element<
     ]
     .spacing(theme::GAP_LG)
     .align_y(iced::Alignment::Center);
-    column![
-        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
-        // **One centre line, one window gutter.** The band is
-        // [`theme::BAR_CONTENT_H`] and its mid-line is the transport's centre
-        // line by construction ([`theme::BAR_LEAD`]), so every zone centred in
-        // it puts its own mark on that line rather than centring its block
-        // around it. The horizontal padding is [`theme::HANG`], the one gutter
-        // every surface that touches a window edge hangs from — it was
-        // `GAP_LG`, which is why nothing in this bar lined up with the wall
-        // above it.
-        container(bar)
-            .width(Length::Fill)
-            .height(Length::Fixed(theme::BAR_BAND_H))
-            .padding(theme::pad(theme::BAR_PAD_V, theme::HANG))
-            .style(move |_theme| theme::bar(room)),
+    let line = player.needle_bar();
+    let tip = line.preview.clone();
+    // **The whole of the window's bottom edge, in three layers and 59 px.** The
+    // hairline, the band, the needle — and over all of them the hover tip,
+    // which is a *layer* and therefore costs no height at all (the same trick
+    // [`theme::PREVIEW_H`] documents, and the reason the transport can sit on
+    // the bar's own centre line).
+    stack![
+        column![
+            horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
+            // **One centre line, one window gutter.** The band is
+            // [`theme::BAR_CONTENT_H`] and its mid-line is the transport's
+            // centre line by construction ([`theme::BAR_LEAD`]), so every zone
+            // centred in it puts its own mark on that line rather than centring
+            // its block around it. The horizontal padding is [`theme::HANG`],
+            // the one gutter every surface that touches a window edge hangs
+            // from. There is no *vertical* padding left to be asymmetric: the
+            // band is the whole bar.
+            container(bar)
+                .width(Length::Fill)
+                .height(Length::Fixed(theme::BAR_CONTENT_H))
+                .padding(theme::pad(0.0, theme::HANG))
+                .style(move |_theme| theme::bar(room)),
+            // **The needle hangs off no gutter**, deliberately: it is the
+            // window's own bottom edge and it states the whole queue, so it
+            // runs the full width. Law L5 gives the bar `HANG`, `W − HANG`, its
+            // zone boundaries and its reserved slots' edges; the needle's edges
+            // are the window's, which is the one pair every surface shares.
+            needle_line(line),
+        ],
+        tip_layer(tip),
     ]
     .into()
+}
+
+/// The needle proper: [`needle::Needle`] over the queue the engine is holding,
+/// wired to the pointer when there is a queue to move within and inert when
+/// there is not.
+///
+/// The two style functions are the whole difference. An inert needle draws its
+/// unfilled track rather than nothing, because a line that came and went with
+/// the music would be movement in the one place ADR-0020 forbids it — and it
+/// refuses the pointer rather than looking identical and doing nothing, which
+/// is the rule [`groove::Groove`] set for a track of undeclared length.
+fn needle_line(line: player::NeedleBar) -> Element<'static, Message> {
+    let room = theme::active();
+    if line.interactive {
+        needle::Needle::new(line, room, theme::needle)
+            .on_pointer(
+                Message::NeedlePressed,
+                Message::NeedleDragged,
+                Message::NeedleHovered,
+                Message::NeedleReleased,
+                Message::NeedleLeft,
+            )
+            .into()
+    } else {
+        needle::Needle::new(line, room, theme::needle_inert).into()
+    }
+}
+
+/// The layer the needle's hover tip floats in: the whole bar's height, with the
+/// tip pinned to the bottom just clear of the line it describes.
+///
+/// A **layer**, so the bar does not change height under the pointer and the
+/// needle keeps costing the collection [`theme::NEEDLE_H`] and nothing else.
+/// The horizontal placement is [`player::preview_offset`], which keeps the tip
+/// whole and on screen at both ends (pure, and tested there) — and it is
+/// measured against the *window's* width because that is what the needle is
+/// measured against, so the tip cannot drift from the segment it names.
+fn tip_layer(preview: Option<player::Preview>) -> Element<'static, Message> {
+    let room = theme::active();
+    let mut lane = row![];
+    if let Some(preview) = preview {
+        let offset = player::preview_offset(&preview, theme::NEEDLE_TIP_W);
+        lane = lane.push(Space::with_width(Length::Fixed(offset))).push(
+            container(
+                text(preview.label)
+                    .size(theme::SIZE_CAPTION)
+                    .line_height(theme::LEADING_CAPTION)
+                    .wrapping(text::Wrapping::None),
+            )
+            .width(Length::Fixed(theme::NEEDLE_TIP_W))
+            .height(Length::Fixed(theme::PREVIEW_H))
+            .clip(true)
+            .align_x(alignment::Horizontal::Center)
+            .align_y(alignment::Vertical::Center)
+            .style(move |_theme| theme::preview_tip(room)),
+        );
+    }
+    container(lane)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Bottom)
+        .padding(iced::Padding {
+            top: 0.0,
+            right: 0.0,
+            bottom: theme::NEEDLE_H,
+            left: 0.0,
+        })
+        .into()
 }
 
 /// The bar's left zone: the now-playing lines, and the **Queue** control
@@ -130,15 +221,74 @@ pub(crate) fn view(player: &PlayerState, queue_open: bool, ink: Ink) -> Element<
 /// text is left free for the one that has no other home. Resolved on purpose
 /// rather than by whichever landed first.
 fn now_playing_block(player: &PlayerState, open: bool) -> Element<'_, Message> {
+    let stamps = player.stamps();
+    // **The two timestamps moved here** (ADR-0017 §1.1), into the same
+    // [`theme::STAMP_W`] slots they held when they flanked a groove — elapsed
+    // right-aligned and total left-aligned, so the pair reads nose to nose with
+    // one gap between them instead of 260 px of bar.
+    //
+    // They are reserved in both senses: the slot is that wide whatever the
+    // digits say, and it is *there* whether or not anything is playing. A
+    // stopped bar keeps the lane, so a track starting moves no title.
+    let elapsed_color = if stamps.as_ref().is_some_and(|stamps| stamps.pending) {
+        theme::active().lamp
+    } else {
+        theme::active().paper_faint
+    };
     row![
         container(now_playing_line(player))
             .width(Length::Fill)
             .clip(true),
+        stamp(
+            stamps.as_ref().map(|stamps| stamps.elapsed.clone()),
+            elapsed_color,
+            alignment::Horizontal::Right,
+        ),
+        stamp(
+            stamps.as_ref().map(|stamps| stamps.total.clone()),
+            theme::active().paper_faint,
+            alignment::Horizontal::Left,
+        ),
         queue_button(player, open),
     ]
     .spacing(theme::GAP_SM)
     .align_y(iced::Alignment::Center)
     .into()
+}
+
+/// One of the two timestamps: a [`theme::STAMP_W`] slot, one line of tabular
+/// figures, and nothing when there is nothing to say.
+///
+/// The digits are tabular — a property of the bundled Sans rather than of a
+/// second face — and the slot is fixed, so they cannot shuffle anything
+/// sideways as they tick or when a track crosses the hour.
+///
+/// It is one line box tall and centred in the row, so its **ink** lands on the
+/// bar's one centre line rather than its block landing anywhere (law L4).
+fn stamp(
+    value: Option<String>,
+    color: Color,
+    align: alignment::Horizontal,
+) -> Element<'static, Message> {
+    let content: Element<'static, Message> = match value {
+        None => Space::new(
+            Length::Fixed(theme::STAMP_W),
+            Length::Fixed(theme::LINE_META),
+        )
+        .into(),
+        Some(value) => text(value)
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(color)
+            .wrapping(text::Wrapping::None)
+            .into(),
+    };
+    container(content)
+        .width(Length::Fixed(theme::STAMP_W))
+        .height(Length::Fixed(theme::LINE_META))
+        .align_x(align)
+        .align_y(alignment::Vertical::Center)
+        .into()
 }
 
 /// The **Queue** control: the word, the count of what it opens onto, and the
@@ -264,6 +414,14 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
     // bar's (law L4). The artist's lane is reserved whether or not the tags
     // carry one, for the same reason the continuation's is: a track without an
     // artist must not shift the two lines around it.
+    //
+    // **And there is no gap between them any more.** 20 + 16 + 20 is exactly
+    // [`theme::BAR_CONTENT_H`] at 56, so the `GAP_XXS` that used to sit between
+    // the lanes has nowhere to go — and it was never buying anything a line box
+    // does not already carry: `LINE_BODY` 20 around a 13 px face is 7 px of
+    // leading, which puts the block's first ink ~3.5 px below the hairline and
+    // its last ~4.5 px above the needle. One fewer user of the lattice's one
+    // named exception (law L2).
     let lines = column![
         container(
             text(now.title.as_str())
@@ -285,8 +443,7 @@ fn now_playing_line(player: &PlayerState) -> Element<'_, Message> {
         })
         .height(Length::Fixed(theme::LINE_META)),
         continuation_lane(player),
-    ]
-    .spacing(theme::GAP_XXS);
+    ];
     lines.into()
 }
 
@@ -358,26 +515,29 @@ fn signal_path(player: &PlayerState) -> Element<'_, Message> {
     .into()
 }
 
-/// The bar's centre: the transport row over the seek row, both centred in a
-/// fixed-width column.
+/// The bar's centre: the transport row, and nothing else.
 ///
-/// When there is nothing to seek — no engine, or nothing playing — the seek
-/// row's space is *reserved* rather than dropped. The transport is the one
-/// thing in this bar that is always in the same place, and a bar that
-/// changed height the moment a track started would undo that.
-fn transport_stack(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
+/// It was a *column* — the three buttons over a seek row, both centred in a
+/// fixed 380 px block (`SEEK_ROW_W`) — because the controls and the
+/// position they acted on read as one thing. The needle took the position to
+/// the window's edge, so what is left is the row, in a
+/// [`theme::TRANSPORT_W`] 112 px column: the block's centre is now the
+/// buttons' own centre by construction rather than by a width they happened to
+/// share with a groove, and the 268 px the column gives up go to the two
+/// flanking zones — the left one being the zone the composition audit found
+/// clipping below ~900 px.
+///
+/// **Previous · Play/Pause · Next stay**, and that is a decision rather than an
+/// omission. ADR-0017 §1.1 refused the critique's hover-reveal-over-the-cover
+/// transport on evidence the critique did not have: our own prior-art study
+/// (R11) found three vendors bought "visual calm" by removing skip and all
+/// three reversed; our own audit found "there is no Previous" the most-missed
+/// control in the app; and glyphs over the playing cover need the playing cover
+/// to be *on screen*, which after a filter or a long scroll it is not.
+/// `docs/REFUSALS.md`'s visible-control rule makes it binding.
+fn transport_row(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
     let pending = player.transport_pending();
     let toggle = player.play_pause();
-    // Previous, play/pause, Next — in that order and symmetric about the
-    // toggle, which is where every listener's hand already expects to find
-    // them. `|◀` was the most-missed control in the app: the engine command
-    // and its restart-versus-step-back rule were both already specified, and
-    // there was no button, no key and no MPRIS flag to reach them by.
-    //
-    // Three fixed [`theme::TRANSPORT_HIT`] squares in a fixed
-    // [`theme::SEEK_ROW_W`] column, so the row gained a control and moved
-    // nothing: the block is still centred on the same pixel, and the seek bar
-    // under it did not shift by one.
     let transport = row![
         glyph_button(
             icon::Glyph::Previous,
@@ -408,27 +568,10 @@ fn transport_stack(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
         ),
     ]
     .spacing(theme::GAP_SM);
-    let seek: Element<'_, Message> = match player.seek_bar() {
-        Some(state) => seek_bar(state),
-        None => Space::new(
-            Length::Fixed(theme::SEEK_ROW_W),
-            Length::Fixed(theme::BAR_LEAD),
-        )
-        .into(),
-    };
-    // **The column is symmetric about the transport row.** `BAR_LEAD` of clear
-    // recess above it, and the same below spent on the gap and the groove — so
-    // the transport's centre *is* the bar's mid-line, in every state and at
-    // every width, rather than sitting 22.5 px above it because the seek row
-    // pushed it there (the audit's defect 2).
-    column![
-        Space::with_height(Length::Fixed(theme::BAR_LEAD)),
-        transport,
-        seek,
-    ]
-    .width(Length::Fixed(theme::SEEK_ROW_W))
-    .align_x(iced::Alignment::Center)
-    .into()
+    container(transport)
+        .width(Length::Fixed(theme::TRANSPORT_W))
+        .align_x(alignment::Horizontal::Center)
+        .into()
 }
 
 /// One icon-only control: a glyph in a fixed square, named by a tooltip.
@@ -505,79 +648,13 @@ fn glyph_button(
         .into()
 }
 
-/// The seek bar: elapsed timestamp, groove, total timestamp — a row that
-/// reads left to right the way the track plays, with a lane above the groove
-/// where the hover preview floats. The timestamps' digits are tabular — a
-/// property of the bundled Sans rather than of a second face — and each sits in
-/// a fixed [`theme::STAMP_W`] slot, so they cannot shuffle the groove sideways
-/// as they tick.
-///
-/// The rail is [`groove::Groove`] rather than iced's `slider`: it reports
-/// pointer *geometry*, which is what the click-vs-scrub threshold, the hover
-/// preview, and the cursor affordance are all built from (that module's docs
-/// carry the evidence for why the built-ins cannot). The volume fader below
-/// is the same widget for the same reasons.
-///
-/// A track whose length was never declared gets the inert groove: the
-/// elapsed time still counts up (that much is known), but there is nothing
-/// to scrub against and the widget says so by refusing the pointer — and by
-/// leaving the cursor alone — rather than by looking identical and doing
-/// nothing.
-fn seek_bar(state: player::SeekBar) -> Element<'static, Message> {
-    let room = theme::active();
-    // While a position is being asked for rather than reported, the elapsed
-    // timestamp warms to lamp amber — the same accent the rest of the room
-    // reserves for playback truth, here saying "this is where you are asking
-    // to be". It cools back to the quiet default the moment the engine
-    // confirms.
-    let elapsed_color = if state.pending {
-        room.lamp
-    } else {
-        room.paper_faint
-    };
-    let rail: Element<'static, Message> = if state.interactive {
-        groove::Groove::new(state.position, room, theme::seek)
-            .width(Length::Fixed(theme::SEEK_W))
-            .height(theme::RAIL_HIT)
-            .on_pointer(
-                Message::SeekPressed,
-                Message::SeekDragged,
-                Message::SeekHovered,
-                Message::SeekReleased,
-                Message::SeekLeft,
-            )
-            .into()
-    } else {
-        groove::Groove::new(state.position, room, theme::seek_inert)
-            .width(Length::Fixed(theme::SEEK_W))
-            .height(theme::RAIL_HIT)
-            .into()
-    };
-    // The groove's whole lane is [`theme::BAR_LEAD`]: `GAP_SM` of clear recess
-    // under the transport, then the hit band. The hover preview is a **layer
-    // over that gap** rather than a row above the groove — it floats in exactly
-    // the pixels it always floated in, and costs the column no height, which is
-    // what lets the transport sit on the bar's centre line at all
-    // ([`theme::PREVIEW_H`]).
-    let groove_column = stack![
-        column![Space::with_height(Length::Fixed(theme::GAP_SM)), rail,],
-        preview_lane(state.preview, theme::SEEK_W, theme::PREVIEW_W),
-    ];
-    row![
-        seek_stamp(state.elapsed, elapsed_color, alignment::Horizontal::Right),
-        groove_column,
-        seek_stamp(state.total, room.paper_faint, alignment::Horizontal::Left),
-    ]
-    .spacing(theme::GAP_SM)
-    .into()
-}
-
 /// The volume control: a mute affordance and a fader, with a lane above the
 /// fader where the level preview floats.
 ///
-/// The fader is the same [`groove::Groove`] as the seek bar — the same
-/// cursor affordance, the same hover preview, the same 4 px click-vs-drag
-/// threshold — plus the one thing a fader needs and a scrub bar does not: a
+/// The fader is [`groove::Groove`], and the needle is built on the same pointer
+/// machinery ([`crate::pointer`]) — the same cursor affordance, the same hover
+/// preview, the same 4 px click-vs-drag threshold, the same "pointer lost ends
+/// the gesture" — plus the one thing a fader needs and a seek line does not: a
 /// **unity detent**, drawn as a small mark above the rail at the top of the
 /// travel. It is faint until the handle is on it and full paper when it is,
 /// which is what makes "at unity" and "a pixel below unity" different on
@@ -618,14 +695,14 @@ fn volume(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
         fader.into()
     };
     row![
-        // **The mute glyph sits on the fader's rail**, and it no longer needs a
-        // lift to get there. The block is symmetric about its own rail — a
-        // preview lane above, an empty lane of the same height below
-        // ([`theme::VOLUME_ROW_H`]) — so centring the block centres the *rail*,
-        // and a centred mute button lands its glyph on the same line. The
-        // `MUTE_TOP` constant that used to buy this by hand is deleted: an
-        // asymmetric block plus a compensating offset is two decisions where a
-        // symmetric block is none.
+        // **The mute glyph sits on the fader's rail**, and it needs no lift to
+        // get there. The block is [`theme::VOLUME_ROW_H`] — one control height
+        // — with the fader's own hit band centred in it, so centring the block
+        // centres the *rail*, and a centred mute button lands its glyph on the
+        // same line. The `MUTE_TOP` constant that used to buy this by hand is
+        // deleted, and so are the two 16 px lanes that bought it structurally
+        // when the bar was 96 px tall: at 56 the block is one square, which is
+        // the same symmetry with two fewer numbers in it.
         glyph_button(
             icon::Glyph::speaker(state.muted),
             state.mute_label,
@@ -635,10 +712,18 @@ fn volume(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
             Control::Mute,
             ink,
         ),
-        column![
-            preview_lane(state.preview, theme::VOLUME_W, theme::LEVEL_W),
-            fader,
-            Space::with_height(Length::Fixed(theme::PREVIEW_H)),
+        // The level preview is a **layer** over the lane the bar already keeps
+        // above the fader ([`theme::BAR_LEAD`] plus the fader's own slop above
+        // its rail), exactly as the seek groove's tip was and the needle's is.
+        // It costs the block no height, which is what lets the block be one
+        // control height at all.
+        stack![
+            container(fader)
+                .height(Length::Fill)
+                .align_y(alignment::Vertical::Center),
+            container(preview_lane(state.preview, theme::VOLUME_W, theme::LEVEL_W))
+                .height(Length::Fill)
+                .align_y(alignment::Vertical::Top),
         ],
     ]
     .spacing(theme::GAP_SM)
@@ -648,42 +733,12 @@ fn volume(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
     .into()
 }
 
-/// One of the seek bar's timestamps, carrying the same preview lane as the
-/// groove above it so that the digits line up with the rail rather than with
-/// the lane-plus-rail block.
-///
-/// The stamp is [`theme::STAMP_W`] wide whatever it says, hugging the groove
-/// it belongs to. Sizing it to its own digits would slide the groove
-/// sideways the moment a track crossed the hour — and, since the whole
-/// centre column is what the transport centres over, would drag the buttons
-/// with it.
-fn seek_stamp(
-    value: String,
-    color: Color,
-    align: alignment::Horizontal,
-) -> Element<'static, Message> {
-    column![
-        Space::with_height(Length::Fixed(theme::GAP_SM)),
-        container(
-            text(value)
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(color)
-                .wrapping(text::Wrapping::None)
-        )
-        .width(Length::Fixed(theme::STAMP_W))
-        .height(Length::Fixed(theme::RAIL_HIT))
-        .align_x(align)
-        .align_y(alignment::Vertical::Center),
-    ]
-    .into()
-}
-
 /// The lane above a groove where its hover preview floats: a fixed-height
 /// strip `width` wide, empty until the pointer rests on the bar, then
 /// carrying a `tip_width` tip centered on the pointer with what a click
-/// there would ask for — a timestamp over the seek bar, a level over the
-/// fader.
+/// there would ask for — a level over the fader. (The needle's own tip is
+/// [`tip_layer`]: same idea, different lane, and a label that can be a record's
+/// name as well as a time.)
 ///
 /// The strip is reserved whether or not anything is hovering, so the bottom
 /// bar never changes height under the pointer; the horizontal placement is
@@ -724,75 +779,119 @@ mod tests {
 
     use baz_core::protocol::Event;
 
-    /// The bar's reserved-slot rule, re-checked for the row that just gained a
-    /// third control.
+    /// The bar's reserved-slot rule, re-checked for a centre column that is
+    /// now the transport row and nothing else.
     ///
-    /// `theme.rs` already pins the pair (`2 × TRANSPORT_HIT + GAP_SM`); this
-    /// is the same claim for the three the transport now draws, asserted here
-    /// rather than there so the module that composes the row owns the check
-    /// for what it composes. The row is what makes the bar's centre column
-    /// stable, and a Previous button that did not fit would push the seek bar
-    /// out from under it.
+    /// `theme.rs` pins the tokens; this is the same claim for the row the view
+    /// composes, asserted here so the module that builds the row owns the check
+    /// for what it builds.
     #[test]
-    fn the_transport_row_still_fits_the_column_it_centres_in() {
-        // Three fixed squares and the two gaps between them.
+    fn the_transport_row_is_the_column_it_used_to_be_centred_in() {
         const TRANSPORT_ROW_W: f32 = 3.0 * theme::TRANSPORT_HIT + 2.0 * theme::GAP_SM;
-        const { assert!(TRANSPORT_ROW_W < theme::SEEK_ROW_W) }
-        // With room left over on *both* sides, or the row would be centred by
-        // its own edges rather than within the column — the seek bar below it
-        // is only `SEEK_W` wide inside the same column, and the two blocks
-        // have to share a centre line.
-        const { assert!(TRANSPORT_ROW_W < theme::SEEK_W) }
-        // And the whole bar still fits the narrowest shipped window beside its
-        // two flanking zones.
-        const { assert!(theme::SEEK_ROW_W + theme::VOLUME_BLOCK_W + theme::SIGNAL_W < 760.0) }
+        // The column *is* the row now — 112 px, where it was a 380 px block
+        // sized for a groove and two timestamps. Equality rather than "fits
+        // inside", because a column wider than its contents centres a block
+        // and a column that is its contents centres the marks (law L4).
+        const { assert!(TRANSPORT_ROW_W == theme::TRANSPORT_W) }
+        // And the bar still fits the narrowest shipped window beside its two
+        // flanking zones, with 268 px more room than it had.
+        const { assert!(theme::TRANSPORT_W + theme::VOLUME_BLOCK_W + theme::SIGNAL_W < 760.0) }
     }
 
-    /// **Law L4 — one centre line per bar**, asserted off the geometry the view
-    /// composes rather than off a screenshot.
+    /// **Law L4 — one centre line per bar**, re-derived at 58 px rather than
+    /// nudged, and asserted off the geometry the view composes rather than off
+    /// a screenshot.
     ///
     /// The audit measured seven mark-lines spanning 787 → 837 in a 102 px band
     /// whose own mid-line at 809.5 carried nothing: the zones were centred as
-    /// *blocks*, and the blocks are different heights. Every claim below is the
-    /// arithmetic that stops that happening again, and each one names the mark
-    /// it is about.
+    /// *blocks*, and the blocks are different heights. Step 10 re-lays the bar
+    /// around the needle's absence of a seek row, so every one of these numbers
+    /// is derived again from the band rather than carried over — and the band
+    /// went from 96 to **56**, which is the change that could most easily have
+    /// put the line back where the audit found it.
+    ///
+    /// Every claim below is the arithmetic that stops that, and each one names
+    /// the mark it is about. The spread is **0**, against the law's ceiling
+    /// of 2.
     #[test]
     fn every_mark_in_the_bar_sits_on_the_bars_one_centre_line() {
-        /// The band's own mid-line.
+        /// The band's own mid-line — 28.
         const MID: f32 = theme::BAR_CONTENT_H / 2.0;
         /// The transport's glyph centres, from the top of the band.
         const TRANSPORT_CENTRE: f32 = theme::BAR_LEAD + theme::TRANSPORT_HIT / 2.0;
-        /// The fader's rail centre, from the top of the volume block.
-        const VOLUME_RAIL_CENTRE: f32 = theme::PREVIEW_H + theme::VOLUME_HIT / 2.0;
-        /// A seek stamp's ink centre, from the top of the seek lane.
-        const STAMP_CENTRE: f32 = theme::GAP_SM + theme::RAIL_HIT / 2.0;
-        /// The groove's rail centre, from the same place.
-        const RAIL_CENTRE: f32 = theme::GAP_SM + theme::RAIL_HIT / 2.0;
+        /// The fader's rail centre, from the top of the volume block, which is
+        /// itself centred in the band.
+        const VOLUME_RAIL_CENTRE: f32 = theme::VOLUME_ROW_H / 2.0;
+        /// The left zone's middle lane — the artist's line box — from the top
+        /// of a zone that fills the band exactly.
+        const ARTIST_CENTRE: f32 = theme::LINE_BODY + theme::LINE_META / 2.0;
+        /// A timestamp's ink centre: one line box, centred in the same band.
+        const STAMP_CENTRE: f32 = MID;
+        /// The left zone's three stacked line boxes.
+        const LEFT_ZONE_H: f32 = theme::LINE_BODY + theme::LINE_META + theme::CONTINUATION_H;
 
-        // The band's mid-line **is** the transport's centre line: the column
-        // reserves `BAR_LEAD` above the transport row and spends `BAR_LEAD`
-        // below it on the gap and the groove.
+        // 1. The band's mid-line **is** the transport's centre line: the band
+        //    reserves `BAR_LEAD` above the row and the same below it, where it
+        //    used to spend that lane on a gap and a groove.
         const { assert!(TRANSPORT_CENTRE == MID) }
-        // The seek row hangs below that line rather than pushing it up, and the
-        // whole of what is below is what is reserved above.
-        const { assert!(theme::BAR_LEAD == theme::GAP_SM + theme::SEEK_ROW_H) }
+        const { assert!(theme::BAR_LEAD == theme::GAP_MD) }
         const { assert!(theme::BAR_CONTENT_H == 2.0 * theme::BAR_LEAD + theme::TRANSPORT_HIT) }
-        // The volume block is symmetric about its own rail, so centring the
-        // block centres the **rail** — the audit's 816 against 809.5.
+        // 2. The volume block is one control height with the fader's hit band
+        //    centred in it, so centring the block centres the **rail** — the
+        //    audit's 816 against 809.5 — and the mute glyph beside it lands on
+        //    the same line without a lift.
         const { assert!(VOLUME_RAIL_CENTRE == theme::VOLUME_ROW_H / 2.0) }
-        // The mute glyph is centred in the same block, so it is on the rail
-        // without a lift — the `MUTE_TOP` constant is deleted, not retuned.
-        const { assert!(theme::VOLUME_ROW_H >= theme::TRANSPORT_HIT) }
-        // The seek stamps hang off the same `GAP_SM` the groove does, so their
-        // ink centres are the groove's rail centre and not the block's.
-        const { assert!(STAMP_CENTRE == RAIL_CENTRE) }
-        // The bar's padding is symmetric, so it moves the band without moving
-        // the line inside it.
-        const { assert!(theme::BAR_BAND_H == theme::BAR_CONTENT_H + 2.0 * theme::BAR_PAD_V) }
-        // Every zone fits inside the band, or the band would not be what sets
-        // the line.
+        const { assert!(theme::VOLUME_ROW_H == theme::TRANSPORT_HIT) }
+        const { assert!(theme::VOLUME_HIT < theme::VOLUME_ROW_H) }
+        // 3. The left zone's three lanes fill the band exactly, so its middle
+        //    lane's centre *is* the band's centre. This is the assertion that
+        //    survived the bar losing 48 px: 20 · 16 · 20 = 56, with the gaps
+        //    between the lanes deleted rather than the lanes.
+        const { assert!(ARTIST_CENTRE == MID) }
+        const { assert!(LEFT_ZONE_H == theme::BAR_CONTENT_H) }
+        const { assert!(theme::CONTINUATION_H == theme::LINE_BODY) }
+        // 4. The two timestamps are one line box centred in the band, so their
+        //    ink is on the line rather than hanging off a groove that no longer
+        //    exists (the audit measured the old pair at 837, 27.5 px low).
+        const { assert!(STAMP_CENTRE == MID) }
+        const { assert!(theme::LINE_META < theme::BAR_CONTENT_H) }
+        // 5. There is no vertical padding left to be asymmetric: the band is
+        //    the whole bar, so the hairline is the only thing above the line's
+        //    own arithmetic and it is 1 px on both readings.
+        const { assert!(theme::BAR_CONTENT_H == 56.0) }
+        // 6. Every zone fits inside the band, or the band would not be what
+        //    sets the line.
         const { assert!(theme::VOLUME_ROW_H <= theme::BAR_CONTENT_H) }
         const { assert!(theme::TRANSPORT_HIT <= theme::BAR_CONTENT_H) }
+    }
+
+    /// **The needle costs the collection 2 px and takes its aim out of the
+    /// bar's own empty lane** — the whole bargain of ADR-0017 §1.1, as
+    /// arithmetic.
+    ///
+    /// The bar gave up 48 px of band and the needle took 2 back, so the wall
+    /// gains **46**. The concession is the other direction: the critique's
+    /// bottom furniture is ~32 px and ours is 59, and the 27 px difference buys
+    /// Previous · Play/Pause · Next a pointer.
+    #[test]
+    fn the_bottom_edge_costs_fifty_nine_pixels_and_the_wall_gets_forty_six_back() {
+        /// The bar as the composition audit measured it: `2 × (GAP_SM + 24) +
+        /// 32` of band, `2 × GAP_XS` of padding, and a hairline.
+        const WAS: f32 = 2.0 * (theme::GAP_SM + 24.0) + theme::TRANSPORT_HIT + 2.0 * 4.0 + 1.0;
+        /// What the window's bottom edge costs now.
+        const NOW: f32 = theme::BAR_CONTENT_H + 1.0 + theme::NEEDLE_H;
+
+        const { assert!(WAS == 105.0) }
+        const { assert!(NOW == 59.0) }
+        const { assert!(WAS - NOW == 46.0) }
+        // The critique's number, and the price of keeping skip reachable.
+        const { assert!(NOW - 32.0 == 27.0) }
+        // At 1280 × 860 the collection's share goes from 81.6 % to 86.9 %.
+        const { assert!(NOW < 0.07 * 860.0) }
+        // And the needle's aiming band is entirely inside the bar's bottom
+        // lane, which is empty recess — so claiming height out of layout can
+        // never take a press meant for a control.
+        const { assert!(theme::NEEDLE_HIT <= theme::BAR_LEAD) }
     }
 
     /// Every glyph the transport row can draw is the same sprite square in the
@@ -823,73 +922,77 @@ mod tests {
         );
     }
 
-    /// **The bar reserves every slot it can be in** — re-checked for the zone
-    /// that just gained an ambient line.
+    /// **The bar reserves every slot it can be in** — re-checked for a left
+    /// zone that just gained the two timestamps.
     ///
     /// One of the four properties `docs/design/01-ux-audit-and-ia.md` §5 says
-    /// must not regress. The left zone carries a labelled control with a readout
-    /// that comes and goes with the queue, and now a continuation line that
-    /// comes and goes with the *position in* the queue — it is drawn for every
-    /// track but the last. All of them are reservations rather than additions:
-    /// the control is [`theme::UP_NEXT_W`] and the readout inside it
-    /// [`theme::POSITION_W`], the continuation's lane is
+    /// must not regress. The zone carries a labelled control with a readout that
+    /// comes and goes with the queue, a continuation line that comes and goes
+    /// with the *position in* the queue, and now an elapsed and a total that
+    /// come and go with playback itself. All of them are reservations rather
+    /// than additions: the control is [`theme::UP_NEXT_W`] and the readout
+    /// inside it [`theme::POSITION_W`], each stamp is [`theme::STAMP_W`] whether
+    /// or not there is a figure in it, the continuation's lane is
     /// [`theme::CONTINUATION_H`] tall whether it says anything or not, and the
-    /// control's border is present in every state — so the bar carries a route
-    /// to a whole new surface *and* a running commentary on what follows, and
-    /// still cannot move.
+    /// control's border is present in every state.
     #[test]
-    fn the_left_zone_reserves_the_continuation_and_the_count_in_every_state() {
-        use baz_core::protocol::Event;
-
-        // The zone's own budget at the shipped window: the readout, the gap to
-        // it, and the button's horizontal padding all come out of the fill
-        // zone, and what is left has to be a real title lane — wide enough for
-        // the continuation line as well as the title, since they share it.
-        // (The *narrow* window is a different question, and a known one — §1.5
-        // of the audit caught the left zone wrapping below ~900 px, and the fix
-        // is a maximum width on the zone, which is step 10 of the plan. Nothing
-        // here makes that worse: the continuation adds no width, it is clipped
-        // by the same zone, and it never wraps.)
+    fn the_left_zone_reserves_the_stamps_the_continuation_and_the_count() {
+        // The zone's own budget at the shipped window: the two stamps, the
+        // readout, the gaps between them and the button's horizontal padding
+        // all come out of the fill zone, and what is left has to be a real
+        // title lane — wide enough for the continuation line as well as the
+        // title, since they share it.
+        //
+        // **The centre column gave 268 px back** when the seek row went, and
+        // this is where they went: the title lane roughly doubles even after
+        // the two stamps move in, which is the audit's §1.5 finding (the left
+        // zone wrapping below ~900 px) addressed by arithmetic rather than by a
+        // maximum width.
         const SHIPPED: f32 = 1280.0;
         const ZONE: f32 = SHIPPED
             - 2.0 * theme::HANG // the bar's own padding: the one window gutter
             - 2.0 * theme::GAP_LG // the gaps between its three zones
-            - theme::SEEK_ROW_W
+            - theme::TRANSPORT_W
             - theme::SIGNAL_W
             - theme::GAP_SM
             - theme::VOLUME_BLOCK_W;
-        const TITLE_LANE: f32 = ZONE - theme::UP_NEXT_W - theme::GAP_SM;
-        // The zone is also shorter than the bar's content band *with the third
-        // line in it*, so neither the control's padding nor the continuation can
-        // be what sets the bar's height. This is the assertion the ambient line
-        // had to survive: it is the only reason a line appearing under the
-        // artist does not push the transport down.
-        const LEFT_H: f32 = theme::LINE_BODY
-            + theme::GAP_XXS
-            + theme::LINE_META
-            + theme::GAP_XXS
-            + theme::CONTINUATION_H;
+        const TITLE_LANE: f32 =
+            ZONE - theme::UP_NEXT_W - 2.0 * theme::STAMP_W - 3.0 * theme::GAP_SM;
+        /// The zone's whole height: three stacked line boxes, every one of them
+        /// reserved, so this is its height in every state rather than its
+        /// tallest.
+        const LEFT_H: f32 = theme::LINE_BODY + theme::LINE_META + theme::CONTINUATION_H;
+
         const { assert!(TITLE_LANE > 200.0) }
-        const { assert!(LEFT_H < theme::BAR_CONTENT_H) }
-        // The continuation is what grew the zone, so state what it cost: the
-        // whole line, and the bar still has a gap of headroom over it.
-        const { assert!(LEFT_H - theme::CONTINUATION_H - theme::GAP_XXS < theme::BAR_CONTENT_H) }
-        const { assert!(LEFT_H + theme::GAP_MD < theme::BAR_CONTENT_H) }
-        // **The stack is symmetric about its middle lane** (law L4): the title's
-        // lane and the continuation's are the same height, so the artist's line
-        // box is the block's exact centre and centring the block puts the zone's
-        // own line on the bar's. Without this the middle line sits 2 px low and
-        // the whole zone reads as one notch off.
+        // The zone is exactly the bar's content band *with the third line in
+        // it*, so neither the control's padding nor the continuation nor a
+        // stamp can be what sets the bar's height, and the zone's middle lane
+        // is the bar's centre line (law L4).
+        const { assert!(LEFT_H == theme::BAR_CONTENT_H) }
+        // **The stack is symmetric about its middle lane**: the title's lane
+        // and the continuation's are the same height, so the artist's line box
+        // is the block's exact centre. Without this the middle line sits low
+        // and the whole zone reads as one notch off.
         const { assert!(theme::CONTINUATION_H == theme::LINE_BODY) }
         // The lane still holds the line it is reserved for, with air to spare —
         // it is one line of caption type, and nothing here may wrap.
         const { assert!(theme::CONTINUATION_H >= theme::LINE_CAPTION) }
+        // A stamp is one line box, so it centres on the band's line rather than
+        // hanging below it the way it did beside the groove.
+        const { assert!(theme::STAMP_W > 0.0 && theme::LINE_META <= theme::BAR_CONTENT_H) }
 
         let mut player = PlayerState::new(Availability::Ready);
         // Nothing queued and nothing playing: neither the count nor the
-        // continuation says anything, and both slots are still there.
+        // continuation nor a stamp says anything, and every slot is still there.
         assert_eq!(player.queue_size_note(), None);
         assert_eq!(player.continuation_note(), None);
+        assert_eq!(player.stamps(), None);
+        // And the needle draws its track with no fill and refuses the pointer,
+        // rather than vanishing and taking 2 px of wall with it.
+        let line = player.needle_bar();
+        assert!(line.entries.is_empty());
+        assert_eq!(line.playing, None);
+        assert!(!line.interactive);
 
         player.apply(
             &Event::TrackStarted {
@@ -898,11 +1001,14 @@ mod tests {
             },
             &[],
         );
-        // Without a recorded queue there is still nothing to count and nothing
-        // to say follows; the front end never invents either (see `player.rs`'s
-        // honesty rule).
+        // Without a recorded queue there is still nothing to count, nothing to
+        // say follows, and no segment to point at — the front end never invents
+        // any of them (see `player.rs`'s honesty rule). The stamps do appear,
+        // because an elapsed time is a fact the engine reported.
         assert_eq!(player.queue_size_note(), None);
         assert_eq!(player.continuation_note(), None);
+        assert!(player.stamps().is_some());
+        assert!(!player.needle_bar().interactive);
     }
 
     /// Previous is offered exactly when it can act, and its enabled-ness is a

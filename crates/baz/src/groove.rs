@@ -1,7 +1,7 @@
 //! The groove: a horizontal rail with a handle, as a custom iced widget.
 //!
-//! Two of the bottom bar's controls are grooves — the seek bar and the volume
-//! fader — and they are the *same* widget deliberately. Everything that made
+//! Two of the bottom bar's controls were grooves — the seek bar and the volume
+//! fader — and they were the *same* widget deliberately. Everything that made
 //! the seek bar worth writing by hand (a cursor that says "clickable", a
 //! hover position to preview from, a press-to-release movement threshold, and
 //! tracking a held pointer wherever it wanders) is exactly what a volume
@@ -9,6 +9,17 @@
 //! to be forgotten. The only thing the fader adds is an optional
 //! [`Detent`] — a mark on the travel, drawn where it can be seen rather than
 //! where the handle will cover it.
+//!
+//! # The seek bar left, and the lessons did not
+//!
+//! ADR-0017 §1.1 deleted the seek row and gave its whole job to
+//! [`crate::needle`], so this widget draws **one** control now. That would
+//! have made "the same widget deliberately" an argument about a thing that no
+//! longer exists — so the sharing moved down a level rather than out: every
+//! pointer rule below is now [`crate::pointer`]'s, the needle is built on the
+//! same module, and what is left here is the *drawing* of a rail, a handle and
+//! a detent. The section titles that follow are kept because the evidence in
+//! them is the evidence for that module, and this is where it was gathered.
 //!
 //! This is view-layer code (ADR-0006 layer 3) and holds **no** playback
 //! state: it measures the pointer against its own bounds and reports what it
@@ -93,7 +104,7 @@
 //! Since no event says "your grab was broken", the widget ends the gesture
 //! on the events that say the pointer is no longer demonstrably ours:
 //!
-//! - [`mouse::Event::CursorLeft`] — it left the window. On Wayland this
+//! - [`iced::mouse::Event::CursorLeft`] — it left the window. On Wayland this
 //!   cannot happen mid-press unless the grab is already gone, so it is
 //!   exactly the signal wanted. On X11 it also fires on an ordinary drag
 //!   past the window edge, and ending there is a deliberate, stated price:
@@ -106,7 +117,7 @@
 //!   rejected: in the owner's report the groove *was* still receiving motion
 //!   while the pointer was elsewhere, so a rule that lets motion resurrect
 //!   the gesture would not have fixed the thing that went wrong.
-//! - [`window::Event::Unfocused`] — another window took focus mid-drag,
+//! - [`iced::window::Event::Unfocused`] — another window took focus mid-drag,
 //!   which is the common real path (click something else while holding the
 //!   fader) and the one that costs the pointer *without* necessarily moving
 //!   it off our surface. It too can fire while a grab is still alive —
@@ -117,7 +128,7 @@
 //!
 //! Touch needs no third case: a finger that leaves the surface is
 //! *cancelled* rather than dropped, and `winit` reports the cancellation as
-//! [`touch::Event::FingerLost`], which is already handled beside
+//! [`iced::touch::Event::FingerLost`], which is already handled beside
 //! `FingerLifted` as an ordinary release. `Unfocused` covers the touch
 //! equivalent of the focus steal for free, since the arm is shared.
 //!
@@ -167,11 +178,10 @@ use iced::advanced::renderer;
 use iced::advanced::widget::{Tree, tree};
 use iced::advanced::{Clipboard, Shell, Widget};
 use iced::widget::slider::{HandleShape, Style};
-use iced::{
-    Border, Element, Event, Length, Point, Rectangle, Size, Theme, event, mouse, touch, window,
-};
+use iced::{Border, Element, Event, Length, Rectangle, Size, Theme, event, mouse};
 
 use crate::player::Pointer;
+use crate::pointer::{self, Pointers, State};
 use crate::theme;
 
 /// How the groove is painted in each of its states. The same shape iced's
@@ -199,17 +209,6 @@ pub struct Detent {
     pub engaged: bool,
 }
 
-/// The pointer handlers a live groove reports through. Absent on an inert
-/// one (a track of undeclared length), which is how the widget knows to
-/// ignore the pointer entirely rather than to look identical and do nothing.
-struct Pointers<'a, Message> {
-    press: Box<dyn Fn(Pointer) -> Message + 'a>,
-    drag: Box<dyn Fn(Pointer) -> Message + 'a>,
-    hover: Box<dyn Fn(Pointer) -> Message + 'a>,
-    release: Message,
-    exit: Message,
-}
-
 /// A horizontal groove with a handle at `position`, reporting raw pointer
 /// geometry.
 pub struct Groove<'a, Message> {
@@ -222,23 +221,6 @@ pub struct Groove<'a, Message> {
     style: StyleFn,
     detent: Option<Detent>,
     pointers: Option<Pointers<'a, Message>>,
-}
-
-/// The widget's own transient input state — not playback state.
-#[derive(Default)]
-struct State {
-    /// The pointer went down on the groove and has not come up yet. While
-    /// this is set the widget tracks the pointer wherever it goes, which is
-    /// what makes a scrub off the end of the bar (and the release that ends
-    /// it) work at all.
-    ///
-    /// "Has not come up yet" is only knowable while the pointer is still
-    /// ours, so this is also cleared by every event that says it is not —
-    /// see the module's "Losing the pointer".
-    held: bool,
-    /// The pointer is resting on the groove, so a departure is worth
-    /// reporting.
-    hovered: bool,
 }
 
 impl<'a, Message> Groove<'a, Message> {
@@ -291,49 +273,8 @@ impl<'a, Message> Groove<'a, Message> {
         release: Message,
         exit: Message,
     ) -> Self {
-        self.pointers = Some(Pointers {
-            press: Box::new(press),
-            drag: Box::new(drag),
-            hover: Box::new(hover),
-            release,
-            exit,
-        });
+        self.pointers = Some(Pointers::new(press, drag, hover, release, exit));
         self
-    }
-}
-
-/// Where `position` falls on `bounds`, in the bar's own coordinates. `x` may
-/// land outside `0..=width`; clamping is the state machine's job, and it is
-/// tested there.
-fn measure(position: Point, bounds: Rectangle) -> Pointer {
-    Pointer::new(position.x - bounds.x, bounds.width)
-}
-
-/// End whatever the pointer was doing, because the widget can no longer be
-/// sure it still has it (module docs: "Losing the pointer").
-///
-/// A held groove publishes its ordinary `release` — the gesture *commits* at
-/// the last position it saw, it is not rolled back — which is also what
-/// keeps [`crate::player`] from being left mid-drag, holding a pending
-/// position and ignoring the engine's `Progress` forever. A hover publishes
-/// its ordinary `exit`, and a held groove publishes that too: the pointer
-/// that left is not resting on the bar, and the preview must not outlive it.
-///
-/// Both flags are cleared unconditionally, so this cannot itself strand
-/// either one, and it is idempotent — a second loss event before the pointer
-/// comes back publishes nothing.
-fn lost_pointer<Message: Clone>(
-    state: &mut State,
-    pointers: &Pointers<'_, Message>,
-    shell: &mut Shell<'_, Message>,
-) {
-    let held = std::mem::take(&mut state.held);
-    let hovered = std::mem::take(&mut state.hovered);
-    if held {
-        shell.publish(pointers.release.clone());
-    }
-    if held || hovered {
-        shell.publish(pointers.exit.clone());
     }
 }
 
@@ -374,63 +315,20 @@ where
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
     ) -> event::Status {
-        let Some(pointers) = self.pointers.as_ref() else {
-            return event::Status::Ignored;
-        };
+        // A groove's hit band **is** its layout box: it reserves
+        // [`theme::RAIL_HIT`] of height and draws a 4 px rail centred in it,
+        // so the pointer aims at the whole reservation. (The needle cannot do
+        // that and claims its band upward instead — [`crate::pointer`].)
         let bounds = layout.bounds();
-        let state = tree.state.downcast_mut::<State>();
-
-        match event {
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
-            | Event::Touch(touch::Event::FingerPressed { .. }) => {
-                if let Some(position) = cursor.position_over(bounds) {
-                    state.held = true;
-                    shell.publish((pointers.press)(measure(position, bounds)));
-                    return event::Status::Captured;
-                }
-            }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
-            | Event::Touch(touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. }) => {
-                if state.held {
-                    state.held = false;
-                    // The button may well have come up somewhere else
-                    // entirely: re-read where the pointer actually is so the
-                    // next move reports the right thing.
-                    state.hovered = cursor.is_over(bounds);
-                    shell.publish(pointers.release.clone());
-                    return event::Status::Captured;
-                }
-            }
-            Event::Mouse(mouse::Event::CursorMoved { .. })
-            | Event::Touch(touch::Event::FingerMoved { .. }) => {
-                let Some(position) = cursor.position() else {
-                    return event::Status::Ignored;
-                };
-                if state.held {
-                    // Captured: a held groove owns the pointer until it is
-                    // released, wherever the pointer wanders.
-                    shell.publish((pointers.drag)(measure(position, bounds)));
-                    return event::Status::Captured;
-                }
-                if cursor.is_over(bounds) {
-                    state.hovered = true;
-                    shell.publish((pointers.hover)(measure(position, bounds)));
-                } else if state.hovered {
-                    state.hovered = false;
-                    shell.publish(pointers.exit.clone());
-                }
-                // Hovering is not an interaction: the event is left for
-                // whatever else wants it.
-            }
-            // The pointer is no longer ours: whatever it was doing has to
-            // end here, because the event that would normally end it is
-            // being delivered to somebody else (module docs).
-            Event::Mouse(mouse::Event::CursorLeft) | Event::Window(window::Event::Unfocused) => {
-                lost_pointer(state, pointers, shell);
-            }
-            _ => {}
-        }
-        event::Status::Ignored
+        pointer::handle(
+            tree.state.downcast_mut::<State>(),
+            self.pointers.as_ref(),
+            &event,
+            bounds,
+            bounds,
+            cursor,
+            shell,
+        )
     }
 
     fn mouse_interaction(
@@ -441,17 +339,12 @@ where
         _viewport: &Rectangle,
         _renderer: &Renderer,
     ) -> mouse::Interaction {
-        let state = tree.state.downcast_ref::<State>();
-        if self.pointers.is_none() {
-            return theme::GROOVE_CURSOR_INERT;
-        }
-        if state.held {
-            theme::GROOVE_CURSOR_HELD
-        } else if cursor.is_over(layout.bounds()) {
-            theme::GROOVE_CURSOR
-        } else {
-            theme::GROOVE_CURSOR_INERT
-        }
+        pointer::interaction(
+            tree.state.downcast_ref::<State>(),
+            self.pointers.is_some(),
+            layout.bounds(),
+            cursor,
+        )
     }
 
     fn draw(
@@ -466,13 +359,7 @@ where
     ) {
         let state = tree.state.downcast_ref::<State>();
         let bounds = layout.bounds();
-        let status = if state.held {
-            iced::widget::slider::Status::Dragged
-        } else if self.pointers.is_some() && cursor.is_over(bounds) {
-            iced::widget::slider::Status::Hovered
-        } else {
-            iced::widget::slider::Status::Active
-        };
+        let status = pointer::status(state, self.pointers.is_some(), bounds, cursor);
         let style = (self.style)(self.palette, status);
 
         let (handle_width, handle_height, handle_radius) = match style.handle.shape {
@@ -567,7 +454,7 @@ where
 #[cfg(test)]
 mod tests {
     use iced::advanced::clipboard;
-    use iced::{Background, Transformation};
+    use iced::{Background, Point, Transformation, touch, window};
 
     use super::*;
 
@@ -648,18 +535,10 @@ mod tests {
             }
         }
 
-        /// The seek bar, wired up.
-        fn seek() -> Self {
-            Self::new(
-                Groove::new(0.25, &theme::CLOSING_TIME, theme::seek)
-                    .width(Length::Fixed(WIDTH))
-                    .height(HEIGHT)
-                    .on_pointer(Msg::Press, Msg::Drag, Msg::Hover, Msg::Release, Msg::Exit),
-            )
-        }
-
-        /// The volume fader, wired up — the same widget with the one thing
-        /// the fader adds, so "both bars" is a claim these tests can make.
+        /// The volume fader, wired up — the one groove the bar still draws,
+        /// with the one thing a fader adds. The pointer rules it exercises are
+        /// [`crate::pointer`]'s and [`crate::needle`] asserts the same ones
+        /// through the other widget built on them.
         fn fader() -> Self {
             Self::new(
                 Groove::new(0.8, &theme::CLOSING_TIME, theme::volume)
@@ -676,7 +555,7 @@ mod tests {
         /// A groove of undeclared length: no handlers, so no pointer.
         fn inert() -> Self {
             Self::new(
-                Groove::new(0.25, &theme::CLOSING_TIME, theme::seek_inert)
+                Groove::new(0.25, &theme::CLOSING_TIME, theme::volume_inert)
                     .width(Length::Fixed(WIDTH))
                     .height(HEIGHT),
             )
@@ -741,7 +620,7 @@ mod tests {
     /// hover that follows — all inside the window.
     #[test]
     fn an_ordinary_drag_released_inside_the_window_is_unchanged() {
-        let mut bar = Bar::seek();
+        let mut bar = Bar::fader();
         assert_eq!(bar.press(on_bar(10.0)), vec![Msg::Press(at(10.0))]);
         assert_eq!(bar.moved(on_bar(60.0)), vec![Msg::Drag(at(60.0))]);
         // A held groove still owns the pointer past either end of the bar.
@@ -757,7 +636,7 @@ mod tests {
     /// every later move has to be nothing but a move.
     #[test]
     fn a_drag_that_leaves_the_window_ends_there_and_scrubs_nothing_after() {
-        let mut bar = Bar::seek();
+        let mut bar = Bar::fader();
         bar.press(on_bar(10.0));
         assert_eq!(bar.moved(on_bar(60.0)), vec![Msg::Drag(at(60.0))]);
 
@@ -775,18 +654,18 @@ mod tests {
     /// takes the focus — and with it the release.
     #[test]
     fn a_drag_interrupted_by_the_window_losing_focus_ends_the_same_way() {
-        let mut bar = Bar::seek();
+        let mut bar = Bar::fader();
         bar.press(on_bar(10.0));
         bar.moved(on_bar(60.0));
         assert_eq!(bar.unfocused(on_bar(60.0)).1, vec![Msg::Release, Msg::Exit]);
         assert_eq!(bar.moved(on_bar(200.0)), vec![Msg::Hover(at(200.0))]);
     }
 
-    /// The fader is the same widget, and it must answer the same way — it
-    /// is the control where a stuck drag is worst, because every step of it
-    /// commits.
+    /// Both ways of losing the pointer, on the control where a stuck drag is
+    /// worst — every step of a fader drag commits, so a fader welded to the
+    /// pointer drags the listener's volume around the screen.
     #[test]
-    fn the_fader_loses_the_pointer_exactly_as_the_seek_bar_does() {
+    fn the_fader_loses_the_pointer_either_way_it_can_be_lost() {
         let losses: [Loss; 2] = [Bar::cursor_left, |bar| bar.unfocused(on_bar(60.0))];
         for lose in losses {
             let mut bar = Bar::fader();
@@ -804,7 +683,7 @@ mod tests {
         let id = touch::Finger(1);
         let position = Point::new(ORIGIN.x + 60.0, ORIGIN.y + HEIGHT / 2.0);
 
-        let mut bar = Bar::seek();
+        let mut bar = Bar::fader();
         bar.feed(
             Event::Touch(touch::Event::FingerPressed { id, position }),
             on_bar(10.0),
@@ -819,7 +698,7 @@ mod tests {
             "a cancelled finger is an ordinary release"
         );
 
-        let mut bar = Bar::seek();
+        let mut bar = Bar::fader();
         bar.feed(
             Event::Touch(touch::Event::FingerPressed { id, position }),
             on_bar(10.0),
@@ -831,7 +710,7 @@ mod tests {
     /// ended a drag, it did not disable the control.
     #[test]
     fn a_press_after_the_pointer_comes_back_starts_a_fresh_drag() {
-        let mut bar = Bar::seek();
+        let mut bar = Bar::fader();
         bar.press(on_bar(10.0));
         bar.moved(on_bar(60.0));
         bar.cursor_left();
@@ -845,7 +724,7 @@ mod tests {
     /// hover is off, so a move that never touches the bar says nothing.
     #[test]
     fn losing_the_pointer_cannot_strand_the_hover() {
-        let mut bar = Bar::seek();
+        let mut bar = Bar::fader();
         bar.press(on_bar(10.0));
         bar.cursor_left();
         assert_eq!(
@@ -862,7 +741,7 @@ mod tests {
     /// once, and only when there was a hover to retire.
     #[test]
     fn losing_the_pointer_while_merely_hovering_exits_exactly_once() {
-        let mut bar = Bar::seek();
+        let mut bar = Bar::fader();
         assert_eq!(bar.moved(on_bar(60.0)), vec![Msg::Hover(at(60.0))]);
         assert_eq!(bar.cursor_left().1, vec![Msg::Exit]);
         assert_eq!(bar.cursor_left().1, vec![], "idempotent");
@@ -874,12 +753,12 @@ mod tests {
     /// focus — have to hear it.
     #[test]
     fn losing_the_pointer_is_never_captured() {
-        let mut bar = Bar::seek();
+        let mut bar = Bar::fader();
         bar.press(on_bar(10.0));
         bar.moved(on_bar(60.0));
         assert_eq!(bar.cursor_left().0, event::Status::Ignored);
 
-        let mut bar = Bar::seek();
+        let mut bar = Bar::fader();
         bar.press(on_bar(10.0));
         assert_eq!(bar.unfocused(on_bar(10.0)).0, event::Status::Ignored);
     }
