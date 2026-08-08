@@ -123,11 +123,12 @@ use symphonia::core::codecs::{Decoder, DecoderOptions};
 use symphonia::core::errors::{Error as SymphoniaError, SeekErrorKind};
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
 use symphonia::core::io::{MediaSource, MediaSourceStream, MediaSourceStreamOptions};
-use symphonia::core::meta::MetadataOptions;
+use symphonia::core::meta::{MetadataOptions, MetadataRevision};
 use symphonia::core::probe::Hint;
 use symphonia::core::units::Time;
 
 use super::{CHANNELS, PlaybackError};
+use crate::replaygain::{ReplayGainReader, ReplayGainTags, field_of_key};
 
 /// A fully decoded track: interleaved stereo f32 samples plus its native
 /// sample rate. Produced by [`AudioSource::decode_all`], consumed by the
@@ -142,6 +143,11 @@ pub struct DecodedAudio {
     /// ([`AudioSource::bits_per_sample`]). Carried for the signal-path
     /// readout; the samples themselves are f32 either way.
     pub bits_per_sample: Option<u32>,
+    /// The ReplayGain figures the file's tags declared
+    /// ([`AudioSource::replay_gain`]). Carried so the engine can apply the
+    /// right gain from this track's very first delivered sample; the samples
+    /// here are unscaled either way.
+    pub replay_gain: ReplayGainTags,
 }
 
 impl DecodedAudio {
@@ -195,6 +201,9 @@ pub struct AudioSource {
     /// Bit depth the container declares, when it declares one. Reported, never
     /// acted on: decoding is to f32 regardless (see [`Self::bits_per_sample`]).
     bits_per_sample: Option<u32>,
+    /// ReplayGain as the file's tags declare it, read once at open from the
+    /// metadata the probe already parsed (see [`Self::replay_gain`]).
+    replay_gain: ReplayGainTags,
 }
 
 impl AudioSource {
@@ -245,13 +254,29 @@ impl AudioSource {
             enable_gapless: true,
             ..FormatOptions::default()
         };
-        let probed = symphonia::default::get_probe().format(
+        let mut probed = symphonia::default::get_probe().format(
             hint,
             mss,
             &format_opts,
             &MetadataOptions::default(),
         )?;
-        let format = probed.format;
+        // ReplayGain, from the metadata the probe has already parsed — no
+        // extra open, no extra read, no second tag library. Two sources,
+        // because containers put tags in two places: `probed.metadata` holds
+        // what sat *outside* the container (an ID3v2 block ahead of an MP3 or
+        // a FLAC stream), and `format.metadata()` holds the container's own
+        // (Vorbis comments, MP4 atoms).
+        let mut replay_gain = ReplayGainReader::default();
+        if let Some(mut outside) = probed.metadata.get()
+            && let Some(revision) = outside.skip_to_latest()
+        {
+            absorb_replay_gain(&mut replay_gain, revision);
+        }
+        let mut format = probed.format;
+        if let Some(revision) = format.metadata().skip_to_latest() {
+            absorb_replay_gain(&mut replay_gain, revision);
+        }
+        let replay_gain = replay_gain.finish();
         // Pick the track to play. Symphonia's `default_track` is the
         // container's first, which is right for every single-stream audio
         // file — but an MP4 lists *all* its tracks and a `.mp4` puts the
@@ -305,6 +330,7 @@ impl AudioSource {
             emit_cap,
             skip_frames: 0,
             bits_per_sample,
+            replay_gain,
         };
         let channels = if let Some(n) = declared_channels {
             n
@@ -389,6 +415,20 @@ impl AudioSource {
     #[must_use]
     pub fn bits_per_sample(&self) -> Option<u32> {
         self.bits_per_sample
+    }
+
+    /// The ReplayGain figures this file's tags declare, all `None` when it
+    /// carries none (ADR-0013).
+    ///
+    /// Read at open from the metadata the probe already parsed, so it costs no
+    /// I/O beyond the header read that was happening anyway — which is what
+    /// makes it affordable on the decode path, and why the engine reads
+    /// ReplayGain from the file it is about to play rather than from the
+    /// library index. A queue of paths is all the engine is ever given, and a
+    /// path that was never scanned still has to play at the right level.
+    #[must_use]
+    pub fn replay_gain(&self) -> ReplayGainTags {
+        self.replay_gain
     }
 
     /// Total frames the container declares for this stream, post gapless
@@ -611,7 +651,24 @@ impl AudioSource {
             samples,
             sample_rate: src.sample_rate,
             bits_per_sample: src.bits_per_sample,
+            replay_gain: src.replay_gain,
         })
+    }
+}
+
+/// Feed one metadata revision's tags to a [`ReplayGainReader`].
+///
+/// The key filter runs first so a value string is only built for the handful
+/// of tags that are ReplayGain — a well-tagged file carries dozens, and
+/// `Value`'s `Display` allocates. Raw keys are passed through untouched:
+/// deciding what `----:com.apple.iTunes:replaygain_track_gain` means is
+/// [`field_of_key`]'s job and is shared with the library scanner, so a file
+/// cannot mean one thing to the shelf and another to the engine.
+fn absorb_replay_gain(reader: &mut ReplayGainReader, revision: &MetadataRevision) {
+    for tag in revision.tags() {
+        if field_of_key(&tag.key).is_some() {
+            reader.absorb(&tag.key, &tag.value.to_string());
+        }
     }
 }
 

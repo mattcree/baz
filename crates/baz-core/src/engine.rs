@@ -156,6 +156,7 @@
 //! | [`Command::Previous`] | no-op | restarts the current track past [`PREVIOUS_RESTART_MS`], else steps back one position | same, and *resumes playing* |
 //! | [`Command::Seek`] | no-op | jumps within the current track, keeps playing | jumps within the current track, **stays paused** |
 //! | [`Command::SetVolume`] / [`Command::SetMute`] | applies, silently | applies within one pump iteration, slewed | applies, silently |
+//! | [`Command::SetReplayGain`] | applies, silently | applies within one pump iteration, slewed | applies, silently |
 //!
 //! # Volume
 //!
@@ -203,6 +204,53 @@
 //! does (ADR-0012). Unity is still reported as [`VolumePath::Unity`] even
 //! then: with nothing to attenuate, "no gain stage anywhere" is the more
 //! precise of the two true statements.
+//!
+//! # ReplayGain
+//!
+//! ADR-0013 is the governing decision; [`crate::replaygain`] holds the units,
+//! the tag parser and the selection rule. What belongs *here* is where the
+//! number comes from, when it changes, and what it shares.
+//!
+//! **It shares the volume's gain stage entirely.** The resolved ReplayGain is
+//! multiplied by the volume where the volume itself is settled, and the *product* is
+//! published as the one gain the pump reads. There is no second multiply, no
+//! second fader and no second slew: at unity-times-unity the pump takes the
+//! transparent branch exactly as before, and at anything else it takes the same
+//! single-multiply branch it already had. That is also why the fidelity readout
+//! did not need a sibling — [`VolumePath`] describes the stage, and the stage is
+//! where ReplayGain lands.
+//!
+//! **Where the tags come from.** The engine is given *paths*, never library
+//! rows, so it reads ReplayGain from the file it is about to play:
+//! [`AudioSource`] lifts it out of the metadata Symphonia already parsed during
+//! the header probe, at no extra I/O, and it travels to the engine thread on
+//! the same `TrackBound` that already carries the track's rate and depth. A
+//! queue of paths the library has never seen therefore plays at the right level,
+//! and the shelf and the engine cannot disagree about a file because they run
+//! the same parser over the same keys ([`crate::replaygain::field_of_key`]).
+//!
+//! **When it changes: exactly at the boundary.** ReplayGain is per *track*,
+//! and the engine can only change a gain between pump calls — so the pump
+//! caps each read at the next known track boundary. The first sample of a new
+//! track is therefore the first sample at its own gain, rather than up to a
+//! block (46 ms at the app's chunk size) late. The change is then slewed like
+//! any other, over [`RAMP_MS`](crate::volume::RAMP_MS), so a gapless splice
+//! carries a 20 ms ramp rather than a step discontinuity. In **album** mode
+//! across an album there is nothing to ramp: every track shares one album gain,
+//! so the gain does not change at the boundary at all.
+//!
+//! **What it survives.** The settings are engine state, exactly as the volume
+//! is: pause, resume, seek, skip, queue replacement and a rate reopen all leave
+//! them untouched. The *resolved* figure is per track and is recomputed
+//! whenever the delivering track changes, or the settings do.
+//!
+//! **Reporting.** [`Event::ReplayGainChanged`] carries the settings and the
+//! resolved figure; it deliberately carries no fidelity flag, because
+//! [`Event::VolumeChanged`]'s [`VolumePath`] already answers for the whole
+//! stage. Engaging a non-unity ReplayGain therefore emits a `VolumeChanged`
+//! whose `path` is [`VolumePath::SoftwareGain`] even though the volume did not
+//! move — which is the truth, and the same neutral information ADR-0009 §5 asks
+//! for rather than a warning.
 //!
 //! # Event semantics
 //!
@@ -364,6 +412,9 @@ use crate::playback::{
     Sink,
 };
 use crate::protocol::{Command, ConversionReason, Event, SignalChain, VolumePath};
+use crate::replaygain::{
+    ReplayGainDecision, ReplayGainSettings, ReplayGainState, ReplayGainTags, SharedReplayGain,
+};
 use crate::volume::{Fader, SharedVolume, Volume, VolumeState};
 
 /// Sleep per engine-loop iteration while paused: long enough to idle
@@ -430,6 +481,7 @@ pub struct EngineHandle {
     delivered: Arc<AtomicUsize>,
     instruments: Arc<Instruments>,
     volume: Arc<SharedVolume>,
+    replay_gain: Arc<SharedReplayGain>,
 }
 
 /// A running count of the conversions the engine has performed, readable from
@@ -530,6 +582,21 @@ impl EngineHandle {
         self.volume.snapshot()
     }
 
+    /// The ReplayGain settings and what they resolved to for the track now
+    /// playing — the pull-side twin of [`Event::ReplayGainChanged`], on the
+    /// same terms as [`Self::volume`] (a snapshot; the events are the ordered
+    /// account).
+    ///
+    /// A freshly spawned engine reports
+    /// [`ReplayGainMode::Off`](crate::protocol::ReplayGainMode::Off) and
+    /// [`ReplayGainDecision::UNITY`], so a front end that never sends
+    /// [`Command::SetReplayGain`] can read this once and know that nothing is
+    /// being applied.
+    #[must_use]
+    pub fn replay_gain(&self) -> ReplayGainState {
+        self.replay_gain.snapshot()
+    }
+
     /// Shut the engine down and wait for its threads to finish. Equivalent
     /// to dropping the handle; provided so intent reads explicitly.
     pub fn shutdown(self) {
@@ -599,6 +666,8 @@ pub fn spawn_offline(
     let probes = Arc::clone(&instruments);
     let volume = Arc::new(SharedVolume::default());
     let gain = Arc::clone(&volume);
+    let replay_gain = Arc::new(SharedReplayGain::default());
+    let loudness = Arc::clone(&replay_gain);
     let thread = thread::Builder::new()
         .name("baz-engine".into())
         .spawn(move || {
@@ -611,6 +680,7 @@ pub fn spawn_offline(
                     delivered: counter,
                     instruments: probes,
                     volume: gain,
+                    replay_gain: loudness,
                 },
                 OfflineSink::with_capacity(capacity_samples),
             );
@@ -624,6 +694,7 @@ pub fn spawn_offline(
             delivered,
             instruments,
             volume,
+            replay_gain,
         },
         event_rx,
         OfflineOutput { output: out_rx },
@@ -816,6 +887,8 @@ pub fn spawn_device_with(
     let probes = Arc::clone(&instruments);
     let volume = Arc::new(SharedVolume::default());
     let gain = Arc::clone(&volume);
+    let replay_gain = Arc::new(SharedReplayGain::default());
+    let loudness = Arc::clone(&replay_gain);
     let thread = thread::Builder::new()
         .name("baz-engine".into())
         .spawn(move || {
@@ -839,6 +912,7 @@ pub fn spawn_device_with(
                             delivered: counter,
                             instruments: probes,
                             volume: gain,
+                            replay_gain: loudness,
                         },
                         sink,
                     );
@@ -855,6 +929,7 @@ pub fn spawn_device_with(
         delivered,
         instruments,
         volume,
+        replay_gain,
     };
     match ack_rx.recv() {
         Ok(Ok(())) => Ok((handle, event_rx)),
@@ -894,9 +969,23 @@ struct Control<S: Sink> {
     /// (from [`Observable::volume`]). This thread is its only writer.
     volume: Arc<SharedVolume>,
     /// The gain applicator. Engine-thread state; see [`crate::volume`].
+    ///
+    /// One fader for both gains: the volume and ReplayGain are multiplied
+    /// together before they reach it, so the pump does one multiply per sample
+    /// whether none, one or both are engaged (ADR-0013).
     fader: Fader,
     /// Where the volume is currently being applied, as last reported.
     volume_path: VolumePath,
+    /// ReplayGain state shared with [`EngineHandle`]. This thread is its only
+    /// writer, and the pump path never reads it — the resolved gain is folded
+    /// into [`SharedVolume`]'s one number.
+    replay_gain: Arc<SharedReplayGain>,
+    /// How ReplayGain is configured. Engine state, not session state: it
+    /// survives every transport command exactly as the volume does.
+    rg_settings: ReplayGainSettings,
+    /// What those settings resolved to for the track currently being
+    /// delivered, as last reported.
+    rg_applied: ReplayGainDecision,
     /// Scratch for the scaled block: one pump chunk, allocated when the engine
     /// thread starts and never grown.
     ///
@@ -921,6 +1010,7 @@ struct Observable {
     delivered: Arc<AtomicUsize>,
     instruments: Arc<Instruments>,
     volume: Arc<SharedVolume>,
+    replay_gain: Arc<SharedReplayGain>,
 }
 
 impl<S: Sink> Control<S> {
@@ -936,7 +1026,14 @@ impl<S: Sink> Control<S> {
             delivered,
             instruments,
             volume,
+            replay_gain,
         } = observable;
+        let rg_settings = ReplayGainSettings::default();
+        // `SharedReplayGain::default` already holds exactly this, so a handle
+        // read before the engine thread's first iteration is correct. Doing it
+        // again here is what keeps the engine's own copy and the shared one
+        // from being two independent claims about the same defaults.
+        replay_gain.publish(rg_settings, ReplayGainDecision::UNITY);
         Self {
             commands,
             events,
@@ -952,6 +1049,9 @@ impl<S: Sink> Control<S> {
             volume,
             fader: Fader::default(),
             volume_path: VolumePath::Unity,
+            replay_gain,
+            rg_settings,
+            rg_applied: ReplayGainDecision::UNITY,
             // One pump chunk is the most `pump` can ever hand to the fader in
             // one call (the ring read is `min`'d against it), so this is
             // exactly enough and is allocated before any audio flows.
@@ -1002,10 +1102,24 @@ impl<S: Sink> Control<S> {
             thread::sleep(PAUSED_POLL);
             return;
         }
+        // Take delivery of anything the producer has published since the last
+        // iteration — before the pump, not after, because a track boundary the
+        // engine has not heard about yet is a boundary the pump would read
+        // straight through at the previous track's ReplayGain.
+        if let Some(session) = self.session.as_mut() {
+            session.absorb();
+            if session.advance_active() {
+                // A new track is now the one being delivered. Resolve its
+                // ReplayGain and fold it into the gain the pump reads, before
+                // a single one of its samples is pulled.
+                self.settle_replay_gain(false);
+            }
+        }
         // The pump path's one volume read: a single acquire load of the
-        // effective gain, taken once per block and never per sample. This is
-        // where a volume change becomes audible, which is what bounds "takes
-        // effect promptly" at one pump iteration.
+        // effective gain — the volume and ReplayGain already multiplied
+        // together — taken once per block and never per sample. This is where
+        // a volume change becomes audible, which is what bounds "takes effect
+        // promptly" at one pump iteration.
         self.fader.aim(self.volume.gain());
         let Some(session) = self.session.as_mut() else {
             return;
@@ -1029,6 +1143,9 @@ impl<S: Sink> Control<S> {
             }
             let _ = self.events.send(Event::QueueEnded);
             self.position = 0;
+            // No track is being delivered any more, so the ReplayGain that was
+            // being applied to one is no longer the state of anything.
+            self.settle_replay_gain(false);
             return;
         }
         // Between pump iterations, never inside one: `pump` above is the
@@ -1102,7 +1219,69 @@ impl<S: Sink> Control<S> {
                     self.apply_volume();
                 }
             }
+            Command::SetReplayGain {
+                mode,
+                preamp_centidb,
+                no_tag_preamp_centidb,
+                prevent_clipping,
+            } => {
+                let settings = ReplayGainSettings::new(
+                    mode,
+                    preamp_centidb,
+                    no_tag_preamp_centidb,
+                    prevent_clipping,
+                );
+                if settings != self.rg_settings {
+                    self.rg_settings = settings;
+                    self.settle_replay_gain(true);
+                }
+            }
         }
+    }
+
+    /// Resolve ReplayGain for the track now being delivered, put the result
+    /// into effect, and say so.
+    ///
+    /// Called on the occasions the answer can change: an accepted
+    /// [`Command::SetReplayGain`] (`announce`, because the listener asked and
+    /// deserves a confirmation even if the number happens to be the same), a
+    /// **track boundary** the pump has reached, and the two moments a session
+    /// ends and there is no longer a track to have a ReplayGain. The last two
+    /// are announced only if the figure actually moved, so an album in album
+    /// mode narrates its ReplayGain once.
+    ///
+    /// The resolved gain does not go anywhere of its own: it is handed to
+    /// [`Self::settle_volume`], which multiplies it by the volume and publishes
+    /// the single number the pump path reads. That is the whole of "sharing the
+    /// volume's machinery" — there is no second gain stage to be out of step
+    /// with the first, and [`VolumePath`] keeps answering the fidelity question
+    /// for both.
+    fn settle_replay_gain(&mut self, announce: bool) {
+        let tags = self
+            .session
+            .as_ref()
+            .map_or_else(ReplayGainTags::default, Session::active_replay_gain);
+        let applied = self.rg_settings.resolve(tags);
+        let news = applied != self.rg_applied;
+        self.rg_applied = applied;
+        self.replay_gain.publish(self.rg_settings, applied);
+        if !(announce || news) {
+            return;
+        }
+        let _ = self.events.send(Event::ReplayGainChanged {
+            mode: self.rg_settings.mode,
+            preamp_centidb: self.rg_settings.preamp_centidb,
+            no_tag_preamp_centidb: self.rg_settings.no_tag_preamp_centidb,
+            prevent_clipping: self.rg_settings.prevent_clipping,
+            source: applied.source,
+            applied_centidb: applied.gain_centidb,
+            clipping_prevented: applied.clipping_prevented,
+        });
+        // Republish the combined gain. Announces `VolumeChanged` only if the
+        // *path* changed — engaging ReplayGain moves the path off `Unity`,
+        // which is exactly the news a fidelity indicator wants and the only
+        // volume news there is here.
+        self.settle_volume(false);
     }
 
     /// The gain the sample stream should end up carrying: the taper's
@@ -1148,37 +1327,75 @@ impl<S: Sink> Control<S> {
         self.settle_volume(false);
     }
 
-    /// The body of both: offer the gain to the sink, fall back to the fader,
-    /// publish, and report.
+    /// Whether a gain change would be inaudible, so the fader may jump to it
+    /// rather than slew.
     ///
-    /// The exact `== 1.0` below is the point rather than an oversight — see
-    /// [`crate::volume`]'s note on `float_cmp`. An epsilon-wide band around
-    /// unity would be a band in which baz scaled the samples while reporting
-    /// [`VolumePath::Unity`], which is the one outcome this whole design rules
-    /// out. The taper makes the top of the travel exactly `1.0`, so the
-    /// comparison is exact by construction.
+    /// True while stopped, while paused, and for a session that has not
+    /// delivered a sample yet — the last being what makes "set the volume (or
+    /// the ReplayGain), then press play" exact from the very first sample
+    /// instead of 20 ms later, and what keeps a seek's fresh session from
+    /// opening at the gain the previous one ended on.
+    fn nothing_audible(&self) -> bool {
+        self.paused || self.session.as_ref().is_none_or(|s| s.pulled == 0)
+    }
+
+    /// The body of both: offer the volume to the sink, fold ReplayGain in,
+    /// publish the one gain the pump reads, and report.
+    ///
+    /// # Two inputs, one stage
+    ///
+    /// The volume and ReplayGain multiply together into a single number
+    /// ([`SharedVolume::set_gain`]), so the pump does one multiply per sample
+    /// however many gains are engaged. The *device* is only ever offered the
+    /// volume: an attenuator downstream of baz cannot carry a per-track
+    /// ReplayGain, so when a sink takes the volume the ReplayGain still has to
+    /// be applied here — and the path is then [`VolumePath::SoftwareGain`],
+    /// because baz is scaling the samples whatever the device is also doing.
+    /// Reporting `DeviceAttenuator` there would be claiming an untouched
+    /// stream while multiplying it, which is the one outcome this whole design
+    /// rules out.
+    ///
+    /// # The exact comparisons are the point
+    ///
+    /// `== 1.0` rather than a tolerance — see [`crate::volume`]'s note on
+    /// `float_cmp`. An epsilon-wide band around unity would be a band in which
+    /// baz scaled the samples while reporting [`VolumePath::Unity`]. Both
+    /// inputs reach exactly `1.0` by construction rather than by luck: the
+    /// volume taper is a cube of `1000/1000`, and
+    /// [`ReplayGainDecision::amplitude`] returns `1.0` from an early return at
+    /// zero centidecibels. Their product is therefore exactly `1.0` exactly
+    /// when both are — `x * 1.0 == x` for every finite `x`, so neither input
+    /// perturbs the other.
     #[allow(clippy::float_cmp)]
     fn settle_volume(&mut self, announce: bool) {
-        let gain = self.effective_gain();
-        // What the *pump* must apply, which is not the same number when the
-        // device took the volume: applying it in both places would apply it
-        // twice. The atomic's contract is "the gain baz itself scales by".
-        let (applied, path) = if self.sink.set_device_volume(gain).is_some() {
-            self.fader.jump(1.0);
+        let volume_gain = self.effective_gain();
+        let replay_gain = self.rg_applied.amplitude();
+        // What the *pump* must apply, which is not the volume when the device
+        // took it: applying it in both places would apply it twice. The
+        // atomic's contract is "the gain baz itself scales by".
+        let device_took_it = self.sink.set_device_volume(volume_gain).is_some();
+        let (volume_applied, volume_path) = if device_took_it {
             (1.0, VolumePath::DeviceAttenuator)
+        } else if volume_gain == 1.0 {
+            (volume_gain, VolumePath::Unity)
         } else {
-            // Nothing is audible while stopped or paused, so there is no
-            // discontinuity for a slew to hide and jumping is the honest move.
-            if self.session.is_none() || self.paused {
-                self.fader.jump(gain);
-            }
-            let path = if gain == 1.0 {
-                VolumePath::Unity
-            } else {
-                VolumePath::SoftwareGain
-            };
-            (gain, path)
+            (volume_gain, VolumePath::SoftwareGain)
         };
+        let applied = volume_applied * replay_gain;
+        // ReplayGain is a software gain wherever the volume ended up: if it is
+        // not unity, baz is multiplying, and the path says so.
+        let path = if applied == 1.0 {
+            volume_path
+        } else {
+            VolumePath::SoftwareGain
+        };
+        // Jump when nothing is audible (no discontinuity to hide in silence,
+        // and the first sample is then exact), and when the device took the
+        // volume — its attenuator changes at once, so a software side that
+        // slewed would double-attenuate for the length of the ramp.
+        if device_took_it || self.nothing_audible() {
+            self.fader.jump(applied);
+        }
         self.volume.set_gain(applied);
         let news = announce || path != self.volume_path;
         self.volume_path = path;
@@ -1352,6 +1569,8 @@ impl<S: Sink> Control<S> {
             drop(session);
             self.sink.discard_buffered();
             let _ = self.events.send(Event::Stopped);
+            // Nothing is being delivered, so nothing has a ReplayGain.
+            self.settle_replay_gain(false);
         }
         self.paused = false;
     }
@@ -1450,6 +1669,10 @@ struct TrackBound {
     source_rate: u32,
     /// The depth the track's container declares, when it declares one.
     source_bits: Option<u32>,
+    /// The ReplayGain the track's tags declare, read at open from metadata the
+    /// probe had already parsed (ADR-0013). Travels with the boundary because
+    /// the gain has to be in effect on the first sample *after* it.
+    replay_gain: ReplayGainTags,
 }
 
 /// One run through the queue from a starting position. Owned by the engine
@@ -1471,6 +1694,21 @@ struct Session {
     /// Stored rate and depth of each queue index's track, once known — the
     /// source half of [`Event::SignalPath`].
     formats: Vec<Option<(u32, Option<u32>)>>,
+    /// Where each track's audio starts in the delivered stream and what
+    /// ReplayGain it carries, **in delivery order** — the cut points the pump
+    /// must not read across.
+    ///
+    /// Keyed by arrival rather than by queue index, unlike the four vectors
+    /// above, because the question this answers is "which track's samples am I
+    /// about to hand to the sink?" and the answer is a cursor
+    /// ([`Self::active_slot`]) rather than a lookup. Bounds arrive in queue
+    /// order over an SPSC ring and `start_sample` is a running total, so the
+    /// starts here are non-decreasing by construction — which is what makes the
+    /// cursor O(1) instead of a scan of the whole queue per pump block.
+    replay_gains: Vec<(usize, ReplayGainTags)>,
+    /// Cursor into [`Self::replay_gains`]: the track whose audio the next pump
+    /// will deliver. `None` until the producer has published the first bound.
+    active_slot: Option<usize>,
     /// The last [`Event::SignalPath`] this session emitted, so an unchanged
     /// chain is stated once rather than once per track.
     last_signal: Option<Event>,
@@ -1547,6 +1785,11 @@ impl Session {
             boundaries: vec![None; len],
             durations: vec![None; len],
             formats: vec![None; len],
+            // One entry per track this session can still reach; the producer
+            // pushes at most that many bounds, so this never grows past its
+            // reservation while audio is flowing.
+            replay_gains: Vec::with_capacity(len.saturating_sub(start).max(1)),
+            active_slot: None,
             last_signal: None,
             boundary: cfg.boundary,
             exclusive,
@@ -1702,6 +1945,17 @@ impl Session {
     /// `min`'d against the scratch, so every index below is in range by
     /// construction and nothing here can panic. One branch per block, one
     /// multiply per sample; [`Fader::apply`] states its own realtime contract.
+    ///
+    /// # A block never crosses a track boundary
+    ///
+    /// The read is also capped at the next known boundary
+    /// ([`Self::next_boundary`]) — one comparison and one `min` per block. That
+    /// is what makes a per-track ReplayGain change land on the *right sample*
+    /// rather than up to a block late: the engine can only change the gain
+    /// between pump calls, so a block spanning two tracks would play the front
+    /// of the new one at the old one's gain. Capping costs one short block per
+    /// boundary and nothing else; the samples delivered, and their order, are
+    /// unchanged, which is why the bit-exactness fixtures are unaffected.
     fn pump(
         &mut self,
         sink: &mut dyn Sink,
@@ -1718,11 +1972,16 @@ impl Session {
         // While scaling, never read more than the scratch can hold; the two
         // are equal by construction, and the `min` is what makes that a fact
         // rather than a comment.
-        let n = if transparent {
+        let mut n = if transparent {
             available.min(chunk_samples)
         } else {
             available.min(chunk_samples).min(scratch.len())
         };
+        if let Some(edge) = self.next_boundary()
+            && edge > self.pulled
+        {
+            n = n.min(edge - self.pulled);
+        }
         let Ok(chunk) = self.audio.read_chunk(n) else {
             return false;
         };
@@ -1748,11 +2007,19 @@ impl Session {
         true
     }
 
-    /// Emit per-track events in strict queue order. A track is reported
-    /// started once its first samples were delivered (`pulled` passed its
-    /// boundary); failures are reported as soon as order allows. With
-    /// `flush` (session complete) every remaining known track is reported.
-    fn report(&mut self, events: &Sender<Event>, flush: bool) {
+    /// Take delivery of everything the producer has published: track bounds
+    /// and failures, drained from their rings into this session's own vectors.
+    ///
+    /// Split out of [`Self::report`] so the engine can run it **before** the
+    /// pump. Reporting must happen after the pump (a track is "started" once
+    /// its audio has been delivered), but the boundary the pump must not read
+    /// across has to be known before it. Draining is destructive, so calling
+    /// this and then `report` in the same iteration processes each item once.
+    ///
+    /// Allocation: `replay_gains` was reserved for the whole reachable queue at
+    /// session start, so the push here does not grow it. This runs on the
+    /// engine thread between pumps, not inside one.
+    fn absorb(&mut self) {
         while let Ok(bound) = self.bounds.pop() {
             if let Some(slot) = self.boundaries.get_mut(bound.index) {
                 *slot = Some(bound.start_sample);
@@ -1763,12 +2030,58 @@ impl Session {
             if let Some(slot) = self.formats.get_mut(bound.index) {
                 *slot = Some((bound.source_rate, bound.source_bits));
             }
+            self.replay_gains
+                .push((bound.start_sample, bound.replay_gain));
         }
         while let Ok((i, reason)) = self.fails.pop() {
             if let Some(slot) = self.failures.get_mut(i) {
                 *slot = Some(reason);
             }
         }
+    }
+
+    /// Where the *next* track's audio begins in the delivered stream, when a
+    /// bound for it has arrived — the cut point [`Self::pump`] will not read
+    /// across.
+    fn next_boundary(&self) -> Option<usize> {
+        let next = self.active_slot.map_or(0, |slot| slot + 1);
+        self.replay_gains.get(next).map(|(start, _)| *start)
+    }
+
+    /// Move the cursor onto whichever track's audio the next pump will
+    /// deliver, reporting whether it moved.
+    ///
+    /// A loop rather than a single step because a zero-length track (a file
+    /// that decoded to nothing) contributes a bound with no samples between it
+    /// and the next, and skipping past it must not take two iterations of the
+    /// engine loop.
+    fn advance_active(&mut self) -> bool {
+        let mut moved = false;
+        while let Some(start) = self.next_boundary() {
+            if self.pulled < start {
+                break;
+            }
+            self.active_slot = Some(self.active_slot.map_or(0, |slot| slot + 1));
+            moved = true;
+        }
+        moved
+    }
+
+    /// The ReplayGain tags of the track whose audio is being delivered — all
+    /// `None` before the first bound arrives, which resolves to "the file said
+    /// nothing" and so to the no-ReplayGain pre-amp.
+    fn active_replay_gain(&self) -> ReplayGainTags {
+        self.active_slot
+            .and_then(|slot| self.replay_gains.get(slot))
+            .map_or_else(ReplayGainTags::default, |(_, tags)| *tags)
+    }
+
+    /// Emit per-track events in strict queue order. A track is reported
+    /// started once its first samples were delivered (`pulled` passed its
+    /// boundary); failures are reported as soon as order allows. With
+    /// `flush` (session complete) every remaining known track is reported.
+    fn report(&mut self, events: &Sender<Event>, flush: bool) {
+        self.absorb();
         while self.next_report < self.queue.len() {
             let i = self.next_report;
             if let Some(start_sample) = self.boundaries[i] {
@@ -1948,15 +2261,16 @@ impl ProducerTask {
                 // the stream rate, which changes their count but not the
                 // seconds they represent.
                 let duration_ms = Some(frames_to_ms(d.frames() as u64, d.sample_rate));
-                let format = (d.sample_rate, d.bits_per_sample);
+                let format = (d.sample_rate, d.bits_per_sample, d.replay_gain);
                 at_rate(d, stream_rate, &self.instruments)
                     .map(|samples| (samples, duration_ms, format))
             }) {
-                Ok((samples, duration_ms, (source_rate, source_bits))) => {
+                Ok((samples, duration_ms, (source_rate, source_bits, replay_gain))) => {
                     let _ = self.bounds.push(TrackBound {
                         index: i,
                         start_sample: pushed,
                         duration_ms,
+                        replay_gain,
                         source_rate,
                         source_bits,
                     });
@@ -2041,6 +2355,7 @@ impl ProducerTask {
             duration_ms: src.duration_ms(),
             source_rate: src.sample_rate(),
             source_bits: src.bits_per_sample(),
+            replay_gain: src.replay_gain(),
         };
         let mut pushed = 0usize;
         if src.sample_rate() == stream_rate {
@@ -2145,6 +2460,7 @@ fn decode_open(mut src: AudioSource, stop: &AtomicBool) -> Result<DecodedAudio, 
         samples,
         sample_rate: src.sample_rate(),
         bits_per_sample: src.bits_per_sample(),
+        replay_gain: src.replay_gain(),
     })
 }
 

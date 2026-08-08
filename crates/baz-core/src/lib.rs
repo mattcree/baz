@@ -9,8 +9,8 @@
 //! The workspace and its quality gates (see `docs/ENGINEERING.md`) were
 //! established before feature code; the engine grows behind them. Features
 //! so far: the [`library`] scanner, the [`index`] it feeds, the gapless
-//! [`playback`] machinery, the [`volume`] control, and the [`engine`] service
-//! that runs it all behind the [`protocol`].
+//! [`playback`] machinery, the [`volume`] control, [`replaygain`], and the
+//! [`engine`] service that runs it all behind the [`protocol`].
 
 #![forbid(unsafe_code)]
 
@@ -19,4 +19,5 @@ pub mod index;
 pub mod library;
 pub mod playback;
 pub mod protocol;
+pub mod replaygain;
 pub mod volume;

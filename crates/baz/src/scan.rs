@@ -337,6 +337,7 @@ mod tests {
     use std::time::SystemTime;
 
     use baz_core::library::FileStamp;
+    use baz_core::replaygain::ReplayGainTags;
 
     fn track(n: u32) -> ScanEntry {
         ScanEntry::Track(TrackMeta {
@@ -355,6 +356,7 @@ mod tests {
             sample_rate: Some(44_100),
             bitrate: Some(900),
             stamp: None,
+            replay_gain: ReplayGainTags::default(),
         })
     }
 
