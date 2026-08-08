@@ -2948,15 +2948,21 @@ fn out_of_range_pre_amps_clamp_and_are_reported_clamped() {
             prevent_clipping: true,
         })
         .expect("send");
-    let event = next_event(&events);
-    let Event::ReplayGainChanged {
-        preamp_centidb,
-        no_tag_preamp_centidb,
-        applied_centidb,
-        ..
-    } = event
-    else {
-        panic!("expected a ReplayGainChanged, got {event:?}");
+    // Skip past any VolumeChanged: engaging ReplayGain republishes the
+    // combined gain *before* announcing itself, so the two arrive together and
+    // in that order. Which of the pair lands first is not a contract — that
+    // the state behind both is current when either is seen, is.
+    let (preamp_centidb, no_tag_preamp_centidb, applied_centidb) = loop {
+        let event = next_event(&events);
+        if let Event::ReplayGainChanged {
+            preamp_centidb,
+            no_tag_preamp_centidb,
+            applied_centidb,
+            ..
+        } = event
+        {
+            break (preamp_centidb, no_tag_preamp_centidb, applied_centidb);
+        }
     };
     assert_eq!(preamp_centidb, MAX_PREAMP_CENTIDB);
     assert_eq!(no_tag_preamp_centidb, -MAX_PREAMP_CENTIDB);

@@ -1268,6 +1268,19 @@ impl<S: Sink> Control<S> {
         if !(announce || news) {
             return;
         }
+        // Republish the combined gain *first*. Announces `VolumeChanged` only
+        // if the *path* changed — engaging ReplayGain moves the path off
+        // `Unity`, which is exactly the news a fidelity indicator wants and the
+        // only volume news there is here.
+        //
+        // Ordering is a contract, not a detail: every piece of shared state is
+        // published before any event announcing it. A front end that observes
+        // an event and then reads `volume()` or `replay_gain()` must never see
+        // a value older than the news it just received. Emitting first left a
+        // window in which `ReplayGainChanged` was visible while `volume()`
+        // still said `Unity` — Linux almost always lost that race to the
+        // reader, Windows did not, which is how CI found it.
+        self.settle_volume(false);
         let _ = self.events.send(Event::ReplayGainChanged {
             mode: self.rg_settings.mode,
             preamp_centidb: self.rg_settings.preamp_centidb,
@@ -1277,11 +1290,6 @@ impl<S: Sink> Control<S> {
             applied_centidb: applied.gain_centidb,
             clipping_prevented: applied.clipping_prevented,
         });
-        // Republish the combined gain. Announces `VolumeChanged` only if the
-        // *path* changed — engaging ReplayGain moves the path off `Unity`,
-        // which is exactly the news a fidelity indicator wants and the only
-        // volume news there is here.
-        self.settle_volume(false);
     }
 
     /// The gain the sample stream should end up carrying: the taper's
