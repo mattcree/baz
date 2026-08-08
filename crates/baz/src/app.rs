@@ -198,6 +198,18 @@ pub(crate) enum Message {
     /// An album tile was clicked (toggles selection / side panel; a second
     /// click within [`shelf::DOUBLE_CLICK`] plays the album).
     AlbumClicked(u64),
+    /// The pointer entered an album's tile, so the tile can draw its hover
+    /// rule under the wall label.
+    ///
+    /// The same toolkit limit [`Self::QueueRowEntered`] works around, in the
+    /// surface where it matters most: the shelf's state vocabulary is a rule
+    /// drawn *beside* the button rather than paint applied *to* it (the shelf
+    /// contains exactly two kinds of thing, artwork and type), and a style
+    /// function cannot reach a sibling.
+    TileEntered(u64),
+    /// The pointer left an album's tile. Carries which one, for the reason
+    /// [`Self::QueueRowLeft`] carries which row.
+    TileLeft(u64),
     /// The grid's held column count may have expired — ticked only while one
     /// is held (see [`shelf::ColumnHold`]).
     ColumnHoldTick,
@@ -1249,6 +1261,20 @@ pub(crate) struct Shelf {
     /// The grid viewport's size, for the virtualization math.
     pub(crate) grid_size: Size,
     last_scan_log: Instant,
+    /// Which album's tile the pointer is on, if any.
+    ///
+    /// The shelf's hover mark is a **rule drawn under the wall label**
+    /// (ADR-0017 step 14), not a card behind the sleeve — and a rule under the
+    /// label is a *sibling* of the button, not the button. iced 0.13 tells a
+    /// widget its own hover status inside a style function and tells its
+    /// siblings nothing, so the tile reports its own crossings with a
+    /// `mouse_area` and the shelf holds the one answer. Exactly the pattern
+    /// [`App::hovered_queue_row`] already uses, and for exactly the same
+    /// toolkit reason.
+    ///
+    /// The rule's lane is reserved whatever this says, so it changes what is
+    /// drawn in it and never the geometry around it.
+    pub(crate) hovered_album: Option<u64>,
     /// Last tile click, for double-click-to-play detection.
     last_click: Option<(u64, Instant)>,
     /// The column count pinned across the reflow a tile click causes, so the
@@ -1303,6 +1329,7 @@ impl Shelf {
             scroll_offset: 0.0,
             grid_size: Size::new(WINDOW.width, WINDOW.height - TOP_BAR_H),
             last_scan_log: Instant::now(),
+            hovered_album: None,
             last_click: None,
             column_hold: shelf::ColumnHold::default(),
         };
@@ -1376,6 +1403,20 @@ impl Shelf {
                 }
                 self.last_click = Some((id, now));
                 self.reflow_holding_columns(now, |selection| selection.select(id))
+            }
+            Message::TileEntered(id) => {
+                self.hovered_album = Some(id);
+                Task::none()
+            }
+            // Only if it is still the tile that left: both messages are
+            // published from one `CursorMoved` in widget order, so crossing the
+            // wall delivers the new tile's entry before the old tile's exit,
+            // and an exit meaning "nothing is hovered" would undo it.
+            Message::TileLeft(id) => {
+                if self.hovered_album == Some(id) {
+                    self.hovered_album = None;
+                }
+                Task::none()
             }
             Message::ColumnHoldTick => {
                 if self.column_hold.expire(Instant::now()) {

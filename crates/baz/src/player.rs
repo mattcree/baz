@@ -1985,11 +1985,13 @@ mod tests {
 
     fn track(path: &str, title: &str, number: u32) -> TrackVm {
         TrackVm {
+            disc: None,
             number: Some(number),
             title: title.to_owned(),
             artist: None,
             duration: Some(Duration::from_secs(200)),
             path: PathBuf::from(path),
+            bytes: None,
         }
     }
 
@@ -1998,6 +2000,10 @@ mod tests {
         EditionVm {
             key: EditionKey(format),
             detail: None,
+            bitrate: None,
+            bit_depth: None,
+            sample_rate: None,
+            replay_gain: crate::vm::ReplayGainCoverage::default(),
             tracks,
         }
     }
@@ -2010,6 +2016,8 @@ mod tests {
                 artist: AlbumArtistVm::Named("Boards of Canada".into()),
                 track_artists_vary: false,
                 year: Some(2002),
+                genre: None,
+                first_seen_ns: None,
                 first_track: PathBuf::from("/m/boc/geogaddi/01.flac"),
                 editions: vec![edition(
                     Some(AudioFormat::Flac),
@@ -2025,6 +2033,8 @@ mod tests {
                 artist: AlbumArtistVm::Unknown,
                 track_artists_vary: false,
                 year: None,
+                genre: None,
+                first_seen_ns: None,
                 first_track: PathBuf::from("/m/strays/a.wav"),
                 editions: vec![edition(
                     Some(AudioFormat::Wav),
@@ -2311,6 +2321,8 @@ mod tests {
             artist: AlbumArtistVm::Named("Stan Rogers".into()),
             track_artists_vary: false,
             year: Some(1981),
+            genre: None,
+            first_seen_ns: None,
             first_track: PathBuf::from("/m/flac/01.flac"),
             editions: vec![
                 edition(
@@ -4373,6 +4385,8 @@ mod tests {
             artist: AlbumArtistVm::Named("Boards of Canada".into()),
             track_artists_vary: false,
             year: None,
+            genre: None,
+            first_seen_ns: None,
             first_track: repeated.path.clone(),
             editions: vec![edition(
                 Some(AudioFormat::Flac),

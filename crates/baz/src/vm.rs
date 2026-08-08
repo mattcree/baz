@@ -77,6 +77,16 @@ pub struct AlbumVm {
     pub track_artists_vary: bool,
     /// Release year, first one any track declares.
     pub year: Option<u32>,
+    /// Genre, **verbatim from the tags** — the first one any track declares,
+    /// exactly as it is spelled (see [`baz_core::index::Album::genre`]). A
+    /// library that carries `Post-Rock`, `post rock` and `Rock; Instrumental`
+    /// shows three genres here, because it *has* three genre tags.
+    pub genre: Option<String>,
+    /// When the library first saw this album, in nanoseconds since the Unix
+    /// epoch, or `None` when every track predates the schema that started
+    /// recording it — permanently, because no later scan can discover when a
+    /// file arrived.
+    pub first_seen_ns: Option<i64>,
     /// First track's path — the file art resolution reads for an embedded
     /// picture, and whose parent directory is searched for cover files.
     /// Taken from the default edition: the best copy is the one most likely
@@ -176,8 +186,60 @@ pub struct EditionVm {
     /// property worth stating. Never invented: a mixed-rate edition declines
     /// to claim a rate (see [`baz_core::index::Edition::bit_depth`]).
     pub detail: Option<String>,
+    /// Mean bitrate in kbit/s over the tracks that declare one — the
+    /// `Bitrate` row of the inspector's **Details** block. `None` when no
+    /// track declared one, which is the truth and not a zero.
+    pub bitrate: Option<u32>,
+    /// Bit depth, when every track in the edition agrees on one.
+    pub bit_depth: Option<u8>,
+    /// Sample rate in Hz, when every track in the edition agrees on one.
+    pub sample_rate: Option<u32>,
+    /// What the **files themselves** say about ReplayGain, summarised: how
+    /// many of this edition's tracks carry an album gain, and how many carry a
+    /// track gain.
+    ///
+    /// Read straight off the tags (ADR-0013's "what the file said"), never a
+    /// figure baz measured, and never an average — a Details row is a
+    /// statement about the files on disk.
+    pub replay_gain: ReplayGainCoverage,
     /// This edition's tracks in disc/track/title order, for the side panel.
     pub tracks: Vec<TrackVm>,
+}
+
+/// How much of an edition carries ReplayGain figures in its tags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ReplayGainCoverage {
+    /// Tracks carrying `REPLAYGAIN_ALBUM_GAIN`.
+    pub album: usize,
+    /// Tracks carrying `REPLAYGAIN_TRACK_GAIN`.
+    pub track: usize,
+    /// Tracks in the edition, so the two counts above can be read as
+    /// "some of them" rather than as bare numbers.
+    pub total: usize,
+}
+
+impl ReplayGainCoverage {
+    /// The Details row's value: what the tags carry, in a sentence a listener
+    /// can act on.
+    ///
+    /// Deliberately not a decibel figure. Which gain the engine will actually
+    /// apply depends on the mode, the pre-amps and the clipping setting — all
+    /// of which live in the Settings place and are stated there, by
+    /// [`crate::replaygain`], in strings this module may not paraphrase
+    /// (ADR-0013 §8). What the inspector can honestly say about a *record* is
+    /// whether its files were ever scanned.
+    #[must_use]
+    pub fn label(self) -> Option<String> {
+        if self.total == 0 {
+            return None;
+        }
+        match (self.album, self.track) {
+            (0, 0) => Some("not in the tags".to_owned()),
+            (album, _) if album == self.total => Some("album and track gains".to_owned()),
+            (0, track) if track == self.total => Some("track gains only".to_owned()),
+            (album, track) => Some(format!("{} of {} tagged", album.max(track), self.total)),
+        }
+    }
 }
 
 impl EditionVm {
@@ -201,6 +263,14 @@ impl EditionVm {
 /// One row in the side panel's track list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackVm {
+    /// Which disc of the set this track is on, when the tags said.
+    ///
+    /// From tags only — folder layouts rarely encode it reliably, and the
+    /// inspector's disc headers are drawn from this. **Never faked**: a
+    /// single-disc rip and a two-disc rip whose tagger forgot the field both
+    /// arrive here as `None`, and both are then drawn as one unbroken list
+    /// rather than as an invented `DISC 1`.
+    pub disc: Option<u32>,
     /// Track number within its disc, when known.
     pub number: Option<u32>,
     /// Display title: the tag/inferred title, else the file name.
@@ -213,6 +283,10 @@ pub struct TrackVm {
     pub duration: Option<Duration>,
     /// The audio file — the future playback seam addresses tracks by path.
     pub path: PathBuf,
+    /// The file's size in bytes as of the last scan, when the filesystem
+    /// reported one. Summed over an edition it is the `Size` row of the
+    /// inspector's **Details** block.
+    pub bytes: Option<u64>,
 }
 
 impl TrackVm {
@@ -223,11 +297,13 @@ impl TrackVm {
                 .map_or_else(|| String::from("?"), |n| n.to_string_lossy().into_owned())
         });
         Self {
+            disc: meta.disc,
             number: meta.track,
             title,
             artist: meta.artist.clone(),
             duration: meta.duration,
             path: meta.path.clone(),
+            bytes: meta.stamp.map(|stamp| stamp.size),
         }
     }
 }
@@ -249,6 +325,8 @@ pub fn build_albums(library: &Library) -> Vec<AlbumVm> {
                 track_artists_vary: track_artists_vary(&album),
                 artist: AlbumArtistVm::from_core(album.artist),
                 year: album.year,
+                genre: album.genre.map(str::to_owned),
+                first_seen_ns: album.first_seen_ns,
                 first_track: first.path.clone(),
                 editions: album.editions.iter().map(build_edition).collect(),
             })
@@ -279,6 +357,22 @@ fn build_edition(edition: &Edition<'_>) -> EditionVm {
     EditionVm {
         key: EditionKey(edition.format),
         detail: edition_detail(edition),
+        bitrate: edition.bitrate(),
+        bit_depth: edition.bit_depth(),
+        sample_rate: edition.sample_rate(),
+        replay_gain: ReplayGainCoverage {
+            album: edition
+                .tracks
+                .iter()
+                .filter(|t| t.replay_gain.album_gain_centidb.is_some())
+                .count(),
+            track: edition
+                .tracks
+                .iter()
+                .filter(|t| t.replay_gain.track_gain_centidb.is_some())
+                .count(),
+            total: edition.tracks.len(),
+        },
         tracks: edition
             .tracks
             .iter()
@@ -520,6 +614,156 @@ pub fn album_queue(album: &AlbumVm, chosen: Option<EditionKey>) -> QueueVm {
         artist: album.artist.label().to_owned(),
         items,
     }
+}
+
+/// The **Details** block: the condition report in full, one row per field the
+/// scan actually read.
+///
+/// `docs/design/03-interface-prior-art.md` R6 is the whole argument: baz's
+/// audience arrived from products that show ~20 fields for free, and the
+/// inspector showed four. This is the back of the record's card, and you turn
+/// it over by scrolling.
+///
+/// # Two rules, and they are the same rule
+///
+/// **A row exists only when the scan read one.** No placeholders, no em
+/// dashes, no `Unknown` — an absent row says "the files did not say" more
+/// honestly than a present row saying nothing, and it keeps the block as long
+/// as the library is good rather than always thirteen lines of mostly nothing.
+///
+/// **Nothing here is inferred.** Every value is a field a tag or the
+/// filesystem stated. The fields `.interface-design/system.md` §9 names that
+/// baz's schema does not carry — Label, Catalogue, `MusicBrainz` — are simply
+/// absent rather than approximated from a folder name, and they will appear
+/// here the day the scanner reads them and not a day before.
+///
+/// Returned as `(label, value)` pairs rather than rendered, so the ordering
+/// and the honesty are unit-testable without a window.
+#[must_use]
+pub fn details(album: &AlbumVm, edition: Option<&EditionVm>) -> Vec<(&'static str, String)> {
+    let mut rows: Vec<(&'static str, String)> = Vec::new();
+    let mut push = |label: &'static str, value: Option<String>| {
+        if let Some(value) = value {
+            rows.push((label, value));
+        }
+    };
+    push(
+        "Album artist",
+        match &album.artist {
+            AlbumArtistVm::Named(name) => Some(name.clone()),
+            AlbumArtistVm::Various => Some(VARIOUS_ARTISTS.to_owned()),
+            AlbumArtistVm::Unknown => None,
+        },
+    );
+    push("Released", album.year.map(|year| year.to_string()));
+    push("Genre", album.genre.clone());
+    if let Some(edition) = edition {
+        push(
+            "Discs",
+            discs(edition).filter(|n| *n > 1).map(|n| n.to_string()),
+        );
+        push("Tracks", Some(edition.tracks.len().to_string()));
+        push(
+            "Format",
+            edition.key.0.map(|format| format.name().to_owned()),
+        );
+        push(
+            "Depth",
+            edition.bit_depth.map(|depth| format!("{depth}-bit")),
+        );
+        push("Sample rate", edition.sample_rate.map(format_sample_rate));
+        push(
+            "Bitrate",
+            edition.bitrate.map(|kbps| format!("{kbps} kbps")),
+        );
+        push("Size", format_size(edition));
+        push("ReplayGain", edition.replay_gain.label());
+    }
+    push("Added", album.first_seen_ns.and_then(format_date));
+    push(
+        "Folder",
+        album
+            .first_track
+            .parent()
+            .map(|dir| dir.to_string_lossy().into_owned()),
+    );
+    rows
+}
+
+/// How many discs an edition spans, when its tags say — the count of distinct
+/// disc numbers, or `None` when no track declared one.
+///
+/// `None` and `Some(1)` are different answers and the inspector treats them
+/// differently: a record whose tagger never wrote the field is not a record
+/// baz knows to be a single disc.
+#[must_use]
+pub fn discs(edition: &EditionVm) -> Option<usize> {
+    let numbers: HashSet<u32> = edition.tracks.iter().filter_map(|t| t.disc).collect();
+    (!numbers.is_empty()).then_some(numbers.len())
+}
+
+/// An edition's total size on disk, in the unit that makes it readable.
+///
+/// `None` unless **every** track reported a size: a total over some of the
+/// files is a smaller number than the truth presented as the truth, which is
+/// the one thing a condition report may not do.
+fn format_size(edition: &EditionVm) -> Option<String> {
+    let total: u64 = edition
+        .tracks
+        .iter()
+        .map(|t| t.bytes)
+        .sum::<Option<u64>>()?;
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a display figure rounded to one decimal; f64 is exact to 2^53 bytes anyway"
+    )]
+    let mib = total as f64 / (1024.0 * 1024.0);
+    Some(if mib >= 1024.0 {
+        format!("{:.1} GiB", mib / 1024.0)
+    } else {
+        format!("{mib:.0} MiB")
+    })
+}
+
+/// A Unix timestamp in nanoseconds as a plain `D Mon YYYY`.
+///
+/// Hand-rolled rather than a date crate, because a date crate is a dependency
+/// and this is one row of one block (`docs/ENGINEERING.md`: every dependency
+/// is argued). The conversion is Howard Hinnant's `civil_from_days`, which is
+/// exact for the whole proleptic Gregorian range and is the algorithm every
+/// date library uses underneath.
+///
+/// **UTC, and it says so nowhere** — deliberately. This row answers *roughly
+/// when did this record arrive*, at a resolution of a day, and a listener who
+/// imported an album at 00:30 local time does not need the interface to
+/// litigate which day that was. Anything that needed the exact instant would
+/// need a time zone database, which is a dependency for a row nobody reads
+/// that closely.
+///
+/// `None` for a timestamp outside the range the algorithm is exact for, which
+/// is a filesystem or a schema fault rather than a date.
+#[must_use]
+pub fn format_date(ns: i64) -> Option<String> {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    const NS_PER_DAY: i64 = 86_400 * 1_000_000_000;
+    // Floor division: a negative timestamp is a pre-1970 file, and truncation
+    // toward zero would put it on the wrong day.
+    let days = ns.div_euclid(NS_PER_DAY);
+    // Shift the epoch to 0000-03-01 so that the leap day is the last day of
+    // the "year" and the month arithmetic below never has to know about it.
+    let z = days.checked_add(719_468)?;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = era * 400 + yoe + i64::from(month <= 2);
+    let index = usize::try_from(month - 1).ok()?;
+    Some(format!("{day} {} {year}", MONTHS.get(index)?))
 }
 
 /// Indices into `albums` that survive the current query filter (all of them
@@ -895,6 +1139,10 @@ mod tests {
         let bare_format = EditionVm {
             key: EditionKey(Some(AudioFormat::Wav)),
             detail: None,
+            bitrate: None,
+            bit_depth: None,
+            sample_rate: None,
+            replay_gain: ReplayGainCoverage::default(),
             tracks: Vec::new(),
         };
         assert_eq!(bare_format.encoding_line().as_deref(), Some("WAV"));
@@ -902,9 +1150,155 @@ mod tests {
         let nothing = EditionVm {
             key: EditionKey(None),
             detail: None,
+            bitrate: None,
+            bit_depth: None,
+            sample_rate: None,
+            replay_gain: ReplayGainCoverage::default(),
             tracks: Vec::new(),
         };
         assert_eq!(nothing.encoding_line(), None);
+    }
+
+    /// **A Details row exists only when the scan read one.**
+    ///
+    /// The whole rule of the block, and the reason it is worth a test rather
+    /// than a comment: the failure mode of a condition report is not a missing
+    /// row, it is a present row saying `Unknown`. Thirteen fields of nothing is
+    /// a form; the fields the files actually carry are a record's card.
+    #[test]
+    fn details_lists_what_the_scan_read_and_invents_nothing() {
+        let bare = AlbumVm {
+            id: 1,
+            title: Some("Untitled".to_owned()),
+            artist: AlbumArtistVm::Unknown,
+            track_artists_vary: false,
+            year: None,
+            genre: None,
+            first_seen_ns: None,
+            first_track: PathBuf::from("/m/x/01.flac"),
+            editions: Vec::new(),
+        };
+        let rows = details(&bare, None);
+        let labels: Vec<&str> = rows.iter().map(|(label, _)| *label).collect();
+        // An unknown album artist is *absent*, not "Unknown Artist": the
+        // caption's fallback label is a thing to read on a wall, and a
+        // condition report may not restate it as a fact about the file.
+        assert!(!labels.contains(&"Album artist"), "{labels:?}");
+        assert!(!labels.contains(&"Released"), "{labels:?}");
+        assert!(!labels.contains(&"Genre"), "{labels:?}");
+        // The folder is the one thing that is always known — the album exists
+        // because a file does.
+        assert_eq!(labels, vec!["Folder"]);
+
+        // Now a record the scan read properly.
+        let full = AlbumVm {
+            artist: AlbumArtistVm::Named("Talk Talk".to_owned()),
+            year: Some(1988),
+            genre: Some("Post-Rock".to_owned()),
+            first_seen_ns: Some(1_700_000_000_000_000_000),
+            ..bare.clone()
+        };
+        let edition = EditionVm {
+            key: EditionKey(Some(AudioFormat::Flac)),
+            detail: None,
+            bitrate: Some(910),
+            bit_depth: Some(16),
+            sample_rate: Some(44_100),
+            replay_gain: ReplayGainCoverage {
+                album: 2,
+                track: 2,
+                total: 2,
+            },
+            tracks: vec![
+                TrackVm {
+                    disc: Some(1),
+                    number: Some(1),
+                    title: "The Rainbow".to_owned(),
+                    artist: None,
+                    duration: Some(Duration::from_secs(560)),
+                    path: PathBuf::from("/m/x/01.flac"),
+                    bytes: Some(60 * 1024 * 1024),
+                },
+                TrackVm {
+                    disc: Some(2),
+                    number: Some(1),
+                    title: "Desire".to_owned(),
+                    artist: None,
+                    duration: Some(Duration::from_secs(415)),
+                    path: PathBuf::from("/m/x/02.flac"),
+                    bytes: Some(40 * 1024 * 1024),
+                },
+            ],
+        };
+        let rows = details(&full, Some(&edition));
+        let value = |label: &str| {
+            rows.iter()
+                .find(|(name, _)| *name == label)
+                .map(|(_, value)| value.as_str())
+        };
+        assert_eq!(value("Album artist"), Some("Talk Talk"));
+        assert_eq!(value("Released"), Some("1988"));
+        // Verbatim: the genre is not title-cased, split or mapped.
+        assert_eq!(value("Genre"), Some("Post-Rock"));
+        assert_eq!(value("Discs"), Some("2"));
+        assert_eq!(value("Format"), Some("FLAC"));
+        assert_eq!(value("Depth"), Some("16-bit"));
+        assert_eq!(value("Sample rate"), Some("44.1 kHz"));
+        assert_eq!(value("Bitrate"), Some("910 kbps"));
+        assert_eq!(value("Size"), Some("100 MiB"));
+        assert_eq!(value("ReplayGain"), Some("album and track gains"));
+        assert_eq!(value("Folder"), Some("/m/x"));
+        // And the block is a genuine improvement on the four lines the header
+        // carries, which is the whole reason it exists (prior art R6).
+        assert!(rows.len() >= 10, "{rows:?}");
+
+        // A single-disc record draws no `Discs` row: `1` is not a fact worth a
+        // line, and a record whose tagger never wrote the field is not a record
+        // baz knows to be single-disc either.
+        let one_disc = EditionVm {
+            tracks: vec![EditionVm::clone(&edition).tracks.remove(0)],
+            ..edition.clone()
+        };
+        assert!(
+            !details(&full, Some(&one_disc))
+                .iter()
+                .any(|(l, _)| *l == "Discs")
+        );
+
+        // A partly-sized edition reports no size at all: a total over some of
+        // the files, presented as the total, is the one thing a condition
+        // report may not do.
+        let mut partial = edition.clone();
+        partial.tracks[1].bytes = None;
+        assert!(
+            !details(&full, Some(&partial))
+                .iter()
+                .any(|(l, _)| *l == "Size")
+        );
+    }
+
+    /// The `Added` row's date arithmetic, at the boundaries that break naive
+    /// implementations: the epoch, a leap day, a century that is not a leap
+    /// year, and a pre-epoch file (which truncating division would put on the
+    /// wrong day).
+    #[test]
+    fn added_dates_are_exact_at_the_awkward_boundaries() {
+        const DAY: i64 = 86_400 * 1_000_000_000;
+        assert_eq!(format_date(0).as_deref(), Some("1 Jan 1970"));
+        assert_eq!(format_date(DAY - 1).as_deref(), Some("1 Jan 1970"));
+        assert_eq!(format_date(DAY).as_deref(), Some("2 Jan 1970"));
+        // A moment before the epoch is the *previous* day, not the epoch: `/`
+        // truncates toward zero and would answer 1 Jan 1970 here.
+        assert_eq!(format_date(-1).as_deref(), Some("31 Dec 1969"));
+        // 2000 is a leap year (divisible by 400); 1900 was not.
+        assert_eq!(
+            format_date(951_782_400 * 1_000_000_000).as_deref(),
+            Some("29 Feb 2000")
+        );
+        assert_eq!(
+            format_date(1_700_000_000 * 1_000_000_000).as_deref(),
+            Some("14 Nov 2023")
+        );
     }
 
     #[test]
@@ -1267,11 +1661,13 @@ mod tests {
     #[test]
     fn a_repeated_track_is_compared_position_by_position() {
         let track = |path: &str| TrackVm {
+            disc: None,
             number: Some(1),
             title: "Loop".to_owned(),
             artist: None,
             duration: Some(Duration::from_secs(60)),
             path: PathBuf::from(path),
+            bytes: None,
         };
         let listed = vec![track("/m/a/1.flac"), track("/m/a/1.flac")];
         let item = |path: &str| QueueItemVm {

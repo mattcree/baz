@@ -171,8 +171,13 @@ fn header() -> Element<'static, Message> {
             .font(theme::MEDIUM)
             .wrapping(text::Wrapping::None),
     )
-    .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-    .style(|_theme, status| theme::panel_toggle(status, false))
+    // The same height as the top bar's `Settings`, which is the control this
+    // one swaps places with: the two strips are one frame, and a way-back that
+    // stood shorter than the control it replaced would make the header jump on
+    // every navigation.
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_SM))
+    .style(|_theme, status| theme::word_button(status))
     .on_press(Message::ToggleSettings);
     column![
         container(
@@ -247,14 +252,10 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
     let live = player.engine_ready();
 
     let mut section = column![
-        text("ReplayGain")
-            .size(theme::SIZE_EMPHASIS)
-            .line_height(theme::LEADING_EMPHASIS)
-            .font(theme::MEDIUM),
-        text("Play everything at the loudness its tags declare.")
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(theme::PAPER_DIM),
+        section_heading(
+            "ReplayGain",
+            "Play everything at the loudness its tags declare.",
+        ),
         mode_selector(state, live),
         // The mode's own sentence, in the quiet ink: present in every mode, so
         // choosing one is never a guess — and in a slot of
@@ -305,31 +306,73 @@ fn replay_gain_section(player: &PlayerState) -> Element<'_, Message> {
     // ReplayGain arithmetic in that mode, and a `0.00 dB` here would describe
     // arithmetic that is not happening (ADR-0013 §2).
     if let Some(readout) = player.replay_gain_readout() {
-        section = section.push(
-            column![
-                text(readout.gain)
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(theme::PAPER),
-                text(readout.detail)
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(theme::PAPER_FAINT),
-            ]
-            .spacing(theme::GAP_XXS),
-        );
+        section = section.push(readout_block(vec![
+            (readout.gain, theme::PAPER),
+            (readout.detail, theme::PAPER_FAINT),
+        ]));
     }
 
     if let Some(note) = player.availability_note() {
-        section = section.push(
-            text(note)
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(theme::PAPER_FAINT),
-        );
+        section = section.push(readout_block(vec![(note.clone(), theme::PAPER_FAINT)]));
     }
 
     section.into()
+}
+
+/// A section's first two lines: **its name, then one sentence saying what it
+/// is for.**
+///
+/// The shape every setting after the first one takes, and the reason it is a
+/// function rather than two `text` calls copied into the next section: a place
+/// whose sections each invented their own heading treatment is a junk drawer
+/// with headings. Name in the emphasis size and the medium weight, sentence in
+/// the meta size and the dim ink, one rung of the ladder between them.
+///
+/// One sentence, present tense, about what the setting *does* rather than what
+/// it is — the vocabulary rule the whole product follows.
+fn section_heading(name: &'static str, sentence: &'static str) -> Element<'static, Message> {
+    column![
+        text(name)
+            .size(theme::SIZE_EMPHASIS)
+            .line_height(theme::LEADING_EMPHASIS)
+            .font(theme::MEDIUM)
+            .color(theme::PAPER),
+        text(sentence)
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(theme::PAPER_DIM),
+    ]
+    .spacing(theme::GAP_XXS)
+    .into()
+}
+
+/// The last part of a section's shape: **what the engine has to say about the
+/// here and now**, under a hairline.
+///
+/// Set apart from the controls above it because it is a different kind of
+/// sentence: everything above is a decision the listener is making, and this is
+/// the machine reporting what that decision came to for the track playing right
+/// now. Without the rule the two read as one list and the readout looks like
+/// another setting with its control missing.
+///
+/// A hairline is the whole of the separation — no surface step, no card. This
+/// is a fourth structural rule beyond the three
+/// `.interface-design/system.md` §2 names, and it earns the place the same way
+/// they do: it divides two kinds of content inside one column, which is exactly
+/// what the inspector's rule against the shelf does.
+fn readout_block(lines: Vec<(String, iced::Color)>) -> Element<'static, Message> {
+    let mut block = column![horizontal_rule(1).style(theme::hairline)].spacing(theme::GAP_SM);
+    let mut readings = column![].spacing(theme::GAP_XXS);
+    for (line, ink) in lines {
+        readings = readings.push(
+            text(line)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(ink),
+        );
+    }
+    block = block.push(readings);
+    block.into()
 }
 
 /// The mode control: the same quiet segmented control the album panel's

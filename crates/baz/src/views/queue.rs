@@ -103,36 +103,24 @@ pub(crate) fn view(
                 .enumerate()
                 .map(|(index, row_state)| queue_row(row_state, index, live, hovered == Some(index)))
                 .collect();
-            // Where the queue came from, in one line: the album if it has a
-            // title, else the artist it is filed under. The design spec's
-            // contents list names only the summary, and this is the one
-            // addition to it — kept because the bar below shows the *track*
-            // and nothing on screen otherwise says which record these twelve
-            // rows are, which is the first thing a listener checks a queue
-            // against.
-            let source = list.album.unwrap_or(list.artist);
             column![
-                column![
-                    text(source)
-                        .size(theme::SIZE_META)
-                        .line_height(theme::LEADING_META)
-                        .color(theme::PAPER_DIM)
-                        .wrapping(text::Wrapping::None),
-                    text(list.summary)
-                        .size(theme::SIZE_META)
-                        .line_height(theme::LEADING_META)
-                        .color(theme::PAPER_FAINT),
-                ]
-                .spacing(theme::GAP_XXS),
+                text(list.summary)
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(theme::PAPER_FAINT)
+                    .wrapping(text::Wrapping::None),
                 // The same reserved scrollbar lane the album inspector's track
                 // list keeps, and for the same reason: this list has a duration
                 // column against the same right edge, so a queue long enough to
                 // scroll would clip it in exactly the same way.
                 // (`side_panel::track_list` carries the argument.)
                 scrollable(
-                    Column::with_children(rows)
-                        .spacing(theme::GAP_XXS)
-                        .padding(theme::scroll_gutter())
+                    column![
+                        album_group(list.album.as_deref(), &list.artist),
+                        Column::with_children(rows).spacing(theme::GAP_XXS),
+                    ]
+                    .spacing(theme::GAP_XS)
+                    .padding(theme::scroll_gutter())
                 )
                 .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
                 .style(theme::scrollbar),
@@ -163,12 +151,56 @@ fn header_row() -> Element<'static, Message> {
         text("Queue")
             .size(theme::SIZE_EMPHASIS)
             .line_height(theme::LEADING_EMPHASIS)
-            .font(theme::MEDIUM),
+            .font(theme::MEDIUM)
+            .color(theme::PAPER),
         Space::with_width(Length::Fill),
         close_button("Close queue", Message::CloseQueue),
     ]
     .align_y(iced::Alignment::Center)
     .into()
+}
+
+/// The header over one album's run of rows: the record's title, and who it is
+/// filed under, in the room's quietest voice.
+///
+/// **Albums are listed as albums, never flattened** — `docs/REFUSALS.md` by way
+/// of the critique's stack, and this is the structure that keeps the promise
+/// before the stack exists to test it. baz's queue is one list with a cursor
+/// (ADR-0016) and today it always holds exactly one album, so there is exactly
+/// one of these; when shift-click starts stacking sleeves (ADR-0017 step 13) a
+/// second album is a second header in this same column and **no other part of
+/// this surface changes**. That is the point of drawing it as a header inside
+/// the scroll rather than as a subtitle in the popover's chrome, which is where
+/// it was: a subtitle can only ever describe one album, so it would have had to
+/// be deleted and reinvented the day a queue held two.
+///
+/// It is inside the scroll for the same reason. A group header scrolls with
+/// its group.
+fn album_group(album: Option<&str>, artist: &str) -> Element<'static, Message> {
+    let title = album.unwrap_or(artist);
+    let mut block = column![
+        text(title.to_owned())
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .font(theme::MEDIUM)
+            .color(theme::PAPER_DIM)
+            .wrapping(text::Wrapping::None),
+    ]
+    .spacing(theme::GAP_XXS);
+    // Only when it is not already the line above: an album with no title is
+    // headed by its artist, and repeating the artist under itself says nothing.
+    if album.is_some() {
+        block = block.push(
+            text(artist.to_owned())
+                .size(theme::SIZE_CAPTION)
+                .line_height(theme::LEADING_CAPTION)
+                .color(theme::heading_ink())
+                .wrapping(text::Wrapping::None),
+        );
+    }
+    container(block)
+        .padding(theme::pad(0.0, theme::GAP_XS))
+        .into()
 }
 
 /// Nothing queued yet: said plainly, with the gesture that fills it.
@@ -183,17 +215,25 @@ fn empty_state() -> Element<'static, Message> {
                 .size(theme::SIZE_EMPHASIS)
                 .line_height(theme::LEADING_EMPHASIS)
                 .color(theme::PAPER_DIM),
-            text("Play an album and it appears here")
+            text("Play an album and it appears here.")
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
                 .color(theme::PAPER_FAINT),
+            // Silence is a feature (`docs/REFUSALS.md`), and the empty queue is
+            // the one surface where saying so costs nothing: this is what a
+            // listener sees the moment a record ends, and it is the frame in
+            // which every other player would have started something.
+            text("When a queue ends, baz stops.")
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(theme::PAPER_MUTED),
         ]
         .spacing(theme::GAP_SM)
-        .align_x(iced::Alignment::Center),
+        .align_x(iced::Alignment::Start),
     )
     .width(Length::Fill)
-    .padding(theme::pad(theme::GAP_XL, 0.0))
-    .align_x(alignment::Horizontal::Center)
+    .padding(theme::pad(theme::GAP_XL, theme::GAP_XS))
+    .align_x(alignment::Horizontal::Left)
     .into()
 }
 
@@ -267,17 +307,34 @@ fn queue_row(
     }
     let body = button(
         row![
+            // Centred on the title's own line rather than on the row's block,
+            // and the row top-aligned to keep it there — the same fix, the same
+            // lane and the same argument as `side_panel::track_row`, because
+            // these are the same twelve rows.
             container(marker)
                 .width(Length::Fixed(theme::TRACK_NO_W))
-                .align_x(alignment::Horizontal::Right),
+                .height(Length::Fixed(theme::CAPTION_LINE_H))
+                .align_x(alignment::Horizontal::Right)
+                .align_y(alignment::Vertical::Center),
             container(title).width(Length::Fill),
-            text(row_state.duration)
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(theme::PAPER_FAINT),
+            // The same reserved, right-aligned duration lane the inspector's
+            // rows keep — one list, one geometry, so a listener who learned one
+            // has learned the other (`side_panel::track_row` carries the
+            // argument).
+            container(
+                text(row_state.duration)
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(theme::PAPER_FAINT)
+                    .wrapping(text::Wrapping::None)
+            )
+            .width(Length::Fixed(theme::DURATION_W))
+            .height(Length::Fixed(theme::CAPTION_LINE_H))
+            .align_x(alignment::Horizontal::Right)
+            .align_y(alignment::Vertical::Center),
         ]
         .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Center),
+        .align_y(iced::Alignment::Start),
     )
     .width(Length::Fill)
     .padding(theme::pad(theme::GAP_XS, theme::GAP_XS))

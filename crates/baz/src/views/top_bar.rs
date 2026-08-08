@@ -23,13 +23,29 @@ use crate::theme;
 
 /// The search field's width in the top bar (logical px).
 const SEARCH_W: f32 = 360.0;
+
+/// The search well's vertical padding (logical px), derived so the well is
+/// exactly [`theme::TRANSPORT_HIT`] tall.
+///
+/// iced lays a `text_input` out as its padding plus one line box plus its 1 px
+/// border on each side, so the padding is the height minus the parts that are
+/// not it, halved. It came to 8, which made the well 34 px against a 32 px
+/// control everywhere else in the product — two pixels, on the one row where
+/// the app's two clusters have to look like they were placed by the same hand.
+const SEARCH_PAD_V: f32 =
+    (theme::TRANSPORT_HIT - theme::SIZE_BODY * theme::LEADING_BODY - 2.0) / 2.0;
 /// The slim top bar: the search well on the left, quiet status and the route
 /// to the settings on the right, a hairline rule below.
 pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
+    // The search **well**: recessed below the wall, like every other place in
+    // baz you put something into. Its vertical padding is set so that the well
+    // stands [`theme::TRANSPORT_HIT`] tall — the same 32 px as every control in
+    // the product — which is what puts the bar's left and right clusters on one
+    // vertical grid instead of merely on one centre line.
     let search = text_input("Search artists, albums, tracks…", &shelf.query)
         .id(search_id())
         .on_input(Message::SearchChanged)
-        .padding(theme::pad(theme::GAP_SM, theme::GAP_MD))
+        .padding(theme::pad(SEARCH_PAD_V, theme::GAP_MD))
         .size(theme::SIZE_BODY)
         .line_height(theme::LEADING_BODY)
         .width(Length::Fixed(SEARCH_W))
@@ -112,8 +128,12 @@ fn settings_toggle() -> Element<'static, Message> {
         .align_x(alignment::Horizontal::Center),
     )
     .width(Length::Fixed(theme::SETTINGS_TOGGLE_W))
-    .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-    .style(|_theme, status| theme::panel_toggle(status, false))
+    // The same 32 px as the search well beside it and as every control in the
+    // product: a row whose two ends are 34 px and 24 px tall is centred but not
+    // aligned, and the difference is exactly what "clunky" describes.
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_SM))
+    .style(|_theme, status| theme::word_button(status))
     .on_press(Message::ToggleSettings)
     .into()
 }
@@ -121,6 +141,12 @@ fn settings_toggle() -> Element<'static, Message> {
 /// The unobtrusive count text: album/track counts, or the filtered
 /// count while a query narrows the shelf. Status, not modal — by
 /// design; scan/skip/problem notes render as separate colored segments.
+///
+/// The filtered form leads with the **match count**, because that is the number
+/// a listener typing into the well is watching: `7 of 1 284 albums` reads as an
+/// answer to the query, where the unfiltered form is a description of the
+/// collection. Both end in the same word so the line does not change shape as
+/// the query empties.
 fn counts_line(shelf: &Shelf) -> String {
     if shelf.query.trim().is_empty() {
         format!(
@@ -129,6 +155,25 @@ fn counts_line(shelf: &Shelf) -> String {
             shelf.library.len()
         )
     } else {
-        format!("{} / {} albums", shelf.visible.len(), shelf.albums.len())
+        format!("{} of {} albums", shelf.visible.len(), shelf.albums.len())
     }
 }
+
+// # The group-key row is **not** wired here, and that is deliberate
+//
+// `Library::shelves(key)` and `GroupKey` landed in `baz-core` (ADR-0019) and
+// nothing in this crate calls either yet. The row of words — ARTIST · YEAR ·
+// GENRE · ADDED · PLAYED — belongs in this bar, and drawing it is the easy
+// tenth of the work: the rest is the active key in `Shelf`, persisted in
+// `config.rs`, the shelf rebuilt as a list of *groups* rather than a flat
+// vector, sticky headers inside the virtualizer's row arithmetic, and the index
+// rail projecting the same keys down the shelf's right edge. That is ADR-0017
+// step 8, it lands squarely on top of `shelf.rs`'s geometry, and a parallel
+// pass owns that file for the hang.
+//
+// So the seam is left rather than half-taken. Drawing five words that do
+// nothing would be worse than drawing none: *an affordance that does nothing is
+// a lie*, and `docs/REFUSALS.md` puts every action behind a visible control
+// precisely so that the reverse cannot happen either. When the key arrives it
+// arrives as one `row!` of `word_button`s here, one field on `Shelf`, and the
+// grouping in `vm`.

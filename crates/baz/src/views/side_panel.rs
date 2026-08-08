@@ -57,14 +57,15 @@
 use std::time::Duration;
 
 use iced::widget::{
-    Column, Space, button, column, container, image as iced_image, row, scrollable, text,
+    Column, Space, button, column, container, horizontal_rule, image as iced_image, row,
+    scrollable, text,
 };
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
 use crate::player::{Availability, PlayerState};
 use crate::views::{close_button, gradient_block};
-use crate::{theme, vm};
+use crate::{icon, theme, vm};
 
 /// Side-panel inner padding (logical px).
 const PANEL_PAD: f32 = theme::GAP_XL;
@@ -102,23 +103,28 @@ pub(crate) fn view<'a>(
     // A row is only a control when there is an engine to send its command to,
     // exactly as `Play album` above it is.
     let interactive = player.engine_ready();
-    let rows: Vec<Element<'_, Message>> = edition
-        .map(|edition| {
-            edition
-                .tracks
-                .iter()
-                .enumerate()
-                .map(|(index, track)| {
-                    track_row(
-                        track,
-                        per_track_artists,
-                        playing_row == Some(index),
-                        interactive.then_some(Message::PlayTrack(album.id, index)),
-                    )
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    // The rows, with a disc header pushed in ahead of each disc **after the
+    // first** — and only when the tags actually carry disc numbers. See
+    // [`disc_header`].
+    let mut rows: Vec<Element<'_, Message>> = Vec::new();
+    if let Some(edition) = edition {
+        let multi_disc = vm::discs(edition).is_some_and(|discs| discs > 1);
+        let mut current: Option<u32> = None;
+        for (index, track) in edition.tracks.iter().enumerate() {
+            if multi_disc && track.disc.is_some() && track.disc != current {
+                current = track.disc;
+                if let Some(disc) = current {
+                    rows.push(disc_header(disc));
+                }
+            }
+            rows.push(track_row(
+                track,
+                per_track_artists,
+                playing_row == Some(index),
+                interactive.then_some(Message::PlayTrack(album.id, index)),
+            ));
+        }
+    }
 
     // The dismissal ✕ sits in a row of its own above the sleeve — the same
     // slot, in the same panel width, as the queue's, so closing a panel is one
@@ -136,38 +142,21 @@ pub(crate) fn view<'a>(
         content = content.push(edition_selector(album, edition));
     }
     if *player.availability() != Availability::NotBuilt {
-        content = content.push(
-            button(
-                container(
-                    text("Play album")
-                        .size(theme::SIZE_BODY)
-                        .line_height(theme::LEADING_BODY)
-                        .font(theme::MEDIUM),
-                )
-                .width(Length::Fill)
-                .align_x(alignment::Horizontal::Center),
-            )
-            .width(Length::Fill)
-            .padding(theme::pad(theme::GAP_SM, 0.0))
-            .style(theme::primary)
-            .on_press_maybe(
-                player
-                    .engine_ready()
-                    .then_some(Message::PlayAlbum(album.id)),
-            ),
-        );
+        content = content.push(play_album(album.id, player.engine_ready()));
     }
     let hint = if *player.availability() == Availability::NotBuilt {
         "Esc closes · built without audio output"
     } else {
         "Esc closes · double-click a tile to play"
     };
-    content = content.push(track_list(rows)).push(
-        text(hint)
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION)
-            .color(theme::PAPER_FAINT),
-    );
+    content = content
+        .push(track_list(rows, details(album, edition)))
+        .push(
+            text(hint)
+                .size(theme::SIZE_CAPTION)
+                .line_height(theme::LEADING_CAPTION)
+                .color(theme::PAPER_FAINT),
+        );
 
     container(content)
         .width(Length::Fixed(theme::PANEL_W))
@@ -190,15 +179,163 @@ pub(crate) fn view<'a>(
 /// same reserved-slot rule the bottom bar's timestamps and signal note follow.
 /// Nothing else about the panel moves: the padding, the number column, the
 /// gaps and the panel width are untouched.
-fn track_list(rows: Vec<Element<'_, Message>>) -> Element<'_, Message> {
+///
+/// # Details rides in the same scroll
+///
+/// `details` is appended **inside** this scrollable rather than under it, and
+/// that is the whole of the interaction the block was specified with: *no
+/// disclosure, no click* — it is the back of the record's card, and you turn it
+/// over by scrolling past the last track. Devon never sees it; Marta never has
+/// to ask for it. A separate scroll region, or a twisty, would make it a
+/// feature you have to discover instead of a page you reach.
+fn track_list<'a>(
+    rows: Vec<Element<'a, Message>>,
+    details: Element<'a, Message>,
+) -> Element<'a, Message> {
     scrollable(
-        Column::with_children(rows)
-            .spacing(theme::GAP_XXS)
+        column![Column::with_children(rows).spacing(theme::GAP_XXS), details]
+            .spacing(theme::GAP_XL)
             .padding(theme::scroll_gutter()),
     )
     .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
     .style(theme::scrollbar)
     .height(Length::Fill)
+    .into()
+}
+
+/// The primary action: **Play album**, a lamp outline with a paper triangle
+/// and a paper label, and the only control in baz drawn in the accent.
+///
+/// It is the switch that turns the picture light on — the one control in the
+/// product that *creates* playback truth — which is why it is allowed the
+/// colour and why there is at most one of it on screen. The paint is
+/// [`theme::primary`], where the argument for an outline rather than an amber
+/// slab lives.
+///
+/// The glyph is [`theme::PAPER`] rather than amber, and that is a deviation
+/// from `.interface-design/system.md` §5 taken deliberately and cheaply:
+/// [`crate::icon`] rasterises one sprite sheet in one ink, so a second colour
+/// costs a second sheet and names an amber token in a module the accent
+/// discipline's source scan would then have to exempt. The accent is on the
+/// border, where a 1 px line is exactly what the refusal permits, and the
+/// triangle is the *shape* that says play. Revisit if the sheet ever gains a
+/// second ink for another reason.
+///
+/// [`theme::TRANSPORT_HIT`] tall and the column's full width, so it reads as
+/// the panel's one commitment rather than as another button in a row of them.
+fn play_album(album: u64, live: bool) -> Element<'static, Message> {
+    button(
+        row![
+            iced_image(icon::handle(icon::Glyph::Play))
+                .width(Length::Fixed(theme::ICON_PX))
+                .height(Length::Fixed(theme::ICON_PX))
+                .opacity(theme::glyph_opacity(live, false)),
+            text("Play album")
+                .size(theme::SIZE_BODY)
+                .line_height(theme::LEADING_BODY)
+                .font(theme::SEMIBOLD)
+                .wrapping(text::Wrapping::None),
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_MD))
+    .style(theme::primary)
+    .on_press_maybe(live.then_some(Message::PlayAlbum(album)))
+    .into()
+}
+
+/// A disc break in the track list — `DISC 2` in the room's quietest voice,
+/// with air above it.
+///
+/// **Data-driven, never faked** (`docs/design/critique/02-surfaces.md`): drawn
+/// only when the edition's tags carry disc numbers *and* they name more than
+/// one disc. A single-disc record gets no header, and — the case that matters
+/// — a two-disc rip whose tagger never wrote the field gets no header either,
+/// because inventing `DISC 1` over the first eleven tracks would be the
+/// interface claiming to know something it does not.
+///
+/// The spec asks for `SIDE A` / `SIDE B`. baz's schema carries **discs**, not
+/// sides: no tag baz reads distinguishes the two halves of a record, so sides
+/// would have to be inferred from a disc number, which is exactly the faking
+/// the same sentence forbids. This is the same header mechanism wearing the
+/// name of the data that exists; sides arrive here unchanged the day the
+/// scanner reads one.
+fn disc_header(disc: u32) -> Element<'static, Message> {
+    container(
+        text(format!("DISC {disc}"))
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION)
+            .font(theme::MEDIUM)
+            .color(theme::heading_ink())
+            .wrapping(text::Wrapping::None),
+    )
+    .padding(theme::pad(theme::GAP_SM, theme::GAP_XS))
+    .into()
+}
+
+/// **Details** — the condition report in full, below the fold.
+///
+/// A hairline, the word `Details` in the room's quietest voice, then one row
+/// per field the scan actually read: the label right-aligned in
+/// [`theme::FIELD_LABEL_W`], the value left-aligned after it, at
+/// [`theme::DETAIL_ROW_H`] pitch. It is a reference table you scan, not prose
+/// you read, which is why the pitch is tighter than the type's own leading.
+///
+/// `docs/design/03-interface-prior-art.md` R6 is the argument: fooyin shows
+/// twenty fields for free and baz showed four, and baz's audience came from
+/// products in the first camp. What decides the row list is
+/// [`vm::details`] — including its refusal to invent a row for a field the
+/// tags do not carry.
+///
+/// Empty when the scan read nothing at all, in which case the block is not
+/// drawn: a heading over nothing is worse than no heading.
+fn details<'a>(album: &'a vm::AlbumVm, edition: Option<&'a vm::EditionVm>) -> Element<'a, Message> {
+    let rows = vm::details(album, edition);
+    if rows.is_empty() {
+        return Space::with_height(Length::Fixed(0.0)).into();
+    }
+    // The rows carry their own pitch ([`theme::DETAIL_ROW_H`]) and take no
+    // spacing from the column, or the table would read at 25 px a line — a
+    // page rather than a card.
+    let mut table = column![];
+    for (label, value) in rows {
+        table = table.push(
+            container(
+                row![
+                    container(
+                        text(label)
+                            .size(theme::SIZE_META)
+                            .line_height(theme::LEADING_META)
+                            .color(theme::PAPER_MUTED)
+                            .wrapping(text::Wrapping::None)
+                    )
+                    .width(Length::Fixed(theme::FIELD_LABEL_W))
+                    .align_x(alignment::Horizontal::Right),
+                    text(value)
+                        .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
+                        .color(theme::PAPER_DIM)
+                        .wrapping(text::Wrapping::None),
+                ]
+                .spacing(theme::GAP_SM),
+            )
+            .height(Length::Fixed(theme::DETAIL_ROW_H))
+            .clip(true),
+        );
+    }
+    column![
+        horizontal_rule(1).style(theme::hairline),
+        text("Details")
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .font(theme::MEDIUM)
+            .color(theme::heading_ink()),
+        table,
+    ]
+    .spacing(theme::GAP_SM)
     .into()
 }
 
@@ -231,15 +368,30 @@ fn album_header<'a>(
     if total > Duration::ZERO {
         meta.push(vm::format_duration(total));
     }
+    // Four voices, four sizes, four inks, in one falling order: the work, who
+    // made it, what it is, what it is made of. Each line is quieter than the
+    // one above it, which is the whole of the hierarchy — there is no rule, no
+    // surface and no colour anywhere in this header.
     let mut header = column![
-        text(title)
-            .size(theme::SIZE_TITLE)
-            .line_height(theme::LEADING_TITLE)
-            .font(theme::SEMIBOLD),
+        // The title clips at **two lines**. `Wrapping::None` does not stop iced
+        // 0.13 laying a long string over several lines (the same behaviour the
+        // shelf's caption lanes work around), and a box-set title running to
+        // four lines pushes the artist, the catalogue line and the Play button
+        // down the panel. Two lines is a title; more is a paragraph.
+        container(
+            text(title)
+                .size(theme::SIZE_TITLE)
+                .line_height(theme::LEADING_TITLE)
+                .font(theme::SEMIBOLD)
+                .color(theme::PAPER)
+        )
+        .max_height(2.0 * theme::SIZE_TITLE * theme::LEADING_TITLE)
+        .clip(true),
         text(artist)
             .size(theme::SIZE_EMPHASIS)
             .line_height(theme::LEADING_EMPHASIS)
             .color(theme::PAPER_DIM),
+        // The catalogue line: `1992 · 13 tracks · 45:35`.
         text(meta.join(" · "))
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
@@ -356,17 +508,42 @@ fn track_row(
     }
     button(
         row![
+            // The number column and the duration lane are centred on the
+            // **title's own line**, not on the row's block, and the row is
+            // top-aligned so they stay there. Centred on the block, a
+            // soundtrack row that carries a composer under its title dragged
+            // its number and its duration halfway down two lines while every
+            // single-line row above kept them on one — so a list of thirteen
+            // tracks had thirteen figures on eleven different baselines. The
+            // lane is [`theme::CAPTION_LINE_H`], the height of one line of body
+            // text, which is what the title occupies whatever follows it.
             container(marker)
                 .width(Length::Fixed(theme::TRACK_NO_W))
-                .align_x(alignment::Horizontal::Right),
+                .height(Length::Fixed(theme::CAPTION_LINE_H))
+                .align_x(alignment::Horizontal::Right)
+                .align_y(alignment::Vertical::Center),
             container(title).width(Length::Fill),
-            text(duration)
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(theme::PAPER_FAINT),
+            // The duration lives in a reserved [`theme::DURATION_W`] lane,
+            // right-aligned. Sized to its own string it was not a column at
+            // all: `9:41` and `12:07` ended on different pixels, so a
+            // thirteen-track record had a ragged right edge where the
+            // proportional face's tabular figures could have given it a ruled
+            // one. Figure columns are right-aligned (§8.2) — ragged-left reads
+            // fine editorially and pins the edge the eye follows.
+            container(
+                text(duration)
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(theme::PAPER_FAINT)
+                    .wrapping(text::Wrapping::None)
+            )
+            .width(Length::Fixed(theme::DURATION_W))
+            .height(Length::Fixed(theme::CAPTION_LINE_H))
+            .align_x(alignment::Horizontal::Right)
+            .align_y(alignment::Vertical::Center),
         ]
         .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Center),
+        .align_y(iced::Alignment::Start),
     )
     .width(Length::Fill)
     .padding(theme::pad(theme::GAP_XS, theme::GAP_XS))

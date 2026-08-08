@@ -168,8 +168,11 @@ pub const LAMP_BRIGHT: Color = Color::from_rgb(0.945, 0.702, 0.384);
 pub const LAMP_DEEP: Color = Color::from_rgb(0.780, 0.533, 0.239);
 /// Lamp amber as a glow: the playing sleeve's halo, and nothing else.
 pub const LAMP_GLOW: Color = Color::from_rgba(0.890, 0.631, 0.306, 0.30);
-/// Near-black ink for text sitting *on* the amber lamp.
-pub const LAMP_INK: Color = Color::from_rgb(0.106, 0.078, 0.043);
+// `LAMP_INK` — near-black ink for text sitting *on* the amber lamp — is
+// **deleted** (`.interface-design/system.md` §4). Nothing sits on the accent
+// any more: amber is never an opaque fill (`docs/REFUSALS.md`), so `primary`
+// is an outline with a paper label and there is no lamp-coloured ground for
+// any glyph to need contrast against.
 /// Keyboard focus: paper at 45%, on the focused `text_input`'s border and
 /// nowhere else.
 ///
@@ -199,8 +202,14 @@ pub const PAPER_MUTED: Color = Color::from_rgb(0.424, 0.416, 0.400);
 pub const ALERT: Color = Color::from_rgb(0.851, 0.467, 0.420);
 /// Success (theme palette slot; nothing renders it directly yet).
 pub const SUCCESS: Color = Color::from_rgb(0.525, 0.663, 0.486);
-/// The sleeve drop shadow's color.
-pub const SHADOW: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.45);
+// `SHADOW` is **deleted** (`.interface-design/system.md` §2), and the deletion
+// is measured rather than preferred: black at 45–55 % composited over the wall
+// `#0C0D0E` yields `#050606`, a contrast ratio of **1.04 : 1**. On near-black a
+// drop shadow is not a design tool, it is a rounding error — so the sleeve's
+// contact shadow and the popover's float shadow are removed rather than tuned,
+// and separation is carried by the surface step and the hairline that were
+// already doing the work. The one shadow primitive left in the product is
+// [`LAMP_GLOW`], and it is not elevation — it is light.
 
 // ---------------------------------------------------------------------------
 // Type scale
@@ -699,20 +708,29 @@ pub fn theme() -> Theme {
     THEME.clone()
 }
 
-/// A shelf tile's button chrome: invisible at rest (the sleeve leads),
-/// a quiet raised card on hover, one step higher plus a hairline edge when
-/// selected.
+/// A shelf tile's button chrome: **nothing, in every state**.
 ///
-/// **Radius 0**, where the tile had a `RADIUS_TILE` of 10. That token is
-/// deleted: the shelf has no rectangles that are not artwork, and artwork is
-/// always square (`.interface-design/system.md` §6). What is left here is
-/// square-cornered chrome, which looks odd on purpose and briefly — B1 of the
-/// adoption order deletes the tile's background and border outright and gives
-/// hover and selection a rule under the *label* instead. This commit is values
-/// only, so it does not reach for that.
+/// This is ADR-0017 step 14, and it is the whole of the shelf's first rule:
+/// *the shelf contains exactly two kinds of thing, artwork and type*
+/// (`.interface-design/system.md` §1.2). A card behind a sleeve is a third
+/// kind, and it was drawing one on hover and two steps' worth on selection.
+/// So the background, the border and the radius all go, and the tile's state
+/// vocabulary moves to a **rule under the label** — [`tile_rule`], drawn at
+/// art width by [`crate::views::shelf`], 1 px [`HAIRLINE_STRONG`] hovered
+/// against 2 px [`PAPER_FAINT`] selected.
+///
+/// The parameters survive because the caller still has the questions, and
+/// because two things are still decided here: `selected` and hover both leave
+/// the *ink* alone (the shelf's marks are geometry, never colour), and nothing
+/// may quietly re-grow a surface under a cover. What is asserted below is that
+/// this function paints nothing at all.
+///
+/// **Radius 0**, where the tile had a `RADIUS_TILE` of 10 — that token is
+/// deleted, artwork is always square, and there is no longer any rectangle
+/// here to round.
 #[must_use]
-pub fn tile(status: button::Status, selected: bool) -> button::Style {
-    let mut style = button::Style {
+pub fn tile(_status: button::Status, _selected: bool) -> button::Style {
+    button::Style {
         background: None,
         text_color: PAPER,
         border: Border {
@@ -721,34 +739,76 @@ pub fn tile(status: button::Status, selected: bool) -> button::Style {
             radius: 0.0.into(),
         },
         shadow: Shadow::default(),
-    };
-    if selected {
-        style.background = Some(Background::Color(PLINTH_LIT));
-        style.border.color = HAIRLINE_STRONG;
-        // Two pixels, not one: see [`SELECTION_EDGE`].
-        style.border.width = SELECTION_EDGE;
-    } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-        style.background = Some(Background::Color(PLINTH));
     }
-    style
 }
 
-/// The artwork's frame: a soft drop shadow so the sleeve sits on the shelf;
-/// the playing album trades it for a lamp-amber halo.
+/// The mark a tile's state makes: a rule under its wall label, at art width,
+/// in the ink and thickness the state calls for.
+///
+/// The shelf's *only* state vocabulary, and deliberately a poor relation of a
+/// border: it is under the type, not around the work, so rule 2 of the
+/// direction — *nothing is ever drawn on top of a sleeve*, and nothing is
+/// drawn around one either — holds in a screenshot as well as in prose.
+///
+/// Hover is 1 px [`HAIRLINE_STRONG`] (paper at 15 %); selection is
+/// [`SELECTION_EDGE`] 2 px of [`PAPER_FAINT`]. That is a 2× thickness and a
+/// ~4× ink step apart, which is what the audit's *"hover and selection are
+/// nearly the same mark"* finding asked for and what one surface step plus a
+/// hairline could never give it. Neither is the accent: selecting a record is
+/// not playing one.
+///
+/// The lane the rule sits in is reserved at [`SELECTION_EDGE`] whatever the
+/// state, so the thick mark, the thin one and no mark at all occupy the same
+/// pixels and a pointer crossing the wall moves nothing.
+#[must_use]
+pub fn tile_rule(hovered: bool, selected: bool) -> container::Style {
+    let ink = if selected {
+        PAPER_FAINT
+    } else if hovered {
+        HAIRLINE_STRONG
+    } else {
+        Color::TRANSPARENT
+    };
+    container::Style {
+        background: Some(Background::Color(ink)),
+        ..container::Style::default()
+    }
+}
+
+/// How thick a tile's [`tile_rule`] is drawn, in the [`SELECTION_EDGE`] lane
+/// reserved for it (logical px).
+#[must_use]
+pub fn tile_rule_h(hovered: bool, selected: bool) -> f32 {
+    if selected {
+        SELECTION_EDGE
+    } else if hovered {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+/// The artwork's backing: a [`RECESS`] square the sleeve sits in, and — when
+/// the album is the one sounding — the lamp's halo around it.
+///
+/// **No contact shadow.** It was `SHADOW` at 45 % offset 3 px, and it composited
+/// to a 1.04 : 1 step over the wall: invisible, and paid for on every tile of
+/// every row. Deleting it is what leaves the halo meaning something, because a
+/// glow is only a glow next to sleeves that have nothing.
+///
+/// The blur is **24**, up from 16 (`.interface-design/system.md` §4): the halo
+/// is now the only light in the shelf rather than one of two shadows, and at
+/// 16 it read as a rim rather than as a room's worth of lamp.
 #[must_use]
 pub fn sleeve(playing: bool) -> container::Style {
     let shadow = if playing {
         Shadow {
             color: LAMP_GLOW,
             offset: Vector::ZERO,
-            blur_radius: 16.0,
+            blur_radius: HALO_BLUR,
         }
     } else {
-        Shadow {
-            color: SHADOW,
-            offset: Vector::new(0.0, 3.0),
-            blur_radius: 8.0,
-        }
+        Shadow::default()
     };
     container::Style {
         background: Some(Background::Color(RECESS)),
@@ -767,15 +827,75 @@ pub fn lamp_dot(_theme: &Theme) -> container::Style {
     }
 }
 
-/// Quiet transport controls (play/pause, next): a card that raises on hover
-/// and sinks on press.
+/// **An icon button: the glyph, and nothing else.**
+///
+/// Every icon-only control in baz takes this style — the three transport
+/// glyphs and the mute speaker in the bar, every layer's dismissal ✕, a queue
+/// row's removal ✕, the settings' `−`/`+` pair — which is why it is one
+/// function rather than four that would drift.
+///
+/// It used to paint a [`PLINTH`] card with a [`HAIRLINE`] border at rest, and
+/// that was the loudest wrong thing in the product: five little bordered boxes
+/// strung along a bar whose entire thesis is that chrome recedes. The mark a
+/// listener is looking for is the triangle, not the box around it, and a box
+/// drawn at rest states nothing that the glyph does not.
+///
+/// So at rest there is **no background and no border**. Hover is a faint ink
+/// wash ([`INK_WASH`], paper at 6 %), press a touch stronger
+/// ([`INK_WASH_PRESS`], 10 %), and disabled is ink alone — the glyph's own
+/// opacity carries that ([`glyph_opacity`]), because a wash under a dead
+/// control would be a control offering itself.
+///
+/// **The target does not move.** [`TRANSPORT_HIT`] 32 is an accessibility
+/// floor asserted in `a_transport_button_is_a_square_target_around_its_glyph`,
+/// and it is a property of the *button*, not of its paint: what has gone is
+/// the chrome, not the square. The border is 1 px in every state and merely
+/// transparent in three, for the reason [`now_playing`] gives — iced draws a
+/// border inside the widget's bounds, so a border that appeared on hover would
+/// move the glyph under the pointer by a pixel, in the bar, where nothing may
+/// move.
 #[must_use]
 pub fn transport(_theme: &Theme, status: button::Status) -> button::Style {
+    let (background, text_color) = match status {
+        button::Status::Hovered => (INK_WASH, PAPER),
+        button::Status::Pressed => (INK_WASH_PRESS, PAPER),
+        button::Status::Disabled => (Color::TRANSPARENT, PAPER_MUTED),
+        button::Status::Active => (Color::TRANSPARENT, PAPER),
+    };
+    button::Style {
+        background: Some(Background::Color(background)),
+        text_color,
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 1.0,
+            radius: RADIUS_CTRL.into(),
+        },
+        shadow: Shadow::default(),
+    }
+}
+
+/// The primary action (Play album): a lamp **outline**, and the only control
+/// in baz drawn in the accent.
+///
+/// It was a solid lamp rectangle — an exception the previous direction argued
+/// for and this one revokes (`.interface-design/system.md` §5). Under a room
+/// this quiet an amber slab was the brightest object on screen and it was
+/// *not* the artwork, which inverts the one hierarchy baz has. The refusal it
+/// broke is now stated without exceptions: **amber is never an opaque fill** —
+/// a ≤ 6 px mark, a 4 px rail, a 1 px line, or light.
+///
+/// So: a 1 px [`LAMP`] border, a [`PAPER`] label, no fill at rest, and
+/// [`LAMP_WASH`] at 10 % hovered / 20 % pressed. The play triangle beside the
+/// label is the glyph, drawn amber by the view. Disabled keeps the geometry
+/// and drops the accent entirely: a control that cannot create playback truth
+/// has no business wearing the colour that means it.
+#[must_use]
+pub fn primary(_theme: &Theme, status: button::Status) -> button::Style {
     let (background, border, text_color) = match status {
-        button::Status::Hovered => (PLINTH_LIT, HAIRLINE_STRONG, PAPER),
-        button::Status::Pressed => (RECESS, HAIRLINE_STRONG, PAPER),
-        button::Status::Disabled => (PLINTH, HAIRLINE, PAPER_FAINT),
-        button::Status::Active => (PLINTH, HAIRLINE, PAPER),
+        button::Status::Active => (Color::TRANSPARENT, LAMP, PAPER),
+        button::Status::Hovered => (LAMP_WASH, LAMP_BRIGHT, PAPER),
+        button::Status::Pressed => (LAMP_WASH_PRESS, LAMP_DEEP, PAPER),
+        button::Status::Disabled => (Color::TRANSPARENT, HAIRLINE, PAPER_MUTED),
     };
     button::Style {
         background: Some(Background::Color(background)),
@@ -785,23 +905,6 @@ pub fn transport(_theme: &Theme, status: button::Status) -> button::Style {
             width: 1.0,
             radius: RADIUS_CTRL.into(),
         },
-        shadow: Shadow::default(),
-    }
-}
-
-/// The primary action (Play album): the only lamp-filled control on screen.
-#[must_use]
-pub fn primary(_theme: &Theme, status: button::Status) -> button::Style {
-    let (background, text_color) = match status {
-        button::Status::Active => (LAMP, LAMP_INK),
-        button::Status::Hovered => (LAMP_BRIGHT, LAMP_INK),
-        button::Status::Pressed => (LAMP_DEEP, LAMP_INK),
-        button::Status::Disabled => (PLINTH, PAPER_FAINT),
-    };
-    button::Style {
-        background: Some(Background::Color(background)),
-        text_color,
-        border: iced::border::rounded(RADIUS_CTRL),
         shadow: Shadow::default(),
     }
 }
@@ -1040,18 +1143,13 @@ pub fn panel(_theme: &Theme) -> container::Style {
     }
 }
 
-/// A panel toggle in the top bar (today: Queue): label-only until the pointer
-/// finds it, a raised card with a hairline edge while its panel is open.
-///
-/// The same treatment as [`segment`], and for the same reason: opening a panel
-/// is a *view* choice, not a claim about what is playing, so the lamp stays
-/// where it belongs. What "on" looks like is therefore a surface step and an
-/// edge — the room's own way of saying a thing is selected — rather than a
-/// second accent competing with the playing album's dot.
-#[must_use]
-pub fn panel_toggle(status: button::Status, active: bool) -> button::Style {
-    segment(status, active)
-}
+// `panel_toggle` is **deleted**. It was `segment` under another name — a
+// *selectable* control's paint, a raised `PLINTH_LIT` card with a hairline
+// edge — worn by the two things in baz that are navigation rather than
+// selection: `Settings` and `‹ Library`. Navigation has no "on" state to draw
+// (the place it leads to replaces the bar the control sits in, so there is no
+// frame in which it could be lit and visible at once), and it should not raise
+// a card to say the pointer found a word. Both now take `word_button`.
 
 /// The now-playing bar: recessed below the wall, like the amp under the
 /// shelf.
@@ -1342,13 +1440,15 @@ pub const SETTINGS_BREAKPOINT: f32 = 1000.0;
 ///   element. The anchor is expressed by *position* — bottom right, above the
 ///   bar — and by the affordance below it taking its open styling.
 /// - **No blur, no backdrop filter, and no scrim.** Separation is a surface
-///   step, a hairline and the shadow, which is the depth strategy the whole
-///   room already uses. Dimming ten thousand covers to show twelve rows would
-///   contradict the palette rationale outright (§2.4).
-///
-/// The shadow is the *sleeve's* shadow, offset and blur alike: artwork is the
-/// one thing in baz that casts one, and a floating layer is the one exception
-/// that has to — so it borrows rather than invents.
+///   step and a hairline, which is the depth strategy the whole room already
+///   uses. Dimming ten thousand covers to show twelve rows would contradict
+///   the palette rationale outright (§2.4).
+/// - **No shadow either, now.** It borrowed the sleeve's, and the sleeve's is
+///   deleted: 45 % black over the wall is a 1.04 : 1 step, so what looked like
+///   a float was a hairline doing all the work and a shadow taking the credit.
+///   [`PLINTH_LIT`] is a full surface step above the panel and two above the
+///   wall, in linear light nearly 2× per step, which is what actually says
+///   *this is in front*.
 #[must_use]
 pub fn popover(_theme: &Theme) -> container::Style {
     container::Style {
@@ -1358,11 +1458,7 @@ pub fn popover(_theme: &Theme) -> container::Style {
             width: 1.0,
             radius: RADIUS_CTRL.into(),
         },
-        shadow: Shadow {
-            color: SHADOW,
-            offset: Vector::new(0.0, 3.0),
-            blur_radius: 8.0,
-        },
+        shadow: Shadow::default(),
         ..container::Style::default()
     }
 }
@@ -1403,6 +1499,180 @@ pub fn now_playing(status: button::Status, open: bool) -> button::Style {
             } else {
                 Color::TRANSPARENT
             },
+            width: 1.0,
+            radius: RADIUS_CTRL.into(),
+        },
+        shadow: Shadow::default(),
+    }
+}
+
+// ===========================================================================
+// The surface-styling pass — ADR-0017 steps 14 and 15, plus the icon button
+//
+// Appended as one block, at the end, deliberately and for the reason the
+// block above gives: two parallel passes are rewriting this file's *values*
+// (the `Palette` indirection, ADR-0017 step 2) and the shelf's *geometry*
+// (the hang, step 5), and a token added here conflicts with neither. Nothing
+// in this section changes an existing value; every name is new. Move each one
+// up into its proper section once the passes either side of it have landed.
+//
+// What is in it: the two ink washes an icon button hovers and presses with,
+// the two lamp washes the primary action is allowed instead of a fill, the
+// halo's blur, and the reserved slots the album inspector's new blocks need.
+// ===========================================================================
+
+/// A control's hover wash: **paper at 6 %**.
+///
+/// The whole of what an icon button gains under the pointer, and the whole of
+/// the critique's `hover = ink 6% overlay`. Six per cent of the ink over the
+/// wall is a step of about a fortieth in linear light — plainly there when you
+/// are looking for it, invisible when you are not, and it says *the pointer is
+/// on this* without claiming the control is a raised object.
+///
+/// A wash rather than a surface step on purpose: [`PLINTH`] is a *place*
+/// (a panel, a popover, a resting control), and a 32 px square that becomes a
+/// panel for as long as a pointer crosses it is the clunk this pass removes.
+pub const INK_WASH: Color = Color { a: 0.06, ..PAPER };
+
+/// A control's pressed wash: **paper at 10 %**.
+///
+/// One step stronger than [`INK_WASH`] and nothing else — no inversion, no
+/// [`RECESS`] sink, no border. Press is a moment; it should read as the same
+/// mark leaning on the button, not as a second design.
+pub const INK_WASH_PRESS: Color = Color { a: 0.10, ..PAPER };
+
+/// The primary action's hovered ground: **lamp at 10 %**.
+///
+/// The only amber ground in baz, and it is a wash rather than a fill —
+/// `docs/REFUSALS.md`: *amber is never an opaque fill*. At 10 % over
+/// [`PLINTH`] it composites to a warmth rather than to a colour, so `Play
+/// album` warms under the pointer without becoming the brightest object in a
+/// room whose brightest object is supposed to be a record sleeve.
+pub const LAMP_WASH: Color = Color { a: 0.10, ..LAMP };
+
+/// The primary action's pressed ground: **lamp at 20 %**.
+pub const LAMP_WASH_PRESS: Color = Color { a: 0.20, ..LAMP };
+
+/// The playing sleeve's halo blur (logical px).
+///
+/// **24**, where it was 16 (`.interface-design/system.md` §4). The halo used
+/// to compete with a contact shadow on every other tile; with the shadows
+/// deleted it is the only light in the shelf, and at 16 px it read as a rim
+/// around the art rather than as a lamp pointed at it. Blur is also the only
+/// dimension of a shadow iced 0.13 lets this design tune — there is no spread
+/// — so the spread is expressed here.
+pub const HALO_BLUR: f32 = 24.0;
+
+/// Width reserved for a duration at the right edge of a track or queue row
+/// (logical px).
+///
+/// A **reserved slot**, exactly like [`STAMP_W`] and [`POSITION_W`], and it is
+/// the fix for a defect visible in every screenshot of the inspector: the
+/// durations were laid out by a `text` sized to its own string, so `9:41` and
+/// `12:07` ended in different columns and a thirteen-track record had a ragged
+/// right edge where it should have had a ruled one. Right-aligned in a fixed
+/// lane, the figures pin the edge the eye follows (§8.2: *figure columns are
+/// right-aligned*).
+///
+/// 48 holds `1:59:59` — seven glyphs of which five are figures at
+/// [`DIGIT_EM`] — with room for the two colons, which is every duration a
+/// track can honestly have. Plex Sans's digits are tabular, so the slot is
+/// exact rather than approximately right.
+pub const DURATION_W: f32 = 48.0;
+
+/// Width of a label in the inspector's **Details** block (logical px).
+///
+/// The labels are right-aligned in it and the values left-aligned after it, so
+/// the block reads as two columns rather than as thirteen sentences. 96 holds
+/// `Album artist` and `MusicBrainz`, the two longest field names the block
+/// draws, at [`SIZE_META`].
+pub const FIELD_LABEL_W: f32 = 96.0;
+
+/// Row pitch in the **Details** block (logical px).
+///
+/// Tighter than the [`SIZE_META`] line box the block's type would otherwise
+/// take, deliberately: thirteen fields at a comfortable reading leading is a
+/// page, and this is a reference table you scan rather than prose you read —
+/// the back of the record's card. It is the same figure
+/// `.interface-design/system.md` §9 names.
+pub const DETAIL_ROW_H: f32 = 17.0;
+
+/// How far a missing sleeve's placeholder gradient is pulled back toward the
+/// [`RECESS`] it sits on: **0.62 of the way**.
+///
+/// The placeholder is deterministic two-colour art derived from the album's id
+/// ([`crate::vm::gradient_colors`]), and at full strength it was the loudest
+/// thing on the wall — a wall of real covers, most of them dark, punctuated by
+/// saturated gradients belonging to the records baz knows *least* about. That
+/// inverts the hierarchy: an album with no art should be the quietest tile in
+/// the row, not the brightest.
+///
+/// Pulled back rather than desaturated, because the point of the gradient is
+/// that two albums with no art still look like two different albums; hue is
+/// the whole of the identification and it survives the mix. Applied by
+/// [`placeholder_ink`].
+pub const PLACEHOLDER_MIX: f32 = 0.62;
+
+/// One stop of a placeholder sleeve's gradient, quietened by
+/// [`PLACEHOLDER_MIX`] toward the [`RECESS`] the sleeve is backed with.
+///
+/// Linear in sRGB components rather than in light, and that is the right
+/// instrument here for once: what is being tuned is how loud the block *looks*
+/// against near-black neighbours, and the encoded ramp is closer to perceived
+/// lightness at these levels than the linear one is.
+#[must_use]
+pub fn placeholder_ink(stop: Color) -> Color {
+    let mix = |from: f32, to: f32| PLACEHOLDER_MIX.mul_add(to - from, from);
+    Color {
+        r: mix(stop.r, RECESS.r),
+        g: mix(stop.g, RECESS.g),
+        b: mix(stop.b, RECESS.b),
+        a: 1.0,
+    }
+}
+
+/// A group or section heading: the room's quietest voice, and the only chrome
+/// voice it has.
+///
+/// [`SIZE_CAPTION`] in [`PAPER_MUTED`] — the critique's *"9–10 px caps at ink
+/// 40 %, the only chrome voice"*, resolved against what iced 0.13 can draw.
+/// There is no letter-spacing and no small-caps in the toolkit (§12), so the
+/// caps are the view's own `to_uppercase` and the tracking the design wanted
+/// is simply not available; what is left — small, quiet, capitalised — is
+/// still unmistakably a different voice from the type around it, which is the
+/// job.
+#[must_use]
+pub fn heading_ink() -> Color {
+    PAPER_MUTED
+}
+
+/// **A word that is a control**: `Settings`, `‹ Library` — navigation set in
+/// type rather than drawn as a button.
+///
+/// The two of them are the only text-labelled controls in baz that are neither
+/// a segment nor the primary action, and they were borrowing [`panel_toggle`],
+/// which is a *selectable* control: it raised a [`PLINTH`] card under the
+/// pointer and had a lit "on" state that navigation can never be in (the place
+/// it leads to replaces the bar the control is in, so there is no frame where
+/// it could be both lit and visible).
+///
+/// So they get the icon button's treatment with a label instead of a glyph: no
+/// ground and no edge at rest, [`INK_WASH`] under the pointer, and the word
+/// itself lifting from [`PAPER_DIM`] to [`PAPER`]. Chrome recedes; the word is
+/// the control. Geometry is identical in all four states.
+#[must_use]
+pub fn word_button(status: button::Status) -> button::Style {
+    let (background, text_color) = match status {
+        button::Status::Hovered => (INK_WASH, PAPER),
+        button::Status::Pressed => (INK_WASH_PRESS, PAPER),
+        button::Status::Disabled => (Color::TRANSPARENT, PAPER_MUTED),
+        button::Status::Active => (Color::TRANSPARENT, PAPER_DIM),
+    };
+    button::Style {
+        background: Some(Background::Color(background)),
+        text_color,
+        border: Border {
+            color: Color::TRANSPARENT,
             width: 1.0,
             radius: RADIUS_CTRL.into(),
         },
@@ -1805,6 +2075,232 @@ mod tests {
         const { assert!(TRANSPORT_HIT > ICON_PX) }
         // …and the pair of them fits inside the column they centre in.
         const { assert!(2.0 * TRANSPORT_HIT + GAP_SM < SEEK_ROW_W) }
+        // …and it is *only* a target: the chrome went and the square stayed.
+        // The accessibility floor is a property of the button's bounds, which
+        // no amount of paint can shrink, so the two claims are independent and
+        // both are asserted rather than one being taken as evidence of the
+        // other.
+        const { assert!(TRANSPORT_HIT >= 32.0) }
+        const { assert!(STEPPER_HIT < TRANSPORT_HIT) }
+    }
+
+    /// **An icon button at rest is the glyph and nothing else.**
+    ///
+    /// The owner's complaint, in a test: *"the clunky looking button styles
+    /// around what should be icon buttons"*. Five bordered cards were strung
+    /// along a bar built to recede, and every ✕ and stepper in the product wore
+    /// the same box. The rule is that the resting state paints **no ground and
+    /// no edge at all**, hover and press are washes rather than surfaces, and
+    /// the geometry is identical in all four states so that nothing moves under
+    /// a pointer.
+    #[test]
+    fn an_icon_button_wears_no_chrome_at_rest() {
+        let theme = theme();
+        let rest = transport(&theme, button::Status::Active);
+        assert_eq!(
+            from_background(rest.background),
+            vec![Color::TRANSPARENT],
+            "an icon button at rest paints a ground: the glyph is the control"
+        );
+        assert_eq!(
+            rest.border.color,
+            Color::TRANSPARENT,
+            "an icon button at rest draws an edge"
+        );
+
+        // Hover and press are ink washes over whatever the button is sitting
+        // on, never a surface step: a 32 px square that becomes a panel for as
+        // long as a pointer crosses it is the clunk this removes.
+        for (status, expected) in [
+            (button::Status::Hovered, INK_WASH),
+            (button::Status::Pressed, INK_WASH_PRESS),
+        ] {
+            let style = transport(&theme, status);
+            assert_eq!(from_background(style.background), vec![expected]);
+            assert!(expected.a < 0.2, "a wash is a wash: {expected:?} is a fill");
+            assert_eq!(style.border.color, Color::TRANSPARENT);
+        }
+        // Press must read as one step firmer than hover, not as a different
+        // design.
+        const { assert!(INK_WASH_PRESS.a > INK_WASH.a) }
+
+        // Disabled is ink alone — no wash under a control that cannot act.
+        let dead = transport(&theme, button::Status::Disabled);
+        assert_eq!(from_background(dead.background), vec![Color::TRANSPARENT]);
+
+        // And every state has the same border geometry and casts no shadow, so
+        // the bar's pixel-stability claim survives the restyle untouched.
+        for status in [
+            button::Status::Active,
+            button::Status::Hovered,
+            button::Status::Pressed,
+            button::Status::Disabled,
+        ] {
+            let style = transport(&theme, status);
+            assert!((style.border.width - 1.0).abs() < f32::EPSILON);
+            assert!((style.border.radius.top_left - RADIUS_CTRL).abs() < f32::EPSILON);
+            assert_eq!(style.shadow, Shadow::default());
+        }
+    }
+
+    /// **The shelf contains exactly two kinds of thing: artwork and type.**
+    ///
+    /// Rule 1 of the direction (`.interface-design/system.md` §1.2), and the
+    /// claim it makes for itself is that it is *checkable in one glance at a
+    /// screenshot* — so it is worth a test that does not need the screenshot.
+    /// A tile paints no ground, no edge, no radius and no shadow in any of its
+    /// eight states; the sleeve gains no shadow unless it is the record that is
+    /// sounding, in which case it gains light; and the state vocabulary lives
+    /// entirely in a rule drawn *under the label*.
+    #[test]
+    fn the_shelf_draws_only_artwork_and_type() {
+        for status in [
+            button::Status::Active,
+            button::Status::Hovered,
+            button::Status::Pressed,
+            button::Status::Disabled,
+        ] {
+            for selected in [false, true] {
+                let style = tile(status, selected);
+                assert!(
+                    style.background.is_none(),
+                    "a tile paints a card behind a sleeve ({status:?}, selected={selected})"
+                );
+                assert!((style.border.width - 0.0).abs() < f32::EPSILON);
+                assert!((style.border.radius.top_left - 0.0).abs() < f32::EPSILON);
+                assert_eq!(style.shadow, Shadow::default());
+            }
+        }
+
+        // No artwork casts a shadow. The playing one is lit instead, and the
+        // halo is the only shadow primitive left in the product.
+        assert_eq!(
+            sleeve(false).shadow,
+            Shadow::default(),
+            "a resting sleeve casts a shadow; on near-black that is a 1.04:1 rounding error"
+        );
+        let halo = sleeve(true).shadow;
+        assert!(is_lamp(halo.color), "the halo is the lamp or it is nothing");
+        assert_eq!(halo.offset, Vector::ZERO, "light does not fall to one side");
+        assert!((halo.blur_radius - HALO_BLUR).abs() < f32::EPSILON);
+
+        // The state vocabulary: two thicknesses and two inks, a 2× step apart,
+        // and neither of them the accent.
+        assert!((tile_rule_h(false, false) - 0.0).abs() < f32::EPSILON);
+        assert!((tile_rule_h(true, false) - 1.0).abs() < f32::EPSILON);
+        assert!((tile_rule_h(false, true) - SELECTION_EDGE).abs() < f32::EPSILON);
+        assert!(
+            tile_rule_h(false, true) >= 2.0 * tile_rule_h(true, false),
+            "hover and selection are nearly the same mark again"
+        );
+        // Selection outranks hover: pointing at a record you have already
+        // opened must not un-mark it.
+        assert!((tile_rule_h(true, true) - SELECTION_EDGE).abs() < f32::EPSILON);
+        // …and the lane is reserved at the thicker of the two, so no state of
+        // a tile moves a pixel of the tile beside it.
+        const { assert!(SELECTION_EDGE >= 2.0) }
+    }
+
+    /// **Amber is never an opaque fill.** `docs/REFUSALS.md`, and the one
+    /// control that used to break it.
+    ///
+    /// `Play album` was a solid lamp rectangle — argued as an exception by the
+    /// previous direction, revoked by this one, because under a room this quiet
+    /// the slab was the brightest object on screen and it was not the artwork.
+    /// What is permitted is a ≤ 6 px mark, a 4 px rail, a 1 px line, or light,
+    /// so the accent may reach this control's **border** at full strength and
+    /// its **ground** only as a wash.
+    #[test]
+    fn the_accent_is_a_line_or_a_wash_but_never_a_slab() {
+        let theme = theme();
+        for status in [
+            button::Status::Active,
+            button::Status::Hovered,
+            button::Status::Pressed,
+            button::Status::Disabled,
+        ] {
+            let style = primary(&theme, status);
+            for ground in from_background(style.background) {
+                assert!(
+                    !is_lamp(ground) || ground.a <= 0.2,
+                    "`primary` fills with the accent in {status:?}: {ground:?}"
+                );
+            }
+            // A 1 px line in every state, so the control does not resize when
+            // the pointer arrives, and the label stays paper — nothing sits on
+            // the accent any more, which is why `LAMP_INK` is deleted.
+            assert!((style.border.width - 1.0).abs() < f32::EPSILON);
+            assert!(!is_lamp(style.text_color));
+        }
+        // At rest it is an outline and nothing else: no fill to hover *off*.
+        let rest = primary(&theme, button::Status::Active);
+        assert_eq!(from_background(rest.background), vec![Color::TRANSPARENT]);
+        assert!(is_lamp(rest.border.color));
+        // And a control that cannot create playback truth does not wear the
+        // colour that means it.
+        let dead = primary(&theme, button::Status::Disabled);
+        assert!(!is_lamp(dead.border.color));
+    }
+
+    /// The room casts **one** shadow, and it is light rather than elevation.
+    ///
+    /// `SHADOW` is deleted (`.interface-design/system.md` §2), and this is the
+    /// assertion that keeps it deleted: black at 45 % over the wall composites
+    /// to a 1.04 : 1 step, so every shadow in the product was a cost with no
+    /// signal. Anything that wants to say *in front* says it with a surface
+    /// step and a hairline.
+    #[test]
+    fn nothing_casts_a_shadow_except_the_playing_record() {
+        let theme = theme();
+        let mut shadowed: Vec<&'static str> = Vec::new();
+        for (name, style) in [
+            ("popover", popover(&theme)),
+            ("panel", panel(&theme)),
+            ("bar", bar(&theme)),
+            ("tooltip", tooltip(&theme)),
+            ("preview_tip", preview_tip(&theme)),
+            ("segmented", segmented(&theme)),
+            ("lamp_dot", lamp_dot(&theme)),
+            ("sleeve(resting)", sleeve(false)),
+            ("sleeve(playing)", sleeve(true)),
+        ] {
+            if style.shadow != Shadow::default() {
+                shadowed.push(name);
+            }
+        }
+        assert_eq!(
+            shadowed,
+            vec!["sleeve(playing)"],
+            "only the record that is sounding is lit; everything else is surface, edge and ink"
+        );
+    }
+
+    /// A duration is a figure column, and figure columns are right-aligned in
+    /// a slot that does not move (§8.1, §8.2).
+    #[test]
+    fn a_duration_has_a_lane_of_its_own() {
+        // Five figures at the face's real advance, plus the two colons between
+        // them, is the worst honest case — `1:59:59`.
+        const { assert!(DURATION_W > SIZE_META * 5.0 * DIGIT_EM) }
+        // It fits the inspector's row beside the number column and the
+        // reserved scrollbar lane…
+        const {
+            assert!(
+                TRACK_NO_W + DURATION_W + SCROLLBAR_LANE + 3.0 * GAP_SM
+                    < PANEL_W - 2.0 * GAP_XL + GAP_SM
+            );
+        }
+        // …and the popover's, which additionally carries a removal target.
+        const {
+            assert!(
+                TRACK_NO_W + DURATION_W + SCROLLBAR_LANE + STEPPER_HIT + 4.0 * GAP_SM < POPOVER_W
+            );
+        }
+        // The Details block's two columns are a table, not prose: the label
+        // lane holds the longest field name the block draws and the values
+        // start on one edge whatever it says.
+        const { assert!(FIELD_LABEL_W > SIZE_META * 12.0 * 0.5) }
+        const { assert!(DETAIL_ROW_H < SIZE_BODY * LEADING_BODY) }
     }
 
     // -----------------------------------------------------------------------
@@ -1895,13 +2391,17 @@ mod tests {
             }
         }
 
-        // The one ink that sits on the accent rather than on a surface: the
-        // Play button's label and triangle.
-        let on_lamp = contrast(LAMP_INK, LAMP);
-        assert!(
-            on_lamp >= TEXT,
-            "LAMP_INK on LAMP is {on_lamp:.2} : 1, below {TEXT} : 1"
-        );
+        // There is **no ink that sits on the accent** any more, which is why
+        // this used to be a `LAMP_INK` on `LAMP` assertion and is now the
+        // absence of one. `Play album` is an outline with a paper label over
+        // the surface it is standing on, so its contrast is already covered by
+        // the sweep above; amber is never an opaque fill, so no glyph in baz
+        // ever needs to be legible against it (`docs/REFUSALS.md`).
+        //
+        // The accent's own legibility still matters — the dot, the halo and the
+        // seek fill are marks a listener has to *find* — so `LAMP` is in the
+        // ink ramp above at the 3 : 1 non-text floor and clears it on all four
+        // surfaces.
 
         // And the two corrections, pinned as corrections: the values v0.1
         // shipped fail the floors above, so this test would have caught them.
@@ -1936,14 +2436,21 @@ mod tests {
     /// tokens are constants, so what has to be prevented is a *style* reaching
     /// for one of them, not a new colour that happens to be warm.
     fn is_lamp(color: Color) -> bool {
-        [LAMP, LAMP_BRIGHT, LAMP_DEEP, LAMP_GLOW, LAMP_INK]
-            .iter()
-            .any(|amber| {
-                (amber.r - color.r).abs() < f32::EPSILON
-                    && (amber.g - color.g).abs() < f32::EPSILON
-                    && (amber.b - color.b).abs() < f32::EPSILON
-                    && (amber.a - color.a).abs() < f32::EPSILON
-            })
+        [
+            LAMP,
+            LAMP_BRIGHT,
+            LAMP_DEEP,
+            LAMP_GLOW,
+            LAMP_WASH,
+            LAMP_WASH_PRESS,
+        ]
+        .iter()
+        .any(|amber| {
+            (amber.r - color.r).abs() < f32::EPSILON
+                && (amber.g - color.g).abs() < f32::EPSILON
+                && (amber.b - color.b).abs() < f32::EPSILON
+                && (amber.a - color.a).abs() < f32::EPSILON
+        })
     }
 
     /// The colours in a `Background`, if it is a flat one.
@@ -2007,12 +2514,9 @@ mod tests {
             for selected in [false, true] {
                 painted.push(("tile", button_colors(&tile(status, selected))));
                 painted.push(("segment", button_colors(&segment(status, selected))));
-                painted.push((
-                    "panel_toggle",
-                    button_colors(&panel_toggle(status, selected)),
-                ));
             }
             painted.push(("transport", button_colors(&transport(&theme, status))));
+            painted.push(("word_button", button_colors(&word_button(status))));
             painted.push(("primary", button_colors(&primary(&theme, status))));
             for open in [false, true] {
                 painted.push(("now_playing", button_colors(&now_playing(status, open))));
@@ -2076,8 +2580,27 @@ mod tests {
                 ],
             ));
         }
+        painted.extend(every_painted_surface());
+        painted
+    }
+
+    /// The half of the sweep that is containers and rules rather than
+    /// controls — split out only so neither half runs past the line budget the
+    /// workspace lints hold every function to.
+    fn every_painted_surface() -> Vec<(&'static str, Vec<Color>)> {
+        let theme = theme();
+        let mut painted: Vec<(&'static str, Vec<Color>)> = Vec::new();
         painted.push(("sleeve(resting)", container_colors(&sleeve(false))));
         painted.push(("sleeve(playing)", container_colors(&sleeve(true))));
+        for hovered in [false, true] {
+            for selected in [false, true] {
+                painted.push(("tile_rule", container_colors(&tile_rule(hovered, selected))));
+            }
+        }
+        painted.push((
+            "placeholder_ink",
+            vec![placeholder_ink(Color::from_rgb(1.0, 0.4, 0.1))],
+        ));
         painted.push(("lamp_dot", container_colors(&lamp_dot(&theme))));
         painted.push(("segmented", container_colors(&segmented(&theme))));
         painted.push(("preview_tip", container_colors(&preview_tip(&theme))));

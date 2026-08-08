@@ -473,13 +473,36 @@ fn volume(player: &PlayerState) -> Element<'_, Message> {
         fader.into()
     };
     row![
-        glyph_button(
-            icon::Glyph::speaker(state.muted),
-            state.mute_label,
-            state.interactive,
-            state.mute_pending,
-            Message::ToggleMute,
-        ),
+        // **The mute glyph sits on the fader's rail**, not on the centre of the
+        // block the fader is in — the one alignment defect in the product a
+        // listener named unprompted.
+        //
+        // The fader's column is the preview lane ([`theme::PREVIEW_H`] 15) over
+        // the groove's hit band ([`theme::VOLUME_HIT`] 28), so its rail runs
+        // across the row at 29 px from the top. Centred in the row, a 32 px
+        // button puts its glyph at 21.5 — seven and a half pixels above the
+        // line it is supposed to be a pair with, which is exactly enough to
+        // read as two controls that were placed separately.
+        //
+        // So the button takes the same two-lane column the timestamps beside
+        // the seek groove already take (`seek_stamp`): the preview lane above,
+        // the groove's band below, glyph centred in the band. It overhangs that
+        // band by 2 px top and bottom, which is invisible and newly harmless —
+        // an icon button paints no ground and no edge any more, so the only
+        // thing drawn is the 16 px glyph, and that lands on the rail's centre
+        // line exactly. The 32 px target is untouched.
+        column![
+            Space::with_height(Length::Fixed(theme::PREVIEW_H)),
+            container(glyph_button(
+                icon::Glyph::speaker(state.muted),
+                state.mute_label,
+                state.interactive,
+                state.mute_pending,
+                Message::ToggleMute,
+            ))
+            .height(Length::Fixed(theme::VOLUME_HIT))
+            .align_y(alignment::Vertical::Center),
+        ],
         column![
             preview_lane(state.preview, theme::VOLUME_W, theme::LEVEL_W),
             fader

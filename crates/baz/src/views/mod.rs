@@ -66,9 +66,21 @@ use crate::{icon, theme, vm};
 /// Shared rather than owned by one surface: the same placeholder stands in
 /// for a missing sleeve on a tile and in the side panel, and a redesign that
 /// changed one and not the other would be a bug.
+///
+/// # It is quieter than a real cover, on purpose
+///
+/// The stops are pulled back toward the sleeve's [`theme::RECESS`] backing by
+/// [`theme::placeholder_ink`], and that is the fix for something plainly wrong
+/// in every wide screenshot of the shelf: at full strength these gradients were
+/// the *brightest* objects on a wall of mostly-dark real artwork, so the eye
+/// went first to the records baz knows least about. An album with no cover
+/// should be the quietest tile in its row.
+///
+/// The hues survive the mix, which is the whole reason the gradient exists:
+/// two albums with no art must still look like two different albums.
 pub(crate) fn gradient_block(album_id: u64, size: f32) -> Element<'static, Message> {
     let (c1, c2) = vm::gradient_colors(album_id);
-    let to_color = |c: [u8; 3]| Color::from_rgb8(c[0], c[1], c[2]);
+    let to_color = |c: [u8; 3]| theme::placeholder_ink(Color::from_rgb8(c[0], c[1], c[2]));
     let gradient = iced::gradient::Linear::new(iced::Radians(2.4))
         .add_stop(0.0, to_color(c1))
         .add_stop(1.0, to_color(c2));
@@ -81,7 +93,8 @@ pub(crate) fn gradient_block(album_id: u64, size: f32) -> Element<'static, Messa
 }
 
 /// The ✕ that dismisses a layer: the close glyph in the same fixed square,
-/// and with the same quiet card, as the bottom bar's transport buttons.
+/// and with the same chrome-free treatment, as the bottom bar's transport
+/// buttons ([`theme::transport`] — at rest, the glyph and nothing else).
 ///
 /// Shared by every surface that can be dismissed because a dismissal must look
 /// and land the same wherever it is — a close control that moved or changed
