@@ -5,8 +5,19 @@
 //! search over 100k tracks, and this bench keeps the real implementation
 //! honest against that bar. The query set is scripted to cover the shapes
 //! that matter: a selective hit, a Unicode-folded hit, a CJK hit, a
-//! high-frequency term that fills the result limit early, and a total miss
-//! (the worst case — it scans every haystack).
+//! high-frequency term that matches a large fraction of the library, and a
+//! total miss (which scans every haystack and scores nothing).
+//!
+//! Both projections of the ranking are measured — tracks
+//! ([`Library::search`]) and albums ([`Library::search_albums`]) — because the
+//! wall draws the second and a front end that has to fold tracks onto albums
+//! itself is paying the difference (ADR-0021).
+//!
+//! `common` is the interesting line. Ranking cannot stop early the way an
+//! unranked filter could: the best match may be the last one in the corpus, so
+//! every match has to be seen before any of them can be called first. That
+//! query matches roughly a third of the library, and its cost is the honest
+//! upper bound on what ranking added — ADR-0021 records the before/after.
 
 use std::hint::black_box;
 use std::path::PathBuf;
@@ -114,17 +125,31 @@ fn bench_search(c: &mut Criterion) {
     assert_eq!(tracks.len(), 100_000);
     library.add_tracks(tracks).expect("index synthetic tracks");
 
-    let mut group = c.benchmark_group("search_100k");
     let queries = [
         ("selective", "velvet sparrow"),
         ("unicode_fold", "GRÖßENWAHN"),
         ("cjk", "東京"),
         ("common_fills_limit", "silver"),
         ("total_miss", "zyzzyva quartet"),
+        // The design's find is type-anywhere, so the *first* keystroke is a
+        // one-character query — which matches nearly every track, several
+        // times each. It is not a pathological case, it is the case that
+        // happens every single time anyone searches, and it is the worst one.
+        ("first_keystroke", "e"),
     ];
+
+    let mut group = c.benchmark_group("search_100k");
     for (name, query) in queries {
         group.bench_function(name, |b| {
             b.iter(|| black_box(library.search(black_box(query), 50)));
+        });
+    }
+    group.finish();
+
+    let mut group = c.benchmark_group("search_albums_100k");
+    for (name, query) in queries {
+        group.bench_function(name, |b| {
+            b.iter(|| black_box(library.search_albums(black_box(query), 50)));
         });
     }
     group.finish();

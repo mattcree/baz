@@ -2,7 +2,7 @@
 //! real database file, incremental adds mid-scan, search semantics, and
 //! album grouping — all through the public `Library` API.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use baz_core::history::{History, HistoryLedger, PlayRecord, Recency};
@@ -214,6 +214,426 @@ fn empty_query_returns_nothing() {
     // Every haystack contains ""; returning "everything, truncated" would
     // misrepresent the library, so the documented behavior is no results.
     assert!(library.search("", 10).is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Search ranking (`docs/adr/0021-search-ranking.md`).
+//
+// The model as a table of cases. The wall's find is type-anywhere and `Enter`
+// plays the first match (`docs/design/critique/02-surfaces.md`), so what ranks
+// first is what plays — every one of these is a claim about what would come out
+// of the speakers.
+// ---------------------------------------------------------------------------
+
+/// A library holding exactly `tracks`, in the order given.
+fn library_of(tracks: Vec<TrackMeta>) -> Library {
+    let mut library = Library::open_in_memory().expect("open");
+    library.add_tracks(tracks).expect("add");
+    library
+}
+
+/// The album titles a ranked album search returns, in rank order.
+fn album_titles(albums: &[baz_core::index::Album<'_>]) -> Vec<String> {
+    albums
+        .iter()
+        .map(|album| album.title.unwrap_or_default().to_owned())
+        .collect()
+}
+
+#[test]
+fn a_match_ranks_by_position_first_and_completeness_second() {
+    // One track per album so nothing but the match's own fit is in play, and
+    // inserted in an order that is neither the corpus order nor the answer.
+    let library = library_of(vec![
+        track("/m/1.flac", "Artist 1", "Album 1", "Skid Row", 1),
+        track("/m/2.flac", "Artist 2", "Album 2", "The Kidz", 1),
+        track("/m/3.flac", "Artist 3", "Album 3", "Kids", 1),
+        track("/m/4.flac", "Artist 4", "Album 4", "Kid", 1),
+        track("/m/5.flac", "Artist 5", "Album 5", "The Kid", 1),
+        track("/m/6.flac", "Artist 6", "Album 6", "Kid A", 1),
+    ]);
+
+    // `Kid` is the whole field; `Kid A` starts it and ends a word; `Kids`
+    // starts it inside a word; `The Kid` starts a later word and ends one;
+    // `The Kidz` starts a later word inside it; `Skid Row` starts inside one.
+    assert_eq!(
+        titles(&library.search("kid", 10)),
+        ["Kid", "Kid A", "Kids", "The Kid", "The Kidz", "Skid Row"],
+        "position before completeness, under one exact tier that is both"
+    );
+}
+
+#[test]
+fn an_equally_good_match_ranks_artist_then_album_then_title() {
+    // The same query is the *entire* value of a different field in each of
+    // three records, so only the field can separate them.
+    let library = library_of(vec![
+        track("/m/1.flac", "Yolanda", "Green", "Delta", 1),
+        track("/m/2.flac", "Xavier", "Delta", "Two", 1),
+        track("/m/3.flac", "Delta", "Blue", "One", 1),
+    ]);
+
+    assert_eq!(
+        titles(&library.search("delta", 10)),
+        ["One", "Two", "Delta"],
+        "at equal fit: who made it, then what record, then which song"
+    );
+}
+
+#[test]
+fn an_exact_title_outranks_an_artist_that_merely_contains_the_query() {
+    // This is why the field is the *second* signal and not the first. Ranking
+    // by field first would play a Yesterdays New Quintet track for `yesterday`
+    // — an artist match, but a worse one than the song actually called that.
+    let library = library_of(vec![
+        track(
+            "/m/1.flac",
+            "Yesterdays New Quintet",
+            "Angles Without Edges",
+            "Sun Song",
+            1,
+        ),
+        track("/m/2.flac", "The Beatles", "Help!", "Yesterday", 13),
+    ]);
+
+    assert_eq!(
+        titles(&library.search("yesterday", 10)),
+        ["Yesterday", "Sun Song"]
+    );
+}
+
+#[test]
+fn the_first_match_is_the_best_match_however_late_it_sits_in_the_corpus() {
+    // The bug this ranking exists to fix. Corpus order puts the Aardvarks
+    // first; `Enter` must still play Kid A.
+    let library = library_of(vec![
+        track(
+            "/m/1.flac",
+            "Aardvark Collective",
+            "Playground",
+            "Kids Everywhere",
+            1,
+        ),
+        track(
+            "/m/2.flac",
+            "Radiohead",
+            "Kid A",
+            "Everything In Its Right Place",
+            1,
+        ),
+    ]);
+
+    assert_eq!(
+        titles(&library.search("kid", 10)),
+        ["Everything In Its Right Place", "Kids Everywhere"]
+    );
+    // What `Enter` plays, which is the whole point.
+    assert_eq!(
+        titles(&library.search("kid", 1)),
+        ["Everything In Its Right Place"],
+        "the limit takes the top of the ranking, not the top of the corpus"
+    );
+    assert_eq!(
+        album_titles(&library.search_albums("kid", 10)),
+        ["Kid A", "Playground"]
+    );
+}
+
+#[test]
+fn an_albums_matching_tracks_stay_together_under_its_best_one() {
+    // Ranked purely track by track the answer would interleave: Moon (exact),
+    // Moonchild (prefix), Half Moonlight (mid-word). The wall draws albums, so
+    // a record's hits stay under the record.
+    let library = library_of(vec![
+        track("/m/1.flac", "Aa", "Dark Side", "Moon", 1),
+        track("/m/2.flac", "Aa", "Dark Side", "Half Moonlight", 2),
+        track("/m/3.flac", "Bb", "Harvest", "Moonchild", 1),
+    ]);
+
+    assert_eq!(
+        titles(&library.search("moon", 10)),
+        ["Moon", "Half Moonlight", "Moonchild"]
+    );
+}
+
+#[test]
+fn more_matching_tracks_never_outrank_one_better_match() {
+    // No count bonus: a long compilation would win every query it brushed
+    // against, for a reason the query never asked about.
+    let mut tracks = vec![track("/m/z.flac", "Zz", "Single", "Halo", 1)];
+    for number in 1..=5 {
+        tracks.push(track(
+            &format!("/m/a{number}.flac"),
+            "Aa",
+            "Compilation",
+            &format!("Bright Halo {number}"),
+            number,
+        ));
+    }
+    let library = library_of(tracks);
+
+    assert_eq!(
+        album_titles(&library.search_albums("halo", 10)),
+        ["Single", "Compilation"],
+        "one exact hit beats five word-boundary hits"
+    );
+    assert_eq!(titles(&library.search("halo", 1)), ["Halo"]);
+}
+
+#[test]
+fn ties_break_on_library_order_and_nothing_else() {
+    // Every track matches the album title identically, so only the third
+    // signal is left. It is library order — which is what the pre-ranking
+    // contract promised and what the determinism tests have always pinned.
+    let library = library_of(vec![
+        track("/m/c.flac", "Carol", "Common", "Gamma", 1),
+        track("/m/a.flac", "Alice", "Common", "Alpha", 1),
+        track("/m/b.flac", "Bob", "Common", "Beta", 1),
+    ]);
+
+    assert_eq!(
+        titles(&library.search("common", 10)),
+        ["Alpha", "Beta", "Gamma"]
+    );
+}
+
+#[test]
+fn ranking_is_deterministic_and_independent_of_insertion_order() {
+    let tracks = || {
+        vec![
+            track("/m/1.flac", "Aardvark Collective", "Playground", "Kids", 1),
+            track("/m/2.flac", "Radiohead", "Kid A", "Idioteque", 8),
+            track("/m/3.flac", "Radiohead", "Kid A", "The National Anthem", 3),
+            track(
+                "/m/4.flac",
+                "Kid Koala",
+                "Carpal Tunnel Syndrome",
+                "Fender Bender",
+                4,
+            ),
+            track("/m/5.flac", "Zeta", "Skid Marks", "Kid Gloves", 2),
+        ]
+    };
+    let forward = library_of(tracks());
+    let mut reversed = tracks();
+    reversed.reverse();
+    let backward = library_of(reversed);
+    // And one built a batch at a time, as a scan in progress would.
+    let mut piecemeal = Library::open_in_memory().expect("open");
+    for one in tracks() {
+        piecemeal.add_tracks(vec![one]).expect("add");
+    }
+
+    let expected = titles(&forward.search("kid", 10));
+    assert_eq!(
+        expected,
+        // Kid Koala's artist starts with the word, then Kid A's album is the
+        // same fit one field down, then `Kid Gloves` the same fit one field
+        // further; `Kids` only manages a mid-word prefix. Nothing here is
+        // decided by where the track sits in the corpus.
+        [
+            "Fender Bender",
+            "The National Anthem",
+            "Idioteque",
+            "Kid Gloves",
+            "Kids"
+        ]
+    );
+    assert_eq!(titles(&backward.search("kid", 10)), expected);
+    assert_eq!(titles(&piecemeal.search("kid", 10)), expected);
+    // Same query, same answer, every time.
+    for _ in 0..4 {
+        assert_eq!(titles(&forward.search("kid", 10)), expected);
+    }
+    assert_eq!(
+        album_titles(&forward.search_albums("kid", 10)),
+        album_titles(&backward.search_albums("kid", 10))
+    );
+}
+
+#[test]
+fn search_albums_lists_each_matching_album_once_in_rank_order() {
+    let library = library_of(vec![
+        track("/m/1.flac", "Aa", "Ghost Signals", "One", 1),
+        track("/m/2.flac", "Aa", "Ghost Signals", "Two", 2),
+        track("/m/3.flac", "Aa", "Ghost Signals", "Three", 3),
+        track("/m/4.flac", "Bb", "Nightfall", "Signal Fire", 1),
+        track("/m/5.flac", "Signal Hill", "Debut", "Anything", 1),
+    ]);
+
+    let albums = library.search_albums("signal", 10);
+    assert_eq!(
+        album_titles(&albums),
+        // The artist match first, then the title that starts with the word,
+        // then the album that carries it mid-title.
+        ["Debut", "Nightfall", "Ghost Signals"]
+    );
+    // Three tracks matched in `Ghost Signals`; the album appears once, and
+    // carries its whole track list rather than only the matches.
+    let ghosts = albums.last().expect("three albums");
+    assert_eq!(
+        ghosts
+            .editions
+            .iter()
+            .map(|edition| edition.tracks.len())
+            .sum::<usize>(),
+        3
+    );
+    assert!(library.search_albums("signal", 0).is_empty());
+    assert!(library.search_albums("", 10).is_empty());
+    assert!(library.search_albums("ghost\nsignals", 10).is_empty());
+}
+
+#[test]
+fn search_albums_does_not_lose_an_album_to_a_track_cap() {
+    // Why `search_albums` exists. A front end that searches *tracks* and folds
+    // them onto albums applies a track cap to an album question: this record's
+    // sixty matching tracks fill any reasonable cap by themselves, and the
+    // second album vanishes from the wall.
+    let mut tracks: Vec<TrackMeta> = (1..=60)
+        .map(|number| {
+            track(
+                &format!("/m/a{number:03}.flac"),
+                "Aa",
+                "Common Ground",
+                &format!("Track {number}"),
+                number,
+            )
+        })
+        .collect();
+    tracks.push(track("/m/z.flac", "Zz", "Elsewhere", "Common Time", 1));
+    let library = library_of(tracks);
+
+    let folded: Vec<String> = library
+        .search("common", 50)
+        .iter()
+        .filter_map(|meta| meta.album.clone())
+        .collect();
+    assert!(
+        !folded.contains(&"Elsewhere".to_owned()),
+        "the track cap really does hide the second album"
+    );
+    assert_eq!(
+        album_titles(&library.search_albums("common", 50)),
+        ["Common Ground", "Elsewhere"],
+        "the album search caps the answer, not the working set"
+    );
+}
+
+#[test]
+fn ranking_holds_across_scripts_and_folds_case() {
+    let library = library_of(vec![
+        track("/m/1.flac", "北風", "東京事変の秘密", "序曲", 1),
+        track("/m/2.flac", "東京事変", "大人", "秘密", 1),
+        track("/m/3.flac", "Größenwahn", "Debüt", "Lied", 1),
+        track("/m/4.flac", "Ein Größenwahnsinn", "Zweit", "Lied Zwei", 1),
+    ]);
+
+    // Exact artist beats the album that merely starts with the same string.
+    assert_eq!(titles(&library.search("東京事変", 10)), ["秘密", "序曲"]);
+    // A substring of a script with no word boundaries is a fragment in both,
+    // so the field decides — the artist's name over the album's — and both are
+    // still found.
+    assert_eq!(titles(&library.search("京事", 10)), ["秘密", "序曲"]);
+    // Folding is Unicode-aware on both sides, and the exact artist outranks
+    // the one whose name only starts with the query.
+    assert_eq!(
+        titles(&library.search("GRÖSSENWAHN", 10)),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        titles(&library.search("größenwahn", 10)),
+        ["Lied", "Lied Zwei"]
+    );
+    assert_eq!(
+        titles(&library.search("GRÖßENWAHN", 10)),
+        ["Lied", "Lied Zwei"]
+    );
+}
+
+#[test]
+fn pathological_queries_are_answered_rather_than_survived() {
+    let library = library_of(vec![
+        track("/m/1.flac", "Alpha", "Anything", "A", 1),
+        track("/m/2.flac", "Beta", "Bee", "Ábaco", 1),
+        bare("/m/3.flac"),
+    ]);
+
+    // The corpus separator can never be searched for: it is what keeps a match
+    // from spanning two fields, so a query containing it could only ask for a
+    // cross-field match.
+    assert!(library.search("\n", 10).is_empty());
+    assert!(library.search("alpha\nanything", 10).is_empty());
+    // No query is not a query.
+    assert!(library.search("", 10).is_empty());
+    assert!(library.search("anything", 0).is_empty());
+    // A query matching nothing.
+    assert!(library.search("zyzzyva", 10).is_empty());
+    // A query matching everything, ranked and capped: the track *called* `a`
+    // is the exact one and comes first.
+    let everything = library.search("a", 10);
+    assert_eq!(
+        everything.len(),
+        2,
+        "the tagless stray has no haystack at all"
+    );
+    assert_eq!(titles(&everything)[0], "A");
+    // A query longer than any field, one that is only punctuation, and one
+    // that is only whitespace.
+    assert!(library.search(&"a".repeat(4096), 10).is_empty());
+    assert!(library.search("!?", 10).is_empty());
+    assert!(library.search(" ", 10).is_empty());
+    // The tagless stray has no haystack to match and never appears.
+    assert!(
+        library
+            .search("a", 10)
+            .iter()
+            .all(|meta| meta.path != Path::new("/m/3.flac"))
+    );
+}
+
+#[test]
+fn ranking_examines_a_capped_prefix_of_library_order_and_says_so() {
+    // The documented limit (`Library::RANKED_CANDIDATES`), asserted rather
+    // than described: past the cap a better match is genuinely not seen.
+    let mut crowded: Vec<TrackMeta> = (0..Library::RANKED_CANDIDATES + 100)
+        .map(|number| {
+            track(
+                &format!("/m/a{number:05}.flac"),
+                &format!("Aa {number:05}"),
+                "Fragments",
+                "Bazooka",
+                1,
+            )
+        })
+        .collect();
+    crowded.push(track("/m/z.flac", "Zz", "Late", "Zoo", 1));
+    let library = library_of(crowded);
+
+    let found = library.search("zoo", 5);
+    assert_eq!(found.len(), 5);
+    assert!(
+        titles(&found).iter().all(|title| title == "Bazooka"),
+        "the exact match past the cap is not seen — the honest cost of a \
+         bounded candidate set, and the reason the cap is large"
+    );
+
+    // Under the cap — which is every query specific enough for `Enter` to
+    // mean anything — the ranking is exact.
+    let mut modest: Vec<TrackMeta> = (0..100)
+        .map(|number| {
+            track(
+                &format!("/m/a{number:05}.flac"),
+                &format!("Aa {number:05}"),
+                "Fragments",
+                "Bazooka",
+                1,
+            )
+        })
+        .collect();
+    modest.push(track("/m/z.flac", "Zz", "Late", "Zoo", 1));
+    let library = library_of(modest);
+    assert_eq!(titles(&library.search("zoo", 1)), ["Zoo"]);
 }
 
 #[test]
