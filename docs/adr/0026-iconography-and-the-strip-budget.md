@@ -1,6 +1,8 @@
 # ADR-0026: Iconography by rule, and the strip budget law
 
-**Status**: proposed (2026-08-09) · extracts the decisions of
+**Status**: accepted (2026-08-09) — shipped by doc 10 §7's eight steps in
+one commit series; the as-shipped deviations, all small and all recorded,
+are at the end of this file · extracts the decisions of
 [`docs/design/10-controls-and-iconography.md`](../design/10-controls-and-iconography.md) ·
 changes no engine command, no protocol message, no control's surface, and
 no gesture — every change is a control's *form* or the strip's
@@ -175,3 +177,42 @@ recommendation costume); icons for the `Queue`/`Playlists` doors (§2);
 icon + word everywhere (a hedge, not a statement); an icon font or SVG
 pipeline (`icon.rs:12–50`'s survey stands); a permanent two-line strip
 (40 px of the collection at rest, forever, to avoid one breakpoint).
+
+## As shipped (2026-08-09)
+
+Everything above shipped as decided, with four deviations the
+implementation forced into the open, none of them a change of posture:
+
+1. **The drawn set is six new glyphs, not five — the sheet is 13, not 12.**
+   §4's own sentence ("the settings steppers swap `−`/`+` for the drawn
+   set") requires a drawn minus, which doc 10 §3.6's table never
+   enumerated: a stepper pair with a drawn `+` beside a font `−` would be
+   the two-technologies-in-one-slot defect this record exists to end.
+   `Minus` ships as the plus's own horizontal bar — literally the same
+   outline, asserted pixel-equal in `icon.rs` — so the pair cannot drift
+   apart.
+2. **The keys' reserved width is 314, not the study's drawn 312.** The five
+   tracked caps words measure 312.98 px in the bundled Medium
+   (`font.rs::the_strips_declared_tenant_widths_hold_their_measured_words`),
+   and a declaration under the measurement would be a budget the law could
+   not honestly assert. The single-line budget therefore sums to exactly
+   960 at the well's floor — the seam lands on the declared breakpoint to
+   the pixel.
+3. **The well's fluid range is spent by 1200, not 1040.** The formula the
+   study fixes — `clamp(W − 1000, 200, 280)` — reaches its floor at
+   W = 1200; §4.3's "(1040 → 960)" aside disagrees with the study's own
+   arithmetic, and the formula wins. The collapse order it exists for
+   (well first, then the split) is unchanged.
+4. **The strip's floor is also the window's declared minimum width.** §4.3
+   calls 600 "the strip's floor and the window's sensible minimum"; the
+   implementation states it as `window::Settings::min_size` rather than
+   leaving the sentence decorative. Height stays unbounded — the study
+   declares no floor for it.
+
+The three tests §7 step 7 specified are in:
+`theme::the_strip_holds_its_tenants_at_the_single_line_floor` (with
+`font.rs` holding the measured words against the declared reservations),
+`theme::every_icon_only_control_carries_a_tooltip` (source-pinned over the
+view functions that draw sprites, with the rule's own exemptions named),
+and per-glyph coverage + stroke-band assertions in `icon.rs`. The render
+captures are `docs/design/impl/controls-iconography/`.

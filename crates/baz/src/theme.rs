@@ -5984,6 +5984,84 @@ mod tests {
         assert!((top_bar_h(TOP_BAR_FLOOR) - TOP_BAR_2LINE_H).abs() < f32::EPSILON);
     }
 
+    /// **Every icon-only control carries a tooltip** — the form rule's
+    /// accessibility clause (doc 10 §3.1; ADR-0017 §4c), a test rather than
+    /// an audit (doc 10 §7 step 7), in the source-pinned shape
+    /// `views/queue.rs`'s own parity test uses.
+    ///
+    /// iced 0.13 publishes no accessibility tree, so an icon-only control's
+    /// tooltip *is* its accessible name; a glyph button without one is a
+    /// control with no name at all. The scan walks every view function that
+    /// draws a sprite (`icon::handle`) and requires a `tooltip` in the same
+    /// function, with the named exemptions the rule itself makes:
+    ///
+    /// - **a glyph beside a word is not icon-only** — the word is the name
+    ///   (`play_album`, the playlist page's `play_control`, the strip's
+    ///   `play_all`);
+    /// - **the well's magnifier is not a control** — the well is the
+    ///   control; the glyph is its label (doc 10 §4.1), and the well itself
+    ///   is reachable by every printable key.
+    #[test]
+    fn every_icon_only_control_carries_a_tooltip() {
+        const EXEMPT: [&str; 4] = ["play_album", "play_control", "play_all", "well"];
+        let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
+        let mut bare: Vec<String> = Vec::new();
+        let mut checked = 0_u32;
+        for path in rust_sources(&views) {
+            let source = std::fs::read_to_string(&path)
+                .expect("a view module baz ships")
+                .replace("\r\n", "\n");
+            let file = path.file_name().unwrap_or_default().to_string_lossy();
+            // Every function item's start and name — a `fn` opening a line,
+            // optionally behind a visibility, at any indentation.
+            let mut functions: Vec<(usize, String)> = Vec::new();
+            for (at, _) in source.match_indices("fn ") {
+                let line_start = source[..at].rfind('\n').map_or(0, |index| index + 1);
+                let prefix = source[line_start..at].trim();
+                if !(prefix.is_empty() || prefix == "pub" || prefix == "pub(crate)") {
+                    continue;
+                }
+                let name: String = source[at + 3..]
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if !name.is_empty() {
+                    functions.push((line_start, name));
+                }
+            }
+            for (index, (start, name)) in functions.iter().enumerate() {
+                let end = functions
+                    .get(index + 1)
+                    .map_or(source.len(), |(next, _)| *next);
+                let body = &source[*start..end];
+                if !body.contains("icon::handle(") {
+                    continue;
+                }
+                // A test that samples sprites is not a control.
+                if source[..*start].trim_end().ends_with("#[test]") {
+                    continue;
+                }
+                checked += 1;
+                if EXEMPT.contains(&name.as_str()) || body.contains("tooltip") {
+                    continue;
+                }
+                bare.push(format!("{file}::{name}"));
+            }
+        }
+        assert!(
+            bare.is_empty(),
+            "an icon-only control has no tooltip — no accessible name at \
+             all in a toolkit with no accessibility tree: {bare:?}"
+        );
+        // Not vacuous: the transport, the gear, the row slots and the
+        // steppers are all in the walk.
+        assert!(
+            checked >= 10,
+            "the scan found only {checked} sprite-drawing functions — the \
+             function walk has stopped seeing the views"
+        );
+    }
+
     /// Every `.rs` file under `root`, recursively.
     fn rust_sources(root: &std::path::Path) -> Vec<std::path::PathBuf> {
         let mut found = Vec::new();

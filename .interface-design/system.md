@@ -692,10 +692,12 @@ where, off real pixels, with the rulers committed at
 whose seven mark-lines spanned 50 px inside a 102 px band, and a type scale
 whose line boxes were not multiples of its own spacing unit.
 
-The seven laws below close that. Each one is **assertable**, and each carries
-the test that pins it — because the project's own history is that a rule which
-is not pinned drifts, and the accent discipline (§5) and the contrast floors
-(§4.1) are the two that prove the habit works.
+The laws below close that — seven from the composition audit, and L9 from
+doc 10's strip charter (ADR-0026), which also amends one clause of doc 07's
+L8. Each one is **assertable**, and each carries the test that pins it —
+because the project's own history is that a rule which is not pinned drifts,
+and the accent discipline (§5) and the contrast floors (§4.1) are the two
+that prove the habit works.
 
 | Law | Pinned by |
 |---|---|
@@ -706,6 +708,8 @@ is not pinned drifts, and the accent discipline (§5) and the contrast floors
 | L5 the permitted alignment edges, per surface | `theme::every_surface_declares_the_edges_it_permits` |
 | L6 hierarchy is declared and then measured | `theme::the_declared_hierarchy_is_the_geometry_that_produces_it`, plus the render pass |
 | L7 one control height | `theme::the_product_stands_at_one_control_height` |
+| L8.4 as amended, and the form rule's tooltip clause | `theme::every_icon_only_control_carries_a_tooltip` |
+| L9 a strip declares its tenants | `theme::the_strip_holds_its_tenants_at_the_single_line_floor`, `font::the_strips_declared_tenant_widths_hold_their_measured_words` |
 
 ### L1 — One gutter per window edge
 
@@ -851,3 +855,61 @@ band upward, out of layout, bounded by the empty lane the bar keeps under its
 transport: `NEEDLE_HIT == GAP_MD` and `NEEDLE_HIT <= BAR_LEAD`, both asserted.
 The exception is a *size with a proof attached* rather than a rail-shaped
 excuse — the bound is what makes it safe, and the bound is the test.
+
+### L8.4 — the door-label clause, amended (ADR-0026)
+
+L8 itself — *one home per control, and the home is the surface that shares
+its subject* — lives in `docs/design/07-control-placement.md` with its seven
+sub-clauses. ADR-0026 amends clause L8.4(1) (*a door is labelled with the
+name of the place, in words*) rather than weakening it:
+
+> A door is labelled with the name of what it opens — in words, **or by its
+> universal symbol where one exists. The symbols that count as labels are
+> enumerated, and the list is two: the gear (Settings) and the magnifier
+> (search).** A door whose symbol is merely familiar rather than universal
+> keeps its word.
+
+The clause's evidence (Sonos, Plexamp — prior art §4.5, §5.2e) concerns
+unlabelled and unconventional routes; the gear in the top-right corner is
+the most standardized door in software in both symbol and position. `Queue`
+and `Playlists` were considered for the list and refused: no universal
+symbol separates queue from playlist from menu, and a door that can be
+misread is worse than a door that must be read. The list is closed the way
+the contrast exemption list is (ADR-0017 §1.6): a new name requires an ADR
+that argues it.
+
+The wider form rule the amendment belongs to is doc 10 §3.1 — icon-only
+where the symbol is universal *and* the semantics are exactly baz's; word
+carrying the glyph where the convention is close but not exact; word-only
+where baz-specific — and its accessibility clause is pinned as a test:
+every icon-only control carries a tooltip, the accessible name in a toolkit
+that publishes no tree (`theme::every_icon_only_control_carries_a_tooltip`,
+ADR-0017 §4c).
+
+### L9 — A strip declares its tenants and holds them at its floor
+
+> Every strip enumerates its tenants' reserved widths; their sum plus the
+> frame's gutters must fit the strip's declared single-line floor, and the
+> sum is asserted in code. When the window is narrower than the floor, the
+> strip **splits at its declared seam** into enumerated lines, each with its
+> own asserted floor. A strip never hides a tenant, never sweeps one into a
+> menu, and never overflows. A proposed tenant that does not fit the budget
+> does not enter — it re-homes by subject (L8) or displaces an argued
+> incumbent.
+
+The evidence is doc 10 §2: the Library strip held ten controls and three
+readouts, every tenant admitted by a locally-correct placement argument and
+no law bounding the whole — 97.6 % of the strip spoken for at the shipped
+window, and the transient scan notes pushing the only route to Settings off
+the window's edge. That is the rail's disease at the next scale down, and
+the cure is the same shape: a charter and a law with a test.
+
+The Library strip's charter under it: the **frame line** (the well wearing
+the magnifier and carrying the counts, the `Playlists` door, the gear) and
+the **library line** (the five arrangement words; `Play all` with its
+triangle, `Shuffle`, `Pull`) — one line at ≥ 960 px, two lines below, floor
+600, which is also the window's declared minimum width. The budget is const
+arithmetic over the reserved widths `views/top_bar.rs` declares
+(`theme::the_strip_holds_its_tenants_at_the_single_line_floor`, the bottom
+bar's own pattern), and `font.rs` measures the real words against the
+declarations, so the face and the arithmetic cannot drift apart.
