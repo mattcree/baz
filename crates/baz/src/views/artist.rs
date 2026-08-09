@@ -66,13 +66,26 @@ pub(crate) fn records(shelf: &Shelf, artist: u64) -> Vec<&vm::AlbumVm> {
         .collect()
 }
 
-/// The artist's label, from the first record filed under them — `None` when the
-/// library no longer holds any, which is what makes the place resolve to the
-/// wall instead.
+/// The artist's label — `None` when the library no longer holds a record filed
+/// under them, which is what makes the place resolve to the wall instead.
+///
+/// **The spelling is the one that sorts first, not the first one found.**
+/// Identity is case-folded ([`vm::artist_id`]), so `Alpha` and `alpha` are one
+/// artist with two spellings on disk, and *the first record filed under them*
+/// is an order — the shelf's — that a rescan or a different arrangement can
+/// change. Taking the minimum makes the answer a property of the set rather
+/// than of the walk, so an artist cannot be spelled one way today and another
+/// tomorrow; it also happens to prefer the capitalised form a tagger meant,
+/// since the upper-case letters sort ahead of the lower.
+///
+/// ADR-0019 §4's *first spelling seen* rule, which genres use, is not
+/// available here: it works because a genre's spellings arrive in a scan order
+/// the index controls, and these arrive in whatever order the wall is in.
 pub(crate) fn label(shelf: &Shelf, artist: u64) -> Option<&str> {
     records(shelf, artist)
-        .first()
+        .iter()
         .map(|album| album.artist.label())
+        .min()
 }
 
 /// The Artist place's body.
@@ -85,9 +98,10 @@ pub(crate) fn view<'a>(
 ) -> Element<'a, Message> {
     let room = theme::active();
     let records = records(shelf, artist);
-    let name = records
-        .first()
-        .map_or("Unknown Artist", |album| album.artist.label());
+    // One spelling, decided in one place: [`label`] takes the minimum rather
+    // than the first, so the page and the breadcrumb cannot disagree and a
+    // rescan cannot change the name.
+    let name = label(shelf, artist).unwrap_or("Unknown Artist");
 
     // **The header's lead is the artist's name**, at the same height the Album
     // place's breadcrumb takes — the two places are joined by one press and a

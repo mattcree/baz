@@ -2401,10 +2401,24 @@ impl App {
             .iter()
             .flat_map(|row| row.art.iter().copied())
             .collect();
+        // An open artist's records are the shelf's own, but *which* artist is
+        // the shell's — so the id is read here and the records named below,
+        // where both halves are in hand.
+        let open_artist = match self.place {
+            Place::Artist(id) => Some(id),
+            _ => None,
+        };
         let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
         };
         let mut ids = state.offscreen_art(width);
+        if let Some(id) = open_artist {
+            let theirs: Vec<u64> = crate::views::artist::records(state, id)
+                .iter()
+                .map(|album| album.id)
+                .collect();
+            ids.extend(theirs);
+        }
         ids.extend(quoted);
         state.request_thumbs_for(&ids)
     }
@@ -5518,12 +5532,21 @@ impl Shelf {
     }
 
     /// The ids the surfaces beside the wall are drawing **that the shelf can
-    /// name**: the lane's recent records and the Home place's newest row.
+    /// name**: the lane's recent records and the Home place's newest row. An
+    /// open artist's records join them in [`App::request_offscreen_art`],
+    /// which is where *which* artist is known.
     ///
     /// A lane row that is a *list* names no record here on purpose — the
     /// records it quotes are `Playlists`' to know, and the shell adds them in
     /// [`App::request_offscreen_art`] rather than this function reaching into
     /// a collection the shelf does not hold.
+    ///
+    /// **The artist's page is here because its tiles are outside the wall's
+    /// visible range**, and the wall's thumbnail guard is exactly that range.
+    /// Without this, an artist's records drew the deterministic gradient until
+    /// one of them happened to scroll past on the wall — real artwork *by
+    /// luck*, which is verbatim the defect the playlist collages had before
+    /// their quotations were named here.
     fn offscreen_art(&self, width: f32) -> Vec<u64> {
         let mut ids: Vec<u64> = self
             .lane_recent
