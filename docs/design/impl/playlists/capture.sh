@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Render the playlist surfaces (ADR-0024 §4–§6) headless, on a private Xvfb,
-# with all six XDG redirections from docs/DEVELOPMENT.md. Nothing touches the
-# owner's session; the run's `[mpris] no session bus` line is the receipt that
-# it did not, and this script prints it.
+# Render the playlist surfaces (ADR-0024 §4–§6 as amended by design doc 09
+# §13 steps 1–2) headless, on a private Xvfb, with all six XDG redirections
+# from docs/DEVELOPMENT.md. Nothing touches the owner's session; the run's
+# `[mpris] no session bus` line is the receipt that it did not, and this
+# script prints it.
 #
 # What it proves against the real binary, at 1280×860 and 1920×1080:
 #
@@ -12,12 +13,17 @@
 #      is "no press re-hangs the collection" as an assertion rather than a
 #      promise. (Run the app with the wgpu renderer, never tiny-skia: partial
 #      repaints are not run-to-run deterministic.)
-#   2. The panel: New playlist, the rows with their counts, the armed state's
-#      surface step, and the collecting `+` on every wall label.
-#   3. The playlist page: hero name, counts (`4 of 5 · 1 missing` on the
+#   2. The panel at rest: the Queue's readout row at its head, one door per
+#      list (no receive `+` — the armed mode is removed, doc 09 §9), `New
+#      playlist` at the foot.
+#   3. **The picker** (doc 09 §8.1), in both postures: at rest — `Add to…`
+#      pressed with nothing provenance-marked, the Queue row first — and
+#      with a playing list hoisted second, marked *playing*.
+#   4. The playlist page: hero name, counts (`4 of 5 · 1 missing` on the
 #      seeded list), Play/Queue/Rename/Delete, record-group headers, the
 #      dimmed missing row with its path.
-#   4. The queue place's `Save as playlist`.
+#   5. The queue place's provenance-led summary (`Worn Tape · …`) and
+#      `Save as playlist`.
 #
 # Build the binary **inside the toolbox** (a host-built release binary links
 # a newer glibc than the container has and dies before it draws):
@@ -109,67 +115,106 @@ klick(){ xdotool mousemove "$1" "$2"; sleep 0.3; xdotool click 1; sleep 0.9; }
 key()  { xdotool key "$@"; sleep 0.6; }
 park() { xdotool mousemove $((W - 6)) 200; }
 
+# The record page's `Add to…` word button: the aside's centre ($ASIDE_X —
+# the page hangs from the gutter at 1280 and centres at 1920, so it is set
+# per section), and the control stands under the sleeve (place header 49 +
+# place pad 40 + sleeve 320 + gap 12 + Play album 32 + gap 12 → its centre
+# ≈ 481). $ROW_X is a page list row's x by the same per-size rule.
+add_to() { klick "$ASIDE_X" 481; }
+
 # ---- 1280 × 860 -----------------------------------------------------------
-W=1280; H=860
+W=1280; H=860; ASIDE_X=200; ROW_X=450
 launch $W $H
 
 # 1. The wall at rest — the "before" of the no-reflow diff.
 park; shot 01-wall-before
-# 2. Ctrl+P: the panel floats over the wall's right edge. The "after".
+# 2. Ctrl+P: the panel floats over the wall's right edge. The "after". At its
+#    head the Queue's readout row (`Nothing queued` — nothing has played);
+#    the named rows carry sleeve and name only; `New playlist` at the foot.
 key ctrl+p
 park; shot 02-wall-panel-open
-# 3. Arm the first playlist (the row's receive target, right edge of the
-#    row): the surface step and hairline on the row, the quiet `+` on every
-#    wall label. The rows now open with their sleeves — the 2 × 2 collage,
-#    the rest tile, the full-bleed single, top to bottom.
-klick $((W - 36)) 116
-park; shot 03-panel-armed
-# 4. A record's page beside the open panel: `Add to playlist` under the play
-#    control. (Disarm first, so the tile press below navigates rather than
-#    adds.)
-klick $((W - 36)) 116
+# 3. A record's page beside the open panel: `Add to…` under the play control.
 klick 160 250
-park; shot 04-album-page-with-panel
-# 5. The playlist page, by the panel row's name: the collage in the hero
-#    position, the record page's own two-column arrangement.
-klick $((W - 250)) 116
+park; shot 03-album-page-with-panel
+# 4. `Add to…` pressed: **the picker at rest** — the hint line names the
+#    record in hand, the Queue row leads (a destination now), no list is
+#    marked playing because no provenance stands.
+add_to
+park; shot 04-picker
+# 5. Put the pick down (one Esc peels it; the panel stays), then the playlist
+#    page by the panel row's name: the collage in the hero position, the
+#    record page's own two-column arrangement.
+key Escape
+klick $((W - 250)) 140
 park; shot 05-playlist-page
-# 6. The single-record list with a missing entry, straight from the panel
-#    (its rows are doors from any place it stands over): the full-bleed
-#    sleeve, the dimmed row with its path, the counted arithmetic.
-klick $((W - 250)) 220
+# 6. The single-record list with a missing entry, straight from the panel:
+#    the full-bleed sleeve, the dimmed row with its path, the arithmetic.
+klick $((W - 250)) 244
 park; shot 06-playlist-page-missing
 # 7. Play from its first row: the playable subset queues (4 of 5), the lamp
-#    lands on the page's row.
-klick 450 250
+#    lands on the page's row — and the run now carries provenance.
+klick $ROW_X 250
 sleep 2
 park; shot 07-playlist-playing
-# 8. The queue place: exactly the playable subset a playlist's Play sent,
-#    grouped under its records' names, and `Save as playlist` by the summary.
+# 8. **The picker with the playing list hoisted**: close the panel, leave the
+#    page, open a record, press `Add to…` — the Queue row first, then
+#    `Worn Tape — playing`, hoisted while the run's provenance stands.
+key Escape
+key Escape
+klick 160 250
+add_to
+park; shot 08-picker-playing
+# 9. The queue place: the playable subset a playlist's Play sent, grouped
+#    under its records' names, the summary **led by the run's provenance**
+#    (`Worn Tape · …`), `Save as playlist` beside it. (Two Esc: the pick,
+#    then the panel.)
+key Escape
 key Escape
 key ctrl+u
-park; shot 08-queue-save-control
-# 9. The save field, open.
+park; shot 09-queue-save-control
+# 10. The save field, open.
 klick 1024 106
-park; shot 09-queue-save-field
+park; shot 10-queue-save-field
 key Escape
 
 kill "$APID" 2>/dev/null; wait "$APID" 2>/dev/null
 kill "$XPID" 2>/dev/null; wait "$XPID" 2>/dev/null
 
 # ---- 1920 × 1080 ----------------------------------------------------------
-W=1920; H=1080
+# The page centres at this width (its list has reached its measure), so the
+# aside sits at ≈ 343..663 and the main column's rows at ≈ 687 on.
+W=1920; H=1080; ASIDE_X=503; ROW_X=750
 Xvfb "$DISP" -screen 0 ${W}x${H}x24 -nolisten tcp &
 XPID=$!
 sleep 1
 launch $W $H
-park; shot 10-wall-before-1920
+park; shot 11-wall-before-1920
 key ctrl+p
-park; shot 11-wall-panel-open-1920
-# 12. The page at 1920: the hero collage beside a list at its measure, both
-#     clear of the panel.
-klick $((W - 250)) 116
-park; shot 12-playlist-page-1920
+park; shot 12-wall-panel-open-1920
+# 13. The picker at rest at 1920: a record's page, `Add to…`.
+klick 160 250
+add_to
+park; shot 13-picker-1920
+# 14. Play a playlist to stand provenance up, then the picker again: the
+#     hoisted `Worn Tape — playing` row under the Queue's.
+key Escape
+klick $((W - 250)) 244
+klick $ROW_X 250
+sleep 2
+key Escape
+key Escape
+klick 160 250
+add_to
+park; shot 14-picker-playing-1920
+# 15. The page at 1920: the hero collage beside a list at its measure, both
+#     clear of the panel. (Two Esc peel the pick and the panel; a third
+#     leaves the record's page; then the panel and the page again.)
+key Escape
+key Escape
+key Escape
+key ctrl+p
+klick $((W - 250)) 140
+park; shot 15-playlist-page-1920
 key Escape
 kill "$APID" 2>/dev/null; wait "$APID" 2>/dev/null
 kill "$XPID" 2>/dev/null; wait "$XPID" 2>/dev/null
@@ -191,7 +236,7 @@ assert_no_reflow() { # before after W label
   [[ "$ae" == "0" ]] || { echo "REFLOW DETECTED at $label"; exit 1; }
 }
 assert_no_reflow 01-wall-before 02-wall-panel-open 1280 "1280x860"
-assert_no_reflow 10-wall-before-1920 11-wall-panel-open-1920 1920 "1920x1080"
+assert_no_reflow 11-wall-before-1920 12-wall-panel-open-1920 1920 "1920x1080"
 
 echo "--- the isolation receipt ---"
 grep -E "^\[mpris\]|^\[startup\] room|^\[playlists\]" "$S/app.log" || echo "(no mpris line — look at $S/app.log)"

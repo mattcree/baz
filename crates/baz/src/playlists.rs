@@ -3,12 +3,19 @@
 //!
 //! [`baz_core::playlist`] is the storage layer — the format, the folder, the
 //! honesty clause that nothing writes a playlist but the user's own edit.
-//! This module is the *shell's* half: which panel is open, which playlist is
-//! armed to receive, what the open page's rows resolve to against the
+//! This module is the *shell's* half: whether the panel is open, what a pick
+//! in flight is holding, what the open page's rows resolve to against the
 //! library, and the guarded edits the page's controls mean. It is
 //! ADR-0006 layer 1 — pure of iced, unit-tested — and every engine effect
-//! (playing, queueing) stays in `app.rs`, exactly as it does for the album
-//! page.
+//! (playing, queueing, the picker's Queue row) stays in `app.rs`, exactly as
+//! it does for the album page.
+//!
+//! There is no collecting mode here. The armed layer (ADR-0024 §6 layer 2)
+//! shipped and was removed the next day on the owner's own observation — it
+//! was a second list-building grammar and a mode
+//! (`docs/design/09-implicit-playlists.md` §9). What remains is the one
+//! transfer gesture: a `+` or `Add to…` opens the panel as the picker, and
+//! the pick lands where it is aimed — the Queue first, then the lists.
 //!
 //! # The fingerprint discipline
 //!
@@ -42,21 +49,18 @@ use baz_core::playlist::{Entry, ExtInf, Folder, Item, Playlist};
 
 use crate::vm::{self, QueueItemVm, QueueVm, TrackVm};
 
-/// What the record page's collecting affordances need to know, bundled so the
-/// view signatures stay readable: whether playlists can exist at all, whether
-/// the panel is standing beside the page, and whether one is armed to
-/// receive.
+/// What the record page's transfer affordances need to know, bundled so the
+/// view signatures stay readable: whether playlists can exist at all, and
+/// whether the panel is standing beside the page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Collecting {
     /// Whether a playlists folder exists on this system.
     pub(crate) available: bool,
     /// Whether the panel is open — the state that draws the track rows' `+`
-    /// at rest (ADR-0024 §6 layer 1: the task's own furniture, not permanent
-    /// chrome).
+    /// at rest (the task's own furniture, not permanent chrome; when the
+    /// panel is closed the `+` is hover-revealed, with the record page's
+    /// `Add to…` as the always-visible route to the same picker).
     pub(crate) panel_open: bool,
-    /// Whether a playlist is armed to receive (layer 2), which makes every
-    /// `+` a one-press add.
-    pub(crate) armed: bool,
 }
 
 /// A playlist's session identity: FNV-1a 64 over the *name's* exact bytes.
@@ -124,15 +128,23 @@ pub(crate) struct NameEntry {
     pub(crate) error: Option<String>,
 }
 
-/// What a layer-1 pick is waiting to add: the record (or the one track) that
-/// was pointed at, held while the panel serves as the picker (ADR-0024 §6).
+/// What a pick is waiting to add: the record (or the one track) that was
+/// pointed at, held while the panel serves as the picker (09 §8.1 — one
+/// transfer gesture, every destination).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Pending {
     /// What the panel's hint names — `Add "Geogaddi"`, `Add "Amo Bishop
     /// Roden"`.
     pub(crate) label: String,
-    /// The entries a pick appends, in order, with their `#EXTINF` metadata.
+    /// The entries a pick appends to a *file*, in order, with their
+    /// `#EXTINF` metadata.
     pub(crate) entries: Vec<Entry>,
+    /// The same music as queue items, for a pick that lands on the picker's
+    /// **Queue** row instead of a file — carried from the gesture so the
+    /// append keeps the record-group facts (album, filed-under) the queue
+    /// place's headers need, which a path-and-`#EXTINF` entry no longer
+    /// holds.
+    pub(crate) items: Vec<QueueItemVm>,
 }
 
 /// One row of the open playlist's page, resolved and render-ready.
@@ -243,9 +255,7 @@ pub(crate) struct Playlists {
     /// surface you were last collecting into is not a standing decision, the
     /// same argument that keeps `settings_section` out of `config.toml`.
     pub(crate) panel_open: bool,
-    /// The playlist armed to receive (ADR-0024 §6 layer 2), by id.
-    pub(crate) armed: Option<u64>,
-    /// A layer-1 pick in flight: the panel is serving as the picker.
+    /// A pick in flight: the panel is serving as the picker.
     pub(crate) pending: Option<Pending>,
     /// The panel's `New playlist` field, while it is a field.
     pub(crate) naming: Option<NameEntry>,
@@ -272,7 +282,6 @@ impl Playlists {
             folder,
             rows: Vec::new(),
             panel_open: false,
-            armed: None,
             pending: None,
             naming: None,
             saving_queue: None,
@@ -290,7 +299,6 @@ impl Playlists {
             folder: Some(folder),
             rows: Vec::new(),
             panel_open: false,
-            armed: None,
             pending: None,
             naming: None,
             saving_queue: None,
@@ -380,12 +388,6 @@ impl Playlists {
                 }
             })
             .collect();
-        // An armed playlist that no longer exists is not a target.
-        if let Some(armed) = self.armed
-            && !self.rows.iter().any(|row| row.id == armed)
-        {
-            self.armed = None;
-        }
     }
 
     /// Whether anything playlist-shaped can happen at all.
@@ -400,7 +402,6 @@ impl Playlists {
         Collecting {
             available: self.available(),
             panel_open: self.panel_open,
-            armed: self.armed.is_some(),
         }
     }
 
@@ -412,8 +413,8 @@ impl Playlists {
 
     /// The `Playlists` door, and <kbd>Ctrl</kbd>+<kbd>P</kbd>: summon the
     /// panel, or close it. Closing puts down everything the panel was holding
-    /// — a pick, an armed target, a half-typed name — because a closed panel
-    /// with an armed row would be an invisible mode.
+    /// — a pick, a half-typed name — because a closed panel holding a pick
+    /// would be an invisible mode.
     pub(crate) fn toggle_panel(&mut self, library: Option<&Library>) {
         if self.panel_open {
             self.close_panel();
@@ -426,17 +427,17 @@ impl Playlists {
     /// Close the panel and everything it was holding.
     pub(crate) fn close_panel(&mut self) {
         self.panel_open = false;
-        self.armed = None;
         self.pending = None;
         self.naming = None;
     }
 
     /// <kbd>Esc</kbd>'s share of the peel, panel layers only: the name field,
-    /// then a pick in flight, then the armed row, then the panel itself. One
-    /// layer per press, topmost first — the field is the newest thing on
-    /// screen, the pick is the task the panel was opened for, the arm is the
-    /// standing state under both, and the panel is the surface they all live
-    /// on. Reports whether a layer came off.
+    /// then a pick in flight, then the panel itself. One layer per press,
+    /// topmost first — the field is the newest thing on screen, the pick is
+    /// the task the panel was opened for, and the panel is the surface both
+    /// live on. Re-derived after the armed layer's removal (09 §9): the peel
+    /// order is unchanged for what remains, one layer shorter. Reports
+    /// whether a layer came off.
     pub(crate) fn peel(&mut self) -> bool {
         if !self.panel_open {
             return false;
@@ -447,39 +448,53 @@ impl Playlists {
         if self.pending.take().is_some() {
             return true;
         }
-        if self.armed.take().is_some() {
-            return true;
-        }
         self.close_panel();
         true
     }
 
-    /// Arm `id` to receive, or put it down when it is the one armed
-    /// (ADR-0024 §6 layer 2: a visible, reversible state).
-    pub(crate) fn toggle_armed(&mut self, id: u64) {
-        self.armed = if self.armed == Some(id) {
-            None
-        } else {
-            Some(id)
-        };
-    }
-
-    /// Begin a layer-1 pick: hold what was pointed at and summon the panel to
-    /// serve as the picker.
+    /// Begin a pick: hold what was pointed at and summon the panel to serve
+    /// as the picker.
     pub(crate) fn begin_pick(
         &mut self,
         library: Option<&Library>,
         label: String,
         entries: Vec<Entry>,
+        items: Vec<QueueItemVm>,
     ) {
         if entries.is_empty() {
             return;
         }
-        self.pending = Some(Pending { label, entries });
+        self.pending = Some(Pending {
+            label,
+            entries,
+            items,
+        });
         if !self.panel_open {
             self.refresh(library);
             self.panel_open = true;
         }
+    }
+
+    /// Complete a pick on the picker's **Queue** row: put the pick down and
+    /// hand its music back for `app.rs` to append to the run — the engine
+    /// effect stays in the shell, exactly as `Play` and `Queue` do
+    /// (09 §8.1). The panel stays open, as [`Self::pick`] leaves it.
+    pub(crate) fn pick_queue(&mut self) -> Option<Pending> {
+        self.pending.take()
+    }
+
+    /// The picker's named rows, in the picker's order (09 §8.1): the current
+    /// playlist — the one `playing` names, while it still exists — hoisted
+    /// first, every other list in the folder's own order after it. The
+    /// **Queue** row above them and `New playlist` below are the view's; this
+    /// is the ordering of the *files*, kept here so it is a tested fact
+    /// rather than a rendering accident.
+    #[must_use]
+    pub(crate) fn picker_order(&self, playing: Option<u64>) -> Vec<&PanelRow> {
+        let mut ordered: Vec<&PanelRow> = Vec::with_capacity(self.rows.len());
+        ordered.extend(self.rows.iter().filter(|row| playing == Some(row.id)));
+        ordered.extend(self.rows.iter().filter(|row| playing != Some(row.id)));
+        ordered
     }
 
     /// Complete a pick on the row `id`: append the held entries and put the
@@ -989,6 +1004,12 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
         album,
         artist: artist.unwrap_or_else(|| playlist.name().to_owned()),
         items,
+        // Playing provenance (09 §6): a queue reified from this *file*
+        // carries the file's name — origin, never a live link. Set here, in
+        // the one place the playable subset becomes a queue record, so
+        // `Play` and a row click cannot disagree about where the run is
+        // from. Every other queue construction leaves it `None`.
+        provenance: Some(playlist.name().to_owned()),
     };
     OpenPlaylist {
         id,
@@ -1068,6 +1089,19 @@ mod tests {
             ])
             .expect("add");
         library
+    }
+
+    /// A queue item for a pick's hand, minimal on purpose: the picker tests
+    /// care about what travels, not about catalogue completeness.
+    fn item(title: &str, path: &str) -> QueueItemVm {
+        QueueItemVm {
+            title: title.to_owned(),
+            artist: None,
+            album: Some("Apollo".to_owned()),
+            album_artist: Some("Eno".to_owned()),
+            duration: Some(Duration::from_secs(260)),
+            path: track(path),
+        }
     }
 
     fn write_list(folder: &Folder, name: &str, entries: &[&str]) -> u64 {
@@ -1253,6 +1287,7 @@ mod tests {
             Some(&library),
             "Add \u{201c}Apollo\u{201d}".to_owned(),
             vec![Entry::new(track("/m/eno/ascent.flac"))],
+            vec![item("An Ending", "/m/eno/ascent.flac")],
         );
         assert!(playlists.panel_open, "the panel serves as the picker");
         playlists.pick(id, &library);
@@ -1264,6 +1299,7 @@ mod tests {
             Some(&library),
             "Add \u{201c}Apollo\u{201d}".to_owned(),
             vec![Entry::new(track("/m/eno/ascent.flac"))],
+            vec![item("An Ending", "/m/eno/ascent.flac")],
         );
         playlists.naming = Some(NameEntry {
             text: "Fresh".to_owned(),
@@ -1307,6 +1343,7 @@ mod tests {
                 duration: Some(Duration::from_secs(260)),
                 path: track("/m/eno/ascent.flac"),
             }],
+            provenance: None,
         };
         // Whitespace at the ends is trimmed rather than refused (the roots
         // field's own manner); what the storage layer's rule genuinely
@@ -1335,29 +1372,28 @@ mod tests {
         assert_eq!(row.seconds, Some(260), "the EXTINF carried the length");
     }
 
-    /// The peel: name field, then the pick, then the arm, then the panel —
-    /// one layer per press, and a closed panel holds nothing.
+    /// The peel: name field, then the pick, then the panel — one layer per
+    /// press, and a closed panel holds nothing. Re-derived after the armed
+    /// layer's removal (09 §9): what remains peels in the same order.
     #[test]
     fn escape_peels_the_panel_one_layer_at_a_time() {
         let (_keep, folder) = folder();
         let mut playlists = Playlists::over(folder);
-        let id = {
+        {
             let folder = playlists.folder.as_ref().expect("folder");
-            write_list(folder, "Mix", &["/m/a.flac"])
-        };
+            write_list(folder, "Mix", &["/m/a.flac"]);
+        }
         playlists.toggle_panel(None);
-        playlists.toggle_armed(id);
         playlists.pending = Some(Pending {
             label: String::new(),
             entries: vec![Entry::new(track("/m/a.flac"))],
+            items: Vec::new(),
         });
         playlists.naming = Some(NameEntry::default());
         assert!(playlists.peel());
         assert!(playlists.naming.is_none(), "the field first");
         assert!(playlists.peel());
         assert!(playlists.pending.is_none(), "then the pick");
-        assert!(playlists.peel());
-        assert!(playlists.armed.is_none(), "then the arm");
         assert!(playlists.peel());
         assert!(!playlists.panel_open, "then the panel itself");
         assert!(!playlists.peel(), "and a closed panel has no layers");
@@ -1438,19 +1474,97 @@ mod tests {
         assert_eq!(playlists.row(id).expect("row").art, []);
     }
 
+    /// The picker's ordering (09 §8.1, S4): the playing list is hoisted to
+    /// the head of the named rows — second overall, under the view's Queue
+    /// row — while it still exists; without provenance, or when the named
+    /// file is gone, the folder's own order stands and nothing dangles.
     #[test]
-    fn arming_is_reversible_by_the_same_press() {
+    fn the_picker_hoists_the_playing_list_and_only_while_it_exists() {
         let (_keep, folder) = folder();
+        let mut playlists = Playlists::over(folder);
+        let (autumn, mix) = {
+            let folder = playlists.folder.as_ref().expect("folder");
+            (
+                write_list(folder, "Autumn", &["/m/a.flac"]),
+                write_list(folder, "Mix", &["/m/b.flac"]),
+            )
+        };
+        playlists.refresh(None);
+        // No provenance: the folder's own order (alphabetical listing).
+        let names =
+            |rows: Vec<&PanelRow>| rows.iter().map(|row| row.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(playlists.picker_order(None)), ["Autumn", "Mix"]);
+        // The playing list is hoisted first among the named rows…
+        assert_eq!(names(playlists.picker_order(Some(mix))), ["Mix", "Autumn"]);
+        // …hoisting the first row is a no-op rearrangement…
+        assert_eq!(
+            names(playlists.picker_order(Some(autumn))),
+            ["Autumn", "Mix"]
+        );
+        // …and provenance naming a file that no longer exists hoists
+        // nothing: a control that cannot act must not pretend it can.
+        assert_eq!(
+            names(playlists.picker_order(Some(playlist_id("Gone")))),
+            ["Autumn", "Mix"]
+        );
+    }
+
+    /// The picker's Queue row (09 §8.1): picking it hands the held music
+    /// back for the shell's `UpdateQueue` append and writes **no file** —
+    /// "hear this later" and "keep this" are the same gesture with a
+    /// different destination, and each destination does only its own thing.
+    #[test]
+    fn a_queue_pick_hands_back_the_items_and_writes_no_file() {
+        let (_keep, folder) = folder();
+        let library = library();
         let mut playlists = Playlists::over(folder);
         let id = {
             let folder = playlists.folder.as_ref().expect("folder");
-            write_list(folder, "Mix", &[])
+            write_list(folder, "Mix", &["/m/a.flac"])
         };
-        playlists.refresh(None);
-        playlists.toggle_armed(id);
-        assert_eq!(playlists.armed, Some(id));
-        playlists.toggle_armed(id);
-        assert_eq!(playlists.armed, None);
+        playlists.refresh(Some(&library));
+        playlists.begin_pick(
+            Some(&library),
+            "Add \u{201c}Apollo\u{201d}".to_owned(),
+            vec![Entry::new(track("/m/eno/ascent.flac"))],
+            vec![item("An Ending", "/m/eno/ascent.flac")],
+        );
+        let pending = playlists.pick_queue().expect("the pick in hand");
+        assert_eq!(pending.items.len(), 1);
+        assert_eq!(pending.items[0].title, "An Ending");
+        assert!(playlists.pending.is_none(), "the pick is spent");
+        assert!(playlists.panel_open, "the panel stays, as a file pick does");
+        assert_eq!(
+            playlists.row(id).expect("row").entries,
+            1,
+            "no file gained an entry from a queue pick"
+        );
+        assert!(playlists.pick_queue().is_none(), "nothing left to spend");
+    }
+
+    /// Playing provenance is set by reifying a playlist *file* (09 §6): the
+    /// queue a page's `Play` sends carries the file's name, so the run can
+    /// say what list it is from after the file and the snapshot part ways.
+    #[test]
+    fn a_resolved_playlist_queue_carries_the_files_name_as_provenance() {
+        let (_keep, folder) = folder();
+        let library = library();
+        let mut playlists = Playlists::over(folder);
+        let id = {
+            let folder = playlists.folder.as_ref().expect("folder");
+            write_list(folder, "Road Trip", &["/m/low/sunflower.flac"])
+        };
+        playlists.refresh(Some(&library));
+        assert!(playlists.open_page(id, &library));
+        assert_eq!(
+            playlists
+                .page(id)
+                .expect("open")
+                .queue
+                .provenance
+                .as_deref(),
+            Some("Road Trip")
+        );
     }
 
     #[test]

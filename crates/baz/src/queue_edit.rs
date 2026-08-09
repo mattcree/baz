@@ -78,6 +78,7 @@ mod tests {
             album: Some("Geogaddi".to_owned()),
             artist: "Boards of Canada".to_owned(),
             items: names.iter().copied().map(item).collect(),
+            provenance: Some("Road Trip".to_owned()),
         }
     }
 
@@ -124,6 +125,9 @@ mod tests {
         // queue from a different album.
         assert_eq!(edited.album.as_deref(), Some("Geogaddi"));
         assert_eq!(edited.artist, "Boards of Canada");
+        // Provenance stands through every edit (09 §6): a run that has been
+        // edited is still "the run I started from Road Trip".
+        assert_eq!(edited.provenance.as_deref(), Some("Road Trip"));
     }
 
     /// A click on a row this record does not have asks for nothing. It is an

@@ -1718,6 +1718,20 @@ impl PlayerState {
         self.queue.as_ref()
     }
 
+    /// The run's **playing provenance**: the playlist file's name the queue
+    /// was reified from, while that origin stands
+    /// (`docs/design/09-implicit-playlists.md` §6).
+    ///
+    /// Session state about the *queue record*, read for two surfaces: the
+    /// picker hoists the named list second, marked *playing*, and the queue
+    /// place's summary leads with the name. `None` the moment a queue from
+    /// any other gesture replaces the run — the record carries its own
+    /// origin, so this is a read, not a bookkeeping site.
+    #[must_use]
+    pub fn queue_provenance(&self) -> Option<&str> {
+        self.queue.as_ref()?.provenance.as_deref()
+    }
+
     /// Which row of the recorded queue the engine is playing, reconciled
     /// against the path it named (module docs; [`QueueVm::playing`] carries the
     /// rule). Requires both an engine-reported position and a current track,
@@ -2114,22 +2128,38 @@ impl PlayerState {
 /// scan read no duration for says nothing rather than `0:00`, on the same
 /// principle as the `--:--` the seek bar shows for an undeclared length: an
 /// unknown is not a zero.
+///
+/// **The summary leads with the run's provenance** when the run has one —
+/// `Road Trip · 3 of 12 · 38:12 left` — because *"what list is this run
+/// from?"* was the one question the hierarchy sheet could not answer at all
+/// (`docs/design/09-implicit-playlists.md` §6, §10). Origin, never a live
+/// link: the name keeps leading through every edit, and goes only when a
+/// different play gesture replaces the run.
 fn queue_summary(queue: &QueueVm, playing: Option<usize>, elapsed_ms: u64) -> String {
-    let Some(index) = playing else {
-        let count = match queue.len() {
-            1 => "1 track".to_owned(),
-            n => format!("{n} tracks"),
-        };
-        let total = queue.total_time();
-        if total == Duration::ZERO {
-            return count;
+    let reading = match playing {
+        None => {
+            let count = match queue.len() {
+                1 => "1 track".to_owned(),
+                n => format!("{n} tracks"),
+            };
+            let total = queue.total_time();
+            if total == Duration::ZERO {
+                count
+            } else {
+                format!("{count} · {}", vm::format_duration(total))
+            }
         }
-        return format!("{count} · {}", vm::format_duration(total));
+        Some(index) => {
+            let count = format!("{} of {}", index + 1, queue.len());
+            match left_note(queue, index, elapsed_ms) {
+                None => count,
+                Some(left) => format!("{count} · {left}"),
+            }
+        }
     };
-    let count = format!("{} of {}", index + 1, queue.len());
-    match left_note(queue, index, elapsed_ms) {
-        None => count,
-        Some(left) => format!("{count} · {left}"),
+    match &queue.provenance {
+        Some(name) => format!("{name} · {reading}"),
+        None => reading,
     }
 }
 
@@ -2670,6 +2700,7 @@ mod tests {
             album: Some("Geogaddi".to_owned()),
             artist: "Boards of Canada".to_owned(),
             items,
+            provenance: None,
         }
     }
 
@@ -4962,6 +4993,46 @@ mod tests {
         );
     }
 
+    /// **The summary leads with the run's provenance** — `Road Trip · 1 of 2
+    /// · 6:40 left` — while the origin stands, through the run's end, and not
+    /// one frame past the `SetQueue` that replaces it
+    /// (`docs/design/09-implicit-playlists.md` §6; S4's and S9's criteria).
+    #[test]
+    fn the_summary_leads_with_provenance_until_a_new_run_replaces_it() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        let mut from_file = geogaddi_queue();
+        from_file.provenance = Some("Road Trip".to_owned());
+        player.note_queue_sent(from_file);
+        assert_eq!(player.queue_provenance(), Some("Road Trip"));
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "Road Trip · 2 tracks · 6:40"
+        );
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "Road Trip · 1 of 2 · 6:40 left"
+        );
+        // The origin survives the run ending: `QueueEnded` clears what is
+        // *playing*, and provenance is a fact about the list that remains.
+        player.apply(&Event::QueueEnded, &albums);
+        assert_eq!(player.queue_provenance(), Some("Road Trip"));
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "Road Trip · 2 tracks · 6:40"
+        );
+        // Replaced only when the queue is replaced: a play gesture from any
+        // other origin hands over a record built with no provenance, and the
+        // summary stops naming a list this run is not from.
+        player.note_queue_sent(geogaddi_queue());
+        assert_eq!(player.queue_provenance(), None);
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "2 tracks · 6:40"
+        );
+    }
+
     /// **A queue holding several records lists them as records** — one name
     /// where each begins, and none where a record simply continues.
     ///
@@ -4981,6 +5052,7 @@ mod tests {
                 item("Music Is Math", "Geogaddi", "Boards of Canada"),
                 item("Sundown", "Sundown", "Gordon Lightfoot"),
             ],
+            provenance: None,
         };
         let mut player = PlayerState::new(Availability::Ready);
         player.note_queue_sent(queue);
@@ -5196,6 +5268,7 @@ mod tests {
                     path: PathBuf::from(format!("/m/stack/{index}.flac")),
                 })
                 .collect(),
+            provenance: None,
         }
     }
 
@@ -5381,6 +5454,7 @@ mod tests {
             album: None,
             artist: vm::UNKNOWN_ARTIST.to_owned(),
             items: Vec::new(),
+            provenance: None,
         });
         assert_eq!(
             player.queue_size_note(),
@@ -5508,6 +5582,7 @@ mod tests {
                     path: PathBuf::from("/m/stack/1.flac"),
                 },
             ],
+            provenance: None,
         });
         player.apply(&started("/m/stack/0.flac", 0), &[]);
         assert_eq!(player.continuation_note().as_deref(), Some("then Kid A"));
@@ -5745,6 +5820,7 @@ mod tests {
                 duration: None,
                 path: PathBuf::from("/m/stream.mp3"),
             }],
+            provenance: None,
         });
         let list = player.queue_list().expect("a queue");
         assert_eq!(list.summary, "1 track");

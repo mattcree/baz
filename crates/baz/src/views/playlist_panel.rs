@@ -15,6 +15,13 @@
 //! *receives*; it does not display a selection, which is what the dead column
 //! did and what places do better.
 //!
+//! The panel's tenant is **ordered lists of tracks** — the unnamed one
+//! included (`docs/design/09-implicit-playlists.md` §8.1, the ADR-0024
+//! amendment's restated single-tenant clause): the **Queue** heads the list
+//! as the sounding, unnamed list. At rest its row is a *readout, not a door*
+//! — the queue's door is the bar's labelled `Queue`, and a second door would
+//! be L8.6's violation; facts may be restated everywhere, controls may not.
+//!
 //! # The float mechanics
 //!
 //! ADR-0016's verified popover mechanics, revived for a surface that earns
@@ -29,20 +36,26 @@
 //!
 //! # What it holds
 //!
-//! `New playlist`, then one row per playlist — the name (a door to
-//! [`Place::Playlist`](crate::place::Place)) and the receive target that arms
-//! it for adding (ADR-0024 §6 layer 2). Rename and delete are *not* here:
-//! destruction lives on the page, where the contents are visible at the
-//! moment of the decision. While a layer-1 pick is in flight the whole row
-//! becomes the pick's target and says so — the panel is the picker.
+//! The Queue's row, then one row per playlist — the name and sleeve, a door
+//! to [`Place::Playlist`](crate::place::Place) — then `New playlist`. Rename
+//! and delete are *not* here: destruction lives on the page, where the
+//! contents are visible at the moment of the decision. While a pick is in
+//! flight the panel is **the picker** (09 §8.1): every row becomes the
+//! pick's target — the Queue first (append to the run), the playing list
+//! hoisted second when provenance stands, the named lists, `New playlist` —
+//! one grammar: pick a destination, whatever the destination is. The armed
+//! collecting mode that used to live on these rows is removed (09 §9); a row
+//! carries one control, and the panel is a directory, not a workspace.
 
 use iced::widget::{Column, Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
-use crate::playlists::{NameEntry, PanelRow, Playlists};
+use crate::player::PlayerState;
+use crate::playlists::{NameEntry, PanelRow, Playlists, playlist_id};
 use crate::theme;
 use crate::views::playlist_sleeve;
+use crate::vm;
 
 /// The panel's width: the one dimension of the dead rail nobody faulted
 /// (`docs/design/08` §5.5), spent on a surface that is only ever on screen
@@ -59,9 +72,23 @@ pub(crate) fn new_name_id() -> text_input::Id {
 ///
 /// `shelf` supplies the thumbnail cache the rows' sleeves quote
 /// (ADR-0024 §A1) — the panel reads it exactly as the wall does and owns no
-/// pixel of it.
-pub(crate) fn view<'a>(shelf: &'a Shelf, playlists: &'a Playlists) -> Element<'a, Message> {
+/// pixel of it. `player` supplies the two facts the Queue row states — the
+/// run's size and time — and the provenance the picker hoists by (09 §6);
+/// both are readings, never held here.
+pub(crate) fn view<'a>(
+    shelf: &'a Shelf,
+    playlists: &'a Playlists,
+    player: &'a PlayerState,
+) -> Element<'a, Message> {
     let room = theme::active();
+    let picking = playlists.pending.is_some();
+    // The playing list, while provenance stands *and* the file still exists —
+    // a rename or delete under the run withdraws the hoist rather than
+    // letting it dangle (09 §6).
+    let playing = player
+        .queue_provenance()
+        .map(playlist_id)
+        .filter(|id| playlists.row(*id).is_some());
     let mut body = column![].spacing(theme::GAP_SM);
     // The panel's own name, and how it leaves — the place-header shape at
     // panel scale, so the surface answers "what is this" the way every other
@@ -86,36 +113,46 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, playlists: &'a Playlists) -> Element<'a
     // hand so the next press is legible before it is made.
     if let Some(pending) = &playlists.pending {
         body = body.push(
-            text(format!("{} — pick a playlist", pending.label))
+            text(format!("{} — pick a destination", pending.label))
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
                 .color(room.paper_dim),
         );
     }
+    // The rows, in the picker's one order (09 §8.1): the Queue first, the
+    // playing list second when one stands, the named lists, `New playlist`
+    // last. At rest the same shape minus the hoist: the Queue as a readout at
+    // the head, the folder's own order below it.
+    let mut listed: Vec<Element<'_, Message>> = vec![queue_row(player, picking)];
+    if playlists.rows.is_empty() {
+        listed.push(empty_words(playlists));
+    } else {
+        let named: Vec<&PanelRow> = if picking {
+            playlists.picker_order(playing)
+        } else {
+            playlists.rows.iter().collect()
+        };
+        for entry in named {
+            listed.push(playlist_row(
+                shelf,
+                entry,
+                picking,
+                picking && playing == Some(entry.id),
+            ));
+        }
+    }
+    body = body.push(
+        scrollable(Column::with_children(listed).spacing(theme::GAP_XS))
+            .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
+            .style(move |_theme, status| theme::scrollbar(room, room.plinth, status))
+            .height(Length::Fill),
+    );
+    // `New playlist`, the last row (09 §8.1's picker diagram): creation is
+    // the furthest destination, under every list that already exists.
     body = body.push(match &playlists.naming {
         None => new_playlist_door(),
         Some(entry) => name_field(entry),
     });
-    let rows: Element<'_, Message> = if playlists.rows.is_empty() {
-        empty_words(playlists)
-    } else {
-        let picking = playlists.pending.is_some();
-        let mut listed: Vec<Element<'_, Message>> = Vec::new();
-        for entry in &playlists.rows {
-            listed.push(playlist_row(
-                shelf,
-                entry,
-                playlists.armed == Some(entry.id),
-                picking,
-            ));
-        }
-        scrollable(Column::with_children(listed).spacing(theme::GAP_XS))
-            .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
-            .style(move |_theme, status| theme::scrollbar(room, room.plinth, status))
-            .height(Length::Fill)
-            .into()
-    };
-    body = body.push(rows);
     // One hairline down the left edge is the seam between the panel and the
     // wall it floats over — the surface step does the rest; a shadow is
     // refused (`docs/REFUSALS.md`).
@@ -133,6 +170,70 @@ pub(crate) fn view<'a>(shelf: &'a Shelf, playlists: &'a Playlists) -> Element<'a
             .style(move |_theme| theme::panel(room)),
     ]
     .into()
+}
+
+/// **The Queue's row** — the unnamed, sounding list at the head of the
+/// directory (09 §8.1).
+///
+/// At rest it is a **readout, not a door**: name and counts in the room's
+/// quieter voice, no press — the queue's one door is the bar's labelled
+/// `Queue`, and a second would be two controls sending one message (L8.6).
+/// While a pick is in flight it is the picker's first destination: one press
+/// appends the held music to the run (`UpdateQueue` — the music keeps
+/// playing, and appending to an empty stopped engine loads a queue without
+/// starting it).
+fn queue_row(player: &PlayerState, picking: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    let counts = match player.queue().filter(|queue| !queue.is_empty()) {
+        Some(queue) => {
+            let time = queue.total_time();
+            if time.is_zero() {
+                queue.len().to_string()
+            } else {
+                format!("{} · {}", queue.len(), vm::format_duration(time))
+            }
+        }
+        None => "Nothing queued".to_owned(),
+    };
+    let name_block = column![
+        text("Queue")
+            .size(theme::SIZE_BODY)
+            .line_height(theme::LEADING_BODY)
+            .font(theme::MEDIUM)
+            .color(room.paper_dim)
+            .wrapping(text::Wrapping::None),
+        text(counts)
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_faint)
+            .wrapping(text::Wrapping::None),
+    ]
+    .spacing(theme::GAP_XXS);
+    if picking {
+        // The pick's first target: one press, one append to the run.
+        return button(
+            row![
+                container(name_block).width(Length::Fill),
+                text("Add")
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .font(theme::MEDIUM)
+                    .color(room.paper_dim)
+                    .wrapping(text::Wrapping::None),
+            ]
+            .spacing(theme::GAP_SM)
+            .align_y(iced::Alignment::Center),
+        )
+        .width(Length::Fill)
+        .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+        .style(move |_theme, status| theme::track_row(room, status, false))
+        .on_press(Message::PickQueue)
+        .into();
+    }
+    container(name_block)
+        .width(Length::Fill)
+        .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+        .into()
 }
 
 /// `New playlist`, at rest: a quiet word that becomes a name field on press —
@@ -184,31 +285,48 @@ fn name_field(entry: &NameEntry) -> Element<'_, Message> {
     block.into()
 }
 
-/// One playlist's row: the name (a door to its page) over its counts, and the
-/// receive target beside them.
+/// One playlist's row: the sleeve, then the name over its counts — one
+/// control, the door to its page (09 §9's shrinking: the receive `+` is
+/// gone, and a row is a directory entry rather than a workspace).
 ///
 /// While a pick is in flight the whole row is the pick's target instead —
 /// pressing anywhere on it appends what the hand holds — because a picker
-/// whose rows kept their two ordinary meanings would make the most important
-/// press on the surface the hardest to aim.
+/// whose rows kept their ordinary meaning would make the most important
+/// press on the surface the hardest to aim. The playing list, hoisted to the
+/// head of the named rows, is `marked` — *playing*, in the quieter voice —
+/// and its pick appends to the **file** only, never the sounding run
+/// (09 §6, S4).
 fn playlist_row<'a>(
     shelf: &'a Shelf,
     entry: &'a PanelRow,
-    armed: bool,
     picking: bool,
+    marked: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
     // The sleeve, at the row's own scale (ADR-0024 §A2): what turns a list
-    // of names into a shelf of objects — and what makes the armed row read
-    // as a thing receiving rather than a highlighted line.
+    // of names into a shelf of objects.
     let sleeve = playlist_sleeve(shelf, &entry.art, &entry.name, theme::PANEL_SLEEVE);
-    let name_block = column![
+    let mut name_line = row![
         text(entry.name.clone())
             .size(theme::SIZE_BODY)
             .line_height(theme::LEADING_BODY)
             .font(theme::MEDIUM)
             .color(room.paper)
             .wrapping(text::Wrapping::None),
+    ]
+    .spacing(theme::GAP_XS)
+    .align_y(iced::Alignment::Center);
+    if marked {
+        name_line = name_line.push(
+            text("— playing")
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.paper_faint)
+                .wrapping(text::Wrapping::None),
+        );
+    }
+    let name_block = column![
+        name_line,
         text(entry.counts())
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
@@ -217,31 +335,29 @@ fn playlist_row<'a>(
     ]
     .spacing(theme::GAP_XXS);
     if picking {
-        // The pick's target: one press, one append, and the row says so.
-        return container(
-            button(
-                row![
-                    sleeve,
-                    container(name_block).width(Length::Fill),
-                    text("Add")
-                        .size(theme::SIZE_META)
-                        .line_height(theme::LEADING_META)
-                        .font(theme::MEDIUM)
-                        .color(room.paper_dim)
-                        .wrapping(text::Wrapping::None),
-                ]
-                .spacing(theme::GAP_SM)
-                .align_y(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-            .style(move |_theme, status| theme::track_row(room, status, false))
-            .on_press(Message::PickPlaylist(entry.id)),
+        // The pick's target: one press, one append to the file, and the row
+        // says so.
+        return button(
+            row![
+                sleeve,
+                container(name_block).width(Length::Fill),
+                text("Add")
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .font(theme::MEDIUM)
+                    .color(room.paper_dim)
+                    .wrapping(text::Wrapping::None),
+            ]
+            .spacing(theme::GAP_SM)
+            .align_y(iced::Alignment::Center),
         )
-        .style(move |_theme| theme::panel_row(room, false))
+        .width(Length::Fill)
+        .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+        .style(move |_theme, status| theme::track_row(room, status, false))
+        .on_press(Message::PickPlaylist(entry.id))
         .into();
     }
-    let door = button(
+    button(
         row![sleeve, container(name_block).width(Length::Fill)]
             .spacing(theme::GAP_SM)
             .align_y(iced::Alignment::Center),
@@ -249,52 +365,11 @@ fn playlist_row<'a>(
     .width(Length::Fill)
     .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
     .style(move |_theme, status| theme::track_row(room, status, false))
-    .on_press(Message::OpenPlaylist(entry.id));
-    // The receive target (ADR-0024 §6 layer 2): a `+` that arms this list to
-    // collect, or puts it down when it is the one armed. `STEPPER_HIT`, the
-    // room's secondary square, and never the accent — arming is a collecting
-    // state, not playback truth.
-    let receive = iced::widget::tooltip(
-        button(
-            container(
-                text(if armed { "\u{2212}" } else { "+" })
-                    .size(theme::SIZE_BODY)
-                    .line_height(theme::LEADING_BODY)
-                    .color(room.paper),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(alignment::Horizontal::Center)
-            .align_y(alignment::Vertical::Center),
-        )
-        .width(Length::Fixed(theme::STEPPER_HIT))
-        .height(Length::Fixed(theme::STEPPER_HIT))
-        .padding(0)
-        .style(move |_theme, status| theme::transport(room, room.plinth, status))
-        .on_press(Message::ArmPlaylist(entry.id)),
-        text(if armed {
-            "Stop adding"
-        } else {
-            "Open for adding: one press per record or track"
-        })
-        .size(theme::SIZE_CAPTION)
-        .line_height(theme::LEADING_CAPTION),
-        iced::widget::tooltip::Position::Left,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room));
-    container(
-        row![door, receive]
-            .spacing(theme::GAP_XS)
-            .align_y(iced::Alignment::Center),
-    )
-    .padding(theme::pad(0.0, 0.0))
-    .style(move |_theme| theme::panel_row(room, armed))
+    .on_press(Message::OpenPlaylist(entry.id))
     .into()
 }
 
-/// No playlists yet: said plainly, with both doors in — the row above, and
+/// No playlists yet: said plainly, with both doors in — the row below, and
 /// the folder itself (the migration story is `cp *.m3u8`, ADR-0024).
 fn empty_words(playlists: &Playlists) -> Element<'_, Message> {
     let room = theme::active();

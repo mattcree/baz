@@ -60,7 +60,6 @@ pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     player: &'a PlayerState,
     lamp: f32,
-    collecting: bool,
 ) -> Element<'a, Message> {
     if shelf.visible.is_empty() {
         return empty_state(shelf);
@@ -95,7 +94,7 @@ pub(crate) fn view<'a>(
             &mut drawn,
         );
         for r in first_row..end_row {
-            grid = grid.push(shelf_row(shelf, player, hang, *run, r, lamp, collecting));
+            grid = grid.push(shelf_row(shelf, player, hang, *run, r, lamp));
         }
         drawn += hang.spacer_height(end_row - first_row);
     }
@@ -155,7 +154,6 @@ fn shelf_row<'a>(
     run: Run,
     row_index: usize,
     lamp: f32,
-    collecting: bool,
 ) -> Element<'a, Message> {
     let mut cells = row![]
         .spacing(hang.gutter)
@@ -187,7 +185,6 @@ fn shelf_row<'a>(
                 lamp,
                 dimmed,
                 ringed,
-                collecting,
             ));
         }
     }
@@ -517,12 +514,6 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
 /// that was the loudest thing on screen after the artwork. Reserving the block
 /// costs nothing (the row pitch already has the room) and the title clips at one
 /// line instead, which is the failure the shelf can afford.
-#[expect(
-    clippy::too_many_arguments,
-    clippy::fn_params_excessive_bools,
-    reason = "a tile is one anatomy with one long fact list; a struct per \
-              call site would be the same eight names once removed"
-)]
 fn tile<'a>(
     shelf: &'a Shelf,
     hang: Grid,
@@ -531,7 +522,6 @@ fn tile<'a>(
     lamp: f32,
     dimmed: bool,
     ringed: bool,
-    collecting: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let edge = hang.art;
@@ -581,21 +571,6 @@ fn tile<'a>(
         .align_y(iced::Alignment::Center);
     if playing {
         title_row = title_row.push(lamp_dot());
-    }
-    // **The open playlist's mark** (ADR-0024 §6 layer 2): while a playlist is
-    // armed to receive, every wall label opens with a quiet `+` in its first
-    // line — the stack's numeral-chip position, and never on the sleeve
-    // (nothing is ever drawn on top of a sleeve). It is a statement about
-    // what the press below now does, not a second control: the tile is the
-    // object (L8.5), and while collecting, its one press *is* the add.
-    if collecting {
-        title_row = title_row.push(
-            text("+")
-                .size(theme::SIZE_BODY)
-                .line_height(theme::LEADING_BODY)
-                .color(room.paper_faint)
-                .wrapping(text::Wrapping::None),
-        );
     }
     title_row = title_row.push(
         text(title)
@@ -672,14 +647,7 @@ fn tile<'a>(
         .height(Length::Fixed(hang.row_h - hang.hang + RULE_LANE_H))
         .padding(0)
         .style(move |_theme, status| theme::tile(room, status, selected))
-        // While a playlist is armed the press pulls the record into it —
-        // one press per addition, the record-shop gesture — and navigation
-        // waits for the crate to leave the counter (`Esc`, or the armed row).
-        .on_press(if collecting {
-            Message::AddAlbumToPlaylist(album.id)
-        } else {
-            Message::AlbumClicked(album.id)
-        }),
+        .on_press(Message::AlbumClicked(album.id)),
     )
     .on_enter(Message::TileEntered(album.id))
     .on_exit(Message::TileLeft(album.id))

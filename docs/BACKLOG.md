@@ -2,7 +2,7 @@
 
 > Deliberate deferrals, in one place. Everything here was consciously *not* done,
 > with the reason. Roadmap-level scope lives in `VISION.md`; this is the list of
-> known gaps and promises. Updated 2026-08-07.
+> known gaps and promises. Updated 2026-08-09.
 
 ## Product decisions to honour later
 
@@ -312,11 +312,15 @@
   the engine's re-derived playing row. What remains is the panel itself: rows
   already carry their queue position, and `PlayerState::queue_list` is the one
   place that gains a message.
-- **The queue cannot be built from a record.** Playing an album replaces the
-  queue wholesale, and the one append route shipped is the playlist page's
-  `Queue` (ADR-0024). The record page's own `Queue album` and the shift-click
-  stack — ADR-0023 §3's "hear this later" at record granularity — are decided,
-  expressible (`UpdateQueue` with rows appended) and not yet built.
+- ~~**The queue cannot be built from a record.**~~ — **closed by the
+  picker's Queue row** (doc 09 §8.1; ADR-0023's accepted amendment): `Add
+  to…` on the record's page, or a track row's `+`, then the picker's first
+  row — `UpdateQueue` with rows appended, the music undisturbed, two presses
+  inside W8's band-C budget. The dedicated `Queue album` control is
+  **withdrawn before being built** (a second control sending the picker
+  row's message — L8.6); what remains open is its one-press accelerators,
+  shift-click and the context menu's `Queue` item (doc 09 §13 steps 4 and
+  7), both resolving to the picker's Queue row as their on-screen control.
 - **Playlist reorder and add have no drag** (ADR-0024 §6 layer 3, deliberately
   last). iced 0.13 has no pointer capture, so the drag needs the hand-built
   widget on the `groove.rs` precedent — one investment paying playlist add,
@@ -332,12 +336,18 @@
   roots (ADR-0024 §2's sovereignty line). One row and an open-folder
   affordance, so the user learns where their artefacts live the way they
   learn where their music does.
-- **Where playlists sit in the information hierarchy is an open question.**
-  The owner: *"we are thinking there are implicit playlists everywhere"* —
-  the implicit-playlists deep dive (design doc 09) owns it, and ADR-0024
-  §A2 deliberately defers to it: wall membership, rail sorting, search-corpus
-  membership, and possibly the armed-collecting flow itself. The sleeve
-  (§A1) is the vocabulary any outcome keeps.
+- **Where playlists sit in the information hierarchy** — **answered by the
+  implicit-playlists study (design doc 09)**: one kind of list, one sounding
+  and unnamed, one transfer gesture. Steps 1–2 of its §13 are shipped (the
+  armed collecting mode removed; the picker's Queue row, the hoisted playing
+  list, playing provenance). What remains is its steps 3–8, each shipping
+  whole: the songs section over the wall, the context-menu mirror layer
+  (§5.2 — and with it S4's two-gesture *"add to the current playlist"* from
+  anywhere), queue-place edit parity (▲▼ and the `+` slot), `Play all`
+  (gated at large scale on queue-place virtualization, §7.1), shift-click,
+  and the drag. Wall membership, rail sorting and search-corpus membership
+  for playlists stay deferred (ADR-0024 §A2); the sleeve (§A1) is the
+  vocabulary any outcome keeps.
 - **No keyboard route out of the search field.** Transport keys are bound
   (`crates/baz/src/keys.rs`), but iced 0.13's `text_input` captures every key
   press while focused except Tab and the vertical arrows, so while the search

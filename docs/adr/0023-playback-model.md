@@ -1,10 +1,14 @@
 # ADR-0023: The playback model — one list with a cursor, and the queue as a record of a choice
 
-> **Proposed amendment (2026-08-09), from
+> **Amendment (2026-08-09), from
 > [`docs/design/09-implicit-playlists.md`](../design/09-implicit-playlists.md)**
 > — the implicit-playlist study, commissioned on the owner's *"we are
 > thinking there are implicit playlists everywhere."* Four changes to this
-> record, none touching the engine:
+> record, none touching the engine. **Status: items 1–2 accepted and shipped
+> (2026-08-09, doc 09 §13 steps 1–2 — the picker's Queue row and playing
+> provenance; item 1's shift-click and context-menu accelerators await steps
+> 4 and 7); items 3–4 remain proposed** (the songs section and
+> `Play all` are steps 3 and 6):
 >
 > 1. **§3's dedicated `Queue album` control is withdrawn before being
 >    built** (it never shipped). The queue-append lives in the unified
