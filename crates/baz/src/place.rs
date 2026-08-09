@@ -6,7 +6,7 @@
 //! > **The window holds one place at a time, with the returns lane to its left
 //! > in every place but Settings, and the now-playing bar under all of them.**
 //!
-//! One kind, seven members, one rule. There is no inspector, no popover and no
+//! One kind, eight members, one rule. There is no inspector, no popover and no
 //! rail; a listener has one question to answer about anything on screen —
 //! *which place am I in* — and one key that answers it. (One summoned,
 //! single-tenant panel floats *over* a place without being one — the playlist
@@ -96,6 +96,22 @@ pub enum Place {
     /// a page. It carries no id for the same reason the bar carries none: the
     /// engine's answer is the only one it may draw.
     NowPlaying,
+    /// **One artist's page**: their name, and their records in the wall's own
+    /// tile.
+    ///
+    /// The owner's, in one line: *"we could add an Artist > album breadcrumb
+    /// though. and have an artist page."* It carries
+    /// [`crate::vm::artist_id`]'s hash of the album artist rather than the
+    /// name, for [`Self::Album`]'s reason exactly — a `Copy` handle the shell
+    /// resolves against the wall on every frame, so a rescan that renamed or
+    /// removed the artist is answered with the wall rather than with a
+    /// dangling borrow.
+    ///
+    /// **Not a destination.** The lane's head is a closed set of three
+    /// (ADR-0030's amendment) and a fourth is the nav rail doc 07 L8.4
+    /// refused. This is reached from a record's page, like `Album` is reached
+    /// from a tile, and it lights nothing in the head.
+    Artist(u64),
     /// **One record's page**: its art, its identity, the action, its tracks
     /// and its condition report, at the width of the window.
     ///
@@ -166,6 +182,30 @@ impl Place {
             Self::Library
         } else {
             Self::Album(id)
+        }
+    }
+
+    /// **The album page's breadcrumb was pressed**: show that artist's page —
+    /// or come back from it, when it is the page already showing.
+    ///
+    /// [`Self::album`]'s shape exactly, and for its reason: pointing at the
+    /// thing you are already reading puts it down, and a different artist
+    /// swaps the page rather than stacking one.
+    ///
+    /// **The toggle-off arm has no route today**, and it is kept rather than
+    /// trimmed: the only door to an artist is the record page's breadcrumb, and
+    /// an artist's own page carries no breadcrumb, so there is nowhere to press
+    /// the artist you are already reading. Three identically-shaped functions
+    /// that behave identically are worth more than one branch pruned for being
+    /// briefly unreachable — the moment a second door exists (a tile's caption,
+    /// a lane row) it is live, and a sibling that quietly did not toggle would
+    /// be the surprise.
+    #[must_use]
+    pub fn artist(self, id: u64) -> Self {
+        if self == Self::Artist(id) {
+            Self::Library
+        } else {
+            Self::Artist(id)
         }
     }
 
@@ -311,6 +351,7 @@ mod tests {
             // …and reached from anywhere, it is the same place.
             for from in [
                 Place::Album(7),
+                Place::Artist(5),
                 Place::Queue,
                 Place::Playlist(3),
                 Place::Settings,
@@ -326,6 +367,7 @@ mod tests {
     fn only_a_destination_lights_the_head() {
         for place in [
             Place::Album(7),
+            Place::Artist(5),
             Place::Queue,
             Place::Playlist(3),
             Place::Settings,
@@ -343,6 +385,7 @@ mod tests {
             Place::Home,
             Place::NowPlaying,
             Place::Album(7),
+            Place::Artist(5),
             Place::Queue,
             Place::Playlist(3),
         ] {
@@ -362,6 +405,9 @@ mod tests {
         assert_eq!(Place::Library.playlist(3), Place::Playlist(3));
         assert_eq!(Place::Playlist(3).playlist(3), Place::Library);
         assert_eq!(Place::Playlist(3).playlist(4), Place::Playlist(4));
+        assert_eq!(Place::Library.artist(5), Place::Artist(5));
+        assert_eq!(Place::Artist(5).artist(5), Place::Library);
+        assert_eq!(Place::Artist(5).artist(6), Place::Artist(6));
 
         // …and a door pressed from *another* place is a move, not a swap back
         // home. The key says where to go; only the place you are in says
@@ -380,6 +426,7 @@ mod tests {
             Place::Home,
             Place::NowPlaying,
             Place::Album(7),
+            Place::Artist(5),
             Place::Queue,
             Place::Playlist(3),
             Place::Settings,
@@ -402,6 +449,7 @@ mod tests {
             Settings,
             Queue,
             Album(u64),
+            Artist(u64),
             Playlist(u64),
             Go(crate::lane::Destination),
             Back,
@@ -411,6 +459,7 @@ mod tests {
             Step::Queue,
             Step::Album(1),
             Step::Album(2),
+            Step::Artist(5),
             Step::Playlist(1),
             Step::Go(crate::lane::Destination::Home),
             Step::Go(crate::lane::Destination::NowPlaying),
@@ -426,6 +475,7 @@ mod tests {
                                 Step::Settings => place.settings(),
                                 Step::Queue => place.queue(),
                                 Step::Album(id) => place.album(id),
+                                Step::Artist(id) => place.artist(id),
                                 Step::Playlist(id) => place.playlist(id),
                                 Step::Go(to) => place.go(to),
                                 Step::Back => place.back(),
@@ -459,6 +509,7 @@ mod tests {
                                 + usize::from(place == Place::Settings)
                                 + usize::from(place == Place::Queue)
                                 + usize::from(place.showing_album().is_some())
+                                + usize::from(matches!(place, Place::Artist(_)))
                                 + usize::from(matches!(place, Place::Playlist(_)));
                             assert_eq!(showing, 1, "{step:?}");
                         }

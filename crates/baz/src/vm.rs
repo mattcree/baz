@@ -1149,32 +1149,6 @@ pub fn visible_indices(albums: &[AlbumVm], library: &Library, query: &str) -> Ve
     }
 }
 
-/// The records either side of `id` **along the wall's current
-/// arrangement** — what the Album place's `‹ Prev` / `Next ›` pair steps
-/// through (doc 07 §3.2, shipped by doc 11 §5 P3).
-///
-/// `visible` is the wall's own filtered, ordered index list
-/// ([`visible_indices`]), so the pool is exactly what the wall shows: the
-/// same order, the same query, the same arrangement — the shuffle rule's
-/// logic applied to navigation. The first record has no previous and the
-/// last no next (`None` disables the door rather than wrapping — a wall is
-/// a wall, not a carousel), and a record the wall no longer shows — filtered
-/// out, or vanished under a rescan — has no neighbours at all: the honest
-/// answer when the pool does not contain you is that there is no "next".
-#[must_use]
-pub fn neighbours(albums: &[AlbumVm], visible: &[usize], id: u64) -> (Option<u64>, Option<u64>) {
-    let Some(at) = visible
-        .iter()
-        .position(|&index| albums.get(index).is_some_and(|album| album.id == id))
-    else {
-        return (None, None);
-    };
-    let of = |position: Option<&usize>| position.and_then(|&index| albums.get(index)).map(|a| a.id);
-    let previous = at.checked_sub(1).and_then(|p| of(visible.get(p)));
-    let next = of(visible.get(at + 1));
-    (previous, next)
-}
-
 /// Deterministic album identity: FNV-1a 64 over the case-folded
 /// (album artist, album title) pair, exactly mirroring the grouping key
 /// [`Library::albums`] uses (`str::to_lowercase`). Each of the three
@@ -1198,6 +1172,39 @@ pub fn album_id(artist: AlbumArtist<'_>, album: Option<&str>) -> u64 {
         None => hash = fnv1a(hash, &[0x01]),
         Some(text) => hash = fnv1a(hash, text.to_lowercase().as_bytes()),
     }
+    fnv1a(hash, &[0x00])
+}
+
+/// **Deterministic artist identity** — [`album_id`]'s first half, alone.
+///
+/// The Artist place carries this rather than a name, for the reason
+/// [`Place::Album`](crate::place::Place::Album) carries an id: a `Copy` handle
+/// the shell resolves against the wall on every frame, so a place cannot hold a
+/// borrowed string that outlives the rescan that rebuilt it.
+///
+/// It is **the same bytes, the same marker and the same fold** as the artist
+/// half of `album_id`, which is what makes the two agree by construction: the
+/// three [`AlbumArtistVm`] states each get their own marker, so a record filed
+/// under a literal "Various Artists" tag and a nameless compilation are two
+/// artists here exactly as they are two albums there. Case-folded with
+/// `str::to_lowercase`, mirroring the grouping key `Library::albums` uses — so
+/// the wall's own `Artist` shelves and this id draw the same line between two
+/// spellings of one name.
+///
+/// Not a hash of the *label*: [`AlbumArtistVm::label`] answers `Various
+/// Artists` for a nameless compilation, and hashing that would make one
+/// compilation's page and one real band called "Various Artists" the same
+/// place.
+#[must_use]
+pub fn artist_id(artist: &AlbumArtistVm) -> u64 {
+    let hash = fnv1a(0xcbf2_9ce4_8422_2325, &[]);
+    let hash = match artist {
+        AlbumArtistVm::Unknown => fnv1a(hash, &[0x01]),
+        AlbumArtistVm::Various => fnv1a(hash, &[0x02]),
+        AlbumArtistVm::Named(name) => fnv1a(hash, name.to_lowercase().as_bytes()),
+    };
+    // The same 0x00 terminator `album_id` writes after its artist field, so
+    // this is a prefix of that fold rather than a second scheme beside it.
     fnv1a(hash, &[0x00])
 }
 
@@ -2518,61 +2525,60 @@ mod tests {
         assert!(stacked_queue(&[]).is_empty());
     }
 
+    /// **The artist id is `album_id`'s own first half**, so the two can never
+    /// disagree about where the line between two artists falls.
+    ///
+    /// Checked rather than asserted: every record by one artist folds to one
+    /// id, two spellings of one name fold together (the wall's `to_lowercase`
+    /// grouping key, mirrored), and the three `AlbumArtistVm` states stay
+    /// three — a nameless compilation is not the band called "Various
+    /// Artists", which is the collision the marker bytes exist to prevent.
+    #[test]
+    fn one_artist_is_one_id_however_their_records_are_spelled() {
+        let library = library_with(vec![
+            meta("Boards of Canada", "Geogaddi", "Music Is Math", 1),
+            meta("boards of canada", "Campfire Headphase", "Dayvan Cowboy", 1),
+            meta("Talk Talk", "Laughing Stock", "Myrhman", 1),
+        ]);
+        let albums = build_albums(&library);
+        let id = |title: &str| {
+            artist_id(
+                &albums
+                    .iter()
+                    .find(|a| a.title.as_deref() == Some(title))
+                    .expect("the fixture's record")
+                    .artist,
+            )
+        };
+        assert_eq!(
+            id("Geogaddi"),
+            id("Campfire Headphase"),
+            "two spellings of one name are one artist, as they are on the wall"
+        );
+        assert_ne!(id("Geogaddi"), id("Laughing Stock"));
+
+        // The three states are three artists, and the literal-tag case is the
+        // one that would collide under a hash of the *label*.
+        let named = AlbumArtistVm::Named("Various Artists".to_owned());
+        assert_ne!(
+            artist_id(&named),
+            artist_id(&AlbumArtistVm::Various),
+            "a band called Various Artists is not the nameless compilation"
+        );
+        assert_ne!(
+            artist_id(&AlbumArtistVm::Various),
+            artist_id(&AlbumArtistVm::Unknown)
+        );
+        assert_ne!(
+            artist_id(&AlbumArtistVm::Unknown),
+            artist_id(&AlbumArtistVm::Named(String::new()))
+        );
+    }
+
     #[test]
     fn duration_formatting() {
         assert_eq!(format_duration(Duration::from_secs(0)), "0:00");
         assert_eq!(format_duration(Duration::from_secs(243)), "4:03");
         assert_eq!(format_duration(Duration::from_secs(3723)), "1:02:03");
-    }
-
-    /// **The Album place steps along the wall's own order** (doc 07 §3.2;
-    /// doc 11 §5 P3): neighbours are read off the visible index list, edges
-    /// disable rather than wrap, and a record the wall does not show has no
-    /// neighbours at all.
-    #[test]
-    fn neighbours_step_the_walls_current_arrangement() {
-        let library = library_with(vec![
-            meta("Arvo Pärt", "Tabula Rasa", "Fratres", 1),
-            meta("Boards of Canada", "Geogaddi", "Music Is Math", 1),
-            meta("Talk Talk", "Laughing Stock", "Myrhman", 1),
-        ]);
-        let albums = build_albums(&library);
-        assert_eq!(albums.len(), 3);
-        let ids: Vec<u64> = albums.iter().map(|album| album.id).collect();
-
-        // The whole wall: interior records have both doors, the ends one each.
-        let all = visible_indices(&albums, &library, "");
-        assert_eq!(neighbours(&albums, &all, ids[0]), (None, Some(ids[1])));
-        assert_eq!(
-            neighbours(&albums, &all, ids[1]),
-            (Some(ids[0]), Some(ids[2]))
-        );
-        assert_eq!(neighbours(&albums, &all, ids[2]), (Some(ids[1]), None));
-
-        // A filtered wall is the pool: the neighbour is the next *visible*
-        // record, stepping over what the query removed.
-        let narrowed = visible_indices(&albums, &library, "ta");
-        let shown: Vec<u64> = narrowed.iter().map(|&index| albums[index].id).collect();
-        assert!(
-            shown.len() < 3 && shown.len() > 1,
-            "the fixture query must narrow the wall without emptying it: {shown:?}"
-        );
-        assert_eq!(
-            neighbours(&albums, &narrowed, shown[0]),
-            (None, Some(shown[1]))
-        );
-
-        // A record the wall no longer shows — filtered out, or vanished
-        // under a rescan — has no neighbours: the pool is the visible one.
-        let hidden = ids
-            .iter()
-            .find(|id| !shown.contains(id))
-            .copied()
-            .expect("some record is filtered out");
-        assert_eq!(neighbours(&albums, &narrowed, hidden), (None, None));
-        assert_eq!(neighbours(&albums, &all, 0xDEAD_BEEF), (None, None));
-
-        // An empty wall answers nothing for anyone.
-        assert_eq!(neighbours(&albums, &[], ids[0]), (None, None));
     }
 }

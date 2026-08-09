@@ -66,7 +66,7 @@ use iced::{Element, Length, alignment};
 use crate::app::{Message, Shelf};
 use crate::player::{Availability, PlayerState};
 use crate::playlists::Collecting;
-use crate::views::{gradient_block, place_header_with, place_pad, section_rule};
+use crate::views::{gradient_block, place_header_led, place_name, place_pad, section_rule};
 use crate::{icon, theme, vm};
 
 /// The record's page: the header strip, then the object beside what is written
@@ -80,11 +80,6 @@ use crate::{icon, theme, vm};
 /// [`theme::ALBUM_BREAKPOINT`] the two columns stack, because at that point the
 /// list would be narrower than the sleeve beside it and two columns have
 /// stopped being two columns.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the page is one composition with one long fact list — the same \
-              trade its own track_row makes below"
-)]
 pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     album: &'a vm::AlbumVm,
@@ -93,7 +88,6 @@ pub(crate) fn view<'a>(
     lamp: f32,
     collecting: Collecting,
     hovered_row: Option<usize>,
-    neighbours: (Option<u64>, Option<u64>),
 ) -> Element<'a, Message> {
     let room = theme::active();
     // What the page's own block has to fit in: the window, less the one gutter
@@ -129,7 +123,7 @@ pub(crate) fn view<'a>(
     };
 
     column![
-        place_header_with("Album", Some(step_pair(neighbours)), None),
+        place_header_led(breadcrumb(album), None),
         // **One scroll for the whole page.** The column had two (the panel and
         // its track list) and the popover had one inside another; a page is one
         // document and turning it over is one gesture. The gutter the bar needs
@@ -149,46 +143,65 @@ pub(crate) fn view<'a>(
     .into()
 }
 
-/// **`‹ Prev` / `Next ›`** — the comparison debt paid (doc 07 §3.2, shipped
-/// by doc 11 §5 P3): two labelled doors in the place's header, stepping
-/// along the wall's current arrangement, so comparing two releases is one
-/// press per release instead of a round trip through the Library. The pair
-/// sits in the strip whose only other tenants are `‹ Library`, the place's
-/// name and the hint — the header pair the law document prescribed, not the
-/// side surface the owner refused.
+/// **`Artist › Album`** — the record's own context in the header, and the
+/// artist half is a door.
 ///
-/// A door with no neighbour is inert, not hidden: the pair's geometry never
-/// moves, and at either end of the wall — or on a record the wall no longer
-/// shows — the word simply cannot be pressed. <kbd>Ctrl</kbd>+<kbd>[</kbd>
-/// and <kbd>Ctrl</kbd>+<kbd>]</kbd> are the accelerators these two visible
-/// twins make legal.
-fn step_pair(neighbours: (Option<u64>, Option<u64>)) -> Element<'static, Message> {
-    let (previous, next) = neighbours;
-    let door = |label: &'static str, exists: bool, delta: i32| {
-        let room = theme::active();
-        button(
-            container(
-                text(label)
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .font(theme::MEDIUM)
-                    .color(if exists { room.paper } else { room.paper_muted })
-                    .wrapping(text::Wrapping::None),
-            )
+/// The owner's, replacing the `‹ Prev` / `Next ›` pair that stood here:
+/// *"previous and next on albums doesn't make sense on the album view. we
+/// could add an Artist > album breadcrumb though."* The pair stepped along the
+/// *wall's* current arrangement — a property of the Library place, not on
+/// screen from here — so it offered a door whose destination the listener
+/// could not know before pressing it. A breadcrumb names where this record
+/// actually sits, and it names it with a fact about the record rather than
+/// about the frame.
+///
+/// **The lead is the place's name now**, and that is the point rather than a
+/// side effect: the strip used to read `Album`, which told you the *kind* of
+/// page you were on when the page is entirely made of the answer. Every other
+/// place still leads with its name because for them the name is the only
+/// honest lead — `Queue`, `Settings` and `Now playing` have no subject that
+/// changes.
+///
+/// The separator is `›` in the readout ink and it is **not** pressable: a
+/// breadcrumb's chevron is punctuation, and a chevron that acts is a control
+/// disguised as a comma. The album half is not pressable either — you are
+/// already there, and doc 07's rule that pressing the place you are on must
+/// leave you there is the returns lane's own (`Place::go`).
+fn breadcrumb(album: &vm::AlbumVm) -> Element<'static, Message> {
+    let room = theme::active();
+    let artist = vm::artist_id(&album.artist);
+    let door = button(
+        container(place_name(album.artist.label()))
             .height(Length::Fill)
             .align_y(alignment::Vertical::Center),
-        )
-        .height(Length::Fixed(theme::TRANSPORT_HIT))
-        .padding(theme::pad(0.0, theme::GAP_SM))
-        .style(move |_theme, status| theme::word_button(room, room.wall, status))
-        .on_press_maybe(exists.then_some(Message::AlbumStep(delta)))
-    };
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    // **No horizontal padding**, and that is law L1 rather than taste: the
+    // strip's lead starts at `HANG` in every place, and a door that inset its
+    // own text by `GAP_SM` would put the artist's name eight pixels right of
+    // where the Artist place puts it — a visible slide across the one press
+    // that joins the two. The hover ground is the word's own box, which is
+    // what a breadcrumb wants anyway.
+    .padding(0)
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press(Message::OpenArtist(artist));
     row![
-        door("\u{2039} Prev", previous.is_some(), -1),
-        door("Next \u{203a}", next.is_some(), 1),
+        door,
+        text("\u{203a}")
+            .size(theme::SIZE_EMPHASIS)
+            .line_height(theme::LEADING_EMPHASIS)
+            .color(room.paper_faint),
+        place_name(
+            album
+                .title
+                .clone()
+                .unwrap_or_else(|| "Unknown Album".to_owned())
+                .as_str()
+        ),
     ]
-    .spacing(theme::GAP_XXS)
+    .spacing(theme::GAP_SM)
     .align_y(iced::Alignment::Center)
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
     .into()
 }
 

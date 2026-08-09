@@ -286,9 +286,21 @@ pub(crate) struct Playlists {
     undo: crate::undo::History<Vec<Item>>,
     /// Which page id [`Self::undo`]'s snapshots belong to.
     undo_for: Option<u64>,
-    /// Bumped on every [`Self::refresh`] — the shell's cue that the lane's
-    /// lists half has moved, without diffing two vectors of strings.
+    /// Bumped on every [`Self::refresh`] and every [`Self::note_played`] — the
+    /// shell's cue that the lane's lists half has moved, without diffing two
+    /// vectors of strings.
     stamp: u64,
+    /// **When each list was last played**, by [`playlist_id`], for as long as
+    /// this process runs.
+    ///
+    /// Beside [`PanelRow::touched_unix_s`] rather than folded into it, because
+    /// the two are different facts with different lifetimes: the mtime is the
+    /// file's and survives a quit, and this is the run's and does not. The lane
+    /// takes whichever is later ([`Self::touched`]).
+    ///
+    /// **It is not persisted, and that is a stated shortfall rather than an
+    /// oversight** — see [`Self::note_played`].
+    played: std::collections::HashMap<u64, u64>,
     /// How [`Self::delete_open`] removes the file: the **platform trash** in
     /// the product ([`Folder::delete_to_trash`], doc 11 §5 P2), a plain
     /// unlink under the test constructor's tempdir fixtures — where the real
@@ -323,6 +335,7 @@ impl Playlists {
             undo: crate::undo::History::new(),
             undo_for: None,
             stamp: 0,
+            played: std::collections::HashMap::new(),
             delete: Folder::delete_to_trash,
         };
         playlists.refresh(None);
@@ -344,6 +357,7 @@ impl Playlists {
             undo: crate::undo::History::new(),
             undo_for: None,
             stamp: 0,
+            played: std::collections::HashMap::new(),
             delete: Folder::delete,
         };
         playlists.refresh(None);
@@ -443,6 +457,45 @@ impl Playlists {
     #[must_use]
     pub(crate) fn stamp(&self) -> u64 {
         self.stamp
+    }
+
+    /// **A run reified from this list has started a track**: the list is now
+    /// the most recently touched thing in the lane.
+    ///
+    /// The owner's defect, from the other side — see [`crate::lane::played_list`]
+    /// for why the play attributes here rather than to the records the list
+    /// quotes. Reports whether anything moved, so the caller does not re-sort
+    /// the lane once per track of a run that is already at its head.
+    ///
+    /// **This is not persisted, and the shortfall is stated rather than
+    /// hidden.** Across a quit a list falls back to its file's mtime, because
+    /// the only thing baz writes about what was played is `baz-core`'s play
+    /// ledger — which is per *path*, is appended by the engine, and is never
+    /// told a run's provenance (the engine receives `SetQueue { paths }` and
+    /// nothing else). Recording it would be a protocol field and a ledger
+    /// format change, which is ADR-0018's decision to reopen and not a
+    /// bug-fix's. `docs/BACKLOG.md` carries it.
+    pub(crate) fn note_played(&mut self, id: u64, at: u64) -> bool {
+        if self.played.get(&id) == Some(&at) {
+            return false;
+        }
+        self.played.insert(id, at);
+        self.stamp = self.stamp.wrapping_add(1);
+        true
+    }
+
+    /// When a list was last **touched**: the later of its file's mtime and the
+    /// last time a run reified from it started a track.
+    ///
+    /// The later of the two rather than one preferred over the other, because
+    /// they are both true and the lane's order is *last touched*: editing a
+    /// list you played an hour ago must move it, and playing a list you edited
+    /// an hour ago must move it too.
+    pub(crate) fn touched(&self, row: &PanelRow) -> Option<u64> {
+        match (row.touched_unix_s, self.played.get(&row.id).copied()) {
+            (Some(mtime), Some(played)) => Some(mtime.max(played)),
+            (mtime, played) => mtime.or(played),
+        }
     }
 
     /// Whether anything playlist-shaped can happen at all.
@@ -2227,5 +2280,61 @@ mod tests {
             "delete_open reaches the trash through the seam, so the fixtures \
              can reach it with a plain unlink"
         );
+    }
+
+    /// **Playing a list touches it, and the lane takes whichever touch is
+    /// later.**
+    ///
+    /// The two facts have different lifetimes and both are true — the mtime is
+    /// the file's and survives a quit, the play is the run's and does not — so
+    /// editing a list you played an hour ago moves it, and playing a list you
+    /// edited an hour ago moves it too. Neither may hide the other.
+    #[test]
+    fn a_list_is_touched_by_being_played_as_well_as_by_being_edited() {
+        let (_dir, folder) = folder();
+        let mut playlists = Playlists::over(folder);
+        {
+            let folder = playlists.folder.as_ref().expect("folder");
+            let mut playlist = folder.create("Road Trip").expect("create");
+            playlist
+                .items_mut()
+                .push(Item::Entry(Entry::new(track("/m/a.flac"))));
+            playlist.save().expect("save");
+        }
+        playlists.refresh(None);
+        let row = playlists
+            .rows
+            .iter()
+            .find(|r| r.name == "Road Trip")
+            .cloned();
+        let row = row.expect("the list is in the panel's index");
+        let mtime = playlists.touched(&row);
+
+        // A play *after* the file was written wins.
+        let later = mtime.unwrap_or(0) + 3_600;
+        assert!(playlists.note_played(row.id, later), "the list moved");
+        assert_eq!(playlists.touched(&row), Some(later));
+
+        // The same play again moves nothing — the lane is not re-sorted once
+        // per track of a run that is already at its head.
+        let before = playlists.stamp();
+        assert!(!playlists.note_played(row.id, later));
+        assert_eq!(
+            playlists.stamp(),
+            before,
+            "an unchanged lane was re-stamped"
+        );
+
+        // A play *before* the file was written does not drag the row back:
+        // the later of the two is the answer, whichever it is.
+        let mut fresher = row.clone();
+        fresher.touched_unix_s = Some(later + 60);
+        assert_eq!(playlists.touched(&fresher), Some(later + 60));
+
+        // …and a list on a filesystem with no usable mtime is still touched by
+        // being played, rather than sorting as *moment unknown* forever.
+        let mut stampless = row.clone();
+        stampless.touched_unix_s = None;
+        assert_eq!(playlists.touched(&stampless), Some(later));
     }
 }

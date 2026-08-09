@@ -776,15 +776,47 @@ adjudicates.
   ADR-0022's "no side surfaces" untouched (nothing resident, nothing beside
   the page).
 
-> **Shipped** (2026-08-09). `‹ Prev` / `Next ›` in the Album place's header
-> strip (the shared `place_header`, grown one optional tenant — the frame's
-> geometry cannot drift), stepping `vm::neighbours` over the wall's own
-> visible order: same arrangement, same filtered set, edges inert rather
-> than wrapping, and a record the wall no longer shows has no neighbours at
-> all. `Ctrl+[` / `Ctrl+]` accelerate the pair (the Finder's own
-> Back/Forward chord), legal because the two visible twins stand in the
-> strip. Comparing two releases is one press per release again — W15's debt
-> paid where doc 07 §3.2 said it must land.
+> **Shipped** (2026-08-09), **and withdrawn by the owner the same day.**
+>
+> What shipped: `‹ Prev` / `Next ›` in the Album place's header strip,
+> stepping `vm::neighbours` over the wall's own visible order — same
+> arrangement, same filtered set, edges inert rather than wrapping, with
+> `Ctrl+[` / `Ctrl+]` accelerating the pair.
+>
+> The owner, looking at it: *"previous and next on albums doesn't make sense
+> on the album view. we could add an Artist > album breadcrumb though. and
+> have an artist page."* `docs/REFUSALS.md`'s preamble settles it, and the
+> reversal is recorded rather than argued — but it is worth saying **why he
+> is right**, because this proposal's own reasoning is what missed it.
+>
+> P3 read the debt as *"the collection reachable from its detail"* and
+> answered it with a **walk along the wall's current arrangement**. But that
+> arrangement is a property of the *Library* place — its group key, its
+> query, its sort — and none of it is on screen from a record's page. So the
+> pair offered to step you through an order you cannot see, by an amount you
+> cannot predict, into a record chosen by a context you left. Two labelled
+> doors whose destination is unknowable is not navigation; it is a shuffle
+> with an arrow on it. That the *implementation* was correct — the pool
+> really was the visible one — is exactly what hid the problem: the code did
+> what the document asked, and the document asked for the wrong thing.
+>
+> **The debt is real and it is now paid better.** The record's own context is
+> not "wherever it happens to sit on the wall today" — it is **its artist**,
+> which is a fact about the record rather than about the frame. `Artist ›
+> Album` in the header names that context, and the artist half is a door to a
+> place that holds their records. Comparing two releases by one artist — the
+> case W15 was actually about — is one press up and one press down, and every
+> record you can reach that way is one you can *see* before you choose it.
+>
+> Doc 07 §3.2's *"either a strip of sleeves along the bottom… or a labelled
+> previous/next pair in its header. Not a gesture, and not nothing"* is
+> therefore **amended, not merely disobeyed**: it prescribed two forms and
+> the owner has supplied a third that satisfies its own stated principle
+> better than either. The clause that survives is *"not nothing"*.
+>
+> **Withdrawn**: the pair, `Message::AlbumStep`, `vm::neighbours`, the
+> `Ctrl+[` / `Ctrl+]` bindings, and `place_header_with`'s extra-tenant slot —
+> removed rather than left open for the next thing that fancies the strip.
 
 ### P4 — One vocabulary: retire the leak, complete the labels · **adopt**
 
@@ -1104,7 +1136,7 @@ adjudicates.
 | See-and-point | index rail, wells, doors — except first run and density | **fails at the front door** (P1, P8) |
 | Direct manipulation | steppers where drag belongs; no drag anywhere | **fails** (P5), partial (P7) |
 | Forgiveness | no undo anywhere; confirm where trash belongs | **fails outright** (P2) |
-| Simultaneity (iTunes lesson) | one panel, ambient facts, unpaid comparison debt | partial by choice (P3 owed; P10 rejected) |
+| Simultaneity (iTunes lesson) | one panel, ambient facts, unpaid comparison debt | paid by the breadcrumb and the Artist place, not by P3's stepper (withdrawn); P10 rejected |
 
 The pattern across the whole examination: **baz has out-Jobsed Jobs on
 subtraction, honesty and visual discipline, and under-delivered the era's
