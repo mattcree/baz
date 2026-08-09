@@ -296,6 +296,16 @@ EXPANDED — SIDEBAR_W 280                    COLLAPSED — SIDEBAR_RAIL_W 96
 | `SIDEBAR_ROW_H` | **64** | 48 + 2 × `GAP_SM`. Above L7's floor, and the two-line block (`LINE_BODY` 20 + `LINE_META` 16 = 36) sits centred in it |
 | `SIDEBAR_FLOOR` | **1000** | the smallest window at which the expanded lane still leaves the wall two columns at or above `ART_MIN` 240 (988, rounded onto the lattice). Below it the lane is collapsed and the expand mark is inert |
 
+Both widths were derived from baz's own tokens and then found to land on
+the industry's: Material's navigation drawer is **280 dp** at its default
+maximum and its collapsed rail is **80 dp**, or **96 dp** under the
+expressive update ([Material Components for
+Android](https://github.com/material-components/material-components-android/blob/master/docs/components/NavigationDrawer.md),
+[NavigationRail](https://github.com/material-components/material-components-android/blob/master/docs/components/NavigationRail.md)).
+280 and 96 exactly. That is corroboration rather than derivation — the
+numbers came from `GAP_XL` and `MENU_W` — but a surface that arrives at the
+same two figures from a different direction is a surface at a sensible size.
+
 The row's name column is 176 px, which holds about 24 characters at
 `SIZE_BODY` 13 and clips with `Wrapping::None` — the wall label's own rule
 (`shelf.rs:962–968`), so a long title fails the way it already fails
@@ -394,6 +404,21 @@ lanes, one on each side of the wall — which is a composition statement
 worth having rather than a coincidence, and it means the lane introduces
 **no new control vocabulary at all**.
 
+**The one piece of guidance this contradicts, engaged.** Apple's HIG says
+*"avoid putting critical information or actions at the bottom of a
+sidebar. People often relocate a window in a way that hides its bottom
+edge"*
+([Apple HIG — Sidebars](https://developer.apple.com/design/human-interface-guidelines/sidebars)).
+The concern is real and does not reach baz: the window's bottom edge
+carries the now-playing bar in every place, so a window positioned with its
+bottom edge off-screen has lost the transport, the needle and the volume
+fader — a problem the collapse marks are not the worst part of. The
+product has also already placed view controls exactly there once, on the
+other side of the wall (ADR-0028's density detents), and putting the
+sidebar's marks anywhere else would break the symmetry that makes both sets
+legible as one class. Recorded rather than skipped, because a design that
+only cites the guidance agreeing with it is not citing guidance.
+
 `Ctrl+B` returns as the accelerator. Doc 07 §5.3 deleted it because *"its
 subject was a sidebar that no longer exists"*, and ADR-0022 left it unbound
 deliberately — *"a key that survives a redesign pointing at a new meaning
@@ -455,9 +480,38 @@ change it.**
 - **The collapsed lane is a column of covers**, which is the product's best
   argument for itself: at 96 px it is the wall's own vocabulary at a
   smaller size, and it holds the two things the eye is fastest at — colour
-  and image. The tooltip carries the name (doc 10 §3.1's icon-only rule),
-  which is also what makes the collapsed state legal rather than a hover
-  puzzle.
+  and image. The tooltip carries the name (doc 10 §3.1's icon-only rule).
+
+  **The guidance against this is real and is worth stating.** Nielsen
+  Norman is blunt about icon-only navigation: *"A text label must be
+  present alongside an icon to clarify its meaning in that particular
+  context"*, labels *"should be visible at all times"*, and *"don't rely on
+  hover to reveal text labels: not only does it increase the interaction
+  cost, but it also fails to translate well on touch devices"*
+  ([NN/g](https://www.nngroup.com/articles/icon-usability/)). Three things
+  make the collapsed lane survivable where an icon nav bar would not, and
+  they are the conditions under which it should be kept:
+
+  1. **These are not icons.** NN/g's finding is about glyphs standing for
+     concepts — a heart meaning *favourite*, a gear meaning *settings*. A
+     record's sleeve does not stand for the record; it **is** how that
+     record is identified everywhere else in the product, on a wall whose
+     entire premise is that a person recognises their own covers. The
+     playlist collage is the same claim one level up.
+  2. **Expanded is the default and it persists.** Apple's HIG says the same
+     thing from the other side — *"avoid hiding the sidebar by default to
+     ensure that it remains discoverable"* — and adds the behaviour §2.4's
+     floor already implements: *"consider automatically hiding and
+     revealing a sidebar when its container window resizes."* Collapsed is
+     a state a person chose, or one a narrow window forced; it is never
+     where they start.
+  3. **Nothing is only in the collapsed state.** Every row's press is the
+     same message in both, and the name is one press of the `Expanded` mark
+     away.
+
+  If the covers turn out not to carry it — if the owner finds himself
+  hovering to read names — the honest fix is not a label crammed into 96 px
+  but a wider collapsed width, and that is a token change.
 - **The heading.** One word, `Recent`, at `SIZE_META` caps-tracked in
   `paper_faint` — the state-row vocabulary, the same voice as a shelf
   header. It names the ordering, which is the one thing every row in a
@@ -698,7 +752,7 @@ needs a clock — and the owner's own bar is *responsiveness*.
 
 **Nobody does it this way, and the reason is geometric.** Every product
 that reveals a play affordance on a cover grid draws it **inside the
-object's own bounds** (§10.2: Apple Music, Plex, Spotify, Tidal all on the
+object's own bounds** (§10.4: Apple Music, Plex, Spotify, Tidal all on the
 artwork or its card; MusicBee and foobar2000 reveal nothing on hover at
 all). An object's own bounds are the one region guaranteed to belong to no
 other object, which is why a full-bleed grid has nowhere else to put it.
@@ -736,7 +790,7 @@ that still exists (doc 09 §6) — a record's whole selected edition is
 appended to **that file**. The run is untouched: *keep it* is
 `Add to "Road Trip"`, *hear it tonight* is `Queue album`, and doing both is
 both gestures. The decoupling is doc 09 §6's and the both-at-once gesture
-stays refused, for the reason §10.4's Plexamp entry demonstrates — two
+stays refused, for the reason §10.6's Plexamp entry demonstrates — two
 verbs that claim different things and do the same thing are worse than one.
 
 It costs nothing to build: the item's presses are `AddAlbumToPlaylist(id)`
@@ -836,7 +890,7 @@ Every navigation baz has, with its depth from home:
 `Place` is five members and an enum, and `Place::back` is total because
 there is nothing for it to be partial about (`place.rs:171`). A breadcrumb
 here would render `Library › Album` — the header's back door and the
-header's title, with a separator between them (§10.5 for the guidance that
+header's title, with a separator between them (§10.7 for the guidance that
 excludes exactly this case). Miller columns over a one-level tree render
 one column.
 
@@ -895,7 +949,7 @@ none of it (frame `04`: two doors with no position between them).
 where this orphans you — Queue place → the bar's now-playing block → the
 record's page → `Esc` → Library rather than the Queue — and it is band D,
 it is a *teleport* rather than a descent, and the standard guidance treats
-Up and Back as identical inside a single task (§10.5). With the lane
+Up and Back as identical inside a single task (§10.7). With the lane
 resident, the case matters less again: what you left is still on screen.
 
 ---
@@ -1369,37 +1423,139 @@ precise about which is which. Vendor documentation is preferred; community
 sources are marked. `03-interface-prior-art.md`'s findings are cited by
 section where they still stand.
 
-### 10.1 Spotify's left pane, and where baz should and should not follow
+### 10.1 Spotify's "Your Library" pane — the one the owner named
 
-| Aspect | Spotify | baz's lane |
+Spotify's own documentation, since this is the surface the brief points at.
+
+- **Contents**: songs, albums, playlists, artists, podcasts and shows in one
+  saved collection, in the side menu
+  ([Spotify — Your Library](https://support.spotify.com/us/article/your-library/)).
+  The 2023 desktop redesign is what merged them into one sidebar list
+  ([Spotify Newsroom, 2023-06-20](https://newsroom.spotify.com/2023-06-20/spotify-desktop-experience-redesign-your-library-now-playing-views-customize/)).
+- **Order**: a dropdown at the top of the list offering *"Recents, Recently
+  added, Alphabetically, or By Creator"*, plus a desktop-only drag-and-drop
+  **Custom order**; and *"the app saves your sort and filter options for
+  your next sessions"*
+  ([Spotify — Sort and filter](https://support.spotify.com/us/article/sort-and-filter/)).
+- **Filter**: a search-within-collection field plus combinable chips —
+  *"choose a filter at the top (ex. Playlists)… you can combine filters"*
+  (same page).
+- **Collapse**: *"click the 'Your Library' button in the top right hand
+  corner to collapse the library"*, and when collapsed *"you'll see your
+  playlist icons"* — a cover-art rail
+  ([Newsroom](https://newsroom.spotify.com/2023-06-20/spotify-desktop-experience-redesign-your-library-now-playing-views-customize/)).
+  It is documented with a keyboard shortcut: **`Alt + Shift + L`, "Toggle
+  Your Library Sidebar"**
+  ([Spotify — Keyboard shortcuts](https://support.spotify.com/us/article/keyboard-shortcuts/)).
+- **Resize**: *"Your Library and Now Playing can both be resized to take up
+  more or less of the screen"* (Newsroom). A documented numeric width range
+  is **unsourced**.
+- **Pinning**: documented on both platforms — *"right-click on it and select
+  Pin"* (Sort and filter).
+
+**What baz takes**: the **recents ordering** and the **collapse to covers**,
+which are the two things the owner asked for by name. The ordering is the
+honest one because every event in it is caused by the person, and Spotify's
+own `Recents` is the same idea.
+
+**What baz does not take, and why**:
+
+| Spotify | baz | Reason |
 |---|---|---|
-| Contents | Playlists, albums, artists, podcasts in one list | Records and playlists only — one subject (§2.1) |
-| Default order | Recents | Last touched — **the same idea, and it is the right one** |
-| Other orders | Recently Added, Alphabetical, Creator, Custom, via a sort control | **None.** The order is the design |
-| Filter | A search-within-library field and type chips | None; the lane is short enough to read |
-| Collapse | Yes, to a narrow icon rail of cover art | Yes, `SIDEBAR_RAIL_W` 96 (§2.3) |
-| Resize | Draggable | No |
-| Pinning | Yes | No, at v1 (§11) |
+| Four sort orders + a control | One order, no control | The order *is* the design (§2.2). A sort dropdown is the one form `REFUSALS.md`'s view-options entry names, and it is the answer to a pane holding four kinds and thousands of rows — baz's holds one kind and about thirty |
+| A filter field and chips | Neither | Same reason: the chips exist to separate the four kinds Spotify mixed. baz's lane mixes two kinds that are the same subject, and it is short enough to read |
+| Draggable width | Two states | A dragged width is a per-user layout — `03` §4.3's customisable-panel tradition — and it would make every width claim in §9 conditional |
+| Pinning | Not at v1 | A pinned set is a second ordering to arbitrate against the first (§11) |
 
-**Follow**: the recents ordering, and the collapse-to-covers. Both are what
-the owner asked for by name, and the ordering is honest because every event
-in it is one the user caused.
+**And the warning Spotify's own redesign supplies.** The most-repeated
+complaint about the 2023 sidebar was that it took the window: users
+objected to having to *"give up on half of my desktop size to have an
+overview"*, and to the full-window library page being discontinued in favour
+of sidebar-only navigation
+([Spotify Community](https://community.spotify.com/t5/Your-Library/Desktop-New-Your-Library-sidebar/td-p/5571384) [community];
+[The Verge](https://www.theverge.com/2023/6/21/23768163/spotify-desktop-app-redesign-your-library-sidebar-now-playing)).
+That is exactly the cost §9.3 measures, and it is why this design keeps the
+wall as the place, keeps the lane collapsible to 96 px, and does not move
+any existing surface into it.
 
-**Do not follow**: the sort control and the filter chips. They are the
-answer to a pane that holds four kinds of thing and thousands of rows; baz's
-holds one kind and about thirty. `REFUSALS.md`'s view-options entry names a
-sort dropdown specifically, and adding one to a list this short would be
-chrome answering a problem the design does not have.
+### 10.2 The same surface elsewhere
 
-**The lesson `03` already recorded, applying here**: R11's three vendors who
-bought visual calm by removing control density and reversed inside two
-years. Spotify's own 2023 library redesign is in that ledger. The lane is
-therefore specified with *no* removable facts — the counts, the artist line
-and the sleeve are all present at the expanded width, and the collapse
-removes text rather than facts, because every collapsed row carries its
-name in a tooltip.
+- **MusicBee** — the **Navigator**, *"like a map of your library… permanently
+  located in the Left Sidebar"*, whose nodes include a first-class
+  **History** destination driven purely by playback
+  ([MusicBee wiki — Navigator](https://musicbee.fandom.com/wiki/Navigator)).
+  Nearly every node is toggleable in Layout Preferences
+  ([wiki](https://musicbee.fandom.com/wiki/Layout_Preferences)); there is
+  **no icon-only collapsed mode** — the panel is open, hidden, or
+  auto-hidden ([forum](https://getmusicbee.com/forum/index.php?topic=30377.0)
+  [community]). *The relevant finding: the product baz's audience arrives
+  from already treats "what I have played" as a left-hand destination.*
+- **Roon** — **no persistent left nav at all**. The twelve browsers
+  (Overview, Genres, Artists, Albums, Tracks, Composers, Playlists, Tags…)
+  live behind a toggled overlay opened by the navigation icon or `Tab`
+  ([Roon — Browsers](https://help.roonlabs.com/portal/en/kb/articles/browsers),
+  [Keyboard shortcuts](https://help.roonlabs.com/portal/en/kb/articles/keyboard-shortcuts)).
+- **Apple Music** (macOS) — a **Library** heading with playlists below, and
+  the library rows are **user-editable and reorderable**: *"move the pointer
+  over Library in the sidebar, then choose Edit…"*
+  ([Apple](https://support.apple.com/guide/music/customize-the-music-window-mus0cec331d6/mac)).
+  **Recently Added** is a first-class sort over your own library
+  ([Apple](https://support.apple.com/guide/music-web/sort-songs-apdmbb7c96e5/web)).
+  baz declines the editability for `03` §4.3's reason — a panel the user
+  configures is the tradition whose signature defect is W21 — and takes the
+  recency idea.
+- **foobar2000** — the **Album List** is a tree-like media-library viewer
+  whose whole structure is a user-written title-formatting pattern
+  ([HA wiki](https://wiki.hydrogenaudio.org/index.php?title=Foobar2000:Preferences:Album_List)),
+  and its position is a user arrangement made in Layout Editing Mode
+  ([HA wiki](https://wiki.hydrogenaudio.org/index.php?title=Foobar2000:Layout_Editing_Mode)).
+  The left column exists; it is configuration, not design.
+- **Plexamp** — a desktop sidebar is **unsourced** in vendor documentation;
+  Plex's own web app documents a navigation sidebar whose sources are
+  user-customisable
+  ([Plex](https://support.plex.tv/articles/200484203-interface-overview/)).
+  [community] reports describe Plexamp's desktop UI as a scaled mobile one
+  ([Plex forums](https://forums.plex.tv/t/plexamp-navigation-and-closing/902622)).
 
-### 10.2 Hover-to-play on a cover grid: everybody draws it inside the object
+**The pattern across the five**: the persistent left column is either a
+**navigation** surface (Roon's browsers, Apple's library views) or a
+**user-configured** one (MusicBee, foobar2000). baz's lane is neither — it
+is a list of the user's own objects in one fixed order — which is why
+almost none of the guidance about *rails* applies to it directly, and why
+its closest relative in the field is the MusicBee node nobody talks about.
+
+### 10.3 Rail and drawer guidance, and what it does and does not govern
+
+- **Material 3** now prefers the rail to the drawer outright, and gives the
+  breakpoints: compact windows get a bottom bar, medium windows a collapsed
+  rail, expanded windows a rail or drawer
+  ([M3 — Navigation rail](https://m3.material.io/components/navigation-rail/guidelines),
+  [Navigation drawer](https://m3.material.io/components/navigation-drawer/guidelines)).
+  A collapsed rail holds *"three to no more than seven"* destinations and
+  *"should not be hidden"*.
+- **Apple HIG — Sidebars**: *"a sidebar requires a large amount of vertical
+  and horizontal space"*; *"consider letting people hide the sidebar"*;
+  *"avoid hiding the sidebar by default to ensure that it remains
+  discoverable"*; *"consider automatically hiding and revealing a sidebar
+  when its container window resizes"*
+  ([Apple](https://developer.apple.com/design/human-interface-guidelines/sidebars)).
+
+Three of these bind and one does not, and the distinction matters:
+
+- **Binds**: expanded by default (§2.4 — the state persists, and the
+  shipped default is expanded); auto-collapse on resize (§2.4's
+  `SIDEBAR_FLOOR` 1000 regime is exactly this); and the widths (§2.3).
+- **Does not bind**: the *"three to seven destinations"* rule. baz's lane
+  holds **no destinations at all** — it holds objects you open (§2.8). The
+  guidance is about navigation rails, where each icon stands for a section
+  of the app; a list of thirty records is a different thing wearing the
+  same geometry, and counting it against a seven-item ceiling would be
+  reading the shape rather than the content.
+- **Apple offers no guidance on an icon-only collapsed sidebar** — its
+  collapse model is hide/show, not shrink-to-rail — so §2.6's engagement
+  with NN/g is the relevant one, not the HIG.
+
+### 10.4 Hover-to-play on a cover grid: everybody draws it inside the object
 
 - **Apple Music** (macOS): *"Move the pointer over any song or album, then
   click the Play button"* —
@@ -1434,7 +1590,7 @@ load-bearing convention. What this study adds is *why* the convention is
 load-bearing: an object's own bounds are the only region a full-bleed grid
 can spare.
 
-### 10.3 Timing, if a hover reveal ever were built
+### 10.5 Timing, if a hover reveal ever were built
 
 - **WCAG 2.1 SC 1.4.13** requires hover-triggered content to be
   **Dismissible**, **Hoverable** and **Persistent** —
@@ -1449,7 +1605,7 @@ A group that covers a whole neighbouring record sits at the long end of
 that scale by NN/g's own rule, which is a half-second wait bought with a
 timer — against the owner's stated bar of responsiveness.
 
-### 10.4 Add-to-playlist, and album-scoped queueing
+### 10.6 Add-to-playlist, and album-scoped queueing
 
 | Product | Picker form | Album-level queue verb |
 |---|---|---|
@@ -1487,7 +1643,7 @@ controls. Apple's *"Minimize the use of modality"*
 ([HIG](https://developer.apple.com/design/human-interface-guidelines/modality))
 is why it takes no scrim, which the ledger refuses anyway.
 
-### 10.5 Depth, back, and showing your place
+### 10.7 Depth, back, and showing your place
 
 - **Nielsen Norman on breadcrumbs**: they exist for *"making users aware of
   their current location within the hierarchical structure"* — and
@@ -1522,7 +1678,7 @@ is why it takes no scrim, which the ledger refuses anyway.
   This is `03` §7.2(5)'s finding and doc 11 P10's named door — and the lane
   is the same idea rotated: the peer set follows you into the detail view.
 
-### 10.6 The evidence that cuts against this study
+### 10.8 The evidence that cuts against this study
 
 A prior-art section that only supports its own conclusions is a
 rationalisation.
@@ -1539,16 +1695,26 @@ than dropped. If band-A play may not live behind a right-click, may not
 live on a sleeve and may not live behind a timer, then the modifier press
 is the last candidate standing or the two-press price is permanent.
 
-**(b) Icon-only navigation is measurably worse than labelled navigation**,
-and hidden navigation roughly halves discoverability
-([NN/g](https://www.nngroup.com/videos/hamburger-menus/)). Applied here:
-the collapsed lane is icon-only by construction, which is why every
-collapsed row carries a tooltip (§2.3), why the *expanded* state is the one
-that persists by default, and why the collapse is a state the user chose
-rather than a default they must discover their way out of. It is also the
-sharpest available statement of why §6.1's *"very minor tip"* is a real
-defect and not a nitpick: subtlety in the one line that explains a surface
-is measured, repeatable harm.
+**(b) Icon-only navigation is measurably worse than labelled navigation.**
+NN/g: *"A text label must be present alongside an icon"*, labels *"should
+be visible at all times"*, and *"don't rely on hover to reveal text
+labels"*
+([NN/g — Icon Usability](https://www.nngroup.com/articles/icon-usability/));
+and hidden navigation was used in only **27 %** of cases against 48–50 %
+for visible, with desktop users *"at least 39 % slower when the navigation
+was hidden"*
+([NN/g — Hamburger menus](https://www.nngroup.com/articles/hamburger-menus/)).
+This is the sharpest evidence against the collapsed lane, and §2.6 answers
+it at length rather than here: the marks are artwork rather than symbols,
+expanded is the default and persists, and nothing lives only in the
+collapsed state. The measured figures are also a caution about their own
+scope — they were taken over *hidden* navigation, not icon rails, and no
+NN/g study isolating an icon rail was found — so they are cited as a
+direction of risk rather than as a number this design has to beat.
+
+It is also the sharpest available statement of why §6.1's *"very minor
+tip"* is a real defect and not a nitpick: subtlety in the one line that
+explains a surface is measured, repeatable harm.
 
 **(c) One convergence worth recording**: NN/g's contextual-menu rule is
 *"make sure the commands in contextual menus are also available from the
@@ -1589,7 +1755,7 @@ application's main menu"*
 9. **A drawn seam or a surface step under the lane.** §2.6 — the grid's
    margin is provably ≥ 40 px at every width, so the gap is already there
    and a line would be ink added to it. The index rail's own posture.
-10. **Breadcrumbs, Miller columns, a back stack.** §5.1, §5.4, §10.5.
+10. **Breadcrumbs, Miller columns, a back stack.** §5.1, §5.4, §10.7.
 11. **`Place::Home` as the launch destination.** §3.2, drawn in §9.4 — a
     fifth place, a route back to the wall that is either a nav rail or a
     strip tenant, a launch frame that is not the collection, and a
@@ -1598,7 +1764,7 @@ application's main menu"*
     unbidden offer is generation without a request.
 13. **"Recently played" as a home band.** §3.1 — it is the lane's content,
     and one fact drawn twice is L8.6's own test.
-14. **An `Add to playlist ▸` submenu.** §10.4 — nesting guidance, Spotify's
+14. **An `Add to playlist ▸` submenu.** §10.6 — nesting guidance, Spotify's
     own failure mode, and it answers only the menu route.
 15. **A modal dialog for the pick.** No dialogs in the product, no scrim by
     refusal, and Apple's own guidance is to minimise modality.
@@ -1606,7 +1772,7 @@ application's main menu"*
     refused, not the answer: it leaves the 682 px trip, the window-width
     dependence and the 340 px surface untouched.
 17. **A search field inside the card.** Spotify's answer at scale
-    (§10.4). **Deferred**, not refused: the hoist plus the folder's order
+    (§10.6). **Deferred**, not refused: the hoist plus the folder's order
     answers it until someone has more lists than `PICKER_MAX_H` holds, and
     a second text field in a float is a focus-and-dismissal problem worth
     solving when someone has it.
