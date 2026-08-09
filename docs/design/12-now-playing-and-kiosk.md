@@ -1659,3 +1659,282 @@ Every constraint below is a requirement, not a preference, and none of it is in
   no F6. This is the property that makes the local design load-bearing: **if the
   network layer's failure mode is "the feed is slightly shorter", the surface was
   designed correctly.**
+
+---
+
+## 9. The meter: a real measurement, or nothing
+
+> *"some nice VU meter stuff over it in a stylised way, maybe somewhat
+> ambient"*, and earlier: *"maybe we could have a visualizer mode at some point,
+> but also VU options"*.
+
+### 9.0 What it is, named precisely
+
+**It is not a VU.** §2.3 sets out the four instruments people call one; this is
+the fourth:
+
+> **The default is a momentary-loudness meter to EBU R128 / ITU-R BS.1770-4** —
+> K-weighted mean square over a **400 ms** sliding window, hopping every 100 ms
+> — **with a sample-peak indicator beside it.**
+
+**Why that one, and it is not a close call:**
+
+1. **baz already owns the filter, derived and vector-tested.**
+   `baz_core::loudness` implements BS.1770-4 K-weighting, and ADR-0015 §1 records
+   that *"the filter is derived, not tabulated"* with all ten coefficients
+   asserted against the standard's published Tables 1 and 2, plus five
+   compliance vectors matching to within 0.025 LU (`0015:69–73`). **A meter
+   built on this is correct by inheritance**; a meter built on a fresh
+   peak-follower would be a new number nobody has checked.
+2. **It is the same scale as a fact the surface already shows.** F6 states the
+   record's *integrated* loudness, measured offline by the same code. Putting a
+   *momentary* reading of the same quantity next to it means the two numbers are
+   comparable — the live mark sits above or below the record's own average, and
+   that is a genuinely informative thing to watch. No other choice of instrument
+   gives that for free.
+3. **It is the closest of the four to what a listener means by "how loud is this
+   right now"**, because K-weighting is a perceptual weighting and peak is not.
+4. **The 400 ms window is already the shape of the existing code.**
+   `BLOCK_MS = 400` with `STEPS_PER_BLOCK = 4` (`loudness.rs:87–91`) is exactly a
+   400 ms window hopping every 100 ms. The offline analyser and the live meter
+   are the same measurement at different lifetimes.
+
+### 9.1 "VU options" — the choice, offered
+
+The owner's *"VU options"* is read as *offer the choice*, and three ballistics
+ship. Each names its standard, because a meter that does not is furniture:
+
+| Mode | Standard | Integration (rise) | Fall | What it is for |
+|---|---|---|---|---|
+| **Loudness** *(default)* | EBU R128 / ITU-R BS.1770-4, momentary | 400 ms K-weighted sliding window, 100 ms hop | (sliding window — no separate ballistic) | How loud this sounds; comparable to F6 |
+| **VU** | IEC 60268-17 | **300 ms to 99 %** of a steady tone, with **1–1.5 % overshoot** | symmetric, 300 ms | The classic instrument, behaving as the classic instrument. Reads average; deliberately misses transients |
+| **PPM** | IEC 60268-10 Type II (BBC/EBU) | **10 ms** | **2.8 s per 24 dB** | Catching transients the other two average away |
+
+**A sample-peak hold** sits alongside all three, in dBFS, with a 1.5 s hold and
+an instant reset on track change. It is the only one of the four numbers that is
+sample-accurate, and it is the one that answers *is this clipping*.
+
+**Two disciplines carried from ADR-0015, because they are what make this
+different from every "VU meter" in §2.3:**
+
+- **Compliance vectors ship with the ballistics.** ADR-0015 asserted its filter
+  against the standard's own tables and five test signals; the VU and PPM modes
+  get the same treatment — a step of sine at reference level must reach 99 % in
+  300 ms ± tolerance for VU, and the PPM's fall must cross 24 dB in 2.8 s.
+  **A ballistic without a test is a guess with a standard's name on it.**
+- **The published constants are checked against the published document before
+  implementation, not from memory.** The figures in the table above are stated
+  to be verified at implementation time — that is §12 step 8's gate and §13 R1's
+  ranking, and it is exactly the posture ADR-0015 took when it refused to ship
+  true peak *"without [its compliance vectors]"* (`0015:148–151`).
+
+### 9.2 Where it taps, and why there
+
+The pump is `Session::pump` (`engine.rs:2735–2782`), and its shape decides
+everything:
+
+```rust
+let transparent = fader.is_transparent();
+let (a, b) = chunk.as_slices();          // ← the ring: the decoded file
+if transparent {
+    sink.write(a);                        // bit-exact: untouched to the device
+    if !b.is_empty() { sink.write(b); }
+} else {
+    scratch[..split].copy_from_slice(a);
+    scratch[split..n].copy_from_slice(b);
+    let block = &mut scratch[..n];
+    fader.apply(block, rate);             // ← the ONE gain stage
+    sink.write(block);
+}
+```
+
+> **The tap reads `a` and `b` — the ring's own content, before the fader — in
+> both branches.**
+
+**This is pre-gain, and that is the decision.** `settle_volume`
+(`engine.rs:1845–1874`) folds ReplayGain and volume into **one** number
+(`applied = volume_applied * replay_gain`, `:1859`) applied in **one** place,
+`Fader::apply` (`volume.rs:442–485`). So the ring holds the decoded file and
+nothing has touched it yet. Four consequences, and each is a reason:
+
+1. **The meter can never contradict `bit-perfect`, because it never observes the
+   gain stage at all.** The bar's `bit_exact()` asks `VolumePath::is_transparent`
+   — the engine's own answer (`player.rs:2034–2038`) — about a stage the meter
+   is upstream of. There is no reading either surface can produce that disagrees
+   with the other, and this is structural rather than a matter of keeping them in
+   sync.
+2. **One tap, one meaning, in both branches.** A post-fader tap would have to
+   read `a`/`b` in the transparent branch and `block` in the scaled one — the
+   same code path producing two different quantities depending on the volume
+   knob. In the transparent branch pre- and post- are *bit-identical* anyway
+   (the gain is exactly 1.0, `volume.rs:198–203`), so pre-gain is the reading
+   that is stable across the branch rather than the one that changes with it.
+3. **It measures the record, not the volume knob.** Turning the volume down does
+   not move the meter — which is what a console VU does, what makes the reading
+   worth looking at, and what makes it comparable to F6's stored figure (also
+   measured from the decoded file, `loudness.rs`).
+4. **It reads before ReplayGain too**, which must be **labelled** or it is snake
+   oil (`REFUSALS.md:348–350`). The instrument's own caption says what it
+   measures — *the file as decoded* — so a listener who sees the meter unmoved
+   after enabling ReplayGain has the answer on screen rather than a mystery.
+
+**Metering cannot alter a sample, and it is not promised — it is unspoiled by
+type.** The tap's signature is:
+
+```rust
+fn observe(&mut self, samples: &[f32])
+```
+
+`&[f32]`, never `&mut [f32]`. `a` and `b` come from `chunk.as_slices()`, which
+yields shared slices; the meter is handed those. **There is no expressible
+mutation**, so ADR-0009's bit-exactness is not defended by a test here — it is
+defended by the borrow checker, and the existing bit-exactness tests continue to
+pass unmodified because the code they exercise is untouched.
+
+### 9.3 Zero cost when off — structurally
+
+The requirement is *zero, not small*. An `AtomicBool` checked per block would be
+small; this is zero:
+
+> **The meter is an `Option<LiveMeter>` owned by the session, created and dropped
+> by a `Command`.** When it is `None` there is no filter state, no memory, and no
+> arithmetic — the pump does one null check on engine-thread-local state per
+> block, which is the same class of check as `self.next_boundary()`
+> (`engine.rs:2754`) that it already performs every block.
+
+```rust
+// In pump, after the slices are obtained. Nothing here can mutate them.
+if let Some(meter) = &mut self.meter {
+    meter.observe(a);
+    if !b.is_empty() { meter.observe(b); }
+}
+```
+
+- **No atomic is loaded on the disable path.** The UI's toggle sends
+  `Command::SetMetering(bool)`; the engine thread swaps the `Option` between
+  commands, never inside a pump. There is no cross-thread read per block.
+- **A block is 1024–8192 samples**, so this branch is evaluated tens of times a
+  second, not tens of thousands.
+- **When it is `None`, the K-weighting filters do not exist**, so the cost is
+  not "a skipped multiply" — it is an absent object.
+
+**And the whole chain switches off together.** T2 off ⇒ no `Command::SetMetering`
+⇒ no `LiveMeter` in the engine ⇒ no atomic being written ⇒ no
+`window::frames()` arm in the subscription (§7.3) ⇒ the loop parks. **Each layer's
+off state is the absence of a thing rather than a guard around it**, which is
+what makes §7.3's claim hold end to end.
+
+### 9.4 How levels cross to the UI
+
+The precedent is in the codebase twice, and this is the third instance of the
+same pattern rather than a new mechanism:
+
+- `DeviceSink`'s callback publishes its counters with a **plain store**, single
+  writer, no read-modify-write: *"Callback-owned counters: the callback is their
+  only writer, so it keeps them locally and publishes with a plain store — no
+  read-modify-write on the realtime path"* (`device.rs:385–387`,
+  `:420–421`). The seek watermark is the same idea in the other direction
+  (`device.rs:337–342`, `:397`).
+- `SharedVolume` holds a gain as **one `AtomicU32` carrying the f32's bit
+  pattern** — *"the wait-free way"* (`volume.rs:244–249`).
+
+So:
+
+```rust
+/// Engine → UI. One writer (the engine thread, inside the pump), any number
+/// of readers. Two f32 bit patterns; no lock, no allocation, no RMW.
+pub struct SharedMeter {
+    momentary: AtomicU32,   // LUFS (or the selected ballistic's reading)
+    peak:      AtomicU32,   // dBFS, sample peak, with hold applied
+}
+```
+
+- **Published once per completed 100 ms step**, not per sample and not per
+  block: the meter accumulates in engine-thread-local state and does two
+  `store(Ordering::Release)` when a step closes. That is **10 stores a second,
+  total**.
+- **Read once per frame** by the UI with `load(Ordering::Acquire)`.
+- **Torn reads are impossible and staleness is bounded** by construction: each
+  value is a single 32-bit atomic, and the worst a frame can see is a reading
+  100 ms old — a third of a VU's own integration time, i.e. below the
+  instrument's resolution.
+- **The two values are deliberately not read atomically together.** They are
+  independent measurements displayed independently; a frame that shows a
+  momentary reading from step *n* and a peak from step *n+1* is not wrong, and
+  paying for a seqlock to prevent it would be paying for a problem that does not
+  exist.
+
+**What is *not* reused, and why.** `LoudnessMeter` (`loudness.rs:211–231`) is
+the offline instrument and **must not** be used on this path: `close_step`
+pushes to `self.blocks: Vec<f64>` for the album gate, and a `Vec::push` can
+reallocate — which is exactly what the pump path may not do. The live meter
+reuses **`KWeighting`** (`loudness.rs:153–201`, `run(&mut self, x: f64) -> f64`,
+pure state, no allocation) and re-implements the step/window accumulation with a
+fixed-size ring. That is a `pub(crate)` on one struct and no new dependency.
+
+**On ADR-0015's reversal clause, engaged rather than skipped.** ADR-0015 §3
+names what would reverse its hand-rolled-rather-than-crate decision: *"needing
+BS.1770-4 Annex 2 true peak, **a momentary or short-term meter**, loudness
+range, or more than two channels"* (`0015:132–135`). This design needs a
+momentary meter, so the clause is live and must be answered rather than walked
+past. The answer: the clause is about the **analysis unit's** completeness — the
+point at which a general-purpose crate's generality stops being a cost — and
+what this needs is not generality but **the K-weighting filter already written
+and already vector-tested**, with less machinery around it rather than more (no
+gating, no LRA, no album pass, two channels). Taking a dependency to get a
+subset of what baz already has, on the realtime path, with its allocation
+behaviour unaudited, would be the worse trade. **§12 step 8 records this as a
+decision re-made rather than defended**, which is what the clause asks for.
+
+### 9.5 The two registers, and where they are drawn
+
+This is where the owner's *"stylised… somewhat ambient"* and §1.2's two
+distances turn out to be the same requirement. **One measurement, two readouts:**
+
+**The ambient register — the field responds.** The field's overall luminance and
+the scale of its wash track the momentary reading, gently: a mapping from LUFS
+to a narrow luminance band, heavily smoothed, never exceeding §5.3's L 0.22
+ceiling. From 3 m you do not read a number — **the room breathes with the
+music**. This is the "VU meter stuff over it" the brief asks for, drawn **over
+the field, never over the sleeve** (§5.4).
+
+Two constraints keep it honest:
+- **It is bounded and slow.** The luminance band is narrow enough that a loud
+  passage cannot make the field compete with the artwork, which is the one thing
+  §5.3 promised.
+- **It states nothing** (§7.1's last clause). Nobody can read a level off a
+  breathing room, and it is not asked to carry one. It is the ambient class
+  doing what the ambient class is for.
+
+**The instrument register — the meter proper.** On the placard column, at the
+work's own width, `METER_H` 24: a horizontal scale with the current reading, the
+peak hold, and — the detail that makes it worth having — **a fixed mark at this
+record's own integrated loudness (F6)**, so the live reading is legible as
+*louder or quieter than this record's average* rather than as an abstract
+number. At 60 cm it is an instrument; at 3 m it is a moving line, which is fine,
+because the ambient register is what the far field is reading.
+
+### 9.6 Why the meter is not amber, and other refusals kept
+
+- **Not amber.** `REFUSALS.md:271–274`: the accent *"states what is true about
+  playback right now and nothing else: not what is queued, not what is selected,
+  not what has focus"*. A level is not *which record, which track, where the
+  playhead is* — it is a measurement of the audio. The meter draws in the room's
+  own inks (`paper`, `paper_dim`, `paper_faint`); the needle keeps the amber,
+  because the needle is exactly what the accent is reserved for. **The one
+  exception is the peak indicator crossing 0 dBFS**, which is playback truth of
+  the kind the accent exists for — and it is accompanied by the numeral, because
+  `REFUSALS.md:259–261` forbids state signalled by colour alone.
+- **Not an instrument face.** §14.3 rewrites the skeuomorphism entry, and the
+  line it draws is the entry's own: *"the record supplies physics, structure and
+  vocabulary… it never supplies **surface**."* **Refused: a beige panel, a glass
+  face, a printed arc scale, a pivoting needle, a bezel, a lamp behind the
+  dial.** **Permitted: the measurement**, drawn in baz's own vocabulary — a line,
+  a mark, a numeral, the room's inks. The owner's *"in a stylised way"* is read
+  as exactly this: the instrument's *behaviour*, not its *costume*.
+- **No peak-hold-forever, no session maxima, no "loudness score".** Those are
+  engagement stats about audio, and `REFUSALS.md:68–73`'s tone rule applies to
+  the meter as much as to the feed.
+- **No headroom claim, no "audiophile" framing.** `REFUSALS.md:348–350`. The
+  meter reports a number and names its standard. It does not say the number is
+  good.
