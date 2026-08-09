@@ -2478,7 +2478,7 @@ impl App {
     /// music keeps playing (ADR-0014's guarantee), the sounding row moves
     /// like any other, and the cursor follows its track because both sides
     /// find it again by path (the engine re-derives and announces
-    /// [`Event::QueueChanged`](baz_core::protocol::Event::QueueChanged);
+    /// [`baz_core::protocol::Event::QueueChanged`];
     /// until it does, [`vm::QueueVm::playing`] reconciles the same way).
     fn shift_queued(&mut self, row: usize, delta: i32) {
         let Some(edited) = self

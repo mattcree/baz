@@ -11,7 +11,7 @@
 //! names queue-place virtualization as `Play all`'s implementation gate, so
 //! the two ship together. The wall's own virtualizer is the in-repo
 //! precedent ([`crate::shelf::Grid::visible_rows`], `views/shelf.rs`'s
-//! spacer column): everything not on screen is a single [`Space`] of the
+//! spacer column): everything not on screen is a single [`Space`](iced::widget::Space) of the
 //! right height, so a 40 000-track run costs the frame what a twelve-track
 //! record does.
 //!
