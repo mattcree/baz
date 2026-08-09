@@ -5,6 +5,7 @@
 `Save as playlist`, with §6's **layer 3 (the drag) pending** on the shared
 pointer-capture widget, and §3's repair surface (`Locate…`) not yet built;
 §7 remains ground rules for a feature that does not exist ·
+**amended 2026-08-09** — the playlist's sleeve, §A1–§A2 ·
 extracts the decisions of
 [`docs/design/08-playback-and-playlists.md`](../design/08-playback-and-playlists.md)
 §4–§6 · changes no engine command — playing a playlist is `SetQueue` ·
@@ -217,3 +218,88 @@ edit, and any candidate pool the person cannot see."*
   playlists folder (the mtime check on read is the whole mechanism — the
   ADR-0022 §7 argument against watchers applies with less force and the
   same conclusion), and any sync or share surface.
+
+## Amendment — the sleeve (2026-08-09)
+
+The owner, after using the shipped surfaces: *"I think similar to Spotify a
+playlist would appear like a cd does."* A playlist should be a visual object
+with a sleeve, the way a record is — not only a name in the panel and a page.
+This amendment designs that sleeve and decides where it hangs.
+
+### A1. The sleeve is a collage of quotations
+
+A playlist has no artwork of its own; its sleeve is **constructed from the
+records it quotes**. The canonical prior art is Spotify's generated cover —
+a 2 × 2 collage of the first distinct cover arts, falling back to a single
+cover below four — and baz adopts that read with its rules stated rather than
+inherited:
+
+1. **Four or more distinct records** (resolved through the library, in
+   playlist order): a 2 × 2 collage of the first four records' sleeves, each
+   cell half the tile's edge, no gaps, no frames.
+2. **One to three distinct records**: the **first** record's sleeve,
+   full-bleed. A 2- or 3-way tiling was considered and declined: every
+   candidate (halves, an L, a dominant-plus-strip) is a layout with an
+   opinion, drawn differently at 40 px and 320 px, where "the first record's
+   face" is one rule at every size — and it is what Spotify itself shipped
+   for years below four.
+3. **No resolvable records** (an empty list, or nothing the library knows):
+   a designed rest tile — the room's [`plinth`] surface step with a hairline
+   edge, carrying the playlist's name in the display face (the name whole at
+   page scale, its initial at panel scale). No random colours and no
+   generated gradients: a made thing with no contents yet is *quiet*, not
+   decorated.
+4. **A cell whose thumbnail has not decoded yet** shows the same
+   deterministic gradient placeholder a wall tile shows for the same record
+   — the collage degrades exactly as the wall does, because it is drawn from
+   the same cache.
+
+**Against the refusals, explicitly.** *"Nothing is ever drawn on top of a
+sleeve"* is not touched: the collage **constructs the playlist's own sleeve
+out of quotations** — each cell is a record's artwork, whole and unmarked,
+at thumbnail scale; nothing is drawn over any record's sleeve, and the
+playlist's sleeve is its own object the way a record's is. *"No artwork is
+ever drawn larger than its source"* holds by arithmetic: the full-bleed
+single is drawn at `ART_MAX` exactly (the album page's own bound) and a
+collage cell at half of it.
+
+**Mechanically**: the cells come from the **same thumbnail cache the wall
+uses** — the same decode path, the same LRU, the same placeholder — with no
+new pipeline, no composited bitmap and no write anywhere near a cover file.
+The composition is a list of album ids computed when the playlist is read,
+so it follows the fingerprint discipline the surfaces already have: an
+edited playlist re-reads, re-resolves, and its sleeve regenerates with its
+rows.
+
+### A2. Where the sleeve hangs today
+
+- **The panel's rows** carry it at [`PANEL_SLEEVE`] 40: the rows were
+  text-only, and a sleeve is what makes twelve of them scannable — and makes
+  the armed row read as *a thing receiving* rather than a highlighted line.
+- **The playlist's page** carries it in the hero position at `ART_MAX` 320,
+  in the record page's own two-column arrangement: the object and its acts
+  in the aside, the name and the rows in the main column. The page was
+  already the album page's sibling; now it holds the same declared hierarchy
+  — **the work ≫ `Play` → the name → the rows** (law L6).
+- **Whether playlists join the wall is deliberately not decided here.** The
+  owner has opened the deeper information-hierarchy question — *"I am really
+  struggling to come up with a simple and satisfying information hierarchy
+  here… we are thinking there are implicit playlists everywhere"* — and a
+  design deep dive on it is running as its own study (design doc 09). This
+  amendment must not pre-empt it, so wall membership, a playlist's rail
+  sorting, and search-corpus membership are all **deferred to that study**.
+  What ships here is the vocabulary every outcome needs: a playlist that
+  looks like a record wherever a playlist appears, which today is the panel
+  and the page. Recorded as *input* to the study, not as a decision: a
+  pinned wall shelf strains ADR-0019's arrangement-as-projection grammar
+  (under YEAR a playlist has no year, under ARTIST no artist; the rail would
+  carry a foreign entry; `Library::search` does not hold made things), and
+  the owner's sentence reads playlists as first-class visual citizens — the
+  study weighs the two, and nothing built here forecloses either answer.
+- **A playlist cannot be added to a playlist today**, because no surface
+  offers the gesture: entries are track references (§1) and the panel's
+  rows are doors and receive targets, not sources. If a future gesture ever
+  picks up a playlist and drops it on another list, the honest meaning is
+  *append its tracks, resolved at that moment* — noted so the semantics are
+  on record before any widget, per ADR-0023 §3's precedent, and subject to
+  the same deep dive.

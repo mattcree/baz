@@ -1129,8 +1129,10 @@ impl App {
                 // library), and never in Settings — the panel is absent there
                 // (ADR-0024 §5), so the key falls dead rather than opening a
                 // surface the place will not show.
-                if matches!(self.screen, Screen::Shelf(_)) && self.place != Place::Settings {
-                    self.playlists.toggle_panel();
+                if let Screen::Shelf(state) = &self.screen
+                    && self.place != Place::Settings
+                {
+                    self.playlists.toggle_panel(Some(&state.library));
                 }
             }
             Message::OpenPlaylist(id) => {
@@ -1224,7 +1226,11 @@ impl App {
                 }
             }
             Message::PlaylistDeleteConfirm => {
-                if self.playlists.delete_open() && matches!(self.place, Place::Playlist(_)) {
+                let library = match &self.screen {
+                    Screen::Shelf(state) => Some(&state.library),
+                    Screen::Setup(_) => None,
+                };
+                if self.playlists.delete_open(library) && matches!(self.place, Place::Playlist(_)) {
                     // The page's subject is gone; the wall is the honest
                     // answer, by the same route Esc takes.
                     self.place = self.place.back();
@@ -1243,21 +1249,58 @@ impl App {
             Message::SaveQueueSubmit => {
                 if let Some(queue) = self.player.queue() {
                     let queue = queue.clone();
-                    self.playlists.submit_queue_save(&queue);
+                    let library = match &self.screen {
+                        Screen::Shelf(state) => Some(&state.library),
+                        Screen::Setup(_) => None,
+                    };
+                    self.playlists.submit_queue_save(&queue, library);
                 }
             }
-            Message::PlaylistRowEntered(row) => self.hovered_playlist_row = Some(*row),
-            Message::PlaylistRowLeft(row) if self.hovered_playlist_row == Some(*row) => {
-                self.hovered_playlist_row = None;
+            Message::PlaylistRowEntered(row) => {
+                self.hovered_playlist_row = Some(*row);
+                return Some(Task::none());
             }
-            Message::AlbumRowEntered(row) => self.hovered_album_row = Some(*row),
-            Message::AlbumRowLeft(row) if self.hovered_album_row == Some(*row) => {
-                self.hovered_album_row = None;
+            Message::PlaylistRowLeft(row) => {
+                if self.hovered_playlist_row == Some(*row) {
+                    self.hovered_playlist_row = None;
+                }
+                return Some(Task::none());
             }
-            Message::PlaylistRowLeft(_) | Message::AlbumRowLeft(_) => {}
+            Message::AlbumRowEntered(row) => {
+                self.hovered_album_row = Some(*row);
+                return Some(Task::none());
+            }
+            Message::AlbumRowLeft(row) => {
+                if self.hovered_album_row == Some(*row) {
+                    self.hovered_album_row = None;
+                }
+                return Some(Task::none());
+            }
             _ => return None,
         }
-        Some(Task::none())
+        // Whatever the act just changed, the sleeves may now quote records
+        // whose thumbnails are not decoded yet — ask for exactly those, off
+        // thread, through the wall's own pipeline (ADR-0024 §A1).
+        Some(self.request_playlist_art())
+    }
+
+    /// Kick off decodes for every record the playlist sleeves quote that the
+    /// thumbnail cache does not hold — the collage's whole supply line, and
+    /// it is [`Shelf::request_thumbs`]'s, which is the wall's.
+    fn request_playlist_art(&mut self) -> Task<Message> {
+        let mut wanted: Vec<u64> = Vec::new();
+        for row in &self.playlists.rows {
+            wanted.extend(&row.art);
+        }
+        if let Some(open) = &self.playlists.open {
+            wanted.extend(&open.art);
+        }
+        wanted.sort_unstable();
+        wanted.dedup();
+        match &mut self.screen {
+            Screen::Shelf(state) => state.request_thumbs(&wanted),
+            Screen::Setup(_) => Task::none(),
+        }
     }
 
     /// The record, whole, toward a playlist (ADR-0024 §6): appended outright
@@ -1283,7 +1326,8 @@ impl App {
         if let Some(armed) = self.playlists.armed {
             self.playlists.append(armed, entries, &state.library);
         } else {
-            self.playlists.begin_pick(label, entries);
+            self.playlists
+                .begin_pick(Some(&state.library), label, entries);
         }
     }
 
@@ -1312,7 +1356,8 @@ impl App {
         if let Some(armed) = self.playlists.armed {
             self.playlists.append(armed, entries, &state.library);
         } else {
-            self.playlists.begin_pick(label, entries);
+            self.playlists
+                .begin_pick(Some(&state.library), label, entries);
         }
     }
 
@@ -2234,6 +2279,7 @@ impl App {
             ),
             (Screen::Shelf(state), Place::Playlist(id)) => match self.playlists.page(id) {
                 Some(open) => views::playlist::view(
+                    state,
                     open,
                     &self.player,
                     self.window.width,
@@ -2264,10 +2310,13 @@ impl App {
         // the wall. The wall is not re-laid by a pixel — the panel is a
         // layer, not a column — and the bar below stays untouched because the
         // stack holds only the place.
-        let screen: Element<'_, Message> = if self.panel_on_screen() {
+        let screen: Element<'_, Message> = if let Screen::Shelf(state) = &self.screen
+            && self.panel_on_screen()
+        {
             iced::widget::stack![
                 screen,
                 iced::widget::container(iced::widget::opaque(views::playlist_panel::view(
+                    state,
                     &self.playlists
                 )))
                 .width(iced::Length::Fill)
@@ -3558,6 +3607,43 @@ impl Shelf {
             {
                 continue;
             }
+            self.pending.insert(id);
+            let path = album.first_track.clone();
+            tasks.push(Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        art::load_thumb(&path)
+                            .map(|(w, h, rgba)| iced_image::Handle::from_rgba(w, h, rgba))
+                    })
+                    .await
+                    .ok()
+                    .flatten()
+                },
+                move |handle| Message::ThumbLoaded(id, handle),
+            ));
+        }
+        Task::batch(tasks)
+    }
+
+    /// Kick off off-thread decodes for the albums in `ids` whose thumbnail is
+    /// neither cached, in flight, nor known-absent — the playlist sleeves'
+    /// supply line (ADR-0024 §A1), and deliberately nothing but a re-aim of
+    /// [`Self::request_visible_thumbs`]'s pipeline: same cache, same decode
+    /// path, same placeholder while it runs. An id the wall no longer holds
+    /// is skipped; the collage cell keeps its gradient, which is the same
+    /// honest reading a tile gives art that cannot be decoded.
+    fn request_thumbs(&mut self, ids: &[u64]) -> Task<Message> {
+        let mut tasks = Vec::new();
+        for &id in ids {
+            if self.thumbs.get(&id).is_some()
+                || self.pending.contains(&id)
+                || self.no_art.contains(&id)
+            {
+                continue;
+            }
+            let Some(album) = self.albums.iter().find(|album| album.id == id) else {
+                continue;
+            };
             self.pending.insert(id);
             let path = album.first_track.clone();
             tasks.push(Task::perform(

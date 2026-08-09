@@ -39,9 +39,10 @@
 use iced::widget::{Column, Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Element, Length, alignment};
 
-use crate::app::Message;
+use crate::app::{Message, Shelf};
 use crate::playlists::{NameEntry, PanelRow, Playlists};
 use crate::theme;
+use crate::views::playlist_sleeve;
 
 /// The panel's width: the one dimension of the dead rail nobody faulted
 /// (`docs/design/08` §5.5), spent on a surface that is only ever on screen
@@ -55,7 +56,11 @@ pub(crate) fn new_name_id() -> text_input::Id {
 }
 
 /// The panel, ready to be stacked over whichever place is standing.
-pub(crate) fn view(playlists: &Playlists) -> Element<'_, Message> {
+///
+/// `shelf` supplies the thumbnail cache the rows' sleeves quote
+/// (ADR-0024 §A1) — the panel reads it exactly as the wall does and owns no
+/// pixel of it.
+pub(crate) fn view<'a>(shelf: &'a Shelf, playlists: &'a Playlists) -> Element<'a, Message> {
     let room = theme::active();
     let mut body = column![].spacing(theme::GAP_SM);
     // The panel's own name, and how it leaves — the place-header shape at
@@ -98,6 +103,7 @@ pub(crate) fn view(playlists: &Playlists) -> Element<'_, Message> {
         let mut listed: Vec<Element<'_, Message>> = Vec::new();
         for entry in &playlists.rows {
             listed.push(playlist_row(
+                shelf,
                 entry,
                 playlists.armed == Some(entry.id),
                 picking,
@@ -185,8 +191,17 @@ fn name_field(entry: &NameEntry) -> Element<'_, Message> {
 /// pressing anywhere on it appends what the hand holds — because a picker
 /// whose rows kept their two ordinary meanings would make the most important
 /// press on the surface the hardest to aim.
-fn playlist_row(entry: &PanelRow, armed: bool, picking: bool) -> Element<'_, Message> {
+fn playlist_row<'a>(
+    shelf: &'a Shelf,
+    entry: &'a PanelRow,
+    armed: bool,
+    picking: bool,
+) -> Element<'a, Message> {
     let room = theme::active();
+    // The sleeve, at the row's own scale (ADR-0024 §A2): what turns a list
+    // of names into a shelf of objects — and what makes the armed row read
+    // as a thing receiving rather than a highlighted line.
+    let sleeve = playlist_sleeve(shelf, &entry.art, &entry.name, theme::PANEL_SLEEVE);
     let name_block = column![
         text(entry.name.clone())
             .size(theme::SIZE_BODY)
@@ -206,6 +221,7 @@ fn playlist_row(entry: &PanelRow, armed: bool, picking: bool) -> Element<'_, Mes
         return container(
             button(
                 row![
+                    sleeve,
                     container(name_block).width(Length::Fill),
                     text("Add")
                         .size(theme::SIZE_META)
@@ -225,11 +241,15 @@ fn playlist_row(entry: &PanelRow, armed: bool, picking: bool) -> Element<'_, Mes
         .style(move |_theme| theme::panel_row(room, false))
         .into();
     }
-    let door = button(name_block)
-        .width(Length::Fill)
-        .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-        .style(move |_theme, status| theme::track_row(room, status, false))
-        .on_press(Message::OpenPlaylist(entry.id));
+    let door = button(
+        row![sleeve, container(name_block).width(Length::Fill)]
+            .spacing(theme::GAP_SM)
+            .align_y(iced::Alignment::Center),
+    )
+    .width(Length::Fill)
+    .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+    .style(move |_theme, status| theme::track_row(room, status, false))
+    .on_press(Message::OpenPlaylist(entry.id));
     // The receive target (ADR-0024 §6 layer 2): a `+` that arms this list to
     // collect, or puts it down when it is the one armed. `STEPPER_HIT`, the
     // room's secondary square, and never the accent — arming is a collecting

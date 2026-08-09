@@ -332,6 +332,12 @@
   roots (ADR-0024 §2's sovereignty line). One row and an open-folder
   affordance, so the user learns where their artefacts live the way they
   learn where their music does.
+- **Where playlists sit in the information hierarchy is an open question.**
+  The owner: *"we are thinking there are implicit playlists everywhere"* —
+  the implicit-playlists deep dive (design doc 09) owns it, and ADR-0024
+  §A2 deliberately defers to it: wall membership, rail sorting, search-corpus
+  membership, and possibly the armed-collecting flow itself. The sleeve
+  (§A1) is the vocabulary any outcome keeps.
 - **No keyboard route out of the search field.** Transport keys are bound
   (`crates/baz/src/keys.rs`), but iced 0.13's `text_input` captures every key
   press while focused except Tab and the vertical arrows, so while the search

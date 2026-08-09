@@ -3196,6 +3196,36 @@ pub fn panel(p: &Palette) -> container::Style {
     }
 }
 
+/// A playlist's sleeve in the panel's rows (logical px) — ADR-0024 §A2.
+///
+/// On the 4 px lattice, sized so the row it opens is the sleeve plus the
+/// row's own `GAP_XS` padding: big enough that a 2 × 2 collage still reads
+/// as four records (each cell 20 px), small enough that twelve rows stay a
+/// panel rather than a wall. The page's sleeve is [`ART_MAX`], the album
+/// page's own bound — a playlist tile is never drawn larger than a record's.
+pub const PANEL_SLEEVE: f32 = 40.0;
+
+/// The rest tile of a playlist with nothing to quote (ADR-0024 §A1.3): the
+/// surface step with a hairline edge, the name in ink on it.
+///
+/// Deliberately quieter than a record's gradient placeholder: the gradient
+/// stands in for artwork that exists and has not decoded, where this stands
+/// for artwork that **cannot** exist yet — an empty made thing — and
+/// decorating it would be the interface inventing a fact.
+#[must_use]
+pub fn playlist_rest_tile(p: &Palette) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(p.plinth)),
+        text_color: Some(p.paper_dim),
+        border: Border {
+            color: p.hairline_strong(p.plinth),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
 /// The 1 px seam down the panel's left edge — the hairline half of the
 /// panel/wall separation, painted as a filled lane because iced's `rule` is
 /// horizontal-or-vertical by *widget* and this one has to fill a `Fill`
@@ -5430,6 +5460,24 @@ mod tests {
         // the law is about window edges, and collapsing the two would be the
         // opposite error.
         const { assert!(GAP_XL != HANG) }
+    }
+
+    /// **The playlist's sleeve obeys the laws its sizes touch**
+    /// (ADR-0024 §A1–§A2): the panel tile is on the 4 px lattice (L2) and
+    /// splits into whole-pixel collage cells; the page tile is `ART_MAX`
+    /// exactly, so the full-bleed single is the album page's own bound and a
+    /// collage cell half of it — *no artwork is ever drawn larger than its
+    /// source*, by arithmetic.
+    #[test]
+    fn the_playlist_sleeve_sizes_hold_the_artwork_laws() {
+        const { assert!(PANEL_SLEEVE == 40.0) }
+        const { assert!(PANEL_SLEEVE % 4.0 == 0.0) }
+        const { assert!(PANEL_SLEEVE % 2.0 == 0.0) }
+        const { assert!(PANEL_SLEEVE < ART_MIN) }
+        // The hero sleeve is the album's: one bound, not a second number —
+        // both spellings of 320 pinned so neither can drift alone.
+        const { assert!(ART_MAX == 320.0) }
+        const { assert!(crate::art::THUMB_PX == 320) }
     }
 
     /// **L2 — the vertical unit is 4, and the type is inside it.**

@@ -16,9 +16,11 @@ Silent fixtures (`composition/tools/mkfixture.sh` writes zeros) and an
 `.asoundrc` routing ALSA's default PCM to `null` — two independent guarantees
 that nothing was audible; `BAZ_DEVICE_TESTS` stays unset. The script cleans up
 **only the pids it started**, never by name. The playlists themselves are
-seeded the way a migrating listener would seed them: two `.m3u8` files written
-into the scratch data directory before launch, one of them carrying a dead
-path on purpose.
+seeded the way a migrating listener would seed them: three `.m3u8` files
+written into the scratch data directory before launch — one spanning four
+records (the 2 × 2 collage sleeve, ADR-0024 §A1), one holding a single record
+plus a dead path on purpose (the full-bleed sleeve and the missing-entry
+arithmetic), and one empty (the rest tile).
 
 ## The no-reflow assertion
 
@@ -39,15 +41,16 @@ no-reflow @1920x1080: AE=0 outside the panel's region
 | | |
 |---|---|
 | [`01-wall-before`](01-wall-before.png) | the wall at rest — the diff's "before" |
-| [`02-wall-panel-open`](02-wall-panel-open.png) | `Ctrl+P` (or the strip's `Playlists` door): the panel over the wall's right edge — `New playlist`, one row per list with its counts, the receive `+` per row. The wall behind is pixel-identical |
+| [`02-wall-panel-open`](02-wall-panel-open.png) | `Ctrl+P` (or the strip's `Playlists` door): the panel over the wall's right edge — `New playlist`, one row per list with **its sleeve** (§A1: the 2 × 2 collage, the rest tile with the name's initial, the full-bleed single, top to bottom), its counts, the receive `+`. The wall behind is pixel-identical |
 | [`03-panel-armed`](03-panel-armed.png) | the receive target pressed: the row carries the surface step and hairline (never the accent), its mark flips to `−`, and **every wall label gains the quiet `+`** — while it stands, a tile press pulls the record in, one press per addition (§6 layer 2) |
 | [`04-album-page-with-panel`](04-album-page-with-panel.png) | the record's page beside the open panel: `Add to playlist` under `Play album`, quiet, no accent (§6 layer 1) |
-| [`05-playlist-page`](05-playlist-page.png) | the playlist's page by the panel row's name: hero name, counts, `Play` / `Queue` / `Rename` / `Delete`, record-group headers over consecutive same-record runs |
-| [`06-playlist-page-missing`](06-playlist-page-missing.png) | the seeded broken list: `4 of 5 · 1 missing · 22:21`, the dead entry dimmed from its stem with its path on the row, still in the file (§3) |
+| [`05-playlist-page`](05-playlist-page.png) | the playlist's page by the panel row's name, in the record page's own two-column arrangement (§A2): the collage sleeve at 320 in the hero position, `Play` at the sleeve's width under it, the quieter acts below, the name at hero scale over record-grouped rows |
+| [`06-playlist-page-missing`](06-playlist-page-missing.png) | the seeded broken list: the single record's face full-bleed, `4 of 5 · 1 missing · 22:21`, the dead entry dimmed from its stem with its path on the row, still in the file (§3) |
 | [`07-playlist-playing`](07-playlist-playing.png) | its first row pressed: the playable subset queued, the lamp dot in the number column — the queue is exactly this list, so the page may mark it |
 | [`08-queue-save-control`](08-queue-save-control.png) | the queue place holding exactly what `Play` sent — four rows, grouped under their records' names — with `Save as playlist` beside the summary |
 | [`09-queue-save-field`](09-queue-save-field.png) | the save word become a name field (the roots field's anatomy; the storage layer's refusals land under it in its own words) |
 | [`10`–`11`](10-wall-before-1920.png) | the before/after pair again at 1920 × 1080 |
+| [`12-playlist-page-1920`](12-playlist-page-1920.png) | the page at 1920: the hero collage beside a list at its measure, durations and edit slots clear of the panel |
 
 ## Reproduce
 

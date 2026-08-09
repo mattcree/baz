@@ -215,6 +215,20 @@ next commit.
 - **`Save as playlist` on the queue place**: tonight's run frozen into a new
   file — a new artefact and nothing else; the queue is not linked to the
   playlist it seeded, and editing either never reaches the other.
+- **A playlist has a sleeve** (ADR-0024 §A1, on the owner's *"similar to
+  Spotify a playlist would appear like a cd does"*): a generated collage of
+  quotations — the first four distinct records' artwork as a 2 × 2, the
+  first record's face full-bleed below four, and a designed rest tile (the
+  surface step, the name in ink) for a list with nothing to quote. Cells
+  come from the wall's own thumbnail cache with no new decode path and
+  degrade to the wall's own gradient placeholder mid-decode; the composition
+  re-derives whenever the playlist re-reads, so an edit changes the sleeve
+  with the rows. It hangs at 40 px on the panel's rows — which turns the
+  index from a list of names into a shelf of objects — and at 320 in the
+  hero position of the playlist's page, which now wears the record page's
+  own two-column arrangement: the work over `Play` in the aside, the name
+  over the rows in the main column. Whether playlists also join the wall is
+  deliberately deferred to the implicit-playlists design study (doc 09).
 
 **Interface**
 

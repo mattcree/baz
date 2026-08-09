@@ -66,10 +66,12 @@ pub(crate) mod setup;
 pub(crate) mod shelf;
 pub(crate) mod top_bar;
 
-use iced::widget::{Space, button, column, container, horizontal_rule, row, text};
+use iced::widget::{
+    Space, button, column, container, horizontal_rule, image as iced_image, row, text,
+};
 use iced::{Color, Element, Length, alignment};
 
-use crate::app::Message;
+use crate::app::{Message, Shelf};
 use crate::{theme, vm};
 
 /// A `size`×`size` block filled with the album's deterministic two-color
@@ -117,6 +119,95 @@ pub(crate) fn gradient_block(album_id: u64, size: f32, shown: f32) -> Element<'s
             ..container::Style::default()
         })
         .into()
+}
+
+/// **A playlist's sleeve** (ADR-0024 §A1): a collage of quotations from the
+/// records it holds, at `edge` px — the panel's rows draw it at
+/// [`theme::PANEL_SLEEVE`], the playlist's page at [`theme::ART_MAX`].
+///
+/// The rule, at every size: four or more distinct records → a 2 × 2 collage
+/// of the first four, in playlist order; one to three → the first record's
+/// sleeve, full-bleed; none the library resolves → the rest tile (the
+/// surface step, the name in ink — an empty made thing is quiet, not
+/// decorated). Cells come from the wall's own thumbnail cache and degrade to
+/// the wall's own deterministic gradient while a decode is in flight, so a
+/// playlist's sleeve can never disagree with the tiles of the records it
+/// quotes.
+///
+/// This *constructs* a playlist's sleeve out of whole, unmarked artwork at
+/// thumbnail scale; nothing is drawn on top of any record's sleeve, and no
+/// cell exceeds the decoded source (§A1 argues both against the refusals by
+/// name). Shared by the panel and the page for [`gradient_block`]'s reason:
+/// two renderings of one identity that could drift apart would be a bug.
+pub(crate) fn playlist_sleeve(
+    shelf: &Shelf,
+    art: &[u64],
+    name: &str,
+    edge: f32,
+) -> Element<'static, Message> {
+    let room = theme::active();
+    match art {
+        [] => {
+            // The rest tile: the name whole at page scale, its initial at
+            // panel scale — a 40 px tile has no room for words and needs
+            // only to be tellable apart.
+            let large = edge >= theme::ART_MIN;
+            let label: String = if large {
+                name.to_owned()
+            } else {
+                name.chars()
+                    .next()
+                    .map(|initial| initial.to_uppercase().to_string())
+                    .unwrap_or_default()
+            };
+            let word = if large {
+                text(label)
+                    .size(theme::SIZE_TITLE)
+                    .line_height(theme::LEADING_TITLE)
+                    .font(theme::SEMIBOLD)
+            } else {
+                text(label)
+                    .size(theme::SIZE_EMPHASIS)
+                    .line_height(theme::LEADING_EMPHASIS)
+                    .font(theme::MEDIUM)
+            };
+            container(word)
+                .width(Length::Fixed(edge))
+                .height(Length::Fixed(edge))
+                .padding(if large { theme::GAP_MD } else { 0.0 })
+                .align_x(alignment::Horizontal::Center)
+                .align_y(alignment::Vertical::Center)
+                .clip(true)
+                .style(move |_theme| theme::playlist_rest_tile(room))
+                .into()
+        }
+        [a, b, c, d, ..] => {
+            let half = edge / 2.0;
+            column![
+                row![sleeve_cell(shelf, *a, half), sleeve_cell(shelf, *b, half)],
+                row![sleeve_cell(shelf, *c, half), sleeve_cell(shelf, *d, half)],
+            ]
+            .width(Length::Fixed(edge))
+            .height(Length::Fixed(edge))
+            .into()
+        }
+        // Below four distinct records the first one's face is the sleeve —
+        // one rule at every size, and the tiling question never opens.
+        [first, ..] => sleeve_cell(shelf, *first, edge),
+    }
+}
+
+/// One quotation in a playlist's sleeve: the record's thumbnail from the
+/// wall's cache, or — while its decode is in flight, or where no art can be
+/// decoded — the same deterministic gradient the record's own tile shows.
+fn sleeve_cell(shelf: &Shelf, album: u64, size: f32) -> Element<'static, Message> {
+    match shelf.thumbs.peek(&album) {
+        Some(handle) => iced_image(handle.clone())
+            .width(Length::Fixed(size))
+            .height(Length::Fixed(size))
+            .into(),
+        None => gradient_block(album, size, 1.0),
+    }
 }
 
 /// **The strip every place that is not the Library wears**: the way back, the

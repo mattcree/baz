@@ -1,18 +1,25 @@
 //! **A playlist's page**: one list a person made, at the width of the window
-//! (ADR-0024 §4) — the sibling of the record's page, in the queue place's
-//! anatomy.
+//! (ADR-0024 §4) — the record page's sibling in arrangement, the queue
+//! place's sibling in row anatomy.
 //!
-//! # Three list surfaces, one composition
+//! # The record page's composition, the queue place's rows
 //!
-//! Header strip, summary, rows at [`theme::LIST_MEASURE`], one scroll — the
-//! queue place's shape exactly, because a listener who has read one list in
-//! baz must not have to learn another. What a *durable* artefact earns over
-//! the transient queue is the header block (the name at hero scale, the
-//! page's acts) and the two reserved edit slots per row: the ✕ that takes an
-//! entry out and the ▲▼ steppers that reorder — the no-drag pointer route the
-//! visible-control rule requires, at the settings steppers' own size, with
+//! Since the sleeve amendment (ADR-0024 §A2) the page wears the album page's
+//! own two-column arrangement: **the object beside what is written about
+//! it** — the collage sleeve at [`theme::ALBUM_SLEEVE`] over `Play` and the
+//! quieter acts in the aside, the name at hero scale over the rows in the
+//! main column, stacking below [`theme::ALBUM_BREAKPOINT`] by the same
+//! arithmetic. The rows themselves stay the queue place's — one anatomy for
+//! every list in baz — plus the two reserved edit slots a durable artefact
+//! earns: the ✕ that takes an entry out and the ▲▼ steppers that reorder,
+//! the no-drag pointer route the visible-control rule requires, with
 //! drag-to-reorder deferred to the shared pointer-capture widget
 //! (ADR-0024 §6 layer 3).
+//!
+//! The declared hierarchy (law L6) is the album page's, re-read for a made
+//! thing: **the work ≫ `Play` → the name → the rows** — the sleeve is a
+//! collage of quotations and it is the only image of the playlist on
+//! screen, so it is first by declaration exactly as the record's is.
 //!
 //! # The honesty on this surface
 //!
@@ -37,10 +44,10 @@ use iced::widget::{
 };
 use iced::{Element, Length, alignment};
 
-use crate::app::Message;
+use crate::app::{Message, Shelf};
 use crate::player::PlayerState;
 use crate::playlists::{NameEntry, OpenPlaylist, PageRow};
-use crate::views::{place_header, place_pad, section_rule};
+use crate::views::{place_header, place_pad, playlist_sleeve, section_rule};
 use crate::{icon, theme};
 
 /// The rename field's id, so the caret can land in it the moment `Rename` is
@@ -49,16 +56,27 @@ pub(crate) fn rename_id() -> text_input::Id {
     text_input::Id::new("baz-playlist-rename")
 }
 
-/// The playlist's page: the header strip, the name and its acts, the rows.
+/// The playlist's page: the header strip, then **the object beside what is
+/// written about it** — the record page's own two-column arrangement, worn
+/// by its sibling (ADR-0024 §A2). The aside holds the sleeve, the page's one
+/// commitment and its quieter acts; the main column holds the name at hero
+/// scale, the counts and the rows. Below [`theme::ALBUM_BREAKPOINT`] the two
+/// columns stack, by the album page's own arithmetic and for its reason.
 pub(crate) fn view<'a>(
+    shelf: &'a Shelf,
     open: &'a OpenPlaylist,
     player: &'a PlayerState,
     window_width: f32,
     hovered: Option<usize>,
 ) -> Element<'a, Message> {
     let room = theme::active();
-    let measure =
-        (window_width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).clamp(0.0, theme::LIST_MEASURE);
+    let content = (window_width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).max(0.0);
+    let side_by_side = window_width >= theme::ALBUM_BREAKPOINT;
+    let measure = if side_by_side {
+        (content - theme::ALBUM_ASIDE_W - theme::GAP_XL).clamp(0.0, theme::LIST_MEASURE)
+    } else {
+        content.min(theme::LIST_MEASURE)
+    };
     let live = player.engine_ready();
     // Which display row carries the lamp: the engine's confirmed row in the
     // playable subset, mapped back through each row's own subset position —
@@ -90,15 +108,31 @@ pub(crate) fn view<'a>(
     } else {
         Column::with_children(rows).spacing(theme::GAP_XS).into()
     };
-    let content = column![
-        header_block(open, live),
+    let main = column![
+        identity_block(open),
         column![section_rule("Tracks"), body].spacing(theme::GAP_SM),
     ]
     .spacing(theme::GAP_XL);
+    let page: Element<'a, Message> = if side_by_side {
+        row![
+            container(aside(shelf, open, live)).width(Length::Fixed(theme::ALBUM_ASIDE_W)),
+            container(main).width(Length::Fixed(measure)),
+        ]
+        .spacing(theme::GAP_XL)
+        .align_y(iced::Alignment::Start)
+        .into()
+    } else {
+        column![
+            container(aside(shelf, open, live)).width(Length::Fixed(theme::ALBUM_ASIDE_W)),
+            container(main).width(Length::Fixed(measure)),
+        ]
+        .spacing(theme::GAP_XL)
+        .into()
+    };
     column![
         place_header("Playlist", "Esc returns to the wall"),
         scrollable(
-            container(container(content).width(Length::Fixed(measure)))
+            container(page)
                 .width(Length::Fill)
                 .padding(place_pad())
                 .align_x(alignment::Horizontal::Center)
@@ -111,13 +145,41 @@ pub(crate) fn view<'a>(
     .into()
 }
 
-/// The page's identity and its acts: the name at hero scale, the counts —
-/// `38 of 40 · 2 missing` when entries are missing — then `Play`, `Queue`,
-/// `Rename`, `Delete`, and whichever of the rename field or the delete
-/// confirmation is standing.
-fn header_block(open: &OpenPlaylist, live: bool) -> Element<'_, Message> {
-    let room = theme::active();
+/// The left column: **the object, the one thing you can do to it, and its
+/// quieter acts** — the album page's aside, worn by the playlist. The sleeve
+/// is the collage of quotations at [`theme::ART_MAX`] (§A1), `Play` stands
+/// directly under it at the sleeve's whole width exactly as `Play album`
+/// does, and the acts that redefine or destroy the artefact sit below with
+/// whichever of their fields is standing.
+fn aside<'a>(shelf: &'a Shelf, open: &'a OpenPlaylist, live: bool) -> Element<'a, Message> {
+    let playable = !open.queue.is_empty();
     let mut block = column![
+        playlist_sleeve(shelf, &open.art, open.name(), theme::ALBUM_SLEEVE),
+        play_control(live && playable),
+        row![
+            word_act("Queue", live && playable, Message::PlaylistQueue),
+            word_act("Rename", true, Message::PlaylistRenameStart),
+            word_act("Delete", true, Message::PlaylistDeleteArm),
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(theme::GAP_MD);
+    if let Some(renaming) = &open.renaming {
+        block = block.push(rename_field(renaming));
+    }
+    if open.delete_armed {
+        block = block.push(delete_confirm(open.name()));
+    }
+    block.into()
+}
+
+/// The main column's identity block: **the name at hero scale over the
+/// counts** — `38 of 40 · 2 missing` when entries are missing — the album
+/// header's falling order with the fields a made thing has.
+fn identity_block(open: &OpenPlaylist) -> Element<'_, Message> {
+    let room = theme::active();
+    column![
         container(
             text(open.name().to_owned())
                 .size(theme::SIZE_HERO)
@@ -132,25 +194,8 @@ fn header_block(open: &OpenPlaylist, live: bool) -> Element<'_, Message> {
             .line_height(theme::LEADING_META)
             .color(room.paper_faint),
     ]
-    .spacing(theme::GAP_XS);
-    let playable = !open.queue.is_empty();
-    block = block.push(
-        row![
-            play_control(live && playable),
-            word_act("Queue", live && playable, Message::PlaylistQueue),
-            word_act("Rename", true, Message::PlaylistRenameStart),
-            word_act("Delete", true, Message::PlaylistDeleteArm),
-        ]
-        .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Center),
-    );
-    if let Some(renaming) = &open.renaming {
-        block = block.push(rename_field(renaming));
-    }
-    if open.delete_armed {
-        block = block.push(delete_confirm(open.name()));
-    }
-    block.into()
+    .spacing(theme::GAP_XS)
+    .into()
 }
 
 /// **Play** — the page's one commitment, in `Play album`'s clothes: the lamp
@@ -175,12 +220,14 @@ fn play_control(live: bool) -> Element<'static, Message> {
             .spacing(theme::GAP_SM)
             .align_y(iced::Alignment::Center),
         )
+        .width(Length::Fill)
         .height(Length::Fill)
         .align_x(alignment::Horizontal::Center)
         .align_y(alignment::Vertical::Center),
     )
+    .width(Length::Fill)
     .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_XL))
+    .padding(theme::pad(0.0, theme::GAP_MD))
     .style(move |_theme, status| theme::primary(room, status))
     .on_press_maybe(live.then_some(Message::PlaylistPlay))
     .into()
@@ -225,7 +272,7 @@ fn rename_field(entry: &NameEntry) -> Element<'_, Message> {
             .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
             .size(theme::SIZE_BODY)
             .line_height(theme::LEADING_BODY)
-            .width(Length::Fixed(theme::SETTINGS_CONTENT_MIN))
+            .width(Length::Fill)
             .style(move |_theme, status| theme::input(room, status)),
     ]
     .spacing(theme::GAP_XS);
@@ -241,21 +288,25 @@ fn rename_field(entry: &NameEntry) -> Element<'_, Message> {
 }
 
 /// The armed delete, in the roots ADR's voice: every destructive
-/// confirmation in baz states what survives.
+/// confirmation in baz states what survives. Stacked rather than in a row,
+/// because it now lives in the aside's 320 px lane.
 fn delete_confirm(name: &str) -> Element<'_, Message> {
     let room = theme::active();
-    row![
+    column![
         text(format!(
             "Delete \u{201c}{name}\u{201d}? The file goes; your music stays."
         ))
         .size(theme::SIZE_META)
         .line_height(theme::LEADING_META)
         .color(room.paper_dim),
-        word_act("Delete", true, Message::PlaylistDeleteConfirm),
-        word_act("Keep", true, Message::PlaylistDeleteCancel),
+        row![
+            word_act("Delete", true, Message::PlaylistDeleteConfirm),
+            word_act("Keep", true, Message::PlaylistDeleteCancel),
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center),
     ]
-    .spacing(theme::GAP_SM)
-    .align_y(iced::Alignment::Center)
+    .spacing(theme::GAP_XS)
     .into()
 }
 

@@ -55,23 +55,29 @@ group_key = "artist"
 EOF
 
 # Seed the playlists folder the way a migrating listener would: files. One
-# healthy list spanning two records, and one carrying a missing entry so the
-# page's `N of M · K missing` arithmetic is on camera.
+# list spanning four records (the 2 × 2 collage, ADR-0024 §A1), one carrying
+# a single record and a missing entry (the full-bleed single, and the page's
+# `N of M · K missing` arithmetic), and one empty (the rest tile).
 PL="$S/data/baz/playlists"
 mkdir -p "$PL"
 mapfile -t AMBER < <(find "$FIX" -path '*Amber Room*' -name '*.flac' | sort)
-mapfile -t ORBITS < <(find "$FIX" -path '*Orbits*' -name '*.flac' | sort | head -3)
+mapfile -t ORBITS < <(find "$FIX" -path '*Orbits*' -name '*.flac' | sort | head -2)
+mapfile -t BASALT < <(find "$FIX" -path '*Basalt*' -name '*.flac' | sort | head -1)
+mapfile -t WERK   < <(find "$FIX" -path '*Werkbund*' -name '*.flac' | sort | head -2)
 {
   echo "#EXTM3U"
   echo "# made with baz on 2026-08-09"
-  printf '%s\n' "${AMBER[@]:0:4}"
+  printf '%s\n' "${AMBER[@]:0:2}"
   printf '%s\n' "${ORBITS[@]}"
+  printf '%s\n' "${BASALT[@]}"
+  printf '%s\n' "${WERK[@]}"
 } > "$PL/Late Shift.m3u8"
 {
   echo "#EXTM3U"
   printf '%s\n' "${AMBER[@]:0:4}"
   echo "/gone/nowhere/dust.flac"
 } > "$PL/Worn Tape.m3u8"
+printf '#EXTM3U\n# made with baz on 2026-08-09\n' > "$PL/Sketches.m3u8"
 
 Xvfb "$DISP" -screen 0 1280x860x24 -nolisten tcp &
 XPID=$!
@@ -114,7 +120,8 @@ key ctrl+p
 park; shot 02-wall-panel-open
 # 3. Arm the first playlist (the row's receive target, right edge of the
 #    row): the surface step and hairline on the row, the quiet `+` on every
-#    wall label.
+#    wall label. The rows now open with their sleeves — the 2 × 2 collage,
+#    the rest tile, the full-bleed single, top to bottom.
 klick $((W - 36)) 116
 park; shot 03-panel-armed
 # 4. A record's page beside the open panel: `Add to playlist` under the play
@@ -123,17 +130,18 @@ park; shot 03-panel-armed
 klick $((W - 36)) 116
 klick 160 250
 park; shot 04-album-page-with-panel
-# 5. The playlist page, by the panel row's name.
+# 5. The playlist page, by the panel row's name: the collage in the hero
+#    position, the record page's own two-column arrangement.
 klick $((W - 250)) 116
 park; shot 05-playlist-page
-# 6. The other list, straight from the panel (its rows are doors from any
-#    place it stands over): a missing entry, dimmed, its path on the row,
-#    counted in the header.
-klick $((W - 250)) 166
+# 6. The single-record list with a missing entry, straight from the panel
+#    (its rows are doors from any place it stands over): the full-bleed
+#    sleeve, the dimmed row with its path, the counted arithmetic.
+klick $((W - 250)) 220
 park; shot 06-playlist-page-missing
 # 7. Play from its first row: the playable subset queues (4 of 5), the lamp
 #    lands on the page's row.
-klick 300 290
+klick 450 250
 sleep 2
 park; shot 07-playlist-playing
 # 8. The queue place: exactly the playable subset a playlist's Play sent,
@@ -158,6 +166,10 @@ launch $W $H
 park; shot 10-wall-before-1920
 key ctrl+p
 park; shot 11-wall-panel-open-1920
+# 12. The page at 1920: the hero collage beside a list at its measure, both
+#     clear of the panel.
+klick $((W - 250)) 116
+park; shot 12-playlist-page-1920
 key Escape
 kill "$APID" 2>/dev/null; wait "$APID" 2>/dev/null
 kill "$XPID" 2>/dev/null; wait "$XPID" 2>/dev/null

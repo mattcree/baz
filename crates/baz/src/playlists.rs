@@ -37,7 +37,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use baz_core::index::Library;
+use baz_core::index::{AlbumArtist, Library};
 use baz_core::playlist::{Entry, ExtInf, Folder, Item, Playlist};
 
 use crate::vm::{self, QueueItemVm, QueueVm, TrackVm};
@@ -90,6 +90,11 @@ pub(crate) struct PanelRow {
     /// `None` when none did (a bare imported path list), so the row does not
     /// claim `0:00` about music it has not measured.
     pub(crate) seconds: Option<u64>,
+    /// The sleeve's quotations (ADR-0024 §A1): the first four *distinct*
+    /// records the library resolves, in playlist order — four for the 2 × 2
+    /// collage, fewer meaning "draw the first full-bleed", none meaning the
+    /// rest tile.
+    pub(crate) art: Vec<u64>,
 }
 
 impl PanelRow {
@@ -179,6 +184,10 @@ pub(crate) struct OpenPlaylist {
     pub(crate) queue: QueueVm,
     /// How many entries did not resolve.
     pub(crate) missing: usize,
+    /// The sleeve's quotations, by [`PanelRow::art`]'s rule — recomputed
+    /// with every re-read, so an edit that changes the first records changes
+    /// the sleeve with the rows.
+    pub(crate) art: Vec<u64>,
     /// Whether `Delete` has been pressed once and is waiting for the
     /// confirming press (the Settings folder-Remove shape).
     pub(crate) delete_armed: bool,
@@ -269,7 +278,7 @@ impl Playlists {
             saving_queue: None,
             open: None,
         };
-        playlists.refresh();
+        playlists.refresh(None);
         playlists
     }
 
@@ -287,7 +296,7 @@ impl Playlists {
             saving_queue: None,
             open: None,
         };
-        playlists.refresh();
+        playlists.refresh(None);
         playlists
     }
 
@@ -298,7 +307,7 @@ impl Playlists {
     /// check on read is the whole mechanism; ADR-0024 refuses a watcher), so
     /// a file dropped into the folder appears the next time the panel is
     /// summoned: last writer wins, no prompt.
-    pub(crate) fn refresh(&mut self) {
+    pub(crate) fn refresh(&mut self, library: Option<&Library>) {
         let Some(folder) = &self.folder else {
             return;
         };
@@ -309,25 +318,66 @@ impl Playlists {
                 return;
             }
         };
-        self.rows = listed
+        let readings: Vec<(String, Playlist)> = listed
             .iter()
             .filter_map(|file| {
-                let playlist = file.read().ok()?;
+                file.read()
+                    .ok()
+                    .map(|playlist| (file.name.clone(), playlist))
+            })
+            .collect();
+        // One walk of the index for every sleeve at once: each entry path
+        // resolves to the id of the record it belongs to — the same identity
+        // the wall's thumbnail cache is keyed by, which is what makes the
+        // collage a read of that cache rather than a second pipeline
+        // (ADR-0024 §A1).
+        let records: HashMap<&Path, u64> = match library {
+            Some(library) => {
+                let wanted: std::collections::HashSet<&Path> = readings
+                    .iter()
+                    .flat_map(|(_, playlist)| playlist.entries().map(|entry| entry.path.as_path()))
+                    .collect();
+                library
+                    .tracks()
+                    .filter(|meta| wanted.contains(meta.path.as_path()))
+                    .map(|meta| {
+                        (
+                            meta.path.as_path(),
+                            vm::album_id(AlbumArtist::of(meta), meta.album.as_deref()),
+                        )
+                    })
+                    .collect()
+            }
+            // No library yet (first construction): the rows list without
+            // sleeves, and the first refresh with one fills them in.
+            None => HashMap::new(),
+        };
+        self.rows = readings
+            .iter()
+            .map(|(name, playlist)| {
                 let mut entries = 0usize;
                 let mut seconds: Option<u64> = None;
+                let mut art: Vec<u64> = Vec::new();
                 for entry in playlist.entries() {
                     entries += 1;
                     if let Some(declared) = entry.extinf.as_ref().and_then(|extinf| extinf.seconds)
                     {
                         seconds = Some(seconds.unwrap_or(0) + declared);
                     }
+                    if art.len() < 4
+                        && let Some(&record) = records.get(entry.path.as_path())
+                        && !art.contains(&record)
+                    {
+                        art.push(record);
+                    }
                 }
-                Some(PanelRow {
-                    id: playlist_id(&file.name),
-                    name: file.name.clone(),
+                PanelRow {
+                    id: playlist_id(name),
+                    name: name.clone(),
                     entries,
                     seconds,
-                })
+                    art,
+                }
             })
             .collect();
         // An armed playlist that no longer exists is not a target.
@@ -364,11 +414,11 @@ impl Playlists {
     /// panel, or close it. Closing puts down everything the panel was holding
     /// — a pick, an armed target, a half-typed name — because a closed panel
     /// with an armed row would be an invisible mode.
-    pub(crate) fn toggle_panel(&mut self) {
+    pub(crate) fn toggle_panel(&mut self, library: Option<&Library>) {
         if self.panel_open {
             self.close_panel();
         } else {
-            self.refresh();
+            self.refresh(library);
             self.panel_open = true;
         }
     }
@@ -416,13 +466,18 @@ impl Playlists {
 
     /// Begin a layer-1 pick: hold what was pointed at and summon the panel to
     /// serve as the picker.
-    pub(crate) fn begin_pick(&mut self, label: String, entries: Vec<Entry>) {
+    pub(crate) fn begin_pick(
+        &mut self,
+        library: Option<&Library>,
+        label: String,
+        entries: Vec<Entry>,
+    ) {
         if entries.is_empty() {
             return;
         }
         self.pending = Some(Pending { label, entries });
         if !self.panel_open {
-            self.refresh();
+            self.refresh(library);
             self.panel_open = true;
         }
     }
@@ -459,7 +514,7 @@ impl Playlists {
         };
         let Some(file) = listed.iter().find(|file| file.name == row.name) else {
             // Deleted under the panel; the refresh below takes the row off.
-            self.refresh();
+            self.refresh(Some(library));
             return;
         };
         // Freshly read, so the append lands on what the file holds *now* —
@@ -487,7 +542,7 @@ impl Playlists {
                 return;
             }
         }
-        self.refresh();
+        self.refresh(Some(library));
         if self.open.as_ref().is_some_and(|open| open.id == id) {
             self.reload_open(library);
         }
@@ -512,7 +567,7 @@ impl Playlists {
                 println!("[playlists] created {:?}", playlist.name());
                 let id = playlist_id(playlist.name());
                 self.naming = None;
-                self.refresh();
+                self.refresh(Some(library));
                 if self.pending.is_some() {
                     self.pick(id, library);
                 }
@@ -524,7 +579,7 @@ impl Playlists {
     /// The queue place's `Save as playlist` was submitted: tonight's run
     /// frozen into a new file, and nothing else — the queue is not linked to
     /// the playlist, and the file is not linked to the run (ADR-0024 §4).
-    pub(crate) fn submit_queue_save(&mut self, queue: &QueueVm) {
+    pub(crate) fn submit_queue_save(&mut self, queue: &QueueVm, library: Option<&Library>) {
         let Some(saving) = &mut self.saving_queue else {
             return;
         };
@@ -545,7 +600,7 @@ impl Playlists {
                             queue.items.len()
                         );
                         self.saving_queue = None;
-                        self.refresh();
+                        self.refresh(library);
                     }
                     Err(error) => saving.error = Some(error.to_string()),
                 }
@@ -558,7 +613,7 @@ impl Playlists {
     /// Reports whether there is now a page to show.
     pub(crate) fn open_page(&mut self, id: u64, library: &Library) -> bool {
         // Re-list first: the id in hand may have been minted frames ago.
-        self.refresh();
+        self.refresh(Some(library));
         let Some(folder) = &self.folder else {
             return false;
         };
@@ -597,7 +652,7 @@ impl Playlists {
                 // place stops resolving; nothing to hold here.
                 println!("[playlists] cannot read {}: {error}", path.display());
                 self.open = None;
-                self.refresh();
+                self.refresh(Some(library));
             }
         }
     }
@@ -631,7 +686,7 @@ impl Playlists {
             println!("[playlists] could not save {:?}: {error}", open.name());
         }
         self.reload_open(library);
-        self.refresh();
+        self.refresh(Some(library));
     }
 
     /// The page's per-row ✕: take the entry at display row `row` out of the
@@ -692,7 +747,7 @@ impl Playlists {
                     Ok(playlist) => self.open = Some(resolve(id, playlist, library)),
                     Err(_) => self.open = None,
                 }
-                self.refresh();
+                self.refresh(Some(library));
                 Some(id)
             }
             Err(error) => {
@@ -704,7 +759,7 @@ impl Playlists {
 
     /// The page's `Delete`, confirmed: the file goes; the music stays.
     /// Reports whether it went, so the shell can leave the page it was for.
-    pub(crate) fn delete_open(&mut self) -> bool {
+    pub(crate) fn delete_open(&mut self, library: Option<&Library>) -> bool {
         let Some(open) = &self.open else {
             return false;
         };
@@ -716,7 +771,7 @@ impl Playlists {
             Ok(()) => {
                 println!("[playlists] deleted {name:?} — the file; the music stays");
                 self.open = None;
-                self.refresh();
+                self.refresh(library);
                 true
             }
             Err(error) => {
@@ -813,6 +868,11 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
     let mut items: Vec<QueueItemVm> = Vec::new();
     let mut missing = 0usize;
     let mut previous_record: Option<(String, String)> = None;
+    // The sleeve's quotations: the first four distinct records, in order
+    // (ADR-0024 §A1) — the same identity the wall's thumbnail cache is keyed
+    // by, so the page's hero and the panel's tile read the cache the tiles
+    // already fill.
+    let mut art: Vec<u64> = Vec::new();
     for (position, entry) in playlist.entries().enumerate() {
         let stem = || {
             entry.path.file_stem().map_or_else(
@@ -821,6 +881,14 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
             )
         };
         let meta = indexed.get(entry.path.as_path());
+        if art.len() < 4
+            && let Some(meta) = meta
+        {
+            let record = vm::album_id(AlbumArtist::of(meta), meta.album.as_deref());
+            if !art.contains(&record) {
+                art.push(record);
+            }
+        }
         // The verdict (module docs): indexed, or on disk. The one `stat` per
         // unindexed entry happens here, at load.
         let playable = meta.is_some() || entry.path.is_file();
@@ -929,6 +997,7 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
         tracks,
         queue,
         missing,
+        art,
         delete_armed: false,
         renaming: None,
     }
@@ -1041,7 +1110,7 @@ mod tests {
             playlist.save().expect("save");
             playlist_id("Mix")
         };
-        playlists.refresh();
+        playlists.refresh(Some(&library));
         assert!(playlists.open_page(id, &library));
         let open = playlists.page(id).expect("open");
         assert_eq!(open.rows.len(), 4);
@@ -1090,7 +1159,7 @@ mod tests {
             playlist.save().expect("save");
             playlist_id("Mix")
         };
-        playlists.refresh();
+        playlists.refresh(Some(&library));
         assert!(playlists.open_page(id, &library));
         playlists.shift_entry(1, -1, &library);
         let open = playlists.page(id).expect("open");
@@ -1114,7 +1183,7 @@ mod tests {
             let folder = playlists.folder.as_ref().expect("folder");
             write_list(folder, "Mix", &["/m/a.flac", "/m/b.flac"])
         };
-        playlists.refresh();
+        playlists.refresh(Some(&library));
         assert!(playlists.open_page(id, &library));
         // vim adds a track under the open page: size changes, stamp changes.
         let path = playlists
@@ -1179,8 +1248,9 @@ mod tests {
             let folder = playlists.folder.as_ref().expect("folder");
             write_list(folder, "Mix", &["/m/a.flac"])
         };
-        playlists.refresh();
+        playlists.refresh(Some(&library));
         playlists.begin_pick(
+            Some(&library),
             "Add \u{201c}Apollo\u{201d}".to_owned(),
             vec![Entry::new(track("/m/eno/ascent.flac"))],
         );
@@ -1191,6 +1261,7 @@ mod tests {
         assert_eq!(row.entries, 2, "the record was appended");
         // A pick into a new playlist: two gestures, one file.
         playlists.begin_pick(
+            Some(&library),
             "Add \u{201c}Apollo\u{201d}".to_owned(),
             vec![Entry::new(track("/m/eno/ascent.flac"))],
         );
@@ -1212,7 +1283,7 @@ mod tests {
             let folder = playlists.folder.as_ref().expect("folder");
             write_list(folder, "Mix", &["/m/low/sunflower.flac"])
         };
-        playlists.refresh();
+        playlists.refresh(Some(&library));
         playlists.append(
             id,
             vec![Entry::new(track("/m/low/sunflower.flac"))],
@@ -1244,7 +1315,7 @@ mod tests {
             text: "night/late".to_owned(),
             error: None,
         });
-        playlists.submit_queue_save(&queue);
+        playlists.submit_queue_save(&queue, None);
         assert!(
             playlists
                 .saving_queue
@@ -1257,7 +1328,7 @@ mod tests {
             text: "Tonight".to_owned(),
             error: None,
         });
-        playlists.submit_queue_save(&queue);
+        playlists.submit_queue_save(&queue, None);
         assert!(playlists.saving_queue.is_none());
         let row = playlists.row(playlist_id("Tonight")).expect("saved");
         assert_eq!(row.entries, 1);
@@ -1274,7 +1345,7 @@ mod tests {
             let folder = playlists.folder.as_ref().expect("folder");
             write_list(folder, "Mix", &["/m/a.flac"])
         };
-        playlists.toggle_panel();
+        playlists.toggle_panel(None);
         playlists.toggle_armed(id);
         playlists.pending = Some(Pending {
             label: String::new(),
@@ -1292,6 +1363,81 @@ mod tests {
         assert!(!playlists.peel(), "and a closed panel has no layers");
     }
 
+    /// The sleeve's quotations (ADR-0024 §A1): the first four *distinct*
+    /// records the library resolves, in playlist order — duplicates and
+    /// later records quote nothing, unindexed entries contribute nothing,
+    /// and the panel's reading and the page's are the same list.
+    #[test]
+    fn the_sleeve_quotes_the_first_four_distinct_records_in_order() {
+        let (_keep, folder) = folder();
+        let mut library = Library::open_in_memory().expect("library");
+        let mut expected: Vec<u64> = Vec::new();
+        let mut paths: Vec<String> = Vec::new();
+        for n in 1..=5u32 {
+            let path = format!("/m/band{n}/one.flac");
+            let meta = meta(&format!("Band {n}"), &format!("Record {n}"), "One", &path);
+            expected.push(vm::album_id(AlbumArtist::of(&meta), meta.album.as_deref()));
+            paths.push(path);
+            library.add_tracks(vec![meta]).expect("add");
+        }
+        let mut playlists = Playlists::over(folder);
+        let id = {
+            let folder = playlists.folder.as_ref().expect("folder");
+            let mut playlist = folder.create("Mix").expect("create");
+            // The first record twice (one quotation), an unindexed stranger
+            // (none), then the rest — five records, four quoted.
+            for path in [
+                paths[0].as_str(),
+                paths[0].as_str(),
+                "/elsewhere/unindexed.flac",
+                paths[1].as_str(),
+                paths[2].as_str(),
+                paths[3].as_str(),
+                paths[4].as_str(),
+            ] {
+                playlist
+                    .items_mut()
+                    .push(Item::Entry(Entry::new(track(path))));
+            }
+            playlist.save().expect("save");
+            playlist_id("Mix")
+        };
+        playlists.refresh(Some(&library));
+        let row = playlists.row(id).expect("row");
+        assert_eq!(row.art, expected[..4], "first four distinct, in order");
+        assert!(playlists.open_page(id, &library));
+        assert_eq!(
+            playlists.page(id).expect("open").art,
+            expected[..4],
+            "the page quotes the same records the panel does"
+        );
+        // A list below four distinct records quotes what it has…
+        let two = {
+            let folder = playlists.folder.as_ref().expect("folder");
+            let mut playlist = folder.create("Pair").expect("create");
+            for path in [paths[0].as_str(), paths[1].as_str()] {
+                playlist
+                    .items_mut()
+                    .push(Item::Entry(Entry::new(track(path))));
+            }
+            playlist.save().expect("save");
+            playlist_id("Pair")
+        };
+        // …and an empty one quotes nothing at all: the rest tile's case.
+        let bare = {
+            let folder = playlists.folder.as_ref().expect("folder");
+            folder.create("Bare").expect("create");
+            playlist_id("Bare")
+        };
+        playlists.refresh(Some(&library));
+        assert_eq!(playlists.row(two).expect("row").art, expected[..2]);
+        assert_eq!(playlists.row(bare).expect("row").art, []);
+        // Without a library there is nothing to resolve against, and the
+        // rows say so rather than guessing.
+        playlists.refresh(None);
+        assert_eq!(playlists.row(id).expect("row").art, []);
+    }
+
     #[test]
     fn arming_is_reversible_by_the_same_press() {
         let (_keep, folder) = folder();
@@ -1300,7 +1446,7 @@ mod tests {
             let folder = playlists.folder.as_ref().expect("folder");
             write_list(folder, "Mix", &[])
         };
-        playlists.refresh();
+        playlists.refresh(None);
         playlists.toggle_armed(id);
         assert_eq!(playlists.armed, Some(id));
         playlists.toggle_armed(id);
@@ -1316,7 +1462,7 @@ mod tests {
             let folder = playlists.folder.as_ref().expect("folder");
             write_list(folder, "Mix", &["/m/a.flac"])
         };
-        playlists.refresh();
+        playlists.refresh(Some(&library));
         assert!(playlists.open_page(id, &library));
         playlists.open.as_mut().expect("open").renaming = Some(NameEntry {
             text: "Late".to_owned(),
@@ -1326,7 +1472,7 @@ mod tests {
         assert_eq!(renamed, playlist_id("Late"));
         assert!(playlists.page(renamed).is_some());
         assert!(playlists.row(id).is_none(), "the old name is gone");
-        assert!(playlists.delete_open());
+        assert!(playlists.delete_open(None));
         assert!(playlists.rows.is_empty());
     }
 }
