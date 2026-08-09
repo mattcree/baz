@@ -144,12 +144,14 @@ pub struct Config {
     /// **View state, persisted, and deliberately not a setting.** ADR-0017
     /// §1.3 takes the critique's better half — *Settings must never be the
     /// answer to a view question* — and supersedes `02` §2.7's Settings →
-    /// Appearance row: the control is <kbd>Ctrl</kbd>+<kbd>-</kbd> /
-    /// <kbd>Ctrl</kbd>+<kbd>=</kbd> and <kbd>Ctrl</kbd>+scroll, and this key
-    /// is where the gesture's *result* is remembered, exactly as `group_key`
-    /// remembers the press on a word in the top bar. There is no density row
-    /// anywhere in the Settings place, and `docs/REFUSALS.md` refuses the
-    /// grid-size picker that would be the other way to spell it.
+    /// Appearance row: the control is the three detent marks at the foot of
+    /// the index rail's lane (ADR-0028), with <kbd>Ctrl</kbd>+<kbd>-</kbd> /
+    /// <kbd>Ctrl</kbd>+<kbd>=</kbd> and <kbd>Ctrl</kbd>+scroll as its
+    /// accelerators, and this key is where the press's *result* is
+    /// remembered, exactly as `group_key` remembers the press on a word in
+    /// the top bar. There is no density row anywhere in the Settings place,
+    /// and `docs/REFUSALS.md` (as ADR-0028 narrowed it) still refuses the
+    /// view-options menu that would be the other way to spell it.
     ///
     /// Written as [`Density::code`], for `group_key`'s reason.
     pub density: Density,

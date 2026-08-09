@@ -67,9 +67,22 @@ optional *output*, never a dependency and never the source of truth.
 
 ## The interface
 
-**No view-options menus.** No grid-size picker, no list-mode toggle, no column
-chooser, no sort dropdown. Group keys are a row of words; the lens switcher is
-two words; density is a zoom gesture.
+**No view-options menus.** No list-mode toggle, no column chooser, no sort
+dropdown, no free zoom slider. Group keys are a row of words; the lens switcher
+is two words; density is three detent marks on the index rail's lane, and the
+zoom gesture accelerates them.
+
+*Amended by [ADR-0028](adr/0028-density-detents.md) under the editing rule.*
+The entry's force is against what it was written against — menus, choosers and
+sliders that enumerate view state and grow tenants — and all of that stands.
+What falls is one clause, *"no grid-size picker"*, as applied to three quiet
+detents in the place's own body: the clause had come to forbid the only visible
+route to an action, which put it in direct contradiction with this ledger's own
+accessibility entry (*no action is gesture-only* — doc 09 §5.2's reading of the
+visible-control rule below), and the accessibility entry is the mitigation for
+a toolkit with no accessibility tree, which outranks a quietness preference.
+The three named steps, the gesture, the persistence-as-state and the absence of
+any Settings row are all unchanged. (Owner's decision, 2026-08-09.)
 
 **Nothing is ever drawn on top of a sleeve.** No play overlay on hover, no
 badge, no duration chip, no gradient scrim, no selection tint, no queue numeral.

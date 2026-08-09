@@ -124,6 +124,13 @@ pub enum Glyph {
     ArrowUp,
     /// Reorder, down: [`Self::ArrowUp`] mirrored.
     ArrowDown,
+    /// The wall at its loosest hang — one work filling the field. The first
+    /// of the three density detents (ADR-0028); see [`DENSITY_SPACIOUS`].
+    DensitySpacious,
+    /// The wall at the default hang — four works. The middle detent.
+    DensityBalanced,
+    /// The wall at its tightest hang — nine works. The third detent.
+    DensityDense,
 }
 
 /// Play — one triangle, sitting a touch right of the box's centre so the
@@ -477,6 +484,110 @@ const ARROW_DOWN: &[Outline] = &[
     ],
 ];
 
+/// The three density detents (ADR-0028) share one field — 0.125 … 0.875, a
+/// 12 px square at [`theme::ICON_PX`] — subdivided one, two and three ways:
+/// **the wall itself at its three hangs**, one work, four works, nine works.
+/// The field is constant across the set so the three read as one thing at
+/// three settings rather than as three marks, exactly as the walls they
+/// depict are one wall at three steps.
+const DENSITY_FIELD: (f32, f32) = (0.125, 0.875);
+
+/// One work filling the field: the loosest hang.
+const DENSITY_SPACIOUS: &[Outline] = &[&[
+    (DENSITY_FIELD.0, DENSITY_FIELD.0),
+    (DENSITY_FIELD.1, DENSITY_FIELD.0),
+    (DENSITY_FIELD.1, DENSITY_FIELD.1),
+    (DENSITY_FIELD.0, DENSITY_FIELD.1),
+]];
+
+/// Four works: the default hang. Cell 0.3125 (5 px), gap 0.125 (2 px) —
+/// `2 × 0.3125 + 0.125` spans the field exactly.
+const DENSITY_BALANCED: &[Outline] = &[
+    &[
+        (0.125, 0.125),
+        (0.4375, 0.125),
+        (0.4375, 0.4375),
+        (0.125, 0.4375),
+    ],
+    &[
+        (0.5625, 0.125),
+        (0.875, 0.125),
+        (0.875, 0.4375),
+        (0.5625, 0.4375),
+    ],
+    &[
+        (0.125, 0.5625),
+        (0.4375, 0.5625),
+        (0.4375, 0.875),
+        (0.125, 0.875),
+    ],
+    &[
+        (0.5625, 0.5625),
+        (0.875, 0.5625),
+        (0.875, 0.875),
+        (0.5625, 0.875),
+    ],
+];
+
+/// Nine works: the tightest hang. Cell 0.1875 (3 px), gap 0.09375 (1.5 px)
+/// — `3 × 0.1875 + 2 × 0.09375` spans the field exactly.
+const DENSITY_DENSE: &[Outline] = &[
+    &[
+        (0.125, 0.125),
+        (0.3125, 0.125),
+        (0.3125, 0.3125),
+        (0.125, 0.3125),
+    ],
+    &[
+        (0.40625, 0.125),
+        (0.59375, 0.125),
+        (0.59375, 0.3125),
+        (0.40625, 0.3125),
+    ],
+    &[
+        (0.6875, 0.125),
+        (0.875, 0.125),
+        (0.875, 0.3125),
+        (0.6875, 0.3125),
+    ],
+    &[
+        (0.125, 0.40625),
+        (0.3125, 0.40625),
+        (0.3125, 0.59375),
+        (0.125, 0.59375),
+    ],
+    &[
+        (0.40625, 0.40625),
+        (0.59375, 0.40625),
+        (0.59375, 0.59375),
+        (0.40625, 0.59375),
+    ],
+    &[
+        (0.6875, 0.40625),
+        (0.875, 0.40625),
+        (0.875, 0.59375),
+        (0.6875, 0.59375),
+    ],
+    &[
+        (0.125, 0.6875),
+        (0.3125, 0.6875),
+        (0.3125, 0.875),
+        (0.125, 0.875),
+    ],
+    &[
+        (0.40625, 0.6875),
+        (0.59375, 0.6875),
+        (0.59375, 0.875),
+        (0.40625, 0.875),
+    ],
+    &[
+        (0.6875, 0.6875),
+        (0.875, 0.6875),
+        (0.875, 0.875),
+        (0.6875, 0.875),
+    ],
+];
+
 impl Glyph {
     /// Every glyph, in sprite-sheet order.
     const ALL: [Self; Self::COUNT] = [
@@ -493,10 +604,13 @@ impl Glyph {
         Self::Minus,
         Self::ArrowUp,
         Self::ArrowDown,
+        Self::DensitySpacious,
+        Self::DensityBalanced,
+        Self::DensityDense,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 13;
+    const COUNT: usize = 16;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -515,6 +629,9 @@ impl Glyph {
             Self::Minus => MINUS,
             Self::ArrowUp => ARROW_UP,
             Self::ArrowDown => ARROW_DOWN,
+            Self::DensitySpacious => DENSITY_SPACIOUS,
+            Self::DensityBalanced => DENSITY_BALANCED,
+            Self::DensityDense => DENSITY_DENSE,
         }
     }
 
@@ -534,6 +651,9 @@ impl Glyph {
             Self::Minus => 10,
             Self::ArrowUp => 11,
             Self::ArrowDown => 12,
+            Self::DensitySpacious => 13,
+            Self::DensityBalanced => 14,
+            Self::DensityDense => 15,
         }
     }
 
@@ -985,6 +1105,42 @@ mod tests {
             runs.push((began, 1.0 - began));
         }
         runs
+    }
+
+    /// **The density detents depict the wall at its three hangs** — one,
+    /// four and nine works subdividing one shared field (ADR-0028), so the
+    /// three read as one wall at three settings rather than as three
+    /// unrelated marks.
+    #[test]
+    fn the_density_detents_subdivide_one_shared_field() {
+        let detents = [
+            (Glyph::DensitySpacious, 1),
+            (Glyph::DensityBalanced, 2),
+            (Glyph::DensityDense, 3),
+        ];
+        for (glyph, columns) in detents {
+            // Through the top row of cells: as many solid runs as columns.
+            let runs = runs_along(glyph, 0.25);
+            assert_eq!(runs.len(), columns, "{glyph:?} across its top row");
+            // One shared field: the first run opens on the field's left
+            // edge and the last closes on its right, for every detent.
+            let first = runs.first().expect("a cell");
+            let last = runs.last().expect("a cell");
+            assert!(
+                (first.0 - DENSITY_FIELD.0).abs() < 0.01,
+                "{glyph:?} does not open on the shared field's edge"
+            );
+            assert!(
+                (last.0 + last.1 - DENSITY_FIELD.1).abs() < 0.01,
+                "{glyph:?} does not close on the shared field's edge"
+            );
+        }
+        // The subdivisions are real: mid-height crosses Balanced's gap
+        // (nothing), Dense's middle row (three cells) and Spacious's one
+        // work (still solid).
+        assert!(runs_along(Glyph::DensityBalanced, 0.5).is_empty());
+        assert_eq!(runs_along(Glyph::DensityDense, 0.5).len(), 3);
+        assert_eq!(runs_along(Glyph::DensitySpacious, 0.5).len(), 1);
     }
 
     /// **The magnifier is a ring with a handle**, and the ring's hole
