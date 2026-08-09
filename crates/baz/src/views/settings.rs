@@ -70,15 +70,15 @@
 use std::path::PathBuf;
 
 use iced::widget::{
-    Column, Space, button, checkbox, column, container, horizontal_rule, row, scrollable, text,
-    text_input,
+    Column, Space, button, checkbox, column, container, horizontal_rule, image as iced_image, row,
+    scrollable, text, text_input, tooltip,
 };
 use iced::{Element, Length, alignment};
 
 use crate::app::Message;
 use crate::player::PlayerState;
 use crate::replaygain::{self, MODES};
-use crate::theme;
+use crate::{icon, theme};
 
 /// One music folder, as the Library section draws it (ADR-0022).
 ///
@@ -873,8 +873,8 @@ fn stepper_row(
             )
             .width(Length::Fixed(theme::SETTING_VALUE_W))
             .align_x(alignment::Horizontal::Right),
-            stepper("\u{2212}", can_decrease, decrease),
-            stepper("+", can_increase, increase),
+            stepper(icon::Glyph::Minus, "Step down", can_decrease, decrease),
+            stepper(icon::Glyph::Plus, "Step up", can_increase, increase),
         ]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center),
@@ -887,33 +887,50 @@ fn stepper_row(
     .into()
 }
 
-/// One `−` or `+` button: the transport's quiet card in a smaller square.
+/// One `−` or `+` button: the transport's quiet card in a smaller square,
+/// wearing the drawn [`icon::Glyph::Minus`] / [`icon::Glyph::Plus`] pair
+/// (doc 10 §3.6).
 ///
-/// A minus sign (U+2212), not a hyphen: it is the character that matches the
-/// `+` in width and in height, and these two sit side by side.
-fn stepper(glyph: &'static str, enabled: bool, message: Message) -> Element<'static, Message> {
+/// The pair used to be font characters — U+2212 chosen so the two matched
+/// in width — and the same care is now structural: the minus *is* the
+/// plus's own horizontal bar (asserted in `icon.rs`), so the pair cannot
+/// drift apart. U+2212 stays legitimate in the **value** beside them,
+/// where it is a figure; the slot is a control, and a control slot carries
+/// a drawn glyph or a word, never a borrowed character. Icon-only, so each
+/// carries its name as a tooltip (ADR-0017 §4c); the ink is the resting
+/// ladder, because unlike the row slots these stand at rest.
+fn stepper(
+    glyph: icon::Glyph,
+    name: &'static str,
+    enabled: bool,
+    message: Message,
+) -> Element<'static, Message> {
     let room = theme::active();
-    button(
-        container(
-            text(glyph)
-                .size(theme::SIZE_BODY)
-                .line_height(theme::LEADING_BODY)
-                .color(if enabled {
-                    room.paper
-                } else {
-                    room.paper_muted
-                }),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(alignment::Horizontal::Center)
-        .align_y(alignment::Vertical::Center),
+    let mark = container(
+        iced_image(icon::handle(glyph))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(theme::glyph_opacity(enabled, false)),
     )
-    .width(Length::Fixed(theme::STEPPER_HIT))
-    .height(Length::Fixed(theme::STEPPER_HIT))
-    .padding(0)
-    .style(move |_theme, status| theme::transport(room, room.wall, status))
-    .on_press_maybe(enabled.then_some(message))
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    tooltip(
+        button(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .padding(0)
+            .style(move |_theme, status| theme::transport(room, room.wall, status))
+            .on_press_maybe(enabled.then_some(message)),
+        text(name)
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Top,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
     .into()
 }
 

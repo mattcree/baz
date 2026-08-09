@@ -453,13 +453,15 @@ fn entry_row(
     let mut slots = row![
         body,
         step_slot(
-            "\u{2191}",
+            icon::Glyph::ArrowUp,
+            "Move up",
             index > 0,
             offered,
             Message::PlaylistShiftEntry(index, -1)
         ),
         step_slot(
-            "\u{2193}",
+            icon::Glyph::ArrowDown,
+            "Move down",
             index + 1 < total,
             offered,
             Message::PlaylistShiftEntry(index, 1),
@@ -492,33 +494,33 @@ fn entry_row(
     )
 }
 
-/// The row's transfer `+` — the queue row's exact anatomy and tooltip,
-/// sending the page's own message ([`Message::PlaylistAddEntry`]): hold this
-/// row's track, open the panel as the picker (doc 09 §8.1's one gesture,
-/// reaching the page's rows at step 4 as §8.2's parity promised).
+/// The row's transfer `+` — the queue row's exact anatomy and tooltip, the
+/// drawn [`icon::Glyph::Plus`] since doc 10 §3.6, sending the page's own
+/// message ([`Message::PlaylistAddEntry`]): hold this row's track, open the
+/// panel as the picker (doc 09 §8.1's one gesture, reaching the page's rows
+/// at step 4 as §8.2's parity promised).
 fn transfer_slot(index: usize, offered: bool) -> Element<'static, Message> {
     let room = theme::active();
     if !offered {
         return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
     }
+    let mark = container(
+        iced_image(icon::handle(icon::Glyph::Plus))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(theme::GLYPH_OPACITY_HOVER),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
     tooltip(
-        button(
-            container(
-                text("+")
-                    .size(theme::SIZE_BODY)
-                    .line_height(theme::LEADING_BODY)
-                    .color(room.paper),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(alignment::Horizontal::Center)
-            .align_y(alignment::Vertical::Center),
-        )
-        .width(Length::Fixed(theme::STEPPER_HIT))
-        .height(Length::Fixed(theme::STEPPER_HIT))
-        .padding(0)
-        .style(move |_theme, status| theme::transport(room, room.wall, status))
-        .on_press(Message::PlaylistAddEntry(index)),
+        button(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .padding(0)
+            .style(move |_theme, status| theme::transport(room, room.wall, status))
+            .on_press(Message::PlaylistAddEntry(index)),
         text("Add to a playlist, or the queue")
             .size(theme::SIZE_CAPTION)
             .line_height(theme::LEADING_CAPTION),
@@ -530,17 +532,19 @@ fn transfer_slot(index: usize, offered: bool) -> Element<'static, Message> {
     .into()
 }
 
-/// One reorder stepper's reserved slot: ↑ or ↓ while the pointer is on the
-/// row, and a space of exactly the same width when it is not — the settings
-/// steppers' size, the queue ✕'s reservation rule.
+/// One reorder stepper's reserved slot: the drawn ↑ or ↓ while the pointer
+/// is on the row, and a space of exactly the same width when it is not —
+/// the settings steppers' size, the queue ✕'s reservation rule.
 ///
-/// The arrows are U+2191/U+2193 rather than the design docs' ▲▼ shorthand:
-/// IBM Plex Sans (`assets/fonts`) carries no triangle glyphs at any code
-/// point, so the triangles rasterised as tofu boxes on the shipped page —
-/// caught the first time a capture actually hovered a row. The arrows are
-/// in the face, and they say the same thing.
+/// The arrows were U+2191/U+2193 borrowed from the face (IBM Plex Sans
+/// carries no triangles, so the docs' ▲▼ shorthand rasterised as tofu);
+/// they are [`icon::Glyph::ArrowUp`]/[`icon::Glyph::ArrowDown`] now
+/// (doc 10 §3.6): a control slot carries a drawn glyph or a word, never a
+/// borrowed character, and the drawn pair matches the ✕ beside it in
+/// stroke and ink. Icon-only, so the tooltip carries the name.
 fn step_slot(
-    glyph: &'static str,
+    glyph: icon::Glyph,
+    name: &'static str,
     can: bool,
     offered: bool,
     message: Message,
@@ -549,23 +553,35 @@ fn step_slot(
     if !offered {
         return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
     }
-    button(
-        container(
-            text(glyph)
-                .size(theme::SIZE_BODY)
-                .line_height(theme::LEADING_BODY)
-                .color(if can { room.paper } else { room.paper_muted }),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(alignment::Horizontal::Center)
-        .align_y(alignment::Vertical::Center),
+    let mark = container(
+        iced_image(icon::handle(glyph))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(if can {
+                theme::GLYPH_OPACITY_HOVER
+            } else {
+                theme::GLYPH_OPACITY_DISABLED
+            }),
     )
-    .width(Length::Fixed(theme::STEPPER_HIT))
-    .height(Length::Fixed(theme::STEPPER_HIT))
-    .padding(0)
-    .style(move |_theme, status| theme::transport(room, room.wall, status))
-    .on_press_maybe(can.then_some(message))
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    tooltip(
+        button(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .padding(0)
+            .style(move |_theme, status| theme::transport(room, room.wall, status))
+            .on_press_maybe(can.then_some(message)),
+        text(name)
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Left,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
     .into()
 }
 

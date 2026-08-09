@@ -692,8 +692,11 @@ fn track_row(
 }
 
 /// The track's `+` slot: the queue ✕'s exact anatomy — [`theme::STEPPER_HIT`]
-/// square, slot reserved whether shown — sending one track toward the picker
-/// (09 §8.1): pick a destination, the Queue first among them.
+/// square, slot reserved whether shown, the drawn [`icon::Glyph::Plus`]
+/// since doc 10 §3.6 — sending one track toward the picker (09 §8.1): pick
+/// a destination, the Queue first among them. The drawn mark is what ends
+/// the accidental fourth vocabulary in this row: one stroke weight beside
+/// the ✕ it shares the slot column with.
 ///
 /// Crate-visible because the wall's **Songs** rows carry the same reserved
 /// slot sending the same message (doc 09 §5's row anatomy): one transfer
@@ -703,24 +706,23 @@ pub(crate) fn add_slot(album: u64, index: usize, offered: bool) -> Element<'stat
     if !offered {
         return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
     }
+    let mark = container(
+        iced_image(icon::handle(icon::Glyph::Plus))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(theme::GLYPH_OPACITY_HOVER),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
     iced::widget::tooltip(
-        button(
-            container(
-                text("+")
-                    .size(theme::SIZE_BODY)
-                    .line_height(theme::LEADING_BODY)
-                    .color(room.paper),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(alignment::Horizontal::Center)
-            .align_y(alignment::Vertical::Center),
-        )
-        .width(Length::Fixed(theme::STEPPER_HIT))
-        .height(Length::Fixed(theme::STEPPER_HIT))
-        .padding(0)
-        .style(move |_theme, status| theme::transport(room, room.wall, status))
-        .on_press(Message::AddTrackToPlaylist(album, index)),
+        button(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .padding(0)
+            .style(move |_theme, status| theme::transport(room, room.wall, status))
+            .on_press(Message::AddTrackToPlaylist(album, index)),
         text("Add to a playlist, or the queue")
             .size(theme::SIZE_CAPTION)
             .line_height(theme::LEADING_CAPTION),

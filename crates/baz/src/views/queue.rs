@@ -480,13 +480,15 @@ fn queue_row(
     let mut slots = row![
         body,
         step_slot(
-            "\u{2191}",
+            icon::Glyph::ArrowUp,
+            "Move up",
             index > 0,
             offered,
             Message::ShiftQueued(index, -1)
         ),
         step_slot(
-            "\u{2193}",
+            icon::Glyph::ArrowDown,
+            "Move down",
             index + 1 < total,
             offered,
             Message::ShiftQueued(index, 1),
@@ -512,15 +514,23 @@ fn queue_row(
     )
 }
 
-/// One reorder stepper's reserved slot: ↑ or ↓ while the pointer is on the
-/// row, and a space of exactly the same width when it is not — the playlist
-/// page's `step_slot`, spending the queue's own message
+/// One reorder stepper's reserved slot: the drawn ↑ or ↓ while the pointer
+/// is on the row, and a space of exactly the same width when it is not —
+/// the playlist page's `step_slot`, spending the queue's own message
 /// ([`Message::ShiftQueued`]) so the two editors stay one anatomy
-/// (doc 09 §8.2). U+2191/U+2193 rather than the docs' ▲▼ shorthand for the
-/// playlist page's reason: IBM Plex Sans carries no triangles, and these
-/// arrows are in the face (see `views/playlist.rs`'s `step_slot`).
+/// (doc 09 §8.2).
+///
+/// **Drawn glyphs, not font characters** (doc 10 §3.6): the slot row used
+/// to hold the drawn ✕ beside U+2191/U+2193 borrowed from the face at a
+/// visibly different stroke weight — the accidental fourth vocabulary the
+/// study names — and a control slot now carries a drawn glyph or a word,
+/// never a borrowed character. Icon-only, so the tooltip carries its name
+/// (§3.1's rule; ADR-0017 §4c), and it draws at the hovered weight for the
+/// ✕'s own reason: a control that exists only under the pointer has one
+/// reading.
 fn step_slot(
-    glyph: &'static str,
+    glyph: icon::Glyph,
+    name: &'static str,
     can: bool,
     offered: bool,
     message: Message,
@@ -529,52 +539,64 @@ fn step_slot(
     if !offered {
         return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
     }
-    button(
-        container(
-            text(glyph)
-                .size(theme::SIZE_BODY)
-                .line_height(theme::LEADING_BODY)
-                .color(if can { room.paper } else { room.paper_muted }),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(alignment::Horizontal::Center)
-        .align_y(alignment::Vertical::Center),
+    let mark = container(
+        iced_image(icon::handle(glyph))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(if can {
+                theme::GLYPH_OPACITY_HOVER
+            } else {
+                theme::GLYPH_OPACITY_DISABLED
+            }),
     )
-    .width(Length::Fixed(theme::STEPPER_HIT))
-    .height(Length::Fixed(theme::STEPPER_HIT))
-    .padding(0)
-    .style(move |_theme, status| theme::transport(room, room.wall, status))
-    .on_press_maybe(can.then_some(message))
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    tooltip(
+        button(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .padding(0)
+            .style(move |_theme, status| theme::transport(room, room.wall, status))
+            .on_press_maybe(can.then_some(message)),
+        text(name)
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Left,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
     .into()
 }
 
-/// The row's transfer slot: the album page's `+` anatomy, holding this row's
-/// track and opening the picker (doc 09 §8.1 — pick a destination, the Queue
-/// first among them).
+/// The row's transfer slot: the album page's `+` anatomy — the drawn
+/// [`icon::Glyph::Plus`] since doc 10 §3.6 — holding this row's track and
+/// opening the picker (doc 09 §8.1 — pick a destination, the Queue first
+/// among them).
 fn transfer_slot(index: usize, offered: bool) -> Element<'static, Message> {
     let room = theme::active();
     if !offered {
         return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
     }
+    let mark = container(
+        iced_image(icon::handle(icon::Glyph::Plus))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(theme::GLYPH_OPACITY_HOVER),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
     tooltip(
-        button(
-            container(
-                text("+")
-                    .size(theme::SIZE_BODY)
-                    .line_height(theme::LEADING_BODY)
-                    .color(room.paper),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(alignment::Horizontal::Center)
-            .align_y(alignment::Vertical::Center),
-        )
-        .width(Length::Fixed(theme::STEPPER_HIT))
-        .height(Length::Fixed(theme::STEPPER_HIT))
-        .padding(0)
-        .style(move |_theme, status| theme::transport(room, room.wall, status))
-        .on_press(Message::AddQueuedToPlaylist(index)),
+        button(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .padding(0)
+            .style(move |_theme, status| theme::transport(room, room.wall, status))
+            .on_press(Message::AddQueuedToPlaylist(index)),
         text("Add to a playlist, or the queue")
             .size(theme::SIZE_CAPTION)
             .line_height(theme::LEADING_CAPTION),
@@ -605,9 +627,10 @@ fn remove_slot(index: usize, offered: bool) -> Element<'static, Message> {
         iced_image(icon::handle(icon::Glyph::Close))
             .width(Length::Fixed(theme::ICON_PX))
             .height(Length::Fixed(theme::ICON_PX))
-            // The one glyph in baz drawn at its hovered weight: this control
-            // exists only while the pointer is on its row, so its resting
-            // reading and its hovered reading are the same reading.
+            // Drawn at the hovered weight, like every glyph in the slot row:
+            // a control that exists only while the pointer is on its row has
+            // one reading, so its resting weight and its hovered weight are
+            // the same weight.
             .opacity(theme::GLYPH_OPACITY_HOVER),
     )
     .width(Length::Fill)

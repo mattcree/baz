@@ -114,6 +114,16 @@ pub enum Glyph {
     Magnifier,
     /// Settings: the gear, the strip's one icon-only door (doc 10 §3.4).
     Gear,
+    /// Add-to: the transfer slot's mark, on every row that can send a track
+    /// toward the picker (doc 10 §3.6).
+    Plus,
+    /// Step-down: [`Self::Plus`]'s horizontal bar alone, for the settings
+    /// steppers' `−` half.
+    Minus,
+    /// Reorder, up: the row steppers' upward arrow.
+    ArrowUp,
+    /// Reorder, down: [`Self::ArrowUp`] mirrored.
+    ArrowDown,
 }
 
 /// Play — one triangle, sitting a touch right of the box's centre so the
@@ -381,6 +391,92 @@ const GEAR: &[Outline] = &[&[
     (0.6550, 0.5000),
 ]];
 
+/// Add-to — two bars crossing at the centre, axis-aligned where [`CLOSE`]'s
+/// are diagonal: the transfer mark for every row slot (doc 10 §3.6),
+/// replacing the borrowed font `+`. The bars **overlap** at the centre and
+/// fill by the union rule in [`Glyph::covers`], exactly as the two crosses
+/// do. Bar stroke 0.15, the pause bars' own.
+const PLUS: &[Outline] = &[
+    &[
+        (0.425, 0.155),
+        (0.575, 0.155),
+        (0.575, 0.845),
+        (0.425, 0.845),
+    ],
+    &[
+        (0.155, 0.425),
+        (0.155, 0.575),
+        (0.845, 0.575),
+        (0.845, 0.425),
+    ],
+];
+
+/// Step-down — [`PLUS`]'s horizontal bar, alone: the settings steppers'
+/// `−`, drawn rather than borrowed (U+2212 remains legitimate *in a value*,
+/// where it is a figure; in a control slot it was the accidental fourth
+/// vocabulary doc 10 §0.3 names). Sharing the plus's own bar is what makes
+/// the pair read as a pair.
+const MINUS: &[Outline] = &[&[
+    (0.155, 0.425),
+    (0.845, 0.425),
+    (0.845, 0.575),
+    (0.155, 0.575),
+]];
+
+/// Reorder, up — a shaft with a chevron head, all three bars at the set's
+/// stroke: the arrows are *strokes*, not filled triangles, for the speaker
+/// waves' reason — the chevron is the same statement with no interpolation
+/// table, and one stroke weight is what makes the sheet one set.
+const ARROW_UP: &[Outline] = &[
+    // The shaft, from just under the apex to the baseline.
+    &[
+        (0.4275, 0.20),
+        (0.5725, 0.20),
+        (0.5725, 0.86),
+        (0.4275, 0.86),
+    ],
+    // The two arms, 45° each way from the apex; the union fills the join.
+    &[
+        (0.5513, 0.2513),
+        (0.4487, 0.1487),
+        (0.1587, 0.4387),
+        (0.2613, 0.5413),
+    ],
+    &[
+        (0.5513, 0.1487),
+        (0.4487, 0.2513),
+        (0.7387, 0.5413),
+        (0.8413, 0.4387),
+    ],
+];
+
+/// Reorder, down — [`ARROW_UP`] reflected in the box's horizontal centre
+/// line, vertex for vertex (`y → 1 − y`): a mirror, not a second drawing,
+/// for [`PREVIOUS`]'s reason — the pair sit stacked in one slot column, and
+/// an arrow whose head flared a pixel differently from its twin's would
+/// read as two glyphs from two sets. The test holds them to the reflection
+/// pixel for pixel.
+const ARROW_DOWN: &[Outline] = &[
+    &[
+        (0.4275, 0.80),
+        (0.5725, 0.80),
+        (0.5725, 0.14),
+        (0.4275, 0.14),
+    ],
+    &[
+        (0.5513, 0.7487),
+        (0.4487, 0.8513),
+        (0.1587, 0.5613),
+        (0.2613, 0.4587),
+    ],
+    &[
+        (0.5513, 0.8513),
+        (0.4487, 0.7487),
+        (0.7387, 0.4587),
+        (0.8413, 0.5613),
+    ],
+];
+
 impl Glyph {
     /// Every glyph, in sprite-sheet order.
     const ALL: [Self; Self::COUNT] = [
@@ -393,10 +489,14 @@ impl Glyph {
         Self::Close,
         Self::Magnifier,
         Self::Gear,
+        Self::Plus,
+        Self::Minus,
+        Self::ArrowUp,
+        Self::ArrowDown,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 9;
+    const COUNT: usize = 13;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -411,6 +511,10 @@ impl Glyph {
             Self::Close => CLOSE,
             Self::Magnifier => MAGNIFIER,
             Self::Gear => GEAR,
+            Self::Plus => PLUS,
+            Self::Minus => MINUS,
+            Self::ArrowUp => ARROW_UP,
+            Self::ArrowDown => ARROW_DOWN,
         }
     }
 
@@ -426,6 +530,10 @@ impl Glyph {
             Self::Close => 6,
             Self::Magnifier => 7,
             Self::Gear => 8,
+            Self::Plus => 9,
+            Self::Minus => 10,
+            Self::ArrowUp => 11,
+            Self::ArrowDown => 12,
         }
     }
 
@@ -1001,6 +1109,131 @@ mod tests {
             (0.14..=0.152).contains(&band),
             "a ring stroke of {band:.3} is off the set's band"
         );
+    }
+
+    /// **The plus is a solid axis-aligned cross** at the set's stroke: two
+    /// bars filled by the union rule where they overlap, symmetric about
+    /// both axes — the ✕'s construction, turned upright.
+    #[test]
+    fn the_plus_is_a_solid_upright_cross_at_the_sets_stroke() {
+        let pixels = rasterize(Glyph::Plus, [255, 255, 255]);
+        let mid = RASTER_PX / 2;
+        // Solid where the bars overlap — the union rule again.
+        assert_eq!(alpha(&pixels, mid, mid), u8::MAX);
+        // Nothing at the corners, and nothing at the very edges: the mark
+        // is inset like the rest of the set.
+        for (column, row) in [(1, 1), (RASTER_PX - 2, 1), (1, RASTER_PX - 2)] {
+            assert_eq!(alpha(&pixels, column, row), 0, "corner {column},{row}");
+        }
+        // Symmetric about both axes.
+        for row in 0..RASTER_PX {
+            for column in 0..RASTER_PX / 2 {
+                assert_eq!(
+                    alpha(&pixels, column, row),
+                    alpha(&pixels, RASTER_PX - 1 - column, row),
+                    "plus is not left-right symmetric at {column},{row}"
+                );
+                assert_eq!(
+                    alpha(&pixels, row, column),
+                    alpha(&pixels, row, RASTER_PX - 1 - column),
+                    "plus is not top-bottom symmetric at {row},{column}"
+                );
+            }
+        }
+        // The vertical bar alone, crossed above the horizontal one, is one
+        // run at the set's stroke.
+        let runs = runs_along(Glyph::Plus, 0.30);
+        assert_eq!(runs.len(), 1, "expected the vertical bar alone at y 0.30");
+        assert!(
+            (0.14..=0.152).contains(&runs[0].1),
+            "a plus stroke of {:.3} is off the set's band",
+            runs[0].1
+        );
+    }
+
+    /// **The minus is the plus's own horizontal bar**, alone — the sharing
+    /// is what makes the stepper pair read as a pair, and it is asserted as
+    /// pixel equality wherever the plus's vertical bar is not.
+    #[test]
+    fn the_minus_is_the_pluss_own_bar() {
+        let plus = rasterize(Glyph::Plus, [255, 255, 255]);
+        let minus = rasterize(Glyph::Minus, [255, 255, 255]);
+        // Left and right of the vertical bar (which spans 0.425–0.575, i.e.
+        // raster columns 13.6–18.4 — so columns 13 and 18 carry its
+        // antialiased edges), the two sprites are identical.
+        for row in 0..RASTER_PX {
+            for column in (0..RASTER_PX * 42 / 100).chain(RASTER_PX * 60 / 100..RASTER_PX) {
+                assert_eq!(
+                    alpha(&plus, column, row),
+                    alpha(&minus, column, row),
+                    "the minus is not the plus's bar at {column},{row}"
+                );
+            }
+        }
+        // And it genuinely lacks the vertical bar.
+        let mid = RASTER_PX / 2;
+        assert_eq!(alpha(&minus, mid, RASTER_PX / 4), 0);
+        assert_eq!(alpha(&plus, mid, RASTER_PX / 4), u8::MAX);
+        // One run across the middle, at the bar's own length.
+        let runs = runs_along(Glyph::Minus, 0.5);
+        assert_eq!(runs.len(), 1);
+        assert!((runs[0].1 - 0.69).abs() < 0.01, "the bar is 0.845 − 0.155");
+    }
+
+    /// **The up arrow is three strokes** — a shaft and two chevron arms —
+    /// all at the set's band: drawn strokes, not a filled triangle head,
+    /// for the speaker waves' reason.
+    #[test]
+    fn the_arrow_is_a_shaft_under_a_chevron_at_the_sets_stroke() {
+        // At a height crossing both arms and the shaft: three runs — arm,
+        // shaft, arm — the arms' horizontal cuts √2 wider than their
+        // strokes (they run at 45°).
+        let runs = runs_along(Glyph::ArrowUp, 0.42);
+        assert_eq!(runs.len(), 3, "expected arm/shaft/arm at y 0.42");
+        for (index, (_, width)) in runs.iter().enumerate() {
+            let stroke = if index == 1 {
+                *width
+            } else {
+                *width / std::f32::consts::SQRT_2
+            };
+            assert!(
+                (0.14..=0.152).contains(&stroke),
+                "an arrow stroke of {stroke:.3} is off the set's band"
+            );
+        }
+        // Below the arms, the shaft alone.
+        let shaft = runs_along(Glyph::ArrowUp, 0.70);
+        assert_eq!(shaft.len(), 1, "expected the shaft alone at y 0.70");
+        // Left-right symmetric, so the head reads as centred on the shaft.
+        let pixels = rasterize(Glyph::ArrowUp, [255, 255, 255]);
+        for row in 0..RASTER_PX {
+            for column in 0..RASTER_PX / 2 {
+                assert_eq!(
+                    alpha(&pixels, column, row),
+                    alpha(&pixels, RASTER_PX - 1 - column, row),
+                    "the arrow is not symmetric at {column},{row}"
+                );
+            }
+        }
+    }
+
+    /// The down arrow is the up arrow reflected, pixel for pixel — the
+    /// strongest form of "the pair reads as one set", exactly as
+    /// [`Glyph::Previous`] is held to [`Glyph::Next`].
+    #[test]
+    fn arrow_down_is_arrow_up_reflected() {
+        let up = rasterize(Glyph::ArrowUp, [255, 255, 255]);
+        let down = rasterize(Glyph::ArrowDown, [255, 255, 255]);
+        for row in 0..RASTER_PX {
+            for column in 0..RASTER_PX {
+                assert_eq!(
+                    alpha(&up, column, row),
+                    alpha(&down, column, RASTER_PX - 1 - row),
+                    "down is not up mirrored at {column},{row}"
+                );
+            }
+        }
+        assert_ne!(up, down);
     }
 
     #[test]
