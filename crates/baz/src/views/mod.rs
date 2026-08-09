@@ -10,6 +10,12 @@
 //!   list and the condition report.
 //! - [`queue`] — the queue place: what baz handed the engine, and where it is
 //!   in it.
+//! - [`playlist`] — a playlist's page: the durable list, its acts, and its
+//!   rows in the queue place's anatomy (ADR-0024 §4).
+//! - [`playlist_panel`] — the one summoned panel: the index of playlists and
+//!   the receive target collecting needs (ADR-0024 §5). Not a place — it
+//!   floats over one, which is why the "one kind of surface" sentence below
+//!   now carries its named exception.
 //! - [`settings`] — the Settings place: the standing decisions, today
 //!   ReplayGain.
 //! - [`bottom_bar`] — now-playing, transport, the two timestamps, and the
@@ -52,6 +58,8 @@
 
 pub(crate) mod album;
 pub(crate) mod bottom_bar;
+pub(crate) mod playlist;
+pub(crate) mod playlist_panel;
 pub(crate) mod queue;
 pub(crate) mod settings;
 pub(crate) mod setup;

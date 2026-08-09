@@ -312,10 +312,26 @@
   the engine's re-derived playing row. What remains is the panel itself: rows
   already carry their queue position, and `PlayerState::queue_list` is the one
   place that gains a message.
-- **The queue cannot be built.** There is one way to queue anything — play an
-  album, which replaces the queue wholesale. "Add to queue" / "play next" are
-  now expressible (`UpdateQueue` with the entry inserted where it belongs) and
-  want a shelf-side gesture to send them.
+- **The queue cannot be built from a record.** Playing an album replaces the
+  queue wholesale, and the one append route shipped is the playlist page's
+  `Queue` (ADR-0024). The record page's own `Queue album` and the shift-click
+  stack — ADR-0023 §3's "hear this later" at record granularity — are decided,
+  expressible (`UpdateQueue` with rows appended) and not yet built.
+- **Playlist reorder and add have no drag** (ADR-0024 §6 layer 3, deliberately
+  last). iced 0.13 has no pointer capture, so the drag needs the hand-built
+  widget on the `groove.rs` precedent — one investment paying playlist add,
+  playlist reorder and queue reorder alike. Until it lands the ▲▼ steppers and
+  the two-press adds are the routes, which is the ADR's own shipping order.
+- **A missing playlist entry cannot be repaired in place.** ADR-0024 §3
+  specifies the surface — candidate matches (same filename under a current
+  root) proposed per entry, confirmed by the user, the confirmation being the
+  only thing that writes the file — and the page today only counts and shows
+  the broken path. Repair by hand (edit the file; the page re-reads) works
+  meanwhile.
+- **The playlists folder is not yet shown in Settings → Library** beside the
+  roots (ADR-0024 §2's sovereignty line). One row and an open-folder
+  affordance, so the user learns where their artefacts live the way they
+  learn where their music does.
 - **No keyboard route out of the search field.** Transport keys are bound
   (`crates/baz/src/keys.rs`), but iced 0.13's `text_input` captures every key
   press while focused except Tab and the vertical arrows, so while the search

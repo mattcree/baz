@@ -46,14 +46,21 @@
 
 use iced::widget::{
     Column, Space, button, column, container, image as iced_image, mouse_area, row, scrollable,
-    text, tooltip,
+    text, text_input, tooltip,
 };
 use iced::{Element, Length, alignment};
 
 use crate::app::Message;
 use crate::player::{PlayerState, QueueRow, QueueRowState};
+use crate::playlists::NameEntry;
 use crate::views::{place_header, place_pad};
 use crate::{icon, theme};
+
+/// The `Save as playlist` field's id, so the caret can land in it the moment
+/// the word becomes a field.
+pub(crate) fn save_name_id() -> text_input::Id {
+    text_input::Id::new("baz-queue-save")
+}
 
 /// The **Queue** place: the header strip, the summary, and the rows.
 ///
@@ -67,17 +74,18 @@ use crate::{icon, theme};
 /// render-ready reading, which is why the element is `'static`: the contents
 /// are a projection of engine events and a request-side record, not a borrow of
 /// the library, so nothing on screen can outlive a view-model rebuild mid-scan.
-pub(crate) fn view(
-    player: &PlayerState,
+pub(crate) fn view<'a>(
+    player: &'a PlayerState,
     window_width: f32,
     hovered: Option<usize>,
-) -> Element<'static, Message> {
+    saving: Option<&'a NameEntry>,
+) -> Element<'a, Message> {
     let room = theme::active();
     let measure =
         (window_width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).clamp(0.0, theme::LIST_MEASURE);
     // A row is only a control when there is an engine to send its command to.
     let live = player.engine_ready();
-    let body: Element<'static, Message> = match player.queue_list() {
+    let body: Element<'a, Message> = match player.queue_list() {
         None => empty_state(),
         Some(list) => {
             // A record's name where the record begins, then its tracks —
@@ -97,11 +105,22 @@ pub(crate) fn view(
                 rows.push(queue_row(row_state, index, live, hovered == Some(index)));
             }
             column![
-                text(list.summary)
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_faint)
-                    .wrapping(text::Wrapping::None),
+                // The summary shares its line with the one act the transient
+                // earns: freezing tonight's run into a file (ADR-0024 §4,
+                // prior art's W19). A new file and nothing else — the queue
+                // does not become linked to the playlist it seeded.
+                row![
+                    text(list.summary)
+                        .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
+                        .color(room.paper_faint)
+                        .wrapping(text::Wrapping::None),
+                    Space::with_width(Length::Fill),
+                    save_control(saving.is_none()),
+                ]
+                .spacing(theme::GAP_SM)
+                .align_y(iced::Alignment::Center),
+                save_field(saving),
                 column![
                     album_group(list.album.as_deref(), &list.artist, 0.0),
                     Column::with_children(rows).spacing(theme::GAP_XS),
@@ -130,6 +149,64 @@ pub(crate) fn view(
         .height(Length::Fill),
     ]
     .into()
+}
+
+/// **Save as playlist** — the transient frozen into an artefact
+/// (ADR-0024 §4): a labelled word beside the summary, quiet because it is an
+/// act on a file rather than on playback.
+///
+/// Offered only while the name field is closed: the field below is the same
+/// control mid-gesture, and drawing both would be one act with two live
+/// buttons.
+fn save_control(offered: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    button(
+        container(
+            text("Save as playlist")
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_SM))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press_maybe(offered.then_some(Message::SaveQueueStart))
+    .into()
+}
+
+/// The name field `Save as playlist` becomes, with the storage layer's
+/// refusal surfaced plainly under it — or nothing at all while the word is at
+/// rest.
+fn save_field(saving: Option<&NameEntry>) -> Element<'_, Message> {
+    let room = theme::active();
+    let Some(entry) = saving else {
+        return Space::with_height(Length::Fixed(0.0)).into();
+    };
+    let mut block = column![
+        text_input("Name tonight's run…", &entry.text)
+            .id(save_name_id())
+            .on_input(Message::SaveQueueInput)
+            .on_submit(Message::SaveQueueSubmit)
+            .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
+            .size(theme::SIZE_BODY)
+            .line_height(theme::LEADING_BODY)
+            .width(Length::Fixed(theme::SETTINGS_CONTENT_MIN))
+            .style(move |_theme, status| theme::input(room, status)),
+    ]
+    .spacing(theme::GAP_XS);
+    if let Some(error) = &entry.error {
+        block = block.push(
+            text(error.clone())
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.alert),
+        );
+    }
+    block.into()
 }
 
 /// The header over one album's run of rows: the record's title, and who it is

@@ -168,6 +168,54 @@ next commit.
   performs. Scrobbling is out of scope and attaches downstream, as a consumer
   of the event, never as a dependency of the ledger.
 
+**Playlists**
+
+- **Playlists as files the user owns** (ADR-0024): one `.m3u8` per playlist in
+  `$XDG_DATA_HOME/baz/playlists/`, beside the library and the ledger — no
+  database table, no export step. `baz_core::playlist` reads liberally
+  (headerless files, bare path lists, CRLF, BOM, relative paths and `~`,
+  unknown `#EXT` directives preserved verbatim) and writes the strict common
+  subset (`#EXTM3U`, one `#EXTINF` per entry, absolute paths, UTF-8, atomic
+  whole-file rewrites). The migration story for a foobar2000/MusicBee refugee
+  is `cp *.m3u8` into one directory; legacy `.m3u` files are listed and read,
+  never minted. Nothing writes a playlist file but the user's own edit —
+  enforced by the module's shape, not by discipline — and external edits are
+  honoured by fingerprint on read: last writer wins, per file, no prompt.
+- **A playlist's page** (`Place::Playlist`, the record page's sibling): the
+  name at hero scale, `Play`, `Queue`, `Rename`, `Delete` (confirmed in the
+  roots ADR's voice — *"The file goes; your music stays"*), and rows in the
+  queue place's anatomy: record-group headers over consecutive same-record
+  runs, a reserved ✕ to remove and reserved ▲▼ steppers to reorder (the
+  no-drag pointer route the visible-control rule requires), a row click
+  playing the list from there through the same `play_from` rule every list
+  surface uses, and the lamp dot only when the queue is exactly this list. A
+  missing entry **stays in the file**, drawn dimmed from its path's stem with
+  the path on the row, unplayable; `Play` sends the playable subset and the
+  page says so: `38 of 40 · 2 missing`.
+- **The playlist panel** — the one summoned, single-tenant side surface, and
+  the amendment of the refusals ledger's side-surfaces entry (by ADR-0024
+  under the ledger's own editing rule; the entry names the panel and closes
+  the slot). A labelled `Playlists` door in the Library strip (`Ctrl+P`
+  beside it) floats it over the wall's right edge by ADR-0016's verified
+  mechanics — `stack` + `opaque`, no scrim, wheel passing through — so the
+  wall does not reflow by a pixel (`docs/design/impl/playlists/` holds the
+  before/after diff). Present in Library, Album and Queue places, absent in
+  Settings; `Esc` peels its layers one per press. Contents: `New playlist`
+  (an inline name field validated by the storage layer's rule, its refusals
+  surfaced in its own words), then one row per playlist — the name (a door to
+  its page) and the receive target.
+- **Adding, two layers of the three** (ADR-0024 §6; the drag is layer 3 and
+  waits on the shared pointer-capture widget): the two-press add — `Add to
+  playlist` on the record's page, or a track row's reserved-slot `+`, then
+  the panel as the picker — and the **open playlist**: arm a playlist from
+  its panel row (surface step and hairline, never the accent) and every wall
+  tile grows a quiet `+` in its label while a press pulls the record straight
+  in, one press per addition, `Esc` or the armed row to disarm. Additions
+  append; duplicates are allowed and unmarked — the gesture did what it said.
+- **`Save as playlist` on the queue place**: tonight's run frozen into a new
+  file — a new artefact and nothing else; the queue is not linked to the
+  playlist it seeded, and editing either never reaches the other.
+
 **Interface**
 
 - **Shuffle, drawing only from what the wall shows** (ADR-0017 step 17). One
@@ -483,7 +531,12 @@ next commit.
   `AnalysisCommand` and reports progress on the event stream; the control is a
   parallel unit, exactly as the volume slider and the ReplayGain mode selector
   were before them.
-- No playlists, no cue sheets, no watch folders, no tag editing, no application
+- **Playlist reorder has steppers, not yet a drag.** iced 0.13 has no pointer
+  capture, so drag-to-reorder (and drag-to-add, ADR-0024 §6 layer 3) waits on
+  the hand-built widget that will serve queue and playlist alike; the ▲▼
+  steppers and the two-press adds are the routes that ship. The missing-entry
+  repair surface (`Locate…`, ADR-0024 §3) is designed and not yet built.
+- No cue sheets, no watch folders, no tag editing, no application
   icon, and no exclusive-mode output (which is also what puts hardware volume
   out of reach). `docs/BACKLOG.md` is the honest list.
 

@@ -29,8 +29,20 @@ shows — a shelf, the filter's matches, everything — and the pool is visible:
 non-pool covers dim, the next draws carry faint rings. A shuffle whose source
 you cannot see is a recommendation engine wearing a dice icon.
 
-**No auto-generated playlists.** Every crate and every mixtape is made by a
-person.
+**No auto-generated playlists.** Every playlist is asked for by a person and
+owned by them thereafter. Refused: generation without a request, mutation
+without an edit, and any candidate pool the person cannot see.
+
+*Amended by ADR-0024 §6 under the editing rule.* The entry's force is against
+what it was written against — playlists that generate themselves, unbidden, as
+engagement surfaces — and its old gloss (*"every crate and every mixtape is
+made by a person"*) could be read to forbid the owner's stated goal of
+sentiment-generated lists a person explicitly asks for. ADR-0024 §7 sets the
+ground any generator inherits: its output is an ordinary `.m3u8` with ordinary
+rights, generation is an act not a condition, provenance is recorded and
+inert, nothing plays until the person says so, and the candidate pool is
+statable in a sentence. *Made by a person* includes *asked for by a person*;
+nothing else moved.
 
 ---
 
@@ -89,9 +101,12 @@ too short"* — the needle's bar was correct in every token and had no air at al
 
 ## Surfaces
 
-**baz has no side surfaces.** No sidebar, no inspector, no rail, no drawer, no
-popover, no float. **The window holds one place at a time and the now-playing
-bar is in every one of them** (ADR-0022).
+**baz has no resident side surfaces, and no surface that is a slot.** No
+sidebar, no inspector, no rail, no drawer, no popover. **The window holds one
+place at a time and the now-playing bar is in every one of them** (ADR-0022).
+One summoned, single-tenant panel exists: the playlist panel (ADR-0024) —
+opened by its labelled door for the duration of a collecting task, overlaying
+without reflow, closed at rest. **It may never gain a second tenant.**
 
 Rejected twice by the owner before this was written down — *"an example of a
 strange UI is the two side panels we have now"*, and then *"I really hate the
@@ -100,6 +115,22 @@ supports a right-hand inspector for cataloguer audiences and that evidence is
 not overturned; it is relocated. It argues for the album having a rich resident
 surface, and the record's page is three and a half times wider than the column
 was.
+
+*Amended by ADR-0024 §5 under the editing rule*, which is the required
+argument, engaged rather than snuck past. The rail died of five findings —
+three unrelated tenants, a paragraph of dismissal, the wrong tenant paying
+resident width, a gesture-breaking reflow, arbitration state — and the panel
+has none of them by construction: one tenant forever (the junk-drawer disease
+requires vacancy, and this entry closes the slot), summoned by a labelled door
+and closed by `Esc` or the door (the wall keeps 100 % at rest), floating over
+the place without re-hanging it (ADR-0016's verified `stack` + `opaque`
+mechanics, no scrim, wheel passing through), present in Library, Album and
+Queue and absent in Settings. What it buys is the one thing no place can have:
+**simultaneity** — collecting is two-surface work, source and destination on
+screen at once. It *receives*; it does not display a selection, which is what
+the dead column did and what places do better. The owner blessed this surface
+explicitly; this entry records the argument so the blessing is not a precedent
+for panels generally.
 
 **Two vertical strips may not do one job.** The wall draws no scrollbar, because
 the index rail beside it already says where you are, jumps, drags — and names

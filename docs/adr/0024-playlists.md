@@ -1,6 +1,11 @@
 # ADR-0024: Playlists — files the user owns, a page, and one summoned panel
 
-**Status**: proposed (2026-08-09) · extracts the decisions of
+**Status**: accepted (2026-08-09) — §1–§3 shipped as `baz_core::playlist`;
+§4–§6 shipped as `Place::Playlist`, the panel, the add layers 1–2, and
+`Save as playlist`, with §6's **layer 3 (the drag) pending** on the shared
+pointer-capture widget, and §3's repair surface (`Locate…`) not yet built;
+§7 remains ground rules for a feature that does not exist ·
+extracts the decisions of
 [`docs/design/08-playback-and-playlists.md`](../design/08-playback-and-playlists.md)
 §4–§6 · changes no engine command — playing a playlist is `SetQueue` ·
 introduces `baz_core::playlist` and `Place::Playlist` · **amends two

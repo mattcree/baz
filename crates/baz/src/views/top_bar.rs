@@ -106,7 +106,7 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
                 // The well and the keys are one cluster — both are about the
                 // library — held apart by the ladder's largest gap so they
                 // read as two groups on one line rather than as six controls.
-                row![search, keys, draws()]
+                row![search, keys, draws(), playlists_door()]
                     .spacing(theme::GAP_XL)
                     .align_y(iced::Alignment::Center),
                 Space::with_width(Length::Fill),
@@ -194,6 +194,40 @@ fn draw_word(label: &'static str, message: Message) -> Element<'static, Message>
     .padding(theme::pad(0.0, theme::GAP_SM))
     .style(move |_theme, status| theme::word_button(room, room.wall, status))
     .on_press(message)
+    .into()
+}
+
+/// **The playlist panel's door** (ADR-0024 §5): a labelled word in the
+/// Library strip, <kbd>Ctrl</kbd>+<kbd>P</kbd> beside it.
+///
+/// It is in *this* strip by the placement law: a door goes where the hand
+/// already is (L8.4), and playlists are about the collection — the panel is
+/// summoned to collect *from* the wall. It closes the left cluster's reading
+/// order: **narrow, then arrange, then draw, then collect**.
+///
+/// Labelled with the name of what it opens, like `Settings` across the
+/// frame — and unlike `Settings` it *is* honestly a toggle, because the panel
+/// floats over this strip's own place rather than replacing it, so the door
+/// stays visible while what it opened is open. What it deliberately does not
+/// gain is a lit "open" state: the panel standing 340 px away is its own
+/// statement, and a second one would be the same fact twice.
+fn playlists_door() -> Element<'static, Message> {
+    let room = theme::active();
+    button(
+        container(
+            text("Playlists")
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_SM))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press(Message::TogglePlaylists)
     .into()
 }
 

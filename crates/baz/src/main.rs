@@ -47,6 +47,7 @@ mod needle;
 mod place;
 mod playback;
 mod player;
+mod playlists;
 mod pointer;
 mod queue_edit;
 mod rail;

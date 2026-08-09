@@ -397,6 +397,13 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Character("u" | "U") if command => Some(Message::ToggleQueue),
         Key::Character(",") if command => Some(Message::ToggleSettings),
 
+        // The playlist panel's door (ADR-0024 §5): the same press as the
+        // Library strip's labelled `Playlists` word. `P` is the word's own
+        // letter and it is unclaimed under the command modifier; bare `p` is
+        // the query, like every letter (ADR-0017 §1.2), and a door is
+        // modified — L8.7's layer table, the same argument that moved `Q`.
+        Key::Character("p" | "P") if command => Some(Message::TogglePlaylists),
+
         // The zoom. Ctrl+`-` tightens the hang, Ctrl+`=` loosens it, and the
         // shifted spellings of both keys mean the same thing (module docs).
         Key::Character("-" | "_") if zoom => Some(Message::DensityStep(-1)),

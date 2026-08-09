@@ -3179,6 +3179,60 @@ pub fn pool_ring(p: &Palette, ringed: bool) -> container::Style {
     }
 }
 
+/// The playlist panel's surface: one step up from the wall, exactly as the
+/// dead rail's column and the queue popover stood (ADR-0024 §5 revives their
+/// verified float without their residency).
+///
+/// No shadow — `docs/REFUSALS.md` reserves shadows for the playing halo — so
+/// what separates the panel from the wall it floats over is the surface step
+/// plus the 1 px hairline the view draws down its left edge, which is the
+/// same two-part seam the bottom bar uses.
+#[must_use]
+pub fn panel(p: &Palette) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(p.plinth)),
+        text_color: Some(p.paper),
+        ..container::Style::default()
+    }
+}
+
+/// The 1 px seam down the panel's left edge — the hairline half of the
+/// panel/wall separation, painted as a filled lane because iced's `rule` is
+/// horizontal-or-vertical by *widget* and this one has to fill a `Fill`
+/// height inside a row.
+#[must_use]
+pub fn panel_seam(p: &Palette) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(p.hairline_strong(p.wall))),
+        ..container::Style::default()
+    }
+}
+
+/// A panel row's ground: calm on the panel's own surface, and — when this
+/// playlist is **armed to receive** (ADR-0024 §6 layer 2) — one more surface
+/// step with a hairline edge.
+///
+/// Never the accent: the lamp is playback truth, and an armed playlist is a
+/// collecting state, not a sounding one. The step-plus-hairline pair is the
+/// playing row's own vocabulary ([`track_row`]) spent on a different fact,
+/// which is what keeps "armed" legible without inventing a third mark.
+#[must_use]
+pub fn panel_row(p: &Palette, armed: bool) -> container::Style {
+    if armed {
+        container::Style {
+            background: Some(Background::Color(p.plinth_lit)),
+            border: Border {
+                color: p.hairline_strong(p.plinth_lit),
+                width: 1.0,
+                radius: RADIUS_CTRL.into(),
+            },
+            ..container::Style::default()
+        }
+    } else {
+        container::Style::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// The bar's drawn height including its hairline — **57**. Stated here

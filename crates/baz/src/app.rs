@@ -264,6 +264,90 @@ pub(crate) enum Message {
     /// Top bar's Settings toggle, or Ctrl+`,`: go to the settings, or come
     /// back from them.
     ToggleSettings,
+    /// The Library strip's labelled `Playlists` door, or Ctrl+`P`: summon the
+    /// playlist panel, or close it (ADR-0024 §5). A float over the place, not
+    /// a place — the wall does not reflow by a pixel.
+    TogglePlaylists,
+    /// A panel row's name was pressed: open that playlist's page — or come
+    /// back from it, when it is the page already showing ([`Place::playlist`]).
+    OpenPlaylist(u64),
+    /// A panel row's receive target: arm that playlist to collect, or put it
+    /// down when it is the one armed (ADR-0024 §6 layer 2).
+    ArmPlaylist(u64),
+    /// A pick-mode press on a panel row: append what the hand holds to that
+    /// playlist (ADR-0024 §6 layer 1's second gesture).
+    PickPlaylist(u64),
+    /// The panel's `New playlist` row was pressed: become a name field.
+    NewPlaylistStart,
+    /// The name field changed.
+    NewPlaylistInput(String),
+    /// The name field was submitted; the storage layer's name rule decides,
+    /// and its refusal lands under the field in its own words.
+    NewPlaylistSubmit,
+    /// The record page's `Add to playlist`, and — while a playlist is armed —
+    /// a wall tile's press: the record, whole (the selected edition), toward
+    /// a playlist. With one armed it appends outright; otherwise it opens the
+    /// panel as the picker.
+    AddAlbumToPlaylist(u64),
+    /// A track row's reserved-slot `+` on the record's page: one track toward
+    /// a playlist, by the same armed-or-pick rule (`album id`, zero-based
+    /// row).
+    AddTrackToPlaylist(u64, usize),
+    /// The playlist page's `Play`: the playable subset as the queue, from the
+    /// top ([`Command::SetQueue`] then [`Command::Play`] — ADR-0024 §4, and
+    /// the counts line on the page is where the subset is declared).
+    PlaylistPlay,
+    /// The playlist page's `Queue`: the playable subset appended to the run
+    /// ([`Command::UpdateQueue`] — the music keeps playing, ADR-0014).
+    PlaylistQueue,
+    /// A playlist row was clicked: play this list from that row, through the
+    /// same [`PlayerState::play_from`] rule every list surface uses. Carries
+    /// the display row; the playable-subset position is resolved against the
+    /// open page.
+    PlaylistPlayTrack(usize),
+    /// A playlist row's ✕: take that entry out of the *file* — an edit to the
+    /// artefact, saved atomically, no engine involved.
+    PlaylistRemoveEntry(usize),
+    /// A playlist row's ▲ (`-1`) or ▼ (`+1`) stepper: swap the entry with its
+    /// neighbour — the no-drag reorder route the visible-control rule
+    /// requires (ADR-0024 §4).
+    PlaylistShiftEntry(usize, i32),
+    /// The playlist page's `Rename`: open the name field, seeded with the
+    /// current name.
+    PlaylistRenameStart,
+    /// The rename field changed.
+    PlaylistRenameInput(String),
+    /// The rename field was submitted: a filesystem rename keeping the
+    /// extension, refused in place by the storage layer's rule. The place
+    /// moves with the name.
+    PlaylistRenameSubmit,
+    /// The playlist page's `Delete`, first press: arm the confirmation —
+    /// *"The file goes; your music stays"* — and nothing else.
+    PlaylistDeleteArm,
+    /// The confirming press: the file goes; the page leaves for the wall.
+    PlaylistDeleteConfirm,
+    /// The armed deletion was declined.
+    PlaylistDeleteCancel,
+    /// The queue place's `Save as playlist`: become a name field
+    /// (ADR-0024 §4 — the transient frozen into an artefact).
+    SaveQueueStart,
+    /// The save field changed.
+    SaveQueueInput(String),
+    /// The save field was submitted: a new file holding exactly what the
+    /// queue holds, and nothing else.
+    SaveQueueSubmit,
+    /// The pointer entered a playlist row, so the row can offer its ✕ and its
+    /// steppers — the queue rows' hover mechanism, for the same toolkit
+    /// reason.
+    PlaylistRowEntered(usize),
+    /// The pointer left a playlist row. Carries which, for the reason
+    /// [`Self::QueueRowLeft`] carries which row.
+    PlaylistRowLeft(usize),
+    /// The pointer entered a track row on the record's page, so the row can
+    /// offer its `+` when the panel is closed.
+    AlbumRowEntered(usize),
+    /// The pointer left a track row on the record's page.
+    AlbumRowLeft(usize),
     /// Shelf scrolled; carries the real viewport geometry.
     Scrolled(Viewport),
     /// Window resized (approximate grid geometry until the next scroll).
@@ -501,6 +585,23 @@ struct App {
     /// one answer. The ✕'s slot is reserved either way, so this changes what is
     /// drawn in it and never the geometry around it.
     hovered_queue_row: Option<usize>,
+    /// Which row of a **playlist's page** the pointer is on — the same
+    /// mechanism as [`Self::hovered_queue_row`], for the page's ✕ and ▲▼
+    /// slots.
+    hovered_playlist_row: Option<usize>,
+    /// Which track row of the **record's page** the pointer is on — the same
+    /// mechanism again, for the row's reserved `+` slot (ADR-0024 §6).
+    hovered_album_row: Option<usize>,
+    /// The playlist surfaces: the panel, the open page, and the shelf of
+    /// files behind both ([`crate::playlists`], ADR-0024 §4–§6).
+    ///
+    /// Beside `place` rather than inside it because the panel is not a place:
+    /// it floats over Library, Album and Queue alike, and its open/closed
+    /// state survives moving between them while a collecting task is under
+    /// way. Session state throughout — which surface you were collecting
+    /// into is not a standing decision, so none of it is in `config.toml`
+    /// (the same argument as [`Self::settings_section`]).
+    playlists: crate::playlists::Playlists,
     /// The window's size, as the last resize event reported it.
     ///
     /// Held because a place is laid out against the *window*: the record page
@@ -693,6 +794,9 @@ impl App {
             screen,
             place: Place::default(),
             hovered_queue_row: None,
+            hovered_playlist_row: None,
+            hovered_album_row: None,
+            playlists: crate::playlists::Playlists::start(),
             window: WINDOW,
             playback,
             player,
@@ -719,7 +823,11 @@ impl App {
         // The two machines that answer *before* anything else can: ink, which
         // cannot move a pixel of layout, and the modifier layer, which decides
         // whether a keystroke was even text.
-        for machine in [Self::update_motion, Self::update_modified_input] {
+        for machine in [
+            Self::update_motion,
+            Self::update_modified_input,
+            Self::update_playlists,
+        ] {
             if let Some(task) = machine(self, &message) {
                 return task;
             }
@@ -998,6 +1106,316 @@ impl App {
         }
     }
 
+    /// Answer a message that belongs to the **playlist surfaces** — the
+    /// panel, the page, the adds and the queue place's save — reporting
+    /// whether it was one (`Some`), and with which follow-up task.
+    ///
+    /// One machine for the same reason the volume's nine and the library's
+    /// six are one: every arm resolves to "tell the playlists state machine,
+    /// maybe tell the engine, maybe move the caret", and two dozen more arms
+    /// in the shell's own match would bury the messages genuinely about the
+    /// whole application. The engine effects (`Play`, `Queue`, a row click)
+    /// live in their own named helpers below, in `play_album`'s exact shape.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one arm per playlist message, each a few lines; splitting \
+                  the machine would scatter one surface's grammar across \
+                  several functions"
+    )]
+    fn update_playlists(&mut self, message: &Message) -> Option<Task<Message>> {
+        match message {
+            Message::TogglePlaylists => {
+                // Only once there is a shelf (playlists resolve against the
+                // library), and never in Settings — the panel is absent there
+                // (ADR-0024 §5), so the key falls dead rather than opening a
+                // surface the place will not show.
+                if matches!(self.screen, Screen::Shelf(_)) && self.place != Place::Settings {
+                    self.playlists.toggle_panel();
+                }
+            }
+            Message::OpenPlaylist(id) => {
+                // The door to the page you are on puts it down, like a tile
+                // pressed twice ([`Place::playlist`]'s toggle); any other
+                // page is opened only once its file actually read.
+                let leaving = self.place == Place::Playlist(*id);
+                if leaving {
+                    self.place = self.place.playlist(*id);
+                } else if let Screen::Shelf(state) = &self.screen
+                    && self.playlists.open_page(*id, &state.library)
+                {
+                    self.place = self.place.playlist(*id);
+                }
+            }
+            Message::ArmPlaylist(id) => self.playlists.toggle_armed(*id),
+            Message::PickPlaylist(id) => {
+                if let Screen::Shelf(state) = &self.screen {
+                    self.playlists.pick(*id, &state.library);
+                }
+            }
+            Message::NewPlaylistStart => {
+                self.playlists.naming = Some(crate::playlists::NameEntry::default());
+                return Some(text_input::focus(views::playlist_panel::new_name_id()));
+            }
+            Message::NewPlaylistInput(text) => {
+                if let Some(naming) = &mut self.playlists.naming {
+                    naming.text.clone_from(text);
+                    naming.error = None;
+                }
+            }
+            Message::NewPlaylistSubmit => {
+                if let Screen::Shelf(state) = &self.screen {
+                    self.playlists.submit_new(&state.library);
+                }
+            }
+            Message::AddAlbumToPlaylist(id) => self.add_album_to_playlist(*id),
+            Message::AddTrackToPlaylist(id, row) => self.add_track_to_playlist(*id, *row),
+            Message::PlaylistPlay => self.play_playlist(),
+            Message::PlaylistQueue => self.queue_playlist(),
+            Message::PlaylistPlayTrack(row) => self.play_playlist_track(*row),
+            Message::PlaylistRemoveEntry(row) => {
+                if let Screen::Shelf(state) = &self.screen {
+                    self.playlists.remove_entry(*row, &state.library);
+                }
+            }
+            Message::PlaylistShiftEntry(row, delta) => {
+                if let Screen::Shelf(state) = &self.screen {
+                    self.playlists.shift_entry(*row, *delta, &state.library);
+                }
+            }
+            Message::PlaylistRenameStart => {
+                if let Some(open) = &mut self.playlists.open {
+                    let seeded = open.name().to_owned();
+                    open.renaming = Some(crate::playlists::NameEntry {
+                        text: seeded,
+                        error: None,
+                    });
+                    return Some(text_input::focus(views::playlist::rename_id()));
+                }
+            }
+            Message::PlaylistRenameInput(text) => {
+                if let Some(renaming) = self
+                    .playlists
+                    .open
+                    .as_mut()
+                    .and_then(|open| open.renaming.as_mut())
+                {
+                    renaming.text.clone_from(text);
+                    renaming.error = None;
+                }
+            }
+            Message::PlaylistRenameSubmit => {
+                if let Screen::Shelf(state) = &self.screen
+                    && let Some(renamed) = self.playlists.submit_rename(&state.library)
+                    && matches!(self.place, Place::Playlist(_))
+                {
+                    // The place follows the name: the id *is* the name,
+                    // hashed, so a rename mints a new one.
+                    self.place = Place::Playlist(renamed);
+                }
+            }
+            Message::PlaylistDeleteArm => {
+                if let Some(open) = &mut self.playlists.open {
+                    open.delete_armed = true;
+                }
+            }
+            Message::PlaylistDeleteCancel => {
+                if let Some(open) = &mut self.playlists.open {
+                    open.delete_armed = false;
+                }
+            }
+            Message::PlaylistDeleteConfirm => {
+                if self.playlists.delete_open() && matches!(self.place, Place::Playlist(_)) {
+                    // The page's subject is gone; the wall is the honest
+                    // answer, by the same route Esc takes.
+                    self.place = self.place.back();
+                }
+            }
+            Message::SaveQueueStart => {
+                self.playlists.saving_queue = Some(crate::playlists::NameEntry::default());
+                return Some(text_input::focus(views::queue::save_name_id()));
+            }
+            Message::SaveQueueInput(text) => {
+                if let Some(saving) = &mut self.playlists.saving_queue {
+                    saving.text.clone_from(text);
+                    saving.error = None;
+                }
+            }
+            Message::SaveQueueSubmit => {
+                if let Some(queue) = self.player.queue() {
+                    let queue = queue.clone();
+                    self.playlists.submit_queue_save(&queue);
+                }
+            }
+            Message::PlaylistRowEntered(row) => self.hovered_playlist_row = Some(*row),
+            Message::PlaylistRowLeft(row) if self.hovered_playlist_row == Some(*row) => {
+                self.hovered_playlist_row = None;
+            }
+            Message::AlbumRowEntered(row) => self.hovered_album_row = Some(*row),
+            Message::AlbumRowLeft(row) if self.hovered_album_row == Some(*row) => {
+                self.hovered_album_row = None;
+            }
+            Message::PlaylistRowLeft(_) | Message::AlbumRowLeft(_) => {}
+            _ => return None,
+        }
+        Some(Task::none())
+    }
+
+    /// The record, whole, toward a playlist (ADR-0024 §6): appended outright
+    /// when one is armed, else held while the panel serves as the picker.
+    /// What is added is the **selected edition** — the same tracks the page
+    /// lists and `Play album` would queue.
+    fn add_album_to_playlist(&mut self, id: u64) {
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        let Some(album) = state.albums.iter().find(|album| album.id == id) else {
+            return;
+        };
+        let chosen = state.edition_choice.get(&id).copied();
+        let Some(edition) = vm::selected_edition(album, chosen) else {
+            return;
+        };
+        let entries = crate::playlists::entries_for_tracks(&edition.tracks, album.artist.label());
+        let label = format!(
+            "Add \u{201c}{}\u{201d}",
+            album.title.as_deref().unwrap_or("Unknown Album")
+        );
+        if let Some(armed) = self.playlists.armed {
+            self.playlists.append(armed, entries, &state.library);
+        } else {
+            self.playlists.begin_pick(label, entries);
+        }
+    }
+
+    /// One track toward a playlist, by the same armed-or-pick rule. The
+    /// track does not smuggle its album in — the listener pointed at a track
+    /// (ADR-0023 §3's queue rule, applied to collecting).
+    fn add_track_to_playlist(&mut self, id: u64, row: usize) {
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        let Some(album) = state.albums.iter().find(|album| album.id == id) else {
+            return;
+        };
+        let chosen = state.edition_choice.get(&id).copied();
+        let Some(track) = vm::selected_edition(album, chosen)
+            .and_then(|edition| edition.tracks.get(row))
+            .cloned()
+        else {
+            return;
+        };
+        let entries = crate::playlists::entries_for_tracks(
+            std::slice::from_ref(&track),
+            album.artist.label(),
+        );
+        let label = format!("Add \u{201c}{}\u{201d}", track.title);
+        if let Some(armed) = self.playlists.armed {
+            self.playlists.append(armed, entries, &state.library);
+        } else {
+            self.playlists.begin_pick(label, entries);
+        }
+    }
+
+    /// The playlist page's `Play`: the playable subset as the queue, playing
+    /// (ADR-0024 §4). `SetQueue` then `Play` — `play_album`'s exact shape,
+    /// because playing a playlist **copies** it into the queue and from that
+    /// instant the two are decoupled (the MPD boundary, ADR-0024 §1).
+    fn play_playlist(&mut self) {
+        let Some(queue) = self
+            .playlists
+            .open
+            .as_ref()
+            .map(|open| open.queue.clone())
+            .filter(|queue| !queue.is_empty())
+        else {
+            return;
+        };
+        self.draws_are_over();
+        let paths = queue.paths();
+        if self.playback.send(Command::SetQueue { paths }) && self.playback.send(Command::Play) {
+            self.player.note_queue_sent(queue);
+            self.player.note_transport_sent();
+        } else {
+            self.player.engine_closed();
+        }
+        self.publish_mpris(false);
+    }
+
+    /// The playlist page's `Queue`: the playable subset appended to the run
+    /// through `UpdateQueue`, so the music keeps playing (ADR-0014's
+    /// guarantee; "hear this later" is its own gesture, ADR-0023 §3).
+    fn queue_playlist(&mut self) {
+        let Some(addition) = self
+            .playlists
+            .open
+            .as_ref()
+            .map(|open| open.queue.clone())
+            .filter(|queue| !queue.is_empty())
+        else {
+            return;
+        };
+        let edited = match self.player.queue() {
+            Some(held) => {
+                let mut edited = held.clone();
+                edited.items.extend(addition.items);
+                edited
+            }
+            // Appending to nothing gives the engine a queue without starting
+            // it: `UpdateQueue` never begins playback, and nothing sounds
+            // unasked.
+            None => addition,
+        };
+        let paths = edited.paths();
+        if self.playback.send(Command::UpdateQueue { paths }) {
+            self.player.note_queue_edited(edited);
+        } else {
+            self.player.engine_closed();
+        }
+        self.publish_mpris(false);
+    }
+
+    /// A click on a playlist row: play this list from there, by the same
+    /// [`PlayerState::play_from`] decision every list surface spends
+    /// (ADR-0024 §4). The engine already holding exactly this list makes it a
+    /// jump; anything else queues the playable subset and drops the needle on
+    /// the clicked row.
+    fn play_playlist_track(&mut self, row: usize) {
+        let Some(open) = self.playlists.open.as_ref() else {
+            return;
+        };
+        // The display row maps to its position in the playable subset — the
+        // index `JumpTo` speaks; a missing row has none and asks for nothing.
+        let Some(position) = open.rows.get(row).and_then(|row| row.playable_position) else {
+            return;
+        };
+        let Some(decision) = self.player.play_from(&open.tracks, position) else {
+            return;
+        };
+        let queue = open.queue.clone();
+        let replaced = matches!(decision, player::PlayFrom::Requeue { .. });
+        let position = match decision {
+            player::PlayFrom::Jump { position } => position,
+            player::PlayFrom::Requeue { position } => {
+                let paths = queue.paths();
+                if !self.playback.send(Command::SetQueue { paths }) {
+                    self.player.engine_closed();
+                    return;
+                }
+                self.player.note_queue_sent(queue);
+                position
+            }
+        };
+        if self.playback.send(Command::JumpTo { position }) {
+            self.player.note_transport_sent();
+        } else {
+            self.player.engine_closed();
+        }
+        if replaced {
+            self.draws_are_over();
+        }
+        self.publish_mpris(false);
+    }
+
     /// Answer a message that belongs to the **Queue** place's rows, reporting
     /// whether it was one.
     ///
@@ -1075,7 +1493,39 @@ impl App {
         {
             state.pull = None;
         }
+        // A place's transient fields do not outlive the place: a rename field
+        // or an armed delete left standing behind a navigation would greet
+        // the next visit mid-gesture.
+        if let Some(open) = &mut self.playlists.open {
+            open.renaming = None;
+            open.delete_armed = false;
+        }
+        self.playlists.saving_queue = None;
         Task::none()
+    }
+
+    /// <kbd>Esc</kbd>'s place-level share of the peel: the transient fields
+    /// standing *on* the current place — a rename mid-type, an armed delete,
+    /// the queue's save field — each one press, before the place itself
+    /// leaves.
+    fn peel_place_states(&mut self) -> bool {
+        match self.place {
+            Place::Playlist(_) => {
+                let Some(open) = &mut self.playlists.open else {
+                    return false;
+                };
+                if open.renaming.take().is_some() {
+                    return true;
+                }
+                if open.delete_armed {
+                    open.delete_armed = false;
+                    return true;
+                }
+                false
+            }
+            Place::Queue => self.playlists.saving_queue.take().is_some(),
+            _ => false,
+        }
     }
 
     /// <kbd>Esc</kbd>: **peel one layer, top down.**
@@ -1085,10 +1535,16 @@ impl App {
     /// spent one rule on each; ADR-0022 left one kind of surface, so the key's
     /// whole first question is *am I at home*:
     ///
-    /// 1. **The place**, when it is not the Library. Backing out is what
+    /// 1. **The playlist panel's layers**, when it is summoned: its name
+    ///    field, a pick in flight, the armed row, then the panel — it floats
+    ///    over every place it exists in, so it is always the top
+    ///    ([`crate::playlists::Playlists::peel`], ADR-0024 §5–§6).
+    /// 2. **The place's own transient fields** ([`Self::peel_place_states`]):
+    ///    a rename mid-type, an armed delete, the queue's save field.
+    /// 3. **The place**, when it is not the Library. Backing out is what
     ///    <kbd>Esc</kbd> means in a record's page, in the queue and in the
     ///    settings alike, and it is the same press as their `‹ Library`.
-    /// 2. Then the Library's own layers, in [`Shelf::peel`]'s order: the pull's
+    /// 4. Then the Library's own layers, in [`Shelf::peel`]'s order: the pull's
     ///    offer, the search query, the shuffle pool's marks.
     ///
     /// (In the search field itself iced 0.13's `text_input` consumes
@@ -1096,6 +1552,16 @@ impl App {
     /// documented two-press behaviour, and §4.6 of the design spec owns the
     /// fix.)
     fn escape(&mut self) -> Task<Message> {
+        // The playlist panel floats *over* every place it exists in, so its
+        // layers peel first: the name field, a pick in flight, the armed
+        // row, the panel itself — one per press (ADR-0024 §5–§6).
+        if self.playlists.peel() {
+            return Task::none();
+        }
+        // Then whatever transient field is standing on the place itself.
+        if self.peel_place_states() {
+            return Task::none();
+        }
         if !self.place.is_home() {
             return self.leave();
         }
@@ -1740,22 +2206,44 @@ impl App {
         }
         let ink = self.ink();
         let lamp = self.warmth.value();
+        let collecting = self.playlists.armed.is_some();
         let screen: Element<'_, Message> = match (&self.screen, self.place) {
             (Screen::Setup(setup), _) => return views::setup::view(setup),
-            (Screen::Shelf(state), Place::Library) => state.view(&self.player, lamp),
+            (Screen::Shelf(state), Place::Library) => state.view(&self.player, lamp, collecting),
             (Screen::Shelf(state), Place::Album(id)) => match state.album(id) {
-                Some(album) => {
-                    views::album::view(state, album, &self.player, self.window.width, lamp)
-                }
+                Some(album) => views::album::view(
+                    state,
+                    album,
+                    &self.player,
+                    self.window.width,
+                    lamp,
+                    self.playlists.collecting(),
+                    self.hovered_album_row,
+                ),
                 // The record vanished under a rescan while its page was open.
                 // The wall is the honest answer — better than a page about
                 // nothing — and it is drawn rather than navigated to, because a
                 // view function may not change state.
-                None => state.view(&self.player, lamp),
+                None => state.view(&self.player, lamp, collecting),
             },
-            (Screen::Shelf(_), Place::Queue) => {
-                views::queue::view(&self.player, self.window.width, self.hovered_queue_row)
-            }
+            (Screen::Shelf(_), Place::Queue) => views::queue::view(
+                &self.player,
+                self.window.width,
+                self.hovered_queue_row,
+                self.playlists.saving_queue.as_ref(),
+            ),
+            (Screen::Shelf(state), Place::Playlist(id)) => match self.playlists.page(id) {
+                Some(open) => views::playlist::view(
+                    open,
+                    &self.player,
+                    self.window.width,
+                    self.hovered_playlist_row,
+                ),
+                // The playlist vanished under its page — deleted or renamed
+                // on disk. The wall is the honest answer, drawn rather than
+                // navigated to, exactly as a vanished record's page is.
+                None => state.view(&self.player, lamp, collecting),
+            },
             (Screen::Shelf(state), Place::Settings) => {
                 // Built here rather than inside the view: the folders come from
                 // the shell's own list and their contents from the index, and a
@@ -1769,6 +2257,27 @@ impl App {
                 )
             }
         };
+        // **The playlist panel**, floated over the place by ADR-0016's
+        // verified mechanics: a `stack`, the panel wrapped in `opaque` so a
+        // press inside it cannot fall through to a tile underneath, no scrim
+        // (refused), and wheel events beside it passing straight through to
+        // the wall. The wall is not re-laid by a pixel — the panel is a
+        // layer, not a column — and the bar below stays untouched because the
+        // stack holds only the place.
+        let screen: Element<'_, Message> = if self.panel_on_screen() {
+            iced::widget::stack![
+                screen,
+                iced::widget::container(iced::widget::opaque(views::playlist_panel::view(
+                    &self.playlists
+                )))
+                .width(iced::Length::Fill)
+                .height(iced::Length::Fill)
+                .align_x(iced::alignment::Horizontal::Right),
+            ]
+            .into()
+        } else {
+            screen
+        };
         // The persistent bottom bar lives under every place — unless this build
         // has no audio output at all, in which case playback UI is hidden
         // entirely.
@@ -1780,6 +2289,15 @@ impl App {
             views::bottom_bar::view(&self.player, self.place, ink),
         ]
         .into()
+    }
+
+    /// Whether the playlist panel is on screen: summoned, over a shelf, and
+    /// not in Settings — the one place it is absent (ADR-0024 §5). Its open
+    /// state *survives* the Settings round trip; only its pixels do not.
+    fn panel_on_screen(&self) -> bool {
+        matches!(self.screen, Screen::Shelf(_))
+            && self.playlists.panel_open
+            && self.place != Place::Settings
     }
 
     /// What every icon button needs to know to ink itself: which one the
@@ -3066,10 +3584,15 @@ impl Shelf {
     /// inspector behind a reveal viewport — because the grid had to survive a
     /// column arriving beside it over 150 ms. ADR-0022 deleted the column, so
     /// the wall takes the window and nothing is beside it.
-    fn view<'a>(&'a self, player: &'a PlayerState, lamp: f32) -> Element<'a, Message> {
+    fn view<'a>(
+        &'a self,
+        player: &'a PlayerState,
+        lamp: f32,
+        collecting: bool,
+    ) -> Element<'a, Message> {
         column![
             views::top_bar::view(self),
-            views::shelf::view(self, player, lamp)
+            views::shelf::view(self, player, lamp, collecting)
         ]
         .into()
     }
@@ -3541,8 +4064,12 @@ mod tests {
 
         /// Message tag → the on-screen control that sends the same message,
         /// or the reason there is none.
-        const CONTROLS: [(&str, &str); 19] = [
+        const CONTROLS: [(&str, &str); 20] = [
             ("PlayPause", "the bottom bar's play/pause button"),
+            (
+                "TogglePlaylists",
+                "the Library strip's labelled `Playlists` door (ADR-0024 §5)",
+            ),
             ("NextTrack", "the bottom bar's Next button"),
             ("PreviousTrack", "the bottom bar's Previous button"),
             (
@@ -3612,6 +4139,7 @@ mod tests {
             Key::Character("n".into()),
             Key::Character("m".into()),
             Key::Character("q".into()),
+            Key::Character("p".into()),
             Key::Character("u".into()),
             Key::Character("b".into()),
             Key::Character(",".into()),

@@ -6,9 +6,13 @@
 //! > **The window holds one place at a time, and the now-playing bar is in
 //! > every one of them.**
 //!
-//! One kind, four members, one rule. There is no inspector, no popover and no
+//! One kind, five members, one rule. There is no inspector, no popover and no
 //! rail; a listener has one question to answer about anything on screen —
-//! *which place am I in* — and one key that answers it.
+//! *which place am I in* — and one key that answers it. (One summoned,
+//! single-tenant panel floats *over* a place without being one — the playlist
+//! panel, ADR-0024 §5, whose amended refusal names it and closes the slot; it
+//! holds no place-like state here because it is never what the window is
+//! showing, only what is temporarily in front of it.)
 //!
 //! # What this replaces
 //!
@@ -70,6 +74,18 @@ pub enum Place {
     /// **The queue**: what the engine is holding and where it is in it, as a
     /// place of its own rather than a card floating over the wall.
     Queue,
+    /// **One playlist's page** (ADR-0024 §4): its name, its counts, `Play`,
+    /// `Queue`, `Rename`, `Delete`, and its rows in the queue place's anatomy.
+    ///
+    /// Carries [`crate::playlists::playlist_id`]'s hash of the playlist's
+    /// *name* — the filename is the name (ADR-0024 §2), so the name is the
+    /// identity, and the id is to the name what [`Self::Album`]'s id is to the
+    /// (artist, album) pair: a `Copy` handle the shell resolves against the
+    /// playlists folder on every frame. A playlist deleted or renamed under
+    /// this place stops resolving, and the shell answers with the wall — the
+    /// same posture as a record vanishing under a rescan while its page is
+    /// open.
+    Playlist(u64),
     /// Everything that is a standing decision: today ReplayGain (ADR-0013),
     /// and the shape every setting after it takes.
     Settings,
@@ -117,6 +133,21 @@ impl Place {
             Self::Library
         } else {
             Self::Album(id)
+        }
+    }
+
+    /// A playlist's name was pressed in the panel: show that playlist's page —
+    /// or come back from it, when it is the page already showing.
+    ///
+    /// [`Self::album`]'s shape exactly, and for its reason: pointing at the
+    /// thing you are already reading puts it down, and a different playlist
+    /// swaps the page rather than stacking one.
+    #[must_use]
+    pub fn playlist(self, id: u64) -> Self {
+        if self == Self::Playlist(id) {
+            Self::Library
+        } else {
+            Self::Playlist(id)
         }
     }
 
@@ -177,6 +208,9 @@ mod tests {
         assert_eq!(Place::Queue.queue(), Place::Library);
         assert_eq!(Place::Library.album(7), Place::Album(7));
         assert_eq!(Place::Album(7).album(7), Place::Library);
+        assert_eq!(Place::Library.playlist(3), Place::Playlist(3));
+        assert_eq!(Place::Playlist(3).playlist(3), Place::Library);
+        assert_eq!(Place::Playlist(3).playlist(4), Place::Playlist(4));
 
         // …and a door pressed from *another* place is a move, not a swap back
         // home. The key says where to go; only the place you are in says
@@ -194,6 +228,7 @@ mod tests {
             Place::Library,
             Place::Album(7),
             Place::Queue,
+            Place::Playlist(3),
             Place::Settings,
         ] {
             assert_eq!(place.back(), Place::Library);
@@ -214,6 +249,7 @@ mod tests {
             Settings,
             Queue,
             Album(u64),
+            Playlist(u64),
             Back,
         }
         let steps = [
@@ -221,6 +257,7 @@ mod tests {
             Step::Queue,
             Step::Album(1),
             Step::Album(2),
+            Step::Playlist(1),
             Step::Back,
         ];
         for a in steps {
@@ -233,6 +270,7 @@ mod tests {
                                 Step::Settings => place.settings(),
                                 Step::Queue => place.queue(),
                                 Step::Album(id) => place.album(id),
+                                Step::Playlist(id) => place.playlist(id),
                                 Step::Back => place.back(),
                             };
                             assert_eq!(
@@ -253,7 +291,8 @@ mod tests {
                             let showing = usize::from(place.is_home())
                                 + usize::from(place == Place::Settings)
                                 + usize::from(place == Place::Queue)
-                                + usize::from(place.showing_album().is_some());
+                                + usize::from(place.showing_album().is_some())
+                                + usize::from(matches!(place, Place::Playlist(_)));
                             assert_eq!(showing, 1, "{step:?}");
                         }
                     }

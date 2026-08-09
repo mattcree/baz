@@ -58,12 +58,14 @@
 use std::time::Duration;
 
 use iced::widget::{
-    Column, Space, button, column, container, image as iced_image, row, scrollable, text,
+    Column, Space, button, column, container, image as iced_image, mouse_area, row, scrollable,
+    text,
 };
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
 use crate::player::{Availability, PlayerState};
+use crate::playlists::Collecting;
 use crate::views::{gradient_block, place_header, place_pad, section_rule};
 use crate::{icon, theme, vm};
 
@@ -84,6 +86,8 @@ pub(crate) fn view<'a>(
     player: &'a PlayerState,
     window_width: f32,
     lamp: f32,
+    collecting: Collecting,
+    hovered_row: Option<usize>,
 ) -> Element<'a, Message> {
     let room = theme::active();
     // What the page's own block has to fit in: the window, less the one gutter
@@ -99,16 +103,20 @@ pub(crate) fn view<'a>(
 
     let body: Element<'_, Message> = if side_by_side {
         row![
-            container(aside(shelf, album, player, lamp)).width(Length::Fixed(theme::ALBUM_ASIDE_W)),
-            container(main_column(shelf, album, player)).width(Length::Fixed(tracks_w)),
+            container(aside(shelf, album, player, lamp, collecting))
+                .width(Length::Fixed(theme::ALBUM_ASIDE_W)),
+            container(main_column(shelf, album, player, collecting, hovered_row))
+                .width(Length::Fixed(tracks_w)),
         ]
         .spacing(theme::GAP_XL)
         .align_y(iced::Alignment::Start)
         .into()
     } else {
         column![
-            container(aside(shelf, album, player, lamp)).width(Length::Fixed(theme::ALBUM_ASIDE_W)),
-            container(main_column(shelf, album, player)).width(Length::Fixed(tracks_w)),
+            container(aside(shelf, album, player, lamp, collecting))
+                .width(Length::Fixed(theme::ALBUM_ASIDE_W)),
+            container(main_column(shelf, album, player, collecting, hovered_row))
+                .width(Length::Fixed(tracks_w)),
         ]
         .spacing(theme::GAP_XL)
         .into()
@@ -146,6 +154,7 @@ fn aside<'a>(
     album: &'a vm::AlbumVm,
     player: &'a PlayerState,
     lamp: f32,
+    collecting: Collecting,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let playing = player.playing_album() == Some(album.id);
@@ -175,6 +184,14 @@ fn aside<'a>(
     if *player.availability() != Availability::NotBuilt {
         block = block.push(play_album(album.id, player.engine_ready()));
     }
+    // The layer-1 add (ADR-0024 §6): the two-press route that ships first.
+    // It reads the selected album — L8.1 puts it with the album — and stands
+    // under the page's one commitment, quiet, no accent: collecting is not
+    // playback truth. With a playlist armed the same press is the one-press
+    // add layer 2 promises; otherwise it opens the panel as the picker.
+    if collecting.available {
+        block = block.push(add_to_playlist(album.id, collecting.armed));
+    }
     // Only a genuinely multi-format album gets a control; a single-format
     // album must look exactly as it always did.
     if album.editions.len() > 1 {
@@ -189,6 +206,8 @@ fn main_column<'a>(
     shelf: &'a Shelf,
     album: &'a vm::AlbumVm,
     player: &'a PlayerState,
+    collecting: Collecting,
+    hovered_row: Option<usize>,
 ) -> Element<'a, Message> {
     let chosen = shelf.edition_choice.get(&album.id).copied();
     let edition = vm::selected_edition(album, chosen);
@@ -217,6 +236,10 @@ fn main_column<'a>(
                 per_track_artists,
                 playing_row == Some(index),
                 interactive.then_some(Message::PlayTrack(album.id, index)),
+                album.id,
+                index,
+                collecting,
+                hovered_row == Some(index),
             ));
         }
     }
@@ -316,6 +339,40 @@ fn play_album(album: u64, live: bool) -> Element<'static, Message> {
     .padding(theme::pad(0.0, theme::GAP_MD))
     .style(move |_theme, status| theme::primary(room, status))
     .on_press_maybe(live.then_some(Message::PlayAlbum(album)))
+    .into()
+}
+
+/// **Add to playlist** — the record, whole, into a list of the user's
+/// choosing (ADR-0024 §6 layer 1).
+///
+/// The sleeve's width, like `Play album` above it, but a quiet word button
+/// rather than the accent: the lamp stays spent on playback truth alone.
+/// While a playlist is armed the label says where the press will land, so the
+/// one-press add is legible before it is made.
+fn add_to_playlist(album: u64, armed: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    button(
+        container(
+            text(if armed {
+                "+ Add to the open playlist"
+            } else {
+                "Add to playlist"
+            })
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .font(theme::MEDIUM)
+            .wrapping(text::Wrapping::None),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(alignment::Horizontal::Center)
+        .align_y(alignment::Vertical::Center),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_MD))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press(Message::AddAlbumToPlaylist(album))
     .into()
 }
 
@@ -522,11 +579,29 @@ fn edition_selector<'a>(
 /// `press` is `None` when there is no engine to ask, and the row then renders
 /// as the inert text it always was — a disabled control rather than a live one
 /// that would do nothing.
+///
+/// The row also carries the **reserved `+` slot** — a track's own route into
+/// a playlist (ADR-0024 §6). The slot is reserved whether or not the control
+/// is in it, so no duration slides as the pointer crosses a row; the control
+/// itself appears on hover, and **at rest whenever the panel is open or a
+/// playlist is armed** — the quiet mark that appears only while the user is
+/// collecting is the task's own furniture, not permanent chrome. Hover is not
+/// its only route: the open target (layer 2) is the rest-drawn second road
+/// the visible-control rule requires of a hover-revealed control.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a row is one anatomy with one long fact list; a struct per call \
+              site would be the same eight names once removed"
+)]
 fn track_row(
     track: &vm::TrackVm,
     show_artist: bool,
     playing: bool,
     press: Option<Message>,
+    album: u64,
+    index: usize,
+    collecting: Collecting,
+    hovered: bool,
 ) -> Element<'_, Message> {
     let room = theme::active();
     let duration = track.duration.map(vm::format_duration).unwrap_or_default();
@@ -561,7 +636,7 @@ fn track_row(
                 .wrapping(text::Wrapping::None),
         );
     }
-    button(
+    let body = button(
         row![
             // The number column and the duration lane are centred on the
             // **title's own line**, not on the row's block, and the row is
@@ -598,7 +673,60 @@ fn track_row(
     // reads down shares its edges with the column that holds it (law L5).
     .padding(theme::pad(theme::GAP_XS, 0.0))
     .style(move |_theme, status| theme::track_row(room, status, playing))
-    .on_press_maybe(press)
+    .on_press_maybe(press);
+    if !collecting.available {
+        return body.into();
+    }
+    let offered = collecting.armed || collecting.panel_open || hovered;
+    mouse_area(
+        row![body, add_slot(album, index, offered, collecting.armed)]
+            .spacing(theme::GAP_XS)
+            .align_y(iced::Alignment::Center),
+    )
+    .on_enter(Message::AlbumRowEntered(index))
+    .on_exit(Message::AlbumRowLeft(index))
+    .into()
+}
+
+/// The track's `+` slot: the queue ✕'s exact anatomy — [`theme::STEPPER_HIT`]
+/// square, slot reserved whether shown — sending one track toward a playlist.
+/// With one armed the press adds outright; otherwise it opens the panel as
+/// the picker (ADR-0024 §6 layers 2 and 1 respectively).
+fn add_slot(album: u64, index: usize, offered: bool, armed: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    if !offered {
+        return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
+    }
+    iced::widget::tooltip(
+        button(
+            container(
+                text("+")
+                    .size(theme::SIZE_BODY)
+                    .line_height(theme::LEADING_BODY)
+                    .color(room.paper),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(alignment::Horizontal::Center)
+            .align_y(alignment::Vertical::Center),
+        )
+        .width(Length::Fixed(theme::STEPPER_HIT))
+        .height(Length::Fixed(theme::STEPPER_HIT))
+        .padding(0)
+        .style(move |_theme, status| theme::transport(room, room.wall, status))
+        .on_press(Message::AddTrackToPlaylist(album, index)),
+        text(if armed {
+            "Add to the open playlist"
+        } else {
+            "Add to playlist"
+        })
+        .size(theme::SIZE_CAPTION)
+        .line_height(theme::LEADING_CAPTION),
+        iced::widget::tooltip::Position::Left,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
     .into()
 }
 
