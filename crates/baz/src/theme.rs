@@ -2865,16 +2865,10 @@ pub const CONTINUATION_H: f32 = LINE_BODY;
 /// label is empty and the slot is still this wide.
 pub const UP_NEXT_W: f32 = 152.0;
 
-/// Width of the top bar's `Settings` control (logical px).
-///
-/// A reserved slot like the rest, but reserved for **one word** rather than for
-/// a figure that changes. It was 92 px — a width fitted to the `Queue` toggle
-/// it used to sit beside, so the pair would read as a pair — and at a 760 px
-/// window the longer word wrapped to two lines inside it (§1.4 of the audit).
-/// With the queue gone to the bar, the control has no twin to match and is
-/// sized to its own label instead; `font.rs` measures `Settings` in the face
-/// that draws it against this number less its padding.
-pub const SETTINGS_TOGGLE_W: f32 = 84.0;
+// `SETTINGS_TOGGLE_W` is gone (doc 10 §7 step 1): the route to the Settings
+// place is the gear — a [`TRANSPORT_HIT`] square in the strip's corner — so
+// there is no word left to reserve a width for. The 52 px difference is the
+// first of the strip's three reclamations (ADR-0026's arithmetic).
 
 /// Width of the Settings place's section list (logical px).
 ///

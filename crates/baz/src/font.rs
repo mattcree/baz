@@ -439,7 +439,9 @@ mod tests {
         let sans = sans();
         // A library larger than the owner's, in the longest form the line takes.
         let counts = sans.width("40 000 albums · 512 345 tracks", theme::SIZE_META);
-        let right = counts + theme::GAP_LG + theme::SETTINGS_TOGGLE_W;
+        // The strip's corner is the gear now — a `TRANSPORT_HIT` square, not
+        // a word with a reserved width (doc 10 §7 step 1).
+        let right = counts + theme::GAP_LG + theme::TRANSPORT_HIT;
 
         let window = 1280.0_f32;
         assert!(
@@ -737,18 +739,10 @@ mod tests {
             );
         }
 
-        // The top bar's one remaining control, in the Medium face it is set in
-        // and inside the padding it carries. It used to be sized to the *queue*
-        // toggle beside it, and wrapped to two lines at a 760 px window
-        // because of it; now it is sized to its own word, which only means
-        // anything if the word is measured.
-        fits(
-            &Face::parse(SANS_MEDIUM),
-            "Settings",
-            theme::SIZE_META,
-            theme::SETTINGS_TOGGLE_W - 2.0 * theme::GAP_SM,
-            "SETTINGS_TOGGLE_W",
-        );
+        // The strip's Settings door is the gear now (doc 10 §7 step 1): a
+        // glyph in a fixed square has no word to measure, and its name rides
+        // the tooltip, whose card sizes to its own text. Nothing to assert —
+        // which is itself the point of the change.
     }
 
     /// The Settings place's reserved note slot still holds every sentence it

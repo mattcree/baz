@@ -109,6 +109,11 @@ pub enum Glyph {
     SpeakerMuted,
     /// Close: the dismissal cross, for the panels in the right-hand rail.
     Close,
+    /// Search: the magnifier that marks the well (doc 10 §4.1). Not a
+    /// control's mark — the well is the control; this is its label.
+    Magnifier,
+    /// Settings: the gear, the strip's one icon-only door (doc 10 §3.4).
+    Gear,
 }
 
 /// Play — one triangle, sitting a touch right of the box's centre so the
@@ -215,9 +220,170 @@ const CLOSE: &[Outline] = &[
     &[(0.16, 0.74), (0.26, 0.84), (0.84, 0.26), (0.74, 0.16)],
 ];
 
+/// The magnifier's ring — a **keyhole outline**, because [`Glyph::covers`]
+/// takes the union of outlines and a ring drawn as two circles would have its
+/// hole cancelled (doc 10 §3.6's implementation note). One closed polygon:
+/// the outer circle traced all the way round, a zero-width bridge in to the
+/// inner circle, the inner circle traced back the other way, and the bridge
+/// out again. The existing even-odd test ([`encloses`]) then fills the band
+/// and leaves the hole: a ray from a point inside the hole crosses both
+/// circles — an even count — and the two coincident bridge edges cancel.
+///
+/// The slit sits at 45°, pointing into the lower right, so the handle laid
+/// over it makes it unreachable even in principle. Ring stroke
+/// 0.30 − 0.155 = **0.145** of the unit square — the shipped glyphs' own
+/// band (the pause bars are 0.15, the close bars 0.141).
+const MAGNIFIER_RING: Outline = &[
+    (0.6321, 0.6321),
+    (0.5562, 0.6873),
+    (0.4669, 0.7163),
+    (0.3731, 0.7163),
+    (0.2838, 0.6873),
+    (0.2079, 0.6321),
+    (0.1527, 0.5562),
+    (0.1237, 0.4669),
+    (0.1237, 0.3731),
+    (0.1527, 0.2838),
+    (0.2079, 0.2079),
+    (0.2838, 0.1527),
+    (0.3731, 0.1237),
+    (0.4669, 0.1237),
+    (0.5562, 0.1527),
+    (0.6321, 0.2079),
+    (0.6873, 0.2838),
+    (0.7163, 0.3731),
+    (0.7163, 0.4669),
+    (0.6873, 0.5562),
+    (0.6321, 0.6321),
+    (0.5296, 0.5296),
+    (0.5581, 0.4904),
+    (0.5731, 0.4442),
+    (0.5731, 0.3958),
+    (0.5581, 0.3496),
+    (0.5296, 0.3104),
+    (0.4904, 0.2819),
+    (0.4442, 0.2669),
+    (0.3958, 0.2669),
+    (0.3496, 0.2819),
+    (0.3104, 0.3104),
+    (0.2819, 0.3496),
+    (0.2669, 0.3958),
+    (0.2669, 0.4442),
+    (0.2819, 0.4904),
+    (0.3104, 0.5296),
+    (0.3496, 0.5581),
+    (0.3958, 0.5731),
+    (0.4442, 0.5731),
+    (0.4904, 0.5581),
+    (0.5296, 0.5296),
+];
+
+/// Search — the ring above, and its handle: one bar at 45°, the ring's own
+/// stroke width, starting inside the ring's outer edge (the union fills the
+/// overlap, exactly as the mute cross's bars do) and running to the lower
+/// right. The glass sits high-left so the whole mark reads centred with the
+/// handle on.
+const MAGNIFIER: &[Outline] = &[
+    MAGNIFIER_RING,
+    &[
+        (0.6693, 0.5667),
+        (0.5667, 0.6693),
+        (0.8287, 0.9313),
+        (0.9313, 0.8287),
+    ],
+];
+
+/// Settings — the gear: the magnifier's keyhole construction with teeth on
+/// the outer trace. **Eight teeth**, which is what reads cleanly at
+/// [`theme::ICON_PX`] 16 (doc 10 §3.6): tips at 0.42 from centre, valleys at
+/// 0.30, the hole at 0.155 — so the ring band is the set's 0.145 stroke and
+/// the teeth stand 0.12 proud of it. The slit runs through the tooth at 0°.
+/// Symmetric about both axes and both diagonals, so the mark reads as
+/// centred in the strip's corner button.
+const GEAR: &[Outline] = &[&[
+    (0.9200, 0.5000),
+    (0.9159, 0.5585),
+    (0.7934, 0.5624),
+    (0.7837, 0.5977),
+    (0.7696, 0.6315),
+    (0.7516, 0.6634),
+    (0.8354, 0.7528),
+    (0.7970, 0.7970),
+    (0.7528, 0.8354),
+    (0.6634, 0.7516),
+    (0.6315, 0.7696),
+    (0.5977, 0.7837),
+    (0.5624, 0.7934),
+    (0.5585, 0.9159),
+    (0.5000, 0.9200),
+    (0.4415, 0.9159),
+    (0.4376, 0.7934),
+    (0.4023, 0.7837),
+    (0.3685, 0.7696),
+    (0.3366, 0.7516),
+    (0.2472, 0.8354),
+    (0.2030, 0.7970),
+    (0.1646, 0.7528),
+    (0.2484, 0.6634),
+    (0.2304, 0.6315),
+    (0.2163, 0.5977),
+    (0.2066, 0.5624),
+    (0.0841, 0.5585),
+    (0.0800, 0.5000),
+    (0.0841, 0.4415),
+    (0.2066, 0.4376),
+    (0.2163, 0.4023),
+    (0.2304, 0.3685),
+    (0.2484, 0.3366),
+    (0.1646, 0.2472),
+    (0.2030, 0.2030),
+    (0.2472, 0.1646),
+    (0.3366, 0.2484),
+    (0.3685, 0.2304),
+    (0.4023, 0.2163),
+    (0.4376, 0.2066),
+    (0.4415, 0.0841),
+    (0.5000, 0.0800),
+    (0.5585, 0.0841),
+    (0.5624, 0.2066),
+    (0.5977, 0.2163),
+    (0.6315, 0.2304),
+    (0.6634, 0.2484),
+    (0.7528, 0.1646),
+    (0.7970, 0.2030),
+    (0.8354, 0.2472),
+    (0.7516, 0.3366),
+    (0.7696, 0.3685),
+    (0.7837, 0.4023),
+    (0.7934, 0.4376),
+    (0.9159, 0.4415),
+    (0.9200, 0.5000),
+    (0.6550, 0.5000),
+    (0.6474, 0.4521),
+    (0.6254, 0.4089),
+    (0.5911, 0.3746),
+    (0.5479, 0.3526),
+    (0.5000, 0.3450),
+    (0.4521, 0.3526),
+    (0.4089, 0.3746),
+    (0.3746, 0.4089),
+    (0.3526, 0.4521),
+    (0.3450, 0.5000),
+    (0.3526, 0.5479),
+    (0.3746, 0.5911),
+    (0.4089, 0.6254),
+    (0.4521, 0.6474),
+    (0.5000, 0.6550),
+    (0.5479, 0.6474),
+    (0.5911, 0.6254),
+    (0.6254, 0.5911),
+    (0.6474, 0.5479),
+    (0.6550, 0.5000),
+]];
+
 impl Glyph {
     /// Every glyph, in sprite-sheet order.
-    const ALL: [Self; 7] = [
+    const ALL: [Self; Self::COUNT] = [
         Self::Play,
         Self::Pause,
         Self::Next,
@@ -225,7 +391,12 @@ impl Glyph {
         Self::Speaker,
         Self::SpeakerMuted,
         Self::Close,
+        Self::Magnifier,
+        Self::Gear,
     ];
+
+    /// How many glyphs the sheet holds.
+    const COUNT: usize = 9;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -238,6 +409,8 @@ impl Glyph {
             Self::Speaker => SPEAKER,
             Self::SpeakerMuted => SPEAKER_MUTED,
             Self::Close => CLOSE,
+            Self::Magnifier => MAGNIFIER,
+            Self::Gear => GEAR,
         }
     }
 
@@ -251,6 +424,8 @@ impl Glyph {
             Self::Speaker => 4,
             Self::SpeakerMuted => 5,
             Self::Close => 6,
+            Self::Magnifier => 7,
+            Self::Gear => 8,
         }
     }
 
@@ -296,7 +471,7 @@ impl From<PlayPause> for Glyph {
 /// the room; a room that could change while the process ran would have to
 /// invalidate this, and that is part of what step 20 buys when it makes the
 /// second room selectable.
-static SHEET: LazyLock<[image::Handle; 7]> = LazyLock::new(|| {
+static SHEET: LazyLock<[image::Handle; Glyph::COUNT]> = LazyLock::new(|| {
     let ink = rgb(theme::active().glyph());
     Glyph::ALL.map(|glyph| image::Handle::from_rgba(RASTER_PX, RASTER_PX, rasterize(glyph, ink)))
 });
@@ -676,6 +851,156 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The solid runs a horizontal line at unit-square height `y` crosses,
+    /// as `(start, width)` pairs in unit-square units — measured off
+    /// [`Glyph::covers`] directly, so a stroke width is geometry rather than
+    /// a count of antialiased pixels.
+    fn runs_along(glyph: Glyph, y: f32) -> Vec<(f32, f32)> {
+        const STEP: f32 = 1.0 / 2048.0;
+        let mut runs = Vec::new();
+        let mut start: Option<f32> = None;
+        let mut x = 0.0;
+        while x <= 1.0 {
+            match (glyph.covers(x, y), start) {
+                (true, None) => start = Some(x),
+                (false, Some(began)) => {
+                    runs.push((began, x - began));
+                    start = None;
+                }
+                _ => {}
+            }
+            x += STEP;
+        }
+        if let Some(began) = start {
+            runs.push((began, 1.0 - began));
+        }
+        runs
+    }
+
+    /// **The magnifier is a ring with a handle**, and the ring's hole
+    /// survives the keyhole outline — the property doc 10 §3.6's note is
+    /// about: `covers` takes the union of outlines, so the hole has to be
+    /// carried by the even-odd rule *within* one outline, and it is.
+    #[test]
+    fn the_magnifier_is_a_ring_with_a_handle_and_the_hole_survives() {
+        // The glass's centre is empty and the band around it is solid.
+        assert!(!Glyph::Magnifier.covers(0.42, 0.42), "the hole filled in");
+        assert!(Glyph::Magnifier.covers(0.42 - 0.2275, 0.42), "no band left");
+        assert!(
+            Glyph::Magnifier.covers(0.42, 0.42 - 0.2275),
+            "no band above"
+        );
+        // The handle reaches into the lower right; the far corners are bare.
+        assert!(Glyph::Magnifier.covers(0.84, 0.84), "no handle");
+        assert!(!Glyph::Magnifier.covers(0.1, 0.9));
+        assert!(!Glyph::Magnifier.covers(0.9, 0.1));
+        // Across the glass's own centre line: gap, band, hole, band, gap —
+        // the ring reads as a ring, not as a disc.
+        let runs = runs_along(Glyph::Magnifier, 0.42);
+        assert_eq!(runs.len(), 2, "expected band/hole/band across the glass");
+        // And the raster agrees: the hole is transparent in the sprite.
+        let pixels = rasterize(Glyph::Magnifier, [255, 255, 255]);
+        let centre = RASTER_PX * 42 / 100;
+        assert_eq!(alpha(&pixels, centre, centre), 0, "the hole filled in");
+    }
+
+    /// The magnifier's ring and handle draw at the set's one stroke band —
+    /// 0.14–0.15 of the unit square (doc 10 §3.7) — measured as geometry.
+    #[test]
+    fn the_magnifier_keeps_the_sets_stroke_band() {
+        // The ring, crossed horizontally through the glass's centre: both
+        // band runs are one stroke wide.
+        for (_, width) in runs_along(Glyph::Magnifier, 0.42) {
+            assert!(
+                (0.14..=0.152).contains(&width),
+                "a ring stroke of {width:.3} is off the set's band"
+            );
+        }
+        // The handle, crossed at a height only its shaft occupies — below
+        // the ring (which ends at y 0.72) and clear of the end cap. It runs
+        // at 45°, so a horizontal cut is its stroke × √2.
+        let handle = runs_along(Glyph::Magnifier, 0.80);
+        assert_eq!(handle.len(), 1, "expected the handle alone at y 0.80");
+        let width = handle[0].1 / std::f32::consts::SQRT_2;
+        assert!(
+            (0.14..=0.152).contains(&width),
+            "a handle stroke of {width:.3} is off the set's band"
+        );
+    }
+
+    /// **The gear is a toothed ring with a hole**: eight teeth, a band at
+    /// the set's stroke, and an empty centre — the keyhole construction
+    /// again, with the teeth on the outer trace.
+    #[test]
+    fn the_gear_is_eight_teeth_around_a_ring_with_a_hole() {
+        // The hole is a hole.
+        assert!(!Glyph::Gear.covers(0.5, 0.5), "the gear's hole filled in");
+        // Across the centre: gap, tooth-and-band, hole, band-and-tooth, gap —
+        // the tooth at 0° meets the ring, so each side is one solid run.
+        let runs = runs_along(Glyph::Gear, 0.5);
+        assert_eq!(runs.len(), 2, "expected band/hole/band across the middle");
+        // Those runs span valley-to-tip *and* the ring: from 0.08 in to the
+        // hole's edge at 0.345.
+        let (start, width) = runs[0];
+        assert!((start - 0.08).abs() < 0.01, "the tooth tip starts at 0.08");
+        assert!((width - 0.265).abs() < 0.01, "tooth and band are one mass");
+        // Eight teeth: a circle sampled between valley and tip crosses a
+        // tooth eight times.
+        let mut crossings = 0;
+        let mut previous = Glyph::Gear.covers(0.5 + 0.36, 0.5);
+        for step in 1..=2880 {
+            let angle = std::f32::consts::TAU * index_to_f32(step) / 2880.0;
+            let inside = Glyph::Gear.covers(0.5 + 0.36 * angle.cos(), 0.5 + 0.36 * angle.sin());
+            if inside != previous {
+                crossings += 1;
+                previous = inside;
+            }
+        }
+        assert_eq!(crossings, 16, "eight teeth cross the 0.36 circle");
+        // Symmetric about the horizontal centre line, like the rest of the
+        // set — the slit is zero-width, so it cannot break this.
+        let pixels = rasterize(Glyph::Gear, [255, 255, 255]);
+        for column in 0..RASTER_PX {
+            for row in 0..RASTER_PX / 2 {
+                assert_eq!(
+                    alpha(&pixels, column, row),
+                    alpha(&pixels, column, RASTER_PX - 1 - row),
+                    "the gear is not symmetric at {column},{row}"
+                );
+            }
+        }
+    }
+
+    /// The gear's ring keeps the set's stroke band, measured where only the
+    /// ring is: along the valley between two teeth, the band is
+    /// 0.30 − 0.155 = 0.145 of the unit square.
+    #[test]
+    fn the_gear_keeps_the_sets_stroke_band() {
+        // Walk a ray out through a valley centre (22.5°) and measure where
+        // the band starts and stops.
+        let angle = std::f32::consts::TAU * 22.5 / 360.0;
+        let (dx, dy) = (angle.cos(), angle.sin());
+        let mut entered: Option<f32> = None;
+        let mut band = 0.0;
+        let mut radius = 0.0;
+        while radius <= 0.5 {
+            let inside = Glyph::Gear.covers(0.5 + radius * dx, 0.5 + radius * dy);
+            match (inside, entered) {
+                (true, None) => entered = Some(radius),
+                (false, Some(began)) => {
+                    band = radius - began;
+                    break;
+                }
+                _ => {}
+            }
+            radius += 1.0 / 2048.0;
+        }
+        assert!(
+            (0.14..=0.152).contains(&band),
+            "a ring stroke of {band:.3} is off the set's band"
+        );
     }
 
     #[test]

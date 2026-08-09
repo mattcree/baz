@@ -2705,7 +2705,9 @@ impl App {
         let collecting = self.playlists.collecting();
         let screen: Element<'_, Message> = match (&self.screen, self.place) {
             (Screen::Setup(setup), _) => return views::setup::view(setup),
-            (Screen::Shelf(state), Place::Library) => state.view(&self.player, lamp, collecting),
+            (Screen::Shelf(state), Place::Library) => {
+                state.view(&self.player, lamp, collecting, ink)
+            }
             (Screen::Shelf(state), Place::Album(id)) => match state.album(id) {
                 Some(album) => views::album::view(
                     state,
@@ -2720,7 +2722,7 @@ impl App {
                 // The wall is the honest answer — better than a page about
                 // nothing — and it is drawn rather than navigated to, because a
                 // view function may not change state.
-                None => state.view(&self.player, lamp, collecting),
+                None => state.view(&self.player, lamp, collecting, ink),
             },
             (Screen::Shelf(_), Place::Queue) => views::queue::view(
                 &self.player,
@@ -2742,7 +2744,7 @@ impl App {
                 // The playlist vanished under its page — deleted or renamed
                 // on disk. The wall is the honest answer, drawn rather than
                 // navigated to, exactly as a vanished record's page is.
-                None => state.view(&self.player, lamp, collecting),
+                None => state.view(&self.player, lamp, collecting, ink),
             },
             (Screen::Shelf(state), Place::Settings) => {
                 // Built here rather than inside the view: the folders come from
@@ -4202,9 +4204,10 @@ impl Shelf {
         player: &'a PlayerState,
         lamp: f32,
         collecting: crate::playlists::Collecting,
+        ink: Ink,
     ) -> Element<'a, Message> {
         column![
-            views::top_bar::view(self),
+            views::top_bar::view(self, ink),
             views::shelf::view(self, player, lamp, collecting)
         ]
         .into()

@@ -24,40 +24,25 @@
 //! words and not a menu.
 
 use baz_core::index::GroupKey;
-use iced::widget::{Space, button, column, container, horizontal_rule, row, text, text_input};
+use iced::widget::{
+    Space, button, column, container, horizontal_rule, image as iced_image, mouse_area, row, stack,
+    text, text_input, tooltip,
+};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf, search_id};
+use crate::motion::{Control, Ink};
 
-use crate::theme;
+use crate::{icon, theme};
 
 /// The search field's width in the top bar (logical px).
 pub(crate) const SEARCH_W: f32 = 360.0;
 
 /// The slim top bar: the search well on the left, quiet status and the route
 /// to the settings on the right, a hairline rule below.
-pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
+pub(crate) fn view(shelf: &Shelf, ink: Ink) -> Element<'_, Message> {
     let room = theme::active();
-    // The search **well**: recessed below the wall, like every other place in
-    // baz you put something into. Its vertical padding is set so that the well
-    // stands [`theme::TRANSPORT_HIT`] tall — the same 32 px as every control in
-    // the product — which is what puts the bar's left and right clusters on one
-    // vertical grid instead of merely on one centre line.
-    // **`on_submit` is what makes Enter mean one thing.** With the well
-    // focused iced 0.13's `text_input` consumes <kbd>Enter</kbd> and publishes
-    // this; with the well unfocused `crate::keys` binds the same message. Both
-    // roads are [`Message::PlayFirstMatch`], so a listener who typed from the
-    // wall and one who clicked into the well get the same record
-    // (ADR-0017 §1.2, ADR-0021).
-    let search = text_input("Search artists, albums, tracks…", &shelf.query)
-        .id(search_id())
-        .on_input(Message::SearchChanged)
-        .on_submit(Message::PlayFirstMatch)
-        .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
-        .size(theme::SIZE_BODY)
-        .line_height(theme::LEADING_BODY)
-        .width(Length::Fixed(SEARCH_W))
-        .style(move |_theme, status| theme::input(room, status));
+    let search = well(shelf, SEARCH_W);
     let mut keys = row![]
         .spacing(theme::GAP_MD)
         .align_y(iced::Alignment::Center);
@@ -99,7 +84,7 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
                 .color(room.alert),
         );
     }
-    status = status.push(settings_toggle());
+    status = status.push(settings_gear(ink));
     column![
         container(
             row![
@@ -168,10 +153,11 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
 /// recommendation engine wears. baz's shuffle can afford to be spelled out
 /// because it can say what it is drawing from.
 ///
-/// Sentence case in the Medium face, like `Settings` at the other end of the
-/// bar: these are **actions**, where the caps-and-tracked row beside them is a
-/// set of *states* one of which is current. Two vocabularies for two kinds of
-/// thing, and no third.
+/// Sentence case in the Medium face, like the doors: these are **actions**,
+/// where the caps-and-tracked row beside them is a set of *states* one of
+/// which is current — two of doc 10 §0.3's three vocabularies, and the third
+/// (the drawn glyph) enters this strip only where its rule admits it: the
+/// gear, the magnifier, and `Play all`'s leading triangle.
 fn draws() -> Element<'static, Message> {
     row![
         draw_word("Play all", Message::PlayAll),
@@ -213,12 +199,15 @@ fn draw_word(label: &'static str, message: Message) -> Element<'static, Message>
 /// summoned to collect *from* the wall. It closes the left cluster's reading
 /// order: **narrow, then arrange, then draw, then collect**.
 ///
-/// Labelled with the name of what it opens, like `Settings` across the
-/// frame — and unlike `Settings` it *is* honestly a toggle, because the panel
-/// floats over this strip's own place rather than replacing it, so the door
-/// stays visible while what it opened is open. What it deliberately does not
-/// gain is a lit "open" state: the panel standing 340 px away is its own
-/// statement, and a second one would be the same fact twice.
+/// Labelled with the name of what it opens, **in words** — and confirmed as
+/// a word by doc 10 §3.4: no universal symbol distinguishes *playlists* from
+/// *queue* from *menu*, so this door is exactly the class L8.4's two-symbol
+/// exception refuses. Unlike the gear across the frame it *is* honestly a
+/// toggle, because the panel floats over this strip's own place rather than
+/// replacing it, so the door stays visible while what it opened is open.
+/// What it deliberately does not gain is a lit "open" state: the panel
+/// standing 340 px away is its own statement, and a second one would be the
+/// same fact twice.
 fn playlists_door() -> Element<'static, Message> {
     let room = theme::active();
     button(
@@ -239,53 +228,125 @@ fn playlists_door() -> Element<'static, Message> {
     .into()
 }
 
-/// The route to the Settings **place**, and the only place in the interface
-/// that says baz has settings at all.
+/// **The search well**, with the magnifier laid over its left padding
+/// (doc 10 §4.1): recessed below the wall, like every other place in baz you
+/// put something into. Its vertical padding is set so that the well stands
+/// [`theme::TRANSPORT_HIT`] tall — the same 32 px as every control in the
+/// product — which is what puts the bar's left and right clusters on one
+/// vertical grid instead of merely on one centre line.
 ///
-/// It sits at the far right of the top bar, which is where an application's own
-/// affairs belong: the bottom bar is the transport, every pixel of it reserved
-/// so that nothing moves as the music does, and it was not touched to put this
-/// here.
+/// # The magnifier is the well's label, not a control
 ///
-/// It is **navigation** now, not a panel toggle, and it is drawn as such: no
-/// "open" state, because the place it leads to fills the window and takes this
-/// bar with it, so there is no frame in which the control could be lit and
-/// visible at once. The same message <kbd>Ctrl</kbd>+<kbd>,</kbd> sends, and
-/// the same one the Settings place's own Back sends.
+/// The universal mark, in the universal corner — the second of the two
+/// symbols L8.4's amendment admits as door labels (doc 10 §3.4) — drawn as a
+/// **layer** over the input (the mechanism the bar's tip layers already use;
+/// iced 0.13's `text_input::Icon` is font-based and therefore not it). The
+/// well remains the only focusable widget (ADR-0017 §1.2), the glyph takes
+/// the resting glyph ink and answers nothing, and the input's own left
+/// padding reserves the lane the glyph sits in, so the caret and the mark
+/// cannot collide.
 ///
-/// A word rather than a gear. baz draws its glyphs itself ([`crate::icon`])
-/// from a small, deliberate set, and a cog would be a new one for a control
-/// that has a short and unambiguous name.
-fn settings_toggle() -> Element<'static, Message> {
+/// # `on_submit` is what makes Enter mean one thing
+///
+/// With the well focused iced 0.13's `text_input` consumes <kbd>Enter</kbd>
+/// and publishes this; with the well unfocused `crate::keys` binds the same
+/// message. Both roads are [`Message::PlayFirstMatch`], so a listener who
+/// typed from the wall and one who clicked into the well get the same record
+/// (ADR-0017 §1.2, ADR-0021).
+fn well(shelf: &Shelf, width: f32) -> Element<'_, Message> {
     let room = theme::active();
-    button(
-        container(
-            text("Settings")
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .font(theme::MEDIUM)
-                .wrapping(text::Wrapping::None),
-        )
-        // **Both axes, from the box** (law L3). A `button` with a fixed height
-        // and no vertical alignment on its content lays that content out at the
-        // *top*: the audit measured this word's ink centre at y 19.5 against a
-        // box centre of 25.9 — 6.4 px high — which put its baseline 8 px above
-        // the counts line it shares a row with, visible without a ruler. The
-        // horizontal centring was already stated; the vertical one was not.
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(alignment::Horizontal::Center)
-        .align_y(alignment::Vertical::Center),
+    let input = text_input("Search artists, albums, tracks…", &shelf.query)
+        .id(search_id())
+        .on_input(Message::SearchChanged)
+        .on_submit(Message::PlayFirstMatch)
+        .padding(iced::Padding {
+            top: theme::WELL_PAD_V,
+            right: theme::GAP_MD,
+            bottom: theme::WELL_PAD_V,
+            left: theme::GAP_MD + theme::ICON_PX + theme::GAP_SM,
+        })
+        .size(theme::SIZE_BODY)
+        .line_height(theme::LEADING_BODY)
+        .width(Length::Fixed(width))
+        .style(move |_theme, status| theme::input(room, status));
+    let magnifier = container(
+        iced_image(icon::handle(icon::Glyph::Magnifier))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(theme::GLYPH_OPACITY),
     )
-    .width(Length::Fixed(theme::SETTINGS_TOGGLE_W))
-    // The same 32 px as the search well beside it and as every control in the
-    // product: a row whose two ends are 34 px and 24 px tall is centred but not
-    // aligned, and the difference is exactly what "clunky" describes.
     .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_SM))
-    .style(move |_theme, status| theme::word_button(room, room.wall, status))
-    .on_press(Message::ToggleSettings)
-    .into()
+    .padding(theme::pad(0.0, theme::GAP_MD))
+    .align_y(alignment::Vertical::Center);
+    stack![input, magnifier].into()
+}
+
+/// The route to the Settings **place** — **the gear**, in the corner where
+/// every application this audience arrives from keeps it.
+///
+/// It sits at the far right of the top bar, which is where an application's
+/// own affairs belong: the bottom bar is the transport, every pixel of it
+/// reserved so that nothing moves as the music does, and it was not touched
+/// to put this here.
+///
+/// It is the one door in baz labelled by a symbol rather than a word, and
+/// the licence is narrow (doc 10 §3.4, ADR-0026 §2): L8.4's amendment
+/// enumerates exactly two symbols that count as labels — the gear and the
+/// magnifier — because both are universal in symbol *and* position, and the
+/// tooltip carries the word for the hover (the accessible name,
+/// ADR-0017 §4c). It replaced an 84 px word with a 32 px square, which is
+/// most of the slack the strip got back.
+///
+/// It is **navigation**, not a panel toggle, and it is drawn as such: no
+/// "open" state, because the place it leads to fills the window and takes
+/// this bar with it, so there is no frame in which the control could be lit
+/// and visible at once. The same message <kbd>Ctrl</kbd>+<kbd>,</kbd> sends,
+/// and the same one the Settings place's own Back sends.
+///
+/// The anatomy is the transport's own ([`crate::views::bottom_bar`]'s glyph
+/// button): the mark is a rasterised sprite, so the ink — not the button
+/// style's `text_color`, which never reaches an image — carries the state,
+/// through the same `mouse_area` crossings and the same 90 ms tween
+/// (ADR-0020 §2.1).
+fn settings_gear(ink: Ink) -> Element<'static, Message> {
+    let room = theme::active();
+    let mark = container(
+        iced_image(icon::handle(icon::Glyph::Gear))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(theme::glyph_ink(
+                true,
+                false,
+                ink.hover(Control::Settings),
+                ink.pressed(Control::Settings),
+            )),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    let control = button(mark)
+        .width(Length::Fixed(theme::TRANSPORT_HIT))
+        .height(Length::Fixed(theme::TRANSPORT_HIT))
+        .padding(0)
+        .style(move |_theme, status| theme::transport(room, room.wall, status))
+        .on_press(Message::ToggleSettings);
+    let named = tooltip(
+        control,
+        text("Settings")
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        // Below the control rather than above it: the gear stands in the
+        // window's own top corner, and a tip above it would clip.
+        tooltip::Position::Bottom,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room));
+    mouse_area(named)
+        .on_enter(Message::ControlEntered(Control::Settings))
+        .on_exit(Message::ControlLeft(Control::Settings))
+        .into()
 }
 
 /// The unobtrusive count text: album/track counts, or the filtered

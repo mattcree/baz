@@ -227,12 +227,12 @@ fn sleeve_cell(shelf: &Shelf, album: u64, size: f32) -> Element<'static, Message
 /// wearing it rather than one, that is a property worth having in one function
 /// instead of three copies that can drift.
 ///
-/// **Back is a word, not a chevron.** baz draws its glyphs itself from a small
-/// deliberate set ([`crate::icon`]), and a back arrow would be a new one for a
-/// control that has a short and unambiguous name — the same argument that keeps
-/// `Settings` a word in the top bar it returns to. It sends
-/// [`Message::LeavePlace`], which is the message <kbd>Esc</kbd> sends, so the
-/// two are one press and the visible-control rule holds for every place.
+/// **Back is a word, not a chevron.** A door is labelled with the name of what
+/// it opens (doc 07 L8.4), and the amendment that let the gear and the
+/// magnifier stand as symbols is a closed two-name list (doc 10 §3.4) — a back
+/// arrow is merely familiar, not universal, so this door keeps its word. It
+/// sends [`Message::LeavePlace`], which is the message <kbd>Esc</kbd> sends, so
+/// the two are one press and the visible-control rule holds for every place.
 pub(crate) fn place_header(name: &'static str, note: &'static str) -> Element<'static, Message> {
     let room = theme::active();
     let back = button(

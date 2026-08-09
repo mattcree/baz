@@ -370,6 +370,9 @@ pub enum Control {
     Next,
     /// The bottom bar's speaker.
     Mute,
+    /// The Library strip's gear — the door to the Settings place
+    /// (doc 10 §3.4), the one icon-only control outside the bottom bar.
+    Settings,
 }
 
 /// What every icon button needs to know to ink itself: which one the pointer is
@@ -688,6 +691,7 @@ mod tests {
             Control::PlayPause,
             Control::Next,
             Control::Mute,
+            Control::Settings,
         ];
         for (index, control) in all.iter().enumerate() {
             for other in &all[index + 1..] {
