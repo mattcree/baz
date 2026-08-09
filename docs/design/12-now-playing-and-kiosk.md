@@ -1936,43 +1936,399 @@ because the ambient register is what the far field is reading.
 
 ---
 
-## 10. The visualizer, deferred with a price
+## 10. The spectrum analyser: the visualizer, promoted
 
-> *"maybe we could have a visualizer mode at some point"* — the owner's own
-> *"at some point"*, which this section takes at face value.
+> *"is it a spectrum analyzer or graphic thing with the bars going up and
+> down… that would be nice"* — the owner, 2026-08-09
 
-**What changed.** Under the old posture the visualizer was blocked on the motion
-law, and this section would have been an argument. Under the ruling it is not
-blocked on anything in principle — §7.1's class admits it exactly as it admits
-the field. So the deferral is now about **cost and sequence**, which is a much
-healthier reason.
+**What this collapses.** The earlier brief asked for *"a visualizer mode at some
+point, but also VU options"*, and this document deferred the visualizer as
+**D1** while designing the meter. The bars **are** that visualizer, and *"at
+some point"* has become now. So §10 stops being a deferral with a price and
+becomes the design; §13's D1 is retired and replaced.
 
-**Why it is still deferred, in one sentence**: everything in §5–§9 makes the
-surface better for the listener who leaves it running, and a visualizer makes it
-better for the listener who is *watching it*, which is a smaller audience and a
-larger build.
+**What it does not collapse.** The R128 meter of §9 stays, in full. The two are
+not competing answers to one question — **the bars are a *visual* and the meter
+is a *reading***, and §10.7 specifies the guarantee that they can never tell
+different stories about the same instant.
 
-**What it would actually cost**, so that re-proposing it is a decision rather
-than a fresh study:
+### 10.1 The FFT: `realfft`, and it costs nothing
 
-| Piece | Cost | Already paid by this study? |
+**The decision: take `realfft` 3.5.0.** Not because a hand-rolled radix-2 would
+be hard, but because of a fact that settles it outright:
+
+> **`realfft` and `rustfft` are already in `Cargo.lock`.** `rubato` — baz's
+> windowed-sinc resampler, a non-optional `baz-core` dependency
+> (`crates/baz-core/Cargo.toml:25`, used at `playback/resample.rs:32`) —
+> depends on `realfft`, which depends on `rustfft`. Both are compiled into
+> every baz build today.
+
+So the cost of the usual objection is zero, and each part of it is checked
+rather than assumed:
+
+| Question | Answer | How known |
 |---|---|---|
-| A real-time tap on the audio | — | **Yes.** §9.2's tap is exactly it |
-| An FFT for a spectrum display | ~1024-point, per 100 ms step, on the engine thread — or better, on the UI side from a shared sample ring | **No.** New, and it is the one piece with real per-sample cost |
-| A sample ring shared to the UI | The meter publishes two floats; a visualizer needs *waveform*, which is a ring buffer and a second crossing discipline | **No** |
-| Continuous GPU work | A `shader` widget, as §7.5 | **Yes**, mechanically |
-| The frame budget and its measurement | §7.4's harness and gate | **Yes**, extends directly |
+| New crates in the tree? | **None.** `realfft` 3.5.0 → `rustfft` 6.4.1 → `num-complex`, `num-integer`, `num-traits`, `primal-check`, `strength_reduce`, `transpose` — every one already present | `Cargo.lock` (`rubato` 0.16.2's dependency block) |
+| Licences? | `realfft` **MIT**; `rustfft`, `primal-check`, `strength_reduce`, `transpose`, `num-complex` all **MIT OR Apache-2.0** | each crate's `Cargo.toml` in `~/.cargo/registry` |
+| Already allowed by policy? | **Yes** — `MIT` and `Apache-2.0` are both on `deny.toml`'s allowlist, which is a *"GPL-3.0-compatible allowlist [whose] extending… is a reviewed decision"*. **No extension is needed** | `deny.toml`, `[licenses] allow` |
+| A C library or build dependency? | **No.** None of the five has a `build.rs` or a `links` key, and none is a `-sys` crate | checked in the registry source |
+| Does `cargo deny check` change? | **No.** The graph is unchanged — this adds a direct edge to a crate already in it | follows from the above |
 
-**So the marginal work is the FFT and the sample ring**, and the marginal risk is
-that a spectrum analyser is the single easiest way to make this surface look like
-every other music player — which is the thing baz exists not to be. §2.2's
-finding stands: the tradition's visualizers are unbounded by design, and the
-interesting design question is not *how do we draw one* but *what would baz's
-own be*, which nobody has answered yet and which should not be answered in a
-hurry inside a document about something else.
+**Why this matters more here than usual.** `docs/BACKLOG.md:122–131` sets the
+standard, in the Opus decision: libopus bindings were refused because they cost
+*"a **C library and a `cmake` build dependency on every platform**… baz's decode
+path is pure Rust with **zero system dependencies** today (even SQLite is
+`bundled`); spending that property on one lossy format is not a trade worth
+making unprompted."* **That property is not spent here.** The FFT is pure Rust,
+already present, and adds no build step on any platform.
 
-**Ranked as D1 in §13** — first among the deferred, because the tap it needs
-will exist the moment §12 step 8 lands.
+**And the hostile-input concern does not apply.** The same BACKLOG note refuses
+young pure-Rust Opus decoders because *"this is a parser sitting in front of
+hostile input from the user's own filesystem"*. An FFT is not a parser: it
+consumes `f32` samples the decoder has already produced and validated, and its
+input length is baz's own constant. `ENGINEERING.md`'s *prefer proven crates*
+points the same way it did there — and `rustfft` is the proven one.
+
+**Why not hand-roll it, given ADR-0015 hand-rolled the K-weighting.** The
+distinction is what a skeptic needs to audit. ADR-0015's reason was
+verifiability against a *published standard*: *"`loudness.rs` puts the filter
+derivation, the gate and the standard's published constants where a skeptic can
+read them against BS.1770-4 in one sitting"* (`0015:128–131`). **An FFT has no
+standard to audit** — it has an answer, and the answer is checkable
+mechanically against a naive DFT. There is nothing a reader must be able to read
+in one sitting, so the argument that carried ADR-0015 does not reach this, and
+the ordinary preference for proven code applies unopposed.
+
+**The API, and the allocation property that matters.** `realfft`'s
+`process_with_scratch(input, output, scratch)` takes a caller-owned scratch
+buffer, in contrast to `process`, which *"allocates additional scratch space as
+needed"* (`realfft-3.5.0/src/lib.rs:127–145`). The planner is built once and the
+buffers are owned; **the per-frame path allocates nothing.**
+
+### 10.2 Where it runs: not the audio path, and never a queue
+
+Three threads matter, and the transform is on none of the first two:
+
+```
+audio callback  (device.rs:390–422)   ── untouched. Nothing added, ever.
+engine thread   (Session::pump)       ── the tap: downmix + one ring write
+UI thread       (view, once a frame)  ── the FFT, the banding, the draw
+```
+
+**The tap**, beside §9.2's meter call, on the same `a`/`b` slices at the same
+instant, pre-gain:
+
+```rust
+if let Some(meter) = &mut self.meter {
+    meter.observe(a);                       // §9 — K-weighted, continuous
+    if !b.is_empty() { meter.observe(b); }
+}
+if let Some(ring) = &self.spectrum {
+    ring.write_downmixed(a);                // §10 — mono, overwriting
+    if !b.is_empty() { ring.write_downmixed(b); }
+}
+```
+
+Both take `&[f32]`. **Neither can mutate a sample**, for §9.2's reason: the
+type does not permit it, so ADR-0009's bit-exactness is defended by the borrow
+checker and its tests pass unmodified.
+
+**The downmix is `(l + r) * 0.5`** — one add and one multiply per frame, about
+88 200 flops/second at 44.1 kHz stereo, which is an order of magnitude *below*
+the K-weighting the meter already does beside it. A spectrum of a stereo mix is
+conventionally the mono sum, and it halves the ring.
+
+**The ring is an overwriting ring, not a queue — this is the whole answer to
+"what if the UI is slower than the audio".**
+
+> **`SpectrumRing`: 16 384 `f32` (64 KiB), power-of-two, single writer (engine),
+> single reader (UI). The writer never blocks and never fails; it overwrites the
+> oldest samples and publishes a monotonically increasing write count. The
+> reader takes the most recent 2048 samples and ignores everything else.**
+
+- **Drop, never queue.** There is no backpressure path from the UI to the
+  engine, and no way for a slow UI to make the ring grow. A UI that misses
+  frames simply analyses a more recent window next time; the audio is never
+  affected, because the writer's cost is a memcpy into a fixed buffer whatever
+  the reader is doing.
+- **The margin is large and stated.** 16 384 mono samples is **371 ms** at
+  44.1 kHz. The reader needs the newest 2048 (46 ms). At 60 fps it returns every
+  16.7 ms, so it is roughly **22× inside** the window before the data it wants is
+  overwritten. Even a UI stalled to 3 fps still reads intact samples.
+- **A torn read is possible and harmless, and that is a decision.** If the
+  writer laps the reader mid-copy the frame shows a spectrum spliced from two
+  instants — one frame, on a visual, at 60 fps. Paying for a seqlock to prevent
+  something invisible is paying for a problem that does not exist; §9.4 declined
+  the same trade for the same reason. This is stated so nobody later "fixes" it
+  under the impression it was overlooked.
+- **The meter does not read the ring**, and that is deliberate. K-weighting is a
+  stateful IIR filter that must see **every** sample in order or its state is
+  wrong; a consumer permitted to drop samples cannot host it. The FFT is
+  stateless per window and can. So each measurement sits where its own
+  arithmetic requires — and §10.7 shows this costs nothing in agreement.
+
+### 10.3 The transform, and its constants
+
+| Parameter | Value | Why |
+|---|---|---|
+| Size | **2048** real samples | 21.5 Hz bins and a 46 ms window at 44.1 kHz. 1024 gives 43 Hz bins — too coarse in the bass; 4096 gives 93 ms — visibly sluggish on attacks |
+| Window | **Hann** | Standard for display analysis: −31 dB side lobes, and the spectral leakage that would otherwise smear a tone across neighbouring bars |
+| Output | 1025 complex bins (0…Nyquist) | `realfft` returns `N/2 + 1` |
+| Rate | once per drawn frame, from the newest 2048 samples | Overlapping windows at 60 fps; no hop bookkeeping, because the ring always holds "the most recent" |
+| Normalisation | a full-scale sine reads **0 dBFS** in its own band | So the bars and §9's meter share one reference (§10.7) |
+
+**Cost, and it is small.** A 2048-point *real* transform is roughly half the
+work of a 2048-point complex one — `realfft` exists for exactly that — at about
+`(N/2)·log₂(N/2) ≈ 1024 × 10 ≈ 10 240` butterflies, order **10⁵ flops per
+frame**, ≈ 6 Mflop/s at 60 fps. *Engineering estimate: **20–60 µs per frame**,
+i.e. **0.1–0.4 %** of a 16.7 ms budget.* Labelled an estimate; §10.8 measures it.
+
+### 10.4 The banding: linear bins, logarithmic music
+
+FFT bins are linear and pitch is logarithmic, so the mapping is specified rather
+than left to the drawing code.
+
+**Range: 32 Hz – 16 kHz**, nine octaves. Not 20 Hz–20 kHz, and honestly so: the
+first bin above DC is 21.5 Hz, so *"20 Hz"* would be a label for a band with no
+resolution behind it, and above 16 kHz there is nothing in most material and
+nothing in most listeners.
+
+**Band edges are geometric**: `f(i) = 32 · (16000/32)^(i/bars)`, so every bar
+spans the same musical interval. Each bar's value is the **sum of the power** of
+the bins whose centres fall in its band — energy, not maximum, so a band's value
+does not depend on how many bins it happens to contain.
+
+**Bar count is derived from width, not fixed**, because a count that looks right
+at 1280 is wrong at 4K:
+
+```
+bars = round(body_width / (24 · kiosk_scale)).clamp(24, 64)
+```
+
+| Window | body width | `kiosk_scale` | bars | bar pitch |
+|---|---|---|---|---|
+| 1280 × 800 | 1184 | 1.0 | **49** | 24 px |
+| 1920 × 1080 | 1824 | 1.0 | **64** (clamped) | 28 px |
+| 3840 × 2160, 3000 px cover | 3744 | 2.5 | **62** | 60 px |
+
+Keyed to `kiosk_scale` (§11.2) for the reason the type is: at 3 m the bars must
+get **chunkier**, not merely more numerous. A 4K panel gets 62 bars at 60 px
+rather than 156 at 24 px, and the ceiling of 64 keeps the count musically
+sensible — about 7 bars per octave, near the 1/6-octave resolution a hardware
+analyser uses.
+
+**The bottom-octave limit, stated rather than faked.** With 21.5 Hz bins, the
+32–64 Hz octave contains about **1.5 bins** while seven bars want to span it. So
+the lowest bars **share bins and move together**, and that is what the data
+supports — the alternative is interpolating a resolution the transform does not
+have, which is drawing a number that was never measured. If the bass ever reads
+as visibly ganged, the honest fix is a 4096-point transform for the lowest
+octave only, and it is ranked in §13 rather than pre-built.
+
+### 10.5 The scale, the floor, and silence
+
+- **Scale: dBFS**, with the bar's height linear in decibels — the same
+  convention as every analyser, and the one that matches hearing.
+- **Floor: −72 dBFS.** Twelve bits below full scale: far under the noise floor
+  of any 16-bit material (≈ −96 dBFS) yet high enough that dither and room tone
+  in a quiet passage do not make the bars twitch. Displayed travel is therefore
+  **72 dB**, floor to full scale.
+- **Digital silence is exactly flat, and it is exact rather than approximate.**
+  If every sample in the window is `0.0`, every bin's magnitude is exactly
+  `0.0`, which clamps to the floor and draws zero height. **The bars are still —
+  not low, not shimmering.** *Silence is a feature* (`REFUSALS.md:19–21`) is
+  drawn rather than merely honoured, which is the same property §7.6 relies on
+  for the stopped case.
+- **Stopped or paused: the surface holds no bars at all.** When nothing is
+  sounding the place already states silence in words and draws no artwork
+  (`now_playing.rs:92–104`, S5) — so there is no field and no spectrum either,
+  and the ring is not being written. On *pause* the bars fall to the floor under
+  the decay ballistic rather than snapping, which is the honest picture of
+  audio stopping.
+
+### 10.6 Ballistics, and the shared options family
+
+**Attack is instantaneous; decay is exponential.** A new value above the current
+bar takes it immediately — an analyser that lags a transient is lying about the
+transient — and a value below it decays at a fixed dB/second.
+
+**Peak-hold caps** — the small marks that hang above each bar and fall — are the
+Winamp and foobar2000 signature, they cost one float per bar, and they are what
+makes a fast-decaying bar readable.
+
+The **Ballistics** selector of §9.1 governs both instruments, which is what stops
+the surface having two unrelated speed settings:
+
+| Ballistics | Meter (§9.1) — *standardised* | Bars: decay | Cap: hold, then fall |
+|---|---|---|---|
+| **Loudness** *(default)* | R128 momentary, 400 ms window | 20 dB/s | 2.0 s, then 10 dB/s |
+| **VU** | IEC 60268-17, 300 ms to 99 % | 30 dB/s | 1.5 s, then 15 dB/s |
+| **PPM** | IEC 60268-10 Type II, 10 ms rise | 60 dB/s | 1.0 s, then 20 dB/s |
+
+**One honesty note that must survive into the code.** The meter's column is
+**standardised** and tested against published documents (§9.1, §13 R1). **The
+bars' column is conventional** — these are display constants chosen because they
+look right, not because a standard specifies them, and no test asserts them
+against any document. Naming them in one table must not launder the second
+column into the authority of the first, and the code's comment says so.
+
+### 10.7 How the bars and the meter cannot disagree
+
+They read the same samples, at the same instant, through the same (absent) gain
+stage. The differences that remain are stated transformations, not
+discrepancies:
+
+| | Meter (§9) | Bars (§10) |
+|---|---|---|
+| Source | `a`/`b` in `pump`, pre-gain | the same `a`/`b`, same call site, pre-gain |
+| Weighting | **K-weighted** (BS.1770-4) | **unweighted** |
+| Domain | one number | 24–64 bands |
+| Reference | dBFS / LUFS | dBFS, same reference |
+
+So a bass-heavy passage reads lower on the meter than the bars' bottom bands
+suggest — **because K-weighting attenuates the bass by a published amount**, and
+that is the meter being correct, not the two disagreeing. Neither follows the
+volume knob, because neither observes the fader.
+
+**Three properties, asserted as tests rather than argued:**
+
+- `the_meter_and_the_bars_agree_on_silence` — at digital silence the meter is at
+  its floor and every bar is at zero height, in the **same frame**. Both derive
+  from the same zero samples, so this is exact.
+- `the_meter_and_the_bars_agree_on_a_full_scale_sine` — a 1 kHz full-scale sine
+  puts exactly one band at 0 dBFS and the meter at the LUFS the K-weighting
+  curve predicts for 1 kHz, which is a number `loudness.rs` can already compute.
+- `neither_instrument_moves_with_the_volume` — sweeping the fader from unity to
+  silence changes no reading on either.
+
+### 10.8 The look
+
+This is the part the owner weighted most — *"stylised"*, *"somewhat ambient"* —
+and the thing to avoid is named: a harsh green Winamp bank.
+
+**The bars are drawn inside the field's own shader, as light rather than as
+widgets.** One full-screen quad already exists for the field (§7.5); the bar
+heights arrive as a **uniform array of 64 floats — 256 bytes per frame** — and
+the fragment shader decides, per pixel, whether it is inside a bar. So the
+drawing cost of N bars is **not N quads**; it is a slightly longer shader on the
+quad the surface already draws.
+
+**Colour: the cover's own palette, never the accent.**
+
+- The bars use the **brightest** of the three colours §5.3 samples from the
+  artwork, so they belong to the record rather than to a theme.
+- Their luminance ceiling is **L ≤ 0.38** — above the field's 0.22 so they are
+  legible against it, below the sleeve so **the artwork remains the brightest
+  object on the screen**, which is the promise §5.3 made and this must not
+  break.
+- **Not amber.** `REFUSALS.md:271–274` reserves the accent for *"what is true
+  about playback right now… not what is queued, not what is selected"* — and a
+  spectrum is a property of the audio, not playback truth. The needle keeps the
+  amber; the bars never take it.
+- A cover with no chroma yields the room's own ink, on §5.3's existing fallback.
+
+**Shape.** Flat-topped columns with a `GAP_XXS` 2 px gutter, rising from the
+bottom edge of the body, height = normalised dB × `BAND_H`, where
+`BAND_H = body_height × 0.45` — so a full-scale bar reaches 45 % up the body:
+dramatic from a chair, never near the top. The caps are a 2 px mark in the same
+colour at higher opacity. No radius, no gloss, no gradient along the bar's
+length, no mirrored reflection.
+
+**The mask, which is what makes it work.** The bars are full-bleed and would
+otherwise run behind the placard, and moving light under type is hard to read
+even at safe contrast. So:
+
+> **The bars' opacity is multiplied by a soft-edged mask that goes to zero over
+> the centred column** — the work and the placard, expanded by `GAP_XL` 24, with
+> the transition falling over a further `GAP_XL`.
+
+The composition sits in a calm pocket and the spectrum surrounds it. **This
+costs no layout at all** — `below` is unchanged, so the artwork keeps every
+pixel §5 fought for. And it is the discipline the ledger already blessed for the
+hover veil: *"a gradient that dies before the [edge], never a flat panel"*
+(`REFUSALS.md:113–121`).
+
+**1920 × 1080, lane collapsed — 64 bars, 28 px pitch:**
+
+```
+ ┌──────────────────────────────────────────────────────────────────┐
+ │▓▓▓▓▓ the field, derived, L ≤ 0.22 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│
+ │▓ 96 ▓                                                          ▓▓│
+ │▓lane▓                  ┌──────────────┐                        ▓▓│
+ │▓    ▓                  │              │                        ▓▓│
+ │▓Home▓                  │   the work   │  729 × 729             ▓▓│
+ │▓Libr▓                  │              │                        ▓▓│
+ │▓Now ▓                  └──────────────┘   ← mask: bars duck    ▓▓│
+ │▓ ●  ▓                  T A L K   T A L K     behind the column ▓▓│
+ │▓    ▓                  Spirit of Eden                          ▓▓│
+ │▓    ▓                  Spirit of Eden · 1988                   ▓▓│
+ │▓    ▓                  ├──────────────┤ needle                 ▓▓│
+ │▓    ▓                  3:12              6:27                  ▓▓│
+ │▓  ▁▂▓ Played 34 times since 2019           ▁▃         ▂▁       ▓▓│
+ │▓ ▃█▅▂▃▁      ▂▄▃▁         ▁▂▄▅▃▂        ▂▄██▅▃    ▁▃▅█▆▄▂▁     ▓▓│
+ │▓██████▅▃▂▁▂▄███▆▄▂▁▃▅▆▄▂▄███████▅▃▂▁▂▄▆████████▄▂▄████████▅▃▂▁ ▓▓│  ← BAND_H = 45 %
+ ├──────────────────────────────────────────────────────────────────┤
+ │ the bar — 81 px, unchanged, in every place                       │
+ └──────────────────────────────────────────────────────────────────┘
+    32 Hz ◄────────────── nine octaves, geometric ──────────────► 16 kHz
+```
+
+**3840 × 2160 — 62 bars at 60 px, everything at `kiosk_scale` 2.5:**
+
+```
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│
+ │▓ 96▓                                                                     ▓▓│
+ │▓   ▓                      ┌────────────────────┐                         ▓▓│
+ │▓   ▓                      │                    │                         ▓▓│
+ │▓ ● ▓                      │     the work       │  1809 × 1809            ▓▓│
+ │▓   ▓                      │                    │  (source-bound)         ▓▓│
+ │▓   ▓                      └────────────────────┘                         ▓▓│
+ │▓   ▓                                                                     ▓▓│
+ │▓   ▓                      T A L K   T A L K        ← 25 px tracked caps  ▓▓│
+ │▓   ▓                      Spirit of Eden           ← 70 px title         ▓▓│
+ │▓   ▓                      Spirit of Eden · 1988    ← 33 px               ▓▓│
+ │▓   ▓                      ├────────────────────┤   ← 5 px needle         ▓▓│
+ │▓   ▓                      3:12            6:27                           ▓▓│
+ │▓  ▁▓ Played 34 times since 2019  ← 33 px               ▁▃                ▓▓│
+ │▓ ▄█▃▁▂    ▁▃▂        ▂▄▃▁         ▁▂▄▃▂        ▂▄█▅▃      ▃▅█▆▄▂         ▓▓│
+ │▓███████▄▂▄███▅▃▂▁▃▅███████▄▂▁▂▄▆████████▅▃▂▄██████████▄▂▄██████████▅▃▂▁  ▓▓│
+ ├────────────────────────────────────────────────────────────────────────────┤
+ │ the bar — 81 px, unchanged                                                 │
+ └────────────────────────────────────────────────────────────────────────────┘
+```
+
+**The fallback, required rather than nice.** §0.3(7) found the `shader` widget
+renders nothing under `tiny-skia`. T1's field already falls back to a static
+wash; the bars fall back to **`Canvas` geometry** — N flat rectangles and their
+caps, in the same sampled colour, with the mask reduced to a hard rectangular
+exclusion rather than a soft gradient. `Canvas` draws under every backend, the
+geometry is tens of vertices, and `Cache::with_group` (§0.3(6)) keeps the
+static part out of the per-frame re-tessellation. **A software-rendered baz gets
+a still field and working bars, not a hole.**
+
+### 10.9 What this costs, and the thresholds it must clear
+
+The bars are the most expensive thing on this surface, so §7.4's gate is
+extended rather than reused unchanged:
+
+| Added metric | Threshold | Why |
+|---|---|---|
+| FFT + banding, per frame, CPU | **< 1 ms** | The estimate is 20–60 µs; a millisecond is over an order of magnitude of headroom, so exceeding it means something is wrong rather than expensive |
+| Frame time with bars, 1920 × 1080, 99th pct | **< 8 ms** | Unchanged from §7.4 — the bars must fit inside the budget already set, not enlarge it |
+| Frame time with bars, 3840 × 2160, 99th pct | **< 12 ms** | Unchanged, and this is the case the owner described |
+| Ring write cost, engine thread, per block | **< 5 µs** | It is a memcpy plus a downmix; this is a guard against an accidental per-sample atomic |
+| All toggles off, idle | **0.0 % CPU, 0 frames** | §7.3's structural claim, unchanged and re-asserted with the bars present |
+
+The harness is doc 04 §1.3's, already extended in §7.4; the `ambient` driver
+gains the FFT and the bar draw. **The owner's ruling is the standing condition
+— *"ambient motion is fine as long as the performance remains top tier"* — so
+the bars are welcome and these numbers are the price of entry.**
+
+**Off is still structurally zero**, by §9.3's mechanism exactly: the ring is an
+`Option<SpectrumRing>` owned by the session and swapped by a `Command`. When
+`None` there is no buffer, no downmix and no write — and with T2 off there is no
+`window::frames()` arm, so the loop parks (§7.3).
 
 ---
 
