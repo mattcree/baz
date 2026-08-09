@@ -436,12 +436,12 @@ mod tests {
         let well = crate::views::top_bar::SEARCH_W;
         let left = 2.0f32.mul_add(theme::GAP_LG, well + theme::GAP_XL + keys);
 
-        let sans = sans();
-        // A library larger than the owner's, in the longest form the line takes.
-        let counts = sans.width("40 000 albums · 512 345 tracks", theme::SIZE_META);
-        // The strip's corner is the gear now — a `TRANSPORT_HIT` square, not
-        // a word with a reserved width (doc 10 §7 step 1).
-        let right = counts + theme::GAP_LG + theme::TRANSPORT_HIT;
+        // The strip's right side at rest is the gear alone — a
+        // `TRANSPORT_HIT` square, not a word with a reserved width (doc 10
+        // §7 step 1) — and the counts live inside the well now (step 2), so
+        // the widest readout the strip used to carry is off this budget
+        // entirely.
+        let right = theme::TRANSPORT_HIT;
 
         let window = 1280.0_f32;
         assert!(
@@ -741,8 +741,20 @@ mod tests {
 
         // The strip's Settings door is the gear now (doc 10 §7 step 1): a
         // glyph in a fixed square has no word to measure, and its name rides
-        // the tooltip, whose card sizes to its own text. Nothing to assert —
-        // which is itself the point of the change.
+        // the tooltip, whose card sizes to its own text.
+
+        // The well's reserved match-count slot (doc 10 §4.1): `7 / 1284` up
+        // to a library far larger than the owner's, in the readout's own
+        // face and size.
+        for count in ["7 / 1284", "40000 / 40000"] {
+            fits(
+                &sans,
+                count,
+                theme::SIZE_META,
+                crate::views::top_bar::MATCH_W,
+                "MATCH_W",
+            );
+        }
     }
 
     /// The Settings place's reserved note slot still holds every sentence it

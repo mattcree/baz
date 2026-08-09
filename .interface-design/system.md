@@ -798,7 +798,7 @@ what the test forbids. The full edge census is the render pass
 | surface | declared order |
 |---|---|
 | the wall | the works ≫ their labels ≫ the playing mark ≫ the counts |
-| the top bar | the counts → the well → `Settings` |
+| the top bar | the well → the acts → the gear |
 | the bottom bar | what is sounding → the transport → the position → what is next |
 | the record's page | the work ≫ `Play album` → the title → the artist → the track list → the condition (the title is first among *type*) |
 | the queue place | the rows → the summary → each record's name |

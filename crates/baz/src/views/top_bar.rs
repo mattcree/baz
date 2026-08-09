@@ -49,14 +49,14 @@ pub(crate) fn view(shelf: &Shelf, ink: Ink) -> Element<'_, Message> {
     for key in GroupKey::ALL {
         keys = keys.push(group_key(key, key == shelf.group_key));
     }
-    let mut status = row![
-        text(counts_line(shelf))
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(room.paper_faint)
-    ]
-    .spacing(theme::GAP_SM)
-    .align_y(iced::Alignment::Center);
+    // The status row holds only the transient notes now — the counts moved
+    // into the well they describe (doc 10 §4.1; L8.3's valve run in reverse:
+    // the fact goes to where it is watched). What the move freed is exactly
+    // the slack the scan notes spend, which is what repaired the strip's
+    // scan-time overflow at the shipped window (doc 10 §2.1).
+    let mut status = row![]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center);
     if shelf.scanning {
         // Not the accent. A scan is the library working, not the music — the
         // lamp means playback truth (`theme`'s accent-discipline note) and this
@@ -255,13 +255,27 @@ fn playlists_door() -> Element<'static, Message> {
 /// (ADR-0017 §1.2, ADR-0021).
 fn well(shelf: &Shelf, width: f32) -> Element<'_, Message> {
     let room = theme::active();
-    let input = text_input("Search artists, albums, tracks…", &shelf.query)
+    let filtering = !shelf.query.trim().is_empty();
+    // **The counts are the placeholder** (doc 10 §4.1): the placeholder lane
+    // is by definition empty exactly when the query is — the one lane in the
+    // product that is free whenever the counts have something to say. During
+    // a scan the figure ticks up, which is the shelf-filling progress rule
+    // (`REFUSALS.md`) restated in figures.
+    let input = text_input(&resting_counts(shelf), &shelf.query)
         .id(search_id())
         .on_input(Message::SearchChanged)
         .on_submit(Message::PlayFirstMatch)
         .padding(iced::Padding {
             top: theme::WELL_PAD_V,
-            right: theme::GAP_MD,
+            // While a query narrows the shelf, the match count holds a
+            // reserved [`MATCH_W`] slot at the well's right edge, and the
+            // input's own padding keeps the caret out of it. At rest the
+            // lane is the placeholder's.
+            right: if filtering {
+                theme::GAP_MD + MATCH_W
+            } else {
+                theme::GAP_MD
+            },
             bottom: theme::WELL_PAD_V,
             left: theme::GAP_MD + theme::ICON_PX + theme::GAP_SM,
         })
@@ -278,7 +292,32 @@ fn well(shelf: &Shelf, width: f32) -> Element<'_, Message> {
     .height(Length::Fixed(theme::TRANSPORT_HIT))
     .padding(theme::pad(0.0, theme::GAP_MD))
     .align_y(alignment::Vertical::Center);
-    stack![input, magnifier].into()
+    let mut layers = stack![input, magnifier];
+    if filtering {
+        // **The match count, inside the control being typed into** — the
+        // in-well slot doc 07 §3.1 prescribed, delivered (doc 10 §4.1).
+        // Right-aligned in a reserved-width box, so the figure shrinking
+        // from `70` to `7` moves nothing; `paper_faint`, a readout's ink.
+        layers = layers.push(
+            container(
+                container(
+                    text(match_count(shelf))
+                        .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
+                        .color(room.paper_faint)
+                        .wrapping(text::Wrapping::None),
+                )
+                .width(Length::Fixed(MATCH_W))
+                .align_x(alignment::Horizontal::Right),
+            )
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(theme::TRANSPORT_HIT))
+            .padding(theme::pad(0.0, theme::GAP_MD))
+            .align_x(alignment::Horizontal::Right)
+            .align_y(alignment::Vertical::Center),
+        );
+    }
+    layers.into()
 }
 
 /// The route to the Settings **place** — **the gear**, in the corner where
@@ -349,25 +388,30 @@ fn settings_gear(ink: Ink) -> Element<'static, Message> {
         .into()
 }
 
-/// The unobtrusive count text: album/track counts, or the filtered
-/// count while a query narrows the shelf. Status, not modal — by
-/// design; scan/skip/problem notes render as separate colored segments.
-///
-/// The filtered form leads with the **match count**, because that is the number
-/// a listener typing into the well is watching: `7 of 1 284 albums` reads as an
-/// answer to the query, where the unfiltered form is a description of the
-/// collection. Both end in the same word so the line does not change shape as
-/// the query empties.
-fn counts_line(shelf: &Shelf) -> String {
-    if shelf.query.trim().is_empty() {
-        format!(
-            "{} albums · {} tracks",
-            shelf.albums.len(),
-            shelf.library.len()
-        )
-    } else {
-        format!("{} of {} albums", shelf.visible.len(), shelf.albums.len())
-    }
+/// Width of the well's reserved match-count slot (logical px): room for
+/// `40000 / 40000` — a library far larger than the owner's — at the meta
+/// size, measured in `font.rs`'s reserved-slot test. Fixed for the reason
+/// every readout slot is: the figures change as the query narrows, and a
+/// right-aligned slot of constant width means they change in place.
+pub(crate) const MATCH_W: f32 = 88.0;
+
+/// The collection, described: `1284 albums · 9902 tracks` — the well's
+/// placeholder, present exactly when the query is empty (doc 10 §4.1). The
+/// corpus size sits behind the glyph that says "search this", which is the
+/// fact landing where it is consulted (L8.3).
+fn resting_counts(shelf: &Shelf) -> String {
+    format!(
+        "{} albums · {} tracks",
+        shelf.albums.len(),
+        shelf.library.len()
+    )
+}
+
+/// The query, answered: `7 / 1284`, in the well's reserved right-hand slot.
+/// It was `7 of 1 284 albums`, ≈ 1 100 px from the keys producing it; inside
+/// the control being typed into, the figures need no caption.
+fn match_count(shelf: &Shelf) -> String {
+    format!("{} / {}", shelf.visible.len(), shelf.albums.len())
 }
 
 /// One of the five words the wall is arranged by.
