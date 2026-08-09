@@ -13,7 +13,9 @@
 //! [`loudness`] meter and the [`analysis`] pass that computes ReplayGain for
 //! files that carry none, the append-only play [`history`] ledger, the
 //! [`playlist`] store that reads and writes the user's own `.m3u8` files,
-//! and the [`engine`] service that runs it all behind the [`protocol`].
+//! the [`dynamic`] rules that draw a list from the ledger when a person asks
+//! for one, and the [`engine`] service that runs it all behind the
+//! [`protocol`].
 //!
 //! There are **two** services, deliberately: [`engine`] plays and is given
 //! paths, [`analysis`] measures and is given a library. Each takes its own
@@ -25,6 +27,7 @@
 #![forbid(unsafe_code)]
 
 pub mod analysis;
+pub mod dynamic;
 pub mod engine;
 pub mod history;
 pub mod index;

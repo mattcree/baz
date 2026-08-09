@@ -167,6 +167,18 @@ next commit.
   least-recently-played weighting. Nothing else — history records, it never
   performs. Scrobbling is out of scope and attaches downstream, as a consumer
   of the event, never as a dependency of the ledger.
+- **`baz_core::dynamic` — dynamic playlists as rules, not lists** (ADR-0033).
+  *"A rule over the library that produces an ordered list of records when a
+  person presses it; the rule is durable, the list is not."* Three of them,
+  a closed set, each stating itself in one sentence — *you have never played*,
+  *you have not played in over a year*, *you have only heard part of* — with
+  `every_rule_states_itself_in_one_sentence` holding the set to the rule that
+  governs it. Pure: no I/O, no thread, no clock, no persisted state, **no crate
+  added to `Cargo.lock`**, and no method added to `History`, so the ledger's own
+  *"there is deliberately no fourth [question]"* fence is not breached. Measured
+  at **3.3 ms per rule over 100 000 tracks** against a 30 000-play ledger, which
+  is why a rule is drawn on entering a page and never in a frame. No surface
+  consumes it yet — the Home section is ADR-0033 §5 and is not built.
 
 **Playlists**
 
