@@ -236,6 +236,19 @@ fn sleeve_cell(shelf: &Shelf, album: u64, size: f32) -> Element<'static, Message
 /// sends [`Message::LeavePlace`], which is the message <kbd>Esc</kbd> sends, so
 /// the two are one press and the visible-control rule holds for every place.
 pub(crate) fn place_header(name: &'static str, note: &'static str) -> Element<'static, Message> {
+    place_header_with(name, None, note)
+}
+
+/// [`place_header`], with one optional extra tenant between the place's name
+/// and the note — the Album place's `‹ Prev` / `Next ›` pair (doc 07 §3.2)
+/// is the one strip today whose budget spends it. The strip stays one
+/// function so the geometry cannot drift between the place that carries the
+/// pair and the three that do not.
+pub(crate) fn place_header_with(
+    name: &'static str,
+    extra: Option<Element<'static, Message>>,
+    note: &'static str,
+) -> Element<'static, Message> {
     let room = theme::active();
     let back = button(
         // Centred in its own box, like `Settings` across the frame from it
@@ -258,25 +271,27 @@ pub(crate) fn place_header(name: &'static str, note: &'static str) -> Element<'s
     .padding(theme::pad(0.0, theme::GAP_SM))
     .style(move |_theme, status| theme::word_button(room, room.wall, status))
     .on_press(Message::LeavePlace);
+    let mut strip = row![
+        back,
+        text(name)
+            .size(theme::SIZE_EMPHASIS)
+            .line_height(theme::LEADING_EMPHASIS)
+            .font(theme::MEDIUM),
+    ]
+    .spacing(theme::GAP_LG)
+    .align_y(iced::Alignment::Center);
+    if let Some(extra) = extra {
+        strip = strip.push(extra);
+    }
+    strip = strip.push(Space::with_width(Length::Fill)).push(
+        text(note)
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_faint)
+            .wrapping(text::Wrapping::None),
+    );
     column![
-        container(
-            row![
-                back,
-                text(name)
-                    .size(theme::SIZE_EMPHASIS)
-                    .line_height(theme::LEADING_EMPHASIS)
-                    .font(theme::MEDIUM),
-                Space::with_width(Length::Fill),
-                text(note)
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_faint)
-                    .wrapping(text::Wrapping::None),
-            ]
-            .spacing(theme::GAP_LG)
-            .align_y(iced::Alignment::Center),
-        )
-        .padding(theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)),
+        container(strip).padding(theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)),
         horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
     ]
     .into()
@@ -324,4 +339,158 @@ pub(crate) fn section_rule(name: &'static str) -> Element<'static, Message> {
     ]
     .spacing(theme::GAP_SM)
     .into()
+}
+
+/// [`section_rule`], with one quiet fact at the rule's right edge — the
+/// Songs section teaching its own accelerator (*"Enter plays the first
+/// match."*, doc 11 §5 P6.4): the era printed the shortcut beside the verb
+/// it accelerates, and without menus that duty falls to the surface the
+/// verb lives on. The note takes the readout ink, never a control's — it is
+/// a fact about the rows below, not a thing to press.
+pub(crate) fn section_rule_noted(
+    name: &'static str,
+    note: &'static str,
+) -> Element<'static, Message> {
+    let room = theme::active();
+    column![
+        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
+        row![
+            text(theme::tracked(&name.to_uppercase()))
+                .size(theme::SIZE_HEADING)
+                .line_height(theme::LEADING_HEADING)
+                .font(theme::MEDIUM)
+                .color(room.paper_faint),
+            Space::with_width(Length::Fill),
+            text(note)
+                .size(theme::SIZE_CAPTION)
+                .line_height(theme::LEADING_CAPTION)
+                .color(room.paper_faint)
+                .wrapping(text::Wrapping::None),
+        ]
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(theme::GAP_SM)
+    .into()
+}
+
+#[cfg(test)]
+mod tests {
+    /// Every string literal in the view sources' *code* lines — comments
+    /// stripped — which is a conservative superset of what can ship on
+    /// screen.
+    fn shipped_strings() -> Vec<(String, String)> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(root.join("views"))
+            .expect("the views directory")
+            .map(|entry| entry.expect("entry").path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
+            .collect();
+        // The context menu's labels ship too, and they are built in `menu.rs`.
+        files.push(root.join("menu.rs"));
+        let mut found = Vec::new();
+        for path in files {
+            let name = path
+                .file_name()
+                .expect("a file name")
+                .to_string_lossy()
+                .into_owned();
+            let source = std::fs::read_to_string(&path)
+                .expect("a view source")
+                .replace("\r\n", "\n");
+            // Only what ships: test modules (this one included) may name the
+            // room's words in order to ban them.
+            let source = source
+                .split("#[cfg(test)]")
+                .next()
+                .expect("a source has a head");
+            for line in source.lines() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                // Walk the line's string literals, escapes respected.
+                let bytes = line.as_bytes();
+                let mut i = 0;
+                while i < bytes.len() {
+                    if bytes[i] == b'"' {
+                        let mut j = i + 1;
+                        let mut literal = String::new();
+                        while j < bytes.len() && bytes[j] != b'"' {
+                            if bytes[j] == b'\\' {
+                                j += 1;
+                            }
+                            if j < bytes.len() {
+                                literal.push(bytes[j] as char);
+                            }
+                            j += 1;
+                        }
+                        found.push((name.clone(), literal));
+                        i = j + 1;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            found.iter().any(|(_, s)| s.contains("Play album")),
+            "the sweep must actually be seeing the shipped copy"
+        );
+        found
+    }
+
+    /// **One vocabulary** (doc 11 §5 P4): no word from the room-vocabulary
+    /// list ships in user-facing copy. "The wall", "the hang", "the stack",
+    /// "marquee" and the pull's internals are the corpus's own names for
+    /// its ideas — correctly internal, like a stage crew's slang — and the
+    /// one leak the critique found (*"Esc returns to the wall"* beside
+    /// `‹ Library`, two names for one destination in one strip) is exactly
+    /// what this pin keeps closed. Licensed uses stay licensed: `Pull` the
+    /// control and its offer line "The pull" (P9, the owner's call), and
+    /// `Save as playlist` / `Add to playlist…` are ordinary words.
+    #[test]
+    fn no_room_vocabulary_ships_in_user_facing_copy() {
+        let licensed = ["The pull", "Pull"];
+        for (file, literal) in shipped_strings() {
+            if licensed.contains(&literal.as_str()) {
+                continue;
+            }
+            let lowered = literal.to_lowercase();
+            for banned in ["wall", "hang", "marquee", "pull's", "the stack"] {
+                // Word boundaries: "wall" must not hide in "wallpaper" and
+                // fail the sweep for the wrong reason — every hit is read
+                // as its own word.
+                let hit = lowered
+                    .split(|c: char| !c.is_alphanumeric() && c != '\u{2019}' && c != '\'')
+                    .any(|word| word == banned)
+                    || (banned.contains(' ') && lowered.contains(banned));
+                assert!(
+                    !hit,
+                    "{file}: the literal {literal:?} ships the room's own \
+                     word {banned:?} — plain words wherever the software \
+                     speaks (doc 11 §5 P4; `02` §2.7)"
+                );
+            }
+        }
+    }
+
+    /// The Shuffle tooltip's figure is [`crate::shuffle::SLEEVES`], not a
+    /// number that can drift from it: the tooltip teaches the bounded draw
+    /// (doc 11 §5 P6.2), and a bound taught wrong would be worse than one
+    /// untaught.
+    #[test]
+    fn the_shuffle_tooltip_states_the_real_bound() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/top_bar.rs"),
+        )
+        .expect("the top bar's source")
+        .replace("\r\n", "\n");
+        let taught = format!(
+            "Play {} records drawn from what the Library shows",
+            crate::shuffle::SLEEVES
+        );
+        assert!(
+            source.contains(&taught),
+            "the Shuffle tooltip must state the draw's real bound: {taught:?}"
+        );
+    }
 }

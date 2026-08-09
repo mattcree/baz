@@ -119,6 +119,23 @@ tell the truth in the three moments a local folder never has:
   screen's whole design, and its validation still stats on the UI thread — at
   first run there is no configured NAS to hang on. If the picker earns its
   place there, it earns a look of its own.
+
+  > **Superseded** (2026-08-09, doc 11 §5 P1 — by this ADR's own argument).
+  > §1 ships the two-door shape for Settings and argues it is *one*
+  > acceptance path, not two designs; the same shape on the first-run screen
+  > is still one question — "Where's your music?" — with a pointing answer
+  > and a typing answer. The UI-thread stat is not inherited but removed:
+  > first-run submission now goes through `check_folder` on the blocking
+  > pool, the Settings door's own off-thread look. The typed field stays
+  > (the unmounted-NAS argument is untouched), the placeholder becomes a
+  > human sentence, and the `baz DIR` teaching moves to `--help`/README.
+  > The window is additionally a **drop target as far as the toolkit
+  > delivers one**: winit 0.30 publishes file-drop events on X11 and not on
+  > Wayland (its Wayland backend carries no data-device handling), so the
+  > drop ships as an unadvertised accelerator — hover feedback appears only
+  > when the platform actually reports a drag — and the full cross-platform
+  > drop target stays deferred per P1's adopt-modified text, without
+  > blocking the button.
 - **A "reconnect" or mount-triggering control.** baz does not mount
   filesystems; it reports them. The periodic rescan (ADR-0022 §6) already
   notices a returned share within five minutes, and a force sync notices it on

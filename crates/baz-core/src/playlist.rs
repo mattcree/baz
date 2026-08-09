@@ -722,6 +722,11 @@ impl Folder {
 
     /// Delete the playlist named `name` — the file goes; the music stays.
     ///
+    /// Unlinks outright. The product's own `Delete` does not spend this —
+    /// it spends [`Self::delete_to_trash`], the reversible form (doc 11 §5
+    /// P2) — but tools and tests that mean *remove, now, here* keep the
+    /// plain verb.
+    ///
     /// # Errors
     ///
     /// [`PlaylistError::NotFound`] if it is not in the folder;
@@ -731,6 +736,35 @@ impl Folder {
         std::fs::remove_file(&found.path).map_err(|source| PlaylistError::Io {
             path: found.path,
             source,
+        })
+    }
+
+    /// Move the playlist named `name` to the **platform trash** — the file
+    /// goes where the desktop's own restore can reach it; the music stays.
+    ///
+    /// The forgiveness form of [`Self::delete`] (doc 11 §5 P2): deletion of
+    /// a small file is the textbook reversible act, so the interface spends
+    /// this and retires its confirm dialog — the trash *is* the safety net,
+    /// so the warning's job is done by the mechanism instead. On Linux this
+    /// is the freedesktop trash spec (`$XDG_DATA_HOME/Trash`, or the
+    /// mount's own `.Trash-$uid`), which every desktop file manager lists
+    /// and restores from; on macOS and Windows it is the Trash and the
+    /// Recycle Bin.
+    ///
+    /// A failure leaves the file exactly where it was: refusing to delete
+    /// is the honest answer when the reversible route is not available, and
+    /// nothing falls back to unlinking behind the listener's back.
+    ///
+    /// # Errors
+    ///
+    /// [`PlaylistError::NotFound`] if it is not in the folder;
+    /// [`PlaylistError::Io`] if the platform refuses the move (carrying the
+    /// trash layer's own words).
+    pub fn delete_to_trash(&self, name: &str) -> Result<(), PlaylistError> {
+        let found = self.locate(name)?;
+        trash::delete(&found.path).map_err(|error| PlaylistError::Io {
+            path: found.path,
+            source: std::io::Error::other(error),
         })
     }
 

@@ -207,9 +207,18 @@ fn songs_section<'a>(
         ));
     }
     container(
-        column![section_rule("Songs"), rows, section_rule("Albums")]
-            .spacing(theme::GAP_SM)
-            .width(Length::Fixed(block)),
+        column![
+            // The rule carries the accelerator it accelerates (doc 11 §5
+            // P6.4): Enter's meaning while a query stands was true and
+            // unannounced — the era printed the shortcut beside the verb,
+            // and without menus the section's own rule is where the verb
+            // lives.
+            crate::views::section_rule_noted("Songs", "Enter plays the first match."),
+            rows,
+            section_rule("Albums")
+        ]
+        .spacing(theme::GAP_SM)
+        .width(Length::Fixed(block)),
     )
     .width(Length::Fill)
     .padding(iced::Padding {
@@ -648,12 +657,12 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
         if shelf.scanning {
             (
                 "Reading your music…".to_owned(),
-                Some("Covers land on the wall as they are read."),
+                Some("Covers land as they are read."),
                 Some("Nothing waits for the scan to finish."),
             )
         } else {
             (
-                "Nothing on the wall yet".to_owned(),
+                "Nothing here yet".to_owned(),
                 Some("baz reads this folder again each time it starts."),
                 None,
             )

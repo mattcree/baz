@@ -413,6 +413,22 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         // rather than started (module docs).
         Key::Character("r" | "R") if command => Some(Message::Pull),
 
+        // Undo (doc 11 §5 P2): the universal chord, over the transient
+        // `Undo` word the edited place carries — the visible twin that
+        // makes the accelerator legal (doc 09 §5.2's construction). Which
+        // list surface answers is the shell's business; anywhere without an
+        // edit history, the chord falls dead.
+        Key::Character("z" | "Z") if command => Some(Message::Undo),
+
+        // The Album place's record step (doc 07 §3.2; doc 11 §5 P3):
+        // Ctrl+`[` is the previous record, Ctrl+`]` the next, along the
+        // wall's current arrangement — the Finder's own Back/Forward chord,
+        // for the same kind of walk. The visible twins are the header's
+        // `‹ Prev` / `Next ›` pair; outside a record's page the chord asks
+        // for nothing.
+        Key::Character("[" | "{") if command => Some(Message::AlbumStep(-1)),
+        Key::Character("]" | "}") if command => Some(Message::AlbumStep(1)),
+
         // Arrangement. `1`–`5` are the five group keys, in the order the top
         // bar's row of words states them (module docs).
         Key::Character(digit @ ("1" | "2" | "3" | "4" | "5")) if bare => {
@@ -920,6 +936,39 @@ mod tests {
                 "{modifiers:?}"
             );
         }
+    }
+
+    /// **Ctrl+Z is undo** (doc 11 §5 P2), and only Ctrl+Z: bare `z` is the
+    /// query, and a further modifier is somebody else's chord (there is no
+    /// redo, so Ctrl+Shift+Z means nothing rather than something surprising).
+    #[test]
+    fn ctrl_z_is_undo_and_bare_z_is_still_the_query() {
+        assert_eq!(bind(&ch("z"), Modifiers::COMMAND).as_deref(), Some("Undo"));
+        assert_eq!(bind(&ch("Z"), Modifiers::COMMAND).as_deref(), Some("Undo"));
+        assert_eq!(bind(&ch("z"), none()).as_deref(), Some("QueryTyped(\"z\")"));
+        assert_eq!(bind(&ch("z"), Modifiers::COMMAND | Modifiers::SHIFT), None);
+        assert_eq!(bind(&ch("z"), Modifiers::ALT), None);
+        assert!(binding_for(&ch("z"), Modifiers::COMMAND, Focus::TextField).is_none());
+    }
+
+    /// **Ctrl+`[` / Ctrl+`]` step the record** (doc 07 §3.2; doc 11 §5 P3) —
+    /// the Album place's `‹ Prev` / `Next ›` pair, accelerated. Bare, the
+    /// brackets are query text (album titles carry them); otherwise
+    /// modified, they are nothing.
+    #[test]
+    fn ctrl_brackets_step_the_album_place() {
+        assert_eq!(
+            bind(&ch("["), Modifiers::COMMAND).as_deref(),
+            Some("AlbumStep(-1)")
+        );
+        assert_eq!(
+            bind(&ch("]"), Modifiers::COMMAND).as_deref(),
+            Some("AlbumStep(1)")
+        );
+        assert_eq!(bind(&ch("["), none()).as_deref(), Some("QueryTyped(\"[\")"));
+        assert_eq!(bind(&ch("]"), none()).as_deref(), Some("QueryTyped(\"]\")"));
+        assert_eq!(bind(&ch("["), Modifiers::ALT), None);
+        assert!(binding_for(&ch("]"), Modifiers::COMMAND, Focus::TextField).is_none());
     }
 
     /// **Type anywhere**: a bare printable character is the query, in every

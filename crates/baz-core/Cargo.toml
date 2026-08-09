@@ -27,6 +27,11 @@ rusqlite = { workspace = true }
 serde = { workspace = true }
 symphonia = { workspace = true }
 thiserror = { workspace = true }
+# The platform trash, for playlist deletion only (doc 11 §5 P2): the file a
+# listener deletes is recoverable by the desktop's own means, which is what
+# lets the confirm dialog retire. Lives here because `playlist::Folder` is
+# the storage layer — the GUI never touches the filesystem itself.
+trash = { workspace = true }
 walkdir = { workspace = true }
 
 # Exclusive-mode output (ADR-0012) is ALSA, and ALSA is Linux. The dependency

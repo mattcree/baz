@@ -671,6 +671,20 @@ adjudicates.
   ("deliberately not taken: the picker on the first-run screen") by that
   ADR's own two-door argument. No REFUSALS entry touched.
 
+> **Shipped** (2026-08-09). `Browse…` beside the field (the Settings door's
+> anatomy and message), the typed submission moved onto the blocking pool
+> (`check_folder` — the deferral's UI-thread-stat ground removed, not
+> inherited), the placeholder now *Your music folder*, and the `baz DIR`
+> teaching moved to `--help`. The drop target shipped **as far as the
+> toolkit delivers one**: winit 0.30 publishes file-drop events on X11 and
+> not on Wayland (verified in its Wayland backend — no data-device handling
+> at all), so a drop opens the folder where the event exists, hover feedback
+> appears only when the platform actually reports a drag, and the screen's
+> copy advertises nothing it cannot keep — the adopt-modified deferral,
+> recorded in ADR-0025 §3's superseded clause. One extra find: the screen's
+> scan-status line itself said "the wall"; P4's sweep caught it and the
+> copy now reads *"Covers land as they are read."*
+
 ### P2 — Forgiveness: undo for list edits, trash for deletion · **adopt-modified**
 
 - **Principle**: forgiveness (1992 HIG: reversibility first, warnings only
@@ -718,6 +732,20 @@ adjudicates.
   clears) and L9's strip budget (one short word in pages whose strips are
   near-empty; it clears).
 
+> **Shipped** (2026-08-09) as **ADR-0027**, with two upgrades inside P2's
+> own shape: the history is a bounded stack (depth 8, `crates/baz/src/undo.rs`)
+> rather than one-deep, and **append** joins remove and reorder in the
+> undoable set on both surfaces. The transient `Undo` word stands beside the
+> queue's summary and the playlist page's counts, `Ctrl+Z` over it; a queue
+> undo goes out as `UpdateQueue` and nothing else (pinned: nothing ever
+> sounds), a playlist undo passes the same fingerprint guard as the edit it
+> reverses, and provenance rides in the snapshots. The trash crate was
+> priced and accepted (`cargo deny` green; fourteen lock entries, three
+> crates on the compiled Linux graph; flatpak sources regenerated), so
+> `Delete` is one press into `$XDG_DATA_HOME/Trash` and the confirm dialog
+> is retired with honour, exactly as §2 prescribed — the fallback graveyard
+> was not needed.
+
 ### P3 — Pay the comparison debt: previous/next record in the Album place · **adopt**
 
 - **Principle**: the iTunes lesson's minimum viable form under a one-place
@@ -748,6 +776,16 @@ adjudicates.
   ADR-0022's "no side surfaces" untouched (nothing resident, nothing beside
   the page).
 
+> **Shipped** (2026-08-09). `‹ Prev` / `Next ›` in the Album place's header
+> strip (the shared `place_header`, grown one optional tenant — the frame's
+> geometry cannot drift), stepping `vm::neighbours` over the wall's own
+> visible order: same arrangement, same filtered set, edges inert rather
+> than wrapping, and a record the wall no longer shows has no neighbours at
+> all. `Ctrl+[` / `Ctrl+]` accelerate the pair (the Finder's own
+> Back/Forward chord), legal because the two visible twins stand in the
+> strip. Comparing two releases is one press per release again — W15's debt
+> paid where doc 07 §3.2 said it must land.
+
 ### P4 — One vocabulary: retire the leak, complete the labels · **adopt**
 
 - **Principle**: consistency; plain user-vocabulary language (§1.5).
@@ -767,6 +805,16 @@ adjudicates.
   outside its licensed uses (`Pull` the control pending P9).
 - **Cost**: strings and one test.
 - **Refusals/ADR impact**: none.
+
+> **Shipped** (2026-08-09). (a) *"Esc returns to Library"* in all three
+> place headers; (b) `Add to playlist…` on the record page and in the
+> playlist page's empty-state copy; (c) the sweep
+> (`no_room_vocabulary_ships_in_user_facing_copy`) walks every string
+> literal the view sources ship, word-boundaried, licensed uses excepted —
+> and it earned its keep on arrival, catching **two leaks this document
+> missed**: the first-run scan line and the empty wall's own heading
+> (*"Nothing on the wall yet"* → *"Nothing here yet"*), plus the "wall" in
+> P6's own proposed sentences, adjusted to "the Library" before shipping.
 
 ### P5 — The drag is not sugar: build the pointer-capture widget now · **adopt**
 
@@ -836,6 +884,19 @@ adjudicates.
 - **Refusals/ADR impact**: none. (A first-run coach screen and any overlay
   tour were considered and are **not** proposed: the era did not ship tours;
   it shipped self-explanatory surfaces.)
+
+> **Shipped** (2026-08-09), all four, with P4 applied to this proposal's own
+> sentences ("the wall" → "the Library"): (1) the tile menu's `Queue album`
+> prints `Shift-click` at its right edge — the one item with a gesture to
+> print, pinned so no item can invent one; a word rather than P6's `⇧`,
+> because doc 10 §3.6 bans borrowed characters and the shipped face draws
+> U+21E7 as tofu (verified on a rendered frame); (2) `Shuffle` and `Pull` carry tooltips
+> (*"Play 8 records drawn from what the Library shows"* — the figure pinned
+> to `shuffle::SLEEVES` — and *"Offer one record you haven't played in
+> years — nothing plays until you say so"*); (3) the queue's empty state
+> reads *"When a queue ends, baz stops. Shuffle draws again; Play all plays
+> the Library."*; (4) the Songs rule notes *"Enter plays the first match."*
+> No tour, no overlay, no new surface kinds.
 
 ### P7 — One gesture to sound from the wall · **present-to-owner**
 

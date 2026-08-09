@@ -14,8 +14,9 @@
 //! shipped and was removed the next day on the owner's own observation — it
 //! was a second list-building grammar and a mode
 //! (`docs/design/09-implicit-playlists.md` §9). What remains is the one
-//! transfer gesture: a `+` or `Add to…` opens the panel as the picker, and
-//! the pick lands where it is aimed — the Queue first, then the lists.
+//! transfer gesture: a `+` or `Add to playlist…` opens the panel as the
+//! picker, and the pick lands where it is aimed — the Queue first, then the
+//! lists.
 //!
 //! # The fingerprint discipline
 //!
@@ -45,7 +46,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use baz_core::index::{AlbumArtist, Library};
-use baz_core::playlist::{Entry, ExtInf, Folder, Item, Playlist};
+use baz_core::playlist::{Entry, ExtInf, Folder, Item, Playlist, PlaylistError};
 
 use crate::vm::{self, QueueItemVm, QueueVm, TrackVm};
 
@@ -59,7 +60,7 @@ pub(crate) struct Collecting {
     /// Whether the panel is open — the state that draws the track rows' `+`
     /// at rest (the task's own furniture, not permanent chrome; when the
     /// panel is closed the `+` is hover-revealed, with the record page's
-    /// `Add to…` as the always-visible route to the same picker).
+    /// `Add to playlist…` as the always-visible route to the same picker).
     pub(crate) panel_open: bool,
 }
 
@@ -200,9 +201,6 @@ pub(crate) struct OpenPlaylist {
     /// with every re-read, so an edit that changes the first records changes
     /// the sleeve with the rows.
     pub(crate) art: Vec<u64>,
-    /// Whether `Delete` has been pressed once and is waiting for the
-    /// confirming press (the Settings folder-Remove shape).
-    pub(crate) delete_armed: bool,
     /// The rename field, while renaming.
     pub(crate) renaming: Option<NameEntry>,
 }
@@ -263,6 +261,22 @@ pub(crate) struct Playlists {
     pub(crate) saving_queue: Option<NameEntry>,
     /// The playlist whose page is open, if one is.
     pub(crate) open: Option<OpenPlaylist>,
+    /// The open page's edit history: whole-item-list snapshots, newest last
+    /// (doc 11 §5 P2). Keyed to [`Self::undo_for`] and cleared the moment
+    /// the page it describes is no longer the page on screen — a snapshot
+    /// applied to a different file would be the stale-index failure the
+    /// fingerprint discipline exists to refuse.
+    undo: crate::undo::History<Vec<Item>>,
+    /// Which page id [`Self::undo`]'s snapshots belong to.
+    undo_for: Option<u64>,
+    /// How [`Self::delete_open`] removes the file: the **platform trash** in
+    /// the product ([`Folder::delete_to_trash`], doc 11 §5 P2), a plain
+    /// unlink under the test constructor's tempdir fixtures — where the real
+    /// trash would mean a test writing outside its own directory, the XDG-isolation
+    /// rule at test scale. The trash behaviour itself is pinned by the
+    /// storage layer's isolated `tests/trash.rs`, and the wiring here is
+    /// pinned by `the_product_deletes_to_the_trash_and_the_tests_do_not`.
+    delete: fn(&Folder, &str) -> Result<(), PlaylistError>,
 }
 
 impl Playlists {
@@ -286,6 +300,9 @@ impl Playlists {
             naming: None,
             saving_queue: None,
             open: None,
+            undo: crate::undo::History::new(),
+            undo_for: None,
+            delete: Folder::delete_to_trash,
         };
         playlists.refresh(None);
         playlists
@@ -303,6 +320,9 @@ impl Playlists {
             naming: None,
             saving_queue: None,
             open: None,
+            undo: crate::undo::History::new(),
+            undo_for: None,
+            delete: Folder::delete,
         };
         playlists.refresh(None);
         playlists
@@ -556,6 +576,12 @@ impl Playlists {
             }
         };
         let added = entries.len();
+        // The list the append lands on, kept for the open page's history
+        // when this file *is* the open page (doc 11 §5 P2 — an append is an
+        // edit a hand can take back). Snapshotted from the fresh read, so
+        // undo restores exactly what the file held the moment before this
+        // write, external edits included.
+        let before = playlist.items().to_vec();
         playlist
             .items_mut()
             .extend(entries.into_iter().map(Item::Entry));
@@ -569,6 +595,9 @@ impl Playlists {
                 println!("[playlists] could not save {:?}: {error}", playlist.name());
                 return;
             }
+        }
+        if self.open.as_ref().is_some_and(|open| open.id == id) {
+            self.record_undo(id, before);
         }
         self.refresh(Some(library));
         if self.open.as_ref().is_some_and(|open| open.id == id) {
@@ -656,6 +685,14 @@ impl Playlists {
         };
         match file.read() {
             Ok(playlist) => {
+                // A history keyed to any other page does not survive the
+                // swap. (Leaving the place already cleared it — P2's word
+                // stands "until the next edit, a navigation, or the run
+                // ending" — so this guard is the module keeping its own
+                // invariant rather than trusting the shell to.)
+                if self.undo_for != Some(id) {
+                    self.clear_undo();
+                }
                 self.open = Some(resolve(id, playlist, library));
                 true
             }
@@ -677,9 +714,11 @@ impl Playlists {
             Ok(playlist) => self.open = Some(resolve(id, playlist, library)),
             Err(error) => {
                 // Deleted under the page. The shell draws the wall when the
-                // place stops resolving; nothing to hold here.
+                // place stops resolving; nothing to hold here — the edit
+                // history included, which described a file that is gone.
                 println!("[playlists] cannot read {}: {error}", path.display());
                 self.open = None;
+                self.clear_undo();
                 self.refresh(Some(library));
             }
         }
@@ -695,26 +734,98 @@ impl Playlists {
     /// One guarded edit to the open playlist: fingerprint first, then the
     /// edit, then the atomic save, then a re-resolve (module docs). `edit`
     /// reports whether it changed anything; an untouched value is not saved.
+    ///
+    /// Every edit that goes through here records the list it replaced in the
+    /// page's history (doc 11 §5 P2) — *after* the fingerprint check, so a
+    /// snapshot is only ever of a state this process itself wrote or read
+    /// whole, and only when the edit actually changed something.
     fn edit_open(&mut self, library: &Library, edit: impl FnOnce(&mut Playlist) -> bool) {
+        self.edit_open_recording(true, library, edit);
+    }
+
+    /// [`Self::edit_open`], with the history push optional — `false` is the
+    /// undo itself, which must not record the state it is removing (an undo
+    /// that pushed would make <kbd>Ctrl</kbd>+<kbd>Z</kbd> a two-state
+    /// toggle rather than a walk back through the edits).
+    fn edit_open_recording(
+        &mut self,
+        record: bool,
+        library: &Library,
+        edit: impl FnOnce(&mut Playlist) -> bool,
+    ) {
         let Some(open) = &mut self.open else {
             return;
         };
         if open.playlist.externally_edited() {
             // The press was aimed at rows the file no longer holds: re-read,
             // apply nothing (module docs — last writer wins is about files,
-            // not about stale indices).
+            // not about stale indices). The history goes with the stale
+            // picture: its snapshots describe a lineage the disk has left.
             println!("[playlists] {:?} changed on disk; re-reading", open.name());
+            self.clear_undo();
             self.reload_open(library);
             return;
         }
+        let before = open.playlist.items().to_vec();
+        let id = open.id;
         if !edit(&mut open.playlist) {
             return;
         }
         if let Err(error) = open.playlist.save() {
             println!("[playlists] could not save {:?}: {error}", open.name());
+        } else if record {
+            self.record_undo(id, before);
         }
         self.reload_open(library);
         self.refresh(Some(library));
+    }
+
+    /// Keep `before` as the open page's newest undo snapshot.
+    fn record_undo(&mut self, id: u64, before: Vec<Item>) {
+        if self.undo_for != Some(id) {
+            self.undo.clear();
+            self.undo_for = Some(id);
+        }
+        self.undo.push(before);
+    }
+
+    /// Forget the open page's edit history — the page was left, renamed,
+    /// deleted, or overtaken by an external edit. Crate-visible because
+    /// leaving the Playlist *place* is the shell's knowledge, not this
+    /// module's.
+    pub(crate) fn clear_undo(&mut self) {
+        self.undo.clear();
+        self.undo_for = None;
+    }
+
+    /// Whether the open page has an edit to take back — what decides if its
+    /// `Undo` word is drawn.
+    #[must_use]
+    pub(crate) fn can_undo_open(&self) -> bool {
+        self.open
+            .as_ref()
+            .is_some_and(|open| self.undo_for == Some(open.id))
+            && self.undo.can_undo()
+    }
+
+    /// The page's `Undo` (and <kbd>Ctrl</kbd>+<kbd>Z</kbd> over it): put the
+    /// file back as it stood before the last recorded edit — one atomic
+    /// whole-file rewrite, through the same fingerprint guard as the edit it
+    /// reverses. A file that changed on disk since refuses the restore and
+    /// drops the whole history instead: the snapshots describe a lineage
+    /// the disk has left, and "last writer wins" is about files, not about
+    /// baz overwriting somebody's edit with its own memory.
+    pub(crate) fn undo_open(&mut self, library: &Library) {
+        if !self.can_undo_open() {
+            return;
+        }
+        let Some(before) = self.undo.pop() else {
+            return;
+        };
+        self.edit_open_recording(false, library, move |playlist| {
+            *playlist.items_mut() = before;
+            true
+        });
     }
 
     /// The page's per-row ✕: take the entry at display row `row` out of the
@@ -805,6 +916,9 @@ impl Playlists {
         match folder.rename(&from, &to) {
             Ok(file) => {
                 println!("[playlists] renamed {from:?} to {to:?}");
+                // The id is the name, hashed, so a rename mints a new page
+                // identity — the old id's history does not follow it.
+                self.clear_undo();
                 let id = playlist_id(&file.name);
                 match file.read() {
                     Ok(playlist) => self.open = Some(resolve(id, playlist, library)),
@@ -820,8 +934,17 @@ impl Playlists {
         }
     }
 
-    /// The page's `Delete`, confirmed: the file goes; the music stays.
-    /// Reports whether it went, so the shell can leave the page it was for.
+    /// The page's `Delete`: the file moves to the **platform trash**; the
+    /// music stays. Reports whether it went, so the shell can leave the page
+    /// it was for.
+    ///
+    /// One press, no confirm (doc 11 §5 P2): the 1992 HIG ranks the
+    /// mechanisms reversible-first, and a file the desktop's own Restore can
+    /// bring back needs no warning. The confirm dialog and its sentence —
+    /// *"The file goes; your music stays"* — are retired with honour; the
+    /// trash keeps the promise the sentence made. A refusal from the trash
+    /// layer leaves the file exactly where it was and the page standing —
+    /// nothing falls back to unlinking.
     pub(crate) fn delete_open(&mut self, library: Option<&Library>) -> bool {
         let Some(open) = &self.open else {
             return false;
@@ -830,10 +953,11 @@ impl Playlists {
             return false;
         };
         let name = open.playlist.name().to_owned();
-        match folder.delete(&name) {
+        match (self.delete)(folder, &name) {
             Ok(()) => {
-                println!("[playlists] deleted {name:?} — the file; the music stays");
+                println!("[playlists] {name:?} moved to the trash — the file; the music stays");
                 self.open = None;
+                self.clear_undo();
                 self.refresh(library);
                 true
             }
@@ -1076,7 +1200,6 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
         queue,
         missing,
         art,
-        delete_armed: false,
         renaming: None,
     }
 }
@@ -1814,5 +1937,184 @@ mod tests {
         assert!(playlists.row(id).is_none(), "the old name is gone");
         assert!(playlists.delete_open(None));
         assert!(playlists.rows.is_empty());
+    }
+
+    /// The paths the open page's file holds, in order — what the undo tests
+    /// compare before and after.
+    fn open_paths(playlists: &Playlists) -> Vec<PathBuf> {
+        playlists
+            .open
+            .as_ref()
+            .expect("open page")
+            .rows
+            .iter()
+            .map(|row| row.path.clone())
+            .collect()
+    }
+
+    /// **Undo round-trips the page's edits** (doc 11 §5 P2): a remove and a
+    /// reorder each restore the file exactly as it stood — on disk, not
+    /// just on screen — and pressing `Undo` twice walks two steps back
+    /// rather than toggling (an undo records nothing of its own).
+    #[test]
+    fn undo_round_trips_a_remove_and_a_reorder_on_disk() {
+        let (_keep, folder) = folder();
+        let library = library();
+        let mut playlists = Playlists::over(folder);
+        let id = {
+            let folder = playlists.folder.as_ref().expect("folder");
+            write_list(folder, "Mix", &["/m/a.flac", "/m/b.flac", "/m/c.flac"])
+        };
+        playlists.refresh(Some(&library));
+        assert!(playlists.open_page(id, &library));
+        assert!(
+            !playlists.can_undo_open(),
+            "an unedited page has no history"
+        );
+        let original = open_paths(&playlists);
+
+        playlists.remove_entry(1, &library);
+        assert_eq!(open_paths(&playlists).len(), 2);
+        assert!(playlists.can_undo_open());
+        playlists.shift_entry(0, 1, &library);
+        let shifted = open_paths(&playlists);
+        assert_ne!(shifted[0], original[0]);
+
+        // Two edits, two steps back — newest first, no toggle.
+        playlists.undo_open(&library);
+        assert_eq!(open_paths(&playlists).len(), 2, "the reorder came back");
+        playlists.undo_open(&library);
+        assert_eq!(open_paths(&playlists), original, "the remove came back");
+        assert!(!playlists.can_undo_open(), "the history is spent");
+
+        // …and the restore reached the disk, not just the resolved rows.
+        let on_disk = playlists
+            .folder
+            .as_ref()
+            .expect("folder")
+            .list()
+            .expect("list")
+            .into_iter()
+            .find(|file| file.name == "Mix")
+            .expect("the file")
+            .read()
+            .expect("read");
+        let paths: Vec<PathBuf> = on_disk.entries().map(|entry| entry.path.clone()).collect();
+        assert_eq!(paths, original);
+    }
+
+    /// **An append into the open page is undoable too** (P2's scope as
+    /// adopted: remove, reorder, append) — the pick lands, `Undo` takes it
+    /// back, and appends into *other* files record nothing (their pages
+    /// carry no word to make the accelerator legal).
+    #[test]
+    fn undo_takes_back_an_append_into_the_open_page_only() {
+        let (_keep, folder) = folder();
+        let library = library();
+        let mut playlists = Playlists::over(folder);
+        let (id, other) = {
+            let folder = playlists.folder.as_ref().expect("folder");
+            (
+                write_list(folder, "Mix", &["/m/a.flac"]),
+                write_list(folder, "Other", &["/m/b.flac"]),
+            )
+        };
+        playlists.refresh(Some(&library));
+        assert!(playlists.open_page(id, &library));
+        let original = open_paths(&playlists);
+
+        // An append into a file that is not the open page: no history.
+        playlists.append(
+            other,
+            vec![Entry::new(track("/m/eno/ascent.flac"))],
+            &library,
+        );
+        assert!(!playlists.can_undo_open());
+
+        // An append into the open page: one step of history.
+        playlists.append(id, vec![Entry::new(track("/m/eno/ascent.flac"))], &library);
+        assert_eq!(open_paths(&playlists).len(), 2);
+        assert!(playlists.can_undo_open());
+        playlists.undo_open(&library);
+        assert_eq!(open_paths(&playlists), original);
+    }
+
+    /// **The fingerprint guard survives undo** (P2: provenance and
+    /// fingerprint guards survive): a file edited under baz refuses the
+    /// restore — the page re-reads the disk's truth instead — and the stale
+    /// history goes with it, because its snapshots describe a lineage the
+    /// disk has left.
+    #[test]
+    fn an_external_edit_refuses_the_undo_and_drops_the_stale_history() {
+        let (_keep, folder) = folder();
+        let library = library();
+        let mut playlists = Playlists::over(folder);
+        let id = {
+            let folder = playlists.folder.as_ref().expect("folder");
+            write_list(folder, "Mix", &["/m/a.flac", "/m/b.flac"])
+        };
+        playlists.refresh(Some(&library));
+        assert!(playlists.open_page(id, &library));
+        playlists.remove_entry(0, &library);
+        assert!(playlists.can_undo_open());
+
+        // Somebody else writes the file — vim, a sync tool, another baz.
+        let path = playlists
+            .folder
+            .as_ref()
+            .expect("folder")
+            .list()
+            .expect("list")
+            .into_iter()
+            .find(|file| file.name == "Mix")
+            .expect("the file")
+            .path;
+        // A whole new list, and an mtime the fingerprint cannot mistake.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&path, "#EXTM3U\n/m/theirs.flac\n").expect("external edit");
+
+        playlists.undo_open(&library);
+        let after = open_paths(&playlists);
+        assert_eq!(
+            after,
+            vec![track("/m/theirs.flac")],
+            "the disk's truth stands; baz's memory does not overwrite it"
+        );
+        assert!(
+            !playlists.can_undo_open(),
+            "a history describing a lineage the disk left is dropped whole"
+        );
+    }
+
+    /// **The product deletes to the trash; the fixtures do not.** The seam
+    /// exists so a tempdir test never writes outside its own directory —
+    /// the XDG-isolation rule at test scale — so this pin is what keeps the
+    /// two wired the right way round: `start()` must hand `delete_open` the
+    /// trash, and the trash behaviour itself is exercised for real in the
+    /// storage layer's isolated `tests/trash.rs`.
+    #[test]
+    fn the_product_deletes_to_the_trash_and_the_tests_do_not() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/playlists.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        let start = source
+            .split("fn start()")
+            .nth(1)
+            .and_then(|after| after.split("fn over(").next())
+            .expect("start() precedes over()");
+        assert!(
+            start.contains("delete: Folder::delete_to_trash"),
+            "the product's delete_open must go through the platform trash \
+             (doc 11 §5 P2)"
+        );
+        // Assembled so the pin does not match its own text.
+        let direct_call = String::from("folder.") + "delete_to_trash(";
+        assert!(
+            !source.contains(&direct_call),
+            "delete_open reaches the trash through the seam, so the fixtures \
+             can reach it with a plain unlink"
+        );
     }
 }

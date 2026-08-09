@@ -37,18 +37,37 @@ pub(crate) fn layer(menu: &Menu, window: Size) -> Element<'static, Message> {
     let at = crate::menu::anchor(menu.at, size, window);
     let mut listed = column![];
     for (index, item) in menu.items.iter().enumerate() {
+        // The verb, and — where one exists — the gesture that accelerates
+        // it, quietly at the row's right edge (doc 11 §5 P6.1: the era
+        // printed `⌘Q` beside Quit; the mirror layer prints `⇧‑click`
+        // beside the queueing verb). Readout ink, never the verb's: the
+        // hint is a fact about the gesture, not a second control.
+        let mut inks = iced::widget::row![
+            text(item.label.clone())
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None),
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center);
+        if let Some(accelerator) = item.accelerator {
+            inks = inks.push(Space::new(Length::Fill, Length::Fixed(0.0)));
+            inks = inks.push(
+                text(accelerator)
+                    .size(theme::SIZE_CAPTION)
+                    .line_height(theme::LEADING_CAPTION)
+                    .color(room.paper_faint)
+                    .wrapping(text::Wrapping::None),
+            );
+        }
         listed = listed.push(
             button(
-                container(
-                    text(item.label.clone())
-                        .size(theme::SIZE_META)
-                        .line_height(theme::LEADING_META)
-                        .font(theme::MEDIUM)
-                        .wrapping(text::Wrapping::None),
-                )
-                .height(Length::Fill)
-                .align_y(alignment::Vertical::Center)
-                .clip(true),
+                container(inks)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_y(alignment::Vertical::Center)
+                    .clip(true),
             )
             .width(Length::Fill)
             .height(Length::Fixed(theme::TRANSPORT_HIT))

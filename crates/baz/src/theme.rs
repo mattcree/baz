@@ -5471,10 +5471,18 @@ mod tests {
         }
         // …and the four places that share it really do use it, rather than
         // reinventing a strip of their own — Settings included, since doc 10
-        // §7 step 8 folded its private copy into the one function.
-        for name in ["album.rs", "queue.rs", "playlist.rs", "settings.rs"] {
+        // §7 step 8 folded its private copy into the one function. The Album
+        // place spends the same function's `_with` door for its `‹ Prev` /
+        // `Next ›` pair (doc 07 §3.2; doc 11 §5 P3): one strip, one extra
+        // tenant, still the frame's own geometry.
+        for (name, strip) in [
+            ("album.rs", "place_header_with("),
+            ("queue.rs", "place_header("),
+            ("playlist.rs", "place_header("),
+            ("settings.rs", "place_header("),
+        ] {
             assert!(
-                read(name).contains("place_header("),
+                read(name).contains(strip),
                 "{name} draws a header of its own instead of the frame's"
             );
         }

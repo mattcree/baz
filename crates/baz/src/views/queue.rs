@@ -97,6 +97,13 @@ pub(crate) fn save_name_id() -> text_input::Id {
               field, and the windowed rows loop — and the loop's boxing \
               rules must stay in sight of the spacers they keep honest"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one independent reading the place renders — \
+              the drag in flight and the undo affordance arrived from two \
+              different studies, and bundling them into a struct would name \
+              nothing the call site does not already say"
+)]
 pub(crate) fn view<'a>(
     player: &'a PlayerState,
     window: iced::Size,
@@ -105,6 +112,7 @@ pub(crate) fn view<'a>(
     collecting: Collecting,
     scroll: f32,
     drag: Option<&'a crate::drag::DragState>,
+    can_undo: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let measure =
@@ -197,6 +205,13 @@ pub(crate) fn view<'a>(
                         .line_height(theme::LEADING_META)
                         .color(room.paper_faint)
                         .wrapping(text::Wrapping::None),
+                    // The transient `Undo`, beside the summary (doc 11 §5
+                    // P2): present exactly while there is an edit to take
+                    // back, gone otherwise — no toast, no popover, no
+                    // timer, a word in a strip in the product's own
+                    // grammar. Ctrl+Z is its accelerator; this word is
+                    // what makes the accelerator legal.
+                    undo_control(can_undo),
                     Space::with_width(Length::Fill),
                     save_control(saving.is_none()),
                 ]
@@ -214,7 +229,7 @@ pub(crate) fn view<'a>(
         }
     };
     column![
-        place_header("Queue", "Esc returns to the wall"),
+        place_header("Queue", "Esc returns to Library"),
         // One scroll for the place, with the bar's lane reserved whether or not
         // the list overflows — the same reserved-slot rule the durations
         // depend on, and the reason a thirteenth track arriving shunts none of
@@ -241,6 +256,36 @@ pub(crate) fn view<'a>(
 /// Offered only while the name field is closed: the field below is the same
 /// control mid-gesture, and drawing both would be one act with two live
 /// buttons.
+/// **Undo** — the run as it stood before the last edit, restored
+/// (doc 11 §5 P2). Drawn only while there is an edit to take back: a
+/// standing "Undo" over a list nobody has edited would be a control that
+/// cannot act pretending it can. A word in the summary strip rather than a
+/// toast, because forgiveness is a fact about the place, not an
+/// interruption; quiet, because restoring a list is an act on the run, not
+/// on playback — nothing sounds because of it.
+fn undo_control(offered: bool) -> Element<'static, Message> {
+    if !offered {
+        return Space::with_width(Length::Fixed(0.0)).into();
+    }
+    let room = theme::active();
+    button(
+        container(
+            text("Undo")
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_SM))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press(Message::Undo)
+    .into()
+}
+
 fn save_control(offered: bool) -> Element<'static, Message> {
     let room = theme::active();
     button(
@@ -349,8 +394,13 @@ fn empty_state() -> Element<'static, Message> {
             // Silence is a feature (`docs/REFUSALS.md`), and the empty queue is
             // the one surface where saying so costs nothing: this is what a
             // listener sees the moment a record ends, and it is the frame in
-            // which every other player would have started something.
-            text("When a queue ends, baz stops.")
+            // which every other player would have started something. Since
+            // doc 11 §5 P6.3 the line carries its missing half — the
+            // refusal stated *with* the answers ADR-0023 §5 says exist in
+            // advance, at the exact moment the refusal is felt. ("Plays the
+            // Library", not "the wall": room vocabulary stays internal,
+            // P4's rule, applied to P6's own sentence.)
+            text("When a queue ends, baz stops. Shuffle draws again; Play all plays the Library.")
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
                 .color(room.paper_muted),
