@@ -1,6 +1,23 @@
-# ADR-0029: The ambient surface — the field, the meter, the feed, and the class that admits them
+# ADR-0029: The ambient surface — the field, the spectrum, the meter, the feed, and the class that admits them
 
-**Status**: proposed (2026-08-09) · extracts the decisions of `docs/design/12-now-playing-and-kiosk.md` · **amends [ADR-0020](0020-motion.md)** (adds §7, user-started ambient content) · **amends [ADR-0015](0015-replaygain-analysis.md) §3** (its reversal clause is triggered and re-decided) · rewrites four `docs/REFUSALS.md` entries on the owner's decision
+> ## Amendment (2026-08-09) — the spectrum analyser, promoted
+>
+> After this record was written, the owner asked what the meter should be:
+> *"is it a spectrum analyzer or graphic thing with the bars going up and
+> down… that would be nice"*.
+>
+> **This collapses a deferral.** The earlier brief asked for *"a visualizer mode
+> at some point, but also VU options"*, and §Consequences below deferred the
+> visualizer. **The bars are that visualizer, and *"at some point"* is now.**
+> Doc 12 §10, which was the deferral, is now the design; doc 12 §13's D1 is
+> retired.
+>
+> **The R128 meter of §3 stays, in full** — the bars are a *visual* and the
+> meter is a *reading*. What changes is which is the default and how they are
+> held together. §3a is the new decision; §3 is unchanged except that its
+> instrument register now defaults to off.
+
+**Status**: proposed (2026-08-09), **amended 2026-08-09 (§3a: the spectrum analyser, promoted)** · extracts the decisions of `docs/design/12-now-playing-and-kiosk.md` · **amends [ADR-0020](0020-motion.md)** (adds §7, user-started ambient content) · **amends [ADR-0015](0015-replaygain-analysis.md) §3** (its reversal clause is triggered and re-decided) · rewrites four `docs/REFUSALS.md` entries on the owner's decision
 
 ## Context
 
@@ -126,6 +143,104 @@ discipline of `DeviceSink`'s callback counters (`device.rs:385–387`) and
 `SharedVolume`'s gain (`volume.rs:244–249`). `LoudnessMeter` itself is **not**
 reused: `close_step` pushes to a `Vec`, which may allocate. `KWeighting` is.
 
+### 3a. The spectrum analyser is the surface's primary visual
+
+**The FFT is `realfft` 3.5.0, and it costs zero new crates.** Not a judgement
+call: `rubato` — baz's windowed-sinc resampler, a non-optional `baz-core`
+dependency (`crates/baz-core/Cargo.toml:25`) — already depends on `realfft`,
+which depends on `rustfft`. Both are in `Cargo.lock` and compiled into every
+build today. Licences are `MIT` and `MIT OR Apache-2.0`, both already on
+`deny.toml`'s allowlist, so **no reviewed extension of the licence policy is
+required**; none of the five crates has a `build.rs`, a `links` key, or is a
+`-sys` crate, so **`docs/BACKLOG.md:122–131`'s "pure Rust, zero system
+dependencies" property is not spent.** That note refused libopus for costing *"a
+C library and a `cmake` build dependency on every platform"*; nothing of the
+kind is being paid here.
+
+**Hand-rolling is declined**, and the distinction from ADR-0015 is stated rather
+than glossed: that decision hand-rolled the K-weighting because a skeptic must
+be able to read it *against a published standard in one sitting*. **An FFT has
+no standard to audit** — only an answer, checkable mechanically against a naive
+DFT — so the argument that carried ADR-0015 does not reach it, and
+`ENGINEERING.md`'s *prefer proven crates* applies unopposed. The FFT is also not
+a parser in front of hostile input, which is the other half of the BACKLOG
+note's reasoning.
+
+**Where it runs: not the audio path, and never a queue.** The audio callback is
+untouched. The engine thread's tap gains one line beside §3's meter call, on the
+same `a`/`b` slices at the same instant, pre-gain: a `(l+r)*0.5` downmix written
+into a **16 384-sample overwriting ring** (371 ms at 44.1 kHz). The UI thread
+takes the newest 2048 samples once a frame and transforms them. **The writer
+never blocks and there is no backpressure path**: a slow UI analyses a more
+recent window next time, and the ring cannot grow. At 60 fps the reader is ~22×
+inside the overwrite window. A torn read is possible, harmless, and accepted
+deliberately — one frame of a visual, at 60 fps, is not worth a seqlock.
+
+The meter deliberately does **not** read the ring: K-weighting is a stateful IIR
+filter that must see every sample in order, and a consumer permitted to drop
+samples cannot host one. The FFT is stateless per window and can.
+
+**The transform**: 2048-point real, Hann-windowed, once per drawn frame,
+normalised so a full-scale sine reads 0 dBFS. *Estimate: 20–60 µs per frame,
+≈ 0.1–0.4 % of a 16.7 ms budget* — labelled an estimate, and gated below.
+
+**The banding**: **32 Hz – 16 kHz**, nine octaves, geometric band edges, each
+bar the **sum of power** of the bins in its band. **Bar count is derived from
+width and the kiosk scale** — `round(body_width / (24 · kiosk_scale)).clamp(24, 64)`
+— giving 49 bars at 1280, 64 at 1920, and 62 at 60 px pitch on 4K, because at
+three metres bars must get *chunkier*, not merely more numerous. The bottom
+octave holds ~1.5 bins, so the lowest bars share them and move together; **that
+is stated rather than interpolated**, and a 4096-point transform for the bottom
+octave is ranked as deferred rather than pre-built.
+
+**The scale**: dBFS, height linear in decibels, **floor −72 dBFS** — below any
+16-bit noise floor, above the level where dither makes bars twitch. **At digital
+silence every bar is exactly zero, not near it**, because an all-zero window
+produces exactly-zero bins. *Silence is a feature*, drawn rather than honoured.
+Stopped or paused, the surface holds no bars at all, as it holds no artwork.
+
+**Ballistics**: instantaneous attack, exponential decay, with peak-hold caps.
+The **Ballistics** selector governs both instruments so the surface has one
+speed setting — but the meter's column is **standardised and tested against
+published documents** while the bars' column is **conventional**, chosen because
+it looks right, and the code must not launder the second into the authority of
+the first.
+
+**The look**: drawn **inside the field's own shader**, so N bars cost a
+64-float uniform upload rather than N quads. Colours are sampled from the cover,
+capped at **L ≤ 0.38** — above the field's 0.22 so they read against it, below
+the sleeve so **the artwork stays the brightest object**. **Never amber**: the
+accent states playback truth and a spectrum is a property of the audio. The bars
+are full-bleed and their opacity is **masked to zero over the centred column**,
+softly, so type is never read over moving light — which costs **no layout at
+all**, and is the discipline the ledger already blessed for the hover veil. Under
+`tiny-skia`, where the shader renders nothing, the bars fall back to `Canvas`
+geometry: a still field and working bars, never a hole.
+
+**Defaults**: **the spectrum is on; the R128 instrument readout is off.** The
+bars are what the owner asked to see, they read from three metres, and they are
+the surface's primary motion; the meter is a precise number for a specific
+question at 60 cm, and a kiosk that opens covered in decibel figures is an
+instrument panel rather than something you leave running.
+
+**They cannot disagree**, and this is asserted rather than argued. Both read the
+same samples, at the same instant, through the same absent gain stage. The only
+difference is that the meter is **K-weighted** and the bars are not — a
+published curve, a stated transformation, not a discrepancy. Three tests hold
+it: `the_meter_and_the_bars_agree_on_silence`,
+`the_meter_and_the_bars_agree_on_a_full_scale_sine`, and
+`neither_instrument_moves_with_the_volume`.
+
+**Off is structurally zero**, by §3's mechanism exactly: an
+`Option<SpectrumRing>` owned by the session and swapped by a `Command`. When
+`None` there is no buffer, no downmix and no write — and with the toggle off
+there is no `window::frames()` arm, so the loop parks.
+
+**The gate gains three metrics**: FFT + banding **< 1 ms** per frame; ring write
+**< 5 µs** per block on the engine thread; and the existing frame-time
+thresholds **unchanged** at 8 ms (1080p) and 12 ms (4K) — the bars must fit
+inside the budget already set, not enlarge it.
+
 ### 4. The feed is local-first, and its rotation rule is one sentence
 
 > **The feed shows one fact at a time, cycling in a fixed order through exactly
@@ -171,10 +286,11 @@ fiction"*. The same move:
 > - a **stated frame budget and a measured cost**, re-measured when it changes;
 > - it **states nothing**, so it may never be the only carrier of a fact.
 
-**Three toggles**, because they are three subsystems: **T1** field
-(still/drifting/unavailable), **T2** meter, **T3** feed. **All default on**, and
-T1 defaults to *drifting* — that one on hardware-protection grounds (§7.6),
-since the drift *is* the burn-in mitigation. Controls live **both** on the
+**Four toggles**, because they are four subsystems: **T1** field
+(still/drifting/unavailable), **T2** spectrum, **T3** meter, **T4** feed — plus
+one **Ballistics** selector governing both instruments. **T1, T2 and T4 default
+on; T3 defaults off** (§3a). T1 defaults to *drifting* on hardware-protection
+grounds (§7.6), since the drift *is* the burn-in mitigation. Controls live **both** on the
 surface (an `Ambient` word-door, visible at rest — never hover-revealed) and in
 Settings.
 
@@ -259,21 +375,24 @@ hole.
   variants.
 - **`Event::PlayRecorded` gains its first consumer in `crates/baz`**, and
   `signal_path()` stops being dead code.
-- **The visualizer is deferred**, and now for sequence and cost rather than for
-  the motion law, which no longer forbids it. The tap it needs arrives with the
-  meter; what it lacks is an answer to *what baz's own visualizer would be*,
-  which should not be answered inside a decision about something else.
-- **The plan is eight shippable steps**, ordered highest-relief-first: delete
-  the duplicate transport · the hero decode · the static field · the kiosk type
-  scale · the feed · the toggles · the drift (gated on measurement) · the meter.
-  A release may stop after any of them.
+- **The visualizer is no longer deferred** — §3a is it, and the question *what
+  would baz's own be* is answered: a real transform, drawn as light in the
+  record's own colours, inside the field's shader, masked away from type. What
+  remains deferred is a 4096-point transform for the lowest octave, if the bass
+  ever reads as visibly ganged.
+- **The plan is nine shippable steps**, ordered highest-relief-first: delete the
+  duplicate transport · the hero decode · the static field · the kiosk type
+  scale · the feed · the toggles · the drift (gated) · **the tap and the
+  spectrum** (gated) · the meter. A release may stop after any of them, and doc
+  12 §12 gives the shorter path — 1 → 2 → 6 → 8 — if the bars are wanted first.
 
 ## What would reverse this
 
 - **The measurement gate failing.** If the field cannot hold 12 ms at 4K on real
-  hardware, it does not ship drifting, and T1's default becomes *still*. The
-  owner's condition is explicit and it is the one this decision is subordinate
-  to.
+  hardware it does not ship drifting, and T1's default becomes *still*; if the
+  spectrum cannot, T2's default becomes off and the bars ship as an opt-in. The
+  owner's condition — *"as long as the performance remains top tier"* — is
+  explicit, and it is the one this decision is subordinate to.
 - **iced exposing `MonitorHandle` *and* an answer to the global control-flow
   coupling** — both, not either — which would reopen the second window.
 - **Evidence of OLED ghosting on a drifting field**, which would revive the
