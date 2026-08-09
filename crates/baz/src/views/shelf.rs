@@ -111,17 +111,12 @@ pub(crate) fn view<'a>(
     )
     .id(scroll_id())
     .on_scroll(Message::Scrolled)
-    // **The wall has no scrollbar** ([`theme::wall_scrollbar`]). The rail two
-    // pixels to its right is already the wall's scroll affordance — it says
-    // where you are, it jumps, and it names what it jumps to — so a bar beside
-    // it was two vertical strips doing one job, which is the third of the
-    // owner's three complaints in ADR-0022.
-    //
-    // The *scrolling* is untouched: a zero-width `Scrollbar` is a bar iced
-    // draws nothing for, not a `scrollable` that stopped scrolling, so the
-    // wheel, the touchpad, the drag and every programmatic `scroll_to` behave
-    // exactly as before. The style is still handed over because a zero-width
-    // bar is still asked for one.
+    // **The wall's scrollbar** ([`theme::wall_scrollbar`]): 4 px, in the room's
+    // hairline, reserving its own lane inside the scrollable so no cover is
+    // ever drawn under it. The rail beside it still says *where you are* and
+    // still names the shelf it jumps to; what the bar adds is the one gesture
+    // the rail has no answer to — drag to the end. The owner's decision,
+    // 2026-08-09; `docs/REFUSALS.md`'s two-vertical-strips entry records it.
     .direction(scrollable::Direction::Vertical(theme::wall_scrollbar()))
     .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
     .width(Length::Fill)
