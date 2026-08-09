@@ -19,6 +19,15 @@
 //! spec's home-trash branch (not a mount's `.Trash-$uid`) is the one
 //! exercised.
 
+// Linux only: the layout asserted below — `Trash/files` + `Trash/info`
+// under `$XDG_DATA_HOME` — is the *freedesktop* spec's, and the redirect
+// that keeps this test hermetic only exists there. On macOS and Windows
+// the `trash` crate targets the system Trash/Recycle Bin, which no
+// environment variable can point at a tempdir — a hermetic layout test is
+// not possible, and a non-hermetic one would move files into the real
+// trash of whoever runs the suite. The cross-platform contract (the call
+// succeeds, the file leaves the folder) is the crate's own tested ground.
+#![cfg(target_os = "linux")]
 #![expect(
     unsafe_code,
     reason = "redirecting XDG_DATA_HOME is the whole point of the test — the \
