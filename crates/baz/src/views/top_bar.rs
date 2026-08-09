@@ -1,27 +1,35 @@
-//! The slim top bar: the search well on the left, quiet status and the route
-//! to the settings on the right.
+//! The slim Library strip: **how the wall is arranged and what may be done to
+//! it**, with the route to the Settings in the corner.
 //!
-//! # The bar has a subject again
+//! # What it is now, after the well left
 //!
-//! It used to carry four things and only two of them were about the library:
-//! search and the counts *are*, `Queue` was about the engine, and `Settings` is
-//! about the application. The audit's finding was that the bar therefore had no
-//! subject (§1.4).
+//! The audit's §1.4 finding was that this bar had no subject: it carried
+//! search, the counts, `Queue` and `Settings`, and only the first two were
+//! about the library. Three of those four have since gone somewhere truer.
+//! `Queue`'s count went to the now-playing bar beside the track it counts. The
+//! `Playlists` door went when the returns lane became the resident index
+//! (ADR-0030 §5). And the **well and the counts have gone to the lane**, on
+//! the owner's decision — *"the design does not match properly… the search
+//! should really be in the sidebar"* — because the query is the frame's state
+//! and the frame's resident surface is the lane.
 //!
-//! `Queue` has gone. Its count now sits in the now-playing bar beside the track
-//! it counts, and the queue itself opens from there
-//! ([`crate::views::queue`]) — closer to its subject, and no longer stale:
-//! the toggle went on saying `Queue · 13` after the run had ended, because it
-//! reported the length of the last queue rather than what was next.
+//! What is left is one subject, stated in the two vocabularies doc 10 §0.3
+//! separates: **the states** — ARTIST · YEAR · GENRE · ADDED · PLAYED, caps
+//! and tracked, one of them current — and **the acts** — `Play all`,
+//! `Shuffle`, `Pull`, sentence-case words. Narrow-then-arrange used to read
+//! left to right across this strip; the narrowing is in the lane now and the
+//! strip begins at the arrangement. The gear stays in the corner because it is
+//! the *application's* affair rather than the frame's, and the lane's head is
+//! a closed set of three (ADR-0030's amendment).
 //!
-//! # The group keys sit here, beside the well
+//! # The well is still drawn here at the widths the lane cannot hold it
 //!
-//! ARTIST · YEAR · GENRE · ADDED · PLAYED (ADR-0019) are the bar's third
-//! tenant, and they belong to its subject: search narrows the collection and
-//! the keys arrange it, so both are about the library and both are on the left.
-//! The application's own affairs — the counts it can report, the route to the
-//! Settings — stay on the right. See [`group_key`] for why the row is five
-//! words and not a menu.
+//! [`theme::strip_holds_the_well`] is the one predicate: below
+//! [`theme::SIDEBAR_FLOOR`] the lane is a rail that cannot open, so the well
+//! comes back to the strip's frame line in the exact form doc 10 §4.1 drew for
+//! it — the counts as the placeholder, the match count in its reserved
+//! [`MATCH_W`] slot. **Two forms, never two at once**, and the breakpoint is
+//! the lane's own floor rather than a second one this file gets to choose.
 
 use baz_core::index::GroupKey;
 use iced::widget::{
@@ -35,27 +43,19 @@ use crate::motion::{Control, Ink};
 
 use crate::{icon, theme};
 
-/// The search well's width floor (logical px) — what it stands at when the
-/// window has spent the fluid range.
-pub(crate) const WELL_MIN: f32 = 200.0;
-
-/// The search well's width ceiling (logical px) — 280 at the shipped window
-/// and above.
+/// The search well's width in the strip (logical px) — **200**, flat.
 ///
-/// It was `SEARCH_W` 360, sized in the era when you *aimed* at the field;
-/// under type-anywhere (ADR-0017 §1.2) you reach it by typing, and 280 holds
-/// a long query beside the reserved match slot (doc 10 §2.3). The 80 px the
-/// ceiling gives back is the strip's second reclamation.
-pub(crate) const WELL_MAX: f32 = 280.0;
-
-/// The well's width at `window_width`: `clamp(W − 1000, 200, 280)`
-/// (doc 10 §4.1) — 280 at ≥ 1280, spending its fluid 80 px down to 1200,
-/// then holding the floor. The well is the strip's **one** fluid tenant,
-/// which is what makes the collapse order one step rather than a cascade:
-/// first this range, then the split (§4.3).
-pub(crate) fn well_width(window_width: f32) -> f32 {
-    (window_width - 1000.0).clamp(WELL_MIN, WELL_MAX)
-}
+/// **The fluid range is gone, and it is gone because it is unreachable.** It
+/// was `clamp(W − 1000, 200, 280)`: 280 at the shipped window, spending 80 px
+/// down to 1200, then holding the floor — the strip's one fluid tenant, and
+/// the reason doc 10 §4.3 could call the collapse order *one step then the
+/// split*. The strip now carries the well only below [`theme::SIDEBAR_FLOOR`]
+/// ([`theme::strip_holds_the_well`]), where the strip's own width is at most
+/// `SIDEBAR_FLOOR − SIDEBAR_RAIL_W` = 904 and the clamp returns its floor at
+/// every one of those widths. A ramp no width can climb is a comment that can
+/// rot, so the constant states the number the strip actually draws and **the
+/// split is now the whole of the collapse order**.
+pub(crate) const WELL_W: f32 = 200.0;
 
 /// The group-key row's reserved width (logical px): five tracked caps words
 /// in their `GAP_XS`-padded buttons with `GAP_MD` between them, measured in
@@ -68,25 +68,32 @@ pub(crate) const KEYS_W: f32 = 314.0;
 /// word, `Shuffle`, `Pull`, their paddings and the two `GAP_XS` gaps.
 pub(crate) const ACTS_W: f32 = 182.0;
 
-/// The slim top bar — one line at [`theme::TOP_BAR_SPLIT`] and above, two
-/// below it, a hairline rule under either.
+/// The slim Library strip — one line at [`theme::TOP_BAR_SPLIT`] and above,
+/// two below it, a hairline rule under either.
 ///
-/// `window_width` decides the well's width and which regime the strip is in,
-/// and nothing else. **The split is the charter drawn** (doc 10 §4.3): below
-/// 960 the frame's furniture — the well and the two doors — stays on the
-/// window line, and the library's verbs and states take a line of their own.
-/// Nothing hides, nothing overflows, no menu appears; every control keeps
-/// its exact form, and the collapse order is one step — first the well
-/// spends its fluid 80 px, then the strip splits. Below
+/// `strip_width` is the **strip's** width — the window less the returns lane,
+/// `App::body_width` — never the window's, because the lane is a column and a
+/// strip that resolved its split against the window would split at the wrong
+/// moment. It decides which regime the strip is in and nothing else; whether
+/// the well is a tenant at all is [`theme::strip_holds_the_well`]'s answer,
+/// read off `shelf.window_w`.
+///
+/// **The split is the charter drawn** (doc 10 §4.3): below
+/// [`theme::TOP_BAR_SPLIT`] the frame's furniture — the well and the gear —
+/// stays on the window line, and the library's verbs and states take a line of
+/// their own. Nothing hides, nothing overflows, no menu appears; every control
+/// keeps its exact form. It can only be reached where the well is a tenant:
+/// once the well is in the lane the strip's tenants sum to 648 against a
+/// narrowest possible strip of 720, asserted in `theme.rs`. Below
 /// [`theme::TOP_BAR_FLOOR`] nothing further collapses: 600 is the strip's
-/// declared floor and the window's sensible minimum.
+/// declared floor.
 ///
 /// The resolved height is [`theme::top_bar_h`], and `app.rs`'s viewport
 /// estimate reads the same function — the pair of tokens and the breakpoint
 /// are one decision, not two that must agree.
-pub(crate) fn view(shelf: &Shelf, window_width: f32, ink: Ink) -> Element<'_, Message> {
+pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Message> {
     let room = theme::active();
-    let search = well(shelf, well_width(window_width));
+    let holds_well = theme::strip_holds_the_well(shelf.window_w);
     let mut keys_row = row![]
         .spacing(theme::GAP_MD)
         .align_y(iced::Alignment::Center);
@@ -105,11 +112,10 @@ pub(crate) fn view(shelf: &Shelf, window_width: f32, ink: Ink) -> Element<'_, Me
     let acts = container(draws())
         .width(Length::Fixed(ACTS_W))
         .align_x(alignment::Horizontal::Left);
-    // The status row holds only the transient notes now — the counts moved
-    // into the well they describe (doc 10 §4.1; L8.3's valve run in reverse:
-    // the fact goes to where it is watched). What the move freed is exactly
-    // the slack the scan notes spend, which is what repaired the strip's
-    // scan-time overflow at the shipped window (doc 10 §2.1).
+    // The status row holds only the transient notes — the counts went with
+    // the well, first into it (doc 10 §4.1) and now into the lane's own
+    // readout line, which is L8.3's valve applied twice in the same direction:
+    // the fact goes to where it is watched.
     let mut status = row![]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center);
@@ -140,15 +146,21 @@ pub(crate) fn view(shelf: &Shelf, window_width: f32, ink: Ink) -> Element<'_, Me
                 .color(room.alert),
         );
     }
-    if window_width < theme::TOP_BAR_SPLIT {
-        // **The two-line regime** (doc 10 §4.3). The frame line: the well,
-        // the transient notes in the slack, then the doors at the corner.
-        // The library line: the arrangement's states, then the wall's acts.
-        // The seam is the charter's own division — frame furniture above,
-        // library verbs below — and both lines keep every control at its
-        // exact single-line form.
+    if holds_well && strip_width < theme::TOP_BAR_SPLIT {
+        // **The two-line regime** (doc 10 §4.3), and it is reachable only in
+        // this branch's own condition: the split exists to give the *library*
+        // line its 600 px, and the frame line it splits away is the well's.
+        // With the well in the lane the strip's remaining tenants sum to 648
+        // against a strip that is never narrower than 720, so there is nothing
+        // to split — asserted in `theme.rs`, not assumed here.
+        //
+        // The frame line: the well, the transient notes in the slack, then the
+        // gear at the corner. The library line: the arrangement's states, then
+        // the wall's acts. The seam is the charter's own division — frame
+        // furniture above, library verbs below — and both lines keep every
+        // control at its exact single-line form.
         let frame_line = row![
-            search,
+            well(shelf, WELL_W),
             Space::with_width(Length::Fill),
             status,
             settings_gear(ink),
@@ -171,15 +183,22 @@ pub(crate) fn view(shelf: &Shelf, window_width: f32, ink: Ink) -> Element<'_, Me
         .into();
     }
     status = status.push(settings_gear(ink));
+    // **The left cluster**, in the order the gestures happen: narrow, arrange,
+    // then play or draw. The narrowing is in the lane at every width the lane
+    // can hold it, so at those widths the cluster begins at the arrangement
+    // and the strip hangs from `HANG` with a group key rather than a field.
+    let mut cluster = row![]
+        .spacing(theme::GAP_XL)
+        .align_y(iced::Alignment::Center);
+    if holds_well {
+        cluster = cluster.push(well(shelf, WELL_W));
+    }
     column![
         container(
             row![
-                // The well and the keys are one cluster — both are about the
-                // library — held apart by the ladder's largest gap so they
-                // read as two groups on one line rather than as six controls.
-                row![search, keys, acts]
-                    .spacing(theme::GAP_XL)
-                    .align_y(iced::Alignment::Center),
+                // Held apart by the ladder's largest gap so they read as two
+                // groups on one line rather than as ten controls.
+                cluster.push(keys).push(acts),
                 // The strip's one flexible region. The row's `GAP_SM` counts
                 // once each side of it, which is the 16 px status lead the
                 // budget arithmetic reserves (doc 10 §4.2) — at the regime
@@ -356,7 +375,18 @@ fn draw_word(
     .into()
 }
 
-/// **The search well**, with the magnifier laid over its left padding
+/// **The search well, in the strip's own form** — drawn only where the
+/// returns lane cannot hold it ([`theme::strip_holds_the_well`]); the lane's
+/// form is [`crate::views::lane`]'s `well`, which is where the query lives at
+/// every width above [`theme::SIDEBAR_FLOOR`].
+///
+/// Both forms share the id, the messages and the mark. What differs is where
+/// the two figures go: at 232 px the lane puts them on a line under the field,
+/// and at 200 px the strip keeps them *inside* it — the counts as the
+/// placeholder, the match count in the reserved [`MATCH_W`] slot — because a
+/// strip is one control tall and has no second line to give.
+///
+/// The magnifier is laid over its left padding
 /// (doc 10 §4.1): recessed below the wall, like every other place in baz you
 /// put something into. Its vertical padding is set so that the well stands
 /// [`theme::TRANSPORT_HIT`] tall — the same 32 px as every control in the

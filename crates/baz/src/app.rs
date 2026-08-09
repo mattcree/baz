@@ -1303,10 +1303,8 @@ impl App {
                 self.send_seek(target);
                 Task::none()
             }
-            Message::FocusSearch => match &self.screen {
-                Screen::Shelf(_) => text_input::focus(search_id()),
-                Screen::Setup(_) => Task::none(),
-            },
+            Message::FocusSearch => self.focus_the_well(),
+            Message::QueryTyped(text) => self.type_anywhere(&text),
             Message::Quit => self.leave_for_good(),
             // Best effort by nature: a Wayland compositor is entitled to
             // refuse a focus request, and refusing is not an error here.
@@ -2360,6 +2358,17 @@ impl App {
     /// they change exactly when a new record appears in one of those
     /// surfaces, so this is a comparison of three small values on every other
     /// message.
+    ///
+    /// **The lists' quotations are asked for by name**, and that is a
+    /// correction. A playlist's sleeve is a collage of the records it quotes
+    /// (ADR-0024 §A1), read out of the wall's own thumbnail cache — and
+    /// nothing was ever putting those records *into* it. `Shelf::offscreen_art`
+    /// yields the lane's **records**; a list's quotations are the shell's,
+    /// because the shell is what holds [`crate::playlists::Playlists`]. So a
+    /// list drew the deterministic gradient until one of the records it quotes
+    /// happened to scroll onto the wall — real artwork by luck, which is not
+    /// what ADR-0030 §2 claims. Four ids per list, on the same guard, through
+    /// the same cache: a sleeve is one decode however many surfaces draw it.
     fn request_offscreen_art(&mut self) -> Task<Message> {
         let mark = (self.lane_mark, self.place);
         if mark == self.art_mark {
@@ -2367,10 +2376,17 @@ impl App {
         }
         self.art_mark = mark;
         let width = self.body_width();
+        let quoted: Vec<u64> = self
+            .playlists
+            .rows
+            .iter()
+            .flat_map(|row| row.art.iter().copied())
+            .collect();
         let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
         };
-        let ids = state.offscreen_art(width);
+        let mut ids = state.offscreen_art(width);
+        ids.extend(quoted);
         state.request_thumbs_for(&ids)
     }
 
@@ -2422,16 +2438,86 @@ impl App {
     /// Inert below [`theme::SIDEBAR_FLOOR`]: there is nothing to toggle when
     /// the window can only hold the rail, and the mark says so in its ink.
     fn toggle_lane(&mut self) -> Task<Message> {
+        self.set_lane(!self.lane_open)
+    }
+
+    /// Put the lane in `open` — the marks at its foot,
+    /// <kbd>Ctrl</kbd>+<kbd>B</kbd>, and every road to the well
+    /// ([`Self::reach_the_well`]) — persisting the state and re-hanging the
+    /// wall.
+    ///
+    /// It does nothing at all when the window cannot hold the expanded lane
+    /// ([`theme::sidebar_can_expand`]) or when the lane is already in the state
+    /// asked for. That second guard is what keeps the re-hang to the presses
+    /// whose subject is the collection's width: reaching for the well while
+    /// the lane is already open must not touch the grid.
+    fn set_lane(&mut self, open: bool) -> Task<Message> {
         let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
         };
-        if !theme::sidebar_can_expand(state.window_w) {
+        if !theme::sidebar_can_expand(state.window_w) || self.lane_open == open {
             return Task::none();
         }
-        self.lane_open = !self.lane_open;
-        state.lane_open = self.lane_open;
-        persist_lane(self.lane_open);
+        self.lane_open = open;
+        state.lane_open = open;
+        persist_lane(open);
         state.rehang()
+    }
+
+    /// **Make the well reachable**, without asking for the caret: go to the
+    /// Library, and open the lane if the well is in it and it is shut.
+    ///
+    /// Both halves are consequences of the owner's decision to move search
+    /// into the lane, and both are about not typing into something you cannot
+    /// see:
+    ///
+    /// - **The Library**, because the well searches the collection and the
+    ///   collection is what answers. Type-anywhere has always filtered the wall
+    ///   from anywhere; until the well was resident, doing it from `Home` or a
+    ///   record's page filled a field that was not on screen and narrowed a
+    ///   wall that was not either. The lane put the field in every place, and
+    ///   this puts the wall back under it.
+    /// - **The lane**, because at [`theme::SIDEBAR_RAIL_W`] there is no field
+    ///   to focus until it opens. One frame, no tween (ADR-0030 §3.1), so the
+    ///   caret lands in the same frame the key did.
+    ///
+    /// Below [`theme::SIDEBAR_FLOOR`] the second half is a no-op by
+    /// [`Self::set_lane`]'s own guard, which is correct: there the well is in
+    /// the strip ([`theme::strip_holds_the_well`]) and the Library is the only
+    /// place that draws one.
+    fn reach_the_well(&mut self) -> Task<Message> {
+        if !matches!(self.screen, Screen::Shelf(_)) {
+            return Task::none();
+        }
+        let there = self.go(|place| place.go(crate::lane::Destination::Library));
+        let open = self.set_lane(true);
+        Task::batch([there, open])
+    }
+
+    /// <kbd>/</kbd>, <kbd>Ctrl</kbd>+<kbd>F</kbd> and the collapsed lane's
+    /// magnifier: reach the well, then put the caret in it.
+    fn focus_the_well(&mut self) -> Task<Message> {
+        if !matches!(self.screen, Screen::Shelf(_)) {
+            return Task::none();
+        }
+        Task::batch([self.reach_the_well(), text_input::focus(search_id())])
+    }
+
+    /// **Type anywhere** (ADR-0017 §1.2) — the shell's half of it, which
+    /// exists because the owner moved the well into the lane.
+    ///
+    /// The shelf still appends the text, filters and takes the caret
+    /// ([`Shelf::type_into_query`]). What the shell adds, *first*, is a
+    /// visible field to append into and the wall the filter is about. Every
+    /// road to the query goes through [`Self::reach_the_well`], so the letter,
+    /// the slash and the lane's magnifier all land in the same state.
+    fn type_anywhere(&mut self, text: &str) -> Task<Message> {
+        let reach = self.reach_the_well();
+        let typed = match &mut self.screen {
+            Screen::Shelf(state) => state.type_into_query(text),
+            Screen::Setup(_) => Task::none(),
+        };
+        Task::batch([reach, typed])
     }
 
     /// **Go somewhere**, by whichever door was pressed.
@@ -3705,6 +3791,12 @@ impl App {
                     self.place,
                     &self.lane,
                     self.player.now_playing_path().is_some(),
+                    // Two facts, not one: *anything* is sounding lights the
+                    // head's `Now playing` dot, and *this record* is sounding
+                    // lights its own row. They differ for a file the library
+                    // does not hold — the head still answers, the list has
+                    // nothing to mark.
+                    self.player.playing_album(),
                     self.window.width,
                 ),
                 screen
@@ -4105,7 +4197,11 @@ pub(crate) struct Shelf {
     /// changed nine times over 150 ms — and with no side surface left there is
     /// nothing to subtract but the index rail's lane (see
     /// [`Shelf::grid_width`]).
-    window_w: f32,
+    ///
+    /// Crate-visible because the Library strip reads it to answer one
+    /// question the strip's *own* width cannot: whether the returns lane can
+    /// hold the search well ([`theme::strip_holds_the_well`]).
+    pub(crate) window_w: f32,
     /// **What the shuffle in progress is drawing from**, or `None` when no
     /// shuffle is running (`crate::shuffle`).
     ///
@@ -4253,7 +4349,7 @@ impl Shelf {
             scroll_offset: 0.0,
             grid_size: Size::new(
                 WINDOW.width - theme::INDEX_LANE_W,
-                WINDOW.height - theme::top_bar_h(WINDOW.width),
+                WINDOW.height - theme::top_bar_h(WINDOW.width, lane_open),
             ),
             last_scan_log: Instant::now(),
             hovered_album: None,
@@ -4310,9 +4406,12 @@ impl Shelf {
                     self.request_visible_thumbs(),
                 ])
             }
-            // **Type anywhere** (ADR-0017 §1.2). Both halves of the gesture,
-            // in one arm, because they are one act — see [`Message::QueryTyped`].
-            Message::QueryTyped(text) => self.type_into_query(&text),
+            // **Type anywhere** has no arm here any more. Its message is
+            // answered by the shell (`App::type_anywhere`), which reaches the
+            // well — the Library, and the lane opened if the well is in it —
+            // before handing the text down to [`Self::type_into_query`]. The
+            // shelf cannot do that half: the place and the lane are the
+            // shell's state, and the owner's move put the field in the lane.
             Message::EscapePressed => self.peel(),
             Message::GroupKeySelected(key) => self.arrange_by(key),
             Message::RailJumped(run) => self.jump_to_shelf(run),
@@ -4335,12 +4434,16 @@ impl Shelf {
                 // Estimate until the next scroll event reports real bounds.
                 // The rail's lane comes off here too, because the scrollable
                 // the next `Scrolled` will measure has already given it up.
-                // The strip's height is *resolved* against this very width —
-                // below the split the strip is two lines, and an estimate
-                // that assumed one would mis-virtualize 40 px of shelf.
+                // The strip's height is *resolved* against the window **and
+                // the lane's state** — below the split the strip is two lines,
+                // and an estimate that assumed one would mis-virtualize 40 px
+                // of shelf. It took only the width until now, while the strip
+                // itself was drawn at `App::body_width`; between a 1000 and a
+                // 1056 px window with the lane open the two disagreed by
+                // exactly those 40 px. One function, both facts.
                 self.grid_size = Size::new(
                     self.grid_width(),
-                    (size.height - theme::top_bar_h(size.width)).max(100.0),
+                    (size.height - theme::top_bar_h(size.width, self.lane_open)).max(100.0),
                 );
                 self.request_visible_thumbs()
             }
@@ -5385,8 +5488,13 @@ impl Shelf {
         Task::batch(tasks)
     }
 
-    /// The ids the surfaces beside the wall are drawing: the lane's recent
-    /// records and the Home place's newest row.
+    /// The ids the surfaces beside the wall are drawing **that the shelf can
+    /// name**: the lane's recent records and the Home place's newest row.
+    ///
+    /// A lane row that is a *list* names no record here on purpose — the
+    /// records it quotes are `Playlists`' to know, and the shell adds them in
+    /// [`App::request_offscreen_art`] rather than this function reaching into
+    /// a collection the shelf does not hold.
     fn offscreen_art(&self, width: f32) -> Vec<u64> {
         let mut ids: Vec<u64> = self
             .lane_recent
@@ -6674,6 +6782,84 @@ mod tests {
         assert_eq!(
             format!("{from_key:?}"),
             format!("{:?}", Some(Message::ToggleLane))
+        );
+    }
+
+    /// **Every road to the query goes through the same two steps**, now that
+    /// the owner has moved the well into the returns lane.
+    ///
+    /// <kbd>/</kbd>, <kbd>Ctrl</kbd>+<kbd>F</kbd>, the lane's collapsed
+    /// magnifier and the first key of a type-anywhere query all reach
+    /// `reach_the_well` first, and it does exactly two things: **go to the
+    /// Library**, because the well searches the collection and the collection
+    /// is what answers, and **open the lane**, because at `SIDEBAR_RAIL_W`
+    /// there is no field to focus until it does. Source-pinned for
+    /// [`Self::the_pull_offers_a_record_and_sends_no_command_at_all`]'s
+    /// reason — there is no `Shelf` to build without a database and a scan
+    /// thread — and the pins are the two calls plus the guard that keeps the
+    /// re-hang off the presses that do not deserve one.
+    #[test]
+    fn every_road_to_the_query_reaches_the_well_the_same_way() {
+        let source = include_str!("app.rs").replace("\r\n", "\n");
+        let body = |signature: &str| {
+            let rest = source
+                .split_once(signature)
+                .unwrap_or_else(|| panic!("`{signature}` exists"))
+                .1;
+            rest[..rest.find("\n    }\n").expect("a function ends")].to_owned()
+        };
+
+        let reach = body("fn reach_the_well(&mut self) -> Task<Message> {");
+        assert!(
+            reach.contains("place.go(crate::lane::Destination::Library)"),
+            "reaching the well no longer puts the wall it filters on screen"
+        );
+        assert!(
+            reach.contains("self.set_lane(true)"),
+            "reaching the well no longer opens the lane it lives in"
+        );
+
+        // The caret is the second step and only the second: `reach_the_well`
+        // stays free of it so that type-anywhere can reach the well and let
+        // the shelf take the caret in its own arm.
+        let focus = body("fn focus_the_well(&mut self) -> Task<Message> {");
+        assert!(
+            focus.contains("self.reach_the_well()") && focus.contains("text_input::focus"),
+            "`/` and Ctrl+F no longer reach the well before focusing it"
+        );
+
+        let typed = body("fn type_anywhere(&mut self, text: &str) -> Task<Message> {");
+        let at_reach = typed.find("reach_the_well").expect("the reach");
+        let at_text = typed.find("type_into_query").expect("the text");
+        assert!(
+            at_reach < at_text,
+            "type-anywhere appends the text before there is a field to see it in"
+        );
+
+        // **And the shelf no longer answers the message at all** — the place
+        // and the lane are the shell's state, so the shelf cannot do the half
+        // the owner's move added.
+        // (Spelled in two halves so this assertion is not its own needle.)
+        let old_arm = format!(
+            "Message::QueryTyped(text) => self.{}(&text)",
+            "type_into_query"
+        );
+        assert!(
+            !source.contains(&old_arm),
+            "the shelf still answers type-anywhere on its own"
+        );
+
+        // **The re-hang stays on the presses whose subject is the wall's
+        // width** (ADR-0030 §3): reaching for the well while the lane is
+        // already open must not touch the grid.
+        let set = body("fn set_lane(&mut self, open: bool) -> Task<Message> {");
+        assert!(
+            set.contains("self.lane_open == open"),
+            "`set_lane` re-hangs the wall for a state it is already in"
+        );
+        assert!(
+            set.contains("theme::sidebar_can_expand(state.window_w)"),
+            "`set_lane` can expand the lane at a width that cannot hold it"
         );
     }
 

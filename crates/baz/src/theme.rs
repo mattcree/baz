@@ -1055,7 +1055,12 @@ pub const INDEX_LANE_W: f32 = INDEX_CLEARANCE + INDEX_W + HANG;
 /// It lands on the industry's number from the other direction: Material's
 /// navigation drawer is 280 dp at its default maximum. Corroboration, not
 /// derivation.
-pub const SIDEBAR_W: f32 = GAP_XL + MENU_W + GAP_XL;
+pub const SIDEBAR_W: f32 = GAP_XL + SIDEBAR_MEASURE + GAP_XL;
+
+/// The lane's content measure — [`MENU_W`] 232 — which is the width every head
+/// row, the well and every list row are drawn at, and the width `font.rs`
+/// measures the well's two strings against.
+pub const SIDEBAR_MEASURE: f32 = MENU_W;
 
 /// **The returns lane, collapsed**: [`GAP_XL`] 24 + [`SIDEBAR_SLEEVE`] 48 +
 /// [`GAP_XL`] 24 = **96**. Material's expressive navigation rail, again from
@@ -1125,6 +1130,45 @@ pub fn sidebar_can_expand(window_w: f32) -> bool {
 /// states, at the same offset. [`GAP_SM`] of headroom is exactly the
 /// [`DOT`] 6 plus the 2 px that keeps it off the ink.
 pub const SIDEBAR_GLYPH_BOX: f32 = ICON_PX + GAP_SM;
+
+/// **Where a head row's glyph is centred**, from the row's own left edge:
+/// [`GAP_SM`] 8 + half of [`SIDEBAR_GLYPH_BOX`] = **20**.
+///
+/// Declared because the search well has to land on it. The well draws its
+/// magnifier as a layer over its own left padding ([`GAP_MD`] 12) and the
+/// glyph is [`ICON_PX`] 16 wide, so its centre is `12 + 8` = 20 — the same
+/// vertical the three destinations' marks stand on. That equality is asserted
+/// rather than eyeballed (`the_lane_head_stands_on_two_verticals`): a well
+/// whose mark sat 4 px off the marks above it would say *this is a different
+/// surface* louder than any of its words.
+pub const SIDEBAR_HEAD_GLYPH_X: f32 = GAP_SM + SIDEBAR_GLYPH_BOX / 2.0;
+
+/// **Where a head row's words begin**, from the row's own left edge:
+/// [`GAP_SM`] 8 + [`SIDEBAR_GLYPH_BOX`] 24 + [`GAP_MD`] 12 = **44**.
+///
+/// The destination rows get it from the row's padding, its glyph box and its
+/// spacing; the well gets it by declaring it as the input's left padding, and
+/// the readout line under the well is indented to it too. One vertical for
+/// every word in the head.
+pub const SIDEBAR_HEAD_TEXT_X: f32 = GAP_SM + SIDEBAR_GLYPH_BOX + GAP_MD;
+
+/// The lead the well's magnifier needs to stand on [`SIDEBAR_HEAD_GLYPH_X`]:
+/// the vertical, less half the glyph. **12** — which is [`GAP_MD`], but stated
+/// as the derivation so that a change to the head's box moves the mark with
+/// it rather than leaving it 4 px off three glyphs above it.
+pub const SIDEBAR_WELL_GLYPH_LEAD: f32 = SIDEBAR_HEAD_GLYPH_X - ICON_PX / 2.0;
+
+/// **The search well's block in the lane's head**: **52** — the field at
+/// [`TRANSPORT_HIT`] 32, [`GAP_XS`] 4, and one [`LINE_META`] 16 readout line
+/// under it.
+///
+/// The readout is **always drawn**, because a line that appeared when you
+/// typed would push [`SIDEBAR_ROW_H`]-pitched rows down by 16 px on the first
+/// keystroke. It carries the collection's counts at rest and the query's
+/// match count while one narrows the wall — the same reserved-slot discipline
+/// the well used inside itself when it lived in the strip, kept by holding the
+/// *line* rather than a width.
+pub const SIDEBAR_WELL_H: f32 = TRANSPORT_HIT + GAP_XS + LINE_META;
 
 /// **A work's own title**, and the one place in the product it is set: the
 /// Home place's `CONTINUE` placard.
@@ -1823,14 +1867,23 @@ pub const TOP_BAR_PAD_V: f32 = GAP_SM;
 /// three pixels was three pixels of shelf mis-virtualized on the first frame.
 pub const TOP_BAR_H: f32 = 2.0 * TOP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
 
-/// Window width below which the Library strip splits into its two lines
-/// (logical px) — the single-line regime's floor, from the budget arithmetic
-/// doc 10 §4.2 lays out: the tenants' reserved widths and the frame's
-/// gutters sum to 958 with the well at its 200 px floor, so the seam is
-/// declared at **960** and asserted in this module's own tests
-/// (`the_strip_holds_its_tenants_at_the_single_line_floor`, the L9 budget
-/// law).
-pub const TOP_BAR_SPLIT: f32 = 960.0;
+/// **Strip width** below which the Library strip splits into its two lines
+/// (logical px) — **872**, and it is now an exact sum rather than a rounded
+/// one.
+///
+/// It was 960: the tenants summed to 958 with the well at its 200 px floor and
+/// the seam was declared on the next lattice step up. Two of those tenants have
+/// since left. The `Playlists` door went with the returns lane (ADR-0030 §5),
+/// giving back its 64 px and the [`GAP_XL`] beside it — 88 — and that is what
+/// took 960 to 872. **The well then left too** (ADR-0030's search amendment),
+/// but it left only where the lane can hold it, which is exactly the widths at
+/// which this seam cannot be reached: see [`strip_holds_the_well`]. So the
+/// split's own arithmetic still counts the well, and 872 is the sum with it in.
+///
+/// The number this is compared against is the **strip's** width — the window
+/// less the returns lane — never the window's. See [`top_bar_h`], which is the
+/// one place that resolution happens.
+pub const TOP_BAR_SPLIT: f32 = 872.0;
 
 /// The strip's floor, and the window's sensible minimum (logical px) —
 /// **600**, from the two-line regime's own arithmetic (doc 10 §4.3): the
@@ -1850,15 +1903,49 @@ pub const TOP_BAR_FLOOR: f32 = 600.0;
 /// its capacity math once.
 pub const TOP_BAR_2LINE_H: f32 = 3.0 * TOP_BAR_PAD_V + 2.0 * TRANSPORT_HIT + 1.0;
 
-/// The Library strip's resolved height at `window_width`: [`TOP_BAR_H`] in
-/// the single-line regime, [`TOP_BAR_2LINE_H`] below [`TOP_BAR_SPLIT`].
+/// **Whether the Library strip carries the search well** — true exactly where
+/// the returns lane cannot hold it.
+///
+/// The owner's decision (ADR-0030's search amendment): *"the search should
+/// really be in the sidebar"*. The lane is where the query lives, and it can
+/// hold a field at [`SIDEBAR_W`] and reach one at [`SIDEBAR_RAIL_W`] — the
+/// rail's magnifier opens the lane onto the caret. Below [`SIDEBAR_FLOOR`]
+/// the lane is a rail that *cannot* open ([`sidebar_can_expand`]), so there is
+/// nothing for a magnifier there to lead to, and the well goes back to the
+/// strip in the form doc 10 §4.1 drew for it.
+///
+/// **One home at a time, and the breakpoint is the lane's own.** The defect
+/// the owner named — *"the design does not match properly"* — was two surfaces
+/// both carrying the frame's identity; a well drawn in both would be that
+/// defect with an extra field.
+#[must_use]
+pub fn strip_holds_the_well(window_w: f32) -> bool {
+    !sidebar_can_expand(window_w)
+}
+
+/// The Library strip's resolved height: [`TOP_BAR_H`] in the single-line
+/// regime, [`TOP_BAR_2LINE_H`] where the strip splits.
 ///
 /// The one function every consumer of the strip's height must read — the
-/// strip's own view and `app.rs`'s viewport estimate both — so the two
-/// regimes cannot disagree about where the seam is.
+/// strip's own view and `app.rs`'s viewport estimate both — so the two regimes
+/// cannot disagree about where the seam is.
+///
+/// **It takes the window and the lane's state, not a width**, and that is a
+/// correction. The strip is drawn at `App::body_width` — the window less the
+/// returns lane — while this function was still being handed the *window*, so
+/// between a 1000 px and a 1056 px window with the lane open the strip drew
+/// two lines and the virtualizer's viewport estimate assumed one. Taking the
+/// same two facts the composition takes makes the pair impossible to disagree.
+///
+/// Where the well has left the strip ([`strip_holds_the_well`]) the split
+/// cannot be reached at all: the narrowest strip in that regime is
+/// `SIDEBAR_FLOOR − SIDEBAR_W` = 720, against a well-less single line of 648.
+/// That is asserted, which is what makes this branch a fact rather than a
+/// hope.
 #[must_use]
-pub fn top_bar_h(window_width: f32) -> f32 {
-    if window_width < TOP_BAR_SPLIT {
+pub fn top_bar_h(window_w: f32, lane_open: bool) -> f32 {
+    let strip = (window_w - sidebar_w(window_w, lane_open)).max(0.0);
+    if strip_holds_the_well(window_w) && strip < TOP_BAR_SPLIT {
         TOP_BAR_2LINE_H
     } else {
         TOP_BAR_H
@@ -7002,12 +7089,11 @@ mod tests {
         /// always beside it.
         const STRIP_FLOOR_WINDOW: f32 = TOP_BAR_FLOOR + SIDEBAR_RAIL_W;
 
-        /// The single-line regime, at the well's floor (doc 10 §4.2): the
-        /// gutter, the well, the three `GAP_XL` seams and the left cluster,
-        /// the fill's two `GAP_SM` flanks (the status lead), the gear, the
-        /// gutter.
+        /// The single-line regime **with the well** (doc 10 §4.2): the gutter,
+        /// the well, the two `GAP_XL` seams and the left cluster, the fill's
+        /// two `GAP_SM` flanks (the status lead), the gear, the gutter.
         const SINGLE_LINE: f32 = HANG
-            + top_bar::WELL_MIN
+            + top_bar::WELL_W
             + GAP_XL
             + top_bar::KEYS_W
             + GAP_XL
@@ -7016,39 +7102,62 @@ mod tests {
             + TRANSPORT_HIT
             + HANG;
 
+        /// The single-line regime **without it** — the strip at every width
+        /// the returns lane can hold the well, which is
+        /// [`SIDEBAR_FLOOR`] and above.
+        const SINGLE_LINE_NO_WELL: f32 = SINGLE_LINE - top_bar::WELL_W - GAP_XL;
+
+        /// The narrowest strip that regime can be handed: the window at the
+        /// lane's floor, less the lane at its full width.
+        const WIDEST_LANE_STRIP: f32 = SIDEBAR_FLOOR - SIDEBAR_W;
+
         /// The frame line below the split (doc 10 §4.3): the well, the
         /// empty status slot's flanks, the gear — `GAP_LG` between the row's
         /// four members.
-        const FRAME_LINE: f32 = HANG + top_bar::WELL_MIN + 3.0 * GAP_LG + TRANSPORT_HIT + HANG;
+        const FRAME_LINE: f32 = HANG + top_bar::WELL_W + 3.0 * GAP_LG + TRANSPORT_HIT + HANG;
 
         /// The library line: the states, one seam, the acts.
         const LIBRARY_LINE: f32 = HANG + top_bar::KEYS_W + GAP_XL + top_bar::ACTS_W + HANG;
 
-        const { assert!(SINGLE_LINE <= TOP_BAR_SPLIT) }
         const { assert!(FRAME_LINE <= TOP_BAR_FLOOR) }
         const { assert!(LIBRARY_LINE <= TOP_BAR_FLOOR) }
 
-        // **What the `Playlists` door gave back** (ADR-0030 §5): the word's
-        // reserved width and the `GAP_XL` seam beside it — 88 px — so the
-        // single line now fits at **872** where it needed 960.
+        // **The split is now an exact sum, not a rounded one.** It was 960
+        // for a line of 958. The `Playlists` door's 64 px and the `GAP_XL`
+        // beside it went with ADR-0030 §5 — 88 px — and what is left comes to
+        // 872 exactly, which is what the seam is declared at.
         const { assert!(FREED == 88.0) }
         const { assert!(SINGLE_LINE == 872.0) }
         const { assert!(SINGLE_LINE + FREED == 960.0) }
+        const { assert!(SINGLE_LINE == TOP_BAR_SPLIT) }
 
-        // **The two-line split still earns its keep, and the door's removal
-        // did not buy it away.** The frame line is what the door stood on, so
-        // removing it made *that* line cheaper — but the split exists for the
-        // **library** line, whose two tenants are untouched at 600 px. Between
-        // 600 and 872 there is no single line that fits and a two-line pair
-        // that does, which is exactly the band the split serves.
+        // **The two-line split still earns its keep, and neither removal
+        // bought it away.** The frame line is what the door and the well stood
+        // on, so both removals made *that* line cheaper — but the split exists
+        // for the **library** line, whose two tenants are untouched at 600 px.
+        // Between 600 and 872 there is no single line that fits and a two-line
+        // pair that does, which is exactly the band the split serves.
         const { assert!(LIBRARY_LINE == TOP_BAR_FLOOR) }
         const { assert!(TOP_BAR_FLOOR < SINGLE_LINE) }
-        // The strip's width is now the *body's* — the window less the returns
+        // The strip's width is the *body's* — the window less the returns
         // lane — so the split's band is reached at a wider window than
         // before: `TOP_BAR_SPLIT + SIDEBAR_RAIL_W` collapsed, and
         // `+ SIDEBAR_W` open. The floor a window must clear for the strip to
         // hold its tenants at all rises with it.
         const { assert!(STRIP_FLOOR_WINDOW == 696.0) }
+
+        // **And the band the split serves is exactly the band the well is
+        // still a tenant of.** Once the well is the lane's the strip wants
+        // 648 px, and the narrowest strip that can happen in is 720 — the
+        // lane's own floor less the lane's own width. So the strip is one line
+        // at every width above `SIDEBAR_FLOOR`, in either lane state, and
+        // `top_bar_h`'s `strip_holds_the_well` branch is a fact rather than a
+        // hope.
+        const { assert!(SINGLE_LINE_NO_WELL == 648.0) }
+        const { assert!(WIDEST_LANE_STRIP == 720.0) }
+        const { assert!(SINGLE_LINE_NO_WELL < WIDEST_LANE_STRIP) }
+        // The rail is wider still, so the collapsed lane cannot reach it either.
+        const { assert!(SIDEBAR_FLOOR - SIDEBAR_RAIL_W > WIDEST_LANE_STRIP) }
 
         // The two-line band is the single-line band's own lead three times
         // around two control rows — 8+32+8+32+8, plus the hairline: 89
@@ -7057,20 +7166,34 @@ mod tests {
         const { assert!(TOP_BAR_H == 49.0 && TOP_BAR_2LINE_H == 89.0) }
         const { assert!(TOP_BAR_FLOOR < TOP_BAR_SPLIT) }
 
-        // The well is the strip's one fluid tenant: an 80 px range, spent
-        // before the split so the collapse order is one step, and pinned at
-        // the floor for every width below its ramp.
-        const { assert!(top_bar::WELL_MAX - top_bar::WELL_MIN == 80.0) }
-        assert!((top_bar::well_width(1280.0) - top_bar::WELL_MAX).abs() < f32::EPSILON);
-        assert!((top_bar::well_width(1200.0) - top_bar::WELL_MIN).abs() < f32::EPSILON);
-        assert!((top_bar::well_width(TOP_BAR_FLOOR) - top_bar::WELL_MIN).abs() < f32::EPSILON);
+        // **The well has one width in the strip, because it can only be drawn
+        // in one regime.** Its 80 px fluid range was spent between 1200 and
+        // 1280, and the strip is never that wide while the well is in it.
+        const { assert!(top_bar::WELL_W == 200.0) }
+        const { assert!(SIDEBAR_FLOOR - SIDEBAR_RAIL_W < 1200.0) }
 
-        // And the resolved height is the regime the width says it is — the
-        // function `app.rs`'s viewport estimate reads, asserted at the seam
-        // itself.
-        assert!((top_bar_h(TOP_BAR_SPLIT) - TOP_BAR_H).abs() < f32::EPSILON);
-        assert!((top_bar_h(TOP_BAR_SPLIT - 1.0) - TOP_BAR_2LINE_H).abs() < f32::EPSILON);
-        assert!((top_bar_h(TOP_BAR_FLOOR) - TOP_BAR_2LINE_H).abs() < f32::EPSILON);
+        // And the resolved height is the regime the window and the lane say it
+        // is — the function `app.rs`'s viewport estimate reads, asserted at the
+        // seam itself. The lane is collapsed at every width the seam is
+        // reachable at, so the strip there is the window less the rail.
+        let window = |strip: f32| strip + SIDEBAR_RAIL_W;
+        assert!((top_bar_h(window(TOP_BAR_SPLIT), false) - TOP_BAR_H).abs() < f32::EPSILON);
+        assert!(
+            (top_bar_h(window(TOP_BAR_SPLIT - 1.0), false) - TOP_BAR_2LINE_H).abs() < f32::EPSILON
+        );
+        assert!((top_bar_h(window(TOP_BAR_FLOOR), false) - TOP_BAR_2LINE_H).abs() < f32::EPSILON);
+        // Above the lane's floor there is no two-line regime at all, in
+        // either state — the defect the old signature could not even express,
+        // because it was handed the window while the strip was drawn at the
+        // body's width.
+        for open in [true, false] {
+            for w in [SIDEBAR_FLOOR, 1056.0, 1280.0, 1920.0] {
+                assert!(
+                    (top_bar_h(w, open) - TOP_BAR_H).abs() < f32::EPSILON,
+                    "the strip splits at {w} with the lane open={open}"
+                );
+            }
+        }
     }
 
     /// **Every icon-only control carries a tooltip** — the form rule's

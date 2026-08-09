@@ -357,6 +357,36 @@ next commit.
     floor falls from 960 to 872. The two-line split still earns its keep — it
     exists for the *library* line, whose tenants still need 600. The window's
     declared minimum rises to 696, the strip's floor plus the lane's rail.
+  - **The search well is in the lane's head**, under the three destinations —
+    the owner's decision: *"the design does not match properly… the search
+    should really be in the sidebar"*. A **field**, not a `Search`
+    destination: baz has type-anywhere, so the query is open before you decide
+    to search, and a destination row would say *go somewhere first*. Its mark
+    stands on the destinations' glyph vertical and its text on their word
+    vertical, and it wears the lane row's own two-line anatomy — the field over
+    one quiet readout line.
+    - **The counts and the match count moved onto that line**:
+      `25 albums · 206 tracks` at rest, `12 of 25 albums` while narrowing. The
+      reserved in-well slot would have left the query 88 px of the lane's
+      232 px measure. The line is always drawn and left-aligned, so a keystroke
+      moves no row below it and the figures change in place.
+    - **Collapsed**, the well is the magnifier in the destinations' anatomy,
+      tooltipped `Search`, taking the lit ink while a query stands. Pressing
+      it, `/`, `Ctrl`+`F` and the first key of a query all open the lane onto
+      the caret — one frame, no tween.
+    - **Every road to the query now goes to the Library first.** Typing from
+      `Home` or a record's page used to fill a field that was not on screen and
+      narrow a wall that was not either; the lane put the field in every place,
+      and this puts the wall back under it.
+    - **Below `SIDEBAR_FLOOR` the strip takes the well back** in its old form,
+      because a 96 px rail cannot hold a field and cannot open. One home per
+      regime, never two — the breakpoint is the lane's own floor.
+    - **The strip is now states, acts and the gear.** `TOP_BAR_SPLIT` is 872
+      exactly rather than a rounded 960; the well's 80 px fluid range is
+      deleted, because no strip that draws the well is ever wide enough to
+      climb it, so the split is the whole of the collapse order. Above
+      `SIDEBAR_FLOOR` the strip is one line at every width in either lane
+      state — 648 wanted against a narrowest possible 720, asserted.
 - **`Place::Home`** — the interrupted run and what is new, as a place rather
   than as a band at the head of the wall (the owner's choice between
   ADR-0030 §3.2 and §9.4). `CONTINUE` is a 132 px sleeve beside a placard: the
@@ -836,6 +866,31 @@ next commit.
 
 ### Fixed
 
+- **A returns-lane row's sleeve is 48 px, not 40.** The expanded lane drew the
+  *playlist panel's* `PANEL_SLEEVE`, which left `SIDEBAR_ROW_H`'s own
+  derivation — 48 with one `GAP_SM` above and below — describing a row nothing
+  was drawing, against doc 13 §9.2's 48. Measured off the shipped frame at
+  40 × 40.
+- **The returns lane marks the record that is sounding.** Doc 13 §2.6 promised
+  the lamp dot before its name; every row drew the row style with `playing`
+  hard-coded false, so the surface whose subject is *things you have touched*
+  could not say which of them was on. The dot and the row's card now — the
+  vocabulary the queue and a playlist's page already use — and the card is what
+  survives the collapse, where there is no name to set a dot before. A list is
+  never marked, however many of its tracks are in the run.
+- **A playlist's sleeve gets real artwork rather than getting it by luck.** The
+  collage is read out of the wall's thumbnail cache and nothing was putting the
+  records a list quotes *into* that cache: the lane's own art request yields its
+  **records** and skipped its **lists**, so a list wore the deterministic
+  gradient until one of the records it quotes happened to scroll onto the wall.
+  Four ids per list are now asked for by name, on the same guard, through the
+  same cache.
+- **The strip's height and the strip's width agreed about the split.** The strip
+  is drawn at the window less the returns lane, but `theme::top_bar_h` was still
+  being handed the *window*, so between a 1000 and a 1056 px window with the
+  lane open the strip drew two lines while the virtualizer's viewport estimate
+  assumed one — 40 px of mis-virtualized shelf. It takes the window and the
+  lane's state now, which is what the composition takes.
 - **The reorder steppers now render.** The playlist page's ▲▼ shipped as
   U+25B4/U+25BE literals, but IBM Plex Sans — the product's one face —
   carries no triangle glyphs at any code point, so the steppers rasterised
