@@ -420,6 +420,57 @@
 - **No shortcut discovery in the interface.** The bindings are in the README
   and nowhere the user can see them while running — no `?` overlay, no menu.
 
+## "Feels like treacle when I resize" — measured, not reproduced
+
+Reported 2026-08-09. **It is not caused by the hover options, the bar cover or
+the wall's scrollbar**: an A/B of this branch against `main`, same harness, same
+fixture, driving 60 window resizes at ~30 Hz, gives the same numbers to within
+a millisecond —
+
+| | frames drawn | median gap | p90 | max |
+|---|---|---|---|---|
+| this branch | 118 | 7 ms | 31 ms | 33 ms |
+| `main` | 118 | 8 ms | 32 ms | 33 ms |
+
+and repeating it against a fixture whose covers are 3000 × 3000 JPEGs (rather
+than the harness's 600 px ones) changes nothing either: 118 frames, 7 ms
+median, 35 ms max.
+
+**So the harness does not reproduce it**, and that is the finding rather than a
+failure to find one. Three things differ between it and the owner's machine,
+and they are the three places to look:
+
+1. **Programmatic resize is not drag resize.** `xdotool windowsize` delivers
+   discrete size changes; a real drag on a compositor delivers a continuous
+   stream of `configure` events, each of which makes wgpu **reconfigure the
+   surface**. Swapchain recreation per frame is the classic iced/wgpu resize
+   jank on Linux, and nothing in baz would show it under Xvfb, which has no
+   GPU and falls back to `tiny-skia`.
+2. **Library size.** The harness has 25 albums.
+3. **Present mode.** `iced_wgpu` reads `ICED_PRESENT_MODE`
+   (`iced_wgpu-0.13.5/src/settings.rs:67-79`) and otherwise takes its default.
+
+Two commands bisect it in under a minute, and they should be run before
+anything is changed:
+
+```sh
+ICED_BACKEND=tiny-skia baz    # smooth here => it is wgpu surface reconfiguration
+                              # treacle here too => it is baz's own layout
+ICED_PRESENT_MODE=immediate baz   # smooth here => it is vsync/swapchain
+```
+
+**One thing worth fixing regardless of the outcome**, found while looking:
+`Message::WindowResized` calls `request_visible_thumbs()` on **every** resize
+event (`app.rs:3759-3772`), and `art::load_thumb` (`art.rs:131-139`) does a
+*full-resolution* decode — `image::open` on a 3000 × 3000 cover is ~9 M pixels
+— before downscaling to `THUMB_PX` 320. `spawn_blocking`'s pool is 512 threads
+by default, so widening the window into unseen albums can start dozens of
+full-resolution JPEG decodes at once, all competing with the thread trying to
+draw the resize. It is deduped by `pending`/`no_art` so it only bites on first
+sight of an album, which is exactly when a listener is dragging the window to
+see more of the wall. A debounce on the resize path — request thumbs when the
+size *settles*, not on every configure — costs nothing and removes the burst.
+
 ## The strip demolition — four removals the owner asked for
 
 2026-08-09: *"I think the pull option will just disappear, and so will the
@@ -613,13 +664,32 @@ Three ways out, in the order they should be considered:
    and the one to take if 1 is not wanted, because 2 buys a cleaner top edge at
    the cost of the gesture people use most.
 
-**If it ships**, the strip is where the buttons go, at the right, in the
-[`theme::TRANSPORT_HIT`] box every other icon control uses; `docs/design/10`
-§3.1's rule already admits close (`Glyph::Close` is drawn), and minimise and
-maximise would be two more glyphs on the sheet in the same 0.14–0.15 stroke
-band. The drag region is *the strip's empty space*, which needs stating
-carefully: every control in the strip must keep its own press, so the drag is
-what the gaps do, not what the bar does.
+**The owner's placement, 2026-08-09**: *"I want the top bar with the search etc
+to become the chrome… we have the close, resize, minimise on that bar with the
+settings on the left."* So: the three window buttons take the strip's right
+corner, and the gear moves to the left. Each in the [`theme::TRANSPORT_HIT`] 32
+box every other icon control uses. `Glyph::Close` is already drawn; minimise
+and maximise are two more on the sheet in the same 0.14–0.15 stroke band. The
+"resize" button is `window::toggle_maximize`, which iced has — it is only
+*edge-drag* resize that is missing.
+
+Two consequences worth naming before it is built:
+
+- **The gear loses half its licence.** Doc 10 §3.4 admits the gear as one of
+  exactly two symbols allowed to stand without a word, and the argument is
+  *"universal, **and top-right is its universal position**"*. Moved to the
+  left, the symbol is still universal but the position argument is gone. Either
+  the amendment is rewritten to drop the position clause, or the gear takes its
+  word back on the left where there is room for it.
+- **The strip's width budget works out**, and it works out *because* of the
+  other brief. Three buttons plus their gaps is ~104 px on the right; the four
+  removals above free `ACTS_W` 182. Net −78 px, so the two-line split at 960
+  (`theme.rs:6500-6517`) gets easier rather than harder. The two briefs should
+  land in that order.
+
+The drag region is **the strip's empty space**, which needs stating carefully:
+every control in the strip keeps its own press, so dragging is what the *gaps*
+do, not what the bar does.
 
 ## The wall's hover options
 
