@@ -53,9 +53,11 @@
 //!
 //! Refused from the page and still refused: **recently played** and
 //! **playlists**, which are the returns lane's content one column to the left
-//! — one fact drawn twice is doc 07 L8.6's test; **the pull**, which is an act
-//! you press, and an unbidden offer is generation without a request; and every
-//! engagement statistic, which is not close.
+//! — one fact drawn twice is doc 07 L8.6's test; **any unbidden suggestion**,
+//! because generation without a request is what the home page of every
+//! streaming product is made of (the pull was baz's one *requested* draw and
+//! even it never reached this page; the owner removed it on 2026-08-10); and
+//! every engagement statistic, which is not close.
 //!
 //! **A section is absent, not empty.** `CONTINUE` is absent while something is
 //! sounding, with no run to carry on with, and when the library no longer holds

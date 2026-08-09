@@ -1,20 +1,23 @@
-//! Reading the ledger back: the three surfaces `docs/design/critique` names,
-//! and nothing else.
+//! Reading the ledger back: the surfaces `docs/design/critique` names, and
+//! nothing else.
 //!
 //! [`History`] is a snapshot of the file, folded per track. It answers exactly
-//! three questions:
+//! two questions:
 //!
 //! 1. **[`History::track`]** — how many times, and when: the inspector card's
 //!    stamp.
 //! 2. **[`History::recency`]** — which [`Recency`] bucket a track falls in:
 //!    the PLAYED group key, `THIS EVENING` through to `NEVER`.
-//! 3. **[`History::pull_weight`]** — how strongly the pull should favour a
-//!    track it has not heard in a while.
 //!
-//! There is deliberately no fourth. The design's constraint is that history
-//! *records* and never *performs*: no charts, no streaks, no year in review.
-//! Those would be built from this data, so the way to not build them is to not
-//! provide the surface that makes them easy.
+//! There is deliberately no third. **There was one** — `pull_weight`, the
+//! weighting behind the strip's `Pull` — and it went with the control on
+//! 2026-08-10 (the owner: *"please can we remove pull since it doesn't make
+//! sense here"*). ADR-0018's third surface is amended to record that; a
+//! weighting nothing spends is a recommendation engine's foundations left in
+//! the ground, and the design's constraint is that history *records* and never
+//! *performs*: no charts, no streaks, no year in review. Those would be built
+//! from this data, so the way to not build them is to not provide the surface
+//! that makes them easy.
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -49,19 +52,6 @@ pub const MONTH_DAYS: u64 = 30;
 
 /// The number of days [`Recency`] counts as a year.
 pub const YEAR_DAYS: u64 = 365;
-
-/// The heaviest a played track's pull weight can get: one per day since it was
-/// last heard, capped at a year.
-pub const PULL_DAY_CAP: u32 = 365;
-
-/// The pull weight of a track that has never been played.
-///
-/// One past the cap, so that a record nobody has ever put on is drawn in
-/// preference to one last heard a year ago — which is the whole point of the
-/// pull — while a track heard this morning still has a weight of 1 and so is
-/// still reachable. Nothing is ever weighted to zero: the pull is a bias, not
-/// a filter.
-pub const PULL_NEVER_WEIGHT: u32 = PULL_DAY_CAP + 2;
 
 /// How long ago a track was last played — the PLAYED group key.
 ///
@@ -304,29 +294,6 @@ impl History {
         bucket(to_unix_s(now).saturating_sub(last))
     }
 
-    /// How strongly the pull should favour `path`, as of `now`.
-    ///
-    /// One per day since it was last played, capped at [`PULL_DAY_CAP`], with
-    /// [`PULL_NEVER_WEIGHT`] for a record that has never been played. Larger is
-    /// more likely; nothing is ever zero.
-    ///
-    /// Read it as a relative weight for a weighted draw
-    /// (`pick w in 0..sum(weights)`), not as a probability and not as a score
-    /// to display. It deliberately does not consider skips: down-weighting what
-    /// you skipped would make the pull start having opinions about your taste,
-    /// which is the "performing" the design rules out. [`Self::track`] carries
-    /// the skip count for a caller that decides otherwise, in the open.
-    #[must_use]
-    pub fn pull_weight(&self, path: &Path, now: SystemTime) -> u32 {
-        let Some(last) = self.track(path).last_played_unix_s else {
-            return PULL_NEVER_WEIGHT;
-        };
-        let days = to_unix_s(now).saturating_sub(last) / DAY;
-        1 + u32::try_from(days)
-            .unwrap_or(PULL_DAY_CAP)
-            .min(PULL_DAY_CAP)
-    }
-
     /// Every track the ledger mentions, with what it says about each. The order
     /// is unspecified.
     pub fn tracks(&self) -> impl Iterator<Item = (&Path, &TrackHistory)> {
@@ -476,7 +443,6 @@ mod tests {
         let unknown = Path::new("/music/never.flac");
         assert_eq!(history.track(unknown), TrackHistory::default());
         assert_eq!(history.recency(unknown, at(NOW)), Recency::Never);
-        assert_eq!(history.pull_weight(unknown, at(NOW)), PULL_NEVER_WEIGHT);
     }
 
     #[test]
@@ -550,28 +516,6 @@ mod tests {
         let history = read();
         let a = Path::new("/music/a.flac");
         assert_eq!(history.recency(a, at(NOW - 10 * DAY)), Recency::ThisEvening);
-        assert_eq!(history.pull_weight(a, at(NOW - 10 * DAY)), 1);
-    }
-
-    #[test]
-    fn the_pull_favours_what_has_not_been_heard() {
-        let history = read();
-        let a = history.pull_weight(Path::new("/music/a.flac"), at(NOW));
-        let c = history.pull_weight(Path::new("/music/c stream.mp3"), at(NOW));
-        let never = history.pull_weight(Path::new("/music/never.flac"), at(NOW));
-        assert_eq!(a, 4); // three days ago
-        assert_eq!(c, 366); // 400 days ago, capped at a year
-        assert_eq!(never, PULL_NEVER_WEIGHT);
-        assert!(a < c && c < never);
-    }
-
-    /// Nothing is ever weighted out of the draw entirely.
-    #[test]
-    fn the_pull_never_weights_anything_to_zero() {
-        let history = read();
-        for path in ["/music/a.flac", "/music/b.flac", "/music/never.flac"] {
-            assert!(history.pull_weight(Path::new(path), at(NOW)) > 0);
-        }
     }
 
     /// The corrupt-tail contract, at the read end: a final line with no

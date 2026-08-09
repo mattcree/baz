@@ -872,6 +872,26 @@ next commit.
 
 ### Removed
 
+- **`Pull`, and everything that existed only for it.** The owner: *"please can
+  we remove pull since it doesn't make sense here."* Gone: the Library strip's
+  `Pull` word and its tooltip, <kbd>Ctrl</kbd>+<kbd>R</kbd>, the record page's
+  `The pull · Last played 3 years ago` line, the draw itself (~125 lines of
+  `shuffle.rs`), and `baz-core`'s `History::pull_weight` with `PULL_DAY_CAP`
+  and `PULL_NEVER_WEIGHT` — the weighting had exactly one consumer, and a
+  weighted draw nothing draws from is a recommendation engine's foundations
+  left in the ground. **Shuffle is untouched**: the two shared one function,
+  `shuffle::Pool::from_wall`, and shuffle owns it now.
+
+  This is also the third answer to `docs/design/11-jobs-era-critique.md` **P9**
+  (*"`Pull`: explain it or rename it"*), which was an open question addressed
+  to the owner: he removed the control instead. Recorded there, in
+  `docs/REFUSALS.md`'s history entry (whose list of permitted surfaces named
+  the pull's weighting) and in ADR-0018 §6, whose third read surface is struck
+  with its behaviour preserved in the text so it stays findable. Two knock-ons
+  worth naming: the copy sweep's licence list held `Pull` and `The pull` and
+  nothing else, so **P4's one-vocabulary rule is now total**; and the strip's
+  acts cluster fell from 182 px to 144, taking the two-line split seam from
+  872 to 834.
 - **The playlist delete confirmation.** *"Delete "{name}"? The file goes;
   your music stays."* was the correct fallback while deletion was
   irreversible; the trash makes it reversible, and the 1992 HIG's ranking —

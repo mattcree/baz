@@ -1890,28 +1890,41 @@ pub const TOP_BAR_PAD_V: f32 = GAP_SM;
 pub const TOP_BAR_H: f32 = 2.0 * TOP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
 
 /// **Strip width** below which the Library strip splits into its two lines
-/// (logical px) — **872**, and it is now an exact sum rather than a rounded
-/// one.
+/// (logical px) — **834**, an exact sum rather than a rounded one.
 ///
 /// It was 960: the tenants summed to 958 with the well at its 200 px floor and
-/// the seam was declared on the next lattice step up. Two of those tenants have
-/// since left. The `Playlists` door went with the returns lane (ADR-0030 §5),
-/// giving back its 64 px and the [`GAP_XL`] beside it — 88 — and that is what
-/// took 960 to 872. **The well then left too** (ADR-0030's search amendment),
-/// but it left only where the lane can hold it, which is exactly the widths at
-/// which this seam cannot be reached: see [`strip_holds_the_well`]. So the
-/// split's own arithmetic still counts the well, and 872 is the sum with it in.
+/// the seam was declared on the next lattice step up. Three of those tenants
+/// have since left. The `Playlists` door went with the returns lane
+/// (ADR-0030 §5), giving back its 64 px and the [`GAP_XL`] beside it — 88 —
+/// which took 960 to 872; and **`Pull` went on 2026-08-10** on the owner's
+/// decision, taking [`crate::views::top_bar::ACTS_W`] from 182 to 144 and this
+/// seam from 872 to 834. A split declared where the line still fits would put
+/// the strip on two rows for a control it no longer draws.
+///
+/// **The well left too** (ADR-0030's search amendment), but it left only where
+/// the lane can hold it, which is exactly the widths at which this seam cannot
+/// be reached: see [`strip_holds_the_well`]. So the split's own arithmetic
+/// still counts the well, and 834 is the sum with it in.
 ///
 /// The number this is compared against is the **strip's** width — the window
 /// less the returns lane — never the window's. See [`top_bar_h`], which is the
 /// one place that resolution happens.
-pub const TOP_BAR_SPLIT: f32 = 872.0;
+pub const TOP_BAR_SPLIT: f32 = 834.0;
 
 /// The strip's floor, and the window's sensible minimum (logical px) —
 /// **600**, from the two-line regime's own arithmetic (doc 10 §4.3): the
-/// library line's tenants sum to 598. Below it nothing further collapses —
-/// there is no third regime, and a proposal that needs one has outgrown the
-/// strip (doc 10 §8).
+/// library line's tenants summed to exactly this. Below it nothing further
+/// collapses — there is no third regime, and a proposal that needs one has
+/// outgrown the strip (doc 10 §8).
+///
+/// **It no longer sits exactly on that sum, and it does not follow it down.**
+/// `Pull` left the acts cluster on 2026-08-10 and the library line came to
+/// 562. The floor stays at 600 because it is *also* the window's sensible
+/// minimum, and a window minimum that shrank every time a word left a strip
+/// would be a promise about the smallest usable baz that was really a
+/// statement about the strip's current population. The slack is recorded in
+/// `the_strip_holds_its_tenants_at_the_single_line_floor`, which asserts the
+/// line fits under the floor rather than meeting it.
 pub const TOP_BAR_FLOOR: f32 = 600.0;
 
 /// Height of the two-line Library strip, hairline included — **89**
@@ -7107,6 +7120,10 @@ mod tests {
         /// What the door gave back to the strip: its width and the `GAP_XL`
         /// seam beside it.
         const FREED: f32 = PLAYLISTS_DOOR_W + GAP_XL;
+        /// What `Pull` gave back when the owner removed it (2026-08-10): the
+        /// word's own box and the `GAP_XS` beside it, as the drop in the acts
+        /// cluster's declared width.
+        const PULL_FREED: f32 = 182.0 - top_bar::ACTS_W;
         /// The window a strip at its floor now needs, with the lane's rail
         /// always beside it.
         const STRIP_FLOOR_WINDOW: f32 = TOP_BAR_FLOOR + SIDEBAR_RAIL_W;
@@ -7144,22 +7161,32 @@ mod tests {
         const { assert!(FRAME_LINE <= TOP_BAR_FLOOR) }
         const { assert!(LIBRARY_LINE <= TOP_BAR_FLOOR) }
 
-        // **The split is now an exact sum, not a rounded one.** It was 960
-        // for a line of 958. The `Playlists` door's 64 px and the `GAP_XL`
-        // beside it went with ADR-0030 §5 — 88 px — and what is left comes to
-        // 872 exactly, which is what the seam is declared at.
+        // **The split is an exact sum, not a rounded one.** It was 960 for a
+        // line of 958. The `Playlists` door's 64 px and the `GAP_XL` beside it
+        // went with ADR-0030 §5 — 88 px — taking it to 872; `Pull`'s removal
+        // (2026-08-10, the owner) took `ACTS_W` from 182 to 144 and the seam
+        // to 834. The seam follows the tenants down, because a split declared
+        // where the line still fits would put the strip on two rows for a
+        // control it no longer draws.
         const { assert!(FREED == 88.0) }
-        const { assert!(SINGLE_LINE == 872.0) }
-        const { assert!(SINGLE_LINE + FREED == 960.0) }
+        const { assert!(PULL_FREED == 38.0) }
+        const { assert!(SINGLE_LINE == 834.0) }
+        const { assert!(SINGLE_LINE + FREED + PULL_FREED == 960.0) }
         const { assert!(SINGLE_LINE == TOP_BAR_SPLIT) }
 
-        // **The two-line split still earns its keep, and neither removal
-        // bought it away.** The frame line is what the door and the well stood
-        // on, so both removals made *that* line cheaper — but the split exists
-        // for the **library** line, whose two tenants are untouched at 600 px.
-        // Between 600 and 872 there is no single line that fits and a two-line
-        // pair that does, which is exactly the band the split serves.
-        const { assert!(LIBRARY_LINE == TOP_BAR_FLOOR) }
+        // **The two-line split still earns its keep, and no removal bought it
+        // away.** The frame line is what the door and the well stood on, so
+        // those removals made *that* line cheaper — but the split exists for
+        // the **library** line, and `Pull` was on it. The line now comes to
+        // 562 against a floor of 600, so it fits **under** the floor with 38
+        // px to spare rather than meeting it exactly; the floor does not
+        // follow, because it is also the window's sensible minimum (see
+        // [`TOP_BAR_FLOOR`]). Between 600 and 834 there is still no single
+        // line that fits and a two-line pair that does, which is the band the
+        // split serves.
+        const { assert!(LIBRARY_LINE == 562.0) }
+        const { assert!(TOP_BAR_FLOOR - LIBRARY_LINE == PULL_FREED) }
+        const { assert!(LIBRARY_LINE < TOP_BAR_FLOOR) }
         const { assert!(TOP_BAR_FLOOR < SINGLE_LINE) }
         // The strip's width is the *body's* — the window less the returns
         // lane — so the split's band is reached at a wider window than
@@ -7170,12 +7197,12 @@ mod tests {
 
         // **And the band the split serves is exactly the band the well is
         // still a tenant of.** Once the well is the lane's the strip wants
-        // 648 px, and the narrowest strip that can happen in is 720 — the
+        // 610 px, and the narrowest strip that can happen in is 720 — the
         // lane's own floor less the lane's own width. So the strip is one line
         // at every width above `SIDEBAR_FLOOR`, in either lane state, and
         // `top_bar_h`'s `strip_holds_the_well` branch is a fact rather than a
-        // hope.
-        const { assert!(SINGLE_LINE_NO_WELL == 648.0) }
+        // hope. It was 648 before `Pull` left.
+        const { assert!(SINGLE_LINE_NO_WELL == 610.0) }
         const { assert!(WIDEST_LANE_STRIP == 720.0) }
         const { assert!(SINGLE_LINE_NO_WELL < WIDEST_LANE_STRIP) }
         // The rail is wider still, so the collapsed lane cannot reach it either.

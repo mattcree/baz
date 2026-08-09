@@ -1,10 +1,21 @@
-//! **Shuffle, and the pull**: the two draws baz makes, and the one rule they
-//! share — *you can see what they are drawing from*.
+//! **Shuffle**: the draw baz makes, and the rule it keeps — *you can see what
+//! it is drawing from*.
 //!
-//! Everything here is pure: a list of albums, the wall's own filter, a ledger
-//! snapshot and a seed in; album ids out. No window, no engine, no clock of its
-//! own. That is what makes the two features testable at all, and it is the same
-//! separation [`crate::shelf`] and [`crate::rail`] already keep.
+//! Everything here is pure: a list of albums, the wall's own filter and a seed
+//! in; album ids out. No window, no engine, no clock of its own. That is what
+//! makes the feature testable at all, and it is the same separation
+//! [`crate::shelf`] and [`crate::rail`] already keep.
+//!
+//! # The pull is gone
+//!
+//! This module drew twice: shuffle, and **the pull** — one record, weighted
+//! toward the long unplayed, offered rather than played. The owner removed it
+//! on 2026-08-10 (*"please can we remove pull since it doesn't make sense
+//! here"*), which also answers `docs/design/11-jobs-era-critique.md` **P9**
+//! (*"Pull: explain it or rename it"*) a third way. What went with it:
+//! `baz_core::history::pull_weight` and its two constants, `Ctrl+R`, the strip
+//! word, and the record page's offer line. What stayed is [`Pool::from_wall`],
+//! which the pull borrowed and shuffle owns.
 //!
 //! # The pool is the wall
 //!
@@ -56,9 +67,6 @@
 
 use std::collections::HashSet;
 use std::ops::Range;
-use std::time::SystemTime;
-
-use baz_core::history::{History, PULL_NEVER_WEIGHT, Recency};
 
 use crate::vm::AlbumVm;
 
@@ -139,7 +147,15 @@ impl Pool {
         self.ids.is_empty()
     }
 
-    /// The albums in the pool, in wall order.
+    /// The albums in the pool, **in wall order** — the pool's own order, as
+    /// distinct from the order a draw puts them in.
+    ///
+    /// The wall itself reads the pool through [`Self::holds`] and
+    /// [`Self::ringed`]; the order was the pull's, and the pull is gone
+    /// (module docs). What is left needs it is the property the tests state —
+    /// *the pool is the wall, in the wall's order* — so it is kept for them
+    /// and gated to them, rather than left as a public accessor nothing calls.
+    #[cfg(test)]
     pub(crate) fn ids(&self) -> &[u64] {
         &self.ids
     }
@@ -187,128 +203,6 @@ impl Pool {
     }
 }
 
-/// **How strongly the pull should favour one record.**
-///
-/// [`History::pull_weight`] answers this per *track* — one per day since it was
-/// last heard, capped at a year, [`PULL_NEVER_WEIGHT`] for a track never played,
-/// never zero. An album is a stack of tracks, so the album's weight is the
-/// weight of its **most recently played** track, which is its smallest: putting
-/// side A on this morning means you have heard this record today, whatever the
-/// rest of it says.
-///
-/// Every edition is considered, not just the one on screen. Hearing the FLAC rip
-/// is hearing the record.
-///
-/// With no ledger at all every album weighs [`PULL_NEVER_WEIGHT`], which makes
-/// the pull a uniform draw — the honest behaviour for a library baz has no
-/// record of, and not a reason to refuse to pull.
-pub(crate) fn album_weight(album: &AlbumVm, history: Option<&History>, now: SystemTime) -> u32 {
-    let Some(history) = history else {
-        return PULL_NEVER_WEIGHT;
-    };
-    album
-        .editions
-        .iter()
-        .flat_map(|edition| edition.tracks.iter())
-        .map(|track| history.pull_weight(&track.path, now))
-        .min()
-        .unwrap_or(PULL_NEVER_WEIGHT)
-}
-
-/// When this record was last heard, as the PLAYED key's own bucket — the fact
-/// the pull states out loud.
-///
-/// The most recent play of any track of any edition, for [`album_weight`]'s
-/// reason. [`Recency`] is ordered most-recent-first, so the smallest bucket is
-/// the album's.
-pub(crate) fn last_played(album: &AlbumVm, history: Option<&History>, now: SystemTime) -> Recency {
-    let Some(history) = history else {
-        return Recency::Never;
-    };
-    album
-        .editions
-        .iter()
-        .flat_map(|edition| edition.tracks.iter())
-        .map(|track| history.recency(&track.path, now))
-        .min()
-        .unwrap_or(Recency::Never)
-}
-
-/// The line the pull prints: *"Last played 3 years ago"*, or *"Never played"*.
-///
-/// The ledger has the date, so this is a reading rather than a claim
-/// (`docs/REFUSALS.md`: history records, it never performs). It is the only
-/// number the pull shows — no score, no weight, no percentage. A weight is an
-/// implementation detail of a draw, and printing it would turn a suggestion into
-/// a ranking.
-pub(crate) fn pull_note(recency: Recency) -> String {
-    match recency {
-        Recency::Never => "Never played".to_owned(),
-        Recency::Unrecorded => "No play recorded".to_owned(),
-        bucket => format!("Last played {}", lowercase_first(&bucket.label())),
-    }
-}
-
-/// `This evening` → `this evening`, so it can follow *Last played*.
-fn lowercase_first(label: &str) -> String {
-    let mut chars = label.chars();
-    chars.next().map_or_else(String::new, |first| {
-        first.to_lowercase().collect::<String>() + chars.as_str()
-    })
-}
-
-/// **The pull**: one sleeve from the pool, weighted toward the long unplayed.
-///
-/// `exclude` is the record the pull is already showing, and it is left out so
-/// that pressing again gives you a *different* suggestion — the gesture is
-/// "not that one, try again", and a re-pull that could answer with the same
-/// sleeve would read as a control that did nothing. It is dropped when it is the
-/// only record in the pool, because refusing to answer would be worse than
-/// repeating.
-///
-/// `None` when the pool is empty. Nothing is ever weighted to zero
-/// ([`History::pull_weight`]), so every record in the pool is reachable; the
-/// weighting is a bias, never a filter.
-pub(crate) fn pull(
-    albums: &[AlbumVm],
-    pool: &Pool,
-    history: Option<&History>,
-    now: SystemTime,
-    seed: u64,
-    exclude: Option<u64>,
-) -> Option<u64> {
-    let mut candidates: Vec<&AlbumVm> = pool
-        .ids()
-        .iter()
-        .filter_map(|id| albums.iter().find(|album| album.id == *id))
-        .collect();
-    if candidates.len() > 1 {
-        candidates.retain(|album| Some(album.id) != exclude);
-    }
-    if candidates.is_empty() {
-        return None;
-    }
-    let weights: Vec<u64> = candidates
-        .iter()
-        .map(|album| u64::from(album_weight(album, history, now)))
-        .collect();
-    let total: u64 = weights.iter().sum();
-    if total == 0 {
-        // Unreachable while `pull_weight` never returns zero, and cheaper to
-        // answer than to prove: the first candidate is a true member of the
-        // pool, which is the only promise this function makes.
-        return candidates.first().map(|album| album.id);
-    }
-    let mut ticket = next(&mut seed_state(seed)) % total;
-    for (album, weight) in candidates.iter().zip(&weights) {
-        if ticket < *weight {
-            return Some(album.id);
-        }
-        ticket -= *weight;
-    }
-    candidates.last().map(|album| album.id)
-}
-
 /// Fisher–Yates over `items`, driven by `seed`.
 ///
 /// In place, unbiased, and deterministic: the same seed over the same pool is
@@ -351,23 +245,13 @@ fn next(state: &mut u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use std::time::{Duration, UNIX_EPOCH};
-
-    use baz_core::history::{History, PULL_DAY_CAP, PULL_NEVER_WEIGHT, PlayRecord};
+    use std::time::Duration;
 
     use super::*;
     use crate::vm::{AlbumArtistVm, EditionKey, EditionVm, ReplayGainCoverage, TrackVm};
 
-    const DAY: u64 = 24 * 60 * 60;
-    /// A fixed "now" well past the epoch, so a ledger can carry dates before it.
-    const NOW: u64 = 1_700_000_000;
-    /// The length every fixture track declares, in milliseconds — long enough
-    /// that a full listen is unambiguously a play rather than a skip.
+    /// The length every fixture track declares, in milliseconds.
     const TRACK_MS: u64 = 200_000;
-
-    fn at(unix_s: u64) -> SystemTime {
-        UNIX_EPOCH + Duration::from_secs(unix_s)
-    }
 
     fn track(path: &str) -> TrackVm {
         TrackVm {
@@ -414,19 +298,6 @@ mod tests {
     /// Five albums, `a`..`e`, two tracks each.
     fn wall() -> Vec<AlbumVm> {
         ["a", "b", "c", "d", "e"].iter().map(|n| album(n)).collect()
-    }
-
-    /// A ledger holding one full play of `path` at `when`, per entry —
-    /// written through `baz-core`'s own encoder, so the fixture is a file the
-    /// real reader would meet rather than a shape invented here.
-    fn ledger(plays: &[(&str, u64)]) -> History {
-        let mut text = String::new();
-        for (path, when) in plays {
-            let record = PlayRecord::new(PathBuf::from(path), *when, TRACK_MS, Some(TRACK_MS))
-                .expect("a full listen is a play");
-            text.push_str(&record.to_line());
-        }
-        History::from_reader(text.as_bytes())
     }
 
     fn ids(albums: &[AlbumVm], names: &[&str]) -> Vec<u64> {
@@ -506,7 +377,6 @@ mod tests {
 
         let mut empty = Pool::from_wall(&albums, &[], None);
         assert!(empty.draw(1, SLEEVES).is_empty());
-        assert_eq!(pull(&albums, &empty, None, at(NOW), 1, None), None);
     }
 
     /// **The queue a shuffle builds**: whole sleeves, no repeats, bounded, and
@@ -586,156 +456,5 @@ mod tests {
 
         // A record outside the run is never ringed, whatever is playing.
         assert!(!pool.ringed(outside[1], None));
-    }
-
-    /// **The weighting**, against a ledger with known dates — the cap, the
-    /// never-played weight, and the floor of one.
-    #[test]
-    fn an_albums_weight_is_its_most_recent_play_capped_at_a_year() {
-        let albums = wall();
-        let history = ledger(&[
-            // `a` was heard this morning; its second side a year and a half ago.
-            ("/m/a/1.flac", NOW - 2 * 60 * 60),
-            ("/m/a/2.flac", NOW - 500 * DAY),
-            // `b`, ten days ago.
-            ("/m/b/1.flac", NOW - 10 * DAY),
-            // `c`, well past the cap.
-            ("/m/c/1.flac", NOW - 900 * DAY),
-            // `d` was *skipped* only — never played.
-        ]);
-        let now = at(NOW);
-        let weight = |name: &str| {
-            album_weight(
-                albums
-                    .iter()
-                    .find(|album| album.title.as_deref() == Some(name))
-                    .expect("fixture album"),
-                Some(&history),
-                now,
-            )
-        };
-
-        // The most recent play wins: hearing side A today is hearing the record
-        // today, whatever side B's stamp says.
-        assert_eq!(weight("a"), 1);
-        assert_eq!(weight("b"), 11, "one per day since, plus the floor of one");
-        assert_eq!(weight("c"), PULL_DAY_CAP + 1, "the 366 cap, and not 901");
-        assert_eq!(weight("d"), PULL_NEVER_WEIGHT);
-        assert_eq!(weight("e"), PULL_NEVER_WEIGHT);
-
-        // Never-played beats a year ago, which is the whole point of the pull.
-        assert!(weight("d") > weight("c"));
-        assert!(weight("c") > weight("b"));
-        assert!(weight("b") > weight("a"));
-        // Nothing is ever zero: a record heard an hour ago is still reachable.
-        assert!(["a", "b", "c", "d", "e"].iter().all(|n| weight(n) > 0));
-
-        // No ledger at all is a uniform draw rather than a refusal.
-        assert_eq!(album_weight(&albums[0], None, now), PULL_NEVER_WEIGHT);
-    }
-
-    /// The line the pull prints, from the ledger's own buckets.
-    #[test]
-    fn the_pull_states_when_the_record_was_last_heard() {
-        let albums = wall();
-        let history = ledger(&[
-            ("/m/a/1.flac", NOW - 2 * 60 * 60),
-            ("/m/b/1.flac", NOW - 800 * DAY),
-        ]);
-        let now = at(NOW);
-        let of = |name: &str| {
-            last_played(
-                albums
-                    .iter()
-                    .find(|album| album.title.as_deref() == Some(name))
-                    .expect("fixture album"),
-                Some(&history),
-                now,
-            )
-        };
-        assert_eq!(pull_note(of("a")), "Last played this evening");
-        assert_eq!(pull_note(of("b")), "Last played 2 years ago");
-        assert_eq!(pull_note(of("e")), "Never played");
-        assert_eq!(pull_note(Recency::Unrecorded), "No play recorded");
-        // Without a ledger the honest statement is the one the ledger would
-        // make about a library it has no record of.
-        assert_eq!(last_played(&albums[0], None, now), Recency::Never);
-    }
-
-    /// The pull is weighted, not filtered: the long-unplayed dominate, and the
-    /// recently played are still reachable.
-    #[test]
-    fn the_pull_leans_hard_toward_the_long_unplayed_without_excluding_anything() {
-        let albums = wall();
-        let all: Vec<usize> = (0..albums.len()).collect();
-        let pool = Pool::from_wall(&albums, &all, None);
-        // `a`–`d` were all heard today (weight 1); `e` never (weight 367).
-        let history = ledger(&[
-            ("/m/a/1.flac", NOW - 60),
-            ("/m/b/1.flac", NOW - 60),
-            ("/m/c/1.flac", NOW - 60),
-            ("/m/d/1.flac", NOW - 60),
-        ]);
-        let now = at(NOW);
-        let never = ids(&albums, &["e"])[0];
-
-        let mut drew_never = 0;
-        let mut drew_something_else = 0;
-        for seed in 0..200_u64 {
-            let drawn = pull(&albums, &pool, Some(&history), now, seed, None).expect("a draw");
-            if drawn == never {
-                drew_never += 1;
-            } else {
-                drew_something_else += 1;
-            }
-        }
-        // 367 : 4 in the weights. Anything short of overwhelming here means the
-        // weighting is not being applied.
-        assert!(
-            drew_never > 190,
-            "the never-played record should dominate; drew it {drew_never} times"
-        );
-        // …and nothing is excluded. Over 200 seeds a weight-1 record among
-        // weight-367 ones is expected about twice; asserting only that the
-        // *mechanism* admits them keeps this test from being a coin flip.
-        assert_eq!(drew_never + drew_something_else, 200);
-        assert!(
-            (0..2000_u64)
-                .filter_map(|seed| pull(&albums, &pool, Some(&history), now, seed, None))
-                .any(|drawn| drawn != never),
-            "a recently played record must still be reachable"
-        );
-    }
-
-    /// **A re-pull is a different suggestion.** `Ctrl+R` means "not that one".
-    #[test]
-    fn a_re_pull_never_answers_with_the_record_it_is_already_showing() {
-        let albums = wall();
-        let all: Vec<usize> = (0..albums.len()).collect();
-        let pool = Pool::from_wall(&albums, &all, None);
-        let now = at(NOW);
-        for seed in 0..200_u64 {
-            let showing = pull(&albums, &pool, None, now, seed, None).expect("a draw");
-            let again = pull(&albums, &pool, None, now, seed + 1, Some(showing)).expect("a draw");
-            assert_ne!(again, showing, "seed {seed} re-pulled the same sleeve");
-        }
-        // …unless the pool holds exactly one record, where refusing to answer
-        // would be worse than repeating.
-        let one = Pool::from_wall(&albums, &[3], None);
-        let only = ids(&albums, &["d"])[0];
-        assert_eq!(pull(&albums, &one, None, now, 5, Some(only)), Some(only));
-    }
-
-    /// Every draw the pull can make is a member of the pool — it can no more
-    /// suggest an unseen record than shuffle can play one.
-    #[test]
-    fn the_pull_draws_only_from_what_the_wall_shows() {
-        let albums = wall();
-        let pool = Pool::from_wall(&albums, &[1, 2], None);
-        let now = at(NOW);
-        for seed in 0..200_u64 {
-            let drawn = pull(&albums, &pool, None, now, seed, None).expect("a draw");
-            assert!(pool.holds(drawn), "seed {seed} drew from outside the wall");
-        }
     }
 }

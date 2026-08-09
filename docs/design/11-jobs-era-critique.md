@@ -535,7 +535,7 @@ it? Every word that ships on screen:
 | `Where's your music?`, `Play album`, `Play all`, `Queue`, `Playlists`, `Settings`, `‹ Library`, `Back`, `Browse…`, `New playlist`, `Save as playlist`, `Rename`, `Delete`, `Open` | **pass** | Verbs and place names in user vocabulary; the `…` convention honestly promising a dialog (ADR-0025 §1) is itself classic-HIG. |
 | `ARTIST · YEAR · GENRE · ADDED · PLAYED` | pass | One row of words, no menus; self-revealing on press, reversible on press. |
 | `Shuffle` | **pass with a caveat** | The word is universal; baz's behaviour is a bounded draw of 8 that ends in silence. ADR-0026 refused the crossed-arrows icon *because the convention promises a mode* — the sharpest icon reasoning in the corpus — but the **word** carries the same promise at lower volume. A first press behaves as expected; the surprise is deferred to the 8th record's end, where the queue's empty state ("When a queue ends, baz stops.") catches it — but does not say a new press is a new draw. One sentence closes it (§5 P6). Renaming is examined and rejected (§5 P12). |
-| `Pull` | **fail** | No convention (ADR-0026: "the pull has no convention at all"), no tooltip (`top_bar.rs::draw_word`), no on-screen explanation until *after* the press. A first-timer cannot form any expectation. The name is crate-digger's vocabulary — pulling a record from the shelf — and the metaphor rule (REFUSALS, skeuomorphism: the record supplies *vocabulary*) genuinely licenses it; but the era licensed poetic names only with explanation at first contact. The offer's own note (*"The pull · Last played 3 years ago"*) is that explanation, one press too late. §5 P9. |
+| `Pull` (removed 2026-08-10, P9) | **fail** | No convention (ADR-0026: "the pull has no convention at all"), no tooltip (`top_bar.rs::draw_word`), no on-screen explanation until *after* the press. A first-timer cannot form any expectation. The name is crate-digger's vocabulary — pulling a record from the shelf — and the metaphor rule (REFUSALS, skeuomorphism: the record supplies *vocabulary*) genuinely licenses it; but the era licensed poetic names only with explanation at first contact. The offer's own note (*"The pull · Last played 3 years ago"*) is that explanation, one press too late. §5 P9. |
 | *"Esc returns to the wall"* | **fail** | The one leak of internal poetry into shipping copy, inconsistent with `‹ Library` in the same strip. §5 P4. |
 | `Add to…` | marginal | The object is missing; the menu's own `Add to playlist…` is the better label. §5 P4. |
 | `bit-perfect`, `48 → 44.1 kHz`, `FLAC · 16-bit · 44.1 kHz` | pass | Audience vocabulary (Karl's), quiet, never a sales pitch. The era would have hidden it; baz's audience is why it must not. Credit. |
@@ -802,7 +802,9 @@ adjudicates.
   separately named `Queue album`); (c) a sweep test in the spirit of the
   existing copy tests: no string from the room-vocabulary list (`wall`,
   `hang`, `pull's` internals, `stack`, `marquee`) ships in user-facing copy
-  outside its licensed uses (`Pull` the control pending P9).
+  outside its licensed uses (`Pull` the control pending P9 — and P9 was
+  answered on 2026-08-10 by removing the control, so the licence list is now
+  empty and the sweep is unconditional).
 - **Cost**: strings and one test.
 - **Refusals/ADR impact**: none.
 
@@ -1020,6 +1022,23 @@ adjudicates.
   the explanation in the right voice one press late — acceptable once the
   tooltip closes the gap in front.
 - **Refusals/ADR impact**: none; ADR-0026's word-not-icon ruling untouched.
+
+> **Answered (2026-08-10) — option (d), which was not on the list: the control
+> is gone.** The owner: *"please can we remove pull since it doesn't make sense
+> here."* P9 asked for *explain it or rename it*; the third answer to a control
+> a first-timer cannot form an expectation about is to not have it, and that is
+> the one the owner gave. The tooltip option (a) had shipped in the meantime
+> and is moot; the rename candidates (b) are unspent.
+>
+> **What went with it**, so the answer is findable from the cost side: the
+> strip word and its tooltip, <kbd>Ctrl</kbd>+<kbd>R</kbd>, the record page's
+> `The pull · Last played 3 years ago` line, ~125 lines of `shuffle.rs`,
+> `baz-core`'s `History::pull_weight` and its two constants (ADR-0018's third
+> read surface, amended), and the copy sweep's entire licence list — `Pull` and
+> `The pull` were the only two entries in it, so **P4's one-vocabulary rule is
+> now total** rather than total-with-exceptions. `ACTS_W` fell 182 → 144 and
+> the strip's split seam 872 → 834. The pool `Pull` shared with `Shuffle`
+> (`shuffle::Pool::from_wall`) stayed; shuffle owns it.
 
 ### P10 — Restore persistent library visibility (the full iTunes three-pane) · **rejected-with-reasons**
 

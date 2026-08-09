@@ -295,8 +295,7 @@ pub(crate) enum Message {
     /// own business and this arm does nothing with it.
     Wheel(f32),
     /// Esc anywhere: peel one layer, top down — the place you are in, then the
-    /// pull's offer, then the search query, then the shuffle pool's marks (see
-    /// [`App::escape`]).
+    /// search query, then the shuffle pool's marks (see [`App::escape`]).
     EscapePressed,
     /// The bar's labelled `Queue` control, or `Q`: go to the queue place, or
     /// come back from it (see [`crate::place`]).
@@ -607,11 +606,6 @@ pub(crate) enum Message {
     /// currently showing, queues them, and starts. The pool it drew from stays
     /// on screen afterwards, marked (`crate::shuffle`).
     Shuffle,
-    /// **The pull** — the top bar's `Pull`, and <kbd>Ctrl</kbd>+<kbd>R</kbd>.
-    ///
-    /// Draws one record, weighted toward the long unplayed, and *offers* it.
-    /// **Nothing plays.** Pressing again re-pulls; Escape puts it back.
-    Pull,
     /// The record's page: a different format of this album was picked.
     EditionSelected(u64, vm::EditionKey),
     /// Bottom bar, Space, or MPRIS `PlayPause`: play/pause toggle.
@@ -1292,7 +1286,6 @@ impl App {
                 self.play_all();
                 Task::none()
             }
-            Message::Pull => self.draw_pull(),
             Message::SeekBy(delta_ms) => {
                 let target = self.player.seek_by(delta_ms);
                 self.send_seek(target);
@@ -2561,8 +2554,8 @@ impl App {
         Task::none()
     }
 
-    /// **Open a record's page** — a tile press, the bar's now-playing block, or
-    /// the pull's own draw.
+    /// **Open a record's page** — a tile press, or the bar's now-playing
+    /// block.
     ///
     /// Two things happen and they are deliberately separable: the *place*
     /// changes, and the wall remembers which record you left it for
@@ -2588,26 +2581,14 @@ impl App {
     /// **Go home** — every place's `‹ Library`, and the first thing
     /// <kbd>Esc</kbd> does.
     ///
-    /// Leaving a record's page also withdraws the pull's offer, when the offer
-    /// was about that record: the suggestion and the page it was made on are
-    /// one layer, and a note that outlived the page it was written on would
-    /// leave the wall marked as though the listener had chosen the record
-    /// themselves. `Ctrl+R` re-pulls; this is the *"Esc returns"* half of the
-    /// same sentence (`docs/design/critique/02-surfaces.md`).
     fn leave(&mut self) -> Task<Message> {
         // The place changes, so an open menu and any drag go with it
         // (`go`'s rule).
         self.menu = None;
         self.drag = None;
-        let leaving = self.place.showing_album();
         let from = self.place;
         self.place = self.place.back();
         self.note_place_left(from);
-        if let (Screen::Shelf(state), Some(id)) = (&mut self.screen, leaving)
-            && state.pull.as_ref().is_some_and(|pull| pull.album == id)
-        {
-            state.pull = None;
-        }
         // A place's transient fields do not outlive the place: a rename
         // field left standing behind a navigation would greet the next
         // visit mid-gesture.
@@ -2656,8 +2637,8 @@ impl App {
     /// 4. **The place**, when it is not the Library. Backing out is what
     ///    <kbd>Esc</kbd> means in a record's page, in the queue and in the
     ///    settings alike, and it is the same press as their `‹ Library`.
-    /// 5. Then the Library's own layers, in [`Shelf::peel`]'s order: the pull's
-    ///    offer, the search query, the shuffle pool's marks.
+    /// 5. Then the Library's own layers, in [`Shelf::peel`]'s order: the
+    ///    search query, then the shuffle pool's marks.
     ///
     /// (In the search field itself iced 0.13's `text_input` consumes
     /// <kbd>Esc</kbd> to blur before this is reached at all; that is the
@@ -3154,7 +3135,7 @@ impl App {
         self.publish_mpris(false);
     }
 
-    /// **Take the draws' marks off the wall**: no pool, no offer.
+    /// **Take the draw's marks off the wall**: no pool.
     ///
     /// Called wherever a queue is deliberately replaced by something that is not
     /// a draw. The marks are a statement about the run in progress, and going on
@@ -3164,7 +3145,6 @@ impl App {
     fn draws_are_over(&mut self) {
         if let Screen::Shelf(state) = &mut self.screen {
             state.pool = None;
-            state.pull = None;
         }
     }
 
@@ -3211,10 +3191,6 @@ impl App {
             pool.len()
         );
         state.pool = Some(pool);
-        // The pull was a suggestion about one record; starting a shuffle
-        // answers a different question, so the offer is withdrawn rather than
-        // left standing beside a run it has nothing to do with.
-        state.pull = None;
         let paths = queue.paths();
         if self.playback.send(Command::SetQueue { paths }) && self.playback.send(Command::Play) {
             self.player.note_queue_sent(queue);
@@ -3282,48 +3258,6 @@ impl App {
             self.player.engine_closed();
         }
         self.publish_mpris(false);
-    }
-
-    /// **The pull** (ADR-0017 step 19): draw one record, and offer it.
-    ///
-    /// Weighted toward the long unplayed by [`shuffle::pull`], which weighs on
-    /// `baz_core`'s own [`History::pull_weight`] — one per day since the record
-    /// was last heard, capped at a year, heaviest for one never played, never
-    /// zero. Drawn from the same pool shuffle uses, because the pull may no more
-    /// suggest a record you cannot see than shuffle may play one.
-    ///
-    /// **No command is sent.** Not `SetQueue`, not `Play`, not `Stop`: this
-    /// function cannot start playback, and that is not a discipline it observes
-    /// but a fact about what it does — it writes one field and moves the wall.
-    /// Accepting the suggestion is pressing `Play album`, which is the ordinary
-    /// path every other record takes.
-    ///
-    /// Pressing again re-pulls, excluding the record already on offer.
-    fn draw_pull(&mut self) -> Task<Message> {
-        let seed = draw_seed();
-        let now = SystemTime::now();
-        let Screen::Shelf(state) = &mut self.screen else {
-            return Task::none();
-        };
-        let pool = shuffle::Pool::from_wall(&state.albums, &state.visible, None);
-        let showing = state.pull.as_ref().map(|pull| pull.album);
-        let Some(drawn) = shuffle::pull(
-            &state.albums,
-            &pool,
-            state.history.as_ref(),
-            now,
-            seed,
-            showing,
-        ) else {
-            return Task::none();
-        };
-        let Some(album) = state.albums.iter().find(|album| album.id == drawn) else {
-            return Task::none();
-        };
-        let note = shuffle::pull_note(shuffle::last_played(album, state.history.as_ref(), now));
-        println!("[pull] {} — {note}", album.title.as_deref().unwrap_or("—"));
-        state.pull = Some(Pull { album: drawn, note });
-        state.show_album(drawn)
     }
 
     /// Play the queue from `position` — a click on a row of **Queue**
@@ -3614,7 +3548,7 @@ impl App {
     /// (filtered out, or vanished under a rescan) all ask for nothing —
     /// the pool is the visible one, always.
     fn step_album(&mut self, delta: i32) -> Task<Message> {
-        let Place::Album(id) = self.place else {
+        let Some(id) = self.place.showing_album() else {
             return Task::none();
         };
         let Screen::Shelf(state) = &self.screen else {
@@ -4080,7 +4014,10 @@ pub(crate) struct Shelf {
     /// no third way anywhere in the Settings place.
     pub(crate) density: shelf::Density,
     /// The play ledger, read once at open — what [`GroupKey::Played`] shelves
-    /// on and what the pull will weight on.
+    /// on, and the returns lane's order key for a record.
+    ///
+    /// It had a second consumer, the pull's weighting; that went with the pull
+    /// on 2026-08-10 (ADR-0018's amended third surface).
     ///
     /// A **snapshot**, not a live view: the file is append-only, so a snapshot
     /// can only ever be missing the last few minutes and can never be wrong
@@ -4228,10 +4165,6 @@ pub(crate) struct Shelf {
     /// Escape — the marks describe *this* run, and a run that has been replaced
     /// is not one to go on marking.
     pub(crate) pool: Option<shuffle::Pool>,
-    /// **The record the pull is offering**, or `None`.
-    ///
-    /// A suggestion, holding no playback of its own: see [`Pull`].
-    pub(crate) pull: Option<Pull>,
     /// **Whether the returns lane stands open** (ADR-0030 §3), as the config
     /// remembers it.
     ///
@@ -4257,38 +4190,6 @@ pub(crate) struct Shelf {
     /// Bumped whenever [`Self::lane_recent`] is rebuilt — the shell's cue to
     /// re-merge, without comparing two vectors of strings.
     pub(crate) lane_stamp: u64,
-}
-
-/// **The record the pull drew, and when it was last heard.**
-///
-/// Deliberately two fields and no third. There is no "pending play", no timer,
-/// no accepted flag — because *nothing plays until the listener asks*
-/// (`docs/design/critique/02-surfaces.md`, and `docs/REFUSALS.md`'s *shuffle is
-/// a thing you start*). The pull selects a record and prints one line about it;
-/// accepting it is pressing the inspector's own **Play album**, which is the
-/// same control, sending the same commands, as it is for a record you found
-/// yourself.
-///
-/// # The surface this is drawn on is temporary
-///
-/// ADR-0017 step 18's **Marquee** lens is the pull's designed home — the sleeve
-/// at half-window, full-bleed, with the note as poster type. Marquee is not
-/// built, and inventing a lens to host one feature would be a worse mistake than
-/// borrowing a surface that already exists, so the pull currently opens the
-/// **album inspector** on the drawn record and prints its note there.
-///
-/// The seam is this struct. When Marquee lands it reads exactly these two fields
-/// and draws them larger; nothing about how the draw is made, when it is made,
-/// or what it is allowed to do changes. What must *not* be carried across is the
-/// inspector's framing — a lens hosting the pull states the note as its subject,
-/// not as a line above a button.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Pull {
-    /// The record drawn — an id into [`Shelf::albums`].
-    pub(crate) album: u64,
-    /// What the ledger says about it: `Last played 3 years ago`, or
-    /// `Never played` ([`shuffle::pull_note`]).
-    pub(crate) note: String,
 }
 
 impl Shelf {
@@ -4369,7 +4270,6 @@ impl Shelf {
             tile_hover: Keyed::new(),
             window_w: WINDOW.width,
             pool: None,
-            pull: None,
             lane_open,
             lane_played: HashMap::new(),
             lane_recent: Vec::new(),
@@ -4674,14 +4574,9 @@ impl Shelf {
     /// in. Each press takes exactly one thing off, and each early return is one
     /// press.
     ///
-    /// 1. **The pull's offer.** `docs/design/critique/02-surfaces.md` names the
-    ///    gesture — *"`Ctrl+R` re-pulls; `Esc` returns"* — and an offer is the
-    ///    topmost thing on a wall that is showing one. (Escaping *out of the
-    ///    record's page* the pull opened already withdrew it; this is the
-    ///    press for an offer whose page you have left some other way.)
-    /// 2. **The query** — unchanged, and the one press that keeps focus where
+    /// 1. **The query** — unchanged, and the one press that keeps focus where
     ///    it is.
-    /// 3. **The shuffle pool's marks, last.** That is the point of the ordering
+    /// 2. **The shuffle pool's marks, last.** That is the point of the ordering
     ///    rather than a leftover: clearing the query *widens* the wall while the
     ///    pool stays what it was, which is the frame in which the dimming says
     ///    the most — it is how a listener sees that the shuffle is drawing from
@@ -4696,9 +4591,6 @@ impl Shelf {
     /// (ADR-0017 step 11) — see [`Self::clear_query`] for why holding the caret
     /// stopped being right once any letter could reopen the query.
     fn peel(&mut self) -> Task<Message> {
-        if self.pull.take().is_some() {
-            return Task::none();
-        }
         if !self.query.is_empty() {
             return self.clear_query();
         }
@@ -4732,58 +4624,6 @@ impl Shelf {
             scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
             self.request_visible_thumbs(),
         ])
-    }
-
-    /// **Bring one record to the top of the wall** — what the pull does with
-    /// the sleeve it drew, so that the wall is standing on the record when the
-    /// listener comes back from its page.
-    ///
-    /// A record the wall is not currently showing is not scrolled to, because
-    /// there is nowhere to scroll it to. The pull never draws one (its pool is
-    /// the wall), so in practice this is the guard rather than the case.
-    ///
-    /// The wall lands **at the record's row**, for [`Self::jump_to_shelf`]'s
-    /// reason: arriving somewhere means arriving above the thing you came for,
-    /// not with it clipped at the top edge. And it lands there **exactly**,
-    /// where it used to land approximately — the target used to be measured
-    /// against a width the opening inspector was still travelling to, and there
-    /// is no inspector and no travel, so the grid the scroll is computed
-    /// against is the grid that will be under it.
-    fn show_album(&mut self, id: u64) -> Task<Message> {
-        self.opened = Some(id);
-        let Some(place) = self.album_top(id, self.grid()) else {
-            return Task::none();
-        };
-        self.scroll_offset = place;
-        Task::batch([
-            scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: place }),
-            self.request_visible_thumbs(),
-        ])
-    }
-
-    /// Where the wall must be scrolled for `id`'s row to be at the top of the
-    /// viewport, in the scrollable's content coordinates.
-    ///
-    /// `None` when the query has filtered the record off the wall. The shelf's
-    /// header band is the answer when the record is on the shelf's first row,
-    /// so that landing on the first record of a shelf lands on the words that
-    /// name it.
-    fn album_top(&self, id: u64, grid: shelf::Grid) -> Option<f32> {
-        let at = self
-            .visible
-            .iter()
-            .position(|index| self.albums.get(*index).is_some_and(|a| a.id == id))?;
-        let shelves = shelf::Shelves::new(grid, &self.visible_counts);
-        let run = *shelves
-            .runs()
-            .iter()
-            .find(|run| at >= run.first && at < run.first + run.len)?;
-        let row = (at - run.first) / grid.columns.max(1);
-        Some(if row == 0 {
-            run.top
-        } else {
-            run.rows_top(grid) + grid.spacer_height(row)
-        })
     }
 
     /// Put a shelf at the top of the wall — what an index-rail entry does.
@@ -6112,7 +5952,7 @@ mod tests {
     /// An absence has no return value to compare against, so it is asserted
     /// where the fact lives — over the source of the one function that answers
     /// it — exactly as
-    /// [`Self::the_pull_offers_a_record_and_sends_no_command_at_all`] is. A
+    /// [`Self::shuffle_starts_what_it_draws_and_queues_whole_records`] is. A
     /// future edit that reached for a panel width from here fails the build
     /// rather than the review.
     #[test]
@@ -6203,7 +6043,7 @@ mod tests {
 
         /// Message tag → the on-screen control that sends the same message,
         /// or the reason there is none.
-        const CONTROLS: [(&str, &str); 23] = [
+        const CONTROLS: [(&str, &str); 22] = [
             (
                 "ToggleLane",
                 "the two marks at the returns lane's foot (ADR-0030 §3) — \
@@ -6248,7 +6088,6 @@ mod tests {
             ("ToggleQueue", "the bottom bar's labelled `Queue` control"),
             ("ToggleSettings", "the top bar's Settings control"),
             ("FocusSearch", "the top bar's search well"),
-            ("Pull", "the top bar's Pull word"),
             ("EscapePressed", "every place's `‹ Library`"),
             (
                 "QueryTyped",
@@ -6374,31 +6213,26 @@ mod tests {
         assert!(produced.len() > 20, "the sweep stopped covering the table");
     }
 
-    /// **The pull sends no command.** Not `SetQueue`, not `Play`, not `JumpTo`
-    /// — nothing at all.
+    /// **Shuffle is a thing you start, so it starts.**
     ///
-    /// The refusal this pins is the product's loudest one:
-    /// *"Shuffle is a thing you **start**, never a thing that starts itself"*,
-    /// and the pull is a suggestion one step further from playback than that. It
-    /// draws a record, prints when it was last heard, and stops. Accepting it is
-    /// pressing `Play album`, which is the same act — the same message, the same
-    /// commands — as playing a record you found yourself.
+    /// This test had a second half. `docs/REFUSALS.md`'s loudest entry —
+    /// *"Shuffle is a thing you **start**, never a thing that starts itself"*
+    /// — had a companion in **the pull**, a suggestion one step further from
+    /// playback: it drew a record, printed when it was last heard, and sent no
+    /// command at all. The owner removed the pull on 2026-08-10 and the half
+    /// of this test that pinned its silence went with it; what is left is the
+    /// half that pins the other direction, because a shuffle that started
+    /// nothing would be the other kind of lie.
     ///
-    /// # Why it is asserted like this
-    ///
-    /// The claim is *the absence of a send*, and an absence has no return value
-    /// to compare against. Constructing an `App` to observe the silence is not
-    /// available either: `App::new` opens a real engine and a real library. So
-    /// the assertion is made where the fact lives — over the source of the one
-    /// function that answers [`Message::Pull`] — in exactly the way
+    /// Pinned over the **source** rather than over behaviour, and that is the
+    /// point of it: there is no `Shelf` to construct without a database and a
+    /// scan thread, so the property is asserted as a fact about the text of
+    /// the function that answers [`Message::Shuffle`] — in exactly the way
     /// `theme::every_surface_declares_the_edges_it_permits` pins the alignment
-    /// laws. It cannot be satisfied by accident, and a future edit that reached
-    /// for the engine from here fails the build rather than the review.
-    ///
-    /// Its counterpart is asserted too: shuffle *does* send, because a shuffle
-    /// that started nothing would be the other kind of lie.
+    /// laws. It cannot be satisfied by accident, and a future edit that
+    /// stopped sending from here fails the build rather than the review.
     #[test]
-    fn the_pull_offers_a_record_and_sends_no_command_at_all() {
+    fn shuffle_starts_what_it_draws_and_queues_whole_records() {
         // Read the source with line endings normalised. `.gitattributes`
         // pins these files to LF, but a working tree can still be checked out
         // with CRLF, and every scan below matches on "\n    }\n" — which a
@@ -6418,24 +6252,21 @@ mod tests {
             rest[..end].to_owned()
         };
 
-        let pull = body("draw_pull");
-        for forbidden in ["playback.send", "Command::", "note_transport_sent"] {
-            assert!(
-                !pull.contains(forbidden),
-                "the pull reached for `{forbidden}` — nothing plays until the \
-                 listener asks (docs/REFUSALS.md)"
-            );
-        }
-        // …and it does the two things it is for.
-        assert!(pull.contains("shuffle::pull"), "the pull draws a record");
-        assert!(pull.contains("state.pull = Some"), "and offers it");
-
-        // Shuffle is the opposite: it is *started*, so it starts.
         let shuffle = body("start_shuffle");
         assert!(shuffle.contains("Command::SetQueue"));
         assert!(shuffle.contains("Command::Play"));
         // And what it sends is a queue of whole records, never a flattened one.
         assert!(shuffle.contains("vm::stacked_queue"));
+
+        // **The pull is gone, and nothing kept a stub of it.** Named here so
+        // that a re-introduction is a deliberate act with a test to move
+        // rather than a quiet reappearance.
+        // Spelled in two pieces so this assertion is not its own counter-
+        // example: the needle must not appear in the file it searches.
+        assert!(
+            !source.contains(&format!("fn draw{}pull", '_')),
+            "the pull came back without its removal being reconsidered"
+        );
     }
 
     /// **S6 — `Play all` reifies the wall's scope, plays from the top, and is
@@ -6600,25 +6431,24 @@ mod tests {
         );
     }
 
-    /// **Escape returns the pull before it touches anything else on the wall.**
+    /// **Escape clears the query before it touches the pool's marks.**
     ///
-    /// `docs/design/critique/02-surfaces.md` gives the pull two keys and this is
-    /// the second of them — *"`Ctrl`+`R` re-pulls; `Esc` returns"*. Returning an
-    /// offer comes **first**, because an offer is the topmost thing on a wall
-    /// that is showing one and `escape()`'s whole contract is that each press
-    /// peels the top layer. The shuffle pool's marks come **last**, under the
-    /// query and under the column: clearing the query widens the wall while the
-    /// pool stays what it was, which is the frame in which the dimming actually
-    /// says something, and peeling it first would answer the question by
-    /// deleting it.
+    /// The peel was a triple, led by the pull's offer —
+    /// `docs/design/critique/02-surfaces.md`'s *"`Ctrl`+`R` re-pulls; `Esc`
+    /// returns"*. The owner removed the pull on 2026-08-10 and the first step
+    /// went with it; the two under it kept their order and their reason. The
+    /// shuffle pool's marks come **last**, under the query: clearing the query
+    /// widens the wall while the pool stays what it was, which is the frame in
+    /// which the dimming actually says something, and peeling it first would
+    /// answer the question by deleting it.
     ///
     /// Pinned as an **order in the source** of the one arm that spends it, for
-    /// [`Self::the_pull_offers_a_record_and_sends_no_command_at_all`]'s reason:
-    /// the peel is four early returns in a `match` arm and there is no `Shelf`
+    /// [`Self::shuffle_starts_what_it_draws_and_queues_whole_records`]'s reason:
+    /// the peel is a pair of early returns in a `match` arm and there is no `Shelf`
     /// to build without a database and a scan thread. Each step is named by the
     /// literal a reviewer would have to move to break it.
     #[test]
-    fn escape_returns_the_pull_first_and_the_pools_marks_last() {
+    fn escape_clears_the_query_before_the_pools_marks() {
         // Read the source with line endings normalised. `.gitattributes`
         // pins these files to LF, but a working tree can still be checked out
         // with CRLF, and every scan below matches on "\n    }\n" — which a
@@ -6634,7 +6464,10 @@ mod tests {
             .expect("the shelf's Escape peel")
             .1;
         let arm = &arm[..arm.find("\n    }\n").expect("a function ends")];
-        let peel = ["self.pull.take()", "self.clear_query()", "self.pool = None"];
+        // It was a triple. The pull's offer peeled first until the owner
+        // removed the pull (2026-08-10); the two layers under it kept their
+        // order and their reasons.
+        let peel = ["self.clear_query()", "self.pool = None"];
         let mut at = 0;
         for step in peel {
             let found = arm[at..]
@@ -6662,7 +6495,7 @@ mod tests {
 
     /// **The context menu's state machine, pinned in the source of the arms
     /// that spend it** (doc 09 §5.2) — for
-    /// [`Self::the_pull_offers_a_record_and_sends_no_command_at_all`]'s
+    /// [`Self::shuffle_starts_what_it_draws_and_queues_whole_records`]'s
     /// reason: there is no `Shelf` to build without a database and a scan
     /// thread, and the items themselves are `menu::items`' — a pure
     /// function, swept exhaustively in `menu.rs`. What must hold *here* is
@@ -6748,7 +6581,7 @@ mod tests {
     /// record page's own needle-drop path, never a new one.
     ///
     /// Pinned as an order in the source of the one arm that spends it, for
-    /// [`Self::the_pull_offers_a_record_and_sends_no_command_at_all`]'s
+    /// [`Self::shuffle_starts_what_it_draws_and_queues_whole_records`]'s
     /// reason: there is no `Shelf` to build without a database and a scan
     /// thread, and the decision itself — which song is top, which row it is
     /// on its record — is [`vm::song_hits`]/[`vm::song_row`]'s, tested as
@@ -6876,7 +6709,7 @@ mod tests {
     /// Library**, because the well searches the collection and the collection
     /// is what answers, and **open the lane**, because at `SIDEBAR_RAIL_W`
     /// there is no field to focus until it does. Source-pinned for
-    /// [`Self::the_pull_offers_a_record_and_sends_no_command_at_all`]'s
+    /// [`Self::shuffle_starts_what_it_draws_and_queues_whole_records`]'s
     /// reason — there is no `Shelf` to build without a database and a scan
     /// thread — and the pins are the two calls plus the guard that keeps the
     /// re-hang off the presses that do not deserve one.

@@ -431,17 +431,22 @@ mod tests {
     }
 
     /// **One vocabulary** (doc 11 §5 P4): no word from the room-vocabulary
-    /// list ships in user-facing copy. "The wall", "the hang", "the stack",
-    /// "marquee" and the pull's internals are the corpus's own names for
-    /// its ideas — correctly internal, like a stage crew's slang — and the
-    /// one leak the critique found (*"Esc returns to the wall"* beside
-    /// `‹ Library`, two names for one destination in one strip) is exactly
-    /// what this pin keeps closed. Licensed uses stay licensed: `Pull` the
-    /// control and its offer line "The pull" (P9, the owner's call), and
-    /// `Save as playlist` / `Add to playlist…` are ordinary words.
+    /// list ships in user-facing copy. "The wall", "the hang", "the stack"
+    /// and "marquee" are the corpus's own names for its ideas — correctly
+    /// internal, like a stage crew's slang — and the one leak the critique
+    /// found (*"Esc returns to the wall"* beside `‹ Library`, two names for
+    /// one destination in one strip) is exactly what this pin keeps closed.
+    ///
+    /// **The licence list is now empty.** It held two entries, `Pull` and its
+    /// offer line `The pull` — the only shipped copy the room's vocabulary was
+    /// ever allowed into, on P9's *present-to-owner* footing. The owner
+    /// answered P9 on 2026-08-10 by removing the control, so the exception
+    /// went with the words it excepted and the rule is now total.
+    /// `Save as playlist` / `Add to playlist…` are ordinary words and were
+    /// never on it.
     #[test]
     fn no_room_vocabulary_ships_in_user_facing_copy() {
-        let licensed = ["The pull", "Pull"];
+        let licensed: [&str; 0] = [];
         for (file, literal) in shipped_strings() {
             if licensed.contains(&literal.as_str()) {
                 continue;

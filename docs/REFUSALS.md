@@ -69,8 +69,19 @@ nothing else moved.
 the year", no listening-time totals. **History records; it never performs.**
 
 What history is allowed to surface: the PLAYED group key, the inspector card
-("PLAYED — N times since YYYY", plus a column of date stamps), and the pull's
-weighting. Nothing else.
+("PLAYED — N times since YYYY", plus a column of date stamps), and the returns
+lane's *when did I last touch this* order (ADR-0030 §1). Nothing else.
+
+*Rewritten 2026-08-10 to record the owner's decision.* This entry named a
+fourth permitted surface, **the pull's weighting** — `History::pull_weight`,
+one per day since a record was last heard, drawn from by the strip's `Pull`.
+The owner removed the control: *"please can we remove pull since it doesn't
+make sense here."* The weighting had exactly one consumer, so it went with it,
+constants and all. What the list loses is not a permission but a *use*: a
+weighting nothing spends is a recommendation engine's foundations poured and
+left, and the shortest way to keep history from performing is to keep the
+surfaces down to the ones something reads. Re-adding a weighted draw is a new
+entry and a new argument, not a revival of this one.
 
 **The ledger is the user's.** Append-only, one line per play, in a plain local
 file they can grep, back up or burn. Scrobbling to Last.fm or ListenBrainz is an

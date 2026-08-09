@@ -15,8 +15,8 @@
 //!
 //! What is left is one subject, stated in the two vocabularies doc 10 §0.3
 //! separates: **the states** — ARTIST · YEAR · GENRE · ADDED · PLAYED, caps
-//! and tracked, one of them current — and **the acts** — `Play all`,
-//! `Shuffle`, `Pull`, sentence-case words. Narrow-then-arrange used to read
+//! and tracked, one of them current — and **the acts** — `Play all` and
+//! `Shuffle`, sentence-case words. Narrow-then-arrange used to read
 //! left to right across this strip; the narrowing is in the lane now and the
 //! strip begins at the arrangement. The gear stays in the corner because it is
 //! the *application's* affair rather than the frame's, and the lane's head is
@@ -65,8 +65,13 @@ pub(crate) const WELL_W: f32 = 200.0;
 pub(crate) const KEYS_W: f32 = 314.0;
 
 /// The acts cluster's reserved width (logical px): the triangle and its
-/// word, `Shuffle`, `Pull`, their paddings and the two `GAP_XS` gaps.
-pub(crate) const ACTS_W: f32 = 182.0;
+/// word, `Shuffle`, their paddings and the one `GAP_XS` gap.
+///
+/// It was 182 with `Pull` in it. The owner removed that word on 2026-08-10
+/// and the reservation shrank with it — a slot still reserving room for a
+/// control that is gone is the strip's budget lying about what it holds
+/// (ADR-0026 §3's *asserted in code*).
+pub(crate) const ACTS_W: f32 = 144.0;
 
 /// The slim Library strip — one line at [`theme::TOP_BAR_SPLIT`] and above,
 /// two below it, a hairline rule under either.
@@ -222,15 +227,14 @@ pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Mes
     .into()
 }
 
-/// **The wall's three acts**: `Play all`, `Shuffle` and `Pull`, as words,
-/// beside the arrangement.
+/// **The wall's two acts**: `Play all` and `Shuffle`, as words, beside the
+/// arrangement.
 ///
 /// # Why they are here and not in the transport
 ///
-/// All three are questions asked *of the collection* — "play what I am looking
-/// at, in order", "play what I am looking at, by chance", "suggest something I
-/// have not heard" — and the answer to each is decided entirely by what the
-/// wall is showing. That is this bar's subject (L8.1: a control goes where
+/// Both are questions asked *of the collection* — "play what I am looking
+/// at, in order" and "play what I am looking at, by chance" — and the answer
+/// to each is decided entirely by what the wall is showing. That is this bar's subject (L8.1: a control goes where
 /// what it reads is). The now-playing bar's subject is the record that is
 /// sounding, and none of these is about that record; putting them there would
 /// also mean moving the transport, which `docs/REFUSALS.md` does not permit
@@ -249,10 +253,9 @@ pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Mes
 ///
 /// `docs/REFUSALS.md`: *"Every action in baz has a visible, pointer-reachable
 /// control. No action is keyboard-only, and no control's only affordance is
-/// hover."* The pull has a key (<kbd>Ctrl</kbd>+<kbd>R</kbd>); shuffle and
-/// `Play all` have none; all three have this. Each sends the identical message
-/// any other route sends, which is the same discipline the group keys and the
-/// transport already keep.
+/// hover."* Neither has a key; both have this. Each sends the identical
+/// message any other route sends, which is the same discipline the group keys
+/// and the transport already keep.
 ///
 /// # And they are words
 ///
@@ -270,24 +273,16 @@ pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Mes
 fn draws() -> Element<'static, Message> {
     row![
         play_all(),
-        // The two draw words teach at the moment of relevance (doc 11 §5
-        // P6.2): each carries a tooltip saying what the press will do, in
-        // words, before the first press ever risks it. `Shuffle`'s word is
-        // almost enough but its bound is not in it; `Pull` has no
-        // convention at all (ADR-0026) and until now no explanation before
-        // the press — the era licensed poetic names only with explanation
-        // at first contact. ("What the Library shows", not "the wall":
-        // room vocabulary stays internal, P4's rule applied to P6's
-        // sentences.)
+        // The draw word teaches at the moment of relevance (doc 11 §5 P6.2):
+        // it carries a tooltip saying what the press will do, in words,
+        // before the first press ever risks it — `Shuffle`'s word is almost
+        // enough but its bound is not in it. ("What the Library shows", not
+        // "the wall": room vocabulary stays internal, P4's rule applied to
+        // P6's sentences.)
         draw_word(
             "Shuffle",
             Message::Shuffle,
             "Play 8 records drawn from what the Library shows",
-        ),
-        draw_word(
-            "Pull",
-            Message::Pull,
-            "Offer one record you haven't played in years — nothing plays until you say so",
         ),
     ]
     .spacing(theme::GAP_XS)
@@ -335,7 +330,7 @@ fn play_all() -> Element<'static, Message> {
     .into()
 }
 
-/// One of the two draw words: [`theme::TRANSPORT_HIT`] tall like every control
+/// The draw word: [`theme::TRANSPORT_HIT`] tall like every control
 /// in the product (law L7), centred in its box by the box (law L3), with a
 /// tooltip naming what the press does (doc 11 §5 P6.2) — the mechanism the
 /// gear already spends, now spent where the words are load-bearing and not

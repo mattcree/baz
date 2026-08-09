@@ -294,16 +294,6 @@ fn main_column<'a>(
         }
     }
     let mut block = column![album_header(album, edition)].spacing(theme::GAP_XL);
-    // Is this record the one the pull is offering? The offer is about *a*
-    // record, so it is drawn only on the page that record is on.
-    if let Some(note) = shelf
-        .pull
-        .as_ref()
-        .filter(|pull| pull.album == album.id)
-        .map(|pull| pull.note.as_str())
-    {
-        block = block.push(pull_note(note));
-    }
     block = block.push(
         column![
             section_rule("Tracks"),
@@ -312,39 +302,6 @@ fn main_column<'a>(
         .spacing(theme::GAP_SM),
     );
     block.into()
-}
-
-/// **The pull's line**: `The pull · Last played 3 years ago`.
-///
-/// Two facts and no third. The first says *this record was suggested, it is not
-/// one you went looking for* — without which a page opening on its own would
-/// read as a fault. The second is the ledger's own reading
-/// ([`crate::shuffle::pull_note`]): a date band, never a score, never a reason,
-/// never a "because you liked". History records; it never performs
-/// (`docs/REFUSALS.md`).
-///
-/// There is no button here. The control that accepts the suggestion is the
-/// page's own `Play album`, in the place it always sits — so accepting the pull
-/// is the *same act*, sending the same commands, as playing a record you found
-/// yourself.
-fn pull_note(note: &str) -> Element<'static, Message> {
-    let room = theme::active();
-    row![
-        text("The pull")
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION)
-            .font(theme::MEDIUM)
-            .color(room.paper_dim)
-            .wrapping(text::Wrapping::None),
-        text(note.to_owned())
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION)
-            .color(room.paper_faint)
-            .wrapping(text::Wrapping::None),
-    ]
-    .spacing(theme::GAP_SM)
-    .align_y(iced::Alignment::Center)
-    .into()
 }
 
 /// The primary action: **Play album**, a lamp outline with a paper triangle
