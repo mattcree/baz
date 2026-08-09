@@ -23,12 +23,18 @@
   a queue position **without** starting playback, the restore becomes two
   commands instead of one press and the transport reads *paused* on launch.
   That is the one change that would reopen this.
-- **The two-line strip split could move from 960 to 872.** Removing the
-  `Playlists` door freed 88 px and the single line now fits at 872, but
-  `TOP_BAR_SPLIT` was left at 960: lowering it changes when the strip splits
-  for every user, which is a visible behaviour change and not a consequence of
-  this work. The arithmetic is pinned either way
-  (`the_strip_holds_its_tenants_at_the_single_line_floor`).
+- ~~**The two-line strip split could move from 960 to 872.**~~ **Done**
+  (ADR-0030's second amendment). Moving the search well into the lane meant
+  re-deriving the budget anyway, so the seam was set to its exact sum in the
+  same change rather than left rounded. The well's 80 px fluid range went with
+  it, as unreachable: the strip only draws the well below `SIDEBAR_FLOOR`, and
+  no strip that narrow can climb a ramp that starts at 1200.
+- **The lane's head is now three destinations and a field, and a fourth
+  destination is still refused.** ADR-0030 §1 refused destination rows; the
+  owner's first amendment admitted exactly three, and the second added the well
+  — which is a field, not a destination, and holds no place. The shape of both
+  concessions is the closed set. **A proposal for a fifth head row needs an
+  argument that beats L8.4's, and "there is room" is not one.**
 
 - **Shuffle and auto-queueing must prefer the highest-quality edition.** When a
   track exists in several formats (ADR-0007), any automatic selection — library
@@ -441,6 +447,16 @@
   escape hatch today. A proper fix wants a focus-aware shell (or a toolkit
   that reports focus synchronously), which is the same missing capability as
   the accessibility gap above.
+  - **This got more visible when the well became resident** (ADR-0030's second
+    amendment), and it is worth stating in its own words because it looks like
+    a new defect and is not: **<kbd>Esc</kbd> takes two presses to peel a query
+    you are still typing** — the first is iced's `text_input` unfocusing and
+    *capturing*, the second reaches `crate::keys`. Same for
+    <kbd>Ctrl</kbd>+<kbd>B</kbd>, which asks for nothing at all while the caret
+    is in the well. Both are captured in
+    `docs/design/impl/search-in-lane/05` and `06`. Unchanged behaviour, older
+    than this move, and it will not be fixed by anything short of the
+    focus-aware shell above.
 - **No shortcut discovery in the interface.** The bindings are in the README
   and nowhere the user can see them while running — no `?` overlay, no menu.
 

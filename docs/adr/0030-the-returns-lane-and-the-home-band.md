@@ -65,6 +65,65 @@
 > the row-hover correction, `Place::Home`, `Place::NowPlaying`. Captures and
 > the measured column-count table are at
 > [`docs/design/impl/lane-and-home/`](../design/impl/lane-and-home/README.md).
+>
+> ## Second amendment (2026-08-09) — the search well moves into the lane
+>
+> The owner, looking at the shipped frames: *"the design does not match
+> properly… the search should really be in the sidebar"*. **The well is the
+> lane's now**, and §1's *"nothing else is admitted, ever"* is amended a second
+> time. The concession is recorded rather than smoothed over, in the same shape
+> as the first: the head is now a closed set of **three destinations and one
+> field**, above the hairline, with the list below it still holding one subject
+> and one order. **A fourth destination is still the nav rail L8.4 refused**,
+> and the well is not one — see below.
+>
+> **1. A field, not a `Search` destination.** The two were genuinely different
+> and the choice was made on baz's own terms rather than on Spotify's. Spotify
+> makes `Search` a place you navigate to; baz has **type-anywhere** (ADR-0017
+> §1.2), so any printable key opens the query from anywhere, and a destination
+> row would say *go somewhere first* — the opposite of what the product does.
+> The well is also as much a *readout* as an input, and a readout of the frame's
+> state belongs in the frame's resident surface. It does not navigate and it
+> holds no place; it wears the destination anatomy only when collapsed, because
+> a 96 px rail has exactly one anatomy.
+>
+> **2. What it repairs.** The strip and the lane both carried the frame's
+> identity, so the eye had two places to start. With the well moved the strip
+> carries none: it is the wall's arrangement (five state words) and the wall's
+> verbs (three act words), with the application's gear in the corner.
+>
+> **3. The counts and the match count are re-homed**, and the reason is
+> arithmetic. The lane's measure is `SIDEBAR_MEASURE` 232 against the strip's
+> 280; the in-well `MATCH_W` 88 slot plus the 44 px text inset would leave the
+> query 88 px. Both figures go onto **one always-drawn line under the field** —
+> `25 albums · 206 tracks` at rest, `12 of 25 albums` while narrowing — which is
+> the lane row's own two-line anatomy and therefore the surface's own. Always
+> drawn so a keystroke pushes no `RECENT` row down; left-aligned so the figures
+> change in place.
+>
+> **4. Collapsed, and the one new re-hang.** At `SIDEBAR_RAIL_W` the well is the
+> magnifier, tooltipped, lit while a query stands. Pressing it — and <kbd>/</kbd>,
+> <kbd>Ctrl</kbd>+<kbd>F</kbd>, and the **first key of a type-anywhere query** —
+> opens the lane onto the caret. §3's rule gains a clause, stated rather than
+> hidden: *the collection may also be re-hung by the keystroke that opens the
+> query*, which is safe for §3's own reason — it lands outside the wall, no
+> pointer gesture is in flight, and the wall's contents are being replaced by
+> the matches in the same frame. Below `SIDEBAR_FLOOR` the lane cannot open, so
+> no mark is drawn there and the strip keeps the well in doc 10 §4.1's form.
+> **One home per regime, never two.**
+>
+> **5. Every road to the query goes to the Library.** The well searches the
+> collection, so the collection is what is on screen while you type into it.
+> Before this, typing from `Home` or a record's page filled a field that was not
+> drawn and narrowed a wall that was not either — a real defect the resident
+> well made visible and then fixed.
+>
+> **What the strip's budget becomes**: `TOP_BAR_SPLIT` 960 → **872**, exact
+> rather than rounded; the well's 80 px fluid range deleted as unreachable, so
+> the split is the whole of the collapse order; and above `SIDEBAR_FLOOR` the
+> strip is one line at every width in either lane state (648 wanted, 720
+> narrowest). Frames and the full arithmetic:
+> [`docs/design/impl/search-in-lane/`](../design/impl/search-in-lane/README.md).
 
 **Status**: accepted and shipped, as amended above (2026-08-09) · extracts the decisions of
 [`docs/design/13-everyday-flow.md`](../design/13-everyday-flow.md) §2, §3,

@@ -469,6 +469,30 @@ shipped glyphs have (`icon.rs:407–698`).
 
 ## 4. The layouts, drawn
 
+> **Superseded in part, 2026-08-09 — the well left this strip.** The owner:
+> *"the design does not match properly… the search should really be in the
+> sidebar."* §4.1's anatomy and §4.2's and §4.3's budgets are kept below as
+> written, because they are still exactly what the strip draws **below
+> `SIDEBAR_FLOOR` 1000**, where the returns lane is a rail that cannot hold a
+> field. At every wider window the well is the lane's, in the two-line form
+> ADR-0030's second amendment records, and this strip's left cluster begins at
+> the group keys. What changes here in arithmetic:
+>
+> - `TOP_BAR_SPLIT` is **872**, not 960 — §4.2's sum less the `Playlists`
+>   door's 88 px, and exact rather than rounded up.
+> - The well's width is a flat **200**. §4.1's `clamp(W − 1000, 200, 280)` ramp
+>   is deleted as unreachable: only a strip 1200 px or wider could climb it, and
+>   a strip that draws the well is at most `SIDEBAR_FLOOR − SIDEBAR_RAIL_W` =
+>   904. **The split is now the whole of the collapse order**, not its second
+>   step.
+> - The widths below are read against the **strip's** width — the window less
+>   the lane — never the window's.
+> - Where the well is the lane's, the strip's tenants sum to **648** against a
+>   narrowest possible strip of 720, so the split cannot fire there at all.
+>
+> Frames and the full re-derivation:
+> [`docs/design/impl/search-in-lane/`](impl/search-in-lane/README.md).
+
 All numbers logical px on the 4-lattice; gutters are `HANG` 40 (law L1);
 control height `TRANSPORT_HIT` 32 throughout (L7). Reserved widths:
 well 200–280 fluid · keys 312 · acts 182 (triangle + three words) ·

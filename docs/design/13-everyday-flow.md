@@ -556,6 +556,19 @@ Two things the panel did that must not be lost, and where they land:
 
 ### 2.8 What the lane does *not* do
 
+> **Two of these were overruled by the owner and are kept as written**, in this
+> study's own convention (§0.3): what was recommended and what was chosen can
+> both be read. The head holds `Home`, `Library` and `Now playing` (ADR-0030's
+> first amendment) and, under them, **the search well** (the second) — *"the
+> design does not match properly… the search should really be in the sidebar"*.
+> The well is a **field, not a destination**: it navigates to nothing and holds
+> no place. §10.1's table below says baz takes no *"filter field"* from
+> Spotify's pane and that is still true — Spotify's field filters **the pane's
+> own rows**, and this one is the library's query, which is why it carries the
+> collection's counts under it and why typing in it puts the wall on screen.
+> The list below the hairline still holds one subject and one order; a **fifth**
+> head row is still the nav rail L8.4 refused.
+
 - **It is not a nav rail.** It holds objects, not destinations. There is no
   `Library` row, no `Settings` row, no `Queue` row (§2.1).
 - **It does not follow selection.** It is not an inspector; nothing in it
@@ -1368,6 +1381,22 @@ Rows visible in the lane: the lane's height at 860 is
 at the head and `STEPPER_HIT` 24 + `GAP_XL` 24 at the foot = 628, over
 `SIDEBAR_ROW_H` 64 → **9 rows**, scrolling. At 1080 the same arithmetic
 gives **13**.
+
+> **As built, and as the owner then amended it.** The lane runs the full height
+> of the window rather than starting under the strip — the strip is the
+> Library's, drawn beside the lane, not over it — and the head is three
+> `SIDEBAR_DEST_H` 40 rows before the hairline. The measured arithmetic at 860
+> is `860 − 83` = 777, less `2 × GAP_XL` 48, the head, the seam's
+> `2 × GAP_MD + 1` = 25, the heading's `2 × GAP_SM + 20` = 36 and the marks'
+> `2 × GAP_MD + STEPPER_HIT` = 48. With a head of `3 × 40` that gives **7 rows**
+> at 860 and **11** at 1080.
+>
+> **The search well costs one of them.** ADR-0030's second amendment puts it in
+> the head: `GAP_SM` 8 plus `SIDEBAR_WELL_H` 52 — the field at `TRANSPORT_HIT`,
+> `GAP_XS`, and one `LINE_META` readout line that is always drawn. The head
+> becomes 180, and the list holds **6 rows** at 860 and **10** at 1080. Stated
+> here rather than in the commit, because it is the one thing the move takes
+> from §1's subject and the owner should be able to find it.
 
 ### 9.3 Content share, both readings
 
