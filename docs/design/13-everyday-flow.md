@@ -1783,20 +1783,20 @@ application's main menu"*
 
 ## 12. The proposals, ranked and tiered
 
-| # | Proposal | Cost | Tier |
-|---|---|---|---|
-| **P1** | **The returns lane** — one subject, last-touched order, two widths, collapse at the foot, `Ctrl+B` (§2) | One view, one ordered list maintained by events, five tokens, two glyphs | **adopt** |
-| **P2** | **The panel dies** — its three jobs go to the lane and the card (§2.7, §7) | Deletions: `playlist_panel.rs`, `PANEL_W`, `panel_open`, the strip door, `Ctrl+P` | **adopt** |
-| **P3** | **The picker becomes a card at the pointer** (§6) | One float on `menu::anchor`'s geometry; two tokens | **adopt** |
-| **P4** | **The card's sentence becomes its heading**, with what is held stated in figures (§6.2) | Strings and two type sizes | **adopt** |
-| **P5** | **The home band** — `CONTINUE` and `RECENTLY ADDED` at the head of the Library body (§3) | Two bands, both absent-not-empty; **depends on P6** for the first | **adopt** |
-| **P6** | **Ship ADR-0023 §6's queue snapshot** — persist on exit, restore paused (§3.4) | Already specified and costed there: *"one new persisted snapshot, zero engine changes"* | **adopt** — it is the home band's best content and closes W2 |
-| **P7** | **`Add to "{current}"` at album scope** on the tile menu (§4.4) | Zero new messages, zero new controls | **adopt** |
-| **P8** | **`‹ Prev · 4 of 25 · Next ›`** — the step pair states its position (§5.3) | One readout, one reserved token | **adopt** |
-| **P9** | **Teach the tile menu** in the record page's header note (§4.5) | One string | **adopt-modified** — modest by design |
-| **P10** | **One press to sound from the wall**, as a modifier press (§4.6) | One arm, one accelerator string | **present-to-owner** |
-| **P11** | **`Place::Home`** as a real fifth place, drawn in §9.4 | A fifth place, a route back to the wall, the launch frame | **present-to-owner** |
-| **P12** | Hover-revealed verbs; the lane overlaying; the queue in the lane; sort/filter/pinning; breadcrumbs; a back stack | — | **rejected-with-reasons** (§11) |
+| # | Proposal | Cost | ADR | Tier |
+|---|---|---|---|---|
+| **P1** | **The returns lane** — one subject, last-touched order, two widths, collapse at the foot, `Ctrl+B` (§2) | One view, one ordered list maintained by events, five tokens, two glyphs | 0030 §1–§4 | **adopt** |
+| **P2** | **The panel dies** — its three jobs go to the lane and the card (§2.7, §7) | Deletions: `playlist_panel.rs`, `PANEL_W`, `panel_open`, the strip door, `Ctrl+P` | 0030 §5 | **adopt** |
+| **P3** | **The picker becomes a card at the pointer** (§6) | One float on `menu::anchor`'s geometry; two tokens | 0031 §1–§2 | **adopt** |
+| **P4** | **The card's sentence becomes its heading**, with what is held stated in figures (§6.2) | Strings and two type sizes | 0031 §3 | **adopt** |
+| **P5** | **The home band** — `CONTINUE` and `RECENTLY ADDED` at the head of the Library body (§3) | Two bands, both absent-not-empty; **depends on P6** for the first | 0030 §6 | **adopt** |
+| **P6** | **Ship ADR-0023 §6's queue snapshot** — persist on exit, restore paused (§3.4) | Already specified and costed there: *"one new persisted snapshot, zero engine changes"* | 0023 §6 | **adopt** — the home band's best content, and it closes W2 |
+| **P7** | **`Add to "{current}"` at album scope** on the tile menu (§4.4) | Zero new messages, zero new controls | 0032 §1 | **adopt** |
+| **P8** | **`‹ Prev · 4 of 25 · Next ›`** — the step pair states its position (§5.3) | One readout, one reserved token | 0032 §3 | **adopt** |
+| **P9** | **Teach the tile menu** in the record page's header note (§4.5) | One string | 0032 §5 | **adopt-modified** — modest by design |
+| **P10** | **One press to sound from the wall**, as a modifier press (§4.6) | One arm, one accelerator string | 0032 §4 | **present-to-owner** |
+| **P11** | **`Place::Home`** as a real fifth place, drawn in §9.4 | A fifth place, a route back to the wall, the launch frame | 0030 *deliberately not done* | **present-to-owner** |
+| **P12** | Hover-revealed verbs; the lane overlaying; the queue in the lane; sort/filter/pinning; breadcrumbs; a back stack | — | 0030 / 0032, *considered and rejected* | **rejected-with-reasons** (§11) |
 
 P1–P9 are one coherent programme. P1+P2 are a single change seen from two
 sides, and P5 is the reason to do P6 at last.
