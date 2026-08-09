@@ -21,21 +21,61 @@ family. No new crate, no runtime file lookup, no install step.
 | `IBMPlexSans-Regular.ttf` | IBM Plex Sans Regular | 3.005 | 200 500 | `975dcda37d80f038dcd143c22e33ca2d97a0cc5a929aace1c749153b0fe1afa5` |
 | `IBMPlexSans-Medium.ttf` | IBM Plex Sans Medium | 3.005 | 202 460 | `331c8639d7598b2cde62a911a71db195e30cb655cd6bdf2e324a7e984955f907` |
 | `IBMPlexSans-SemiBold.ttf` | IBM Plex Sans SemiBold | 3.005 | 202 632 | `a20caf8286023a6a7a85e40b1d2a4ae9fc3e3b1f9eda8f4c542dd4986af67bb1` |
+| `IBMPlexSerif-Italic.ttf` | IBM Plex Serif Italic | 3.006 | 227 404 | `d28aa63cf618439712d6b459c5649af1d6d789cb911994f2357f1ce44128f163` |
 
-Total: **605 592 bytes** — one family at three weights.
+Total: **832 996 bytes** — the sans at three weights, and one serif italic.
 
-Two faces were deleted, taking **395 928 bytes (39.5 %)** with them
+One face was deleted and has not come back, taking **173 052 bytes** with it
 (`.interface-design/system.md` §8):
 
 | File | Bytes | Why it went |
 |---|---|---|
 | `IBMPlexMono-Regular.ttf` | 173 052 | baz has no monospace: Plex Sans's figures are already tabular. See "The metrics this asset is accountable for" below. |
-| `IBMPlexSerif-SemiBold.ttf` | 222 876 | baz has no display face: the room supplies nothing and the work supplies everything. The album title is Sans SemiBold at 22. |
 
-Fetched 2026-08-08 from <https://github.com/IBM/plex>, branch `master` at commit
+`IBMPlexSerif-SemiBold.ttf` (222 876 bytes) was deleted for a different reason
+and **stays deleted**: baz has no *display face*. The room supplies nothing and
+the work supplies everything; the album title is Sans SemiBold at 22. That
+argument is about a serif standing in for the room's personality in headings
+and questions, and it is unchanged.
+
+## The serif italic, and why it is not that
+
+Added 2026-08-09 for **one string**: a *work's own title* on the Home place's
+`CONTINUE` placard (`src/theme.rs`'s `WORK_TITLE`, `src/views/home.rs`).
+
+baz's identity is a gallery and its icon is a work under a wall label. On a
+museum placard the **work's title is set in italic** and everything around it —
+the artist, the date, the medium — is not; the italic is not decorating the
+label, it is the label's own convention for saying *this string is the name of
+the thing, not a fact about it*. Nothing else on screen is a work's title
+standing alone beside its own facts, so nothing else takes it, and
+`the_serif_is_the_work_titles_and_nothing_else` says so as a test rather than
+as an intention.
+
+**The owner saw the typographic risk and approved it** (2026-08-09). It is one
+token, so reverting is one line: point `WORK_TITLE` at `MEDIUM` and the face
+has no consumer left.
+
+## Licensing, checked rather than assumed
+
+Both packages are **SIL Open Font License 1.1**. Verified on 2026-08-09 at the
+commit below:
+
+- `packages/plex-serif/package.json` declares `"license": "OFL-1.1"`, as
+  `plex-sans` does;
+- the repository's root `LICENSE.txt` at that commit is **byte-identical** to
+  the `OFL.txt` in this directory —
+  `7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da` — so the
+  licence already shipped here covers the added face with nothing to add.
+
+OFL-1.1 permits verbatim redistribution, bundled in software, with the licence
+included; §3's Reserved Font Name clause is why nothing here is subset (below).
+
+Fetched 2026-08-08 (sans) and 2026-08-09 (serif italic) from
+<https://github.com/IBM/plex>, branch `master` at commit
 `bf260093582f04622aacc1e9f9ca604d7ccd0c42`, from
-`packages/plex-sans/fonts/complete/ttf/` (the two deleted faces came from
-`plex-mono` and `plex-serif` beside it). `OFL.txt` is that repository's
+`packages/plex-sans/fonts/complete/ttf/` and
+`packages/plex-serif/fonts/complete/ttf/`. `OFL.txt` is that repository's
 `LICENSE.txt`, unaltered.
 
 ## Subsetting: none, deliberately

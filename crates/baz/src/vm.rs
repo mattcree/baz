@@ -881,6 +881,76 @@ fn album_items(album: &AlbumVm, chosen: Option<EditionKey>) -> Vec<QueueItemVm> 
     })
 }
 
+/// **The run a snapshot names**, rebuilt from the library
+/// (`crate::session`, ADR-0023 §6).
+///
+/// The paths came off disk and the facts around them did not, so every row is
+/// resolved back through the *same* records the wall holds — which is what
+/// makes a restored run read identically to the run that was saved, rather
+/// than as a list of filenames. A path the library no longer holds is
+/// **dropped**: a rescan may have taken it, and a queue row pointing at
+/// nothing is a row that cannot play.
+///
+/// The header names the first row's record, exactly as [`stacked_queue`]'s
+/// does, because a restored run is the same kind of thing: a list that may
+/// hold several records. Provenance travels in the snapshot and is handed back
+/// unchanged — it is a statement about origin, and the origin did not change
+/// because baz was closed.
+///
+/// Returns the queue **and where the cursor landed in it**, which is not
+/// `cursor` when rows before it were dropped. Resolving the cursor here rather
+/// than at the call site is what keeps "the track you were on" true across a
+/// rescan: it is found by *path*, the same reconciliation every other reading
+/// of a queue position uses.
+#[must_use]
+pub fn restored_queue(
+    albums: &[AlbumVm],
+    paths: &[std::path::PathBuf],
+    cursor: usize,
+    provenance: Option<String>,
+) -> (QueueVm, Option<usize>) {
+    let mut by_path: std::collections::HashMap<&Path, (&AlbumVm, &TrackVm)> =
+        std::collections::HashMap::new();
+    for album in albums {
+        for edition in &album.editions {
+            for track in &edition.tracks {
+                by_path
+                    .entry(track.path.as_path())
+                    .or_insert((album, track));
+            }
+        }
+    }
+    let wanted = paths.get(cursor).map(std::path::PathBuf::as_path);
+    let mut items = Vec::with_capacity(paths.len());
+    let mut landed = None;
+    for path in paths {
+        let Some((album, track)) = by_path.get(path.as_path()) else {
+            continue;
+        };
+        if Some(path.as_path()) == wanted && landed.is_none() {
+            landed = Some(items.len());
+        }
+        items.push(QueueItemVm {
+            title: track.title.clone(),
+            artist: track.artist.clone().filter(|_| album.track_artists_vary),
+            album: album.title.clone(),
+            album_artist: Some(album.artist.label().to_owned()),
+            duration: track.duration,
+            path: track.path.clone(),
+        });
+    }
+    let first = items.first();
+    let queue = QueueVm {
+        album: first.and_then(|item| item.album.clone()),
+        artist: first
+            .and_then(|item| item.album_artist.clone())
+            .unwrap_or_default(),
+        items,
+        provenance,
+    };
+    (queue, landed)
+}
+
 /// **A queue of whole records**, in the order given — what a shuffle sends
 /// (`crate::shuffle`).
 ///

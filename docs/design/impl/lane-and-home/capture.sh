@@ -150,10 +150,15 @@ key ctrl+b
 park
 shot 06-lane-open-again-1280
 
-# Home and Now playing.
+# **Home, with an interrupted run.** A record is sounding, so the snapshot on
+# disk names it — but `CONTINUE` draws from what was *interrupted*, which is
+# only true after a restart. Both states are captured: this launch has no
+# snapshot yet (the band is absent, not empty), and the relaunch below has one.
 click "$HOME_X" "$HOME_Y"
-shot 07-home-1280
+park
+shot 07-home-without-an-interrupted-run-1280
 click "$NOW_X" "$NOW_Y"
+park
 shot 08-now-playing-1280
 click "$LIB_X" "$LIB_Y"
 
@@ -184,6 +189,37 @@ sleep 1
 park
 shot 15-ghost-saved-and-returned-1280 # the list is real; the ghost is back
 key ctrl+p
+# **The exit writes the elapsed position** (ADR-0023 §6), and only a real
+# close request does it — `Message::Quit` is the one exit path. `windowclose`
+# sends WM_DELETE_WINDOW, which is exactly what a title bar's × sends; killing
+# the process instead would leave the position at the last track boundary and
+# the relaunch would prove nothing.
+sleep 6                       # let the run get somewhere worth resuming from
+xdotool windowclose "$WID"
+sleep 3
+stop
+# **The elapsed figure is seeded here, and that is a limitation of the
+# harness rather than of the feature.** Two things write the snapshot: the run
+# moving (a track boundary — proved above, the file already names a cursor),
+# and the exit, which is the only writer of the *elapsed* milliseconds. Under
+# Xvfb with no window manager, `windowclose` races winit's own X11 teardown and
+# the process dies in `GetGeometry` before the update loop sees the close
+# request, so the position on disk is the track boundary's 0. The exit path
+# itself is one function (`App::leave_for_good`) reached by both exit routes
+# and covered by tests; what cannot be shown headlessly is the compositor
+# delivering the request. So the position is written in, to render a needle
+# that is partway rather than a needle at zero.
+if [[ -f "$S/config/baz/session.toml" ]]; then
+  sed -i 's/^position_ms = .*/position_ms = 192000/' "$S/config/baz/session.toml"
+fi
+echo "  --- session.toml after the quit ---"
+sed -n '1,6p' "$S/config/baz/session.toml" 2>/dev/null || echo "  (none written)"
+
+# **Home, with an interrupted run** — the same baz, reopened.
+launch $W $H
+click "$HOME_X" "$HOME_Y"
+park
+shot 16-home-with-an-interrupted-run-1280
 stop
 
 # --------------------------------------------------------------- 1920 × 1080

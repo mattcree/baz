@@ -112,7 +112,7 @@
 
 use std::sync::{LazyLock, OnceLock};
 
-use iced::font::Weight;
+use iced::font::{self, Weight};
 use iced::widget::rule::FillMode;
 use iced::widget::slider::{Handle, HandleShape, Rail};
 use iced::widget::{button, checkbox, container, rule, scrollable, slider, text_input};
@@ -1125,6 +1125,43 @@ pub fn sidebar_can_expand(window_w: f32) -> bool {
 /// states, at the same offset. [`GAP_SM`] of headroom is exactly the
 /// [`DOT`] 6 plus the 2 px that keeps it off the ink.
 pub const SIDEBAR_GLYPH_BOX: f32 = ICON_PX + GAP_SM;
+
+/// **A work's own title**, and the one place in the product it is set: the
+/// Home place's `CONTINUE` placard.
+///
+/// IBM Plex Serif **Italic** — the museum-placard convention, where the
+/// work's title is italic and every fact around it (the artist, the date, the
+/// medium) is not. baz's identity is a gallery and its icon is a work under a
+/// wall label; this is that label's own typography, used for the one string on
+/// screen that is a work's name standing beside its own facts.
+///
+/// **The typographic risk, seen and approved by the owner** (2026-08-09). It
+/// is one token so that it is one line to revert: change this to
+/// [`MEDIUM`] and the serif leaves the product, because
+/// `crate::font::SERIF_ITALIC` has no other consumer and
+/// `the_serif_is_the_work_titles_and_nothing_else` says so.
+pub const WORK_TITLE: Font = Font {
+    style: font::Style::Italic,
+    ..Font::with_name(crate::font::SERIF)
+};
+
+/// The needle's tick: **1 px** at the position, in the brightest accent.
+///
+/// What turns a proportion into a *position*. A bar alone reads as "how
+/// much"; a mark on it reads as "where", which is the question the placard is
+/// answering. It is taken out of the line's own width rather than added to it,
+/// so the needle is the sleeve's measure at every position.
+pub const NEEDLE_TICK_W: f32 = 1.0;
+
+/// The `CONTINUE` placard's sleeve: **132**, between the panel's 40 and the
+/// wall's smallest work.
+///
+/// Large enough that the record is identified by its cover rather than by its
+/// name, small enough that the placard beside it — four lines and a needle —
+/// is the thing being read. On the 4 px lattice, and it is exactly the width
+/// the needle takes, which is the rule that makes the whole band read as one
+/// object.
+pub const CONTINUE_SLEEVE: f32 = 132.0;
 
 /// **The lane's ground**: [`Palette::recess`], one plane *below* the wall.
 ///
@@ -3987,6 +4024,61 @@ mod tests {
         }
     }
 
+    /// **The serif is the work titles' and nothing else's** — the whole of
+    /// what makes the second family a *placard convention* rather than a
+    /// display face returning one weight at a time.
+    ///
+    /// Two claims, both over the source. `WORK_TITLE` is named in exactly one
+    /// view, and that view is the Home place's placard; and the serif family
+    /// is reachable only through that token, so nothing can quietly set a
+    /// second string in it by naming the family directly.
+    ///
+    /// It is the reversion clause made mechanical: point `WORK_TITLE` at
+    /// [`MEDIUM`] and `crate::font::SERIF_ITALIC` has no consumer left.
+    #[test]
+    fn the_serif_is_the_work_titles_and_nothing_else() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut users: Vec<String> = Vec::new();
+        let mut names_family: Vec<String> = Vec::new();
+        for path in rust_sources(&root) {
+            let relative = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            // This module defines the token and `font.rs` holds the bytes;
+            // neither is a view setting a string in it.
+            if relative == "theme.rs" || relative == "font.rs" {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path)
+                .expect("a source file baz ships")
+                .replace("\r\n", "\n");
+            let source = source.split("#[cfg(test)]").next().unwrap_or_default();
+            if source.contains("WORK_TITLE") {
+                users.push(relative.clone());
+            }
+            if source.contains("font::SERIF") {
+                names_family.push(relative);
+            }
+        }
+        assert_eq!(
+            users,
+            ["views/home.rs"],
+            "the serif italic is the museum placard's convention for a \
+             *work's own title*, and the placard is the Home place's. A \
+             second consumer is a display face arriving by the back door — \
+             which is the thing `assets/fonts/README.md` records as deleted \
+             and staying deleted."
+        );
+        assert!(
+            names_family.is_empty(),
+            "{names_family:?} name the serif family directly. It is reachable \
+             through `theme::WORK_TITLE` and nowhere else, so that reverting \
+             the experiment is one line."
+        );
+    }
+
     /// **The tile's hover mark fades in ink and never in geometry**, and every
     /// point of the fade is an opaque pre-composite — the property the whole
     /// [`Palette::ink_over`] correction bought, held through a transition.
@@ -6177,7 +6269,14 @@ mod tests {
     #[test]
     fn the_lamp_is_named_only_where_playback_truth_is_drawn() {
         /// `src`-relative paths that may name an accent token, and why.
-        const PERMITTED: [&str; 2] = ["views/bottom_bar.rs", "icon.rs"];
+        ///
+        /// `views/home.rs` is the sixth, and it is the *same* use as the
+        /// first: the `CONTINUE` placard's needle is **where the playhead
+        /// is** — the third of the three things this test's own sentence
+        /// says the lamp means — drawn at the sleeve's measure on the
+        /// placard rather than on the artwork. It is one line, on one band,
+        /// about one run, and there is at most one interrupted run.
+        const PERMITTED: [&str; 3] = ["views/bottom_bar.rs", "icon.rs", "views/home.rs"];
 
         // Spelled in halves so this test's own source does not match it.
         let needle = concat!(".", "lamp");
@@ -6969,19 +7068,21 @@ mod tests {
     ///
     /// - **a glyph beside a word is not icon-only** — the word is the name
     ///   (`play_album`, the playlist page's `play_control`, the strip's
-    ///   `play_all`, and the panel's `ghost_row`, whose plus stands in the
-    ///   sleeve slot beside the words `New playlist`);
+    ///   `play_all`, the panel's `ghost_row`, whose plus stands in the sleeve
+    ///   slot beside the words `New playlist`, and the Home place's
+    ///   `resume_line`, whose triangle leads the word `Resume`);
     /// - **the well's magnifier is not a control** — the well is the
     ///   control; the glyph is its label (doc 10 §4.1), and the well itself
     ///   is reachable by every printable key.
     #[test]
     fn every_icon_only_control_carries_a_tooltip() {
-        const EXEMPT: [&str; 5] = [
+        const EXEMPT: [&str; 6] = [
             "play_album",
             "play_control",
             "play_all",
             "well",
             "ghost_row",
+            "resume_line",
         ];
         let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
         let mut bare: Vec<String> = Vec::new();

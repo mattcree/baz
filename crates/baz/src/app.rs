@@ -131,6 +131,13 @@ pub fn run(started: Instant, cli_dir: Option<PathBuf>) -> iced::Result {
     println!("[startup] room: {}", room.name);
     let mut app = iced::application("baz", App::update, App::view)
         .subscription(App::subscription)
+        // **baz closes itself.** iced 0.13 would close the window on the
+        // compositor's request before the update loop saw it, and the one
+        // thing that has to happen on the way out is writing where the run
+        // got to (ADR-0023 §6). The request becomes `Message::Quit` — the
+        // same message the desktop's own Quit sends, so there is one exit
+        // path and it cannot drift.
+        .exit_on_close_request(false)
         .theme(|_| theme::theme())
         .default_font(theme::SANS)
         .window(window_settings());
@@ -158,13 +165,16 @@ fn window_settings() -> window::Settings {
     )]
     let mut settings = window::Settings {
         size: WINDOW,
-        // The strip's floor is the window's declared minimum width
-        // (doc 10 §4.3): at 600 the two-line strip holds every tenant, and
-        // below it nothing further collapses — there is no third regime, so
-        // the honest move is to not offer the widths the layout does not
-        // answer. Height is left unbounded; the study declares no floor for
-        // it.
-        min_size: Some(Size::new(theme::TOP_BAR_FLOOR, 0.0)),
+        // The strip's floor **plus the returns lane's rail** is the window's
+        // declared minimum width. At 600 the two-line strip holds every
+        // tenant (doc 10 §4.3), and below it nothing further collapses —
+        // there is no third regime, so the honest move is to not offer the
+        // widths the layout does not answer. ADR-0030 puts a 96 px rail
+        // permanently to the strip's left and the strip resolves against
+        // `Shelf::body_width`, so the *window* has to be that much wider for
+        // the same strip to fit: 600 + 96 = **696**. Height is left
+        // unbounded; the study declares no floor for it.
+        min_size: Some(Size::new(theme::TOP_BAR_FLOOR + theme::SIDEBAR_RAIL_W, 0.0)),
         ..window::Settings::default()
     };
     #[cfg(target_os = "linux")]
@@ -352,6 +362,15 @@ pub(crate) enum Message {
     /// Top bar's Settings toggle, or Ctrl+`,`: go to the settings, or come
     /// back from them.
     ToggleSettings,
+    /// **`Resume` on the Home place's `CONTINUE` placard**: put the
+    /// interrupted run back on, at the track and the second it was
+    /// interrupted at.
+    ///
+    /// The ordinary `Play` (ADR-0030 §6), aimed at the snapshot's cursor:
+    /// `JumpTo` there, then `Seek` to the position. It is the one press on
+    /// that page that starts audio, and the only thing that spends the
+    /// snapshot's elapsed milliseconds.
+    ResumeRun,
     /// Ctrl+`P`: summon the playlist panel, or close it (ADR-0024 §5). A
     /// float over the place, not a place — the wall does not reflow by a
     /// pixel.
@@ -943,10 +962,29 @@ struct App {
     /// The two stamps [`Self::lane`] was built from: the shelf's and the
     /// playlists'.
     lane_mark: (u64, u64),
+    /// What [`Self::request_offscreen_art`] last asked for: the lane's stamps
+    /// and the place, which between them change exactly when one of the
+    /// surfaces beside the wall changes what it draws.
+    art_mark: ((u64, u64), Place),
     /// Whether a scan was running when the last message was answered — the
     /// falling edge is when the lists are re-read (see
     /// [`Self::sync_lists_with_the_library`]).
     was_scanning: bool,
+    /// **The interrupted run** (ADR-0023 §6, `crate::session`): what was
+    /// playing when baz was last closed, read once at launch.
+    ///
+    /// It is *held* rather than consumed, because the Home place's `CONTINUE`
+    /// draws from it and `Resume` spends it — and because a snapshot the shell
+    /// forgot the moment it restored the queue would leave nothing to say
+    /// where in the track the listener actually was.
+    resume: crate::session::Snapshot,
+    /// What the run looked like when the snapshot was last written: the
+    /// queue's length, the cursor, and the track sequence.
+    ///
+    /// Three integers rather than a path comparison, so "has the run moved?"
+    /// is asked on every message and costs nothing between the moments it
+    /// has — a track boundary, a queue replaced, a queue edited.
+    written: (usize, Option<usize>, u64),
     /// Which section of the Settings place is showing (an index into
     /// `views::settings::SECTIONS`).
     ///
@@ -1058,6 +1096,7 @@ impl App {
             .as_ref()
             .map_or(shelf::Density::Balanced, |config| config.density);
         let lane_open = stored.as_ref().is_none_or(|config| config.sidebar_open);
+        let resume = read_snapshot();
         // The folders baz holds this run (ADR-0022): what the config remembers,
         // with a `baz DIR` argument **added to the front** rather than replacing
         // them. Pointing baz at a folder for an afternoon must not silently
@@ -1084,7 +1123,10 @@ impl App {
             lane_open,
             lane: Vec::new(),
             lane_mark: (u64::MAX, u64::MAX),
+            art_mark: ((u64::MAX, u64::MAX), Place::Settings),
             was_scanning: true,
+            resume: resume.clone(),
+            written: (0, None, 0),
             modifiers: keyboard::Modifiers::empty(),
             started,
             first_frame_logged: false,
@@ -1108,6 +1150,15 @@ impl App {
             warmth: Tween::settled(0.0).with_curve(motion::Curve::Linear),
             saved_replay_gain,
         };
+        // **The run, handed back to the engine — silent.** `SetQueue` and
+        // nothing else: it replaces the queue and starts nothing
+        // (`baz_core::engine`'s command table), so the queue survives the quit
+        // exactly as ADR-0023 §6 asks and **nothing sounds unasked**. The
+        // cursor and the elapsed position stay in the snapshot, where
+        // `CONTINUE`'s one press spends them — see `crate::session` for why
+        // the engine cannot be handed a loaded-and-paused run at a non-zero
+        // cursor without changing it, which §6 costed at zero.
+        app.restore_the_run();
         // **The lists, re-read against the library** — once, here.
         // `Playlists::start` lists the folder before there is a library to
         // resolve entry paths against, so every sleeve came back empty; that
@@ -1130,12 +1181,18 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.route(message);
         self.sync_lists_with_the_library();
+        self.sync_snapshot();
         // **The lane, re-merged when — and only when — one of its two halves
         // says it moved**, and *after* the message rather than before it:
         // iced draws the frame this call produced, so a sync that ran first
         // would leave the lane one message behind whatever it describes.
         self.sync_lane();
-        task
+        // **The art the surfaces beside the wall need.** The wall's own
+        // prefetch is a range over the wall and answers nothing about a
+        // record drawn next to it, so the lane's rows and Home's newest row
+        // ask for their own — through the same cache, so a sleeve is one
+        // decode however many surfaces draw it.
+        Task::batch([task, self.request_offscreen_art()])
     }
 
     /// Everything [`Self::update`] does except keep the lane true — the update
@@ -1258,7 +1315,7 @@ impl App {
                 Screen::Shelf(_) => text_input::focus(search_id()),
                 Screen::Setup(_) => Task::none(),
             },
-            Message::Quit => iced::exit(),
+            Message::Quit => self.leave_for_good(),
             // Best effort by nature: a Wayland compositor is entitled to
             // refuse a focus request, and refusing is not an error here.
             Message::Raise => window::get_latest().and_then(window::gain_focus),
@@ -2137,7 +2194,149 @@ impl App {
             // this one ignores where you were (see [`Place::go`]).
             Message::GoTo(to) => Some(self.go(move |place| place.go(to))),
             Message::ToggleLane => Some(self.toggle_lane()),
+            Message::ResumeRun => Some(self.resume_the_run()),
             _ => None,
+        }
+    }
+
+    /// **The way out**, and the one moment the *elapsed* position is worth
+    /// writing (ADR-0023 §6): once, here.
+    ///
+    /// Every exit route lands on this — the window's close request (`run`'s
+    /// `exit_on_close_request(false)`) and the desktop's own Quit — so there
+    /// is one exit path and it cannot drift.
+    fn leave_for_good(&mut self) -> Task<Message> {
+        self.remember_the_run(self.player.elapsed_ms());
+        iced::exit()
+    }
+
+    /// **`Resume`**: the interrupted run, put back on where it stopped.
+    ///
+    /// `JumpTo` at the cursor then `Seek` to the position — the two commands
+    /// the snapshot exists to spend, and the one press ADR-0023 §6 promises.
+    /// The cursor is resolved *by path* against the queue as it stands, so a
+    /// rescan that dropped rows before it does not resume the wrong track.
+    ///
+    /// It does nothing at all rather than something approximate when the
+    /// track is gone: playing something the listener did not point at is the
+    /// failure ADR-0023 §2 already refuses by name.
+    fn resume_the_run(&mut self) -> Task<Message> {
+        let Some(path) = self.resume.current().map(std::path::Path::to_path_buf) else {
+            return Task::none();
+        };
+        let Some(position) = self
+            .player
+            .queue()
+            .and_then(|queue| queue.items.iter().position(|item| item.path == path))
+        else {
+            return Task::none();
+        };
+        let position_ms = self.resume.position_ms;
+        if !self.playback.send(Command::JumpTo { position }) {
+            self.player.engine_closed();
+            return Task::none();
+        }
+        self.player.note_transport_sent();
+        // The seek follows the jump: the engine starts the track from its
+        // beginning and this moves the needle to where it was. Zero is not
+        // sent — a `Seek` to 0 immediately after a start is a redundant
+        // drain-and-restart of a session that is already there.
+        if position_ms > 0 {
+            self.playback.send(Command::Seek { position_ms });
+        }
+        self.publish_mpris(false);
+        Task::none()
+    }
+
+    /// Hand the snapshot's run back to the engine at launch, silently.
+    ///
+    /// A run whose files the library no longer holds is dropped row by row
+    /// ([`vm::restored_queue`]); a run with nothing left is no run, and the
+    /// engine is not told about it.
+    fn restore_the_run(&mut self) {
+        if self.resume.is_empty() {
+            return;
+        }
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        let (queue, _) = vm::restored_queue(
+            &state.albums,
+            &self.resume.paths,
+            self.resume.cursor,
+            self.resume.provenance.clone(),
+        );
+        if queue.is_empty() {
+            return;
+        }
+        let paths = queue.paths();
+        if self.playback.send(Command::SetQueue { paths }) {
+            self.player.note_queue_sent(queue);
+        }
+    }
+
+    /// **Write the snapshot when the run moves** — a track boundary, a queue
+    /// replaced, a queue edited — and never between.
+    ///
+    /// The position written here is the *start* of the current track, which is
+    /// deliberate: between two of these moments that is the correct place to
+    /// resume from if baz is killed rather than closed. The exact elapsed
+    /// position is picked up once, on the way out ([`Self::remember_the_run`]).
+    fn sync_snapshot(&mut self) {
+        let mark = (
+            self.player.queued(),
+            self.player.playing_queue_row(),
+            self.player.track_seq(),
+        );
+        if mark == self.written {
+            return;
+        }
+        self.written = mark;
+        // **A loaded run that has not been started keeps the snapshot it came
+        // from**, and this is the clause the whole feature turns on. Launch
+        // hands the queue back to the engine (`restore_the_run`), which moves
+        // this mark from nothing to twelve tracks — and a write here would
+        // record a cursor of 0 and a position of 0, overwriting the
+        // interrupted point with *the fact that it was restored*. The
+        // listener would lose their place by opening baz, which is the exact
+        // opposite of what ADR-0023 §6 is for.
+        //
+        // So the run is written when the engine says where it is, and not
+        // before: `playing_queue_row` is `Some` only after a `TrackStarted`.
+        // The one exception is the run *ending* — an empty queue is written,
+        // because a `CONTINUE` band offering a run the listener finished
+        // would be the interface remembering something that is over.
+        if self.player.playing_queue_row().is_none() && self.player.queued() > 0 {
+            return;
+        }
+        self.remember_the_run(0);
+    }
+
+    /// Write the snapshot, with `position_ms` into the track the cursor is on.
+    ///
+    /// Best effort by nature, and every failure is a line on stdout: a player
+    /// that could not remember where it got to is a player that starts at the
+    /// top, not a player that stops.
+    fn remember_the_run(&mut self, position_ms: u64) {
+        let Some(path) = crate::session::session_file() else {
+            return;
+        };
+        let snapshot = match self.player.queue() {
+            Some(queue) if !queue.is_empty() => crate::session::Snapshot {
+                paths: queue.paths(),
+                cursor: self.player.playing_queue_row().unwrap_or(0),
+                position_ms,
+                provenance: queue.provenance.clone(),
+            },
+            // The run ended, or was never started: an empty snapshot, written
+            // rather than left stale. A `CONTINUE` band offering a run the
+            // listener finished would be the interface remembering something
+            // that is over.
+            _ => crate::session::Snapshot::default(),
+        };
+        self.resume.clone_from(&snapshot);
+        if let Err(error) = crate::session::store(&path, &snapshot) {
+            println!("[session] could not write {}: {error}", path.display());
         }
     }
 
@@ -2160,6 +2359,27 @@ impl App {
             self.playlists.refresh(Some(&state.library));
         }
         self.was_scanning = scanning;
+    }
+
+    /// Ask for the art the lane and the Home place draw, when either of them
+    /// has changed what it draws.
+    ///
+    /// The guard is the lane's own two stamps plus the place: between them
+    /// they change exactly when a new record appears in one of those
+    /// surfaces, so this is a comparison of three small values on every other
+    /// message.
+    fn request_offscreen_art(&mut self) -> Task<Message> {
+        let mark = (self.lane_mark, self.place);
+        if mark == self.art_mark {
+            return Task::none();
+        }
+        self.art_mark = mark;
+        let width = self.body_width();
+        let Screen::Shelf(state) = &mut self.screen else {
+            return Task::none();
+        };
+        let ids = state.offscreen_art(width);
+        state.request_thumbs_for(&ids)
     }
 
     /// Re-merge [`Self::lane`] if either half has been rebuilt since it was
@@ -3448,9 +3668,13 @@ impl App {
             // in the two commits after this one; what is here is the routing
             // and the frame, so the lane's head is a live control from the
             // moment it exists rather than two rows that go nowhere.
-            (Screen::Shelf(state), Place::Home) => {
-                views::home::view(state, &self.player, self.body_width())
-            }
+            (Screen::Shelf(state), Place::Home) => views::home::view(
+                state,
+                &self.player,
+                &self.resume,
+                self.body_width(),
+                collecting,
+            ),
             (Screen::Shelf(state), Place::NowPlaying) => {
                 views::now_playing::view(state, &self.player, self.body_width())
             }
@@ -3647,6 +3871,9 @@ impl App {
                 _ => None,
             }),
             window::resize_events().map(|(_, size)| Message::WindowResized(size)),
+            // The close request, answered by the shell rather than by the
+            // toolkit: see `run`'s `exit_on_close_request(false)`.
+            window::close_requests().map(|_| Message::Quit),
             self.playback.subscription().map(Message::Playback),
             self.mpris.subscription().map(message_for),
         ];
@@ -5100,6 +5327,67 @@ impl Shelf {
     /// Kick off off-thread decodes for every visible tile whose thumbnail is
     /// neither cached, in flight, nor known-absent. Ported from the spike;
     /// `get` (not `peek`) refreshes LRU recency for visible entries.
+    /// **Decode art for records that are on screen but not on the wall** —
+    /// the returns lane's rows and the Home place's `RECENTLY ADDED` row.
+    ///
+    /// The wall's own prefetch is a range over the *visible slice of the
+    /// wall*, which is the right guard for the wall and answers nothing about
+    /// a record drawn beside it: a recently-added record two thousand rows
+    /// down, or a lane row for something played last week, is on screen with
+    /// its decode never asked for, and falls back to the gradient forever.
+    ///
+    /// The same decode path, the same cache, the same in-flight and
+    /// known-absent sets — so a record's sleeve is one decode however many
+    /// surfaces are drawing it, and asking twice costs one set lookup.
+    fn request_thumbs_for(&mut self, ids: &[u64]) -> Task<Message> {
+        let mut tasks = Vec::new();
+        for &id in ids {
+            if self.thumbs.peek(&id).is_some()
+                || self.pending.contains(&id)
+                || self.no_art.contains(&id)
+            {
+                continue;
+            }
+            let Some(album) = self.albums.iter().find(|album| album.id == id) else {
+                continue;
+            };
+            self.pending.insert(id);
+            let path = album.first_track.clone();
+            tasks.push(Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        art::load_thumb(&path)
+                            .map(|(w, h, rgba)| iced_image::Handle::from_rgba(w, h, rgba))
+                    })
+                    .await
+                    .ok()
+                    .flatten()
+                },
+                move |handle| Message::ThumbLoaded(id, handle),
+            ));
+        }
+        Task::batch(tasks)
+    }
+
+    /// The ids the surfaces beside the wall are drawing: the lane's recent
+    /// records and the Home place's newest row.
+    fn offscreen_art(&self, width: f32) -> Vec<u64> {
+        let mut ids: Vec<u64> = self
+            .lane_recent
+            .iter()
+            .filter_map(|row| match row.subject {
+                crate::lane::Subject::Record(id) => Some(id),
+                crate::lane::Subject::Playlist(_) => None,
+            })
+            .collect();
+        ids.extend(
+            crate::views::home::newest(self, width)
+                .iter()
+                .map(|album| album.id),
+        );
+        ids
+    }
+
     fn request_visible_thumbs(&mut self) -> Task<Message> {
         let (start, end) = self
             .shelves()
@@ -5399,6 +5687,28 @@ fn persist_density(density: shelf::Density) {
 /// density step and the group key, and **no Settings row**).
 fn persist_lane(open: bool) {
     persist(|config| config.sidebar_open = open);
+}
+
+/// **The interrupted run, read once** (ADR-0023 §6).
+///
+/// A missing file is an empty snapshot and not an error: a fresh install has
+/// no run to continue, which is a state the Home place already draws — the
+/// band is absent, not empty.
+fn read_snapshot() -> crate::session::Snapshot {
+    let snapshot = crate::session::session_file()
+        .map(|path| crate::session::load(&path))
+        .unwrap_or_default();
+    if snapshot.is_empty() {
+        println!("[session] no interrupted run");
+    } else {
+        println!(
+            "[session] {} tracks held, cursor {} at {} ms",
+            snapshot.paths.len(),
+            snapshot.cursor,
+            snapshot.position_ms
+        );
+    }
+    snapshot
 }
 
 /// Read the play ledger's snapshot, or say why there is none.

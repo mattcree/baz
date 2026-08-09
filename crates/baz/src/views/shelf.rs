@@ -877,7 +877,7 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
 /// that was the loudest thing on screen after the artwork. Reserving the block
 /// costs nothing (the row pitch already has the room) and the title clips at one
 /// line instead, which is the failure the shelf can afford.
-fn tile<'a>(
+pub(crate) fn tile<'a>(
     shelf: &'a Shelf,
     player: &'a PlayerState,
     hang: Grid,
