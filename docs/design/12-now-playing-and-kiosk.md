@@ -1032,13 +1032,59 @@ the honest shape of the work, and §12 orders it.
 
 ---
 
-## 6. Input: the kiosk that can be paused
+## 6. Input: the transport comes off, because it is already there
 
 *A kiosk that cannot be paused is a design failure; a kiosk covered in chrome
 is not a kiosk.* Both halves are true, and the tension dissolves against
 §1.2's two distances rather than being split.
 
-### 6.1 The decision: the bar is in it, unchanged
+### 6.0 The decision: delete the place's transport, keep the bar's
+
+> **`now_playing.rs:168`'s call to `bottom_bar::transport` is deleted. Nothing
+> replaces it.**
+
+The owner's *"now playing does not need the play pause controls"* is, on this
+surface, a bug report. §0.4 (a) has the evidence: the place calls the bar's own
+`transport(player, ink)` and the bar draws the same function under it
+unconditionally (`app.rs:3744–3752`), separated by one `GAP_XL` 24 and the
+place's own bottom padding. **The same three glyphs, from the same function,
+driven by the same `PlayerState`, twice on one screen.**
+
+**Is the bar present in this place? Yes, and unconditionally.** The composition
+at `app.rs:3744–3752` appends `bottom_bar::view` under *every* place, gated on
+exactly one thing — `Availability::NotBuilt`, a build with no audio output at
+all, where hiding playback UI entirely is the honest answer. There is no
+per-place branch. `Place::NowPlaying` is not special-cased and does not need to
+be.
+
+**This is the same reasoning that just removed `‹ Library` from the place
+headers** (`9a7e9a5`, *"The place headers lose their way back, because the lane
+is one"*): a place that repeats what a resident surface already carries is
+making the same statement twice, and the second copy is the one that goes. The
+lane made the header's back-link redundant; the bar makes the place's transport
+redundant. One precedent, applied twice, four commits apart.
+
+**What it costs: nothing, and this is checkable.** Every function of the deleted
+control survives at full size, visibly, one surface down — play/pause, previous,
+next, the needle, the fader, the doors. The accessibility refusal
+(`REFUSALS.md:249–250`) is satisfied by *a* visible pointer-reachable control,
+not by two; and it is satisfied by the control the listener has used forty times
+a session rather than by a copy of it that exists in one place.
+
+**What it buys**, and why it is not merely tidiness:
+
+- **32 px of `below`** (`TRANSPORT_HIT`), which §5.5 spends on the meter and the
+  feed. The transport was the single largest term in the arithmetic that decides
+  how big the artwork can be — so the control the owner does not want was
+  literally making the thing he does want smaller.
+- **The composition stops arguing with itself.** L6's hierarchy rule is the one
+  §6.2 has to defend for the *title*; for the transport there is no defence to
+  make, because unlike the title it is not a statement at a different scale to a
+  different reader. It is the identical widget at the identical size.
+- **A surface with no controls on it but the needle** is what makes §7's
+  ambient motion legible as *content* rather than as chrome that moves.
+
+### 6.1 The bar itself: in it, unchanged
 
 ADR-0022's second rule — *"the bar is in every place, unchanged, and it is the
 only thing that is"* (`0022-places-and-nothing-else.md:91`) — **is not amended
@@ -1092,145 +1138,341 @@ now-playing block, in this place as in every other.
 
 ---
 
-## 7. Motion, idle cost, and burn-in
 
-This is the section the brief's first two constraints live in, and they pull
-against each other: **constraint 1** says a screen left running for eight hours
-is the ultimate test of the 0.0 % idle claim, and **constraint 2** says a static
-screen for eight hours is an OLED hazard whose standard mitigation is to move
-pixels. Both are right. The resolution is that the screen is neither static nor
-animated — **it is a slideshow with a four-minute frame rate**, and that fact
-does the burn-in work that motion would otherwise have to do.
+## 7. Ambient motion: the class, the toggles, and the bill
 
-### 7.1 The redraw ledger
+### 7.0 The ruling, and what it changes
 
-The honest accounting, in frames, with every number cited rather than
-estimated:
+> **"Ambient motion is fine as long as the performance remains top tier."**
+> — the owner, 2026-08-09
 
-| State | What drives a redraw | Rate |
-|---|---|---|
-| Library at rest, today | `REFRESH_TICK`, the periodic-rescan clock | **1 wake/minute** (`app.rs:82`) |
-| Any place, a tween live | `motion::TICK`, installed **only while `moving()`** | 125 Hz, for ≤ 200 ms (`motion.rs:63`, `app.rs:3345–3353`) |
-| **Kiosk, playing** | `Event::Progress`, from the engine | **4 Hz** (`engine.rs:562`) |
-| **Kiosk, paused** | nothing — `Progress` is not emitted while paused | **0** (`protocol.rs:435–438`; pump pause gate `engine.rs:1518–1523`) |
-| **Kiosk, stopped / queue ended** | nothing | **0** |
+This reverses the posture the first draft of this document was written in, and
+it is worth being precise about what it does and does not reverse.
 
-Three things follow, and they are the whole of this document's answer to
-constraint 1:
+**What it does not touch.** ADR-0020's measurement stands, its five transitions
+stand, and its idle claim stands *for the product at rest*. That claim was
+earned by refusing decorative motion **nobody asked for** — a drifting gradient
+on the wall, a pulse on the bar, a stagger on the grid — and every one of those
+is still refused, because nobody has asked for them and they would still be
+decoration.
 
-1. **The kiosk introduces no clock of its own.** It installs no
-   `window::frames()`, no `time::every`, no subscription that the Library place
-   does not already have. Its redraw rate is the engine's event rate, and the
-   engine's event rate is derived from *delivered audio* rather than from a
-   clock (`engine.rs:557–561`), so it is 4 Hz of playing time and exactly zero
-   when nothing is playing.
-2. **The eight-hour test is passed by construction, not by tuning.** ADR-0020's
-   claim is that the subscription is inactive when no tween is running, asserted
-   by a test rather than promised. The kiosk does not weaken that assertion —
-   it is the first surface on which it is *load-bearing for hours at a time*,
-   which is an argument for the claim rather than against it.
-3. **4 Hz is not new.** The bar has been redrawing at 4 Hz while music plays
-   since the needle shipped; the kiosk redraws the same window at the same rate
-   with a different picture in it. The marginal cost of this surface over the
-   Library place, while playing, is one artwork quad and a few text runs per
-   frame — and the Library place is drawing up to 120 tiles per frame in
-   ADR-0020's own measurement setup.
+**What it changes.** This surface is different in kind. The owner has asked for
+ambient motion *here*, explicitly, on a screen whose entire purpose is to be
+looked at. **Motion that is the content is not decoration.** So ADR-0020 does
+not get violated by this surface; it **gains a class** that this surface fits
+into, bounded by the same discipline every other class carries.
 
-**What is refused, by name.** Each of these was considered because the brief
-invited it, and each breaks a property the project measured and shipped:
+**What replaces the old bar.** The constraint is no longer *"does it redraw
+while idle"* — of course it does, that is what ambient means. The constraint is
+the owner's own, and it is harder because it is quantitative: **top tier**, in
+numbers, with a method. §7.4 is that bill, and §12 gates the work on it.
 
-| Refused | Why |
+### 7.1 ADR-0020's sixth class: user-started ambient content
+
+ADR-0020 names five bounded transitions (§2) and, in its amendment, a sixth
+thing that is *not* a transition — pointer-derived deformation (§5), admitted as
+its own class *precisely because* shipping it under the transitions list *"would
+make the list a fiction"*. That is the precedent, and it is exactly the move
+this needs:
+
+> **7. User-started ambient content is permitted**, as a class distinct from
+> both the bounded tween and pointer-derived deformation, under its own
+> discipline:
+>
+> - it exists **only on a surface whose purpose is to be looked at** — today
+>   that is `Place::NowPlaying` and nothing else, and a second such surface
+>   needs an argument that beats this one;
+> - it is **a thing you start, never a thing that starts itself** — the same
+>   sentence the ledger already applies to shuffle (`REFUSALS.md:35–36`), and
+>   the reason the toggles in §7.2 are first-class rather than a preference
+>   panel;
+> - it costs **exactly nothing when it is off or when its surface is not on
+>   screen**, guaranteed by the subscription being a function of state (§7.3)
+>   rather than by anyone remembering to stop a timer;
+> - it carries **a stated frame budget and a measured cost**, re-measured when
+>   it changes, because *"top tier"* is a number or it is nothing;
+> - it **states nothing**. This is the line that keeps the class from becoming
+>   a loophole: a bounded tween exists to say *something changed*, and ambient
+>   content exists to be pleasant. Because it makes no claim, it may never be
+>   the only carrier of one — no state is signalled by the field's motion, and
+>   `REFUSALS.md:259–261` is why.
+
+The last clause is what stops this class swallowing the other two. A drifting
+field cannot tell you the track changed; the hard cut does that, and it stays a
+hard cut.
+
+### 7.2 What is toggle-able, where, and what the defaults are
+
+Three independent switches, because they have genuinely different costs and
+genuinely different audiences:
+
+| # | Toggle | What it controls | Default | Cost when on |
+|---|---|---|---|---|
+| **T1** | **Ambient field** | The derived wash (§5.3), and whether it **drifts** or is still | **On, drifting** | §7.4 |
+| **T2** | **Meter** | The two registers of §9 — the field's response and the instrument | **On** | §7.4 |
+| **T3** | **Feed** | The rotating fact line (§8) | **On** | ~0 (§8.5) |
+
+**Why these three and not one.** A single "ambient mode" switch would bundle a
+GPU cost, an audio-thread cost and a disk read into one control, so a listener
+who wants the facts but not the meter would have to take both. Three switches,
+three subsystems, and each one's *off* is a real structural saving rather than a
+skipped draw call.
+
+**Why the defaults are on.** Under the old posture these defaults would have
+been defensive; under the ruling they are aesthetic, and the aesthetic answer is
+that **a surface the owner asked to be ambient should be ambient the first time
+he opens it.** A default of *off* would make the feature a thing you have to
+find, which for a screen whose whole value is being left running is the wrong
+failure. T1's *drift* sub-state is the one genuine judgement call, and it
+defaults on for the burn-in reason §7.6 gives — it is the mitigation, so making
+it opt-in would ship the hazard by default.
+
+**Where the controls live: both, and they are different controls.**
+
+- **On the surface** — a single **`Ambient`** word-door in the place's
+  top-right, opening a small menu with the three switches. It is a labelled,
+  pointer-reachable control at rest, which `REFUSALS.md:249–250` requires and
+  which a hover-revealed gear would violate. It is a *word* and not a glyph for
+  doc 10 §3.4's reason: the enumerated symbol list is closed at two, the gear
+  and the magnifier (`system.md:876–879`), and no universal symbol means
+  *ambient*.
+- **In Settings** — the same three switches, in the playback section, because
+  Settings is where a person looks for a setting and because a listener who
+  turned the field off from a chair needs somewhere to find it again that is not
+  the surface they turned it off on.
+
+Both write the same three booleans. There is no third state and no per-place
+override; this is one surface, so the setting is global by construction.
+
+**The fourth switch that is not here.** *Reduce motion* is not a baz setting —
+ADR-0020 §2 already specifies that every transition *"degrades to a hard cut by
+passing a zero duration, which is how a reduce motion setting will be
+implemented"*. T1's still/drifting sub-state is that mechanism for this class,
+and if a global reduce-motion preference is ever read from the desktop it sets
+T1 to still and leaves T2 and T3 alone — a meter is not motion for motion's
+sake, and a rotating fact is not an animation at all.
+
+### 7.3 The structural zero, and why it is not a promise
+
+> **With this surface off screen, or with its toggles off, idle is bit-for-bit
+> the 0.0 % that shipped — because there is no timer to be careful about.**
+
+The mechanism is already in the codebase and already commented, at
+`app.rs:3900–3908`:
+
+> *"**Only while something is moving, and never otherwise** — the whole of
+> ADR-0020's cost argument… A subscription in iced 0.13 is a function of state:
+> it is rebuilt after every update and the ones that went away are dropped, so
+> the last tick of the last tween removes this timer and the event loop parks."*
+
+So the ambient subscription is one more arm in the same `Vec<Subscription>`,
+under a guard that names both conditions:
+
+```rust
+// The ambient surface's clock. Both terms matter: the place must be on
+// screen AND something must be asked to move. Off screen, this arm does
+// not exist, so there is no timer, no wakeup, and nothing to stop.
+if self.place == Place::NowPlaying && self.ambient.animating() {
+    subs.push(window::frames().map(Message::AmbientFrame));
+}
+```
+
+Three properties follow, and each is structural rather than careful:
+
+1. **Navigating away removes the clock.** `self.place` is read on every rebuild.
+   A place change is an update; the arm evaluates false; the subscription is
+   dropped; the loop parks in `Wait` (`iced_winit/src/program.rs:830–846`). No
+   teardown code exists to be forgotten, because there is no handle to hold.
+2. **Toggling off removes the clock**, by the identical mechanism —
+   `ambient.animating()` is `T1.drifting || T2.on`, and T3 is deliberately not
+   in it because a feed that changes on track change needs no clock at all
+   (§8.5).
+3. **The rest of the product is untouched, provably.** ADR-0020's idle
+   assertion is *a test* (`0020-motion.md`: *"the suite asserts the subscription
+   is inactive when no tween is running"*). This adds one assertion of the same
+   shape, and §12 step 6 makes it a gate:
+
+```
+the_ambient_clock_is_absent_outside_its_place
+  for place in every Place except NowPlaying:
+    for toggles in every combination:
+      assert!(!subscription_contains_ambient_frames(place, toggles))
+```
+
+**One caveat, stated because it is real and easy to miss.** §0.3(4) found that
+iced's control flow is **global, not per-window**, and §0.3(5) that after any
+message batch *every* window is redraw-requested (`program.rs:1089–1097`). Today
+baz is a single-window `application`, so this changes nothing. It is recorded
+because it is the precise reason §11 does **not** recommend a second window: an
+ambient clock in a kiosk window would pace the main window too, and the 0.0 %
+idle claim would become false for the *whole product* the moment the kiosk was
+opened. **The single-window design is what keeps §7.3's guarantee true**, which
+makes §11's toolkit finding a design constraint rather than a limitation.
+
+### 7.4 The bill
+
+**What is already known, and it is the most relevant datum in the project.**
+Doc 04 §1.4 measured baz's exact toolkit and feature set under **continuous**
+animation on a real GPU (AMD RX 7700/7800 XT, Wayland, vsync, 1280 × 860,
+**120 tiles per frame**):
+
+| driver | continuous animation |
 |---|---|
-| A drifting gradient, a slow pan/zoom over the artwork ("Ken Burns") | Requires a redraw while the window is idle — the clause everything else hangs on (`REFUSALS.md:243–245`). Also draws *on* artwork, refused separately |
-| A pulsing or breathing glow on the halo | Same, plus the halo is `LAMP_GLOW` and the accent may not be animated into decoration (`REFUSALS.md:250–252`: *"motion states what changed; it never decorates"*) |
-| A rotating record, a spinning disc | Refused twice over: the redraw clause, and skeuomorphism's ban on *"any circle pretending to be a record"* (`REFUSALS.md:257–261`) |
-| An album-art crossfade on track change | Refused by name in ADR-0020 §3 and `REFUSALS.md:241–243`. A track change is a hard cut |
-| A spectrum analyser at rest | §10. It is the one item here with a real case, and it needs its own ADR |
+| bounded `time::every` | 242 frames (60 fps) · **4.0 % CPU** |
+| unconditional `frames()` | 241 frames · **2.0 % CPU** |
 
-**What makes it feel alive instead**, since "nothing moves" is only an
-acceptable answer if something else is doing the work:
+**4.0 % of one core at 60 fps, drawing 120 album tiles.** This surface draws
+**one** image, six text runs, a needle and a meter — an order of magnitude fewer
+widgets. That is the strongest available evidence that the CPU side of this
+design is cheap, and it is a measurement rather than a hope.
 
-- **Scale.** A 720 px sleeve is not a 320 px sleeve; the material of a record
-  sleeve — grain, print texture, the photograph — is legible at kiosk size and
-  invisible at wall size. The artwork is doing the aesthetic work, which is
-  exactly the direction's own thesis: *"the works are lit; the room is not"*
-  (`system.md:25`).
-- **Type at a scale the product has never used.** `SIZE_HERO` 28 is the
-  largest token baz owns and it exists for the first-run question. This surface
-  needs a step beyond it (§5.2), and a title set that large is an event on a
-  near-black field.
-- **The needle advancing**, which was never animation: *"the two movements that
-  were never animation are unchanged: the needle advancing with playback (data
-  arriving) and scrolling"* (`REFUSALS.md:247–248`).
-- **The track changing.** Every three to five minutes the entire surface
-  becomes a different picture and a different set of words. Over an eight-hour
-  evening that is on the order of **100–160 complete content changes**. A
-  surface that fully repaints itself 130 times an evening is not a static
-  screen, and §7.2 is where that stops being an aesthetic observation and
-  becomes the engineering answer.
+**What is not known, and this study will not pretend otherwise.** Three numbers
+the owner's bar requires do not exist yet, because the feature does not exist
+yet:
 
-### 7.2 Burn-in, and why the palette is the mitigation
+1. Frame time at 60 Hz for **this** composition, with the field's shader.
+2. **GPU** cost — doc 04 measured process CPU from `/proc/self/stat` only, which
+   for a fragment-shader-bound design is the wrong instrument.
+3. Both of the above **at 3840 × 2160**, which is the case the owner described
+   and which is **4.0× the pixels** of doc 04's 1280 × 860 window.
+
+**The estimates, labelled as estimates.** The field is a full-screen quad with a
+few dozen ALU operations per pixel and no texture sampling. At 4K60 that is
+≈ 0.5 Gpixel/s of fill; integrated GPUs of the last five years sustain several
+times that, so the field should be **GPU-bound but far from GPU-limited**, and
+its CPU cost should be **one uniform write per frame**. The meter's geometry is
+tens of vertices. *These are engineering estimates from the shape of the work,
+not measurements, and §12 step 7 refuses to ship on them.*
+
+**The measurement protocol** — an extension of doc 04 §1.3's harness rather than
+a new one, so the numbers are comparable to the ones already in the project:
+
+| | |
+|---|---|
+| **Harness** | doc 04 §1.3's standalone binary, pinned to iced 0.13.1 with baz's exact feature set, extended with a fourth driver: `ambient` (field shader + meter geometry + feed, no tiles) |
+| **Instruments** | process CPU from `/proc/self/stat` (as doc 04); `view()` call count in a `Cell` inside `view` (passive, as doc 04); **frame time from `RedrawRequested` deltas**; **GPU busy % and VRAM from `amdgpu_top`/`radeontop`**, which doc 04 lacked |
+| **Windows** | 1280 × 800 · 1920 × 1080 · **3840 × 2160**, all lane-collapsed |
+| **Phases** | 3 s warm-up · 60 s ambient with music playing · toggles off · 60 s idle |
+| **Control** | the same binary with all three toggles off, which must reproduce doc 04's `off` driver exactly |
+
+**The acceptance gate — the numbers that define "top tier".** §12 step 7 does
+not pass unless all four hold on the real GPU:
+
+| Metric | Threshold | Why this number |
+|---|---|---|
+| Frame time, 1920 × 1080, 99th pct | **< 8 ms** | Half a 60 Hz frame. Leaves the compositor its own budget on a machine also doing work |
+| Frame time, 3840 × 2160, 99th pct | **< 12 ms** | Still inside 16.7 ms with margin, at 4× the pixels |
+| Process CPU, ambient, 4K | **≤ 5 %** of one core | Doc 04's continuous figure was 4.0 % at 120 tiles; this draws far less, so exceeding it would mean something is wrong rather than expensive |
+| Process CPU, all toggles off, idle | **0.0 %**, and `view()` calls **0** after settle | §7.3's structural claim, verified rather than asserted |
+
+**On taking the measurement.** Doc 04 recorded that its real-GPU run *"put a
+window on the maintainer's display for about 50 seconds… there is no headless
+path to a real-GPU number, and reporting software-rasterised CPU as if it were
+the shipping cost would be a false receipt — so the intrusion was taken
+deliberately rather than avoided."* The same applies and more so, because this
+run needs a 4K panel and about four minutes. **The intrusion is the deliverable,
+not a cost to be minimised**: a design justified by llvmpipe numbers would be
+exactly the false receipt doc 04 refused to write.
+
+### 7.5 What makes it cheap, and how it degrades
+
+**The field is a `shader` widget, not a `Canvas`.** §0.3(6–7) settles this:
+
+- `Canvas` is **not compiled into baz today** and its `Cache` *"will not redraw
+  its geometry unless the dimensions of its layer change or it is explicitly
+  cleared"* (`iced_graphics/src/geometry/cache.rs:7–10`) — so a field that drifts
+  means `clear()` every frame and a **full re-tessellation** of a gradient mesh
+  at 4K, on the CPU, sixty times a second. That is the expensive way to draw the
+  cheap thing.
+- `iced::widget::shader` **is available today with no manifest change**, because
+  `wgpu` is in iced's default features (`iced/Cargo.toml:107–112`) and baz does
+  not disable them. The drift becomes a **time uniform**: the CPU writes one
+  float per frame and the GPU evaluates the wash per pixel, which is what GPUs
+  are for.
+
+**The meter is a `Canvas`**, and that is the one manifest change this design
+needs (`canvas = ["iced_widget/canvas"]`, no new crate — §0.3(6)). Its geometry
+is small, and `Cache::with_group` (`cache.rs:41–45`) is used exactly as intended:
+**the static scale and labels in one cache, the moving mark in another**, so the
+per-frame re-tessellation covers tens of vertices rather than the whole
+instrument.
+
+**The degradation, which is required rather than nice.** iced's defaults include
+`tiny-skia` as a software fallback, and **the shader widget renders nothing
+under it** (§0.3(7)). A blank rectangle where the field should be is not an
+acceptable failure for the surface the owner leaves running. So:
+
+> **T1 has three states, not two: `drifting` · `still` · `unavailable`.** When
+> the wgpu backend is not in use, the field falls back to a **static** wash —
+> the same three sampled colours composited once as an ordinary gradient
+> `container` background, which every backend draws. It does not drift, it costs
+> nothing per frame, and it looks like the still state rather than like a bug.
+
+The detection is a startup property of the renderer, not a per-frame check, and
+it sets T1's ceiling once. A listener on software rendering sees a still field
+and a working meter, which is a good screen; they do not see a hole.
+
+### 7.6 Burn-in: the hazard, and why ambient motion is now its answer
 
 **The hazard is real and specific.** OLED wear is cumulative and per-subpixel:
-an emitter's brightness degrades roughly in proportion to the total light it has
-emitted, so a region that is bright and *unchanging* for many hours ages
-relative to its neighbours and leaves a visible ghost. That is why the standard
-mitigations in shipping products are all either *move the bright thing* (pixel
-shifting/orbiting) or *make it dimmer* (logo-luminance limiting, static-content
-detection).
+an emitter dims roughly in proportion to the total light it has emitted, so a
+region that is bright **and unchanging** for many hours ages relative to its
+neighbours and leaves a ghost. Every shipping mitigation is one of two things —
+*move the bright thing* (pixel shifting, orbiting) or *dim it* (logo-luminance
+limiting, static-content detection).
 
-**Both standard mitigations argue with §7.1**, and pixel shifting argues with it
-directly: moving pixels on a timer is a redraw while the window is idle, which
-is the one clause ADR-0020 kept as an absolute. So the tension the brief names
-is genuine. Here is how it resolves.
+**Under the old posture this was a genuine contradiction**: the mitigation is
+motion, and motion was forbidden. Under the ruling it is not a contradiction at
+all — **the mitigation and the feature are the same thing** — and this section
+gets to stop arguing and start specifying.
 
-**First: this room is already the mitigation.** Closing Time's wall is
-`#0C0D0E` (`system.md:150`) — a near-black at the very bottom of the display's
-range, where an OLED subpixel is emitting almost nothing and therefore ageing
-almost not at all. The product's palette was chosen for a gallery-at-night
-look, and the same choice makes it close to the least hazardous full-screen
-content a display can be asked to hold. Roughly:
+**Four layers of answer, weakest hazard first:**
 
-```
-1920 × 1080 kiosk, one 720 px sleeve, the type block, the bar
-────────────────────────────────────────────────────────────────
-the room  (#0C0D0E, near-zero emission)          ~74 % of pixels
-the artwork (bright, arbitrary, CHANGES/track)   ~25 % of pixels
-ivory type + bar furniture (small, CHANGES/track) ~1 % of pixels
-```
+1. **The palette does most of the work, and it always did.** Closing Time's room
+   is `#0C0D0E` (`system.md:150`), at the very bottom of the display's range,
+   where a subpixel emits almost nothing and ages almost not at all. Roughly, at
+   1920 × 1080 with a 729 px work:
 
-The only large bright region is the artwork, and **the artwork is the thing
-that changes every three to five minutes.** The regions that are static — the
-room, the bar's band, the hairline — are the regions that are near-black. The
-hazard and the stasis are in different places, which is the property that makes
-this safe without moving anything.
+   ```
+   the room + the field (#0C0D0E → L ≤ 0.22)        ~73 % of pixels
+   the work (bright, arbitrary, CHANGES per track)  ~26 % of pixels
+   type + bar furniture (small, CHANGES per track)   ~1 % of pixels
+   ```
 
-**Second: the genuinely static case is the stopped one, and S5 already answers
-it.** A kiosk left paused overnight *is* an unchanging frame. But a stopped
-kiosk holds no artwork and states silence in words (§5.5) — so the frame it
-holds for those hours is overwhelmingly `#0C0D0E` with one quiet line on it.
-The honest empty state and the burn-in answer turn out to be the same design,
-which is the strongest sign that both are right.
+   **The only large bright region is the artwork, and the artwork is the thing
+   that changes every three to five minutes** — 100–160 complete content changes
+   over an eight-hour evening. The hazard and the stasis are in different
+   places.
+2. **The field drifts, which is the textbook mitigation, for free.** T1's drift
+   moves the wash's centres continuously. Every pixel of the 73 % therefore sees
+   a varying — if small — luminance over any ten-minute window, which is exactly
+   what pixel-orbiting exists to achieve, achieved by the feature rather than by
+   a hack bolted beside it. **This is the argument for `drifting` being the
+   default**, and it is a hardware-protection argument rather than an aesthetic
+   one.
+3. **The one genuinely static case is the stopped one, and it is already
+   answered.** A kiosk left paused overnight is an unchanging frame — but a
+   stopped surface holds no artwork and states silence in words
+   (`now_playing.rs:92–104`, S5), so the frame it holds is overwhelmingly
+   `#0C0D0E` with one dim line on it. The honest empty state and the burn-in
+   answer are the same design, which is the strongest sign both are right. Note
+   the field is also **absent** when nothing sounds: there is no record to derive
+   it from, so there is nothing to draw.
+4. **The bar's furniture is the residual**, and it is small, dim, and 81 px of a
+   1080 px screen. It is the same furniture every other place shows, so this
+   surface adds no hazard the product did not already have.
 
-**Third: the mitigation that costs a redraw is priced, and declined.** If
-real-world evidence ever shows the above to be insufficient, the available move
-is a **one-pixel nudge of the whole composition on a slow timer**. Its cost is
-knowable in advance, and it is small:
+**What is still refused, and now for reasons rather than by inheritance:**
 
-> A 1 px shift once per minute is **one frame per 60 s**. baz already runs a
-> 60-second timer at rest in the Library place — `REFRESH_TICK`
-> (`app.rs:82`, installed at `app.rs:3366`) — and that timer is inside
-> ADR-0020's accepted idle cost today. So the nudge is provably no more
-> expensive than a clock the product already runs while doing nothing.
-
-It is **not adopted**, for two reasons: the content already changes 130 times an
-evening, and a mitigation with no measured problem to solve is decoration with a
-technical justification. It is recorded here at its price so that re-proposing
-it costs an observation rather than an argument — and so that if it is ever
-adopted, nobody has to re-derive whether it breaks the motion law. It does not;
-it costs one frame a minute, which is `REFRESH_TICK`'s bill exactly.
-
-**What is refused outright**: global dimming after a timeout (it would make the
-artwork a liar about its own colours, and the room is already dark), and
-"screensaver" behaviour that replaces the content with something else while
-music is still playing (the screen's whole job is to state what is playing).
+- **Global dimming after a timeout** — it would make the artwork a liar about
+  its own colours, and the room is already dark. The hazard does not come from
+  the room.
+- **Replacing the content with a screensaver while music plays** — the screen's
+  whole job is to state what is playing. Plexamp's screensaver is the prior art
+  and it is the wrong trade for a surface that exists to answer *what is this*.
+- **A periodic whole-composition pixel nudge** — the drift already moves the
+  large areas continuously, and nudging the *type* would make text shimmer,
+  which is worse than the hazard it treats. Recorded at its price so
+  re-proposing it costs an observation rather than an argument: a 1 px shift
+  once a minute is one frame per 60 s, which is exactly `REFRESH_TICK`'s
+  existing bill (`app.rs:82`).
