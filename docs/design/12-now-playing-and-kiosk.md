@@ -1,50 +1,73 @@
 # 12 — The now-playing screen: a surface for the far field
 
-> The owner, verbatim:
+> The owner, verbatim, on what this surface is to become:
 >
-> *"we would like a nigh playing screen, which is just dedicated to a very
-> nice, almost, like, kiosk like look in the sense that you can just leave it
-> full screen on your other monitor, and it will just be great. For example,
-> if it could show the album and the track that's playing and also details
-> about that that are found on… well, wherever you think is a good source that
-> really can give context. Or that's just an example of a thought, but I still
-> think that kiosk mode could be good."*
+> *"now playing does not need the play pause controls. it would be nice if the
+> album art was somehow more prominent, like it takes up the background and has
+> some nice VU meter stuff over it in a stylised way, maybe somewhat ambient…
+> I also like the idea of just seeing related stuff appearing in like a feed of
+> random facts. I think this kinda stuff would naturally be toggle-able"*
 >
-> And, in a second brief: *"maybe we could have a visualizer mode at some
-> point, but also VU options"* — with the instruction that the two are to be
-> **separate proposals**.
+> Earlier, on the same surface: *"a kiosk like look in the sense that you can
+> just leave it full screen on your other monitor"*, and *"maybe we could have
+> a visualizer mode at some point, but also VU options"*.
 >
-> (Voice-dictated; *"nigh playing"* is now playing.)
+> And the ruling that settles §7, given while this draft was being finished:
+> **"ambient motion is fine as long as the performance remains top tier."**
 >
-> A design study, not an implementation. Written 2026-08-09 against `b795a06`
-> (the merge that retired the icon backlog entry). Every claim about shipped
-> behaviour is cited `file:line`; every prior-art claim carries a named
-> source; every performance claim is a measurement with a method attached, or
-> it is labelled an estimate. Its first decision is proposed as
-> [ADR-0029](../adr/0029-now-playing-and-kiosk.md). **Its second and third
-> decisions — level metering, and the visualizer — are deliberately not in
-> that ADR**, for the reason §9.0 gives: each one needs a refusal overturned,
-> and a refusal overturned inside an ADR about something else is a refusal
-> deleted rather than beaten.
+> A design study, not an implementation. Written 2026-08-09 against `ee96016`.
+> Every claim about shipped behaviour is cited `file:line`; every prior-art
+> claim carries a named source; every performance claim is a measurement with a
+> method attached, or it is **labelled an estimate**. Its decisions are proposed
+> as [ADR-0029](../adr/0029-the-ambient-surface.md).
 >
-> The short version. **The screen is a place, not a second window** — iced
-> 0.13 cannot put a window on a monitor you name (§0.3, verified against the
-> installed source), so *"full screen on your other monitor"* is delivered by
-> the gesture that already works on both display servers: drag the window
-> there, press one key. **Nothing on it moves that is not data arriving**, and
-> the redraw rate while music plays is the engine's existing 4 Hz
-> (`engine.rs:562`) — so ADR-0020's 0.0 % idle claim is not merely survived
-> here, it is *tested* here, for eight hours at a time. **Burn-in is answered
-> by the palette rather than by motion**: the room is `#0C0D0E`, the bright
-> region is the artwork, and the artwork changes every few minutes on its
-> own. **The screen is excellent with the network unplugged**, because the
-> five things worth saying about a record are already on disk — and one of
-> them, the signal path, is already computed and currently dead code
-> (`player.rs:2016–2027`). Enrichment is a strictly additive opt-in layer that
-> the composition must not have a hole in when it is off. **VU is admitted as
-> data and refused as furniture.** **The visualizer is deferred with a stated
-> price**, because it is the one thing in this document that genuinely costs a
-> redraw while the window is otherwise idle.
+> **What changed since this document was started.** `Place::NowPlaying`
+> shipped (`views/now_playing.rs`), and it shipped with the composition this
+> study had specified: artwork large, identity under it, the needle, every
+> measure derived from the viewport and swept 400–4000 px by its own test
+> (`now_playing.rs:218–234`). So the kiosk is not a second design; it is this
+> surface with a bigger number in it, and that is now a property of the
+> arithmetic rather than a plan. What this revision does is take the surface
+> from *correct* to *worth leaving on*.
+>
+> The short version, decision by decision.
+>
+> 1. **The transport comes off the surface.** It is drawn twice today — the
+>    place calls the bar's own `transport()` (`now_playing.rs:168`) while the
+>    bar draws it 24 px below (`app.rs:3744–3752`). Same function, same state,
+>    two copies, one screen. §6.
+> 2. **The artwork becomes the field, and the refusal it argues with is already
+>    broken.** `NOW_PLAYING_MAX` is 720 px (`now_playing.rs:81`) and the cache
+>    it draws from is 320 px (`art.rs:48`) — the shipped surface upscales
+>    2.25× at 1920×1080 today, which is *no artwork is ever drawn larger than
+>    its source* being false in the one place the ledger never checked. §5
+>    resolves it with a **derived ambient field**: not the artwork, a *reading*
+>    of it, in the same sense the ledger already calls an art-derived lamp
+>    **data**. The refusal is rewritten to say what it always meant.
+> 3. **The meter is a real measurement or it is furniture.** It is **not a VU**;
+>    it is a **momentary-loudness meter to EBU R128 / ITU-R BS.1770-4** with a
+>    sample-peak overlay, because baz already owns that filter, derived and
+>    vector-tested (`loudness.rs:1`, ADR-0015 §1). Ballistics are specified,
+>    the standard is named, and *"VU options"* is answered with three
+>    ballistics rather than one. The tap is **read-only by type** — `&[f32]`,
+>    never `&mut` — so bit-exactness is not promised, it is unspoiled by
+>    construction. §9.
+> 4. **The feed is excellent with the network unplugged**, because the ledger,
+>    the tags, the measured loudness and the signal path are already on disk.
+>    Its rotation rule is one sentence, and it falls on the permitted side of
+>    *history records, it never performs* for a reason §8.4 states rather than
+>    assumes. Enrichment is a strictly additive opt-in layer the composition
+>    must not have a hole in when it is off.
+> 5. **Ambient motion is the thing, not the concession.** The owner asked for
+>    it; ADR-0020 gains the class rather than being violated by it. The bar is
+>    performance, and §7 pays it in numbers with a stated method. **The rest of
+>    the product's idle is untouched structurally** — the subscription is a
+>    function of state (`app.rs:3900–3908`), so with the place off screen there
+>    is no timer to be careful about. **Burn-in stops being an argument** and
+>    becomes the one hazard ambient motion happens to fix.
+> 6. **Kiosk mode is one drag and one key**, because iced 0.13 cannot put a
+>    window on a monitor you name (§0.3, verified against the installed
+>    source). §11.
 
 ---
 
@@ -52,24 +75,53 @@
 
 ### 0.1 The constraint set already in force
 
-This study does not get to invent freely. The refusals ledger, nine
-composition laws (`.interface-design/system.md` §13), and ADR-0020's motion
-law bound every answer below. The entries that bind hardest, and what each
-one forbids here:
+This study does not get to invent freely — but four of the entries that used
+to bind it hardest are entries **the owner has now reversed**, and the ledger's
+own preamble settles what that means:
 
-| Entry | Where | What it forbids on this surface |
+> *"Contributors and agents — not the owner. **The owner's decision is
+> sufficient on its own**; an entry he reverses gets rewritten to say what was
+> decided and why, and that is the whole of the process. Nobody argues with a
+> document to change their own product."*
+> (`REFUSALS.md:6–14`)
+
+So the table below is in two halves, and the split is the honest one. Nothing
+here is an argument against him; the second half is a record of decisions, and
+§14 carries the rewritten entries in the ledger's own voice.
+
+**Still binding, and they shape every answer below:**
+
+| Entry | Where | What it holds to on this surface |
 |---|---|---|
-| **No motion that costs anything when nothing is moving** | `REFUSALS.md:209–210`, ADR-0020 | A drifting gradient, a pulsing glow, a rotating record, a spectrum analyser at rest. The clause the rest hangs on: *"anything requiring a redraw while the window is idle"* (`REFUSALS.md:243–245`) |
-| **Nothing is ever drawn on top of a sleeve** | `REFUSALS.md:89–91` | Text over the artwork, a scrim to make text legible over it, a play overlay, a duration chip. *"The only thing that touches artwork is light around it"* |
-| **No artwork is ever drawn larger than its source** | `REFUSALS.md:92–93`, `art.rs:44–48` | Upscaling a 320 px thumbnail to fill a 1440 px screen. `ART_MAX == THUMB_PX` is asserted in code (`theme.rs:5549–5550`) |
-| **No scrim, ever** | `REFUSALS.md:94–95` | The blurred-cover-as-background pattern every streaming client ships |
-| **Amber is never an opaque fill**, and states playback truth only | `REFUSALS.md:196–199`, system §5 | A meter in the accent; a large amber field; the accent on anything that is not *which record, which track, where the playhead is* |
-| **No engagement stats. History records; it never performs** | `REFUSALS.md:55–61` | Streaks, charts, top-artists, listening-time totals. What is permitted is enumerated: the PLAYED key, the card's *"PLAYED — N times since YYYY"* with its date stamps, and the pull's weighting |
-| **Every action has a visible, pointer-reachable control; no control's only affordance is hover** | `REFUSALS.md:174–175` | A kiosk whose transport appears on mouse-move. This is the mitigation for a toolkit with no accessibility tree, and ADR-0028 has just re-confirmed that it outranks a quietness preference |
-| **Skeuomorphism: the record supplies vocabulary, never surface** | `REFUSALS.md:257–261` | Named in the ban list: **VU meters**, tonearms, wear, patina, *"any circle pretending to be a record"*. §9 engages this directly |
-| **No snake oil** | `REFUSALS.md:274–276` | Any signal-path claim the path cannot demonstrate. *"The condition report is an archivist's note, never a sales pitch"* |
-| **No cloud dependency; internet features individually opt-in** | `README.md:22–24`, `VISION.md` pillar 3 | A screen whose context section is empty without a network |
-| **The bar's ratchet** | `REFUSALS.md:100–105` | Removing a bar slot for tidiness. Replacing a slot with *a better statement of the same fact* is the one permitted move |
+| **Every action has a visible, pointer-reachable control; no control's only affordance is hover** | `REFUSALS.md:249–250` | No kiosk whose controls appear on mouse-move. This is the mitigation for a toolkit that publishes no accessibility tree, and ADR-0028 re-confirmed it outranks a quietness preference (`REFUSALS.md:88–98`). It is what makes §6's *drop the transport* legal — the bar keeps it, visibly, in this place as in every other |
+| **No state is signalled by colour alone** | `REFUSALS.md:259–261` | A meter that is only a colour change; a fact whose "new" is only a tint |
+| **Amber is never an opaque fill**, and states playback truth only | `REFUSALS.md:271–274` | The accent on anything that is not *which record, which track, where the playhead is*. §9.6 is why the meter is **not** amber |
+| **No snake oil** | `REFUSALS.md:348–350` | Any signal-path claim the path cannot demonstrate. This binds the meter hardest of all: a meter that contradicts `bit-perfect` would be exactly the unearned claim this entry exists to stop |
+| **No engagement stats. History records; it never performs** | `REFUSALS.md:68–73` | Streaks, charts, top-artists, listening-time totals. §8.4 states which side the rotating fact falls on, and why, rather than assuming it |
+| **No cloud dependency; internet features individually opt-in** | `README.md:22–24`, `VISION.md` pillar 3 | A screen whose feed is empty without a network. §8 is built local-first for this reason and not merely in deference to it |
+| **The bar's ratchet** | `REFUSALS.md:137–142` | Removing a bar slot for tidiness. Replacing a slot with *a better statement of the same fact* is the one permitted move — and §6 is the mirror case: the *place* drops what the bar already says |
+| **No borders on artwork**; **no shadows** except the playing halo | `REFUSALS.md:279–282` | A frame or drop-shadow to separate the cover from the field behind it. §5.4 solves that separation with light, which is the one thing permitted |
+
+**Reversed by the owner, and rewritten in §14** — each of these is the entry
+this study would otherwise have had to break:
+
+| Entry as it stood | Where | What the owner decided |
+|---|---|---|
+| **No artwork is ever drawn larger than its source.** `ART_MAX == THUMB_PX`, asserted in code | `REFUSALS.md:123–124`, `art.rs:44–48` | *"the album art was somehow more prominent, like it takes up the background"*. §5 draws the true-size cover **and** a derived field behind it; §14.1 rewrites the entry around the distinction the code already needs. Note this entry is **already false on this surface today** (§0.4) |
+| **No scrim, ever** | `REFUSALS.md:126–132` | The field is not a scrim — §5.3 makes the argument the ledger's own hover-veil amendment already made once (`REFUSALS.md:113–121`), and §14.2 records it |
+| **Skeuomorphism: banned — vinyl discs, wood grain, tonearms, VU meters, wear, patina** | `REFUSALS.md:330–335` | *"some nice VU meter stuff over it in a stylised way"*. §9 distinguishes the **instrument** (banned surface: beige panel, glass face, swinging needle) from the **measurement** (permitted data), which is the entry's own *"physics, structure and vocabulary… never surface"* applied rather than overridden. §14.3 |
+| **No motion that costs anything when nothing is moving**; *anything requiring a redraw while the window is idle* | `REFUSALS.md:284–320`, ADR-0020 | *"ambient motion is fine as long as the performance remains top tier"*. ADR-0020 **gains a sixth class** rather than losing its rule: user-started ambient content, on a surface whose whole purpose is to be looked at. §7, and §14.4 |
+
+Two further postures, not refusals but settled, and both survive intact:
+
+- **Places are the whole surface model.** *"The window holds one place at a
+  time, with the returns lane to its left in every place but Settings, and the
+  now-playing bar under all of them"* (`place.rs:5–7`). Seven members today,
+  `NowPlaying` among them.
+- **Nothing in the bar changes size as playback moves**
+  (`bottom_bar.rs:74–86`) — the reserved-slot promise, tested. Whatever this
+  screen states, it must state in slots that are the same width when the
+  track changes.
 
 Two further postures, not refusals but settled:
 
@@ -149,6 +201,67 @@ ships (`README.md:127–137`) over `zbus`, on its own session-bus thread, with
 the exact posture §11 needs — *"with no D-Bus session bus, baz prints one line
 and runs exactly as before."* Screensaver inhibition is the same bus, the same
 optionality, and the same failure mode.
+
+### 0.4 What shipped, and the defect in it
+
+`Place::NowPlaying` exists (`views/now_playing.rs`, 249 lines) and is routed at
+`app.rs:3670–3676`. Its composition is a column of three: the work, the placard
+(artist in tracked caps, title at `SIZE_HERO`, album, the needle, the two
+figures), and the transport (`now_playing.rs:164–174`). Its one derived measure
+is `art_edge` (`now_playing.rs:58–72`):
+
+```
+below   = LINE_HEADING 12 + LINE_HERO 32 + LINE_BODY 20
+        + NEEDLE_H 2 + TRANSPORT_HIT 32 + 4 × GAP_LG 64        = 162
+edge    = min(width − 2×HANG, height − 2×HANG − below)
+            .clamp(ART_MIN 240, NOW_PLAYING_MAX 720)
+```
+
+**Two findings, and the second is a defect.**
+
+**(a) The transport is on this screen twice.** `now_playing.rs:168` calls
+`crate::views::bottom_bar::transport(player, ink)` — not a similar control, the
+*same function* the bar composes — and the bar itself is appended under every
+place unconditionally, gated only on whether the build has audio output at all
+(`app.rs:3744–3752`). So the shipped surface draws play/pause, previous and
+next, then draws them again one `GAP_XL` and one bar-height below. The owner's
+*"now playing does not need the play pause controls"* is not a preference being
+accommodated; it is a duplication being reported. §6.
+
+**(b) The surface upscales artwork, and the ledger says it never does.** The
+image handle comes from `shelf.thumbs.peek(&id)` (`now_playing.rs:106`), and
+`Shelf::thumbs` is `LruCache<u64, iced_image::Handle>` (`app.rs:4034`) filled
+from `art::load_thumb`, which is `image.thumbnail(THUMB_PX, THUMB_PX)` —
+**320 px on the long edge, always** (`art.rs:131–139`, `art.rs:48`). It is then
+drawn at `edge`, which the clamp allows up to 720.
+
+| Window | `edge` | Source | Scale factor |
+|---|---|---|---|
+| 1280 × 800 | 558 | 320 | **1.74×** |
+| 1920 × 1080 | 720 (at the ceiling) | 320 | **2.25×** |
+| 2560 × 1440 | 720 (at the ceiling) | 320 | **2.25×** |
+| 3840 × 2160 | 720 (at the ceiling) | 320 | **2.25×** |
+
+The crossover is `edge > 320`, i.e. any window taller than 562 px and wider
+than 400 px — which is every window baz is ever run in. The captures on main
+show it: `docs/design/impl/lane-and-home/23-now-playing-1920.png` is a 320 px
+thumbnail drawn at 720.
+
+The code knows. `NOW_PLAYING_MAX`'s own doc comment
+(`now_playing.rs:74–81`) reads *"Past this a cover stops gaining anything — the
+decoded thumbnail is not that large, and a bigger square would be upscaling"* —
+which concedes the thumbnail is not that large and then sets the ceiling at
+720 regardless. The wall's guard (`shelf.rs:1509–1530`,
+`the_wall_never_draws_art_larger_than_its_source`) asserts `ART_MAX == THUMB_PX`
+for **the wall**, and there was no equivalent for a surface that had not been
+written when it was.
+
+This matters to §5 beyond bookkeeping. The refusal is not a wall the owner's
+brief runs into for the first time — it is a wall the product already walked
+through, quietly, and the honest move is to rewrite the entry to say what it
+always meant (§14.1) *and* give the surface a decode path that makes the
+rewritten entry true (§5.2, §12 step 2). A ledger entry that is false in shipped
+code is worse than no entry.
 
 ---
 
