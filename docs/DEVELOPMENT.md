@@ -105,6 +105,38 @@ toolbox run -c baz-dev env BAZ_OUTPUT_DEVICE=hw:3,0 \
 They write silence rather than tones (see above), so they are quiet; they skip
 with a notice when every device is busy.
 
+## Two meters, both off by default
+
+`BAZ_FRAME_LOG=1` prints a timestamp every time the shell draws. It is how the
+0-frames-when-idle claim in `docs/design/04-fluidity.md` §1.4 is checked, and
+how a *"nothing is moving and it still redraws"* report is settled.
+
+`BAZ_MSG_LOG=1` prints one line a second naming every message variant that
+arrived in it, busiest first, and nothing at all in a second where nothing
+arrived:
+
+```
+$ BAZ_MSG_LOG=1 baz 2>&1 | grep '^\[msg\]'
+[msg] 87/s  Scrolled 58  ·  WindowResized 29
+```
+
+That line is a real measurement, taken while dragging a window edge: **every
+resize step delivers three messages, not one** — `WindowResized` with its
+estimated grid, `Scrolled` when the scrollable measures its real bounds, and
+`Scrolled` again when the grid that changed underneath it changed the content's
+height (iced republishes a viewport whose `content_bounds` moved,
+`iced_widget-0.13.4/src/scrollable.rs:1249`). Two of the three ask
+`request_visible_thumbs` for exactly what the first asked for, which is why
+that function keeps a range guard.
+
+Both meters are free when off — one relaxed atomic load, resolved once from the
+environment — and neither formats anything it does not print. Reach for the
+message meter first whenever a report sounds like *"something is firing a
+lot"*: it turns a hypothesis into a histogram in ten seconds, and the shell's
+messages come from six subscriptions, a scrollable that republishes on every
+layout change and a window that reconfigures on every drag step, which is not a
+thing to reason about from the source.
+
 ## Headless UI verification
 
 Agents (and you) can render the real binary without touching your desktop
