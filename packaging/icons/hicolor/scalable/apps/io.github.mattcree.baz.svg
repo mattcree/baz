@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>baz</title>
+  <!--
+    baz's application icon — the master. Hand-authored; the PNG ladder beside
+    it is rendered from this file by ../../../render.sh. Read
+    ../../../README.md before editing: every number here comes from
+    docs/design/02-visual-language.md and is not free to move.
+
+    The mark is baz's own signature (design system §1.1), not a music note:
+    a work hanging on the gallery wall, lit by the one picture light, with
+    its wall label beneath it. The work is the placeholder tile baz actually
+    draws when an album has no artwork (§4.3) — a quiet deterministic
+    gradient carrying the title's first letterform, which for this product
+    is a lowercase b in the bundled IBM Plex Sans SemiBold.
+
+    Three of the direction's laws are visible and checkable here:
+      - nothing is drawn on top of the work; only light touches it;
+      - the work has no radius (the canvas does, because a launcher needs a
+        shape — that contrast is deliberate);
+      - the accent appears exactly twice, and both are playback truth: the
+        halo around the sounding work, and the lamp dot on the label's
+        first line.
+  -->
+  <defs>
+    <!-- WALL #0C0D0E down to RECESS #060708: the shadow gap where the
+         hanging wall meets the floor. The only gradient in the room. -->
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0C0D0E"/>
+      <stop offset="1" stop-color="#060708"/>
+    </linearGradient>
+    <!-- The sleeve. Within §4.3's placeholder gamut (S 0.10–0.28,
+         L 0.16–0.30) so it reads as a real tile rather than a swatch:
+         #4A3A55 is hsl(285, 19%, 28%), #26202E is hsl(273, 18%, 15%). A
+         cool work under a warm lamp — "the room is cold and the paper is
+         warm", §1. -->
+    <linearGradient id="sleeve" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4A3A55"/>
+      <stop offset="1" stop-color="#26202E"/>
+    </linearGradient>
+    <!-- LAMP_GLOW: LAMP at 45 %, blur 24 at a 272 px work. Scaled to this
+         152 px work that is stdDeviation 13.4; 18 is used because an icon
+         is looked at from further away than a shelf tile, and the halo is
+         the one thing that must survive to 16 px. -->
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <clipPath id="canvas">
+      <rect width="256" height="256" rx="26" ry="26"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#canvas)">
+    <rect width="256" height="256" fill="url(#wall)"/>
+    <!-- The picture light, pointed at one thing. -->
+    <rect x="52" y="30" width="152" height="152" fill="#E3A14E" fill-opacity="0.6" filter="url(#glow)"/>
+    <!-- The work. -->
+    <rect x="52" y="30" width="152" height="152" fill="url(#sleeve)"/>
+    <!-- The letterform: IBM Plex Sans SemiBold "b" at 0.62 x the work's
+         edge, optically centred on its own ink box rather than its
+         advance. PAPER at 50 %, lifted from the shelf's 12 % because an
+         icon has no library around it to be quiet against. -->
+    <path fill="#E8E4DB" fill-opacity="0.5" d="M105.34 70.57H117.4V99.21H117.77Q119.09 94.97 122.77 92.48Q126.45 89.98 131.35 89.98Q140.77 89.98 145.72 96.62Q150.66 103.27 150.66 115.61Q150.66 128.05 145.72 134.74Q140.77 141.43 131.35 141.43Q126.45 141.43 122.82 138.89Q119.19 136.35 117.77 132.1H117.4V140.3H105.34ZM127.48 131.44Q132.19 131.44 135.12 128.33Q138.04 125.22 138.04 119.95V111.47Q138.04 106.19 135.12 103.03Q132.19 99.87 127.48 99.87Q123.15 99.87 120.27 102.04Q117.4 104.21 117.4 107.79V123.43Q117.4 127.3 120.27 129.37Q123.15 131.44 127.48 131.44Z"/>
+    <!-- The wall label: two independent lines, left-aligned to the work,
+         never on it. Line one carries the lamp dot because the work is
+         sounding; line one is PAPER, line two PAPER_DIM and shorter. Square
+         ends, so they read as type rather than as pills. -->
+    <circle cx="58" cy="202" r="6" fill="#E3A14E"/>
+    <rect x="72" y="196" width="110" height="12" fill="#E8E4DB"/>
+    <rect x="52" y="216" width="76" height="9" fill="#ABA8A1"/>
+  </g>
+</svg>

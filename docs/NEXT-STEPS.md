@@ -36,15 +36,28 @@ README says pre-alpha and the releases page is empty; `RELEASING.md` and
 `INSTALL.md` both describe a process nobody has run. Everything below is
 smaller than this.
 
-1. **An application icon.** `packaging/baz.desktop` carries no `Icon=` key
-   because no file exists to name (`BACKLOG.md`). Draw one, install it, add
-   the key in the same change.
-2. **Dry-run the release**: follow `RELEASING.md` end to end on a throwaway
-   tag, and fix what it turns out to have assumed.
-3. **Verify the Flatpak actually builds** from `packaging/flatpak/` — the
-   vendored-crate list is checked in CI, but the manifest has never been
-   built.
-4. **Tag `v0.1.0`** and publish the three binaries CI already produces.
+1. ~~**An application icon.**~~ **Done.** `packaging/icons/` — an SVG master, a
+   second source for the three smallest sizes, and the hicolor PNG ladder;
+   `Icon=io.github.mattcree.baz` in the desktop entry; installed by the
+   Flatpak and carried in the Linux tarball. `packaging/icons/README.md` says
+   what the mark is and why. The binary still sets no window icon: winit 0.30
+   supports that on Windows and X11 only, and the reasoning and the patch are
+   in that README.
+2. ~~**Dry-run the release**~~ **Done locally, not in CI.** `RELEASING.md` now
+   carries the rehearsal it never had — every gate, the release build, the
+   staging and the checksum step, all run on the maintainer's machine, with
+   the corrections that turned up. What is still unrehearsed is the part only
+   GitHub can run: `workflow_dispatch` on the release workflow, which nobody
+   has fired.
+3. ~~**Verify the Flatpak actually builds**~~ **Done.** It does now. It did
+   not before: `cargo-sources.json` had seven crates unpacked without their
+   `.cargo-checksum.json` and cargo refused the whole build. Regenerated,
+   built, installed, run headless. `check-cargo-sources.py` now fails on that
+   shape, so CI catches the next one.
+4. **What is left before a tag.** A screenshot committed for the metainfo
+   (Flathub rejects a submission whose `<image>` does not resolve — GitHub
+   releases do not care); the version edit and metainfo release entry from
+   `RELEASING.md` steps 2–5; a `workflow_dispatch` dry run; then the tag.
 
 **Accept**: a stranger on Linux, Windows or macOS can download or
 `flatpak install` baz, point it at a folder, and hear music — without

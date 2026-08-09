@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>baz (small sizes)</title>
+  <!--
+    The same mark, drawn for 16, 24 and 32 px. Not an installed icon: it is
+    the rendering source for the three smallest PNGs in the hicolor ladder,
+    exactly as the freedesktop icon theme spec intends size-specific artwork
+    to work. See ../README.md.
+
+    Two simplifications, and only two. The work grows from 152 to 176 (and
+    the letterform with it) because below ~48 px the sleeve is the only
+    thing carrying recognition. The wall label loses its second line and its
+    first thickens, because at 16 px two 1 px lanes composite into one grey
+    smudge and say less than one deliberate line does. Everything else — the
+    palette, the halo, the hard-square work, the lamp dot — is the master's.
+  -->
+  <defs>
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0C0D0E"/>
+      <stop offset="1" stop-color="#060708"/>
+    </linearGradient>
+    <linearGradient id="sleeve" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4A3A55"/>
+      <stop offset="1" stop-color="#26202E"/>
+    </linearGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <clipPath id="canvas">
+      <rect width="256" height="256" rx="26" ry="26"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#canvas)">
+    <rect width="256" height="256" fill="url(#wall)"/>
+    <rect x="40" y="22" width="176" height="176" fill="#E3A14E" fill-opacity="0.6" filter="url(#glow)"/>
+    <rect x="40" y="22" width="176" height="176" fill="url(#sleeve)"/>
+    <path fill="#E8E4DB" fill-opacity="0.55" d="M100.06 66.32H114.93V101.64H115.4Q117.02 96.41 121.55 93.33Q126.08 90.25 132.12 90.25Q143.74 90.25 149.84 98.44Q155.94 106.63 155.94 121.85Q155.94 137.18 149.84 145.43Q143.74 153.68 132.12 153.68Q126.08 153.68 121.61 150.54Q117.14 147.4 115.4 142.18H114.93V152.28H100.06ZM127.36 141.36Q133.17 141.36 136.77 137.53Q140.37 133.7 140.37 127.19V116.74Q140.37 110.23 136.77 106.34Q133.17 102.45 127.36 102.45Q122.02 102.45 118.47 105.12Q114.93 107.79 114.93 112.21V131.49Q114.93 136.25 118.47 138.81Q122.02 141.36 127.36 141.36Z"/>
+    <circle cx="49" cy="225" r="9" fill="#E3A14E"/>
+    <rect x="70" y="216" width="146" height="18" fill="#E8E4DB"/>
+  </g>
+</svg>

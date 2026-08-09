@@ -5,6 +5,7 @@ Name=baz
 GenericName=Music Player
 Comment=A fast music player for people who own their music
 Exec=baz
+Icon=io.github.mattcree.baz
 Terminal=false
 Categories=AudioVideo;Audio;Player;
 Keywords=music;audio;player;library;flac;
