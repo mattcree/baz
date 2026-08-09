@@ -152,7 +152,7 @@ pub(crate) fn view<'a>(
         .into()
     };
     column![
-        place_header("Playlist", "Esc returns to Library"),
+        place_header("Playlist"),
         scrollable(
             container(page)
                 .width(Length::Fill)
@@ -487,7 +487,7 @@ fn entry_row(
     )
     .width(Length::Fill)
     .padding(theme::pad(theme::GAP_XS, 0.0))
-    .style(move |_theme, status| theme::track_row(room, status, playing))
+    .style(move |_theme, status| theme::track_row(room, room.wall, status, playing))
     // A missing entry is not a control: pressing a row plays from it, and
     // there is nothing there to play.
     .on_press_maybe((live && !page_row.missing).then_some(Message::PlaylistPlayTrack(index)));

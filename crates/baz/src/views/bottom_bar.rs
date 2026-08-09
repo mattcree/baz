@@ -84,7 +84,12 @@ use crate::{groove, icon, needle, player, theme};
 /// leftward into the gutter instead of shifting anything beside it. Every
 /// glyph, position, and enabled-state comes from [`PlayerState`] —
 /// event-derived, tested in `player.rs`.
-pub(crate) fn view(player: &PlayerState, place: Place, ink: Ink) -> Element<'_, Message> {
+pub(crate) fn view(
+    player: &PlayerState,
+    place: Place,
+    ink: Ink,
+    cover: Option<iced_image::Handle>,
+) -> Element<'_, Message> {
     let room = theme::active();
     let mut status = row![]
         .spacing(theme::GAP_SM)
@@ -99,7 +104,7 @@ pub(crate) fn view(player: &PlayerState, place: Place, ink: Ink) -> Element<'_, 
     }
     status = status.push(signal_path(player)).push(volume(player, ink));
     let bar = row![
-        container(now_playing_block(player, place))
+        container(now_playing_block(player, place, cover))
             .width(Length::Fill)
             .clip(true),
         transport_row(player, ink),
@@ -233,7 +238,11 @@ fn tip_layer(preview: Option<player::Preview>) -> Element<'static, Message> {
 /// Two doors, side by side, both labelled, two subjects: **the text is the
 /// record, the word `Queue` is the queue.** Neither is a bare gesture and
 /// neither is an icon.
-fn now_playing_block(player: &PlayerState, place: Place) -> Element<'_, Message> {
+fn now_playing_block(
+    player: &PlayerState,
+    place: Place,
+    cover: Option<iced_image::Handle>,
+) -> Element<'_, Message> {
     let stamps = player.stamps();
     // **The two timestamps moved here** (ADR-0017 §1.1), into the same
     // [`theme::STAMP_W`] slots they held when they flanked a groove — elapsed
@@ -249,7 +258,7 @@ fn now_playing_block(player: &PlayerState, place: Place) -> Element<'_, Message>
         theme::active().paper_faint
     };
     row![
-        container(back_to_playing(player))
+        container(back_to_playing(player, cover))
             .width(Length::Fill)
             .clip(true),
         stamp(
@@ -404,12 +413,38 @@ fn queue_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
 ///   height for a control that is a *box*, and a control that is a block of
 ///   type is bounded below by the same number rather than exempt from it. The
 ///   assertion is in this module's tests.
-fn back_to_playing(player: &PlayerState) -> Element<'_, Message> {
+fn back_to_playing(
+    player: &PlayerState,
+    cover: Option<iced_image::Handle>,
+) -> Element<'_, Message> {
     let room = theme::active();
     let lines = now_playing_line(player);
     if player.playing_album().is_none() {
         return lines;
     }
+    // **The sounding record's sleeve, inside the block's own hit box.** One
+    // object: the cover and the type are the same control and go to the same
+    // place, which is why the image is a child of the button rather than a
+    // sibling of it. [`theme::BAR_COVER`] carries the fit; nothing about the
+    // band moved to make room.
+    //
+    // With no artwork there is no lane and no placeholder — the block is drawn
+    // exactly as it was before this existed. The wall's own rule, one surface
+    // along: a tile with no decoded art draws its gradient because a tile is
+    // *about* the record, and the bar's block is about the track, so the
+    // honest absence here is nothing at all.
+    let lines: Element<'_, Message> = match cover {
+        None => lines,
+        Some(handle) => row![
+            iced_image(handle)
+                .width(Length::Fixed(theme::BAR_COVER))
+                .height(Length::Fixed(theme::BAR_COVER)),
+            container(lines).width(Length::Fill).clip(true),
+        ]
+        .spacing(theme::GAP_MD)
+        .align_y(iced::Alignment::Center)
+        .into(),
+    };
     // There is no lit state, where the `Queue` door beside it has one: pressing
     // this while already on that record's page is `Place::album`'s toggle
     // taking you back to the wall, and a now-playing block that lit up would be
@@ -613,10 +648,26 @@ fn signal_path(player: &PlayerState) -> Element<'_, Message> {
 /// control in the app; and glyphs over the playing cover need the playing cover
 /// to be *on screen*, which after a filter or a long scroll it is not.
 /// `docs/REFUSALS.md`'s visible-control rule makes it binding.
-fn transport_row(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
+/// **The transport, on its own** — the three glyph buttons, without the bar's
+/// zone padding.
+///
+/// Shared with the Now playing place (ADR-0030 as the owner extended it): that
+/// place needs the transport at its own scale and in its own composition, and
+/// a second set of three buttons sending the same three messages would be
+/// two controls per intention, which L8.6 forbids. One row, two callers, the
+/// same tooltips and the same enablement.
+///
+/// The bar keeps its own wrapper ([`transport_row`]) because the zone's lead
+/// is derived from the *band*, which the place does not have.
+pub(crate) fn transport(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
+    transport_glyphs(player, ink)
+}
+
+/// The three glyph buttons, and nothing around them.
+fn transport_glyphs(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
     let pending = player.transport_pending();
     let toggle = player.play_pause();
-    let transport = row![
+    row![
         glyph_button(
             icon::Glyph::Previous,
             "Previous track",
@@ -645,7 +696,12 @@ fn transport_row(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
             ink,
         ),
     ]
-    .spacing(theme::GAP_SM);
+    .spacing(theme::GAP_SM)
+    .into()
+}
+
+fn transport_row(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
+    let transport = transport_glyphs(player, ink);
     // **The zone states the band's lead rather than borrowing the row's
     // centring** (law L4). `BAR_LEAD` is derived — whatever is left of
     // [`theme::BAR_CONTENT_H`] once the transport has taken its 32, halved — so
@@ -1030,6 +1086,83 @@ mod tests {
         // parity of the band rather than of the bar, so no cast is needed.
         const { assert!(theme::BAR_CONTENT_H == 2.0 * theme::BAR_LEAD + theme::TRANSPORT_HIT) }
         const { assert!(theme::BAR_LEAD + theme::BAR_LEAD == theme::BAR_CONTENT_H - 32.0) }
+    }
+
+    /// **The sounding record's cover fits the band that already existed.**
+    ///
+    /// The brief's one arithmetic claim, checked rather than asserted: 52 px
+    /// square, inside the bar's 80 px band and its named lead, with nothing
+    /// about either re-derived. [`theme::BAR_CONTENT_H`] is still two hangs,
+    /// [`theme::BAR_ZONE_LEAD`] is still `GAP_MD`, and the cover is the
+    /// largest square on the 4 px lattice that fits the 56 px the tallest zone
+    /// already reserved — 52, with 2 px of slack above and below it inside a
+    /// zone that is itself led by 12.
+    #[test]
+    fn the_cover_fits_the_bands_existing_lead_without_moving_it() {
+        // The band and its leads are exactly what they were.
+        const { assert!(theme::BAR_CONTENT_H == 2.0 * theme::HANG) }
+        const { assert!(theme::BAR_ZONE_LEAD == theme::GAP_MD) }
+        const { assert!(theme::NOW_PLAYING_H == theme::BAR_CONTENT_H - 2.0 * theme::BAR_ZONE_LEAD) }
+        // The cover fits inside the tallest zone, on the lattice, and is the
+        // largest such square: it is exactly one lattice step short of the
+        // 56 px zone, so the next rung up *is* the zone and leaves no slack
+        // at all.
+        const { assert!(theme::BAR_COVER == 52.0) }
+        const { assert!(theme::BAR_COVER < theme::NOW_PLAYING_H) }
+        const { assert!(theme::BAR_COVER % theme::GAP_XS == 0.0) }
+        const { assert!(theme::BAR_COVER + theme::GAP_XS == theme::NOW_PLAYING_H) }
+        // And it never exceeds the decoded source, which is the wall's own
+        // rule about artwork applied one surface along.
+        const { assert!(theme::BAR_COVER <= theme::ART_MAX) }
+    }
+
+    /// **With artwork the cover is part of the control; without it the block
+    /// is what it always was.**
+    ///
+    /// Two claims, both about where the widget sits rather than about what it
+    /// says, so both are pinned to the source:
+    ///
+    /// 1. The image is built **inside** `back_to_playing`, before the
+    ///    `button` — so the cover and the type are one hit target that goes
+    ///    one place, not a picture beside a link.
+    /// 2. The `None` arm returns the lines untouched. No reserved lane, no
+    ///    placeholder, no gradient: a record with no decodable art draws the
+    ///    bar that shipped before this existed.
+    #[test]
+    fn the_cover_joins_the_blocks_own_hit_target_and_is_absent_without_art() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/bottom_bar.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        let rest = source
+            .split_once("fn back_to_playing")
+            .expect("the now-playing block exists")
+            .1;
+        let block = &rest[..rest.find("\n}\n").expect("a function ends")];
+        let cover_at = block
+            .find("theme::BAR_COVER")
+            .expect("the cover is drawn here");
+        let button_at = block.find("button(lines)").expect("the block is a button");
+        assert!(
+            cover_at < button_at,
+            "the cover is not inside the block's button — a picture beside a \
+             link is two objects where the design asks for one"
+        );
+        assert!(
+            block.contains("None => lines,"),
+            "no artwork must return the lines exactly as they were"
+        );
+        for forbidden in [
+            "gradient_block",
+            "Space::new(Length::Fixed(theme::BAR_COVER",
+        ] {
+            assert!(
+                !block.contains(forbidden),
+                "the bar reserves `{forbidden}` for artwork that does not \
+                 exist — the brief says the block renders exactly as today"
+            );
+        }
     }
 
     /// Every glyph the transport row can draw is the same sprite square in the

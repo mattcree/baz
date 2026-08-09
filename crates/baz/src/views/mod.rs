@@ -65,6 +65,9 @@ pub(crate) mod album;
 pub(crate) mod bottom_bar;
 pub(crate) mod context_menu;
 pub(crate) mod drag_ghost;
+pub(crate) mod home;
+pub(crate) mod lane;
+pub(crate) mod now_playing;
 pub(crate) mod playlist;
 pub(crate) mod playlist_panel;
 pub(crate) mod queue;
@@ -73,9 +76,7 @@ pub(crate) mod setup;
 pub(crate) mod shelf;
 pub(crate) mod top_bar;
 
-use iced::widget::{
-    Space, button, column, container, horizontal_rule, image as iced_image, row, text,
-};
+use iced::widget::{Space, column, container, horizontal_rule, image as iced_image, row, text};
 use iced::{Color, Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
@@ -229,50 +230,38 @@ fn sleeve_cell(shelf: &Shelf, album: u64, size: f32) -> Element<'static, Message
 /// it is one function in five places (the Library's own strip being
 /// [`top_bar`]) rather than copies that can drift.
 ///
-/// **Back is a word, not a chevron.** A door is labelled with the name of what
-/// it opens (doc 07 L8.4), and the amendment that let the gear and the
-/// magnifier stand as symbols is a closed two-name list (doc 10 §3.4) — a back
-/// arrow is merely familiar, not universal, so this door keeps its word. It
-/// sends [`Message::LeavePlace`], which is the message <kbd>Esc</kbd> sends, so
-/// the two are one press and the visible-control rule holds for every place.
-pub(crate) fn place_header(name: &'static str, note: &'static str) -> Element<'static, Message> {
-    place_header_with(name, None, note)
+/// **The header carries no way back, and that is not a missing affordance.**
+/// It held a `‹ Library` door and an `Esc returns to Library` hint until the
+/// returns lane shipped; the lane is resident in every place and both of its
+/// states, so `Library` is permanently one press away, up and to the left, and
+/// a second door in every header was the same statement made twice. The
+/// keyboard is untouched — <kbd>Esc</kbd> still peels and still lands on the
+/// Library — and the visible-control rule holds through the lane's own row.
+/// **Do not restore a back door here**: its absence is the lane's presence.
+pub(crate) fn place_header(name: &'static str) -> Element<'static, Message> {
+    place_header_with(name, None, None)
 }
 
-/// [`place_header`], with one optional extra tenant between the place's name
-/// and the note — the Album place's `‹ Prev` / `Next ›` pair (doc 07 §3.2)
-/// is the one strip today whose budget spends it. The strip stays one
-/// function so the geometry cannot drift between the place that carries the
-/// pair and the three that do not.
+/// [`place_header`], with one optional extra tenant after the place's name —
+/// the Album place's `‹ Prev` / `Next ›` pair (doc 07 §3.2) is the one strip
+/// today whose budget spends it, and it survived the way-back's removal
+/// because it is not a way back: it steps along the wall's arrangement, which
+/// is the one thing in this strip the lane cannot do.
+///
+/// `note` is for a statement about the *place*, never a keyboard hint — the
+/// Settings place's *"Kept in config.toml…"* is the only one today. The strip
+/// stays one function so the geometry cannot drift between the place that
+/// carries a tenant and the three that do not.
 pub(crate) fn place_header_with(
     name: &'static str,
     extra: Option<Element<'static, Message>>,
-    note: &'static str,
+    note: Option<&'static str>,
 ) -> Element<'static, Message> {
     let room = theme::active();
-    let back = button(
-        // Centred in its own box, like `Settings` across the frame from it
-        // (law L3).
-        container(
-            text("‹ Library")
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .font(theme::MEDIUM)
-                .wrapping(text::Wrapping::None),
-        )
-        .height(Length::Fill)
-        .align_y(alignment::Vertical::Center),
-    )
-    // The same height as the top bar's `Settings`, which is the control this
-    // one swaps places with: the two strips are one frame, and a way-back that
-    // stood shorter than the control it replaced would make the header jump on
-    // every navigation.
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_SM))
-    .style(move |_theme, status| theme::word_button(room, room.wall, status))
-    .on_press(Message::LeavePlace);
+    // The place's name leads the strip. It stands where the way-back used to,
+    // so the frame's left edge is unchanged (law L1) and moving between places
+    // still slides nothing.
     let mut strip = row![
-        back,
         text(name)
             .size(theme::SIZE_EMPHASIS)
             .line_height(theme::LEADING_EMPHASIS)
@@ -283,13 +272,16 @@ pub(crate) fn place_header_with(
     if let Some(extra) = extra {
         strip = strip.push(extra);
     }
-    strip = strip.push(Space::with_width(Length::Fill)).push(
-        text(note)
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(room.paper_faint)
-            .wrapping(text::Wrapping::None),
-    );
+    strip = strip.push(Space::with_width(Length::Fill));
+    if let Some(note) = note {
+        strip = strip.push(
+            text(note)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.paper_faint)
+                .wrapping(text::Wrapping::None),
+        );
+    }
     column![
         container(strip).padding(theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)),
         horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
@@ -471,6 +463,65 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// **Every row-shaped control names the ground it stands on.**
+    ///
+    /// [`theme::track_row`]'s hover used to be the constant
+    /// `Palette::plinth`, which is right for a row on the wall and mute for a
+    /// row on the panel — whose own ground *is* `plinth`, so its rows painted
+    /// the colour already under them. The owner named it (2026-08-09, *"a bit…
+    /// unresponsive"*); the fix was to make the hover a *relation*
+    /// (`Palette::step_up`), which only works if every call site says what it
+    /// stands on.
+    ///
+    /// Asserted over the source because the failure is invisible in a
+    /// rendering and silent in a type: a ground of the wrong plane compiles,
+    /// draws, and answers the pointer with nothing. A future surface composed
+    /// on a new plane fails the build rather than the review.
+    #[test]
+    fn every_row_shaped_control_names_the_ground_it_stands_on() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut sites = 0_u32;
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(root.join("views"))
+            .expect("the views directory")
+            .map(|entry| entry.expect("entry").path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
+            .collect();
+        files.sort();
+        for path in files {
+            let source = std::fs::read_to_string(&path)
+                .expect("a view source")
+                .replace("\r\n", "\n");
+            let source = source
+                .split("#[cfg(test)]")
+                .next()
+                .expect("a source has a head");
+            let name = path.file_name().expect("a file name").to_string_lossy();
+            for (at, _) in source.match_indices("theme::track_row(") {
+                // Comments name the function too; only calls are call sites.
+                let line_start = source[..at].rfind('\n').map_or(0, |index| index + 1);
+                if source[line_start..at].trim_start().starts_with("//") {
+                    continue;
+                }
+                let tail: String = source[at..].chars().take(80).collect();
+                let arguments = tail
+                    .split_once('(')
+                    .map(|(_, rest)| rest.replace(['\n', ' '], ""))
+                    .unwrap_or_default();
+                assert!(
+                    arguments.starts_with("room,room."),
+                    "{name}: a row must name the surface it stands on — \
+                     `theme::track_row(room, <ground>, …)` — and this one \
+                     reads `{}`",
+                    arguments.chars().take(40).collect::<String>()
+                );
+                sites += 1;
+            }
+        }
+        // Not vacuous: the wall's rows, the panel's, the menu card's and the
+        // returns lane's are all in the walk.
+        assert!(sites >= 6, "only {sites} row call sites found");
     }
 
     /// The Shuffle tooltip's figure is [`crate::shuffle::SLEEVES`], not a

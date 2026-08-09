@@ -189,3 +189,29 @@ Under Flatpak all of it lives under `~/.var/app/io.github.mattcree.baz/`, in
 rescan and nothing else — your files are the source of truth, and baz never
 edits them. Deleting `playlists/` costs you your playlists, because they are
 the only copy.
+
+## How baz draws, and how to make it draw differently
+
+**baz is GPU-accelerated already, and it falls back on its own.** The shell is
+iced 0.13 with both renderers compiled in — `wgpu` (Vulkan, Metal, DX12 or GL)
+and `tiny-skia` (CPU) — and iced's fallback compositor tries the GPU first and
+the software path second when no usable adapter answers
+(`iced_renderer-0.13.0/src/fallback.rs:214–262`). There is nothing to switch on.
+
+There is no setting for it, on purpose: the automatic fallback already covers
+the case a setting would exist for, and a renderer picker is exactly the kind
+of tenant a Settings place accretes. What is offered instead is an **escape
+hatch by environment variable**, for the one case the fallback cannot detect —
+a GPU path that is present and *bad* (a driver that tears, a hybrid laptop
+whose discrete card spins up for a music player):
+
+```sh
+ICED_BACKEND=tiny-skia baz   # force the CPU renderer
+ICED_BACKEND=wgpu baz        # force the GPU renderer, and fail loudly if it cannot
+WGPU_BACKEND=gl baz          # keep the GPU path but pick the API yourself
+                             # (vulkan · metal · dx12 · gl)
+```
+
+`ICED_BACKEND` takes a comma-separated list and tries each in turn. Both are
+read once, when the window opens; there is no way to change renderer without
+restarting, which is also why this is not a toggle in Settings.

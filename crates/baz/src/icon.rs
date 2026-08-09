@@ -131,6 +131,37 @@ pub enum Glyph {
     DensityBalanced,
     /// The wall at its tightest hang — nine works. The third detent.
     DensityDense,
+    /// Queue: three stacked bars, the last one short — a list with more to
+    /// come. The wall's hover option (doc 13 §11 as the owner overruled it).
+    Queue,
+    /// Open: the disclosure chevron — *go to the thing this row names*. The
+    /// wall's hover option for the press the tile has always made.
+    Open,
+    /// Home: the house. The returns lane's first destination (ADR-0030 as the
+    /// owner amended it) — the one glyph in the set that is a *convention*
+    /// rather than a depiction of a baz object, and it is admitted because the
+    /// owner asked for the Spotify shape by name and a house is what that
+    /// shape's first row wears everywhere it exists.
+    Home,
+    /// Library: four spines standing on a shelf. The collection, depicted as
+    /// the thing a collection physically is — and deliberately not a grid of
+    /// squares, which is what the three density detents already are.
+    Library,
+    /// Now playing: the record, with its label. The lane's third destination.
+    ///
+    /// A ring rather than a disc: a filled circle at this size is a dot, and
+    /// the one dot in the product means the lamp. Drawn as a single outline
+    /// that traces the rim and then the label the other way round, so
+    /// [`encloses`]'s even-odd rule punches the hole — [`Glyph::covers`] takes
+    /// the *union* of outlines, so a second circle could not.
+    NowPlaying,
+    /// The lane, expanded: a frame with a wide left band. One of the two marks
+    /// at the lane's foot, in the density detents' exact anatomy (ADR-0028).
+    LaneExpanded,
+    /// The lane, collapsed: [`Self::LaneExpanded`]'s frame with a narrow left
+    /// band. Self-depicting as a pair — what changes between the two marks is
+    /// what changes on screen.
+    LaneCollapsed,
 }
 
 /// Play — one triangle, sitting a touch right of the box's centre so the
@@ -418,6 +449,205 @@ const PLUS: &[Outline] = &[
     ],
 ];
 
+/// Queue — three stacked bars, the third short: **a list with more to come**.
+///
+/// Doc 10 §3.4 refused a queue glyph *as a door's whole label* — "a queue
+/// glyph, a playlist glyph and a menu glyph are one triangle-and-lines drawing
+/// apart, and a door you can misread is worse than a door you must read" — and
+/// that refusal stands for the `Queue` door in the bar, which is still a word.
+/// This is the other case §3.1 names, and names in the affirmative: *where the
+/// convention is close but not exact, the word stays and may carry the glyph as
+/// its leading mark*. The word `Queue` is beside it and carries the semantics;
+/// the mark carries the recognition.
+///
+/// The short third bar is what keeps it off the hamburger: three **equal** bars
+/// are a menu everywhere in software, and three bars that run out are a list
+/// that continues. Bars at the set's 0.15 stroke, on a 0.09 rhythm, the block
+/// symmetric about the box's centre line.
+const QUEUE: &[Outline] = &[
+    &[(0.12, 0.185), (0.88, 0.185), (0.88, 0.335), (0.12, 0.335)],
+    &[(0.12, 0.425), (0.88, 0.425), (0.88, 0.575), (0.12, 0.575)],
+    &[(0.12, 0.665), (0.60, 0.665), (0.60, 0.815), (0.12, 0.815)],
+];
+
+/// Open — the disclosure chevron: **go to the thing this row names**.
+///
+/// Two arms at 45°, at the set's stroke, meeting at a vertex right of centre;
+/// the union fills the join, exactly as [`ARROW_UP`]'s arms do. A *stroke*
+/// rather than a filled triangle, which is also what keeps it apart from
+/// [`PLAY`] two rows above it on the same veil: one is an open angle, the other
+/// a solid mass, and they are drawn in different ink besides.
+const OPEN: &[Outline] = &[
+    &[
+        (0.2988, 0.2063),
+        (0.4013, 0.1038),
+        (0.7563, 0.4488),
+        (0.6538, 0.5513),
+    ],
+    &[
+        (0.2988, 0.7938),
+        (0.4013, 0.8963),
+        (0.7563, 0.5513),
+        (0.6538, 0.4488),
+    ],
+];
+
+/// Home — the house: a wide roof over a body, one closed silhouette.
+///
+/// The roof overhangs the walls on both sides, which is the whole of what
+/// makes a seven-vertex polygon read as a house rather than as an arrow on a
+/// box at 16 px.
+const HOME: &[Outline] = &[&[
+    (0.5000, 0.0800),
+    (0.9400, 0.5000),
+    (0.8200, 0.5000),
+    (0.8200, 0.9000),
+    (0.1800, 0.9000),
+    (0.1800, 0.5000),
+    (0.0600, 0.5000),
+]];
+
+/// Library — four spines of different heights standing on a shelf.
+///
+/// The heights are unequal on purpose: four equal bars are a chart, and the
+/// one thing this mark must not be mistaken for is the density detents' grid
+/// two controls away from it.
+const LIBRARY: &[Outline] = &[
+    &[
+        (0.1400, 0.2000),
+        (0.2800, 0.2000),
+        (0.2800, 0.8000),
+        (0.1400, 0.8000),
+    ],
+    &[
+        (0.3400, 0.1200),
+        (0.4800, 0.1200),
+        (0.4800, 0.8000),
+        (0.3400, 0.8000),
+    ],
+    &[
+        (0.5400, 0.2600),
+        (0.6800, 0.2600),
+        (0.6800, 0.8000),
+        (0.5400, 0.8000),
+    ],
+    &[
+        (0.7400, 0.1600),
+        (0.8800, 0.1600),
+        (0.8800, 0.8000),
+        (0.7400, 0.8000),
+    ],
+    &[
+        (0.0800, 0.8000),
+        (0.9200, 0.8000),
+        (0.9200, 0.8900),
+        (0.0800, 0.8900),
+    ],
+];
+
+/// Now playing — the record: the rim, then the label traced the other way
+/// round in the **same** outline, so the even-odd rule leaves the spindle hole
+/// open. See [`Glyph::NowPlaying`] for why it cannot be two circles.
+const NOW_PLAYING: &[Outline] = &[&[
+    (0.9400, 0.5000),
+    (0.9290, 0.5979),
+    (0.8964, 0.6909),
+    (0.8440, 0.7743),
+    (0.7743, 0.8440),
+    (0.6909, 0.8964),
+    (0.5979, 0.9290),
+    (0.5000, 0.9400),
+    (0.4021, 0.9290),
+    (0.3091, 0.8964),
+    (0.2257, 0.8440),
+    (0.1560, 0.7743),
+    (0.1036, 0.6909),
+    (0.0710, 0.5979),
+    (0.0600, 0.5000),
+    (0.0710, 0.4021),
+    (0.1036, 0.3091),
+    (0.1560, 0.2257),
+    (0.2257, 0.1560),
+    (0.3091, 0.1036),
+    (0.4021, 0.0710),
+    (0.5000, 0.0600),
+    (0.5979, 0.0710),
+    (0.6909, 0.1036),
+    (0.7743, 0.1560),
+    (0.8440, 0.2257),
+    (0.8964, 0.3091),
+    (0.9290, 0.4021),
+    (0.9400, 0.5000),
+    (0.6500, 0.5000),
+    (0.6410, 0.4487),
+    (0.6149, 0.4036),
+    (0.5750, 0.3701),
+    (0.5260, 0.3523),
+    (0.4740, 0.3523),
+    (0.4250, 0.3701),
+    (0.3851, 0.4036),
+    (0.3590, 0.4487),
+    (0.3500, 0.5000),
+    (0.3590, 0.5513),
+    (0.3851, 0.5964),
+    (0.4250, 0.6299),
+    (0.4740, 0.6477),
+    (0.5260, 0.6477),
+    (0.5750, 0.6299),
+    (0.6149, 0.5964),
+    (0.6410, 0.5513),
+    (0.6500, 0.5000),
+]];
+
+/// The frame both lane marks stand in: a top, a right and a bottom stroke.
+/// Shared between them so the pair can differ in exactly one thing.
+const LANE_FRAME: [Outline; 3] = [
+    &[
+        (0.0800, 0.2000),
+        (0.9200, 0.2000),
+        (0.9200, 0.2800),
+        (0.0800, 0.2800),
+    ],
+    &[
+        (0.8400, 0.2000),
+        (0.9200, 0.2000),
+        (0.9200, 0.8000),
+        (0.8400, 0.8000),
+    ],
+    &[
+        (0.0800, 0.7200),
+        (0.9200, 0.7200),
+        (0.9200, 0.8000),
+        (0.0800, 0.8000),
+    ],
+];
+
+/// The lane, expanded — the frame with a **wide** left band.
+const LANE_EXPANDED: &[Outline] = &[
+    LANE_FRAME[0],
+    LANE_FRAME[1],
+    LANE_FRAME[2],
+    &[
+        (0.0800, 0.2000),
+        (0.4000, 0.2000),
+        (0.4000, 0.8000),
+        (0.0800, 0.8000),
+    ],
+];
+
+/// The lane, collapsed — the same frame with a **narrow** left band.
+const LANE_COLLAPSED: &[Outline] = &[
+    LANE_FRAME[0],
+    LANE_FRAME[1],
+    LANE_FRAME[2],
+    &[
+        (0.0800, 0.2000),
+        (0.2400, 0.2000),
+        (0.2400, 0.8000),
+        (0.0800, 0.8000),
+    ],
+];
+
 /// Step-down — [`PLUS`]'s horizontal bar, alone: the settings steppers'
 /// `−`, drawn rather than borrowed (U+2212 remains legitimate *in a value*,
 /// where it is a figure; in a control slot it was the accidental fourth
@@ -607,10 +837,17 @@ impl Glyph {
         Self::DensitySpacious,
         Self::DensityBalanced,
         Self::DensityDense,
+        Self::Queue,
+        Self::Open,
+        Self::Home,
+        Self::Library,
+        Self::NowPlaying,
+        Self::LaneExpanded,
+        Self::LaneCollapsed,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 16;
+    const COUNT: usize = 23;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -632,6 +869,13 @@ impl Glyph {
             Self::DensitySpacious => DENSITY_SPACIOUS,
             Self::DensityBalanced => DENSITY_BALANCED,
             Self::DensityDense => DENSITY_DENSE,
+            Self::Queue => QUEUE,
+            Self::Open => OPEN,
+            Self::Home => HOME,
+            Self::Library => LIBRARY,
+            Self::NowPlaying => NOW_PLAYING,
+            Self::LaneExpanded => LANE_EXPANDED,
+            Self::LaneCollapsed => LANE_COLLAPSED,
         }
     }
 
@@ -654,6 +898,13 @@ impl Glyph {
             Self::DensitySpacious => 13,
             Self::DensityBalanced => 14,
             Self::DensityDense => 15,
+            Self::Queue => 16,
+            Self::Open => 17,
+            Self::Home => 18,
+            Self::Library => 19,
+            Self::NowPlaying => 20,
+            Self::LaneExpanded => 21,
+            Self::LaneCollapsed => 22,
         }
     }
 
@@ -708,6 +959,36 @@ static SHEET: LazyLock<[image::Handle; Glyph::COUNT]> = LazyLock::new(|| {
 #[must_use]
 pub fn handle(glyph: Glyph) -> image::Handle {
     SHEET[glyph.index()].clone()
+}
+
+/// The same sheet, inked in the room's **accent**.
+///
+/// One consumer, and the accent discipline is what bounds it to one: the
+/// wall's hover `Play`, which is the record page's `Play album` moved onto the
+/// sleeve and carries that control's licence (`theme::veil_option_ink`).
+/// Built lazily beside [`SHEET`] and by the same rules — the room is baked in,
+/// the ids live as long as the process, and the cost of the second sheet is
+/// 18 sprites of 32 × 32 × 4 bytes.
+static ACCENT_SHEET: LazyLock<[image::Handle; Glyph::COUNT]> = LazyLock::new(|| {
+    let ink = rgb(theme::active().lamp);
+    Glyph::ALL.map(|glyph| image::Handle::from_rgba(RASTER_PX, RASTER_PX, rasterize(glyph, ink)))
+});
+
+/// The sprite for `glyph` in `ink`, which must be one of the two inks a sheet
+/// exists for: the room's glyph ink, or its accent.
+///
+/// The caller states the ink and this resolves the sheet, so the *decision*
+/// about which glyph wears the accent lives in one place
+/// ([`theme::veil_option_ink`]) rather than being spelled twice. An ink that
+/// is neither takes the ordinary sheet: a third inked sheet is a decision, and
+/// silently minting one here is how an accent discipline stops being one.
+#[must_use]
+pub fn inked(glyph: Glyph, ink: Color) -> image::Handle {
+    if ink == theme::active().lamp {
+        ACCENT_SHEET[glyph.index()].clone()
+    } else {
+        SHEET[glyph.index()].clone()
+    }
 }
 
 /// A theme color as the sRGB bytes the image pipeline stores. iced's
@@ -1105,6 +1386,121 @@ mod tests {
             runs.push((began, 1.0 - began));
         }
         runs
+    }
+
+    /// **Queue is a list that runs out, not a menu.**
+    ///
+    /// Three bars on the set's stroke, the third short — which is the whole of
+    /// what keeps it apart from the hamburger three *equal* bars are
+    /// everywhere else in software (doc 10 §3.4's worry, met rather than
+    /// waved past). The block is symmetric about the box's centre line, so
+    /// the mark reads as centred beside its word.
+    #[test]
+    fn queue_is_three_bars_and_the_last_one_is_short() {
+        let bars: Vec<Vec<(f32, f32)>> = [0.26_f32, 0.50, 0.74]
+            .iter()
+            .map(|&y| runs_along(Glyph::Queue, y))
+            .collect();
+        for (index, runs) in bars.iter().enumerate() {
+            assert_eq!(runs.len(), 1, "bar {index} is not one run: {runs:?}");
+        }
+        let width = |runs: &[(f32, f32)]| runs[0].1;
+        assert!(
+            (width(&bars[0]) - width(&bars[1])).abs() < 0.01,
+            "the first two bars are not the same length"
+        );
+        assert!(
+            width(&bars[2]) < width(&bars[0]) * 0.85,
+            "the third bar is not short — three equal bars are a menu glyph"
+        );
+        for runs in &bars {
+            assert!(
+                (runs[0].0 - 0.12).abs() < 0.01,
+                "the bars do not share a left edge"
+            );
+        }
+        // The gaps between them are gaps.
+        for y in [0.38_f32, 0.62] {
+            assert!(
+                runs_along(Glyph::Queue, y).is_empty(),
+                "the bars touch at y {y}"
+            );
+        }
+        // The stroke band the whole sheet is drawn on (doc 10 §3.7).
+        for y in [0.26_f32, 0.50, 0.74] {
+            let mut top = y;
+            while Glyph::Queue.covers(0.2, top - 0.001) {
+                top -= 0.001;
+            }
+            let mut bottom = y;
+            while Glyph::Queue.covers(0.2, bottom + 0.001) {
+                bottom += 0.001;
+            }
+            let stroke = bottom - top;
+            assert!(
+                (0.14..=0.155).contains(&stroke),
+                "a queue bar is {stroke:.3} thick, outside the set's 0.14-0.15 band"
+            );
+        }
+        // Symmetric about the box's centre line as a *block*: the first bar's
+        // top is as far from 0 as the third bar's bottom is from 1.
+        assert!(
+            ((0.185_f32) - (1.0 - 0.815)).abs() < f32::EPSILON,
+            "the block is not centred in its box"
+        );
+    }
+
+    /// **Open is a chevron, and it is not the play triangle.**
+    ///
+    /// Two strokes meeting at a vertex right of centre, mirror-symmetric about
+    /// the box's horizontal centre line. The distinction that matters is at
+    /// the left edge: [`Glyph::Play`]'s triangle is solid all the way back to
+    /// its base, and this has a hole behind the vertex — one is a mass, the
+    /// other an angle, and the two sit two rows apart on the same veil.
+    #[test]
+    fn open_is_a_chevron_with_a_hole_behind_it() {
+        // The apex: one run where the arms meet.
+        assert_eq!(
+            runs_along(Glyph::Open, 0.5).len(),
+            1,
+            "the arms do not join at the vertex"
+        );
+        // Above and below it, one arm each, and they are mirrors.
+        for y in [0.16_f32, 0.30] {
+            let upper = runs_along(Glyph::Open, y);
+            let lower = runs_along(Glyph::Open, 1.0 - y);
+            assert_eq!(upper.len(), 1, "the upper arm is not one run at {y}");
+            assert_eq!(lower.len(), 1, "the lower arm is not one run at {y}");
+            assert!(
+                (upper[0].0 - lower[0].0).abs() < 0.005 && (upper[0].1 - lower[0].1).abs() < 0.005,
+                "the arms are not mirrors at {y}: {upper:?} vs {lower:?}"
+            );
+        }
+        // The hole: behind the vertex, on the centre line, where a triangle
+        // would be solid.
+        assert!(
+            !Glyph::Open.covers(0.40, 0.50),
+            "the chevron filled in — it is a triangle now"
+        );
+        assert!(
+            Glyph::Play.covers(0.40, 0.50),
+            "the play triangle stopped being solid, and the pair stopped \
+             being tellable apart by mass"
+        );
+        // The vertex sits right of centre, the direction of travel.
+        let apex = runs_along(Glyph::Open, 0.5);
+        assert!(
+            apex[0].0 + apex[0].1 > 0.7,
+            "the vertex does not reach into the right of the box"
+        );
+        // The set's stroke, measured perpendicular to a 45° arm: a horizontal
+        // cut through it is the stroke times root two.
+        let arm = runs_along(Glyph::Open, 0.30);
+        let stroke = arm[0].1 / std::f32::consts::SQRT_2;
+        assert!(
+            (0.14..=0.155).contains(&stroke),
+            "the chevron's stroke is {stroke:.3}, outside the set's 0.14-0.15 band"
+        );
     }
 
     /// **The density detents depict the wall at its three hangs** — one,

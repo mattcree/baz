@@ -68,10 +68,6 @@ pub(crate) const KEYS_W: f32 = 314.0;
 /// word, `Shuffle`, `Pull`, their paddings and the two `GAP_XS` gaps.
 pub(crate) const ACTS_W: f32 = 182.0;
 
-/// The `Playlists` door's reserved width (logical px): the word in its
-/// `GAP_SM` padding.
-pub(crate) const PLAYLISTS_W: f32 = 64.0;
-
 /// The slim top bar — one line at [`theme::TOP_BAR_SPLIT`] and above, two
 /// below it, a hairline rule under either.
 ///
@@ -108,9 +104,6 @@ pub(crate) fn view(shelf: &Shelf, window_width: f32, ink: Ink) -> Element<'_, Me
         .align_x(alignment::Horizontal::Left);
     let acts = container(draws())
         .width(Length::Fixed(ACTS_W))
-        .align_x(alignment::Horizontal::Left);
-    let playlists = container(playlists_door())
-        .width(Length::Fixed(PLAYLISTS_W))
         .align_x(alignment::Horizontal::Left);
     // The status row holds only the transient notes now — the counts moved
     // into the well they describe (doc 10 §4.1; L8.3's valve run in reverse:
@@ -158,7 +151,6 @@ pub(crate) fn view(shelf: &Shelf, window_width: f32, ink: Ink) -> Element<'_, Me
             search,
             Space::with_width(Length::Fill),
             status,
-            playlists,
             settings_gear(ink),
         ]
         .spacing(theme::GAP_LG)
@@ -185,7 +177,7 @@ pub(crate) fn view(shelf: &Shelf, window_width: f32, ink: Ink) -> Element<'_, Me
                 // The well and the keys are one cluster — both are about the
                 // library — held apart by the ladder's largest gap so they
                 // read as two groups on one line rather than as six controls.
-                row![search, keys, acts, playlists]
+                row![search, keys, acts]
                     .spacing(theme::GAP_XL)
                     .align_y(iced::Alignment::Center),
                 // The strip's one flexible region. The row's `GAP_SM` counts
@@ -361,43 +353,6 @@ fn draw_word(
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)
     .style(move |_theme| theme::tooltip(room))
-    .into()
-}
-
-/// **The playlist panel's door** (ADR-0024 §5): a labelled word in the
-/// Library strip, <kbd>Ctrl</kbd>+<kbd>P</kbd> beside it.
-///
-/// It is in *this* strip by the placement law: a door goes where the hand
-/// already is (L8.4), and playlists are about the collection — the panel is
-/// summoned to collect *from* the wall. It closes the left cluster's reading
-/// order: **narrow, then arrange, then draw, then collect**.
-///
-/// Labelled with the name of what it opens, **in words** — and confirmed as
-/// a word by doc 10 §3.4: no universal symbol distinguishes *playlists* from
-/// *queue* from *menu*, so this door is exactly the class L8.4's two-symbol
-/// exception refuses. Unlike the gear across the frame it *is* honestly a
-/// toggle, because the panel floats over this strip's own place rather than
-/// replacing it, so the door stays visible while what it opened is open.
-/// What it deliberately does not gain is a lit "open" state: the panel
-/// standing 340 px away is its own statement, and a second one would be the
-/// same fact twice.
-fn playlists_door() -> Element<'static, Message> {
-    let room = theme::active();
-    button(
-        container(
-            text("Playlists")
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .font(theme::MEDIUM)
-                .wrapping(text::Wrapping::None),
-        )
-        .height(Length::Fill)
-        .align_y(alignment::Vertical::Center),
-    )
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_SM))
-    .style(move |_theme, status| theme::word_button(room, room.wall, status))
-    .on_press(Message::TogglePlaylists)
     .into()
 }
 

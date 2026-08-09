@@ -4,9 +4,22 @@
 > [ADR-0017](adr/0017-design-direction.md) §6 from
 > `docs/design/critique/01-foundations.md`, extended with ours.
 >
-> **The editing rule.** Adding an entry needs a pull request. **Removing one
-> needs an ADR that beats its argument.** A refusal you can delete because you
-> changed your mind is not a refusal; it is a preference.
+> **Who this binds.** Contributors and agents — not the owner. Its job is to
+> stop settled questions being re-litigated by whoever touches the code next,
+> and to stop baz drifting into the generic-music-player defaults it exists to
+> avoid. **The owner's decision is sufficient on its own**; an entry he
+> reverses gets rewritten to say what was decided and why, and that is the
+> whole of the process. Nobody argues with a document to change their own
+> product.
+>
+> **The editing rule, for everyone else.** Adding an entry needs a pull
+> request. Removing one needs an argument that beats it. A refusal a
+> contributor can delete because they changed their mind is not a refusal; it
+> is a preference.
+>
+> **What is actually hard here** is responsiveness and the aesthetic — the
+> product must stay fast and must look excellent. The entries below serve those
+> two ends. Where an entry ever works against them, the entry is wrong.
 >
 > This is a standing document, not a decision record. It is the descendant of
 > `VISION.md`'s "Refuse (the fixes)" and "Betrayal list", and it is where new
@@ -84,15 +97,39 @@ a toolkit with no accessibility tree, which outranks a quietness preference.
 The three named steps, the gesture, the persistence-as-state and the absence of
 any Settings row are all unchanged. (Owner's decision, 2026-08-09.)
 
-**Nothing is ever drawn on top of a sleeve.** No play overlay on hover, no
-badge, no duration chip, no gradient scrim, no selection tint, no queue numeral.
-The only thing that touches artwork is light around it.
+**One thing is drawn on a sleeve, and only under the pointer**: the hover
+options — a veil gathering at the sleeve's left edge and dissolving to nothing
+before its right one, carrying `Play`, `Queue`, `Add to…`, `Open`. It is
+present on exactly one tile at a time, it is gone the moment the pointer
+leaves, and the right of every cover stays as painted so the record stays
+recognisable while you choose.
+
+Still refused, and these are refusals rather than omissions: a badge, a
+duration chip, a selection tint, a queue numeral, **anything at rest**, and
+anything on artwork anywhere but a wall tile — not the Songs rows, not the
+lane, not the record's page. Nothing is drawn on a sleeve nobody is pointing
+at.
+
+*Rewritten on the owner's decision, 2026-08-09.* This entry used to read
+**"Nothing is ever drawn on top of a sleeve"** and listed a play overlay on
+hover and a gradient scrim among the things it refused. The owner approved a
+mockup that draws exactly that, and his decision is sufficient on its own
+(this ledger's own preamble). The design constraint that replaced the blanket
+refusal is the veil's asymmetry: it must be a gradient that dies before the
+right edge, never a flat panel over the whole cover, and
+`the_veil_is_a_gradient_over_one_sleeve_and_never_a_flat_panel` is what holds
+it to that.
 
 **No artwork is ever drawn larger than its source.** `ART_MAX == THUMB_PX`,
 asserted in code.
 
 **No scrim, ever.** Dimming ten thousand covers to show twelve rows is the exact
-mistake the palette exists to avoid.
+mistake the palette exists to avoid. Unchanged by the hover veil above and
+worth saying why: a scrim is a surface laid over *the collection* to make
+something else readable, and the veil is a mark on **one** object under the
+pointer that stops before that object is hidden. The shuffle pool's dimming is
+governed here too, and it is not a scrim for the same reason — it is the
+artwork's own opacity, not a layer over it.
 
 **No spinner and no progress bar, anywhere.** During a scan the shelf filling
 with covers *is* the progress indicator. No importer dialog, no progress modal.
@@ -104,19 +141,23 @@ reversed; what was lost was always position, provenance and skip.) Replacing a
 slot with a *better statement of the same fact* is the one permitted move — it
 is how the seek row became the needle.
 
-**Sound from the wall is two presses, and that is a price, not a debt.**
-Open the record's page, press `Play album` — deliberately, twice considered:
-ADR-0022 removed the double-click structurally (the first press navigates;
-no tile remains under the pointer for a second), and the Jobs-era critique
-(`docs/design/11-jobs-era-critique.md` P7) surfaced the one candidate no ADR
-had listed — a second press landing on the just-opened page as `Play album`
-— and the owner refused it: a press whose meaning depends on arrival time is
-a micro-mode, in a product that hates cleverness. The friction budget's
-*intent → sound = 1 press* line is hereby **re-priced at the wall**, not
-unmet: one press from the Songs section, from a playlist, from the queue,
-from `Play all`; two from a sleeve, where the second is a fixed 320 × 32
-target with a name. Shift-click remains the one-press *sound-later*.
-(Owner's decision, 2026-08-09.)
+**Sound from the wall is one press.** Hover a sleeve and four options are laid
+over it — `Play`, `Queue`, `Add to…`, `Open`. `Play` sounds the record from
+the wall. The friction budget's *intent → sound = 1 press* line is met at
+every scope in the product, the wall included.
+
+*Rewritten on the owner's decision, 2026-08-09.* This entry used to read
+**"Sound from the wall is two presses, and that is a price, not a debt"**, and
+it priced the wall at two: open the record's page, press `Play album`. The
+owner decided the price should not be paid, and that the reveal should be the
+hover group ADR-0032 §2 had measured as not fitting *beside* a tile — it fits
+*inside* one. What the old entry was written against is untouched and still
+refused: no double-click, no press whose meaning depends on arrival time, and
+no route buried in a modifier key (the owner on ADR-0032 §4's `Ctrl`-click
+proposal: *"burying things in modifier keys is not great"*). Shift-click
+remains the one-press *sound-later*, and the tile's right-press menu remains
+the pointer-reachable twin of all four options, so nothing here is reachable
+only by hover.
 
 **A band's content may not touch the band's edges.** Every bar leads its tallest
 zone by a **named gap** on each side — never a ratio, because a constant
@@ -132,12 +173,33 @@ too short"* — the needle's bar was correct in every token and had no air at al
 
 ## Surfaces
 
-**baz has no resident side surfaces, and no surface that is a slot.** No
-sidebar, no inspector, no rail, no drawer, no popover. **The window holds one
-place at a time and the now-playing bar is in every one of them** (ADR-0022).
-One summoned, single-tenant panel exists: the playlist panel (ADR-0024) —
-opened by its labelled door for the duration of a collecting task, overlaying
-without reflow, closed at rest. **It may never gain a second tenant.**
+**baz has one resident side surface, and no surface that is a slot.** No
+inspector, no drawer, no popover. **The window holds one place at a time, with
+the returns lane to its left in every place but Settings, and the now-playing
+bar under all of them** (ADR-0022 as ADR-0030 restates it). One summoned,
+single-tenant panel exists beside it: the playlist panel (ADR-0024) — summoned
+by <kbd>Ctrl</kbd>+<kbd>P</kbd> for the duration of a collecting task,
+overlaying without reflow, closed at rest. **Neither may ever gain a second
+tenant.**
+
+*Rewritten on the owner's decision, 2026-08-09* — *"let's do the ground work
+for adding a home page and left hand side bar… we can collapse it into only an
+icon list. similar to Spotify"*. This entry said *no resident side surfaces*
+and it was rejected twice before it was written down; the owner reversed it,
+and the preamble says that settles it. What the reversal is **not** is a
+licence for panels generally: what was rejected twice was a **slot** — a
+340 px column that showed the selected album, then the queue, then Settings,
+with arbitration state and a re-hang of the wall on every tile press. The lane
+has one subject (*things you have touched*), one list, one order, no
+arbitration, and one press that may re-hang the wall — the press whose subject
+*is* the wall's width, and which lands outside it. ADR-0030 §1 tabulates each
+of the five findings that killed the rail against the thing that makes it
+unreachable here. **A second resident surface needs an argument that beats
+this one, and so does a second tenant in this one.**
+
+The head's three destinations are the owner's too, and they are the one
+concession worth naming: a nav rail is refused (doc 07 L8.4) and the head is a
+**closed set of three**. A fourth is the refused thing.
 
 Rejected twice by the owner before this was written down — *"an example of a
 strange UI is the two side panels we have now"*, and then *"I really hate the
@@ -163,9 +225,22 @@ the dead column did and what places do better. The owner blessed this surface
 explicitly; this entry records the argument so the blessing is not a precedent
 for panels generally.
 
-**Two vertical strips may not do one job.** The wall draws no scrollbar, because
-the index rail beside it already says where you are, jumps, drags — and names
-the shelf it will take you to, which a scroller cannot.
+**Every scrolling surface in baz has a scrollbar, and the wall's is 4 px.**
+The rail says *where you are* and names the shelf it will take you to; the bar
+answers the one thing a rail cannot be asked — *take me to the end*, which is
+not a group key and so is not a rung on the rail. The two strips are not doing
+one job; they are doing two, and the bar is the narrower of them because it is
+the lesser.
+
+*Rewritten on the owner's decision, 2026-08-09* — *"can we allow there to be a
+scroll bar for any view? Just a very minimal scroll bar because otherwise, it's
+hard to just jump to the end"*. This entry used to read **"Two vertical strips
+may not do one job"** and refused the wall a scrollbar outright. Every other
+list in baz already had one, so the wall was the only surface the entry
+applied to. What stands from ADR-0022's complaint (*"the fact that the alphabet
+bar has a scroll to its left isn't nice either"*) is that the bar must not
+compete with the rail: 4 px against the rail's 60, no trough, the room's own
+hairline, and it reserves its own lane so it is never drawn over a cover.
 
 ---
 

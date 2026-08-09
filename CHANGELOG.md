@@ -331,6 +331,127 @@ next commit.
 
 **Interface**
 
+- **The returns lane**: a resident surface at the window's left edge
+  (ADR-0030), on the room's `recess` so it reads as cut into the room rather
+  than stuck onto it. 280 px open, 96 collapsed, `Ctrl`+`B` or two marks at
+  its foot, and the state is remembered in `config.toml` beside the density
+  step. Its head holds three fixed destinations — `Home`, `Library`,
+  `Now playing` — always all three, the current one in full paper ink, and
+  **`Now playing` carries the lamp dot when something is sounding**, stacked
+  on the glyph so it survives the collapse. Below a hairline, `RECENT`: every
+  playlist and the last 24 records played, one list, last touched first, ties
+  by name. No queue, no sort, no filter, no pinning — each of those is one of
+  the five findings that killed the last resident column (ADR-0024 §5), read
+  here as engineering lessons.
+  - **The collapse is a hard cut, one frame, no tween.** It is the one press
+    in the product whose subject is the collection's width, and it is safe
+    because it lands outside the wall: no wall gesture can be in flight. The
+    wall keeps the *shelf* that was at the top of the viewport, not its pixel
+    offset. The 1 px width sweep from 300 to 2560 now runs in both lane states
+    over every density step.
+  - At two of three shipped widths the column count does not change and the
+    covers simply get bigger — 243 → 304 at 1280, 258 → 294 at 1920 — so the
+    gesture reads as *zoom* rather than as reflow, which is also what it means.
+  - **The strip's `Playlists` door is gone**: the lane is the resident,
+    complete index of lists. 88 px come back to the strip and the single-line
+    floor falls from 960 to 872. The two-line split still earns its keep — it
+    exists for the *library* line, whose tenants still need 600. The window's
+    declared minimum rises to 696, the strip's floor plus the lane's rail.
+- **`Place::Home`** — the interrupted run and what is new, as a place rather
+  than as a band at the head of the wall (the owner's choice between
+  ADR-0030 §3.2 and §9.4). `CONTINUE` is a 132 px sleeve beside a placard: the
+  artist in letterspaced caps, the work's title, `1999 · FLAC · 16-bit ·
+  44.1 kHz`, then **the needle** — 2 px at exactly the sleeve's width, amber to
+  the elapsed fraction with a 1 px tick at the position — then `Resume ·
+  Anhydrous 11 · 3:12 of 4:34`. **The placard carries the needle and nothing is
+  drawn on the artwork.** `RECENTLY ADDED` is one row of the wall's own tiles by
+  first-seen, with the wall's own hover options. Both bands are absent, not
+  empty.
+- **`Place::NowPlaying`** — the sounding record at the size it deserves:
+  artwork, identity, the same needle at the work's width, the bar's own
+  transport. Every measure is derived from the viewport, so the kiosk
+  full-screen mode is this surface at a larger size rather than a second one.
+  No visualizer and no VU.
+- **A work's own title is set in IBM Plex Serif Italic** — the museum-placard
+  convention, on the one string in the product that is a work's name standing
+  beside its own facts (the Home placard). The owner saw the typographic risk
+  and approved it; it is one token, pinned by test to one consumer, so
+  reverting is one line. The face is bundled complete under OFL-1.1 (the same
+  licence file, byte for byte, as the bundled sans).
+- **Every row-shaped control answers the pointer on the ground it actually
+  stands on.** A hover is now one surface step up from the row's own ground
+  (`Palette::step_up`) rather than the fixed `plinth`, which was right for
+  rows on the wall and silent everywhere else: the **playlist panel's rows**
+  and the **context menu's items** both stood on `plinth` and painted the
+  colour already under them. The owner named it — *"a more clear indicator
+  that something is a click area… right now it's a bit… unresponsive"*. On the
+  wall the values are the shipped ones to the bit.
+- **`New playlist` is a ghost row** at the head of the panel's list, in a real
+  row's exact geometry with the drawn `+` in a recessed sleeve slot. Pressing
+  it turns the label into a field in place; `Save` sits at the row's right end
+  and is inert while the name is empty or refused, with the storage layer's own
+  words under it. `Enter` commits, `Esc` cancels, and the ghost returns after
+  a save so the affordance is never consumed.
+- **Sound from the wall is one press.** Hovering a record on the wall reveals
+  four options laid over its sleeve — `Play`, `Queue`, `Add to…`, `Open` — and
+  `Play` sounds the record without opening its page. The owner's approved
+  design, and the reversal of `docs/REFUSALS.md`'s *sound from the wall is two
+  presses* and *nothing is ever drawn on top of a sleeve*, and of ADR-0032 §2's
+  *no hover-revealed verb group*; all three are rewritten to record what was
+  decided. The `Ctrl`-click accelerator ADR-0032 §4 left open for the owner is
+  **not** taken — *"burying things in modifier keys is not great"*.
+  - **The veil is a gradient, never a panel**: it gathers at the sleeve's left
+    edge and dissolves to nothing before the right one, so the right of every
+    cover stays as painted and the record stays recognisable while you choose.
+    Its stops were specified as an sRGB composite and are re-solved for a
+    renderer that blends in linear light (`theme::veil_alpha`) — a correction
+    that runs the *opposite* way to the 3.7× overdraw `Palette::ink_over`
+    documents, because the veil is dark ink over lighter artwork rather than
+    light ink on a dark ground. Verified against sampled pixels from real
+    frames, not against the arithmetic: worst deviation 0.021 of an opacity at
+    both 1280 × 860 and 1920 × 1080
+    (`docs/design/impl/hover-options/README.md`).
+  - **Four options on one left edge**, glyph then label, each taking a quarter
+    of the sleeve's height as its hit band — 47 px at the tightest density baz
+    draws, against law L7's 32 px floor. The ink lane ends at the veil's `0.55`
+    stop and the hit band at its `0.68` stop, both read out of the veil's own
+    stops rather than declared: type stops where the veil still carries it over
+    a paper-white sleeve, and the band stops short of the right edge so a
+    press on the sleeve **outside** an option still opens the record's page.
+    Shift-click still queues; the tile's right-press menu is unchanged and
+    remains the pointer-reachable twin of all four options, so nothing is
+    reachable by hover alone.
+  - **The reveal costs nothing**: it is the `+` slot's own boolean, not a
+    tween. No new motion class, no clock, no subscription — 0 frames drawn in
+    10 s whether or not a tile is hovered. ADR-0020's five transitions are
+    untouched.
+  - `Play` wears the accent under the licence `theme::primary` holds — it is
+    the control that creates playback truth, and at most one tile is hovered.
+    `Queue` is **paper**, one departure from the approved mockup, taken under
+    the brief's own licence because the ledger's amber entry says *not what is
+    queued* in those words.
+  - Two glyphs join the sheet: `Queue` (three bars, the last short — a list
+    that runs out, which is what keeps it off the hamburger) and `Open` (the
+    disclosure chevron). Options are wall tiles' alone — not the Songs rows,
+    not the lane.
+- **The sounding record's sleeve is in the now-playing bar**: 52 px square,
+  left of the track and artist, *inside* the block's existing hit target so
+  the cover and the type are one control that goes one place. It fits the
+  bar's existing 80 px band and its named 12 px lead with nothing re-derived —
+  52 is the largest square on the 4 px lattice inside the 56 px the tallest
+  zone already reserved. No artwork, and the block renders exactly as it did
+  before.
+- **The wall has a scrollbar** — 4 px, no trough, the room's own hairline, and
+  it reserves its own lane inside the scrollable so no cover is ever drawn
+  under it. The owner's decision (*"just a very minimal scroll bar because
+  otherwise, it's hard to just jump to the end"*); `docs/REFUSALS.md`'s *two
+  vertical strips may not do one job* entry is rewritten to record it. The wall
+  was the only scrolling surface in baz without one — every list already had
+  `list_scrollbar` — and the rail is untouched: it still says where you are and
+  still names the shelf it jumps to. What the bar adds is the gesture the rail
+  has no rung for, because *the end* is not a group key. `INDEX_LANE_W` and the
+  rail's width algebra are unchanged; the 4 px comes out of the wall's own
+  measure, which the grid absorbs.
 - **The wall's density has a visible control** (ADR-0028; doc 11 §5 P8, the
   owner choosing the visible handle): three detent marks at the foot of the
   index rail's lane — each the wall itself at its hang, one, four, nine works
@@ -654,6 +775,28 @@ next commit.
 
 ### Changed
 
+- **The queue survives a quit** (ADR-0023 §6, unbuilt until something wanted
+  it). `session.toml` beside the config holds the paths, the cursor, the
+  elapsed position and the provenance, written when the run moves and again on
+  the way out. On launch the run is handed back to the engine **loaded and
+  silent** and the interrupted point is one press away on Home's `CONTINUE`.
+  One deviation from §6's letter, argued in `session.rs`: the engine's command
+  table makes *loaded and paused at a non-zero cursor* unrepresentable without
+  changing the engine, which §6 costed at zero. The clause that matters is
+  kept — nothing sounds unasked.
+- **A place's body is sized against the window less the returns lane**, in both
+  axes (`Shelf::body_width`, `App::body_height`). Every in-place breakpoint —
+  the strip's two-line split, the album page's two columns, the Settings
+  measure — resolves against the body rather than the window, because a body
+  that split against the window would split at the wrong moment the instant a
+  column stood beside it.
+- **`Ctrl`+`B` returns.** Doc 07 §5.3 retired it when ADR-0022 left no sidebar;
+  its subject is back and its meaning is unchanged, which is the only condition
+  on which a retired reflex may be revived.
+- **`Place::is_home` is `Place::is_library`.** It always meant *the collection
+  is on screen*; the name only became wrong when a place was actually called
+  Home. `Place::Library` is still the launch frame and still what `Esc`
+  returns to.
 - **One vocabulary in the shipping copy** (doc 11 §5 P4): every place
   header now says *"Esc returns to Library"* — "the wall" was the design
   corpus's own name leaking on screen — the record page's `Add to…` names

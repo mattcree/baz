@@ -3,16 +3,35 @@
 //! ADR-0006 layer 1 — pure, iced-free, unit-tested — and after ADR-0022 the
 //! *whole* of baz's surface model:
 //!
-//! > **The window holds one place at a time, and the now-playing bar is in
-//! > every one of them.**
+//! > **The window holds one place at a time, with the returns lane to its left
+//! > in every place but Settings, and the now-playing bar under all of them.**
 //!
-//! One kind, five members, one rule. There is no inspector, no popover and no
+//! One kind, seven members, one rule. There is no inspector, no popover and no
 //! rail; a listener has one question to answer about anything on screen —
 //! *which place am I in* — and one key that answers it. (One summoned,
 //! single-tenant panel floats *over* a place without being one — the playlist
 //! panel, ADR-0024 §5, whose amended refusal names it and closes the slot; it
 //! holds no place-like state here because it is never what the window is
 //! showing, only what is temporarily in front of it.)
+//!
+//! # The two the owner added
+//!
+//! ADR-0030 recommended a home *band* at the head of the Library's body and
+//! recorded `Place::Home` under "deliberately not done". **The owner overruled
+//! both**, and `docs/REFUSALS.md`'s preamble says his decision is sufficient
+//! on its own: home is a real place, and a `Now playing` place stands beside
+//! it. Both are reached from the returns lane's head, which is what pays the
+//! cost ADR-0030 priced — *"a fifth place needs a route back to the wall,
+//! which is either a nav rail or a strip tenant"*. The route is a resident
+//! surface that was being built anyway, and it costs the strip nothing; it
+//! costs the head its own second subject, which is the concession, recorded.
+//!
+//! **[`Place::Library`] is still the launch frame and still what
+//! [`Place::back`] returns to.** The collection is what baz opens onto
+//! (`VISION.md`'s first pillar) and <kbd>Esc</kbd> means *put this down*, not
+//! *go to the home page*; nothing the owner decided touches either, so neither
+//! moved. [`Place::is_library`] is the reading, renamed from `is_home` the
+//! moment a place was actually called Home.
 //!
 //! # What this replaces
 //!
@@ -55,14 +74,28 @@
 
 /// The place the window is showing.
 ///
-/// [`Self::Library`] is home and the default: a fresh baz, and a baz that has
-/// just been backed out of anywhere, is looking at the shelf.
+/// [`Self::Library`] is the default: a fresh baz, and a baz that has just been
+/// backed out of anywhere, is looking at the shelf.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Place {
     /// The shelf, its search, its arrangement, its counts. The interface, per
     /// the vision's first pillar.
     #[default]
     Library,
+    /// **Home**: the interrupted run, and what is new (ADR-0030 §9.4 as the
+    /// owner chose it).
+    ///
+    /// Not the launch frame and not what `back` returns to — a page you go to,
+    /// from the lane's head, like every other place.
+    Home,
+    /// **Now playing**: the sounding record at the size it deserves, and the
+    /// surface the kiosk mode will be at a larger size.
+    ///
+    /// Distinct from [`Self::Album`] because its subject is *what is sounding*
+    /// rather than *which record I pointed at* — the bottom bar's subject, on
+    /// a page. It carries no id for the same reason the bar carries none: the
+    /// engine's answer is the only one it may draw.
+    NowPlaying,
     /// **One record's page**: its art, its identity, the action, its tracks
     /// and its condition report, at the width of the window.
     ///
@@ -156,7 +189,7 @@ impl Place {
     /// Distinct from the three toggles above because a *back* that toggled
     /// would send you somewhere from the Library, which is not what backing
     /// out of anywhere means. Home is already home, so this is a no-op there —
-    /// and the shell asks [`Self::is_home`] first, so the key falls through to
+    /// and the shell asks [`Self::is_library`] first, so the key falls through to
     /// the layers underneath rather than being silently eaten by a place that
     /// had nothing to leave.
     #[must_use]
@@ -172,9 +205,70 @@ impl Place {
         Self::Library
     }
 
-    /// Whether the shelf is the place on screen.
+    /// **The lane's head, pressed**: go to that destination.
+    ///
+    /// Not a toggle, and that is the difference between a destination and a
+    /// door. `Queue` and `Settings` are doors — press them again and they
+    /// close — because each names one thing you look at and then put down.
+    /// The head's three name *where you are*, and the current one is drawn in
+    /// full paper ink to say so; pressing the row you are already on must
+    /// leave you there, because the alternative is a control whose meaning
+    /// depends on a state you can already see and would be a way to fall out
+    /// of the head into the wall by mis-clicking.
     #[must_use]
-    pub fn is_home(self) -> bool {
+    #[expect(
+        clippy::unused_self,
+        reason = "a navigation verb reads on the place you are leaving, and \
+                  the signature is the claim: that today's answer ignores \
+                  where you were is the *finding* — a destination is not a \
+                  door — not an accident. `back` carries the same expectation \
+                  for the same reason."
+    )]
+    pub fn go(self, to: crate::lane::Destination) -> Self {
+        match to {
+            crate::lane::Destination::Home => Self::Home,
+            crate::lane::Destination::Library => Self::Library,
+            crate::lane::Destination::NowPlaying => Self::NowPlaying,
+        }
+    }
+
+    /// Which of the head's three destinations this place *is*, if it is one —
+    /// what the lane reads to ink the current row.
+    ///
+    /// The four places that are not destinations (`Album`, `Queue`,
+    /// `Playlist`, `Settings`) light **nothing** in the head rather than
+    /// falling back to `Library`. A record's page was reached from the wall,
+    /// but it is not the wall, and a head that claimed otherwise would be
+    /// telling the listener they are somewhere they are not.
+    #[must_use]
+    pub fn destination(self) -> Option<crate::lane::Destination> {
+        match self {
+            Self::Home => Some(crate::lane::Destination::Home),
+            Self::Library => Some(crate::lane::Destination::Library),
+            Self::NowPlaying => Some(crate::lane::Destination::NowPlaying),
+            _ => None,
+        }
+    }
+
+    /// Whether the returns lane is drawn beside this place.
+    ///
+    /// **Everywhere but Settings** — ADR-0024 §5's clause 5, inherited
+    /// verbatim by ADR-0030. The standing decisions are the one place whose
+    /// subject is baz rather than the music, and a column of records beside
+    /// them would be the third tenant that killed the last resident column.
+    #[must_use]
+    pub fn wears_lane(self) -> bool {
+        self != Self::Settings
+    }
+
+    /// Whether the shelf is the place on screen.
+    ///
+    /// Called `is_home` until a place was actually called
+    /// [`Home`](Self::Home). The rename is the whole of the change: this has
+    /// always meant *the collection is what the window is showing*, and every
+    /// caller wanted that reading.
+    #[must_use]
+    pub fn is_library(self) -> bool {
         self == Self::Library
     }
 
@@ -194,10 +288,67 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_fresh_window_is_at_home() {
+    fn a_fresh_window_is_at_the_collection() {
         assert_eq!(Place::default(), Place::Library);
-        assert!(Place::default().is_home());
+        assert!(Place::default().is_library());
         assert_eq!(Place::default().showing_album(), None);
+        // **The launch frame is still the collection**, with a place now
+        // literally called Home beside it. `VISION.md`'s first pillar is the
+        // reason and the owner did not touch it; a fresh baz opens onto the
+        // records it holds.
+        assert_ne!(Place::default(), Place::Home);
+    }
+
+    /// **The head's three are destinations, not doors**: pressing the one you
+    /// are on leaves you there, where `Queue` and `Settings` would close.
+    #[test]
+    fn a_destination_never_closes_itself() {
+        use crate::lane::Destination;
+        for to in Destination::ALL {
+            let arrived = Place::default().go(to);
+            assert_eq!(arrived.destination(), Some(to));
+            assert_eq!(arrived.go(to), arrived, "{to:?} closed itself like a door");
+            // …and reached from anywhere, it is the same place.
+            for from in [
+                Place::Album(7),
+                Place::Queue,
+                Place::Playlist(3),
+                Place::Settings,
+            ] {
+                assert_eq!(from.go(to), arrived);
+            }
+        }
+    }
+
+    /// The four places that are not destinations light **nothing** in the
+    /// head — a page reached from the wall is not the wall.
+    #[test]
+    fn only_a_destination_lights_the_head() {
+        for place in [
+            Place::Album(7),
+            Place::Queue,
+            Place::Playlist(3),
+            Place::Settings,
+        ] {
+            assert_eq!(place.destination(), None, "{place:?}");
+        }
+    }
+
+    /// **The lane is beside every place but Settings** — ADR-0024 §5's clause
+    /// 5, inherited verbatim.
+    #[test]
+    fn the_lane_stands_beside_every_place_but_the_standing_decisions() {
+        for place in [
+            Place::Library,
+            Place::Home,
+            Place::NowPlaying,
+            Place::Album(7),
+            Place::Queue,
+            Place::Playlist(3),
+        ] {
+            assert!(place.wears_lane(), "{place:?}");
+        }
+        assert!(!Place::Settings.wears_lane());
     }
 
     #[test]
@@ -226,6 +377,8 @@ mod tests {
     fn back_always_means_the_library() {
         for place in [
             Place::Library,
+            Place::Home,
+            Place::NowPlaying,
             Place::Album(7),
             Place::Queue,
             Place::Playlist(3),
@@ -250,6 +403,7 @@ mod tests {
             Queue,
             Album(u64),
             Playlist(u64),
+            Go(crate::lane::Destination),
             Back,
         }
         let steps = [
@@ -258,6 +412,8 @@ mod tests {
             Step::Album(1),
             Step::Album(2),
             Step::Playlist(1),
+            Step::Go(crate::lane::Destination::Home),
+            Step::Go(crate::lane::Destination::NowPlaying),
             Step::Back,
         ];
         for a in steps {
@@ -271,10 +427,11 @@ mod tests {
                                 Step::Queue => place.queue(),
                                 Step::Album(id) => place.album(id),
                                 Step::Playlist(id) => place.playlist(id),
+                                Step::Go(to) => place.go(to),
                                 Step::Back => place.back(),
                             };
                             assert_eq!(
-                                place.is_home(),
+                                place.is_library(),
                                 place == Place::Library,
                                 "{step:?} left the two readings disagreeing"
                             );
@@ -283,12 +440,22 @@ mod tests {
                                 matches!(place, Place::Album(_)),
                                 "{step:?} left an album page with no album"
                             );
+                            // The head's reading agrees with the place, both
+                            // ways: a destination place names itself, and a
+                            // place that is not one names nothing.
+                            assert_eq!(
+                                place.destination().is_some(),
+                                matches!(place, Place::Home | Place::Library | Place::NowPlaying),
+                                "{step:?} left the head disagreeing with the place"
+                            );
                             // Exactly one member is on screen: the enum makes
                             // "two places at once" unrepresentable, and this
                             // is that claim spelled out for a reader who is
                             // looking for the rail's arbitration and will not
                             // find it.
-                            let showing = usize::from(place.is_home())
+                            let showing = usize::from(place.is_library())
+                                + usize::from(place == Place::Home)
+                                + usize::from(place == Place::NowPlaying)
                                 + usize::from(place == Place::Settings)
                                 + usize::from(place == Place::Queue)
                                 + usize::from(place.showing_album().is_some())

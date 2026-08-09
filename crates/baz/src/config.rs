@@ -109,6 +109,9 @@ const LEGACY_MUSIC_DIR: &str = "music_dir";
 /// The key the density step is written under.
 const DENSITY: &str = "density";
 
+/// The key the returns lane's open/closed state is written under.
+const SIDEBAR_OPEN: &str = "sidebar_open";
+
 /// Application configuration. See the [module docs](self) for scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -155,6 +158,18 @@ pub struct Config {
     ///
     /// Written as [`Density::code`], for `group_key`'s reason.
     pub density: Density,
+    /// Whether the returns lane stands open (ADR-0030 §3).
+    ///
+    /// **View state, persisted, and deliberately not a setting** — `density`'s
+    /// argument exactly, and ADR-0030 restates ADR-0017 §1.3 to say so: the
+    /// control is the pair of marks at the lane's foot with
+    /// <kbd>Ctrl</kbd>+<kbd>B</kbd> as its accelerator, and there is no
+    /// Settings row anywhere for it.
+    ///
+    /// A fresh baz opens with the lane **open**: it is the surface the owner
+    /// asked for, and a resident index that arrives collapsed would have to be
+    /// discovered before it could be used.
+    pub sidebar_open: bool,
 }
 
 impl Default for Config {
@@ -167,6 +182,7 @@ impl Default for Config {
             replay_gain: ReplayGainSettings::default(),
             group_key: GroupKey::Artist,
             density: Density::Balanced,
+            sidebar_open: true,
         }
     }
 }
@@ -212,6 +228,12 @@ impl Config {
             "# how closely it hangs: \"spacious\", \"balanced\" or \"dense\" \
              (Ctrl+- / Ctrl+= / Ctrl+scroll)\n{DENSITY} = {}",
             toml_string(self.density.code()),
+        );
+        let _ = writeln!(
+            out,
+            "# whether the returns lane stands open (Ctrl+B, or the two \
+             marks at its foot)\n{SIDEBAR_OPEN} = {}",
+            self.sidebar_open,
         );
         let _ = write!(
             out,
@@ -259,11 +281,19 @@ impl Config {
             .and_then(toml::Value::as_str)
             .and_then(Density::from_code)
             .unwrap_or(Density::Balanced);
+        // A bool degrades to the default the same way a word does: a value
+        // that is not a bool at all — a hand edit, a newer baz's spelling —
+        // costs the lane its remembered state and nothing around it.
+        let sidebar_open = table
+            .get(SIDEBAR_OPEN)
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(true);
         Self {
             music_dirs,
             replay_gain,
             group_key,
             density,
+            sidebar_open,
         }
     }
 }
@@ -453,6 +483,7 @@ mod tests {
                 replay_gain,
                 group_key: GroupKey::Year,
                 density: Density::Dense,
+                sidebar_open: true,
             };
             let back = Config::from_toml(&config.to_toml());
             assert_eq!(back, config, "round-trip failed for {replay_gain:?}");
@@ -720,6 +751,7 @@ mod tests {
             replay_gain: settings(ReplayGainMode::Album, -300, 0, false),
             group_key: GroupKey::Genre,
             density: Density::Spacious,
+            sidebar_open: true,
         };
         let text = config.to_toml();
         assert!(!text.contains(MUSIC_DIRS), "{text}");
@@ -737,6 +769,7 @@ mod tests {
             replay_gain: settings(ReplayGainMode::Album, -350, 250, false),
             group_key: GroupKey::Played,
             density: Density::Spacious,
+            sidebar_open: true,
         };
         store(&path, &config).expect("store creates parents and writes");
         assert_eq!(load(&path), config);
@@ -887,6 +920,7 @@ mod tests {
             replay_gain: settings(ReplayGainMode::Track, -1234, 567, false),
             group_key: GroupKey::Added,
             density: Density::Dense,
+            sidebar_open: true,
         };
         let table: toml::Table = config.to_toml().parse().expect("baz writes valid TOML");
         assert!(table.contains_key(MUSIC_DIRS));

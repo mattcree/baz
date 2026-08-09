@@ -112,7 +112,7 @@
 
 use std::sync::{LazyLock, OnceLock};
 
-use iced::font::Weight;
+use iced::font::{self, Weight};
 use iced::widget::rule::FillMode;
 use iced::widget::slider::{Handle, HandleShape, Rail};
 use iced::widget::{button, checkbox, container, rule, scrollable, slider, text_input};
@@ -250,6 +250,15 @@ const HAIRLINE_A: f32 = 0.07;
 const HAIRLINE_STRONG_A: f32 = 0.15;
 /// Opacity of [`Palette::select_wash`]: the room's ink at **18 %**.
 const SELECT_WASH_A: f32 = 0.18;
+/// The synthetic surface step [`Palette::step_up`] uses **above the ladder's
+/// top plane**: the room's ink at **5 %**.
+///
+/// It is not a fifth plane; it is the ladder's own rise, measured. The real
+/// steps `wall → plinth` and `plinth → plinth_lit` work out at 3.6–4.4 % of
+/// the ink in Closing Time and 5.3–6.3 % in Reading Room, so 5 % sits inside
+/// the band both rooms already draw — which is the property
+/// `a_surface_step_is_the_ladders_own_rise` asserts rather than assumes.
+const SURFACE_STEP_A: f32 = 0.05;
 /// Opacity of [`Palette::lamp_glow`]: the accent at **30 %**, blurred.
 const LAMP_GLOW_A: f32 = 0.30;
 /// Opacity of [`Palette::ink_wash`]: the room's ink at **6 %** — the whole of
@@ -326,6 +335,48 @@ impl Palette {
             g: mix(ink.g, ground.g),
             b: mix(ink.b, ground.b),
             a: 1.0,
+        }
+    }
+
+    /// **One surface step up from `ground`** — the room's four-plane ladder
+    /// walked upward, and the whole of what "the pointer is on this row" is
+    /// allowed to say.
+    ///
+    /// # Why this exists, and what it fixed
+    ///
+    /// The row styles used to name their two surfaces as *values*
+    /// ([`Palette::plinth`] under the pointer, [`Palette::plinth_lit`] for the
+    /// playing row), which is correct exactly as long as every row in the
+    /// product stands on the wall. The playlist panel's rows do not: the
+    /// panel's own ground *is* `plinth`, so a row that painted `plinth` under
+    /// the pointer painted **the colour that was already there**. The rows
+    /// were pressable, correctly wired and completely mute — the owner's
+    /// words, 2026-08-09: *"a more clear indicator that something is a click
+    /// area… right now it's a bit… unresponsive"*.
+    ///
+    /// The fix is not a second style for the panel. It is that a hover is a
+    /// **relation** — one step above whatever you are standing on — and the
+    /// call site already knows its ground, exactly as it does for
+    /// [`Palette::hairline`] and [`word_button`]. Every row-shaped control in
+    /// the product now names its ground and steps from it, so a surface
+    /// composed on a different plane cannot go mute again.
+    ///
+    /// Above the ladder's top plane the step is synthesised at
+    /// [`SURFACE_STEP_A`] rather than saturating, so a control on
+    /// `plinth_lit` — the menu card's rows — still answers the pointer.
+    #[must_use]
+    pub fn step_up(&self, ground: Color) -> Color {
+        let same = |a: Color, b: Color| {
+            (a.r - b.r).abs() < 1e-4 && (a.g - b.g).abs() < 1e-4 && (a.b - b.b).abs() < 1e-4
+        };
+        if same(ground, self.recess) {
+            self.wall
+        } else if same(ground, self.wall) {
+            self.plinth
+        } else if same(ground, self.plinth) {
+            self.plinth_lit
+        } else {
+            Self::ink_over(self.paper, ground, SURFACE_STEP_A)
         }
     }
 
@@ -992,6 +1043,156 @@ pub const INDEX_CLEARANCE: f32 = GAP_SM;
 /// `the_rail_lane_hangs_at_exactly_one_hang_from_the_last_column`.
 pub const INDEX_LANE_W: f32 = INDEX_CLEARANCE + INDEX_W + HANG;
 
+/// **The returns lane, open** (ADR-0030 §2): [`GAP_XL`] 24 + the content lane
+/// 232 + [`GAP_XL`] 24 = **280**.
+///
+/// The content lane is [`MENU_W`] 232 — the product's existing float measure —
+/// so the lane introduces no width of its own, and the two gutters are the
+/// panel-interior gap rather than the window's [`HANG`]: the lane is a surface
+/// *inside* the window rather than one hanging off its edge, which is what its
+/// own ground already says.
+///
+/// It lands on the industry's number from the other direction: Material's
+/// navigation drawer is 280 dp at its default maximum. Corroboration, not
+/// derivation.
+pub const SIDEBAR_W: f32 = GAP_XL + MENU_W + GAP_XL;
+
+/// **The returns lane, collapsed**: [`GAP_XL`] 24 + [`SIDEBAR_SLEEVE`] 48 +
+/// [`GAP_XL`] 24 = **96**. Material's expressive navigation rail, again from
+/// the other direction.
+pub const SIDEBAR_RAIL_W: f32 = GAP_XL + SIDEBAR_SLEEVE + GAP_XL;
+
+/// The sleeve on a lane row: **48**, one step above [`PANEL_SLEEVE`] 40.
+///
+/// Collapsed, the sleeve is the *only* thing identifying the row, so it is
+/// drawn one step larger than the panel's — the same face at the size a person
+/// can recognise a record by without a word beside it.
+pub const SIDEBAR_SLEEVE: f32 = PANEL_SLEEVE + GAP_SM;
+
+/// A lane row's pitch: **64** — [`SIDEBAR_SLEEVE`] 48 and one [`GAP_SM`] above
+/// and below.
+///
+/// It holds the two-line block ([`LINE_BODY`] 20 over [`LINE_META`] 16 = 36)
+/// centred, and it is above the hit-target floor at every density.
+pub const SIDEBAR_ROW_H: f32 = SIDEBAR_SLEEVE + 2.0 * GAP_SM;
+
+/// The head's destination row: **40** — [`TRANSPORT_HIT`] 32, the product's
+/// control hit box, with one [`GAP_SM`] of air under it.
+///
+/// A destination is a *control*, not a listing, so its box is the box every
+/// other pressable thing in the product stands in; the gap is what separates
+/// three of them stacked without a rule between.
+pub const SIDEBAR_DEST_H: f32 = TRANSPORT_HIT + GAP_SM;
+
+/// **The width below which the lane is always collapsed**: **1000**.
+///
+/// The smallest window at which the *expanded* lane still leaves the wall two
+/// columns at or above [`ART_MIN`] — 988 by arithmetic, rounded up onto the 4 px
+/// lattice. Below it the lane draws its rail and the `Expanded` mark is inert:
+/// a control that would leave the collection one column of covers is not a
+/// control, it is a trap.
+pub const SIDEBAR_FLOOR: f32 = 1000.0;
+
+/// **The lane's width at a window width, in the state the listener asked
+/// for** — the one function `Shelf::grid_width`, the composition and every
+/// width test read, so the geometry cannot be resolved two ways.
+///
+/// `open` is what is *persisted*; below [`SIDEBAR_FLOOR`] the answer is the
+/// rail whatever it says (ADR-0030 §3), which is why this takes the width and
+/// not just the bool.
+#[must_use]
+pub fn sidebar_w(window_w: f32, open: bool) -> f32 {
+    if open && window_w >= SIDEBAR_FLOOR {
+        SIDEBAR_W
+    } else {
+        SIDEBAR_RAIL_W
+    }
+}
+
+/// Whether the lane may be expanded at all at this window width — what makes
+/// the `Expanded` mark inert rather than merely unpressed (ADR-0030 §3).
+#[must_use]
+pub fn sidebar_can_expand(window_w: f32) -> bool {
+    window_w >= SIDEBAR_FLOOR
+}
+
+/// The box a head destination's glyph stands in: [`ICON_PX`] 16 with room for
+/// the lamp dot tucked against its top-right corner.
+///
+/// The dot must survive the collapse (the owner's requirement), so it is
+/// stacked *on the glyph* rather than set after the word — which means the
+/// glyph needs a box slightly larger than itself to tuck it into, in both
+/// states, at the same offset. [`GAP_SM`] of headroom is exactly the
+/// [`DOT`] 6 plus the 2 px that keeps it off the ink.
+pub const SIDEBAR_GLYPH_BOX: f32 = ICON_PX + GAP_SM;
+
+/// **A work's own title**, and the one place in the product it is set: the
+/// Home place's `CONTINUE` placard.
+///
+/// IBM Plex Serif **Italic** — the museum-placard convention, where the
+/// work's title is italic and every fact around it (the artist, the date, the
+/// medium) is not. baz's identity is a gallery and its icon is a work under a
+/// wall label; this is that label's own typography, used for the one string on
+/// screen that is a work's name standing beside its own facts.
+///
+/// **The typographic risk, seen and approved by the owner** (2026-08-09). It
+/// is one token so that it is one line to revert: change this to
+/// [`MEDIUM`] and the serif leaves the product, because
+/// `crate::font::SERIF_ITALIC` has no other consumer and
+/// `the_serif_is_the_work_titles_and_nothing_else` says so.
+pub const WORK_TITLE: Font = Font {
+    style: font::Style::Italic,
+    ..Font::with_name(crate::font::SERIF)
+};
+
+/// The needle's tick: **1 px** at the position, in the brightest accent.
+///
+/// What turns a proportion into a *position*. A bar alone reads as "how
+/// much"; a mark on it reads as "where", which is the question the placard is
+/// answering. It is taken out of the line's own width rather than added to it,
+/// so the needle is the sleeve's measure at every position.
+pub const NEEDLE_TICK_W: f32 = 1.0;
+
+/// The `CONTINUE` placard's sleeve: **132**, between the panel's 40 and the
+/// wall's smallest work.
+///
+/// Large enough that the record is identified by its cover rather than by its
+/// name, small enough that the placard beside it — four lines and a needle —
+/// is the thing being read. On the 4 px lattice, and it is exactly the width
+/// the needle takes, which is the rule that makes the whole band read as one
+/// object.
+pub const CONTINUE_SLEEVE: f32 = 132.0;
+
+/// **The lane's ground**: [`Palette::recess`], one plane *below* the wall.
+///
+/// The lane reads as cut into the room rather than stuck onto it, which is
+/// what a resident surface has to do to stop looking like a panel that forgot
+/// to close. It is also why the lane needs no drawn shadow and no card: a
+/// plane below is a statement the ladder already makes.
+#[must_use]
+pub fn lane_ground(p: &Palette) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(p.recess)),
+        text_color: Some(p.paper),
+        ..container::Style::default()
+    }
+}
+
+/// The hairline on the lane's right edge — the one mark that separates it
+/// from the wall.
+///
+/// [`Palette::hairline_strong`] rather than the plain hairline because it is
+/// read *across* a surface step: the two grounds either side of it already
+/// differ, and a line that is quieter than the step it sits in reads as an
+/// artefact of the step rather than as an edge.
+#[must_use]
+pub fn lane_seam(p: &Palette) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(p.hairline_strong(p.recess))),
+        ..container::Style::default()
+    }
+}
+
 /// Group heading type: **10 px**, the caps size the critique names ("9–10 px
 /// caps at ink 40 %, the only chrome voice").
 ///
@@ -1505,6 +1706,22 @@ pub const BAR_LEAD: f32 = (BAR_CONTENT_H - TRANSPORT_HIT) / 2.0;
 /// its tallest one.
 pub const NOW_PLAYING_H: f32 = LINE_BODY + LINE_META + CONTINUATION_H;
 
+/// **The sounding record's sleeve in the bar** (logical px) — 52, square.
+///
+/// It is fitted to the band rather than the band to it, which is the whole of
+/// the constraint: [`BAR_CONTENT_H`] 80, [`BAR_ZONE_LEAD`] 12 either side and
+/// [`NOW_PLAYING_H`] 56 between them are all unchanged, and 52 is the largest
+/// square on the 4 px lattice that sits inside the 56 with air left over. No
+/// proportion of the bar is re-derived and no slot is removed
+/// (`docs/REFUSALS.md`'s ratchet: *a slot may be added, none removed*).
+///
+/// It joins the now-playing block's **existing** hit target rather than
+/// standing beside it — the block is already the labelled control that takes
+/// you back to what is playing, and a picture next to a link would be two
+/// objects where the design asks for one. With no artwork the cover is simply
+/// absent and the block is the pixels it has always been.
+pub const BAR_COVER: f32 = 52.0;
+
 /// **The lead a band keeps around its tallest zone** (logical px) — the
 /// breathing rule, stated once and applied to both bars.
 ///
@@ -1779,42 +1996,53 @@ pub fn list_scrollbar() -> scrollable::Scrollbar {
         .margin(SCROLLBAR_MARGIN)
 }
 
-/// **The wall's scrollbar: none at all** — the geometry that draws nothing.
+/// **The wall's scrollbar: 4 px, and it reserves its own lane.**
 ///
-/// A `Scrollbar` at zero width and zero scroller width is a bar iced lays out
-/// and paints nothing for; the `scrollable` around it goes on handling the
-/// wheel, the touchpad, a drag and every programmatic `scroll_to` exactly as it
-/// did. That is the whole of the mechanism, and it is worth stating plainly
-/// because "suppress the bar, keep the scrolling" is the kind of thing a
-/// toolkit often will not do: **iced 0.13 does**, and it is the same primitive
-/// the album inspector's reveal viewport used, verified against
-/// `iced_widget` 0.13.4 before this was specified. No fallback is needed.
+/// The one thing an index rail cannot do is take you to the end. The rail
+/// jumps to *shelves* by group key — a letter, a year, a genre — and "the
+/// bottom" is not one of those: under `ARTIST` the last shelf may be `Z` or
+/// may be `#`, and under a filter it is whatever survived. So the wall now
+/// draws a bar, at the narrowest width that is still a handle.
 ///
-/// # Why the wall gets it and no other list does
+/// *The owner's decision, 2026-08-09* — *"can we allow there to be a scroll
+/// bar for any view? Just a very minimal scroll bar because otherwise, it's
+/// hard to just jump to the end"*. `docs/REFUSALS.md`'s *two vertical strips
+/// may not do one job* entry is rewritten to record it. Every **other** list
+/// in baz already had one ([`list_scrollbar`]); the wall was the only surface
+/// without, so "any view" is this view.
 ///
-/// The wall has the [index rail](crate::views::shelf) hard against the same
-/// edge, and the rail is a *better* scrollbar: it says where you are, it jumps,
-/// it drags, and it names the shelf it will take you to, which a scroller
-/// cannot. Two vertical strips doing one job is the owner's third complaint in
-/// ADR-0022 — *"the fact that the alphabet bar has a scroll to its left isn't
-/// nice either"* — and the one to delete is the one that says nothing.
+/// # It takes its width from the wall, not from the rail's clearance
 ///
-/// Every other list in baz keeps [`list_scrollbar`], because none of them has a
-/// rail beside it and a page with no bar and no rail is a page with no readout
-/// of how much of it there is.
+/// A `Scrollbar` with `spacing` set makes iced reserve `width + 2 × margin +
+/// spacing` of right padding *inside* the scrollable
+/// (`iced_widget-0.13.4/src/scrollable.rs:422–436`); without it the bar is
+/// drawn over the content. Overlaying was the tempting move — there is
+/// [`INDEX_CLEARANCE`] 8 of empty lane to its right — but the wall's block is
+/// centred and is not guaranteed to leave 4 px of slack at every width, so a
+/// cover's right edge would sometimes be under the bar. Reserving costs the
+/// grid 4 px, which it absorbs the way it absorbs every other width, and
+/// [`INDEX_LANE_W`] is unchanged: the rail's algebra, and every test over it,
+/// is untouched.
 #[must_use]
 pub fn wall_scrollbar() -> scrollable::Scrollbar {
     scrollable::Scrollbar::new()
         .width(WALL_SCROLLBAR_W)
         .scroller_width(WALL_SCROLLBAR_W)
         .margin(SCROLLBAR_MARGIN)
+        // Reserve rather than overlay; the gap to the rail's ink is
+        // `INDEX_CLEARANCE`'s job and stays its job.
+        .spacing(0.0)
 }
 
-/// The width of the wall's scrollbar: **zero** ([`wall_scrollbar`]).
+/// The width of the wall's scrollbar — **4**, the [`RAIL`] width, which is the
+/// narrowest mark in the product that is still something to aim at.
 ///
-/// A token rather than a literal so that "the wall draws no bar" is a number a
-/// test can hold down beside [`SCROLLBAR_W`], which every other list keeps.
-pub const WALL_SCROLLBAR_W: f32 = 0.0;
+/// Deliberately narrower than [`SCROLLBAR_W`] 10, which every list keeps: a
+/// list's bar is its only readout of how much list there is, and the wall's is
+/// a *second* readout beside a rail that already says where you are. It is a
+/// handle for the one gesture the rail has no answer to, and it is drawn in
+/// the same hairline as every other edge in the room.
+pub const WALL_SCROLLBAR_W: f32 = RAIL;
 
 /// A list's scrollbar: no trough, and a scroller in the same hairline the room
 /// uses for every other edge, one step firmer while it is being driven.
@@ -2759,13 +2987,37 @@ pub const CAPTION_LINE_H: f32 = SIZE_BODY * LEADING_BODY;
 ///
 /// No accent anywhere: the lamp dot in the number column is the playback
 /// truth, and a row that also washed amber would spend the signal twice.
+///
+/// # `ground` — the parameter that made this style true everywhere
+///
+/// The hover used to be the *value* [`Palette::plinth`], which is right for
+/// every row standing on the wall and wrong for the playlist panel's, whose
+/// ground already **is** `plinth`: the panel's rows painted the colour that was
+/// already under them and answered the pointer with nothing. The owner named it
+/// (2026-08-09, *"a bit… unresponsive"*), and the fix is that a hover is one
+/// step up from wherever the row stands ([`Palette::step_up`]) rather than a
+/// fixed plane. On the wall this is the shipped behaviour to the bit —
+/// `step_up(wall)` is `plinth` and `step_up(step_up(wall))` is `plinth_lit` —
+/// which is what makes the change a correction rather than a repaint.
+///
+/// **The paint is the whole hit area or it is a lie.** Every caller draws this
+/// on the `button` that *is* the row, at `Length::Fill`, with the row's padding
+/// inside it — never on an inner block. A highlight smaller than the pressable
+/// region tells the listener to aim somewhere that is not where the press is.
 #[must_use]
-pub fn track_row(p: &Palette, status: button::Status, playing: bool) -> button::Style {
+pub fn track_row(
+    p: &Palette,
+    ground: Color,
+    status: button::Status,
+    playing: bool,
+) -> button::Style {
+    let lit = p.step_up(ground);
+    let carded = p.step_up(lit);
     let background = match (playing, status) {
         // The playing row keeps its card whatever the pointer is doing, and
         // lifts no further under it: it is already the emphasised row.
-        (true, _) => Some(p.plinth_lit),
-        (false, button::Status::Hovered | button::Status::Pressed) => Some(p.plinth),
+        (true, _) => Some(carded),
+        (false, button::Status::Hovered | button::Status::Pressed) => Some(lit),
         (false, button::Status::Active | button::Status::Disabled) => None,
     };
     button::Style {
@@ -2775,7 +3027,7 @@ pub fn track_row(p: &Palette, status: button::Status, playing: bool) -> button::
         text_color: p.paper,
         border: Border {
             color: if playing {
-                p.hairline_strong(p.plinth_lit)
+                p.hairline_strong(carded)
             } else {
                 Color::TRANSPARENT
             },
@@ -3232,6 +3484,219 @@ pub fn pool_ring(p: &Palette, ringed: bool) -> container::Style {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The hover veil, and the four options laid over a sleeve
+// ---------------------------------------------------------------------------
+
+/// **The veil, as designed** — the owner's approved mockup, in the model its
+/// numbers were written in: an offset across the sleeve's width paired with an
+/// opacity of [`Palette::recess`], composited in **sRGB**.
+///
+/// It gathers at the sleeve's left edge and is gone before the right one, so
+/// the right of every cover stays exactly as painted and the record stays
+/// recognisable while you choose. That is the whole reason it is a gradient
+/// and not a panel: a flat scrim over a sleeve hides the record you are
+/// pointing at, which is the thing the wall is made of.
+///
+/// These numbers are **never handed to the renderer**. iced composites in
+/// linear light; see [`veil_alpha`] for what is handed over instead and why
+/// the difference is not a rounding error.
+pub const VEIL_SPEC: [(f32, f32); 6] = [
+    (0.00, 0.92),
+    (0.38, 0.86),
+    (0.55, 0.66),
+    (0.68, 0.30),
+    (0.82, 0.05),
+    (1.00, 0.00),
+];
+
+/// The ground [`veil_alpha`] solves against: **sRGB mid grey**.
+///
+/// A single alpha cannot reproduce an sRGB composite over *every* sleeve at
+/// once — the correction is ground-dependent — so the reference is stated
+/// rather than assumed, and it is the perceptual midpoint of the range a
+/// sleeve can occupy. The residual over the rest of that range is small and
+/// measured: `the_veil_is_solved_against_a_stated_ground_and_its_residual_is_bounded`
+/// holds it to ≤ 10 / 255 across sleeve grounds from sRGB 0.15 to 0.95, and
+/// the sampled-pixel table in `docs/design/impl/hover-options/README.md`
+/// checks it against real rendered frames rather than against this arithmetic.
+pub const VEIL_GROUND: Color = Color {
+    r: 0.5,
+    g: 0.5,
+    b: 0.5,
+    a: 1.0,
+};
+
+/// sRGB → linear light, iced's own transfer function
+/// (`iced_core::Color::into_linear`).
+fn to_linear(u: f32) -> f32 {
+    if u <= 0.040_45 {
+        u / 12.92
+    } else {
+        ((u + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// **The alpha that draws `spec` right.**
+///
+/// [`Palette::ink_over`] fixes the sRGB/linear mismatch for *opaque* marks by
+/// compositing here and handing the renderer a colour. The veil cannot use
+/// that trick: what it lands on is album art, which the theme does not know.
+/// So the blend happens in the renderer, in linear light, and the only thing
+/// left to correct is the number.
+///
+/// Given a `spec` opacity written as an sRGB composite of `ink` over `ground`,
+/// this returns the opacity that reproduces that same result when the GPU
+/// blends in linear light:
+///
+/// ```text
+///   target = spec·ink + (1 − spec)·ground              (the intent, in sRGB)
+///   a      = (lin(ground) − lin(target)) / (lin(ground) − lin(ink))
+/// ```
+///
+/// solved per channel and averaged (the three answers differ by < 0.005 for
+/// every stop in [`VEIL_SPEC`], which is why one alpha per stop is honest).
+///
+/// # The correction runs both ways, and the veil's way is the unfamiliar one
+///
+/// The mismatch this module already documents at [`Palette::ink_over`] is
+/// *light ink on a dark ground*, where linear compositing draws **louder** —
+/// a 7 % hairline drew at ink 26 %, 3.7×. The veil is the opposite case, dark
+/// ink over artwork that is mostly lighter than it, and there linear
+/// compositing draws **quieter**. Handed through unchanged, the design's own
+/// numbers would have drawn at roughly half their specified weight over a
+/// mid-grey sleeve (`0.30` reading as an effective `0.16`, `0.05` as `0.025`)
+/// — a veil that dissolves too early and an ink lane with no ground under it.
+/// Applying the hairline's 3.7× in its remembered direction would have made
+/// that worse, not better. The direction is a property of which side of the
+/// blend is brighter, not a constant, so it is solved rather than remembered.
+#[must_use]
+pub fn veil_alpha(spec: f32, ink: Color, ground: Color) -> f32 {
+    let channel = |ink: f32, ground: f32| {
+        let target = spec.mul_add(ink - ground, ground);
+        let (lin_ink, lin_ground) = (to_linear(ink), to_linear(ground));
+        let span = lin_ground - lin_ink;
+        if span.abs() < f32::EPSILON {
+            spec
+        } else {
+            ((lin_ground - to_linear(target)) / span).clamp(0.0, 1.0)
+        }
+    };
+    (channel(ink.r, ground.r) + channel(ink.g, ground.g) + channel(ink.b, ground.b)) / 3.0
+}
+
+/// The veil itself: [`VEIL_SPEC`] with every opacity put through
+/// [`veil_alpha`], as a horizontal gradient across the sleeve.
+///
+/// `iced::Radians(FRAC_PI_2)` is left-to-right: `Radians::to_distance`
+/// subtracts a quarter turn before taking `(cos, sin)`, so π/2 gives the
+/// direction vector `(1, 0)` and the ramp runs from the box's left edge to
+/// its right one.
+#[must_use]
+pub fn hover_veil(p: &Palette) -> iced::gradient::Linear {
+    VEIL_SPEC.iter().fold(
+        iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2)),
+        |gradient, &(offset, spec)| {
+            gradient.add_stop(
+                offset,
+                alpha(p.recess, veil_alpha(spec, p.recess, VEIL_GROUND)),
+            )
+        },
+    )
+}
+
+/// Where an option's **ink lane ends**, as a fraction of the sleeve's width —
+/// [`VEIL_SPEC`]'s third stop, and not a number of its own.
+///
+/// Past it the veil is thinner than `0.66` and the sleeve starts to come back
+/// through, which is exactly where type must stop: the contrast floor is
+/// measured against the *composited* veil, and over a paper-white sleeve the
+/// ground at this stop is the last one that clears it. See
+/// `the_option_ink_clears_its_floor_on_the_veil_over_any_sleeve`.
+pub const VEIL_INK_X: f32 = VEIL_SPEC[2].0;
+
+/// Where an option's **hit band ends**, as a fraction of the sleeve's width —
+/// [`VEIL_SPEC`]'s fourth stop.
+///
+/// Wider than the ink lane, because a hit box is not read; and bounded well
+/// short of the sleeve, because *pressing the sleeve outside an option still
+/// opens the record's page*. A row that spanned the full width would take
+/// that press away and leave the wall with no way to open anything.
+pub const VEIL_BAND_X: f32 = VEIL_SPEC[3].0;
+
+/// The lead between the sleeve's left edge and an option's glyph — the same
+/// [`GAP_MD`] the bottom bar leads its type block by.
+pub const VEIL_LEAD: f32 = GAP_MD;
+
+/// How many options the veil carries. Each takes an equal share of the
+/// sleeve's height as its hit band, which is ≥ 47 px at the tightest density
+/// baz draws — well above law L7's [`TRANSPORT_HIT`] floor, and the reason
+/// the options need no boxes of their own.
+pub const VEIL_OPTIONS: usize = 4;
+
+/// The row's hover wash **as designed**: an offset paired with an opacity of
+/// [`Palette::paper`], brightening from the left.
+///
+/// A *light* wash rather than a darker one, deliberately: the veil under it is
+/// already the room's darkest ground, and a second dark wash on top would say
+/// "less" where the pointer means "this one". It fades out inside the ink lane,
+/// so its right edge is never a drawn edge.
+pub const VEIL_ROW_WASH: [(f32, f32); 3] = [(0.00, 0.10), (0.40, 0.06), (0.75, 0.00)];
+
+/// One option's row: no ground at rest, the light wash under the pointer.
+///
+/// The wash's opacities are solved by [`veil_alpha`] against
+/// [`Palette::recess`] rather than against [`VEIL_GROUND`], because that is
+/// what this mark actually lands on — at the row's left edge the veil above it
+/// is already `0.92` of the recess, so the ground under the wash is the room's
+/// own, known here, whatever sleeve is behind it.
+#[must_use]
+pub fn veil_row(p: &Palette, status: button::Status) -> button::Style {
+    let lit = matches!(status, button::Status::Hovered | button::Status::Pressed);
+    let background = lit.then(|| {
+        let gradient = VEIL_ROW_WASH.iter().fold(
+            iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2)),
+            |gradient, &(offset, spec)| {
+                gradient.add_stop(offset, alpha(p.paper, veil_alpha(spec, p.paper, p.recess)))
+            },
+        );
+        Background::Gradient(gradient.into())
+    });
+    button::Style {
+        background,
+        text_color: p.paper,
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        shadow: Shadow::default(),
+    }
+}
+
+/// An option's glyph ink: the accent for `Play`, the room's paper for the
+/// other three.
+///
+/// **`Play` is the accent's fifth use and it is the same use as the fourth.**
+/// The module docs list `primary` — the record page's `Play album` — as the one
+/// control allowed the colour, *because it is the only control in the product
+/// that creates playback truth*. The wall's `Play` is that same control at the
+/// same scope, moved onto the sleeve; at most one tile is hovered at a time, so
+/// there is still at most one of it on screen. The licence transfers with the
+/// act, and it transfers to nothing else.
+///
+/// **`Queue` is paper, and that is a departure from the approved mockup.** The
+/// mockup gives `Queue` the accent too. `docs/REFUSALS.md`'s amber entry names
+/// this exact case in these exact words — the lamp states what is true about
+/// playback right now and *"not what is queued"* — and it is an entry the
+/// owner's brief did not touch. The brief's own licence (*"if it reads too
+/// loud, drop to paper and say so"*) is taken here rather than argued with; it
+/// is one word in this function to put back.
+#[must_use]
+pub const fn veil_option_ink(p: &Palette, plays: bool) -> Color {
+    if plays { p.lamp } else { p.paper }
+}
+
 /// The playlist panel's surface: one step up from the wall, exactly as the
 /// dead rail's column and the queue popover stood (ADR-0024 §5 revives their
 /// verified float without their residency).
@@ -3257,6 +3722,29 @@ pub fn panel(p: &Palette) -> container::Style {
 /// panel rather than a wall. The page's sleeve is [`ART_MAX`], the album
 /// page's own bound — a playlist tile is never drawn larger than a record's.
 pub const PANEL_SLEEVE: f32 = 40.0;
+
+/// **The ghost row's sleeve slot** (the owner's `New playlist`, 2026-08-09):
+/// the surface *below* the panel with a hairline edge, holding the drawn
+/// [`crate::icon::Glyph::Plus`].
+///
+/// A recess rather than a step up, and that is the whole of what makes it read
+/// as *not made yet*: every real sleeve beside it is an opaque object at or
+/// above the panel's own plane, and this one is a hole in the panel where an
+/// object will go. Deliberately quieter even than
+/// [`playlist_rest_tile`] — that stands for a made thing with nothing to
+/// quote; this stands for a thing that does not exist.
+#[must_use]
+pub fn ghost_sleeve(p: &Palette) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(p.recess)),
+        border: Border {
+            color: p.hairline(p.recess),
+            width: 1.0,
+            radius: RADIUS_SEGMENT.into(),
+        },
+        ..container::Style::default()
+    }
+}
 
 /// The rest tile of a playlist with nothing to quote (ADR-0024 §A1.3): the
 /// surface step with a hairline edge, the name in ink on it.
@@ -3438,6 +3926,172 @@ mod tests {
         // queue popover's arrival was the one transition that flew over it;
         // ADR-0022 made the queue a place, so a navigation is a hard cut and
         // nothing floats.
+    }
+
+    /// **A surface step is the ladder's own rise**, so the synthetic step
+    /// above the top plane is not a fifth colour invented for one call site.
+    ///
+    /// [`SURFACE_STEP_A`]'s 5 % has to sit inside the band the *real* steps
+    /// already draw, in both rooms — otherwise a row on the menu card would
+    /// answer the pointer more loudly or more quietly than a row on the wall,
+    /// and the whole point of [`Palette::step_up`] is that a hover means one
+    /// thing everywhere.
+    #[test]
+    fn a_surface_step_is_the_ladders_own_rise() {
+        let mut low = f32::INFINITY;
+        let mut high = 0.0_f32;
+        for room in Room::ALL {
+            let p = room.palette();
+            for (under, over) in [(p.wall, p.plinth), (p.plinth, p.plinth_lit)] {
+                for (u, o, ink) in [
+                    (under.r, over.r, p.paper.r),
+                    (under.g, over.g, p.paper.g),
+                    (under.b, over.b, p.paper.b),
+                ] {
+                    let rise = (o - u) / (ink - u);
+                    low = low.min(rise);
+                    high = high.max(rise);
+                }
+            }
+        }
+        assert!(
+            low <= SURFACE_STEP_A && SURFACE_STEP_A <= high,
+            "the synthetic step {SURFACE_STEP_A} is outside the ladder's own \
+             rise ({low}…{high}) — a hover would not mean one thing everywhere"
+        );
+    }
+
+    /// **Every row-shaped control answers the pointer on the ground it
+    /// actually stands on** — the owner's *"a bit… unresponsive"*, closed as a
+    /// property rather than as a repaint of one surface.
+    ///
+    /// Two claims. First, the step is *visible*: hovering must not paint the
+    /// ground back onto itself, which is exactly what the playlist panel did
+    /// for as long as [`track_row`]'s hover was the constant
+    /// [`Palette::plinth`] and the panel's own ground was `plinth`. Second, on
+    /// the wall the style is the **shipped** one to the bit, which is what
+    /// makes taking a ground a correction rather than a redesign.
+    #[test]
+    fn a_row_answers_the_pointer_on_every_ground_it_stands_on() {
+        let visible =
+            |a: Color, b: Color| (a.r - b.r).abs() + (a.g - b.g).abs() + (a.b - b.b).abs() > 0.005;
+        for room in Room::ALL {
+            let p = room.palette();
+            // The four grounds a row is composed on today: the wall (album,
+            // queue, playlist and songs rows), the panel and the menu card
+            // (`plinth`), and the plane above them.
+            for ground in [p.wall, p.plinth, p.plinth_lit, p.recess] {
+                let rest = track_row(p, ground, button::Status::Active, false).background;
+                let hovered = track_row(p, ground, button::Status::Hovered, false)
+                    .background
+                    .expect("a hovered row has a ground of its own");
+                assert!(rest.is_none(), "{}: a row at rest paints nothing", p.name);
+                let Background::Color(hovered) = hovered else {
+                    panic!("{}: a row's hover is a colour, not a gradient", p.name);
+                };
+                assert!(
+                    visible(hovered, ground),
+                    "{}: a row hovered on {ground:?} paints {hovered:?} — the \
+                     ground it is already standing on, which is no answer at all",
+                    p.name
+                );
+                // …and the playing row is a further step, so "the pointer is
+                // here" and "this is sounding" stay two different statements.
+                let Some(Background::Color(playing)) =
+                    track_row(p, ground, button::Status::Active, true).background
+                else {
+                    panic!("{}: the playing row keeps its card", p.name);
+                };
+                assert!(visible(playing, hovered), "{}: on {ground:?}", p.name);
+            }
+            // The wall's rows are the shipped values, exactly.
+            let Some(Background::Color(hovered)) =
+                track_row(p, p.wall, button::Status::Hovered, false).background
+            else {
+                panic!("a hovered row on the wall")
+            };
+            let Some(Background::Color(playing)) =
+                track_row(p, p.wall, button::Status::Active, true).background
+            else {
+                panic!("the playing row on the wall")
+            };
+            assert!(!visible(hovered, p.plinth), "{}: hover on the wall", p.name);
+            assert!(
+                !visible(playing, p.plinth_lit),
+                "{}: the playing row on the wall",
+                p.name
+            );
+        }
+    }
+
+    /// **The serif is the work titles' and nothing else's** — the whole of
+    /// what makes the second family a *placard convention* rather than a
+    /// display face returning one weight at a time.
+    ///
+    /// Two claims, both over the source. `WORK_TITLE` is named in exactly one
+    /// view, and that view is the Home place's placard; and the serif family
+    /// is reachable only through that token, so nothing can quietly set a
+    /// second string in it by naming the family directly.
+    ///
+    /// It is the reversion clause made mechanical: point `WORK_TITLE` at
+    /// [`MEDIUM`] and `crate::font::SERIF_ITALIC` has no consumer left.
+    #[test]
+    fn the_serif_is_the_work_titles_and_nothing_else() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut users: Vec<String> = Vec::new();
+        let mut names_family: Vec<String> = Vec::new();
+        for path in rust_sources(&root) {
+            let relative = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            // This module defines the token and `font.rs` holds the bytes;
+            // neither is a view setting a string in it.
+            if relative == "theme.rs" || relative == "font.rs" {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path)
+                .expect("a source file baz ships")
+                .replace("\r\n", "\n");
+            // Code lines only. A module that *names* the token in prose to
+            // say it is deliberately not using it — `views/now_playing.rs`
+            // does exactly that — is not a consumer, and a test that could
+            // not tell the difference would punish the file for explaining
+            // itself.
+            let code: String = source
+                .split("#[cfg(test)]")
+                .next()
+                .unwrap_or_default()
+                .lines()
+                .filter(|line| {
+                    let line = line.trim_start();
+                    !(line.starts_with("//") || line.starts_with("/*"))
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if code.contains("WORK_TITLE") {
+                users.push(relative.clone());
+            }
+            if code.contains("font::SERIF") {
+                names_family.push(relative);
+            }
+        }
+        assert_eq!(
+            users,
+            ["views/home.rs"],
+            "the serif italic is the museum placard's convention for a \
+             *work's own title*, and the placard is the Home place's. A \
+             second consumer is a display face arriving by the back door — \
+             which is the thing `assets/fonts/README.md` records as deleted \
+             and staying deleted."
+        );
+        assert!(
+            names_family.is_empty(),
+            "{names_family:?} name the serif family directly. It is reachable \
+             through `theme::WORK_TITLE` and nowhere else, so that reverting \
+             the experiment is one line."
+        );
     }
 
     /// **The tile's hover mark fades in ink and never in geometry**, and every
@@ -3964,6 +4618,111 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// **The shelf virtualizes at every width the window can produce — in
+    /// both of the lane's states.**
+    ///
+    /// ADR-0030's own acceptance test. The sweep above ran over
+    /// `window − INDEX_LANE_W`, which was the whole of the wall's width until
+    /// the lane took a term of its own; this is the same sweep with the second
+    /// term in, at 1 px, over both states and every density step. It is the
+    /// answer to *"the collapse must not jank"* stated as arithmetic rather
+    /// than as intent.
+    #[test]
+    fn the_shelf_virtualizes_in_both_of_the_lanes_states() {
+        use crate::shelf::{Density, Grid};
+
+        for window in 300..=2560 {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a window width in pixels is far below f32's exact-integer range"
+            )]
+            let window = window as f32;
+            for stored in [true, false] {
+                let wall = (window - sidebar_w(window, stored) - INDEX_LANE_W).max(0.0);
+                for density in Density::ALL {
+                    let hang = Grid::new(wall, density);
+                    assert!(hang.columns >= 1, "{window} px, open={stored}");
+                    assert!(
+                        hang.art > 0.0 && hang.art <= density.art_max(),
+                        "{window} px, open={stored}, {density:?}: {} px of art",
+                        hang.art
+                    );
+                    assert!(hang.row_h > 0.0, "{window} px, open={stored}");
+                    assert!(
+                        hang.block_width() <= wall + 0.01,
+                        "{window} px, open={stored}: the block overruns the wall"
+                    );
+                    let rows = hang.rows(97);
+                    let (first, end) = hang.visible_rows(0.0, 800.0, rows);
+                    assert!(first < end && end <= rows, "{window} px, open={stored}");
+                }
+            }
+        }
+    }
+
+    /// **The lane's two widths, and the floor that decides between them.**
+    ///
+    /// Three claims, and the third is the one that matters. The widths are
+    /// built from the room's own tokens; the floor is where the *open* lane
+    /// still leaves the collection two columns at or above [`ART_MIN`]; and
+    /// **the stored state is not the drawn state below the floor** — which is
+    /// what makes `Expanded` inert there rather than a control that produces a
+    /// window the wall cannot use.
+    #[test]
+    fn the_lane_has_two_widths_and_a_floor_that_chooses() {
+        use crate::shelf::{Density, Grid};
+
+        const { assert!(SIDEBAR_W == 280.0 && SIDEBAR_RAIL_W == 96.0) }
+        const { assert!(SIDEBAR_W == GAP_XL + MENU_W + GAP_XL) }
+        const { assert!(SIDEBAR_RAIL_W == GAP_XL + SIDEBAR_SLEEVE + GAP_XL) }
+        const { assert!(SIDEBAR_SLEEVE == 48.0 && SIDEBAR_ROW_H == 64.0) }
+        const { assert!(SIDEBAR_DEST_H == 40.0) }
+        // Every one of them on the 4 px lattice (law L2).
+        const {
+            assert!(
+                SIDEBAR_W % 4.0 == 0.0
+                    && SIDEBAR_RAIL_W % 4.0 == 0.0
+                    && SIDEBAR_SLEEVE % 4.0 == 0.0
+                    && SIDEBAR_ROW_H % 4.0 == 0.0
+                    && SIDEBAR_DEST_H % 4.0 == 0.0
+                    && SIDEBAR_FLOOR % 4.0 == 0.0
+            );
+        }
+
+        // The floor, re-derived rather than asserted: the smallest window at
+        // which the open lane leaves two columns at or above ART_MIN.
+        let two_wide = |window: f32| {
+            let wall = (window - SIDEBAR_W - INDEX_LANE_W).max(0.0);
+            let hang = Grid::new(wall, Density::Balanced);
+            hang.columns >= 2 && hang.art >= ART_MIN
+        };
+        let derived = (600..=1400)
+            .find(|w| {
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "a window width in pixels is exact in f32"
+                )]
+                let w = *w as f32;
+                two_wide(w)
+            })
+            .expect("some window is wide enough for an open lane and two columns");
+        assert!(
+            f32::from(u16::try_from(derived).expect("a window width fits u16")) <= SIDEBAR_FLOOR,
+            "the floor {SIDEBAR_FLOOR} is below the width the arithmetic wants ({derived})"
+        );
+        assert!(
+            two_wide(SIDEBAR_FLOOR),
+            "the floor must itself be wide enough"
+        );
+
+        // And the decision: below the floor the stored state is overruled.
+        assert!((sidebar_w(SIDEBAR_FLOOR, true) - SIDEBAR_W).abs() < f32::EPSILON);
+        assert!((sidebar_w(SIDEBAR_FLOOR - 1.0, true) - SIDEBAR_RAIL_W).abs() < f32::EPSILON);
+        assert!((sidebar_w(2560.0, false) - SIDEBAR_RAIL_W).abs() < f32::EPSILON);
+        assert!(sidebar_can_expand(SIDEBAR_FLOOR));
+        assert!(!sidebar_can_expand(SIDEBAR_FLOOR - 1.0));
     }
 
     /// **The shelf break's vertical rhythm is `HANG` and arithmetic on it.**
@@ -4924,7 +5683,15 @@ mod tests {
     fn from_background(background: Option<Background>) -> Vec<Color> {
         match background {
             Some(Background::Color(color)) => vec![color],
-            _ => Vec::new(),
+            // A gradient paints every one of its stops. Reading them is what
+            // keeps the accent sweep honest now that a style can hand the
+            // renderer a ramp instead of a colour ([`veil_row`]).
+            Some(Background::Gradient(iced::Gradient::Linear(linear))) => linear
+                .stops
+                .iter()
+                .filter_map(|stop| stop.map(|stop| stop.color))
+                .collect(),
+            None => Vec::new(),
         }
     }
 
@@ -4987,6 +5754,7 @@ mod tests {
                 button_colors(&word_button(p, p.wall, status)),
             ));
             painted.push(("primary", button_colors(&primary(p, status))));
+            painted.push(("veil_row", button_colors(&veil_row(p, status))));
             for open in [false, true] {
                 painted.push(("now_playing", button_colors(&now_playing(p, status, open))));
             }
@@ -5112,6 +5880,247 @@ mod tests {
     /// not about amber, so Reading Room's oxblood is held to the same list by
     /// the same code and a style that reached for one room's accent could not
     /// pass by being the other's.
+    /// The veil's **specified** opacity at `x` across the sleeve, `x` in `0..=1`:
+    /// [`VEIL_SPEC`] read as the piecewise-linear ramp the renderer interpolates.
+    ///
+    /// In the design's sRGB terms, so it is the number to compare a sampled pixel
+    /// against once that pixel has been un-composited — which is what the table in
+    /// `docs/design/impl/hover-options/README.md` does. Put it through
+    /// [`veil_alpha`] to get what is handed to the renderer.
+    fn veil_at(x: f32) -> f32 {
+        let x = x.clamp(0.0, 1.0);
+        for pair in VEIL_SPEC.windows(2) {
+            let [(x0, a0), (x1, a1)] = [pair[0], pair[1]];
+            if (x0..=x1).contains(&x) {
+                let span = x1 - x0;
+                if span <= f32::EPSILON {
+                    return a1;
+                }
+                return ((x - x0) / span).mul_add(a1 - a0, a0);
+            }
+        }
+        VEIL_SPEC[VEIL_SPEC.len() - 1].1
+    }
+
+    /// **The veil is solved, not remembered** — and the solve is checked
+    /// against a stated reference ground with its residual bounded over the
+    /// whole range a sleeve can occupy.
+    ///
+    /// Three claims, and each of them is a way the veil could be wrong on
+    /// screen while every number in the source looked right:
+    ///
+    /// 1. At [`VEIL_GROUND`] the rendered composite **is** the design's sRGB
+    ///    composite, to within a byte. This is the claim [`veil_alpha`] makes.
+    /// 2. Away from it the error stays inside 10 / 255 from sRGB 0.15 to 0.95
+    ///    — dark sleeves and near-white ones — so the correction is a
+    ///    reference rather than a fit to one cover.
+    /// 3. The corrected alphas are **larger** than the specified ones for
+    ///    every non-zero stop. That is the direction check: this repo's
+    ///    remembered lesson is a 3.7× *overdraw*, and applying it here in its
+    ///    remembered direction would have thinned a veil that linear light
+    ///    already thins. A regression that reintroduced the old reflex would
+    ///    fail on this line, with the reason attached.
+    #[test]
+    fn the_veil_is_solved_against_a_stated_ground_and_its_residual_is_bounded() {
+        /// The worst byte error tolerated away from the reference ground, in
+        /// the room the wall ships in — a **dark** veil, whose extreme case is
+        /// a near-white sleeve and whose divergence there is small.
+        const RESIDUAL_DARK: i32 = 10;
+        /// The same, in a light room. Reading Room's veil is a near-*white*
+        /// ink, so its extreme is a near-black sleeve, and that is where the
+        /// sRGB curve and the linear one are furthest apart: the residual
+        /// reaches 28 / 255 at the `0.68` stop over an sRGB 0.15 sleeve.
+        /// Stated rather than hidden, because a single tolerance covering both
+        /// rooms would have been a tolerance that measured neither — and it is
+        /// the honest cost of one reference ground, which is the alternative to
+        /// re-solving the veil per sleeve every frame.
+        const RESIDUAL_LIGHT: i32 = 28;
+        let byte = |value: f32| {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "clamped to 0..=255 and rounded on the line it is cast from"
+            )]
+            let byte = (value.clamp(0.0, 1.0) * 255.0).round() as i32;
+            byte
+        };
+        for room in Room::ALL {
+            let p = room.palette();
+            for (offset, spec) in VEIL_SPEC {
+                let solved = veil_alpha(spec, p.recess, VEIL_GROUND);
+                // The direction check. Which way the correction runs is a
+                // property of which side of the blend is brighter, not a
+                // constant: a veil darker than the ground it is solved
+                // against needs *more* alpha in linear light (Closing Time),
+                // and one lighter than it needs less (Reading Room). The
+                // 3.7× this repo remembers is the second case, and applying
+                // it to the first — which is the shipped room — would have
+                // thinned a veil that linear light already thins.
+                if spec > 0.0 {
+                    let moved = solved - spec;
+                    let expected = VEIL_GROUND.g - p.recess.g;
+                    assert!(
+                        moved * expected >= 0.0,
+                        "{}: stop {offset} solved to {solved:.4} from a \
+                         specified {spec:.2} — the correction ran the wrong \
+                         way for a veil at {:.3} over a ground at {:.3}",
+                        p.name,
+                        p.recess.g,
+                        VEIL_GROUND.g
+                    );
+                }
+                for ground in [0.15_f32, 0.25, 0.35, 0.5, 0.65, 0.8, 0.95] {
+                    let under = Color::from_rgb(ground, ground, ground);
+                    // What the design asked for: an sRGB composite.
+                    let intended = Color {
+                        r: spec.mul_add(p.recess.r - ground, ground),
+                        g: spec.mul_add(p.recess.g - ground, ground),
+                        b: spec.mul_add(p.recess.b - ground, ground),
+                        a: 1.0,
+                    };
+                    // What the renderer draws: `composite` blends in linear
+                    // light, exactly as iced's shader does.
+                    let drawn = composite(alpha(p.recess, solved), under);
+                    let error = [
+                        (byte(drawn.r) - byte(intended.r)).abs(),
+                        (byte(drawn.g) - byte(intended.g)).abs(),
+                        (byte(drawn.b) - byte(intended.b)).abs(),
+                    ]
+                    .into_iter()
+                    .max()
+                    .unwrap_or(i32::MAX);
+                    let floor = if (ground - VEIL_GROUND.g).abs() < f32::EPSILON {
+                        1
+                    } else if p.recess.g < VEIL_GROUND.g {
+                        RESIDUAL_DARK
+                    } else {
+                        RESIDUAL_LIGHT
+                    };
+                    assert!(
+                        error <= floor,
+                        "{}: stop {offset} over an sRGB {ground} sleeve draws \
+                         {error}/255 off its intent, past the {floor}/255 this \
+                         solve promises",
+                        p.name
+                    );
+                }
+            }
+        }
+    }
+
+    /// **The option ink clears its floor on the veil, over any sleeve.**
+    ///
+    /// The measurement the brief names: the ink is held against the
+    /// *composited* veil, not against the sleeve, and the worst sleeve is the
+    /// one that shows through most — paper white in the dark room, black in
+    /// the light one. The ink lane stops at [`VEIL_INK_X`] precisely so that
+    /// this passes; a lane one stop wider would not.
+    #[test]
+    fn the_option_ink_clears_its_floor_on_the_veil_over_any_sleeve() {
+        /// The AA floor for text — the option labels are read.
+        const TEXT: f32 = 4.5;
+        /// The floor for a mark — the glyph beside each label.
+        const MARK: f32 = 3.0;
+        // Each mark is measured where it actually sits. The tightest sleeve
+        // the wall draws is the worst case for both, because the same lead
+        // and the same glyph are a larger fraction of a smaller work.
+        let work = 200.8 - 2.0 * POOL_RING;
+        // The label's far end: the ink lane's right edge, the thinnest veil
+        // any type stands on.
+        let label_x = VEIL_INK_X;
+        // The glyph's far end: the lead plus one icon box.
+        let glyph_x = (VEIL_LEAD + ICON_PX) / work;
+        for room in Room::ALL {
+            let p = room.palette();
+            for sleeve in [0.0_f32, 0.25, 0.5, 0.75, 1.0] {
+                let under = Color::from_rgb(sleeve, sleeve, sleeve);
+                let ground_at = |x: f32| {
+                    composite(
+                        alpha(p.recess, veil_alpha(veil_at(x), p.recess, VEIL_GROUND)),
+                        under,
+                    )
+                };
+                let label = contrast(p.paper, ground_at(label_x));
+                assert!(
+                    label >= TEXT,
+                    "{}: an option's label is {label:.2} : 1 on the veil at \
+                     x {label_x} over an sRGB {sleeve} sleeve, below {TEXT} : 1",
+                    p.name
+                );
+                for plays in [false, true] {
+                    let glyph = contrast(veil_option_ink(p, plays), ground_at(glyph_x));
+                    assert!(
+                        glyph >= MARK,
+                        "{}: an option's glyph is {glyph:.2} : 1 on the veil \
+                         at x {glyph_x:.3} over an sRGB {sleeve} sleeve, below \
+                         {MARK} : 1",
+                        p.name
+                    );
+                }
+            }
+        }
+    }
+
+    /// **The veil's geometry is the veil's own stops.**
+    ///
+    /// The ink lane and the hit band are read out of [`VEIL_SPEC`] rather than
+    /// declared, so a stop that moves takes them with it; and the band stops
+    /// short of the sleeve, which is what leaves a press outside an option to
+    /// open the record's page.
+    #[test]
+    fn the_veils_geometry_is_read_out_of_its_own_stops() {
+        const { assert!(VEIL_INK_X == VEIL_SPEC[2].0) }
+        const { assert!(VEIL_BAND_X == VEIL_SPEC[3].0) }
+        const {
+            assert!(
+                VEIL_INK_X < VEIL_BAND_X,
+                "the ink lane must end inside the hit band"
+            );
+        }
+        const {
+            assert!(
+                VEIL_BAND_X < 1.0,
+                "a band that reached the sleeve's edge would take the press \
+                 that opens the record"
+            );
+        }
+        // The lead, and the room the ink lane has left after it, at the
+        // tightest sleeve the wall draws (`shelf.rs`'s Dense column at 1172:
+        // art 200.8, work = art − 2 × POOL_RING).
+        let work = 200.8 - 2.0 * POOL_RING;
+        assert!(
+            work.mul_add(VEIL_INK_X, -VEIL_LEAD) >= 4.0 * GAP_XL,
+            "the ink lane leaves less than 96 px for a glyph and a word"
+        );
+        // Law L7's floor, per option, at that same tightest sleeve.
+        let band = work / f32::from(u8::try_from(VEIL_OPTIONS).unwrap_or(u8::MAX));
+        assert!(
+            band >= TRANSPORT_HIT,
+            "an option's hit band is {band} px, under law L7's {TRANSPORT_HIT}"
+        );
+    }
+
+    /// **The wall's `Play` is the only glyph that wears the lamp.**
+    ///
+    /// [`veil_option_ink`] is the single decision, and this is what makes it
+    /// one: three of the four options take the room's paper, and the fourth
+    /// takes the accent because it is the control that creates playback truth.
+    /// It is also the assertion that records the departure from the approved
+    /// mockup — `Queue` was drawn in amber there and is paper here, under
+    /// `docs/REFUSALS.md`'s *not what is queued*.
+    #[test]
+    fn the_walls_play_option_is_the_only_glyph_that_wears_the_lamp() {
+        for room in Room::ALL {
+            let p = room.palette();
+            assert_eq!(veil_option_ink(p, true), p.lamp, "{}", p.name);
+            assert_eq!(veil_option_ink(p, false), p.paper, "{}", p.name);
+            assert!(
+                !p.is_accent(veil_option_ink(p, false)),
+                "{}: an option that does not sound is wearing the accent",
+                p.name
+            );
+        }
+    }
+
     #[test]
     fn the_lamp_is_spent_only_on_playback_truth() {
         /// The styles §2.1.1 permits the accent in. Nothing may be added here
@@ -5257,14 +6266,32 @@ mod tests {
     /// looser one (a style function is `theme::lamp_dot`, with no dot before
     /// the name, and is not matched).
     ///
-    /// The single entry on the list is §2.1.1's fourth permitted use: the
-    /// elapsed timestamp warms to [`Palette::lamp`] while a position has been
-    /// asked for and not yet confirmed, because a position being asked for is
-    /// a claim about the playhead. It cools the moment the engine answers.
+    /// Two entries are on the list.
+    ///
+    /// `views/bottom_bar.rs` is §2.1.1's fourth permitted use: the elapsed
+    /// timestamp warms to [`Palette::lamp`] while a position has been asked
+    /// for and not yet confirmed, because a position being asked for is a
+    /// claim about the playhead. It cools the moment the engine answers.
+    ///
+    /// `icon.rs` is the fifth, and it is the fifth rather than a sixth: the
+    /// accent-inked sprite sheet exists for the wall's hover `Play`, which is
+    /// the record page's `Play album` moved onto the sleeve — the one control
+    /// in the product that *creates* playback truth, and still at most one of
+    /// it on screen because at most one tile is hovered. `icon.rs` names the
+    /// token to build the sheet; **which glyph is allowed to wear it is
+    /// decided in [`veil_option_ink`]**, in this module, under the sweep
+    /// above. See `the_walls_play_option_is_the_only_glyph_that_wears_the_lamp`.
     #[test]
     fn the_lamp_is_named_only_where_playback_truth_is_drawn() {
         /// `src`-relative paths that may name an accent token, and why.
-        const PERMITTED: [&str; 1] = ["views/bottom_bar.rs"];
+        ///
+        /// `views/home.rs` is the sixth, and it is the *same* use as the
+        /// first: the `CONTINUE` placard's needle is **where the playhead
+        /// is** — the third of the three things this test's own sentence
+        /// says the lamp means — drawn at the sleeve's measure on the
+        /// placard rather than on the artwork. It is one line, on one band,
+        /// about one run, and there is at most one interrupted run.
+        const PERMITTED: [&str; 3] = ["views/bottom_bar.rs", "icon.rs", "views/home.rs"];
 
         // Spelled in halves so this test's own source does not match it.
         let needle = concat!(".", "lamp");
@@ -5479,7 +6506,10 @@ mod tests {
             ("album.rs", "place_header_with("),
             ("queue.rs", "place_header("),
             ("playlist.rs", "place_header("),
-            ("settings.rs", "place_header("),
+            // Settings is the one place with a *note* — a statement about
+            // itself, not a keyboard hint — so it spends the `_with` form
+            // that the Album place's stepper pair also uses.
+            ("settings.rs", "place_header_with("),
         ] {
             assert!(
                 read(name).contains(strip),
@@ -5510,19 +6540,21 @@ mod tests {
             spine.contains("bounds.width - theme::HANG"),
             "the index rail no longer hangs from HANG"
         );
-        // **The rail is the only thing against that edge** (ADR-0022): the wall
-        // draws no scrollbar, so the collection's right-hand side is one
-        // vertical strip doing one job rather than two doing the same one. The
-        // scrolling is untouched — a zero-width bar is a bar iced paints
-        // nothing for — which is why this is asserted as *which geometry the
-        // wall asks for* rather than as the absence of a `scrollable`.
+        // **The wall's bar does not compete with the rail** (the owner's
+        // decision, 2026-08-09, rewriting ADR-0022's two-vertical-strips
+        // entry). The wall draws a bar now, and what this holds down is that it
+        // stays the lesser of the two marks against that edge: narrower than
+        // every list's, and far narrower than the rail's ink. Asserted as
+        // *which geometry the wall asks for* rather than as the presence of a
+        // `scrollable`, which is what it always was.
         assert!(
             read("shelf.rs").contains("theme::wall_scrollbar()"),
-            "the wall has a scrollbar again, two pixels from the index rail"
+            "the wall asks for some other scrollbar geometry than its own"
         );
         const {
-            assert!(WALL_SCROLLBAR_W == 0.0);
-            assert!(SCROLLBAR_W > 0.0);
+            assert!(WALL_SCROLLBAR_W > 0.0);
+            assert!(WALL_SCROLLBAR_W < SCROLLBAR_W);
+            assert!(WALL_SCROLLBAR_W * 4.0 < INDEX_W);
         }
         // The lane arithmetic agrees: the rail's gutter is the same token.
         const { assert!(INDEX_LANE_W == INDEX_CLEARANCE + INDEX_W + HANG) }
@@ -5958,6 +6990,18 @@ mod tests {
     fn the_strip_holds_its_tenants_at_the_single_line_floor() {
         use crate::views::top_bar;
 
+        /// The `Playlists` door's own reserved width, kept here as a
+        /// measurement rather than in `views::top_bar` as a reservation:
+        /// there is no door left to reserve for, and a token nothing draws
+        /// with is a comment that can rot.
+        const PLAYLISTS_DOOR_W: f32 = 64.0;
+        /// What the door gave back to the strip: its width and the `GAP_XL`
+        /// seam beside it.
+        const FREED: f32 = PLAYLISTS_DOOR_W + GAP_XL;
+        /// The window a strip at its floor now needs, with the lane's rail
+        /// always beside it.
+        const STRIP_FLOOR_WINDOW: f32 = TOP_BAR_FLOOR + SIDEBAR_RAIL_W;
+
         /// The single-line regime, at the well's floor (doc 10 §4.2): the
         /// gutter, the well, the three `GAP_XL` seams and the left cluster,
         /// the fill's two `GAP_SM` flanks (the status lead), the gear, the
@@ -5968,17 +7012,14 @@ mod tests {
             + top_bar::KEYS_W
             + GAP_XL
             + top_bar::ACTS_W
-            + GAP_XL
-            + top_bar::PLAYLISTS_W
             + 2.0 * GAP_SM
             + TRANSPORT_HIT
             + HANG;
 
         /// The frame line below the split (doc 10 §4.3): the well, the
-        /// empty status slot's flanks, the two doors — `GAP_LG` between the
-        /// row's five members.
-        const FRAME_LINE: f32 =
-            HANG + top_bar::WELL_MIN + 4.0 * GAP_LG + top_bar::PLAYLISTS_W + TRANSPORT_HIT + HANG;
+        /// empty status slot's flanks, the gear — `GAP_LG` between the row's
+        /// four members.
+        const FRAME_LINE: f32 = HANG + top_bar::WELL_MIN + 3.0 * GAP_LG + TRANSPORT_HIT + HANG;
 
         /// The library line: the states, one seam, the acts.
         const LIBRARY_LINE: f32 = HANG + top_bar::KEYS_W + GAP_XL + top_bar::ACTS_W + HANG;
@@ -5986,6 +7027,28 @@ mod tests {
         const { assert!(SINGLE_LINE <= TOP_BAR_SPLIT) }
         const { assert!(FRAME_LINE <= TOP_BAR_FLOOR) }
         const { assert!(LIBRARY_LINE <= TOP_BAR_FLOOR) }
+
+        // **What the `Playlists` door gave back** (ADR-0030 §5): the word's
+        // reserved width and the `GAP_XL` seam beside it — 88 px — so the
+        // single line now fits at **872** where it needed 960.
+        const { assert!(FREED == 88.0) }
+        const { assert!(SINGLE_LINE == 872.0) }
+        const { assert!(SINGLE_LINE + FREED == 960.0) }
+
+        // **The two-line split still earns its keep, and the door's removal
+        // did not buy it away.** The frame line is what the door stood on, so
+        // removing it made *that* line cheaper — but the split exists for the
+        // **library** line, whose two tenants are untouched at 600 px. Between
+        // 600 and 872 there is no single line that fits and a two-line pair
+        // that does, which is exactly the band the split serves.
+        const { assert!(LIBRARY_LINE == TOP_BAR_FLOOR) }
+        const { assert!(TOP_BAR_FLOOR < SINGLE_LINE) }
+        // The strip's width is now the *body's* — the window less the returns
+        // lane — so the split's band is reached at a wider window than
+        // before: `TOP_BAR_SPLIT + SIDEBAR_RAIL_W` collapsed, and
+        // `+ SIDEBAR_W` open. The floor a window must clear for the strip to
+        // hold its tenants at all rises with it.
+        const { assert!(STRIP_FLOOR_WINDOW == 696.0) }
 
         // The two-line band is the single-line band's own lead three times
         // around two control rows — 8+32+8+32+8, plus the hairline: 89
@@ -6023,13 +7086,22 @@ mod tests {
     ///
     /// - **a glyph beside a word is not icon-only** — the word is the name
     ///   (`play_album`, the playlist page's `play_control`, the strip's
-    ///   `play_all`);
+    ///   `play_all`, the panel's `ghost_row`, whose plus stands in the sleeve
+    ///   slot beside the words `New playlist`, and the Home place's
+    ///   `resume_line`, whose triangle leads the word `Resume`);
     /// - **the well's magnifier is not a control** — the well is the
     ///   control; the glyph is its label (doc 10 §4.1), and the well itself
     ///   is reachable by every printable key.
     #[test]
     fn every_icon_only_control_carries_a_tooltip() {
-        const EXEMPT: [&str; 4] = ["play_album", "play_control", "play_all", "well"];
+        const EXEMPT: [&str; 6] = [
+            "play_album",
+            "play_control",
+            "play_all",
+            "well",
+            "ghost_row",
+            "resume_line",
+        ];
         let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
         let mut bare: Vec<String> = Vec::new();
         let mut checked = 0_u32;

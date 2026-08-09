@@ -72,7 +72,7 @@ pub(crate) fn layer(menu: &Menu, window: Size) -> Element<'static, Message> {
             .width(Length::Fill)
             .height(Length::Fixed(theme::TRANSPORT_HIT))
             .padding(theme::pad(0.0, theme::GAP_MD))
-            .style(move |_theme, status| theme::track_row(room, status, false))
+            .style(move |_theme, status| theme::track_row(room, room.plinth, status, false))
             .on_press(Message::MenuItemPressed(index)),
         );
     }
