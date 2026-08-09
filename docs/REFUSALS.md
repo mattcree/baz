@@ -97,15 +97,39 @@ a toolkit with no accessibility tree, which outranks a quietness preference.
 The three named steps, the gesture, the persistence-as-state and the absence of
 any Settings row are all unchanged. (Owner's decision, 2026-08-09.)
 
-**Nothing is ever drawn on top of a sleeve.** No play overlay on hover, no
-badge, no duration chip, no gradient scrim, no selection tint, no queue numeral.
-The only thing that touches artwork is light around it.
+**One thing is drawn on a sleeve, and only under the pointer**: the hover
+options — a veil gathering at the sleeve's left edge and dissolving to nothing
+before its right one, carrying `Play`, `Queue`, `Add to…`, `Open`. It is
+present on exactly one tile at a time, it is gone the moment the pointer
+leaves, and the right of every cover stays as painted so the record stays
+recognisable while you choose.
+
+Still refused, and these are refusals rather than omissions: a badge, a
+duration chip, a selection tint, a queue numeral, **anything at rest**, and
+anything on artwork anywhere but a wall tile — not the Songs rows, not the
+lane, not the record's page. Nothing is drawn on a sleeve nobody is pointing
+at.
+
+*Rewritten on the owner's decision, 2026-08-09.* This entry used to read
+**"Nothing is ever drawn on top of a sleeve"** and listed a play overlay on
+hover and a gradient scrim among the things it refused. The owner approved a
+mockup that draws exactly that, and his decision is sufficient on its own
+(this ledger's own preamble). The design constraint that replaced the blanket
+refusal is the veil's asymmetry: it must be a gradient that dies before the
+right edge, never a flat panel over the whole cover, and
+`the_veil_is_a_gradient_over_one_sleeve_and_never_a_flat_panel` is what holds
+it to that.
 
 **No artwork is ever drawn larger than its source.** `ART_MAX == THUMB_PX`,
 asserted in code.
 
 **No scrim, ever.** Dimming ten thousand covers to show twelve rows is the exact
-mistake the palette exists to avoid.
+mistake the palette exists to avoid. Unchanged by the hover veil above and
+worth saying why: a scrim is a surface laid over *the collection* to make
+something else readable, and the veil is a mark on **one** object under the
+pointer that stops before that object is hidden. The shuffle pool's dimming is
+governed here too, and it is not a scrim for the same reason — it is the
+artwork's own opacity, not a layer over it.
 
 **No spinner and no progress bar, anywhere.** During a scan the shelf filling
 with covers *is* the progress indicator. No importer dialog, no progress modal.
@@ -117,19 +141,23 @@ reversed; what was lost was always position, provenance and skip.) Replacing a
 slot with a *better statement of the same fact* is the one permitted move — it
 is how the seek row became the needle.
 
-**Sound from the wall is two presses, and that is a price, not a debt.**
-Open the record's page, press `Play album` — deliberately, twice considered:
-ADR-0022 removed the double-click structurally (the first press navigates;
-no tile remains under the pointer for a second), and the Jobs-era critique
-(`docs/design/11-jobs-era-critique.md` P7) surfaced the one candidate no ADR
-had listed — a second press landing on the just-opened page as `Play album`
-— and the owner refused it: a press whose meaning depends on arrival time is
-a micro-mode, in a product that hates cleverness. The friction budget's
-*intent → sound = 1 press* line is hereby **re-priced at the wall**, not
-unmet: one press from the Songs section, from a playlist, from the queue,
-from `Play all`; two from a sleeve, where the second is a fixed 320 × 32
-target with a name. Shift-click remains the one-press *sound-later*.
-(Owner's decision, 2026-08-09.)
+**Sound from the wall is one press.** Hover a sleeve and four options are laid
+over it — `Play`, `Queue`, `Add to…`, `Open`. `Play` sounds the record from
+the wall. The friction budget's *intent → sound = 1 press* line is met at
+every scope in the product, the wall included.
+
+*Rewritten on the owner's decision, 2026-08-09.* This entry used to read
+**"Sound from the wall is two presses, and that is a price, not a debt"**, and
+it priced the wall at two: open the record's page, press `Play album`. The
+owner decided the price should not be paid, and that the reveal should be the
+hover group ADR-0032 §2 had measured as not fitting *beside* a tile — it fits
+*inside* one. What the old entry was written against is untouched and still
+refused: no double-click, no press whose meaning depends on arrival time, and
+no route buried in a modifier key (the owner on ADR-0032 §4's `Ctrl`-click
+proposal: *"burying things in modifier keys is not great"*). Shift-click
+remains the one-press *sound-later*, and the tile's right-press menu remains
+the pointer-reachable twin of all four options, so nothing here is reachable
+only by hover.
 
 **A band's content may not touch the band's edges.** Every bar leads its tallest
 zone by a **named gap** on each side — never a ratio, because a constant

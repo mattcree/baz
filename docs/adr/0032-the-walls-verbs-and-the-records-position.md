@@ -1,6 +1,7 @@
 # ADR-0032: The wall's verbs, and the record's position
 
-**Status**: proposed (2026-08-09) · extracts the decisions of
+**Status**: **§2 and §4 superseded by the owner's decision (2026-08-09)**;
+§1, §3 and §5 stand as proposed · originally proposed (2026-08-09) · extracts the decisions of
 [`docs/design/13-everyday-flow.md`](../design/13-everyday-flow.md) §4 and
 §5 · adds one context-menu item, one readout, one token and one string ·
 **no new message and no new control** — every press already has a named
@@ -9,6 +10,22 @@ for the owner**, drawn and priced rather than decided · the owner's brief,
 verbatim: *"starting to play an album… should not need two clicks. I wonder
 if when we mouse over, we can just show two options somehow… send all to
 current playlist. or play now… or just view details"*
+
+> **What the owner decided, recorded here so this document is not read as
+> current.** §2 refused a hover-revealed verb group on the wall, on the
+> measurement that a card does not fit *beside* a tile. §4 drew a `Ctrl`-click
+> accelerator and left it open for him. He rejected the modifier outright —
+> *"burying things in modifier keys is not great"* — and approved a mockup
+> that puts the verbs **inside the tile's own bounds**, which is the one
+> placement §2's own closing paragraph observes baz does not have. Four
+> options over a veil that gathers at the sleeve's left edge and dissolves
+> before the right one; `Play` sounds the record in one press. The
+> measurements in §2 are not wrong and are not withdrawn — they are about a
+> card floating beside a tile, which is not what shipped. `docs/REFUSALS.md`
+> carries the rewritten entries and
+> `docs/design/impl/hover-options/` carries the render evidence. This ADR is
+> left otherwise unedited: it is a record of what was decided when, not a
+> description of the product.
 
 ## Context
 

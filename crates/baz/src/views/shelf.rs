@@ -97,7 +97,7 @@ pub(crate) fn view<'a>(
             &mut drawn,
         );
         for r in first_row..end_row {
-            grid = grid.push(shelf_row(shelf, player, hang, *run, r, lamp));
+            grid = grid.push(shelf_row(shelf, player, hang, *run, r, lamp, collecting));
         }
         drawn += hang.spacer_height(end_row - first_row);
     }
@@ -387,6 +387,7 @@ fn shelf_row<'a>(
     run: Run,
     row_index: usize,
     lamp: f32,
+    collecting: Collecting,
 ) -> Element<'a, Message> {
     let mut cells = row![]
         .spacing(hang.gutter)
@@ -412,12 +413,12 @@ fn shelf_row<'a>(
             });
             cells = cells.push(tile(
                 shelf,
+                player,
                 hang,
                 album,
-                player.playing_album() == Some(album.id),
                 lamp,
-                dimmed,
-                ringed,
+                (dimmed, ringed),
+                collecting,
             ));
         }
     }
@@ -883,14 +884,18 @@ fn empty_state(shelf: &Shelf) -> Element<'_, Message> {
 /// line instead, which is the failure the shelf can afford.
 fn tile<'a>(
     shelf: &'a Shelf,
+    player: &'a PlayerState,
     hang: Grid,
     album: &'a vm::AlbumVm,
-    playing: bool,
     lamp: f32,
-    dimmed: bool,
-    ringed: bool,
+    // The shuffle pool's two marks, as one argument: `(dimmed, ringed)`.
+    pool: (bool, bool),
+    collecting: Collecting,
 ) -> Element<'a, Message> {
     let room = theme::active();
+    let (dimmed, ringed) = pool;
+    let playing = player.playing_album() == Some(album.id);
+    let engine = player.engine_ready();
     let edge = hang.art;
     // **The work, inside its reserved ring lane.** Every sleeve on the wall is
     // drawn at the grid's art edge less two [`theme::POOL_RING`]s, in every
@@ -908,6 +913,14 @@ fn tile<'a>(
             .opacity(shown)
             .into(),
         None => gradient_block(album.id, work, shown),
+    };
+    // **The hover options** (see [`hover_options`]) — a layer over the work
+    // and only while the pointer is on this tile. `stack` hands events to its
+    // topmost layer first, so an option is reached before the sleeve under it.
+    let art: Element<'_, Message> = if shelf.hovered_album == Some(album.id) {
+        stack![art, hover_options(album.id, work, engine, collecting)].into()
+    } else {
+        art
     };
     // The halo warms over 200 ms when the light moves to this record, and is
     // simply absent on every other tile (ADR-0020 §2.5). The **dot** does not
@@ -1055,6 +1068,146 @@ fn state_rule(hovered: f32, selected: bool, edge: f32) -> Element<'static, Messa
     .height(Length::Fixed(theme::SELECTION_EDGE))
     .align_y(alignment::Vertical::Top)
     .into()
+}
+
+/// **The four options, laid over the sleeve the pointer is on** — the owner's
+/// approved design, and the reversal of ADR-0032 §2 and of `docs/REFUSALS.md`'s
+/// *nothing is ever drawn on a sleeve*. Both entries are rewritten to record
+/// what was decided; neither is argued with here.
+///
+/// # The veil
+///
+/// A horizontal gradient of [`theme::Palette::recess`] that gathers at the
+/// sleeve's **left** edge and is gone before the right one
+/// ([`theme::hover_veil`]). That asymmetry is the design: the right of every
+/// cover stays exactly as painted, so the record you are choosing about stays
+/// the record you recognise. It is not a scrim rectangle, and a flat panel
+/// would be a different decision rather than a simpler rendering of this one.
+///
+/// The stops were specified as an sRGB composite and are re-solved for a
+/// renderer that blends in linear light before they are handed over — see
+/// [`theme::veil_alpha`], which also says which way that correction runs and
+/// why the direction is not the one this repo learned first.
+///
+/// # The reveal costs nothing
+///
+/// This whole layer exists only while [`Shelf::hovered_album`] names this
+/// record — the boolean the `+` slot's reveal already uses
+/// (`song_row`'s `offered`), not a tween. There is no new motion class, no
+/// clock, and no frame is drawn because a pointer is somewhere. The tile's
+/// 90 ms rule tween (ADR-0020 §2.3) is untouched and still the only thing on
+/// the wall that moves.
+///
+/// # Geometry
+///
+/// Four rows sharing one left edge, each taking an equal share of the sleeve's
+/// height as its hit band — 47 px at the tightest density baz draws, against
+/// law L7's 32 px floor. The ink stops at [`theme::VEIL_INK_X`] and the hit
+/// band at [`theme::VEIL_BAND_X`], both of them stops of the veil itself
+/// rather than numbers of their own: type stops where the veil is still thick
+/// enough to carry it over any sleeve, and the band stops well short of the
+/// right edge so that **a press on the sleeve outside an option still opens
+/// the record's page**.
+///
+/// # The presses
+///
+/// Every one of them is a message some visible control already sends, and the
+/// tile's right-press menu remains the pointer-reachable twin of all four — so
+/// this layer is an accelerator and never the only route (`docs/REFUSALS.md`,
+/// Accessibility). An option's press is **captured by the option**: iced's
+/// `button` returns `Captured` for a child's press before its own `on_press`
+/// fires (the same mechanism `album_door` relies on), so pressing `Play` here
+/// cannot also open the page.
+fn hover_options<'a>(
+    album: u64,
+    work: f32,
+    engine: bool,
+    collecting: Collecting,
+) -> Element<'a, Message> {
+    let room = theme::active();
+    let band = work * theme::VEIL_BAND_X;
+    let ink_lane = (work * theme::VEIL_INK_X - theme::VEIL_LEAD).max(0.0);
+    let listed: [(icon::Glyph, &'static str, Option<Message>, bool); theme::VEIL_OPTIONS] = [
+        (
+            icon::Glyph::Play,
+            "Play",
+            engine.then_some(Message::PlayAlbum(album)),
+            true,
+        ),
+        (
+            icon::Glyph::Queue,
+            "Queue",
+            engine.then_some(Message::QueueAlbum(album)),
+            false,
+        ),
+        (
+            icon::Glyph::Plus,
+            "Add to…",
+            collecting
+                .available
+                .then_some(Message::AddAlbumToPlaylist(album)),
+            false,
+        ),
+        (
+            icon::Glyph::Open,
+            "Open",
+            Some(Message::AlbumClicked(album)),
+            false,
+        ),
+    ];
+    let mut options = column![]
+        .width(Length::Fixed(band))
+        .height(Length::Fixed(work));
+    for (glyph, label, press, accent) in listed {
+        // Absent, not disabled: an option with no engine or no playlists
+        // folder behind it is not offered, and the rows left divide the
+        // sleeve between them.
+        let Some(press) = press else {
+            continue;
+        };
+        // One decision about which option wears the accent, made in the
+        // theme and read here — see [`theme::veil_option_ink`], which also
+        // records the one place this departs from the approved mockup.
+        let ink = theme::veil_option_ink(room, accent);
+        options = options.push(
+            button(
+                container(
+                    row![
+                        iced_image(icon::inked(glyph, ink))
+                            .width(Length::Fixed(theme::ICON_PX))
+                            .height(Length::Fixed(theme::ICON_PX)),
+                        text(label)
+                            .size(theme::SIZE_BODY)
+                            .line_height(theme::LEADING_BODY)
+                            .font(theme::MEDIUM)
+                            .color(room.paper)
+                            .wrapping(text::Wrapping::None),
+                    ]
+                    .spacing(theme::GAP_SM)
+                    .align_y(iced::Alignment::Center),
+                )
+                // The ink lane, clipped: no glyph and no word may reach past
+                // the veil's third stop, whatever the label says.
+                .width(Length::Fixed(ink_lane))
+                .height(Length::Fill)
+                .align_y(alignment::Vertical::Center)
+                .clip(true),
+            )
+            .width(Length::Fixed(band))
+            .height(Length::Fill)
+            .padding(iced::Padding::default().left(theme::VEIL_LEAD))
+            .style(move |_theme, status| theme::veil_row(room, status))
+            .on_press(press),
+        );
+    }
+    container(options)
+        .width(Length::Fixed(work))
+        .height(Length::Fixed(work))
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Gradient(theme::hover_veil(room).into())),
+            ..container::Style::default()
+        })
+        .into()
 }
 
 /// The playing album's lamp dot: a small amber circle, the amplifier's
@@ -1291,5 +1444,185 @@ mod tests {
             let grid = Grid::new(1172.0, density);
             assert!(grid.row_h - grid.hang + RULE_LANE_H < grid.row_h);
         }
+    }
+}
+
+#[cfg(test)]
+mod hover_option_tests {
+    use crate::theme;
+
+    /// This module's own source, for the pins below.
+    fn source() -> String {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/shelf.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n")
+    }
+
+    /// The body of `fn name` in this module.
+    fn function(source: &str, name: &str) -> String {
+        let rest = source
+            .split_once(&format!("fn {name}"))
+            .unwrap_or_else(|| panic!("`{name}` exists"))
+            .1;
+        rest[..rest.find("\n}\n").expect("a function ends")].to_owned()
+    }
+
+    /// **Every option is a press some visible control already makes**, and the
+    /// tile's right-press menu is the pointer-reachable twin of all four
+    /// (`docs/REFUSALS.md`, Accessibility: *no control's only affordance is
+    /// hover*). The reveal is an accelerator over routes that exist; it is
+    /// never the only way to any of them.
+    ///
+    /// | Option | Message | Its twin |
+    /// |---|---|---|
+    /// | `Play` | `PlayAlbum` | the record page's `Play album`, and the menu's |
+    /// | `Queue` | `QueueAlbum` | shift-click a sleeve, and the menu's `Queue album` |
+    /// | `Add to…` | `AddAlbumToPlaylist` | the record page's `Add to playlist…`, and the menu's |
+    /// | `Open` | `AlbumClicked` | the tile's own press, and the menu's `Open` |
+    #[test]
+    fn every_option_is_a_press_some_visible_control_already_makes() {
+        let options = function(&source(), "hover_options<'a>");
+        for (label, press) in [
+            ("Play", "Message::PlayAlbum(album)"),
+            ("Queue", "Message::QueueAlbum(album)"),
+            ("Add to…", "Message::AddAlbumToPlaylist(album)"),
+            ("Open", "Message::AlbumClicked(album)"),
+        ] {
+            assert!(
+                options.contains(&format!("\"{label}\"")),
+                "the option `{label}` is gone from the veil"
+            );
+            assert!(
+                options.contains(press),
+                "the option `{label}` no longer sends `{press}`"
+            );
+        }
+        // Four options and four presses: no fifth verb slipped onto a sleeve.
+        assert_eq!(
+            options.matches(".on_press(").count(),
+            1,
+            "the options are pressed through one arm, once"
+        );
+        assert_eq!(theme::VEIL_OPTIONS, 4);
+    }
+
+    /// **An option's press never also opens the page.**
+    ///
+    /// The mechanism is iced's, and it is the same one `album_door` inside a
+    /// songs row relies on: `button::on_event` hands the event to its content
+    /// *first* and returns `Captured` without reaching its own `on_press` if a
+    /// child took it (`iced_widget-0.13.4/src/button.rs:283–295`). So the
+    /// option buttons must be **inside** the tile's button, and the layer they
+    /// live in must be the topmost of the `stack` — `stack::on_event` iterates
+    /// `.rev()` (`iced_widget-0.13.4/src/stack.rs:222–226`).
+    ///
+    /// Both facts are pinned here, because the routing is a property of where
+    /// the widgets sit rather than of anything either function says.
+    #[test]
+    fn an_options_press_is_captured_before_the_tile_sees_it() {
+        let source = source();
+        let tile = function(&source, "tile<'a>");
+        assert!(
+            tile.contains("stack![art, hover_options("),
+            "the options are not the topmost layer over the work — a sleeve \
+             press would reach them before they reached it, or not at all"
+        );
+        // The stack is inside the button, not around it: the `on_press` that
+        // opens the page comes after the column that holds the sleeve.
+        let sleeve_at = tile.find("let sleeve = container(").expect("the sleeve");
+        let stack_at = tile.find("stack![art, hover_options(").expect("the layer");
+        let press_at = tile
+            .find(".on_press(Message::AlbumClicked(album.id))")
+            .expect("the tile's own press");
+        assert!(
+            stack_at < sleeve_at && sleeve_at < press_at,
+            "the options must be built into the work the tile's button holds"
+        );
+        // And the tile still opens the page from anywhere else on it.
+        assert!(
+            tile.contains(".on_press(Message::AlbumClicked(album.id))"),
+            "pressing the sleeve outside an option no longer opens the record"
+        );
+    }
+
+    /// **The veil is a gradient. A flat panel is not the design.**
+    ///
+    /// `docs/REFUSALS.md`'s *no scrim, ever* was written against dimming ten
+    /// thousand covers to show twelve rows, and the owner's reversal is
+    /// specifically of a **gradient over one sleeve under the pointer** — so
+    /// the shape of the mark is the decision, not an implementation detail. A
+    /// `Background::Color` here would be the refused thing wearing the
+    /// permitted thing's name.
+    #[test]
+    fn the_veil_is_a_gradient_over_one_sleeve_and_never_a_flat_panel() {
+        let options = function(&source(), "hover_options<'a>");
+        assert!(
+            options.contains("Background::Gradient(theme::hover_veil(room)"),
+            "the veil stopped being the design's gradient"
+        );
+        assert!(
+            !options.contains("Background::Color"),
+            "a flat scrim rectangle is drawn over the sleeve"
+        );
+        // The gradient runs left to right and dies before the right edge.
+        const { assert!(theme::VEIL_SPEC[0].0 == 0.0) }
+        const { assert!(theme::VEIL_SPEC[0].1 > 0.9) }
+        const { assert!(theme::VEIL_SPEC[theme::VEIL_SPEC.len() - 1].0 >= 1.0) }
+        const {
+            assert!(
+                theme::VEIL_SPEC[theme::VEIL_SPEC.len() - 1].1 == 0.0,
+                "the veil no longer dissolves before the sleeve's right edge"
+            );
+        }
+    }
+
+    /// **The reveal costs nothing when nothing is hovered.**
+    ///
+    /// A boolean, exactly as the `+` slot's reveal is (`song_row`'s
+    /// `offered`) — not a tween, not a clock, not a subscription. The tile's
+    /// 90 ms rule tween (ADR-0020 §2.3) is untouched and stays the only thing
+    /// on the wall that moves; nothing here reads it, and nothing here asks
+    /// for a frame.
+    #[test]
+    fn the_reveal_is_a_boolean_and_asks_for_no_frames() {
+        let source = source();
+        let tile = function(&source, "tile<'a>");
+        assert!(
+            tile.contains("if shelf.hovered_album == Some(album.id)"),
+            "the reveal is no longer the `+` slot's own boolean"
+        );
+        let options = function(&source, "hover_options<'a>");
+        for forbidden in ["tile_hover", "Tween", "motion::", "Instant"] {
+            assert!(
+                !options.contains(forbidden),
+                "the options reach for `{forbidden}` — the reveal is a hover \
+                 state, and a sixth tween is not the door it came in through"
+            );
+        }
+    }
+
+    /// **Options are the wall's alone.** Not on the Songs section's rows, not
+    /// in the lane — a row plays and a tile navigates (doc 09 §5), and a verb
+    /// group laid over a one-line row would be neither.
+    #[test]
+    fn only_a_wall_tile_carries_the_options() {
+        let source = source();
+        for surface in ["song_row<'a>", "songs_section<'a>", "header_line"] {
+            assert!(
+                !function(&source, surface).contains("hover_options"),
+                "`{surface}` grew the wall's hover options"
+            );
+        }
+        // Only the drawing half of the file — the tests below name it too.
+        let drawn = source
+            .split_once("#[cfg(test)]")
+            .map_or(source.as_str(), |(drawn, _)| drawn);
+        assert_eq!(
+            drawn.matches("hover_options(").count(),
+            1,
+            "the options are built in exactly one place"
+        );
     }
 }

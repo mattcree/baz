@@ -403,6 +403,67 @@
 - **No shortcut discovery in the interface.** The bindings are in the README
   and nowhere the user can see them while running — no `?` overlay, no menu.
 
+## The wall's hover options
+
+**The bar's cover depends on the wall's thumbnail LRU.** `App::bar_cover`
+reads the sounding record's sleeve out of `Shelf::thumbs` with `peek`, so the
+bar observes the wall's art rather than competing for it. In a very large
+library, scrolling far enough past `art::THUMB_CACHE_ENTRIES` can evict the
+playing record's thumbnail, and the cover then disappears and the type shifts
+left — the one kind of movement this bar is built not to make. The fix is to
+keep the sounding record's thumbnail warm: `Shelf::request_thumbs` already
+exists for the playlist sleeves and is the right pipeline, but the hook is
+`App::warm_lamp`, which is called from a handler that returns no `Task`.
+Threading one out is the whole of the work; it was left out of the hover-options
+change because it touches the playback event path and that change touches the
+view layer only.
+
+**Idle CPU has not been measured on real hardware for this change.** The frame
+count is measured and is what the design constrains — 0 frames in 10 s with a
+tile hovered and with none — but the harness is Xvfb with no GPU, where iced
+falls back to `tiny-skia` and the process sits at ~99.8 % CPU regardless. The
+pre-change binary measures the same 99.8 % under the same harness, so it is the
+harness; but `docs/design/04-fluidity.md` §1.4's 0.0 % is a real-hardware
+number and has not been re-taken. Re-take it on the owner's machine next time
+one is being taken anyway.
+
+**The options are wall tiles' alone, for now.** Not on the Songs section's
+rows, not in the lane — a row plays and a tile navigates, and a verb group over
+a one-line row would be neither. If the Songs rows ever want an accelerator it
+is a different design, not this one stretched.
+
+## Rendering
+
+**A renderer toggle in Settings — asked for, not built.** The owner asked
+(2026-08-09) whether GPU acceleration can be allowed and toggled. The first
+half needs nothing: baz takes iced's default features, so `wgpu` and
+`tiny-skia` are both compiled in and `iced_renderer`'s fallback compositor
+already tries the GPU first and the CPU second
+(`iced_renderer-0.13.0/src/fallback.rs:214–262`). Every user with a working
+adapter is accelerated today, and everyone else degrades silently — which is
+what the headless captures in `docs/design/impl/` exercise, since Xvfb has no
+GPU (`amdgpu_device_initialize failed` → tiny-skia).
+
+The second half is a real, small piece of work and a real design question:
+
+- **The mechanism exists.** `ICED_BACKEND=tiny-skia|wgpu` and
+  `WGPU_BACKEND=vulkan|metal|dx12|gl` are read when the compositor is built.
+  Documented in `docs/INSTALL.md` so the escape hatch is available now.
+- **A Settings row would have to be restart-scoped.** The compositor is
+  created once when the window opens and iced 0.13 exposes no way to swap it
+  live, so the row is a stored preference plus an honest *takes effect next
+  launch* line — the shape `docs/REFUSALS.md` tolerates least well.
+- **The open question is whether it earns a row at all.** The automatic
+  fallback covers "no GPU". A toggle only buys the case where the GPU path is
+  present and bad: a tearing driver, or a hybrid laptop spinning up a discrete
+  card for a music player. That is a real class of bug report and it is also
+  the sort of tenant a Settings place accretes; deciding it is the owner's.
+- **If it ships**: one `config.toml` key, one row in the existing Settings
+  section machinery, the value passed to `iced::application(...).settings()`
+  rather than to the environment, and a line in the signal-path vocabulary's
+  neighbourhood saying which renderer is live — because a preference whose
+  effect you cannot see is a preference nobody can debug.
+
 ## Platform integration
 
 - ~~**No application icon.**~~ — **shipped.** `packaging/icons/` holds the SVG

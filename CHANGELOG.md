@@ -331,6 +331,55 @@ next commit.
 
 **Interface**
 
+- **Sound from the wall is one press.** Hovering a record on the wall reveals
+  four options laid over its sleeve — `Play`, `Queue`, `Add to…`, `Open` — and
+  `Play` sounds the record without opening its page. The owner's approved
+  design, and the reversal of `docs/REFUSALS.md`'s *sound from the wall is two
+  presses* and *nothing is ever drawn on top of a sleeve*, and of ADR-0032 §2's
+  *no hover-revealed verb group*; all three are rewritten to record what was
+  decided. The `Ctrl`-click accelerator ADR-0032 §4 left open for the owner is
+  **not** taken — *"burying things in modifier keys is not great"*.
+  - **The veil is a gradient, never a panel**: it gathers at the sleeve's left
+    edge and dissolves to nothing before the right one, so the right of every
+    cover stays as painted and the record stays recognisable while you choose.
+    Its stops were specified as an sRGB composite and are re-solved for a
+    renderer that blends in linear light (`theme::veil_alpha`) — a correction
+    that runs the *opposite* way to the 3.7× overdraw `Palette::ink_over`
+    documents, because the veil is dark ink over lighter artwork rather than
+    light ink on a dark ground. Verified against sampled pixels from real
+    frames, not against the arithmetic: worst deviation 0.021 of an opacity at
+    both 1280 × 860 and 1920 × 1080
+    (`docs/design/impl/hover-options/README.md`).
+  - **Four options on one left edge**, glyph then label, each taking a quarter
+    of the sleeve's height as its hit band — 47 px at the tightest density baz
+    draws, against law L7's 32 px floor. The ink lane ends at the veil's `0.55`
+    stop and the hit band at its `0.68` stop, both read out of the veil's own
+    stops rather than declared: type stops where the veil still carries it over
+    a paper-white sleeve, and the band stops short of the right edge so a
+    press on the sleeve **outside** an option still opens the record's page.
+    Shift-click still queues; the tile's right-press menu is unchanged and
+    remains the pointer-reachable twin of all four options, so nothing is
+    reachable by hover alone.
+  - **The reveal costs nothing**: it is the `+` slot's own boolean, not a
+    tween. No new motion class, no clock, no subscription — 0 frames drawn in
+    10 s whether or not a tile is hovered. ADR-0020's five transitions are
+    untouched.
+  - `Play` wears the accent under the licence `theme::primary` holds — it is
+    the control that creates playback truth, and at most one tile is hovered.
+    `Queue` is **paper**, one departure from the approved mockup, taken under
+    the brief's own licence because the ledger's amber entry says *not what is
+    queued* in those words.
+  - Two glyphs join the sheet: `Queue` (three bars, the last short — a list
+    that runs out, which is what keeps it off the hamburger) and `Open` (the
+    disclosure chevron). Options are wall tiles' alone — not the Songs rows,
+    not the lane.
+- **The sounding record's sleeve is in the now-playing bar**: 52 px square,
+  left of the track and artist, *inside* the block's existing hit target so
+  the cover and the type are one control that goes one place. It fits the
+  bar's existing 80 px band and its named 12 px lead with nothing re-derived —
+  52 is the largest square on the 4 px lattice inside the 56 px the tallest
+  zone already reserved. No artwork, and the block renders exactly as it did
+  before.
 - **The wall's density has a visible control** (ADR-0028; doc 11 §5 P8, the
   owner choosing the visible handle): three detent marks at the foot of the
   index rail's lane — each the wall itself at its hang, one, four, nine works

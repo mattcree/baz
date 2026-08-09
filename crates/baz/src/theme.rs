@@ -1505,6 +1505,22 @@ pub const BAR_LEAD: f32 = (BAR_CONTENT_H - TRANSPORT_HIT) / 2.0;
 /// its tallest one.
 pub const NOW_PLAYING_H: f32 = LINE_BODY + LINE_META + CONTINUATION_H;
 
+/// **The sounding record's sleeve in the bar** (logical px) — 52, square.
+///
+/// It is fitted to the band rather than the band to it, which is the whole of
+/// the constraint: [`BAR_CONTENT_H`] 80, [`BAR_ZONE_LEAD`] 12 either side and
+/// [`NOW_PLAYING_H`] 56 between them are all unchanged, and 52 is the largest
+/// square on the 4 px lattice that sits inside the 56 with air left over. No
+/// proportion of the bar is re-derived and no slot is removed
+/// (`docs/REFUSALS.md`'s ratchet: *a slot may be added, none removed*).
+///
+/// It joins the now-playing block's **existing** hit target rather than
+/// standing beside it — the block is already the labelled control that takes
+/// you back to what is playing, and a picture next to a link would be two
+/// objects where the design asks for one. With no artwork the cover is simply
+/// absent and the block is the pixels it has always been.
+pub const BAR_COVER: f32 = 52.0;
+
 /// **The lead a band keeps around its tallest zone** (logical px) — the
 /// breathing rule, stated once and applied to both bars.
 ///
@@ -3232,6 +3248,219 @@ pub fn pool_ring(p: &Palette, ringed: bool) -> container::Style {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The hover veil, and the four options laid over a sleeve
+// ---------------------------------------------------------------------------
+
+/// **The veil, as designed** — the owner's approved mockup, in the model its
+/// numbers were written in: an offset across the sleeve's width paired with an
+/// opacity of [`Palette::recess`], composited in **sRGB**.
+///
+/// It gathers at the sleeve's left edge and is gone before the right one, so
+/// the right of every cover stays exactly as painted and the record stays
+/// recognisable while you choose. That is the whole reason it is a gradient
+/// and not a panel: a flat scrim over a sleeve hides the record you are
+/// pointing at, which is the thing the wall is made of.
+///
+/// These numbers are **never handed to the renderer**. iced composites in
+/// linear light; see [`veil_alpha`] for what is handed over instead and why
+/// the difference is not a rounding error.
+pub const VEIL_SPEC: [(f32, f32); 6] = [
+    (0.00, 0.92),
+    (0.38, 0.86),
+    (0.55, 0.66),
+    (0.68, 0.30),
+    (0.82, 0.05),
+    (1.00, 0.00),
+];
+
+/// The ground [`veil_alpha`] solves against: **sRGB mid grey**.
+///
+/// A single alpha cannot reproduce an sRGB composite over *every* sleeve at
+/// once — the correction is ground-dependent — so the reference is stated
+/// rather than assumed, and it is the perceptual midpoint of the range a
+/// sleeve can occupy. The residual over the rest of that range is small and
+/// measured: `the_veil_is_solved_against_a_stated_ground_and_its_residual_is_bounded`
+/// holds it to ≤ 10 / 255 across sleeve grounds from sRGB 0.15 to 0.95, and
+/// the sampled-pixel table in `docs/design/impl/hover-options/README.md`
+/// checks it against real rendered frames rather than against this arithmetic.
+pub const VEIL_GROUND: Color = Color {
+    r: 0.5,
+    g: 0.5,
+    b: 0.5,
+    a: 1.0,
+};
+
+/// sRGB → linear light, iced's own transfer function
+/// (`iced_core::Color::into_linear`).
+fn to_linear(u: f32) -> f32 {
+    if u <= 0.040_45 {
+        u / 12.92
+    } else {
+        ((u + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// **The alpha that draws `spec` right.**
+///
+/// [`Palette::ink_over`] fixes the sRGB/linear mismatch for *opaque* marks by
+/// compositing here and handing the renderer a colour. The veil cannot use
+/// that trick: what it lands on is album art, which the theme does not know.
+/// So the blend happens in the renderer, in linear light, and the only thing
+/// left to correct is the number.
+///
+/// Given a `spec` opacity written as an sRGB composite of `ink` over `ground`,
+/// this returns the opacity that reproduces that same result when the GPU
+/// blends in linear light:
+///
+/// ```text
+///   target = spec·ink + (1 − spec)·ground              (the intent, in sRGB)
+///   a      = (lin(ground) − lin(target)) / (lin(ground) − lin(ink))
+/// ```
+///
+/// solved per channel and averaged (the three answers differ by < 0.005 for
+/// every stop in [`VEIL_SPEC`], which is why one alpha per stop is honest).
+///
+/// # The correction runs both ways, and the veil's way is the unfamiliar one
+///
+/// The mismatch this module already documents at [`Palette::ink_over`] is
+/// *light ink on a dark ground*, where linear compositing draws **louder** —
+/// a 7 % hairline drew at ink 26 %, 3.7×. The veil is the opposite case, dark
+/// ink over artwork that is mostly lighter than it, and there linear
+/// compositing draws **quieter**. Handed through unchanged, the design's own
+/// numbers would have drawn at roughly half their specified weight over a
+/// mid-grey sleeve (`0.30` reading as an effective `0.16`, `0.05` as `0.025`)
+/// — a veil that dissolves too early and an ink lane with no ground under it.
+/// Applying the hairline's 3.7× in its remembered direction would have made
+/// that worse, not better. The direction is a property of which side of the
+/// blend is brighter, not a constant, so it is solved rather than remembered.
+#[must_use]
+pub fn veil_alpha(spec: f32, ink: Color, ground: Color) -> f32 {
+    let channel = |ink: f32, ground: f32| {
+        let target = spec.mul_add(ink - ground, ground);
+        let (lin_ink, lin_ground) = (to_linear(ink), to_linear(ground));
+        let span = lin_ground - lin_ink;
+        if span.abs() < f32::EPSILON {
+            spec
+        } else {
+            ((lin_ground - to_linear(target)) / span).clamp(0.0, 1.0)
+        }
+    };
+    (channel(ink.r, ground.r) + channel(ink.g, ground.g) + channel(ink.b, ground.b)) / 3.0
+}
+
+/// The veil itself: [`VEIL_SPEC`] with every opacity put through
+/// [`veil_alpha`], as a horizontal gradient across the sleeve.
+///
+/// `iced::Radians(FRAC_PI_2)` is left-to-right: `Radians::to_distance`
+/// subtracts a quarter turn before taking `(cos, sin)`, so π/2 gives the
+/// direction vector `(1, 0)` and the ramp runs from the box's left edge to
+/// its right one.
+#[must_use]
+pub fn hover_veil(p: &Palette) -> iced::gradient::Linear {
+    VEIL_SPEC.iter().fold(
+        iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2)),
+        |gradient, &(offset, spec)| {
+            gradient.add_stop(
+                offset,
+                alpha(p.recess, veil_alpha(spec, p.recess, VEIL_GROUND)),
+            )
+        },
+    )
+}
+
+/// Where an option's **ink lane ends**, as a fraction of the sleeve's width —
+/// [`VEIL_SPEC`]'s third stop, and not a number of its own.
+///
+/// Past it the veil is thinner than `0.66` and the sleeve starts to come back
+/// through, which is exactly where type must stop: the contrast floor is
+/// measured against the *composited* veil, and over a paper-white sleeve the
+/// ground at this stop is the last one that clears it. See
+/// `the_option_ink_clears_its_floor_on_the_veil_over_any_sleeve`.
+pub const VEIL_INK_X: f32 = VEIL_SPEC[2].0;
+
+/// Where an option's **hit band ends**, as a fraction of the sleeve's width —
+/// [`VEIL_SPEC`]'s fourth stop.
+///
+/// Wider than the ink lane, because a hit box is not read; and bounded well
+/// short of the sleeve, because *pressing the sleeve outside an option still
+/// opens the record's page*. A row that spanned the full width would take
+/// that press away and leave the wall with no way to open anything.
+pub const VEIL_BAND_X: f32 = VEIL_SPEC[3].0;
+
+/// The lead between the sleeve's left edge and an option's glyph — the same
+/// [`GAP_MD`] the bottom bar leads its type block by.
+pub const VEIL_LEAD: f32 = GAP_MD;
+
+/// How many options the veil carries. Each takes an equal share of the
+/// sleeve's height as its hit band, which is ≥ 47 px at the tightest density
+/// baz draws — well above law L7's [`TRANSPORT_HIT`] floor, and the reason
+/// the options need no boxes of their own.
+pub const VEIL_OPTIONS: usize = 4;
+
+/// The row's hover wash **as designed**: an offset paired with an opacity of
+/// [`Palette::paper`], brightening from the left.
+///
+/// A *light* wash rather than a darker one, deliberately: the veil under it is
+/// already the room's darkest ground, and a second dark wash on top would say
+/// "less" where the pointer means "this one". It fades out inside the ink lane,
+/// so its right edge is never a drawn edge.
+pub const VEIL_ROW_WASH: [(f32, f32); 3] = [(0.00, 0.10), (0.40, 0.06), (0.75, 0.00)];
+
+/// One option's row: no ground at rest, the light wash under the pointer.
+///
+/// The wash's opacities are solved by [`veil_alpha`] against
+/// [`Palette::recess`] rather than against [`VEIL_GROUND`], because that is
+/// what this mark actually lands on — at the row's left edge the veil above it
+/// is already `0.92` of the recess, so the ground under the wash is the room's
+/// own, known here, whatever sleeve is behind it.
+#[must_use]
+pub fn veil_row(p: &Palette, status: button::Status) -> button::Style {
+    let lit = matches!(status, button::Status::Hovered | button::Status::Pressed);
+    let background = lit.then(|| {
+        let gradient = VEIL_ROW_WASH.iter().fold(
+            iced::gradient::Linear::new(iced::Radians(std::f32::consts::FRAC_PI_2)),
+            |gradient, &(offset, spec)| {
+                gradient.add_stop(offset, alpha(p.paper, veil_alpha(spec, p.paper, p.recess)))
+            },
+        );
+        Background::Gradient(gradient.into())
+    });
+    button::Style {
+        background,
+        text_color: p.paper,
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        shadow: Shadow::default(),
+    }
+}
+
+/// An option's glyph ink: the accent for `Play`, the room's paper for the
+/// other three.
+///
+/// **`Play` is the accent's fifth use and it is the same use as the fourth.**
+/// The module docs list `primary` — the record page's `Play album` — as the one
+/// control allowed the colour, *because it is the only control in the product
+/// that creates playback truth*. The wall's `Play` is that same control at the
+/// same scope, moved onto the sleeve; at most one tile is hovered at a time, so
+/// there is still at most one of it on screen. The licence transfers with the
+/// act, and it transfers to nothing else.
+///
+/// **`Queue` is paper, and that is a departure from the approved mockup.** The
+/// mockup gives `Queue` the accent too. `docs/REFUSALS.md`'s amber entry names
+/// this exact case in these exact words — the lamp states what is true about
+/// playback right now and *"not what is queued"* — and it is an entry the
+/// owner's brief did not touch. The brief's own licence (*"if it reads too
+/// loud, drop to paper and say so"*) is taken here rather than argued with; it
+/// is one word in this function to put back.
+#[must_use]
+pub const fn veil_option_ink(p: &Palette, plays: bool) -> Color {
+    if plays { p.lamp } else { p.paper }
+}
+
 /// The playlist panel's surface: one step up from the wall, exactly as the
 /// dead rail's column and the queue popover stood (ADR-0024 §5 revives their
 /// verified float without their residency).
@@ -4924,7 +5153,15 @@ mod tests {
     fn from_background(background: Option<Background>) -> Vec<Color> {
         match background {
             Some(Background::Color(color)) => vec![color],
-            _ => Vec::new(),
+            // A gradient paints every one of its stops. Reading them is what
+            // keeps the accent sweep honest now that a style can hand the
+            // renderer a ramp instead of a colour ([`veil_row`]).
+            Some(Background::Gradient(iced::Gradient::Linear(linear))) => linear
+                .stops
+                .iter()
+                .filter_map(|stop| stop.map(|stop| stop.color))
+                .collect(),
+            None => Vec::new(),
         }
     }
 
@@ -4987,6 +5224,7 @@ mod tests {
                 button_colors(&word_button(p, p.wall, status)),
             ));
             painted.push(("primary", button_colors(&primary(p, status))));
+            painted.push(("veil_row", button_colors(&veil_row(p, status))));
             for open in [false, true] {
                 painted.push(("now_playing", button_colors(&now_playing(p, status, open))));
             }
@@ -5112,6 +5350,247 @@ mod tests {
     /// not about amber, so Reading Room's oxblood is held to the same list by
     /// the same code and a style that reached for one room's accent could not
     /// pass by being the other's.
+    /// The veil's **specified** opacity at `x` across the sleeve, `x` in `0..=1`:
+    /// [`VEIL_SPEC`] read as the piecewise-linear ramp the renderer interpolates.
+    ///
+    /// In the design's sRGB terms, so it is the number to compare a sampled pixel
+    /// against once that pixel has been un-composited — which is what the table in
+    /// `docs/design/impl/hover-options/README.md` does. Put it through
+    /// [`veil_alpha`] to get what is handed to the renderer.
+    fn veil_at(x: f32) -> f32 {
+        let x = x.clamp(0.0, 1.0);
+        for pair in VEIL_SPEC.windows(2) {
+            let [(x0, a0), (x1, a1)] = [pair[0], pair[1]];
+            if (x0..=x1).contains(&x) {
+                let span = x1 - x0;
+                if span <= f32::EPSILON {
+                    return a1;
+                }
+                return ((x - x0) / span).mul_add(a1 - a0, a0);
+            }
+        }
+        VEIL_SPEC[VEIL_SPEC.len() - 1].1
+    }
+
+    /// **The veil is solved, not remembered** — and the solve is checked
+    /// against a stated reference ground with its residual bounded over the
+    /// whole range a sleeve can occupy.
+    ///
+    /// Three claims, and each of them is a way the veil could be wrong on
+    /// screen while every number in the source looked right:
+    ///
+    /// 1. At [`VEIL_GROUND`] the rendered composite **is** the design's sRGB
+    ///    composite, to within a byte. This is the claim [`veil_alpha`] makes.
+    /// 2. Away from it the error stays inside 10 / 255 from sRGB 0.15 to 0.95
+    ///    — dark sleeves and near-white ones — so the correction is a
+    ///    reference rather than a fit to one cover.
+    /// 3. The corrected alphas are **larger** than the specified ones for
+    ///    every non-zero stop. That is the direction check: this repo's
+    ///    remembered lesson is a 3.7× *overdraw*, and applying it here in its
+    ///    remembered direction would have thinned a veil that linear light
+    ///    already thins. A regression that reintroduced the old reflex would
+    ///    fail on this line, with the reason attached.
+    #[test]
+    fn the_veil_is_solved_against_a_stated_ground_and_its_residual_is_bounded() {
+        /// The worst byte error tolerated away from the reference ground, in
+        /// the room the wall ships in — a **dark** veil, whose extreme case is
+        /// a near-white sleeve and whose divergence there is small.
+        const RESIDUAL_DARK: i32 = 10;
+        /// The same, in a light room. Reading Room's veil is a near-*white*
+        /// ink, so its extreme is a near-black sleeve, and that is where the
+        /// sRGB curve and the linear one are furthest apart: the residual
+        /// reaches 28 / 255 at the `0.68` stop over an sRGB 0.15 sleeve.
+        /// Stated rather than hidden, because a single tolerance covering both
+        /// rooms would have been a tolerance that measured neither — and it is
+        /// the honest cost of one reference ground, which is the alternative to
+        /// re-solving the veil per sleeve every frame.
+        const RESIDUAL_LIGHT: i32 = 28;
+        let byte = |value: f32| {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "clamped to 0..=255 and rounded on the line it is cast from"
+            )]
+            let byte = (value.clamp(0.0, 1.0) * 255.0).round() as i32;
+            byte
+        };
+        for room in Room::ALL {
+            let p = room.palette();
+            for (offset, spec) in VEIL_SPEC {
+                let solved = veil_alpha(spec, p.recess, VEIL_GROUND);
+                // The direction check. Which way the correction runs is a
+                // property of which side of the blend is brighter, not a
+                // constant: a veil darker than the ground it is solved
+                // against needs *more* alpha in linear light (Closing Time),
+                // and one lighter than it needs less (Reading Room). The
+                // 3.7× this repo remembers is the second case, and applying
+                // it to the first — which is the shipped room — would have
+                // thinned a veil that linear light already thins.
+                if spec > 0.0 {
+                    let moved = solved - spec;
+                    let expected = VEIL_GROUND.g - p.recess.g;
+                    assert!(
+                        moved * expected >= 0.0,
+                        "{}: stop {offset} solved to {solved:.4} from a \
+                         specified {spec:.2} — the correction ran the wrong \
+                         way for a veil at {:.3} over a ground at {:.3}",
+                        p.name,
+                        p.recess.g,
+                        VEIL_GROUND.g
+                    );
+                }
+                for ground in [0.15_f32, 0.25, 0.35, 0.5, 0.65, 0.8, 0.95] {
+                    let under = Color::from_rgb(ground, ground, ground);
+                    // What the design asked for: an sRGB composite.
+                    let intended = Color {
+                        r: spec.mul_add(p.recess.r - ground, ground),
+                        g: spec.mul_add(p.recess.g - ground, ground),
+                        b: spec.mul_add(p.recess.b - ground, ground),
+                        a: 1.0,
+                    };
+                    // What the renderer draws: `composite` blends in linear
+                    // light, exactly as iced's shader does.
+                    let drawn = composite(alpha(p.recess, solved), under);
+                    let error = [
+                        (byte(drawn.r) - byte(intended.r)).abs(),
+                        (byte(drawn.g) - byte(intended.g)).abs(),
+                        (byte(drawn.b) - byte(intended.b)).abs(),
+                    ]
+                    .into_iter()
+                    .max()
+                    .unwrap_or(i32::MAX);
+                    let floor = if (ground - VEIL_GROUND.g).abs() < f32::EPSILON {
+                        1
+                    } else if p.recess.g < VEIL_GROUND.g {
+                        RESIDUAL_DARK
+                    } else {
+                        RESIDUAL_LIGHT
+                    };
+                    assert!(
+                        error <= floor,
+                        "{}: stop {offset} over an sRGB {ground} sleeve draws \
+                         {error}/255 off its intent, past the {floor}/255 this \
+                         solve promises",
+                        p.name
+                    );
+                }
+            }
+        }
+    }
+
+    /// **The option ink clears its floor on the veil, over any sleeve.**
+    ///
+    /// The measurement the brief names: the ink is held against the
+    /// *composited* veil, not against the sleeve, and the worst sleeve is the
+    /// one that shows through most — paper white in the dark room, black in
+    /// the light one. The ink lane stops at [`VEIL_INK_X`] precisely so that
+    /// this passes; a lane one stop wider would not.
+    #[test]
+    fn the_option_ink_clears_its_floor_on_the_veil_over_any_sleeve() {
+        /// The AA floor for text — the option labels are read.
+        const TEXT: f32 = 4.5;
+        /// The floor for a mark — the glyph beside each label.
+        const MARK: f32 = 3.0;
+        // Each mark is measured where it actually sits. The tightest sleeve
+        // the wall draws is the worst case for both, because the same lead
+        // and the same glyph are a larger fraction of a smaller work.
+        let work = 200.8 - 2.0 * POOL_RING;
+        // The label's far end: the ink lane's right edge, the thinnest veil
+        // any type stands on.
+        let label_x = VEIL_INK_X;
+        // The glyph's far end: the lead plus one icon box.
+        let glyph_x = (VEIL_LEAD + ICON_PX) / work;
+        for room in Room::ALL {
+            let p = room.palette();
+            for sleeve in [0.0_f32, 0.25, 0.5, 0.75, 1.0] {
+                let under = Color::from_rgb(sleeve, sleeve, sleeve);
+                let ground_at = |x: f32| {
+                    composite(
+                        alpha(p.recess, veil_alpha(veil_at(x), p.recess, VEIL_GROUND)),
+                        under,
+                    )
+                };
+                let label = contrast(p.paper, ground_at(label_x));
+                assert!(
+                    label >= TEXT,
+                    "{}: an option's label is {label:.2} : 1 on the veil at \
+                     x {label_x} over an sRGB {sleeve} sleeve, below {TEXT} : 1",
+                    p.name
+                );
+                for plays in [false, true] {
+                    let glyph = contrast(veil_option_ink(p, plays), ground_at(glyph_x));
+                    assert!(
+                        glyph >= MARK,
+                        "{}: an option's glyph is {glyph:.2} : 1 on the veil \
+                         at x {glyph_x:.3} over an sRGB {sleeve} sleeve, below \
+                         {MARK} : 1",
+                        p.name
+                    );
+                }
+            }
+        }
+    }
+
+    /// **The veil's geometry is the veil's own stops.**
+    ///
+    /// The ink lane and the hit band are read out of [`VEIL_SPEC`] rather than
+    /// declared, so a stop that moves takes them with it; and the band stops
+    /// short of the sleeve, which is what leaves a press outside an option to
+    /// open the record's page.
+    #[test]
+    fn the_veils_geometry_is_read_out_of_its_own_stops() {
+        const { assert!(VEIL_INK_X == VEIL_SPEC[2].0) }
+        const { assert!(VEIL_BAND_X == VEIL_SPEC[3].0) }
+        const {
+            assert!(
+                VEIL_INK_X < VEIL_BAND_X,
+                "the ink lane must end inside the hit band"
+            );
+        }
+        const {
+            assert!(
+                VEIL_BAND_X < 1.0,
+                "a band that reached the sleeve's edge would take the press \
+                 that opens the record"
+            );
+        }
+        // The lead, and the room the ink lane has left after it, at the
+        // tightest sleeve the wall draws (`shelf.rs`'s Dense column at 1172:
+        // art 200.8, work = art − 2 × POOL_RING).
+        let work = 200.8 - 2.0 * POOL_RING;
+        assert!(
+            work.mul_add(VEIL_INK_X, -VEIL_LEAD) >= 4.0 * GAP_XL,
+            "the ink lane leaves less than 96 px for a glyph and a word"
+        );
+        // Law L7's floor, per option, at that same tightest sleeve.
+        let band = work / f32::from(u8::try_from(VEIL_OPTIONS).unwrap_or(u8::MAX));
+        assert!(
+            band >= TRANSPORT_HIT,
+            "an option's hit band is {band} px, under law L7's {TRANSPORT_HIT}"
+        );
+    }
+
+    /// **The wall's `Play` is the only glyph that wears the lamp.**
+    ///
+    /// [`veil_option_ink`] is the single decision, and this is what makes it
+    /// one: three of the four options take the room's paper, and the fourth
+    /// takes the accent because it is the control that creates playback truth.
+    /// It is also the assertion that records the departure from the approved
+    /// mockup — `Queue` was drawn in amber there and is paper here, under
+    /// `docs/REFUSALS.md`'s *not what is queued*.
+    #[test]
+    fn the_walls_play_option_is_the_only_glyph_that_wears_the_lamp() {
+        for room in Room::ALL {
+            let p = room.palette();
+            assert_eq!(veil_option_ink(p, true), p.lamp, "{}", p.name);
+            assert_eq!(veil_option_ink(p, false), p.paper, "{}", p.name);
+            assert!(
+                !p.is_accent(veil_option_ink(p, false)),
+                "{}: an option that does not sound is wearing the accent",
+                p.name
+            );
+        }
+    }
+
     #[test]
     fn the_lamp_is_spent_only_on_playback_truth() {
         /// The styles §2.1.1 permits the accent in. Nothing may be added here
@@ -5257,14 +5736,25 @@ mod tests {
     /// looser one (a style function is `theme::lamp_dot`, with no dot before
     /// the name, and is not matched).
     ///
-    /// The single entry on the list is §2.1.1's fourth permitted use: the
-    /// elapsed timestamp warms to [`Palette::lamp`] while a position has been
-    /// asked for and not yet confirmed, because a position being asked for is
-    /// a claim about the playhead. It cools the moment the engine answers.
+    /// Two entries are on the list.
+    ///
+    /// `views/bottom_bar.rs` is §2.1.1's fourth permitted use: the elapsed
+    /// timestamp warms to [`Palette::lamp`] while a position has been asked
+    /// for and not yet confirmed, because a position being asked for is a
+    /// claim about the playhead. It cools the moment the engine answers.
+    ///
+    /// `icon.rs` is the fifth, and it is the fifth rather than a sixth: the
+    /// accent-inked sprite sheet exists for the wall's hover `Play`, which is
+    /// the record page's `Play album` moved onto the sleeve — the one control
+    /// in the product that *creates* playback truth, and still at most one of
+    /// it on screen because at most one tile is hovered. `icon.rs` names the
+    /// token to build the sheet; **which glyph is allowed to wear it is
+    /// decided in [`veil_option_ink`]**, in this module, under the sweep
+    /// above. See `the_walls_play_option_is_the_only_glyph_that_wears_the_lamp`.
     #[test]
     fn the_lamp_is_named_only_where_playback_truth_is_drawn() {
         /// `src`-relative paths that may name an accent token, and why.
-        const PERMITTED: [&str; 1] = ["views/bottom_bar.rs"];
+        const PERMITTED: [&str; 2] = ["views/bottom_bar.rs", "icon.rs"];
 
         // Spelled in halves so this test's own source does not match it.
         let needle = concat!(".", "lamp");

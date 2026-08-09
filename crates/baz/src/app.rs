@@ -487,6 +487,16 @@ pub(crate) enum Message {
     /// Queue the album's tracks and play (side-panel Play, tile
     /// double-click).
     PlayAlbum(u64),
+    /// **Append the record to the run** — the wall tile's hover `Queue`
+    /// option, and exactly what shift-clicking a sleeve has always done
+    /// ([`Self::AlbumClicked`] with shift, and [`App::queue_album`] under
+    /// both). A message rather than a modifier because the option is a
+    /// visible control and a button press carries one message; the gesture
+    /// and the option now spend the same one, which is what stops the two
+    /// routes drifting.
+    ///
+    /// Nothing sounds: an append is not a play gesture (ADR-0023 §3).
+    QueueAlbum(u64),
     /// A track row of a record's page was clicked: play that album from
     /// that row (`album id`, zero-based row). One message for both of
     /// ADR-0014's cases — which commands go out is
@@ -1053,12 +1063,14 @@ impl App {
             // before.
             Message::AlbumClicked(id) => {
                 if self.modifiers.shift() {
-                    self.queue_album(id);
-                    Task::none()
+                    self.queue_album(id)
                 } else {
                     self.open_album(id)
                 }
             }
+            // The wall's hover `Queue` option: the shift-click gesture's own
+            // append, reached by a named control instead of a held key.
+            Message::QueueAlbum(id) => self.queue_album(id),
             Message::ShowPlayingAlbum => match self.player.playing_album() {
                 // Nothing is sounding, so there is no record to be taken to.
                 // The control is not offered in that state (see
@@ -2506,18 +2518,19 @@ impl App {
     /// own headed group (albums listed as albums, never flattened,
     /// ADR-0014), and appending to an empty stopped engine loads the queue
     /// without starting it.
-    fn queue_album(&mut self, id: u64) {
+    fn queue_album(&mut self, id: u64) -> Task<Message> {
         let Screen::Shelf(state) = &self.screen else {
-            return;
+            return Task::none();
         };
         let Some(album) = state.albums.iter().find(|album| album.id == id) else {
-            return;
+            return Task::none();
         };
         let addition = vm::album_queue(album, state.edition_choice.get(&id).copied());
         if addition.is_empty() {
-            return;
+            return Task::none();
         }
         self.append_to_run(addition);
+        Task::none()
     }
 
     /// Play `id` from row `row` of its selected edition — a click on a track
@@ -3093,6 +3106,21 @@ impl App {
         }
     }
 
+    /// The sleeve the bottom bar draws beside the track and artist: **the
+    /// sounding record's thumbnail, if the wall has decoded one**.
+    ///
+    /// Read from the wall's own cache with `peek` rather than `get`, so a
+    /// frame cannot reorder an LRU — the bar observes the wall's art, it does
+    /// not compete for it. `None` whenever the record has no decodable art,
+    /// and the bar then draws exactly what it drew before the cover existed.
+    fn bar_cover(&self) -> Option<iced_image::Handle> {
+        let Screen::Shelf(state) = &self.screen else {
+            return None;
+        };
+        let id = self.player.playing_album()?;
+        state.thumbs.peek(&id).cloned()
+    }
+
     /// The whole window: the current place, and the persistent bottom bar
     /// under it. Composition only — every surface is drawn by
     /// [`crate::views`].
@@ -3229,7 +3257,7 @@ impl App {
         } else {
             column![
                 screen,
-                views::bottom_bar::view(&self.player, self.place, ink),
+                views::bottom_bar::view(&self.player, self.place, ink, self.bar_cover()),
             ]
             .into()
         };
