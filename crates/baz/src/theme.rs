@@ -3238,31 +3238,6 @@ pub fn panel_seam(p: &Palette) -> container::Style {
     }
 }
 
-/// A panel row's ground: calm on the panel's own surface, and — when this
-/// playlist is **armed to receive** (ADR-0024 §6 layer 2) — one more surface
-/// step with a hairline edge.
-///
-/// Never the accent: the lamp is playback truth, and an armed playlist is a
-/// collecting state, not a sounding one. The step-plus-hairline pair is the
-/// playing row's own vocabulary ([`track_row`]) spent on a different fact,
-/// which is what keeps "armed" legible without inventing a third mark.
-#[must_use]
-pub fn panel_row(p: &Palette, armed: bool) -> container::Style {
-    if armed {
-        container::Style {
-            background: Some(Background::Color(p.plinth_lit)),
-            border: Border {
-                color: p.hairline_strong(p.plinth_lit),
-                width: 1.0,
-                radius: RADIUS_CTRL.into(),
-            },
-            ..container::Style::default()
-        }
-    } else {
-        container::Style::default()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     /// The bar's drawn height including its hairline — **57**. Stated here

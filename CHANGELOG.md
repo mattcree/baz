@@ -200,18 +200,41 @@ next commit.
   mechanics — `stack` + `opaque`, no scrim, wheel passing through — so the
   wall does not reflow by a pixel (`docs/design/impl/playlists/` holds the
   before/after diff). Present in Library, Album and Queue places, absent in
-  Settings; `Esc` peels its layers one per press. Contents: `New playlist`
-  (an inline name field validated by the storage layer's rule, its refusals
-  surfaced in its own words), then one row per playlist — the name (a door to
-  its page) and the receive target.
-- **Adding, two layers of the three** (ADR-0024 §6; the drag is layer 3 and
-  waits on the shared pointer-capture widget): the two-press add — `Add to
-  playlist` on the record's page, or a track row's reserved-slot `+`, then
-  the panel as the picker — and the **open playlist**: arm a playlist from
-  its panel row (surface step and hairline, never the accent) and every wall
-  tile grows a quiet `+` in its label while a press pulls the record straight
-  in, one press per addition, `Esc` or the armed row to disarm. Additions
-  append; duplicates are allowed and unmarked — the gesture did what it said.
+  Settings; `Esc` peels its layers one per press. Contents (doc 09 §8.1):
+  the **Queue's row at the head** — the unnamed, sounding list, a readout at
+  rest (its door stays the bar's labelled `Queue`) and the picker's first
+  destination while a pick stands — then one row per playlist, sleeve and
+  name, one control (the door to its page), then `New playlist` (an inline
+  name field validated by the storage layer's rule, its refusals surfaced in
+  its own words).
+- **One transfer gesture, every destination** (doc 09 §8.1, the accepted
+  amendments to ADR-0023/-0024): a track row's reserved-slot `+` and the
+  record page's `Add to…` (relabelled from `Add to playlist` — the ellipsis
+  promises the second press) open the panel as the picker. Its rows, in one
+  order: **Queue** first — append to the run via `UpdateQueue`, the music
+  keeps playing, and appending to an empty stopped engine loads the queue
+  without starting it — the **playing list hoisted second** while provenance
+  stands (marked *playing*; its pick appends to the *file* only, never the
+  sounding run — the both-at-once gesture is refused, doc 09 §6), the named
+  lists, `New playlist`. Additions append; duplicates are allowed and
+  unmarked — the gesture did what it said. ADR-0023 §3's dedicated `Queue
+  album` control is withdrawn before being built (two controls, one message —
+  L8.6); the picker's Queue row is the queue-append.
+- **Playing provenance** (doc 09 §6): a queue reified from a playlist file —
+  its `Play`, or a click on its rows — records the file's *name* on the
+  request-side queue record. Origin, never a live link: it survives every
+  queue edit and `QueueEnded`, and is replaced only when a different play
+  gesture replaces the run. The Queue place's summary leads with it — `Road
+  Trip · 3 of 12 · 38:12 left` — answering *"what list is this run from?"*,
+  previously unanswerable.
+- **The armed collecting mode is removed** (was ADR-0024 §6 layer 2; doc 09
+  §9). Shipped one day, removed on the owner's own observation: it was a
+  second list-building grammar and a mode — the one press in the product
+  whose meaning depended on what was armed earlier. With it go the panel
+  rows' receive `+`, the wall labels' collecting mark and tile-press
+  override, the record page's relabelling, and the armed layer of the `Esc`
+  peel. Its one-press economy passes to the context menu (doc 09 §5.2,
+  pending) and the drag (layer 3, unchanged).
 - **`Save as playlist` on the queue place**: tonight's run frozen into a new
   file — a new artefact and nothing else; the queue is not linked to the
   playlist it seeded, and editing either never reaches the other.

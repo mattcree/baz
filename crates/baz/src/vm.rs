@@ -698,6 +698,20 @@ pub struct QueueVm {
     /// unit [`Event::TrackStarted`](baz_core::protocol::Event::TrackStarted)
     /// reports in.
     pub items: Vec<QueueItemVm>,
+    /// **Playing provenance** (`docs/design/09-implicit-playlists.md` §6,
+    /// ADR-0023's amendment): the name of the playlist *file* this run was
+    /// reified from, when a play gesture reified one — `None` for every other
+    /// origin (a record, a shuffle draw, a stacked queue).
+    ///
+    /// A statement about **origin, never a live link** — Plexamp's
+    /// `playQueueSourceURI`, adopted by name. It travels with the record
+    /// through every edit (`crate::queue_edit` clones it, appends extend
+    /// [`Self::items`] on the same value), survives `QueueEnded`, and is
+    /// replaced only when the queue is replaced: a `SetQueue` from any other
+    /// gesture carries a record built with `None` here. Nothing consults it
+    /// for behaviour — it powers the Queue place's summary lead and the
+    /// picker's hoisted *playing* row, both readings.
+    pub provenance: Option<String>,
 }
 
 /// One track in the queue, as much of it as the panel shows.
@@ -840,6 +854,9 @@ pub fn album_queue(album: &AlbumVm, chosen: Option<EditionKey>) -> QueueVm {
         album: album.title.clone(),
         artist: album.artist.label().to_owned(),
         items: album_items(album, chosen),
+        // A record is not a playlist file: no provenance, and a run this
+        // gesture replaces loses whatever provenance it had (09 §6).
+        provenance: None,
     }
 }
 
@@ -892,6 +909,9 @@ pub fn stacked_queue(picks: &[(&AlbumVm, Option<EditionKey>)]) -> QueueVm {
         album: first.and_then(|album| album.title.clone()),
         artist: first.map_or_else(String::new, |album| album.artist.label().to_owned()),
         items,
+        // A draw is an implicit playlist, but not a *file*: no provenance
+        // (09 §6 — playlist files only).
+        provenance: None,
     }
 }
 
@@ -2192,6 +2212,7 @@ mod tests {
             album: None,
             artist: UNKNOWN_ARTIST.to_owned(),
             items: Vec::new(),
+            provenance: None,
         };
         assert!(empty.is_empty());
         assert_eq!(empty.playing(0, &first), None);
@@ -2214,6 +2235,7 @@ mod tests {
             album: Some("Loop".to_owned()),
             artist: "A".to_owned(),
             items: vec![item("once"), item("again")],
+            provenance: None,
         };
         // The position is exact and its path agrees, so it is the answer.
         assert_eq!(queue.playing(1, &path), Some(1));
@@ -2262,6 +2284,7 @@ mod tests {
             album: None,
             artist: UNKNOWN_ARTIST.to_owned(),
             items: Vec::new(),
+            provenance: None,
         };
         assert!(empty.holds_exactly(&[]));
         assert!(!empty.holds_exactly(&flac.tracks));
@@ -2294,6 +2317,7 @@ mod tests {
             album: Some("Loop".to_owned()),
             artist: "A".to_owned(),
             items: vec![item("/m/a/1.flac"), item("/m/a/1.flac")],
+            provenance: None,
         };
         assert!(queue.holds_exactly(&listed));
         // The repetition is not collapsed: one entry is not two.

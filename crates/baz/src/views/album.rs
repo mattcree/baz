@@ -184,13 +184,14 @@ fn aside<'a>(
     if *player.availability() != Availability::NotBuilt {
         block = block.push(play_album(album.id, player.engine_ready()));
     }
-    // The layer-1 add (ADR-0024 §6): the two-press route that ships first.
-    // It reads the selected album — L8.1 puts it with the album — and stands
-    // under the page's one commitment, quiet, no accent: collecting is not
-    // playback truth. With a playlist armed the same press is the one-press
-    // add layer 2 promises; otherwise it opens the panel as the picker.
+    // The transfer gesture (09 §8.1): the record, whole, toward a
+    // destination of the user's choosing. It reads the selected album —
+    // L8.1 puts it with the album — and stands under the page's one
+    // commitment, quiet, no accent: collecting is not playback truth. The
+    // press opens the panel as the picker; the ellipsis honestly promises
+    // the second press.
     if collecting.available {
-        block = block.push(add_to_playlist(album.id, collecting.armed));
+        block = block.push(add_to(album.id));
     }
     // Only a genuinely multi-format album gets a control; a single-format
     // album must look exactly as it always did.
@@ -342,26 +343,22 @@ fn play_album(album: u64, live: bool) -> Element<'static, Message> {
     .into()
 }
 
-/// **Add to playlist** — the record, whole, into a list of the user's
-/// choosing (ADR-0024 §6 layer 1).
+/// **Add to…** — the record, whole, toward a destination of the user's
+/// choosing: the picker opens holding it, its first row the Queue, then the
+/// lists (09 §8.1; relabelled from `Add to playlist` because the queue is a
+/// destination now, and the ellipsis promises the second press).
 ///
 /// The sleeve's width, like `Play album` above it, but a quiet word button
 /// rather than the accent: the lamp stays spent on playback truth alone.
-/// While a playlist is armed the label says where the press will land, so the
-/// one-press add is legible before it is made.
-fn add_to_playlist(album: u64, armed: bool) -> Element<'static, Message> {
+fn add_to(album: u64) -> Element<'static, Message> {
     let room = theme::active();
     button(
         container(
-            text(if armed {
-                "+ Add to the open playlist"
-            } else {
-                "Add to playlist"
-            })
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .font(theme::MEDIUM)
-            .wrapping(text::Wrapping::None),
+            text("Add to…")
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None),
         )
         .width(Length::Fill)
         .height(Length::Fill)
@@ -581,13 +578,14 @@ fn edition_selector<'a>(
 /// that would do nothing.
 ///
 /// The row also carries the **reserved `+` slot** — a track's own route into
-/// a playlist (ADR-0024 §6). The slot is reserved whether or not the control
-/// is in it, so no duration slides as the pointer crosses a row; the control
-/// itself appears on hover, and **at rest whenever the panel is open or a
-/// playlist is armed** — the quiet mark that appears only while the user is
-/// collecting is the task's own furniture, not permanent chrome. Hover is not
-/// its only route: the open target (layer 2) is the rest-drawn second road
-/// the visible-control rule requires of a hover-revealed control.
+/// the picker (09 §8.1). The slot is reserved whether or not the control is
+/// in it, so no duration slides as the pointer crosses a row; the control
+/// itself appears on hover, and **at rest whenever the panel is open** — the
+/// quiet mark that appears only while the user is collecting is the task's
+/// own furniture, not permanent chrome. Hover is not its only route: the
+/// page's `Add to…`, always visible, reaches the same picker, which is the
+/// second road the visible-control rule requires of a hover-revealed
+/// control.
 #[expect(
     clippy::too_many_arguments,
     reason = "a row is one anatomy with one long fact list; a struct per call \
@@ -677,9 +675,9 @@ fn track_row(
     if !collecting.available {
         return body.into();
     }
-    let offered = collecting.armed || collecting.panel_open || hovered;
+    let offered = collecting.panel_open || hovered;
     mouse_area(
-        row![body, add_slot(album, index, offered, collecting.armed)]
+        row![body, add_slot(album, index, offered)]
             .spacing(theme::GAP_XS)
             .align_y(iced::Alignment::Center),
     )
@@ -689,19 +687,13 @@ fn track_row(
 }
 
 /// The track's `+` slot: the queue ✕'s exact anatomy — [`theme::STEPPER_HIT`]
-/// square, slot reserved whether shown — sending one track toward a playlist.
-/// With one armed the press adds outright; otherwise it opens the panel as
-/// the picker (ADR-0024 §6 layers 2 and 1 respectively).
+/// square, slot reserved whether shown — sending one track toward the picker
+/// (09 §8.1): pick a destination, the Queue first among them.
 ///
 /// Crate-visible because the wall's **Songs** rows carry the same reserved
 /// slot sending the same message (doc 09 §5's row anatomy): one transfer
 /// gesture, one control, wherever a track row is drawn.
-pub(crate) fn add_slot(
-    album: u64,
-    index: usize,
-    offered: bool,
-    armed: bool,
-) -> Element<'static, Message> {
+pub(crate) fn add_slot(album: u64, index: usize, offered: bool) -> Element<'static, Message> {
     let room = theme::active();
     if !offered {
         return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
@@ -724,13 +716,9 @@ pub(crate) fn add_slot(
         .padding(0)
         .style(move |_theme, status| theme::transport(room, room.wall, status))
         .on_press(Message::AddTrackToPlaylist(album, index)),
-        text(if armed {
-            "Add to the open playlist"
-        } else {
-            "Add to playlist"
-        })
-        .size(theme::SIZE_CAPTION)
-        .line_height(theme::LEADING_CAPTION),
+        text("Add to a playlist, or the queue")
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
         iced::widget::tooltip::Position::Left,
     )
     .gap(theme::GAP_XS)

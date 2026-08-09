@@ -1,12 +1,16 @@
 # ADR-0024: Playlists — files the user owns, a page, and one summoned panel
 
-> **Proposed amendment (2026-08-09), from
+> **Amendment (2026-08-09), from
 > [`docs/design/09-implicit-playlists.md`](../design/09-implicit-playlists.md)**
 > — the implicit-playlist study, on the owner's report that the shipped
 > collecting UX splits the hierarchy (*"I don't want people to have to
 > context switch constantly… we are thinking there are implicit playlists
 > everywhere"*). Six changes; §1–§3 (the storage model and every honesty
-> clause) and §7 (the generator guarantees) are untouched:
+> clause) and §7 (the generator guarantees) are untouched. **Status: items
+> 1, 2 and 6 accepted and shipped (2026-08-09, doc 09 §13 steps 1–2 — the
+> armed mode removed, the picker's Queue row and hoisted playing list, the
+> file-only append); items 3–5 remain proposed** (queue-place edit parity,
+> the context menu and the songs section are steps 5, 4 and 3):
 >
 > 1. **§6 layer 2 — the armed collecting mode — is withdrawn.** Shipped
 >    2026-08-09, removed on the owner's own observation (09 §9): it was a
@@ -43,7 +47,8 @@
 
 **Status**: accepted (2026-08-09) — §1–§3 shipped as `baz_core::playlist`;
 §4–§6 shipped as `Place::Playlist`, the panel, the add layers 1–2, and
-`Save as playlist`, with §6's **layer 3 (the drag) pending** on the shared
+`Save as playlist`, with §6's **layer 2 since withdrawn** (the amendment
+above; doc 09 §9) and its **layer 3 (the drag) pending** on the shared
 pointer-capture widget, and §3's repair surface (`Locate…`) not yet built;
 §7 remains ground rules for a feature that does not exist ·
 **amended 2026-08-09** — the playlist's sleeve, §A1–§A2 ·
@@ -197,19 +202,27 @@ task, overlaying without reflow, closed at rest. It may never gain a second
 tenant."* The owner has blessed this surface explicitly; the entry records
 the argument so the blessing is not a precedent for panels generally.
 
-Panel contents: `New playlist`, then one row per playlist — the name (door to
-its page) and a receive-target. Rename and delete live on the page, where the
-contents are visible at the moment of the decision.
+Panel contents (as amended by doc 09 §8.1, §9): the Queue's row at the head —
+a readout at rest, the picker's first destination while a pick stands — then
+one row per playlist (the name and sleeve, a door to its page; the
+receive-target died with layer 2), then `New playlist`. Rename and delete
+live on the page, where the contents are visible at the moment of the
+decision.
 
 ### 6. Adding — three layers, budget ≤ 2 gestures
 
 1. **Two-press add, ships first**: `Add to playlist` on the record's page →
    pick a playlist (or `New playlist`). A track row's reserved-slot `+` does
    the same for one track. No drag, no modifier, toolkit-safe today.
-2. **The open playlist**: arm a playlist in the panel (a visible, reversible
+2. ~~**The open playlist**: arm a playlist in the panel (a visible, reversible
    state — surface step and hairline, never the accent) and every tile label
    and track row gains a rest-drawn quiet `+`; one press per addition for a
-   collecting session. `Esc` or the armed row disarms.
+   collecting session. `Esc` or the armed row disarms.~~ **Withdrawn
+   2026-08-09** — superseded by
+   [doc 09](../design/09-implicit-playlists.md) §9 (the amendment above,
+   item 1): shipped one day, removed on the owner's own observation as a
+   second list-building grammar and a mode. Its one-press economy passes to
+   the context menu (09 §5.2, pending) and the drag (layer 3, unchanged).
 3. **The drag**: iced 0.13 has no pointer capture, so the drag needs the
    hand-built widget (`groove.rs` precedent) that also unlocks queue and
    playlist reorder — one investment, three surfaces. It ships last and is

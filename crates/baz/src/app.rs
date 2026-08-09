@@ -273,12 +273,15 @@ pub(crate) enum Message {
     /// A panel row's name was pressed: open that playlist's page — or come
     /// back from it, when it is the page already showing ([`Place::playlist`]).
     OpenPlaylist(u64),
-    /// A panel row's receive target: arm that playlist to collect, or put it
-    /// down when it is the one armed (ADR-0024 §6 layer 2).
-    ArmPlaylist(u64),
     /// A pick-mode press on a panel row: append what the hand holds to that
-    /// playlist (ADR-0024 §6 layer 1's second gesture).
+    /// playlist's *file* — the run is untouched, whichever list it is, the
+    /// playing one included (09 §6's decoupling; S4).
     PickPlaylist(u64),
+    /// A pick-mode press on the picker's **Queue** row: append what the hand
+    /// holds to the run — `UpdateQueue`, the music keeps playing, and
+    /// appending to an empty stopped engine loads a queue without starting
+    /// it (09 §8.1; `queue_playlist`'s exact shape).
+    PickQueue,
     /// The panel's `New playlist` row was pressed: become a name field.
     NewPlaylistStart,
     /// The name field changed.
@@ -286,14 +289,12 @@ pub(crate) enum Message {
     /// The name field was submitted; the storage layer's name rule decides,
     /// and its refusal lands under the field in its own words.
     NewPlaylistSubmit,
-    /// The record page's `Add to playlist`, and — while a playlist is armed —
-    /// a wall tile's press: the record, whole (the selected edition), toward
-    /// a playlist. With one armed it appends outright; otherwise it opens the
-    /// panel as the picker.
+    /// The record page's `Add to…`: the record, whole (the selected
+    /// edition), held while the panel opens as the picker — pick a
+    /// destination, the Queue first among them (09 §8.1).
     AddAlbumToPlaylist(u64),
-    /// A track row's reserved-slot `+` on the record's page: one track toward
-    /// a playlist, by the same armed-or-pick rule (`album id`, zero-based
-    /// row).
+    /// A track row's reserved-slot `+` on the record's page: one track
+    /// toward the picker, by the same rule (`album id`, zero-based row).
     AddTrackToPlaylist(u64, usize),
     /// The playlist page's `Play`: the playable subset as the queue, from the
     /// top ([`Command::SetQueue`] then [`Command::Play`] — ADR-0024 §4, and
@@ -1167,10 +1168,14 @@ impl App {
                     self.place = self.place.playlist(*id);
                 }
             }
-            Message::ArmPlaylist(id) => self.playlists.toggle_armed(*id),
             Message::PickPlaylist(id) => {
                 if let Screen::Shelf(state) = &self.screen {
                     self.playlists.pick(*id, &state.library);
+                }
+            }
+            Message::PickQueue => {
+                if let Some(pending) = self.playlists.pick_queue() {
+                    self.append_items_to_run(pending.items);
                 }
             }
             Message::NewPlaylistStart => {
@@ -1322,10 +1327,10 @@ impl App {
         }
     }
 
-    /// The record, whole, toward a playlist (ADR-0024 §6): appended outright
-    /// when one is armed, else held while the panel serves as the picker.
-    /// What is added is the **selected edition** — the same tracks the page
-    /// lists and `Play album` would queue.
+    /// The record, whole, held while the panel serves as the picker
+    /// (09 §8.1). What is held is the **selected edition** — the same tracks
+    /// the page lists and `Play album` would queue — in both shapes a pick
+    /// can land as: file entries, and queue items.
     fn add_album_to_playlist(&mut self, id: u64) {
         let Screen::Shelf(state) = &self.screen else {
             return;
@@ -1338,21 +1343,19 @@ impl App {
             return;
         };
         let entries = crate::playlists::entries_for_tracks(&edition.tracks, album.artist.label());
+        let items = vm::album_queue(album, chosen).items;
         let label = format!(
             "Add \u{201c}{}\u{201d}",
             album.title.as_deref().unwrap_or("Unknown Album")
         );
-        if let Some(armed) = self.playlists.armed {
-            self.playlists.append(armed, entries, &state.library);
-        } else {
-            self.playlists
-                .begin_pick(Some(&state.library), label, entries);
-        }
+        self.playlists
+            .begin_pick(Some(&state.library), label, entries, items);
     }
 
-    /// One track toward a playlist, by the same armed-or-pick rule. The
-    /// track does not smuggle its album in — the listener pointed at a track
-    /// (ADR-0023 §3's queue rule, applied to collecting).
+    /// One track toward the picker, by the same rule. The track does not
+    /// smuggle its album in — the listener pointed at a track (ADR-0023 §3's
+    /// queue rule, applied to collecting): queued, it is its own one-row
+    /// group, headed by its record's name.
     fn add_track_to_playlist(&mut self, id: u64, row: usize) {
         let Screen::Shelf(state) = &self.screen else {
             return;
@@ -1371,13 +1374,17 @@ impl App {
             std::slice::from_ref(&track),
             album.artist.label(),
         );
+        let items = vec![vm::QueueItemVm {
+            title: track.title.clone(),
+            artist: track.artist.clone().filter(|_| album.track_artists_vary),
+            album: album.title.clone(),
+            album_artist: Some(album.artist.label().to_owned()),
+            duration: track.duration,
+            path: track.path.clone(),
+        }];
         let label = format!("Add \u{201c}{}\u{201d}", track.title);
-        if let Some(armed) = self.playlists.armed {
-            self.playlists.append(armed, entries, &state.library);
-        } else {
-            self.playlists
-                .begin_pick(Some(&state.library), label, entries);
-        }
+        self.playlists
+            .begin_pick(Some(&state.library), label, entries, items);
     }
 
     /// The playlist page's `Play`: the playable subset as the queue, playing
@@ -1418,16 +1425,51 @@ impl App {
         else {
             return;
         };
-        let edited = match self.player.queue() {
-            Some(held) => {
-                let mut edited = held.clone();
-                edited.items.extend(addition.items);
-                edited
-            }
+        self.append_to_run(addition);
+    }
+
+    /// The picker's **Queue** row: what the hand holds, appended to the run —
+    /// `queue_playlist`'s exact shape over the pick's own items (09 §8.1).
+    fn append_items_to_run(&mut self, items: Vec<vm::QueueItemVm>) {
+        if items.is_empty() {
+            return;
+        }
+        // The addition's own header names the first record, exactly as a
+        // stacked queue's does — spent only when the run is empty; an
+        // existing run keeps its header and its provenance.
+        let (album, artist) = items.first().map_or((None, String::new()), |item| {
+            (
+                item.album.clone(),
+                item.album_artist.clone().unwrap_or_default(),
+            )
+        });
+        self.append_to_run(vm::QueueVm {
+            album,
+            artist,
+            items,
+            provenance: None,
+        });
+    }
+
+    /// Append `addition` to the run through `UpdateQueue` — the one shape
+    /// every queue-destination pick and the page's `Queue` share. The music
+    /// keeps playing; appending to an empty stopped engine loads the queue
+    /// without starting it, so nothing sounds unasked (`app.rs`'s own rule,
+    /// cited by 09 §8.1).
+    fn append_to_run(&mut self, mut addition: vm::QueueVm) {
+        let edited = if let Some(held) = self.player.queue() {
+            let mut edited = held.clone();
+            edited.items.extend(addition.items);
+            edited
+        } else {
             // Appending to nothing gives the engine a queue without starting
             // it: `UpdateQueue` never begins playback, and nothing sounds
-            // unasked.
-            None => addition,
+            // unasked. An append is not a play gesture, so whatever built
+            // `addition` — a playlist page's `Queue` included — the loaded
+            // run carries **no provenance** (09 §6: provenance is set by
+            // reifying a file through a play gesture, and by nothing else).
+            addition.provenance = None;
+            addition
         };
         let paths = edited.paths();
         if self.playback.send(Command::UpdateQueue { paths }) {
@@ -1600,9 +1642,10 @@ impl App {
     /// whole first question is *am I at home*:
     ///
     /// 1. **The playlist panel's layers**, when it is summoned: its name
-    ///    field, a pick in flight, the armed row, then the panel — it floats
-    ///    over every place it exists in, so it is always the top
-    ///    ([`crate::playlists::Playlists::peel`], ADR-0024 §5–§6).
+    ///    field, a pick in flight, then the panel — it floats over every
+    ///    place it exists in, so it is always the top
+    ///    ([`crate::playlists::Playlists::peel`]; the armed layer died with
+    ///    the collecting mode, 09 §9).
     /// 2. **The place's own transient fields** ([`Self::peel_place_states`]):
     ///    a rename mid-type, an armed delete, the queue's save field.
     /// 3. **The place**, when it is not the Library. Backing out is what
@@ -1617,8 +1660,8 @@ impl App {
     /// fix.)
     fn escape(&mut self) -> Task<Message> {
         // The playlist panel floats *over* every place it exists in, so its
-        // layers peel first: the name field, a pick in flight, the armed
-        // row, the panel itself — one per press (ADR-0024 §5–§6).
+        // layers peel first: the name field, a pick in flight, the panel
+        // itself — one per press (ADR-0024 §5–§6, as amended by doc 09).
         if self.playlists.peel() {
             return Task::none();
         }
@@ -2336,7 +2379,8 @@ impl App {
                 screen,
                 iced::widget::container(iced::widget::opaque(views::playlist_panel::view(
                     state,
-                    &self.playlists
+                    &self.playlists,
+                    &self.player,
                 )))
                 .width(iced::Length::Fill)
                 .height(iced::Length::Fill)
