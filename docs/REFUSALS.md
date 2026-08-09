@@ -204,9 +204,22 @@ the dead column did and what places do better. The owner blessed this surface
 explicitly; this entry records the argument so the blessing is not a precedent
 for panels generally.
 
-**Two vertical strips may not do one job.** The wall draws no scrollbar, because
-the index rail beside it already says where you are, jumps, drags — and names
-the shelf it will take you to, which a scroller cannot.
+**Every scrolling surface in baz has a scrollbar, and the wall's is 4 px.**
+The rail says *where you are* and names the shelf it will take you to; the bar
+answers the one thing a rail cannot be asked — *take me to the end*, which is
+not a group key and so is not a rung on the rail. The two strips are not doing
+one job; they are doing two, and the bar is the narrower of them because it is
+the lesser.
+
+*Rewritten on the owner's decision, 2026-08-09* — *"can we allow there to be a
+scroll bar for any view? Just a very minimal scroll bar because otherwise, it's
+hard to just jump to the end"*. This entry used to read **"Two vertical strips
+may not do one job"** and refused the wall a scrollbar outright. Every other
+list in baz already had one, so the wall was the only surface the entry
+applied to. What stands from ADR-0022's complaint (*"the fact that the alphabet
+bar has a scroll to its left isn't nice either"*) is that the bar must not
+compete with the rail: 4 px against the rail's 60, no trough, the room's own
+hairline, and it reserves its own lane so it is never drawn over a cover.
 
 ---
 

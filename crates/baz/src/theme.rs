@@ -1795,42 +1795,53 @@ pub fn list_scrollbar() -> scrollable::Scrollbar {
         .margin(SCROLLBAR_MARGIN)
 }
 
-/// **The wall's scrollbar: none at all** — the geometry that draws nothing.
+/// **The wall's scrollbar: 4 px, and it reserves its own lane.**
 ///
-/// A `Scrollbar` at zero width and zero scroller width is a bar iced lays out
-/// and paints nothing for; the `scrollable` around it goes on handling the
-/// wheel, the touchpad, a drag and every programmatic `scroll_to` exactly as it
-/// did. That is the whole of the mechanism, and it is worth stating plainly
-/// because "suppress the bar, keep the scrolling" is the kind of thing a
-/// toolkit often will not do: **iced 0.13 does**, and it is the same primitive
-/// the album inspector's reveal viewport used, verified against
-/// `iced_widget` 0.13.4 before this was specified. No fallback is needed.
+/// The one thing an index rail cannot do is take you to the end. The rail
+/// jumps to *shelves* by group key — a letter, a year, a genre — and "the
+/// bottom" is not one of those: under `ARTIST` the last shelf may be `Z` or
+/// may be `#`, and under a filter it is whatever survived. So the wall now
+/// draws a bar, at the narrowest width that is still a handle.
 ///
-/// # Why the wall gets it and no other list does
+/// *The owner's decision, 2026-08-09* — *"can we allow there to be a scroll
+/// bar for any view? Just a very minimal scroll bar because otherwise, it's
+/// hard to just jump to the end"*. `docs/REFUSALS.md`'s *two vertical strips
+/// may not do one job* entry is rewritten to record it. Every **other** list
+/// in baz already had one ([`list_scrollbar`]); the wall was the only surface
+/// without, so "any view" is this view.
 ///
-/// The wall has the [index rail](crate::views::shelf) hard against the same
-/// edge, and the rail is a *better* scrollbar: it says where you are, it jumps,
-/// it drags, and it names the shelf it will take you to, which a scroller
-/// cannot. Two vertical strips doing one job is the owner's third complaint in
-/// ADR-0022 — *"the fact that the alphabet bar has a scroll to its left isn't
-/// nice either"* — and the one to delete is the one that says nothing.
+/// # It takes its width from the wall, not from the rail's clearance
 ///
-/// Every other list in baz keeps [`list_scrollbar`], because none of them has a
-/// rail beside it and a page with no bar and no rail is a page with no readout
-/// of how much of it there is.
+/// A `Scrollbar` with `spacing` set makes iced reserve `width + 2 × margin +
+/// spacing` of right padding *inside* the scrollable
+/// (`iced_widget-0.13.4/src/scrollable.rs:422–436`); without it the bar is
+/// drawn over the content. Overlaying was the tempting move — there is
+/// [`INDEX_CLEARANCE`] 8 of empty lane to its right — but the wall's block is
+/// centred and is not guaranteed to leave 4 px of slack at every width, so a
+/// cover's right edge would sometimes be under the bar. Reserving costs the
+/// grid 4 px, which it absorbs the way it absorbs every other width, and
+/// [`INDEX_LANE_W`] is unchanged: the rail's algebra, and every test over it,
+/// is untouched.
 #[must_use]
 pub fn wall_scrollbar() -> scrollable::Scrollbar {
     scrollable::Scrollbar::new()
         .width(WALL_SCROLLBAR_W)
         .scroller_width(WALL_SCROLLBAR_W)
         .margin(SCROLLBAR_MARGIN)
+        // Reserve rather than overlay; the gap to the rail's ink is
+        // `INDEX_CLEARANCE`'s job and stays its job.
+        .spacing(0.0)
 }
 
-/// The width of the wall's scrollbar: **zero** ([`wall_scrollbar`]).
+/// The width of the wall's scrollbar — **4**, the [`RAIL`] width, which is the
+/// narrowest mark in the product that is still something to aim at.
 ///
-/// A token rather than a literal so that "the wall draws no bar" is a number a
-/// test can hold down beside [`SCROLLBAR_W`], which every other list keeps.
-pub const WALL_SCROLLBAR_W: f32 = 0.0;
+/// Deliberately narrower than [`SCROLLBAR_W`] 10, which every list keeps: a
+/// list's bar is its only readout of how much list there is, and the wall's is
+/// a *second* readout beside a rail that already says where you are. It is a
+/// handle for the one gesture the rail has no answer to, and it is drawn in
+/// the same hairline as every other edge in the room.
+pub const WALL_SCROLLBAR_W: f32 = RAIL;
 
 /// A list's scrollbar: no trough, and a scroller in the same hairline the room
 /// uses for every other edge, one step firmer while it is being driven.

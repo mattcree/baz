@@ -380,6 +380,17 @@ next commit.
   52 is the largest square on the 4 px lattice inside the 56 px the tallest
   zone already reserved. No artwork, and the block renders exactly as it did
   before.
+- **The wall has a scrollbar** — 4 px, no trough, the room's own hairline, and
+  it reserves its own lane inside the scrollable so no cover is ever drawn
+  under it. The owner's decision (*"just a very minimal scroll bar because
+  otherwise, it's hard to just jump to the end"*); `docs/REFUSALS.md`'s *two
+  vertical strips may not do one job* entry is rewritten to record it. The wall
+  was the only scrolling surface in baz without one — every list already had
+  `list_scrollbar` — and the rail is untouched: it still says where you are and
+  still names the shelf it jumps to. What the bar adds is the gesture the rail
+  has no rung for, because *the end* is not a group key. `INDEX_LANE_W` and the
+  rail's width algebra are unchanged; the 4 px comes out of the wall's own
+  measure, which the grid absorbs.
 - **The wall's density has a visible control** (ADR-0028; doc 11 §5 P8, the
   owner choosing the visible handle): three detent marks at the foot of the
   index rail's lane — each the wall itself at its hang, one, four, nine works
