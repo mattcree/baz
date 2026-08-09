@@ -190,12 +190,14 @@ pub(crate) enum Message {
     /// see. Every keystroke *after* it is the field's by the ordinary focus
     /// rule, so this arrives exactly once per query.
     QueryTyped(String),
-    /// <kbd>Enter</kbd>, from the wall or from the well's own submit: play the
-    /// **top-ranked** match while a query narrows the wall, else the record
-    /// whose page is open.
+    /// <kbd>Enter</kbd>, from the wall or from the well's own submit: while a
+    /// query narrows the wall, **needle-drop the top-ranked song** — the
+    /// Songs section's own first row, its record queued whole with the cursor
+    /// on it (doc 09 §5, ADR-0023 §2's amendment; supersedes the album-level
+    /// answer) — else the record the wall was last left for.
     ///
     /// Only defensible because the first match is the best match — ADR-0021
-    /// ranks `Library::search_albums` by fit, then field, then library order —
+    /// ranks `Library::search` by fit, then field, then library order —
     /// which is why step 12 had to land before step 11 could.
     PlayFirstMatch,
     /// <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd>, or
@@ -348,6 +350,13 @@ pub(crate) enum Message {
     AlbumRowEntered(usize),
     /// The pointer left a track row on the record's page.
     AlbumRowLeft(usize),
+    /// The pointer entered a row of the wall's **Songs** section
+    /// (doc 09 §5), so the row can offer its reserved `+` — the album page's
+    /// hover mechanism, for the same toolkit reason.
+    SongRowEntered(usize),
+    /// The pointer left a songs row. Carries which, for the reason
+    /// [`Self::QueueRowLeft`] carries which row.
+    SongRowLeft(usize),
     /// Shelf scrolled; carries the real viewport geometry.
     Scrolled(Viewport),
     /// Window resized (approximate grid geometry until the next scroll).
@@ -922,17 +931,27 @@ impl App {
         }
     }
 
-    /// <kbd>Enter</kbd>: play what the wall says is the best answer to the
-    /// query, or the album the inspector is showing (ADR-0017 §1.2).
+    /// <kbd>Enter</kbd>: needle-drop the top-ranked **song** while a query
+    /// stands (doc 09 §5, ADR-0023 §2's amendment), else play the record the
+    /// wall was last left for (ADR-0017 §1.2's fall-through).
     ///
     /// Resolved on the shell because playing is the shell's job and the answer
     /// is the shelf's — the same split every other play route in this file
-    /// takes. [`Shelf::enter_plays`] holds the choice; this holds the sound.
+    /// takes. [`Shelf::enter_drops_needle`] and [`Shelf::enter_plays`] hold
+    /// the choice; this holds the sound.
+    ///
+    /// The song path is [`Self::play_track`] — the record page's own needle
+    /// drop, `SetQueue` (selected edition, whole, in order) + `JumpTo`
+    /// through [`PlayerState::play_from`]'s decision — so <kbd>Enter</kbd> is
+    /// exactly a press on the Songs section's first row, not a third play
+    /// grammar.
     fn play_first_match(&mut self) -> Task<Message> {
-        if let Screen::Shelf(state) = &self.screen
-            && let Some(id) = state.enter_plays()
-        {
-            self.play_album(id);
+        if let Screen::Shelf(state) = &self.screen {
+            if let Some((id, row)) = state.enter_drops_needle() {
+                self.play_track(id, row);
+            } else if let Some(id) = state.enter_plays() {
+                self.play_album(id);
+            }
         }
         Task::none()
     }
@@ -2251,7 +2270,7 @@ impl App {
         }
         let ink = self.ink();
         let lamp = self.warmth.value();
-        let collecting = self.playlists.armed.is_some();
+        let collecting = self.playlists.collecting();
         let screen: Element<'_, Message> = match (&self.screen, self.place) {
             (Screen::Setup(setup), _) => return views::setup::view(setup),
             (Screen::Shelf(state), Place::Library) => state.view(&self.player, lamp, collecting),
@@ -2497,6 +2516,16 @@ pub(crate) struct Shelf {
     visible_counts: Vec<usize>,
     /// The live search text.
     pub(crate) query: String,
+    /// The **Songs** answers for the live query (doc 09 §5): the top
+    /// [`vm::SONGS`] ranked matching tracks, rebuilt with the filter in
+    /// [`Shelf::refilter`] so the section and the wall answer one query.
+    /// Empty while the query is blank — the section is then absent, not
+    /// empty.
+    pub(crate) songs: Vec<vm::SongVm>,
+    /// Which songs row the pointer is on, if any — the record page's
+    /// [`App::hovered_album_row`] mechanism, for the same toolkit reason:
+    /// the row's reserved `+` is a sibling the row itself cannot style.
+    pub(crate) hovered_song: Option<usize>,
     /// **The record the wall was last left for**, if any — the tile mark, and
     /// the whole of what survives `selection.rs`.
     ///
@@ -2687,6 +2716,8 @@ impl Shelf {
             visible: Vec::new(),
             visible_counts: Vec::new(),
             query: String::new(),
+            songs: Vec::new(),
+            hovered_song: None,
             opened: None,
             edition_choice: HashMap::new(),
             thumbs: LruCache::new(
@@ -2800,6 +2831,18 @@ impl Shelf {
                 self.edition_choice.insert(id, key);
                 Task::none()
             }
+            Message::SongRowEntered(row) => {
+                self.hovered_song = Some(row);
+                Task::none()
+            }
+            // Only if it is still the row that left, for the reason the
+            // queue rows' pair is order-independent.
+            Message::SongRowLeft(row) => {
+                if self.hovered_song == Some(row) {
+                    self.hovered_song = None;
+                }
+                Task::none()
+            }
             Message::ThumbLoaded(id, handle) => {
                 self.pending.remove(&id);
                 match handle {
@@ -2817,9 +2860,13 @@ impl Shelf {
         }
     }
 
-    /// **What <kbd>Enter</kbd> plays**: the top-ranked match while a query is
-    /// narrowing the wall, else the record the wall was last left for, else
-    /// nothing.
+    /// **<kbd>Enter</kbd>'s album-level fall-through**: the record the wall
+    /// was last left for when no query stands, else the top-ranked matching
+    /// album — reached only when [`Self::enter_drops_needle`] answered
+    /// nothing, which with a query standing means the top song could not be
+    /// resolved onto its record (doc 09 §5 retargeted the with-query case to
+    /// the song; this keeps the with-query album answer as the degradation
+    /// rather than a dead key).
     ///
     /// The order is ADR-0017 §1.2's table read left to right — *play the
     /// top-ranked match; play the selected album* — and the fall-through is
@@ -2836,6 +2883,28 @@ impl Shelf {
     /// about a search index they cannot see. If the ranked album is somehow
     /// not on the wall, the wall's own first survivor is played instead, which
     /// is the record under the top-left corner of the collection.
+    /// **What <kbd>Enter</kbd> needle-drops** while a query stands: the Songs
+    /// section's own first row — the top-ranked matching track (ADR-0021),
+    /// as (its record's wall id, its row in the selected edition) for
+    /// [`App::play_track`] to spend (doc 09 §5; ADR-0023 §2's amendment).
+    ///
+    /// `None` with no query, and `None` when nothing matches — <kbd>Enter</kbd>
+    /// then falls through to [`Self::enter_plays`], whose empty-query answer
+    /// (the record the wall was last left for) is unchanged. The row is
+    /// resolved by [`vm::song_row`], so what <kbd>Enter</kbd> plays is
+    /// exactly what a press on the section's first row plays — one answer,
+    /// two routes.
+    pub(crate) fn enter_drops_needle(&self) -> Option<(u64, usize)> {
+        if self.query.trim().is_empty() {
+            return None;
+        }
+        let song = self.songs.first()?;
+        let album = self.albums.iter().find(|album| album.id == song.album_id)?;
+        let chosen = self.edition_choice.get(&album.id).copied();
+        let row = vm::song_row(album, chosen, song)?;
+        Some((album.id, row))
+    }
+
     fn enter_plays(&self) -> Option<u64> {
         if self.query.trim().is_empty() {
             return self.opened;
@@ -3175,6 +3244,13 @@ impl Shelf {
     /// and its contents cannot disagree about which albums survived.
     fn refilter(&mut self) {
         self.visible = vm::visible_indices(&self.albums, &self.library, &self.query);
+        // The Songs section's rows: the ranked head of the same match set
+        // that filtered the wall (doc 09 §5 — the two sections are one
+        // query's two projections). Rebuilt here rather than per frame so a
+        // redraw costs no corpus scan, and the hover cannot outlive the rows
+        // it pointed into.
+        self.songs = vm::song_hits(&self.library, &self.query, vm::SONGS);
+        self.hovered_song = None;
         // The shelves are contiguous slices of `albums` and `visible` is in
         // the same order, so each shelf's surviving count is one walk of the
         // two lists together rather than a second filter that could disagree
@@ -3674,7 +3750,7 @@ impl Shelf {
         &'a self,
         player: &'a PlayerState,
         lamp: f32,
-        collecting: bool,
+        collecting: crate::playlists::Collecting,
     ) -> Element<'a, Message> {
         column![
             views::top_bar::view(self),
@@ -4186,8 +4262,9 @@ mod tests {
             ),
             (
                 "PlayFirstMatch",
-                "the record page's `Play album`; the well's own Enter sends \
-                 this too",
+                "the Songs section's first row while a query stands \
+                 (doc 09 §5); the record page's `Play album` for the \
+                 fall-through; the well's own Enter sends this too",
             ),
             (
                 "DensityStep",
@@ -4418,6 +4495,84 @@ mod tests {
         assert!(
             !clear.contains("text_input::focus(search_id())"),
             "Escape re-focuses the well it just emptied"
+        );
+    }
+
+    /// **<kbd>Enter</kbd> retargets to the top song while a query stands**
+    /// (doc 09 §5, S1; ADR-0023 §2's amendment) — and it does so through the
+    /// record page's own needle-drop path, never a new one.
+    ///
+    /// Pinned as an order in the source of the one arm that spends it, for
+    /// [`Self::the_pull_offers_a_record_and_sends_no_command_at_all`]'s
+    /// reason: there is no `Shelf` to build without a database and a scan
+    /// thread, and the decision itself — which song is top, which row it is
+    /// on its record — is [`vm::song_hits`]/[`vm::song_row`]'s, tested as
+    /// pure functions in `vm`. What must hold *here* is the wiring:
+    ///
+    /// - `play_first_match` asks for the song **before** the album, and
+    ///   spends it as `play_track` — `SetQueue` (selected edition, whole) +
+    ///   `JumpTo` by [`PlayerState::play_from`]'s decision — before
+    ///   `play_album` is even considered;
+    /// - `enter_drops_needle` answers only while a query stands, from the
+    ///   same ranked rows the section renders (`songs.first()`), resolved by
+    ///   the same [`vm::song_row`] a click resolves through;
+    /// - the section's rows are rebuilt with the filter (`refilter` calls
+    ///   [`vm::song_hits`]), so <kbd>Enter</kbd>, the section and the wall
+    ///   answer one query.
+    #[test]
+    fn enter_retargets_to_the_top_song_while_a_query_stands() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        let body = |name: &str| {
+            let start = source
+                .find(&format!("fn {name}(&"))
+                .unwrap_or_else(|| panic!("{name} exists"));
+            let rest = &source[start..];
+            let end = rest.find("\n    }\n").expect("a function ends");
+            rest[..end].to_owned()
+        };
+
+        // The song outranks the album, and it sounds through play_track.
+        let enter = body("play_first_match");
+        let song = enter
+            .find("enter_drops_needle")
+            .expect("Enter asks for the top song");
+        let album = enter
+            .find("enter_plays")
+            .expect("the album-level answer is still the fall-through");
+        assert!(song < album, "the song is asked for before the album");
+        let track = enter.find("play_track").expect("the song is a needle-drop");
+        let whole = enter
+            .find("play_album")
+            .expect("the fall-through still plays a record");
+        assert!(track < whole, "play_track before play_album");
+
+        // The choice is the section's own first row, only while a query
+        // stands, resolved by the one row-resolution a click also uses.
+        let choice = body("enter_drops_needle");
+        assert!(
+            choice.contains("self.query.trim().is_empty()"),
+            "no query, no song — Enter with a blank query stays the \
+             selection's press"
+        );
+        assert!(
+            choice.contains("self.songs.first()"),
+            "Enter plays the row the section shows first, not a second query"
+        );
+        assert!(
+            choice.contains("vm::song_row"),
+            "the row is resolved exactly as a click on it is"
+        );
+
+        // And the rows Enter reads are rebuilt with the filter, from the one
+        // ranked search the wall also answers.
+        let filter = body("refilter");
+        assert!(
+            filter.contains("vm::song_hits"),
+            "the songs section and the wall answer one query"
         );
     }
 

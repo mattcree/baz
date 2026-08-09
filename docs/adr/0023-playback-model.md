@@ -26,6 +26,10 @@
 >    extended verbatim to the new `Songs` section — the song's record is
 >    queued whole, the cursor on the song, and `Enter` plays the
 >    top-ranked song the same way (superseding the album-level answer).
+>    *Accepted (2026-08-09), shipped as doc 09 §13 step 3*: the section
+>    renders over the filtered wall, its press and `Enter` both resolve
+>    through the record page's `play_track`/`play_from` path, and the
+>    captures are at `docs/design/impl/songs-search/`.
 > 4. **Play-everything and shuffle are specified as this model's cases**
 >    (09 §7): `Play all` reifies the wall — every visible record, in the
 >    wall's arrangement order — into the queue in one press; a shuffle

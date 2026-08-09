@@ -338,6 +338,15 @@
   §A2 deliberately defers to it: wall membership, rail sorting, search-corpus
   membership, and possibly the armed-collecting flow itself. The sleeve
   (§A1) is the vocabulary any outcome keeps.
+- **The Songs section answers the pointer with a press and a door, and
+  nothing else yet.** Step 3 of design doc 09 §13 shipped the section (the
+  ranked rows, the needle-drop press, the Enter retarget, the reserved `+`);
+  what the study gives its rows beyond that arrives with its own steps —
+  the right-click mirror menu is §5.2 (step 4), and shift-click as the
+  queue-append accelerator is step 7, gated on the picker's Queue row
+  (step 2) existing for it to resolve to. Until step 4, the rows follow the
+  product's current interaction classes exactly: no gesture-only routes, no
+  menus anywhere.
 - **No keyboard route out of the search field.** Transport keys are bound
   (`crates/baz/src/keys.rs`), but iced 0.13's `text_input` captures every key
   press while focused except Tab and the vertical arrows, so while the search

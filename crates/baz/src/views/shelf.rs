@@ -13,9 +13,11 @@ use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf, scroll_id};
 use crate::player::PlayerState;
+use crate::playlists::Collecting;
 use crate::shelf::{Grid, Run, Shelves};
 use crate::spine::{Slot, Spine};
-use crate::views::gradient_block;
+use crate::views::album::add_slot;
+use crate::views::{gradient_block, section_rule};
 use crate::{rail, theme, vm};
 
 /// **The wall**: the shelved, virtualized grid, its pinned group header, and
@@ -60,7 +62,7 @@ pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     player: &'a PlayerState,
     lamp: f32,
-    collecting: bool,
+    collecting: Collecting,
 ) -> Element<'a, Message> {
     if shelf.visible.is_empty() {
         return empty_state(shelf);
@@ -95,7 +97,15 @@ pub(crate) fn view<'a>(
             &mut drawn,
         );
         for r in first_row..end_row {
-            grid = grid.push(shelf_row(shelf, player, hang, *run, r, lamp, collecting));
+            grid = grid.push(shelf_row(
+                shelf,
+                player,
+                hang,
+                *run,
+                r,
+                lamp,
+                collecting.armed,
+            ));
         }
         drawn += hang.spacer_height(end_row - first_row);
     }
@@ -139,10 +149,220 @@ pub(crate) fn view<'a>(
         .sticky(shelf.scroll_offset)
         .and_then(|index| runs.get(index))
         .copied();
-    row![
-        stack![wall, pinned_header(shelf, hang, pinned, hang.block_width())],
-        index_rail(shelf, &shelves)
-    ]
+    let wall = stack![wall, pinned_header(shelf, hang, pinned, hang.block_width())];
+    // **The Songs section** (doc 09 §5): under a query with matching tracks,
+    // the ranked track-level answers render above the filtered wall — two
+    // sections, separate. In the same left cell as the wall, so both centre
+    // against the same width and the rail stays the sibling of the whole
+    // body; absent (not empty) whenever there are no song answers, in which
+    // case the composition is exactly what it always was.
+    let body: Element<'a, Message> = if shelf.songs.is_empty() {
+        wall.into()
+    } else {
+        column![
+            songs_section(shelf, player, collecting, hang.block_width()),
+            wall
+        ]
+        .into()
+    };
+    row![body, index_rail(shelf, &shelves)].into()
+}
+
+/// **The Songs section's block**: a `Songs` rule, up to [`vm::SONGS`] ranked
+/// track rows, then an `Albums` rule naming the filtered wall below — the
+/// two sections the owner asked for, visibly separate (doc 09 §5, S1).
+///
+/// It is laid out **on the wall's own ruler**: the block is
+/// [`Grid::block_width`] wide and centred exactly as the wall's rows are, so
+/// its left edge is the first column's left edge and the section introduces
+/// no x-position of its own (law L5 — the wall permits `HANG` and the hang's
+/// derived column edges, nothing else). Its top air is [`theme::HANG`], the
+/// wall's own top-edge unit.
+///
+/// The rows are the full match set's ranked head, not its whole: the wall
+/// below is the exhaustive answer, in covers.
+fn songs_section<'a>(
+    shelf: &'a Shelf,
+    player: &'a PlayerState,
+    collecting: Collecting,
+    block: f32,
+) -> Element<'a, Message> {
+    let interactive = player.engine_ready();
+    let mut rows = column![].spacing(theme::GAP_XS);
+    for (index, song) in shelf.songs.iter().enumerate() {
+        // The song resolved onto the record the wall holds: the wall id and
+        // the row in its **selected edition** — what the press and the `+`
+        // both spend ([`vm::song_row`]). A row a rescan has just unmoored
+        // asks for nothing rather than playing a track nobody pointed at.
+        let resolved = shelf.album(song.album_id).and_then(|album| {
+            let chosen = shelf.edition_choice.get(&album.id).copied();
+            vm::song_row(album, chosen, song).map(|row| (album.id, row))
+        });
+        let press = resolved
+            .filter(|_| interactive)
+            .map(|(id, row)| Message::PlayTrack(id, row));
+        // The row's mark follows `TrackStarted`, never the click (S1): the
+        // dot lights when the engine says this file is sounding.
+        let playing = player.now_playing_path() == Some(song.path.as_path());
+        rows = rows.push(song_row(
+            song,
+            index,
+            playing,
+            press,
+            resolved,
+            collecting,
+            shelf.hovered_song == Some(index),
+        ));
+    }
+    container(
+        column![section_rule("Songs"), rows, section_rule("Albums")]
+            .spacing(theme::GAP_SM)
+            .width(Length::Fixed(block)),
+    )
+    .width(Length::Fill)
+    .padding(iced::Padding {
+        top: theme::HANG,
+        ..iced::Padding::ZERO
+    })
+    .align_x(alignment::Horizontal::Center)
+    .into()
+}
+
+/// One row of the Songs section: the reserved mark lane (the lamp dot when
+/// this file is sounding), the title, `artist · record` with **the record's
+/// name a door to its page**, the right-aligned duration, and the reserved
+/// `+` slot — a list row (doc 09 §5: *rows play; tiles navigate*), one line
+/// tall.
+///
+/// **The press is a needle-drop** (ADR-0023 §2 extended to this section):
+/// [`Message::PlayTrack`] with the record's wall id and the song's row in
+/// the selected edition — the record page's exact path, decided by
+/// [`crate::player::PlayerState::play_from`], never a new grammar. The door
+/// sends [`Message::AlbumClicked`] and captures its own press (iced's
+/// `button` returns `Captured` for a child's press before its own
+/// `on_press` fires), and the `+` is the album page's own slot sending
+/// [`Message::AddTrackToPlaylist`].
+///
+/// Every lane is a token the list surfaces already share —
+/// [`theme::TRACK_NO_W`], [`theme::DURATION_W`], [`theme::STEPPER_HIT`] —
+/// and the row's box is `2 × GAP_XS + STEPPER_HIT` = [`theme::TRANSPORT_HIT`],
+/// the product's one control height (law L7).
+fn song_row<'a>(
+    song: &'a vm::SongVm,
+    index: usize,
+    playing: bool,
+    press: Option<Message>,
+    resolved: Option<(u64, usize)>,
+    collecting: Collecting,
+    hovered: bool,
+) -> Element<'a, Message> {
+    let room = theme::active();
+    let duration = song.duration.map(vm::format_duration).unwrap_or_default();
+    let marker: Element<'a, Message> = if playing {
+        lamp_dot()
+    } else {
+        Space::with_width(Length::Fixed(0.0)).into()
+    };
+    // The playing row's title takes the medium weight the bar, the queue and
+    // the album page give the same string.
+    let heading = text(song.title.as_str())
+        .size(theme::SIZE_BODY)
+        .line_height(theme::LEADING_BODY)
+        .color(room.paper)
+        .wrapping(text::Wrapping::None);
+    let heading = if playing {
+        heading.font(theme::MEDIUM)
+    } else {
+        heading
+    };
+    let lane = |content: Element<'a, Message>, width: f32| {
+        container(content)
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .align_x(alignment::Horizontal::Right)
+            .align_y(alignment::Vertical::Center)
+    };
+    let body = button(
+        row![
+            // The mark lane the album page and the queue rows reserve, at
+            // the same width, so the dot arriving moves no text.
+            lane(marker, theme::TRACK_NO_W),
+            container(
+                row![
+                    heading,
+                    text(format!("{} ·", song.artist))
+                        .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
+                        .color(room.paper_dim)
+                        .wrapping(text::Wrapping::None),
+                    album_door(song),
+                ]
+                .spacing(theme::GAP_SM)
+                .align_y(iced::Alignment::Center),
+            )
+            .width(Length::Fill)
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .align_y(alignment::Vertical::Center)
+            .clip(true),
+            lane(
+                text(duration)
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper_faint)
+                    .wrapping(text::Wrapping::None)
+                    .into(),
+                theme::DURATION_W,
+            ),
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center),
+    )
+    .width(Length::Fill)
+    // No horizontal inset: the mark lane starts on the block's own edge and
+    // the duration lane ends on it (law L5) — the album page's rule.
+    .padding(theme::pad(theme::GAP_XS, 0.0))
+    .style(move |_theme, status| theme::track_row(room, status, playing))
+    .on_press_maybe(press);
+    if !collecting.available {
+        return body.into();
+    }
+    let offered = collecting.armed || collecting.panel_open || hovered;
+    let slot: Element<'a, Message> = match resolved {
+        Some((id, row)) => add_slot(id, row, offered, collecting.armed),
+        None => Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into(),
+    };
+    mouse_area(
+        row![body, slot]
+            .spacing(theme::GAP_XS)
+            .align_y(iced::Alignment::Center),
+    )
+    .on_enter(Message::SongRowEntered(index))
+    .on_exit(Message::SongRowLeft(index))
+    .into()
+}
+
+/// The record's name as **a door to its page** — the one navigation inside a
+/// section whose rows otherwise play. A quiet word control
+/// ([`theme::word_button`]: `paper_dim` at rest, full paper under the
+/// pointer), [`theme::STEPPER_HIT`] tall — the named secondary square — so a
+/// single-line row stays one line.
+fn album_door(song: &vm::SongVm) -> Element<'_, Message> {
+    let room = theme::active();
+    button(
+        container(
+            text(song.album.as_deref().unwrap_or("Unknown Album"))
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
+    )
+    .height(Length::Fixed(theme::STEPPER_HIT))
+    .padding(theme::pad(0.0, theme::GAP_XS))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press(Message::AlbumClicked(song.album_id))
     .into()
 }
 
@@ -734,6 +954,75 @@ mod tests {
     use super::RULE_LANE_H;
     use crate::shelf::{Density, Grid};
     use crate::theme;
+
+    /// **The Songs section sits on the same ruler as the wall it tops**
+    /// (doc 09 §5; laws L2, L5, L7).
+    ///
+    /// Three claims, each the kind that drifts if unpinned:
+    ///
+    /// - **The lattice (L2)**: every lane a songs row reserves is a token
+    ///   the list surfaces already share, on the unit of 4 — the section
+    ///   adds no token of its own — and the row's box is `2 × GAP_XS +
+    ///   STEPPER_HIT`, which is exactly [`theme::TRANSPORT_HIT`]: the
+    ///   product's one control height (L7), by arithmetic rather than by a
+    ///   new number.
+    /// - **The ruler (L5)**: the section's block is `Grid::block_width` wide
+    ///   and centred exactly as the wall's rows are, so its left edge *is*
+    ///   the first column's left edge and the wall's permitted-edge list is
+    ///   untouched. Pinned in the source, the way the alignment laws are,
+    ///   because a hardcoded width here would pass every unit test and fail
+    ///   the composition.
+    /// - **The gutter**: the section's top air is [`theme::HANG`] — the
+    ///   wall's own top-edge unit — and its rows carry no horizontal inset
+    ///   of their own (the row's-own-padding defect L5 names).
+    #[test]
+    fn the_songs_section_sits_on_the_walls_own_ruler() {
+        const { assert!(2.0 * theme::GAP_XS + theme::STEPPER_HIT == theme::TRANSPORT_HIT) }
+        const { assert!(theme::TRACK_NO_W % 4.0 == 0.0) }
+        const { assert!(theme::DURATION_W % 4.0 == 0.0) }
+        const { assert!(theme::STEPPER_HIT % 4.0 == 0.0) }
+        const { assert!(theme::HANG % 4.0 == 0.0) }
+
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/shelf.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        // The call site hands the section the wall's own block width…
+        assert!(
+            source.contains("songs_section(shelf, player, collecting, hang.block_width())"),
+            "the songs section is laid out at the wall's block width"
+        );
+        // …and the section spends it as its block, centred the wall's way.
+        let section = source
+            .split_once("fn songs_section")
+            .expect("the songs section exists")
+            .1;
+        let section = &section[..section.find("\n}\n").expect("a function ends")];
+        assert!(
+            section.contains(".width(Length::Fixed(block))"),
+            "the block is the width it was handed, not a width of its own"
+        );
+        assert!(
+            section.contains("alignment::Horizontal::Center"),
+            "centred exactly as the wall's rows are"
+        );
+        assert!(
+            section.contains("top: theme::HANG"),
+            "the section's top air is the wall's own unit"
+        );
+        // The row keeps the album page's no-inset rule: its one padding call
+        // is vertical-only, on the token, with no x-inset of its own.
+        let row = source
+            .split_once("fn song_row")
+            .expect("the songs row exists")
+            .1;
+        let row = &row[..row.find("\n}\n").expect("a function ends")];
+        assert!(
+            row.contains(".padding(theme::pad(theme::GAP_XS, 0.0))"),
+            "a songs row hangs from the block's own edges (law L5)"
+        );
+    }
 
     /// **A tile's box holds the tile, at every density and every width.**
     ///

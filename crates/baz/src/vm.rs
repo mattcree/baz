@@ -52,6 +52,13 @@ pub const VARIOUS_ARTISTS: &str = "Various Artists";
 /// usefully show, and a query that broad is on its way to more keystrokes.
 pub const SEARCH_LIMIT: usize = 10_000;
 
+/// How many rows the **Songs** section shows
+/// (`docs/design/09-implicit-playlists.md` §5): the ranked head of the match
+/// set, not an exhaustive list — the filtered wall below is the exhaustive
+/// answer, in covers. Eight echoes the room's other handful,
+/// [`crate::shuffle::SLEEVES`].
+pub const SONGS: usize = 8;
+
 /// One album tile on the shelf, owned by the UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AlbumVm {
@@ -292,21 +299,119 @@ pub struct TrackVm {
 
 impl TrackVm {
     fn from_meta(meta: &TrackMeta) -> Self {
-        let title = meta.title.clone().unwrap_or_else(|| {
-            meta.path
-                .file_name()
-                .map_or_else(|| String::from("?"), |n| n.to_string_lossy().into_owned())
-        });
         Self {
             disc: meta.disc,
             number: meta.track,
-            title,
+            title: display_title(meta),
             artist: meta.artist.clone(),
             duration: meta.duration,
             path: meta.path.clone(),
             bytes: meta.stamp.map(|stamp| stamp.size),
         }
     }
+}
+
+/// Display title for a track: the tag/inferred title, else the file name —
+/// the one fallback every row surface shares, so a search answer and the
+/// album page it doors to cannot name one file two ways.
+fn display_title(meta: &TrackMeta) -> String {
+    meta.title.clone().unwrap_or_else(|| {
+        meta.path
+            .file_name()
+            .map_or_else(|| String::from("?"), |n| n.to_string_lossy().into_owned())
+    })
+}
+
+/// One row of the **Songs** section — a ranked track-level search answer
+/// (`docs/design/09-implicit-playlists.md` §5), owned by the UI.
+///
+/// It carries exactly what the row shows (title, artist · album, duration)
+/// plus what its two presses need: [`Self::album_id`] is the wall identity
+/// the record-name door navigates to and the album `play_track` needle-drops
+/// (ADR-0023 §2), and the path/number/disc triple is what [`song_row`]
+/// resolves back into the record's *selected edition* — the file itself may
+/// belong to an edition the listener has switched away from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SongVm {
+    /// Display title (the tag/inferred title, else the file name).
+    pub title: String,
+    /// The name beside the title: the track's own artist, else who the album
+    /// is filed under — a search answer always names somebody.
+    pub artist: String,
+    /// The record's title as tagged; `None` for an unknown-album group.
+    pub album: Option<String>,
+    /// The record's wall identity ([`album_id`]) — where the door goes and
+    /// what the press queues.
+    pub album_id: u64,
+    /// Track number within its disc, when known — [`song_row`]'s second key.
+    pub number: Option<u32>,
+    /// Which disc, when the tags said — [`song_row`]'s second key.
+    pub disc: Option<u32>,
+    /// Playing time, when the scan read one.
+    pub duration: Option<Duration>,
+    /// The matched file — [`song_row`]'s first key, and the honest object of
+    /// the row's playing mark.
+    pub path: PathBuf,
+}
+
+/// **The Songs section's rows**: the top `cap` ranked matching tracks for
+/// `query` — [`Library::search`]'s answer (ADR-0021: fit, then field, then
+/// library order), surfaced instead of thrown away at the album fold
+/// (doc 09 §5's finding). Empty for a blank query and for a query nothing
+/// matches; the section is then absent, not empty.
+#[must_use]
+pub fn song_hits(library: &Library, query: &str, cap: usize) -> Vec<SongVm> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    library
+        .search(query, cap)
+        .into_iter()
+        .map(|track| {
+            let filed_under = AlbumArtistVm::from_core(AlbumArtist::of(track));
+            SongVm {
+                title: display_title(track),
+                artist: track
+                    .artist
+                    .clone()
+                    .unwrap_or_else(|| filed_under.label().to_owned()),
+                album: track.album.clone(),
+                album_id: album_id(AlbumArtist::of(track), track.album.as_deref()),
+                number: track.track,
+                disc: track.disc,
+                duration: track.duration,
+                path: track.path.clone(),
+            }
+        })
+        .collect()
+}
+
+/// Where `song` sits in `album`'s **selected edition** — the row a songs
+/// press needle-drops on (ADR-0023 §2: the record whole, the cursor on the
+/// song, exactly the record page's `play_track` path).
+///
+/// The search matched a *file*; the page and the queue play the selected
+/// edition, which may be a different rip of the same record. So the
+/// resolution runs from the strongest key to the weakest: the path itself,
+/// then the same song by disc/track number and case-folded title, then by
+/// title alone. `None` when the selected edition holds nothing by that name,
+/// in which case the row asks for nothing rather than playing a track the
+/// listener did not point at (ADR-0014's out-of-range rule).
+#[must_use]
+pub fn song_row(album: &AlbumVm, chosen: Option<EditionKey>, song: &SongVm) -> Option<usize> {
+    let tracks = &selected_edition(album, chosen)?.tracks;
+    if let Some(row) = tracks.iter().position(|track| track.path == song.path) {
+        return Some(row);
+    }
+    let title = song.title.to_lowercase();
+    let same_title = |track: &TrackVm| track.title.to_lowercase() == title;
+    tracks
+        .iter()
+        .position(|track| {
+            same_title(track) && track.number == song.number && track.disc == song.disc
+        })
+        .or_else(|| tracks.iter().position(same_title))
 }
 
 /// The owned, render-ready form of [`baz_core::index::GroupHeader`].
@@ -1831,6 +1936,149 @@ mod tests {
         assert_eq!(visible_indices(&albums, &library, "CID").len(), 1);
         // No match: empty shelf, not "no filter".
         assert!(visible_indices(&albums, &library, "zzz").is_empty());
+    }
+
+    /// **S1, the section itself** (doc 09 §4): given a non-empty query with
+    /// matching tracks, the Songs answers are the ranked head of the match
+    /// set — top-ranked first (ADR-0021), capped at [`SONGS`] — and each row
+    /// carries title, artist, album, duration, and the wall identity its
+    /// door and its press spend.
+    #[test]
+    fn a_query_fills_the_songs_section_ranked_and_capped() {
+        // One exactly-titled song on one record, and nine prefix-titled songs
+        // on another: the exact match must rank first however the corpus is
+        // ordered, and the cap must trim the tail, never the head.
+        let mut tracks = vec![meta("Zeta", "Zed", "Night", 1)];
+        for t in 1..=9 {
+            tracks.push(meta("Alpha", "Nine", &format!("Night Song {t}"), t));
+        }
+        let library = library_with(tracks);
+        let albums = build_albums(&library);
+
+        let songs = song_hits(&library, "night", SONGS);
+        assert_eq!(songs.len(), SONGS, "the ranked head, capped at eight");
+        let first = &songs[0];
+        assert_eq!(first.title, "Night", "best fit first — ADR-0021's Exact");
+        assert_eq!(first.artist, "Zeta");
+        assert_eq!(first.album.as_deref(), Some("Zed"));
+        assert_eq!(first.duration, Some(Duration::from_secs(200)));
+        // The row's identity is the wall's identity: the door and the press
+        // land on the record the shelf actually holds.
+        assert_eq!(
+            first.album_id,
+            album_id(AlbumArtist::Named("Zeta"), Some("Zed"))
+        );
+        assert!(albums.iter().any(|album| album.id == first.album_id));
+        // The tail is the other record's rows, in library order.
+        assert!(songs[1..].iter().all(|song| song.artist == "Alpha"));
+
+        // Trimmed exactly as the filter trims, so the section and the wall
+        // answer one query.
+        assert_eq!(song_hits(&library, " night ", SONGS), songs);
+    }
+
+    /// **S1's absence criterion**: no matching tracks — or no query at all —
+    /// means no Songs rows, so the section is absent rather than empty, and
+    /// a blank query builds no section for the resting wall.
+    #[test]
+    fn no_matching_tracks_means_no_songs_rows() {
+        let library = library_with(vec![meta("Abel", "Alpha", "Sunrise", 1)]);
+        assert!(song_hits(&library, "zzz", SONGS).is_empty());
+        assert!(song_hits(&library, "", SONGS).is_empty());
+        assert!(song_hits(&library, "   ", SONGS).is_empty());
+    }
+
+    /// **S1, the press** (ADR-0023 §2 extended to the songs section): a song
+    /// row resolves to its record queued **whole, in order** with the cursor
+    /// on the song — the `SetQueue` + `JumpTo` shape of the record page's
+    /// `play_track` path, never a one-track queue and never the top of the
+    /// record.
+    #[test]
+    fn a_song_rows_press_is_a_needle_drop_on_its_whole_record() {
+        let library = library_with(vec![
+            meta("Alpha", "Nine", "Night Song 1", 1),
+            meta("Alpha", "Nine", "Night Song 2", 2),
+            meta("Alpha", "Nine", "Night Song 3", 3),
+        ]);
+        let albums = build_albums(&library);
+        let album = &albums[0];
+
+        let songs = song_hits(&library, "song 2", SONGS);
+        let song = songs.first().expect("the query matches one song");
+        assert_eq!(song.title, "Night Song 2");
+
+        let row = song_row(album, None, song).expect("the song is on its record");
+        let queue = album_queue(album, None);
+        // The whole record, in the edition's own order — not the song alone.
+        assert_eq!(queue.len(), 3);
+        assert_eq!(
+            queue.paths(),
+            vm_paths(album),
+            "the record whole, in order — the queue a click on the record's \
+             own page would send"
+        );
+        // …and the jump lands on the song that was pressed, with the earlier
+        // tracks behind the cursor.
+        assert_eq!(row, 1);
+        assert_eq!(queue.items[row].path, song.path);
+    }
+
+    /// The selected edition's paths in row order — what `play_track` queues.
+    fn vm_paths(album: &AlbumVm) -> Vec<PathBuf> {
+        selected_edition(album, None)
+            .expect("an edition")
+            .tracks
+            .iter()
+            .map(|t| t.path.clone())
+            .collect()
+    }
+
+    /// A song found in one rip resolves into the rip the page would play:
+    /// the search matched a *file*, the press queues the **selected
+    /// edition** (ADR-0023 §2's "selected edition, whole, in order"), and
+    /// the same song is found in it by number and title when the paths
+    /// differ.
+    #[test]
+    fn a_song_resolves_into_the_edition_the_page_would_play() {
+        let library = library_with(vec![
+            encoded("Northwest Passage", "Lies", 2, AudioFormat::Mp3),
+            encoded("Northwest Passage", "Passage", 1, AudioFormat::Flac),
+            encoded("Northwest Passage", "Lies", 2, AudioFormat::Flac),
+            encoded("Northwest Passage", "Passage", 1, AudioFormat::Mp3),
+        ]);
+        let albums = build_albums(&library);
+        let album = &albums[0];
+
+        let songs = song_hits(&library, "lies", SONGS);
+        // Both rips' files matched; take one whose file is the MP3.
+        let song = songs
+            .iter()
+            .find(|song| song.path.to_string_lossy().contains("/mp3/"))
+            .expect("the MP3 rip's file is among the answers");
+
+        // With the FLAC edition selected, the press still lands on *Lies* —
+        // resolved by number and title into the edition on screen.
+        let chosen = Some(EditionKey(Some(AudioFormat::Flac)));
+        let row = song_row(album, chosen, song).expect("the song is on this record");
+        let flac = selected_edition(album, chosen).expect("the FLAC edition");
+        assert_eq!(flac.tracks[row].title, "Lies");
+        assert_ne!(
+            flac.tracks[row].path, song.path,
+            "a different rip of the same song — the path key alone could not \
+             have resolved this row"
+        );
+        // A song the selected edition does not hold asks for nothing.
+        let stray = SongVm {
+            title: "Not Here".to_owned(),
+            artist: "Stan Rogers".to_owned(),
+            album: Some("Northwest Passage".to_owned()),
+            album_id: album.id,
+            number: Some(9),
+            disc: None,
+            duration: None,
+            path: PathBuf::from("/nowhere.flac"),
+        };
+        assert_eq!(song_row(album, chosen, &stray), None);
     }
 
     #[test]

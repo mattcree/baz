@@ -232,6 +232,26 @@ next commit.
 
 **Interface**
 
+- **Search answers in songs** (design doc 09 §5, step 3 of its §13; ADR-0023
+  §2's amendment, accepted): while a query is live the Library place's body
+  opens with a ranked **Songs** section — up to eight track rows, ADR-0021's
+  track ranking surfaced instead of thrown away at the album fold — above an
+  `Albums` rule and the wall, filtered as today. Two sections, separate, as
+  the owner asked. Each row is a list row: title, `artist · record` with the
+  record's name a door to its album page, a right-aligned duration, the
+  reserved `+` slot toward a playlist, and the lamp dot following
+  `TrackStarted` when its file is the one sounding. **A song row's press is a
+  needle-drop**: the record queued whole (the selected edition — a song found
+  in one rip resolves into the rip the page would play) with the cursor on
+  the song, through the record page's own `play_track`/`play_from` path —
+  rows play, tiles navigate, and no third grammar arrives. **Enter retargets
+  to the top-ranked song** (was: the best album; the album-level answer
+  survives only as the fall-through), so Enter is exactly a press on the
+  section's first row. Type-anywhere is unchanged in shape: the first
+  keystroke both filters the wall and grows the section in the same frame,
+  and `Esc` peels the query as before. The section sits on the wall's own
+  ruler — the block width, the shared lanes, the one control height — pinned
+  by test; headless captures in `docs/design/impl/songs-search/`.
 - **Shuffle, drawing only from what the wall shows** (ADR-0017 step 17). One
   rule and no options: the pool is whatever the active group key, the current
   search query and the current shelf leave visible, and it is **visible** —

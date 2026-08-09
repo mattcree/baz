@@ -692,7 +692,16 @@ fn track_row(
 /// square, slot reserved whether shown — sending one track toward a playlist.
 /// With one armed the press adds outright; otherwise it opens the panel as
 /// the picker (ADR-0024 §6 layers 2 and 1 respectively).
-fn add_slot(album: u64, index: usize, offered: bool, armed: bool) -> Element<'static, Message> {
+///
+/// Crate-visible because the wall's **Songs** rows carry the same reserved
+/// slot sending the same message (doc 09 §5's row anatomy): one transfer
+/// gesture, one control, wherever a track row is drawn.
+pub(crate) fn add_slot(
+    album: u64,
+    index: usize,
+    offered: bool,
+    armed: bool,
+) -> Element<'static, Message> {
     let room = theme::active();
     if !offered {
         return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
