@@ -239,22 +239,23 @@ fn sleeve_cell(shelf: &Shelf, album: u64, size: f32) -> Element<'static, Message
 /// Library — and the visible-control rule holds through the lane's own row.
 /// **Do not restore a back door here**: its absence is the lane's presence.
 pub(crate) fn place_header(name: &'static str) -> Element<'static, Message> {
-    place_header_with(name, None, None)
+    place_header_with(name, None)
 }
 
-/// [`place_header`], with one optional extra tenant after the place's name —
-/// the Album place's `‹ Prev` / `Next ›` pair (doc 07 §3.2) is the one strip
-/// today whose budget spends it, and it survived the way-back's removal
-/// because it is not a way back: it steps along the wall's arrangement, which
-/// is the one thing in this strip the lane cannot do.
+/// [`place_header`], with one quiet statement at the strip's right edge.
 ///
 /// `note` is for a statement about the *place*, never a keyboard hint — the
 /// Settings place's *"Kept in config.toml…"* is the only one today. The strip
 /// stays one function so the geometry cannot drift between the place that
-/// carries a tenant and the three that do not.
+/// carries a note and the ones that do not.
+///
+/// It used to carry a third parameter, an extra tenant after the place's name,
+/// and the Album place's `‹ Prev` / `Next ›` pair was its only customer. The
+/// owner removed the pair — *"previous and next on albums doesn't make sense
+/// on the album view"* — and the slot went with it rather than being left open
+/// for the next thing that fancies the strip.
 pub(crate) fn place_header_with(
     name: &'static str,
-    extra: Option<Element<'static, Message>>,
     note: Option<&'static str>,
 ) -> Element<'static, Message> {
     let room = theme::active();
@@ -269,9 +270,6 @@ pub(crate) fn place_header_with(
     ]
     .spacing(theme::GAP_LG)
     .align_y(iced::Alignment::Center);
-    if let Some(extra) = extra {
-        strip = strip.push(extra);
-    }
     strip = strip.push(Space::with_width(Length::Fill));
     if let Some(note) = note {
         strip = strip.push(

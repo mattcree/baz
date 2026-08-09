@@ -208,7 +208,6 @@ pub(crate) fn view<'a>(
         // and <kbd>Esc</kbd>'s peel: the Library.
         place_header_with(
             "Settings",
-            None,
             Some("Kept in config.toml, and remembered next time."),
         ),
         container(body)

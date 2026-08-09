@@ -6607,12 +6607,9 @@ mod tests {
         }
         // …and the four places that share it really do use it, rather than
         // reinventing a strip of their own — Settings included, since doc 10
-        // §7 step 8 folded its private copy into the one function. The Album
-        // place spends the same function's `_with` door for its `‹ Prev` /
-        // `Next ›` pair (doc 07 §3.2; doc 11 §5 P3): one strip, one extra
-        // tenant, still the frame's own geometry.
+        // §7 step 8 folded its private copy into the one function.
         for (name, strip) in [
-            ("album.rs", "place_header_with("),
+            ("album.rs", "place_header("),
             ("queue.rs", "place_header("),
             ("playlist.rs", "place_header("),
             // Settings is the one place with a *note* — a statement about

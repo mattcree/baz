@@ -457,6 +457,27 @@ products that refused to let detail hide the collection. Either a strip of
 sleeves along the bottom of the Album place, or a labelled previous/next pair in
 its header. Not a gesture, and not nothing.
 
+> **Amended 2026-08-09 by the owner** (`docs/REFUSALS.md`'s preamble: his
+> decision is sufficient on its own, and the entry gets rewritten rather than
+> argued). The header pair shipped, and he withdrew it: *"previous and next on
+> albums doesn't make sense on the album view. we could add an Artist > album
+> breadcrumb though. and have an artist page."*
+>
+> **The principle above stands; the two prescribed forms do not.** Both stepped
+> along *the wall's current arrangement* — a property of the Library place, and
+> one that is not on screen from a record's page. So both offered a door whose
+> destination the listener could not know before pressing it, which is not the
+> collection reachable from its detail; it is a walk through a context you have
+> left. The third form the owner supplied satisfies this section's own stated
+> aim better: **`Artist › Album` in the header, with the artist half a door to
+> an Artist place holding their records.** The record's context is its artist —
+> a fact about the record rather than about the frame — and every record you
+> reach that way is one you saw before choosing it. W15's *compare two
+> releases* is one press up and one press down.
+>
+> The clause that survives verbatim is **"not nothing"**. See
+> `11-jobs-era-critique.md` §5 P3 for the full reversal.
+
 ---
 
 ## 4. The keyboard is part of placement

@@ -462,15 +462,6 @@ pub(crate) enum Message {
     /// position, never a `Play` — and a playlist undo is one atomic file
     /// rewrite through the same fingerprint guard as the edit it reverses.
     Undo,
-    /// The Album place's `‹ Prev` / `Next ›` pair (doc 07 §3.2, shipped by
-    /// doc 11 §5 P3), and <kbd>Ctrl</kbd>+<kbd>[</kbd> /
-    /// <kbd>Ctrl</kbd>+<kbd>]</kbd> over it: step to the neighbouring
-    /// record **along the wall's current arrangement** — the same order, the
-    /// same filtered set, so the pool is always the visible one (the
-    /// shuffle rule's logic, applied to navigation). `-1` is the previous
-    /// record, `+1` the next; outside the Album place, or on a record the
-    /// wall no longer shows, the step asks for nothing.
-    AlbumStep(i32),
     /// The queue place's `Save as playlist`: become a name field
     /// (ADR-0024 §4 — the transient frozen into an artefact).
     SaveQueueStart,
@@ -1310,7 +1301,6 @@ impl App {
             // refuse a focus request, and refusing is not an error here.
             Message::Raise => window::get_latest().and_then(window::gain_focus),
             Message::Undo => self.undo_edit(),
-            Message::AlbumStep(delta) => self.step_album(delta),
             message if matches!(self.screen, Screen::Setup(_)) => self.update_setup(message),
             message => match &mut self.screen {
                 Screen::Shelf(state) => state.update(message),
@@ -3622,27 +3612,6 @@ impl App {
         self.publish_mpris(false);
     }
 
-    /// The Album place's `‹ Prev` / `Next ›` (doc 07 §3.2; doc 11 §5 P3):
-    /// step to the neighbouring record along the wall's current
-    /// arrangement. A step off either end, a step from anywhere that is not
-    /// a record's page, and a step from a record the wall no longer shows
-    /// (filtered out, or vanished under a rescan) all ask for nothing —
-    /// the pool is the visible one, always.
-    fn step_album(&mut self, delta: i32) -> Task<Message> {
-        let Place::Album(id) = self.place else {
-            return Task::none();
-        };
-        let Screen::Shelf(state) = &self.screen else {
-            return Task::none();
-        };
-        let (previous, next) = vm::neighbours(&state.albums, &state.visible, id);
-        let target = if delta < 0 { previous } else { next };
-        match target {
-            Some(neighbour) => self.open_album(neighbour),
-            None => Task::none(),
-        }
-    }
-
     /// Bookkeeping for a place change: an edit history belongs to the
     /// surface that shows its `Undo` word, and leaving that surface is one
     /// of the three things that end it (P2: "until the next edit, a
@@ -3734,7 +3703,6 @@ impl App {
                     self.hovered_album_row,
                     // The header pair's pool is the wall as it stands:
                     // same order, same filtered set (doc 11 §5 P3).
-                    vm::neighbours(&state.albums, &state.visible, id),
                 ),
                 // The record vanished under a rescan while its page was open.
                 // The wall is the honest answer — better than a page about
@@ -6218,7 +6186,7 @@ mod tests {
 
         /// Message tag → the on-screen control that sends the same message,
         /// or the reason there is none.
-        const CONTROLS: [(&str, &str); 23] = [
+        const CONTROLS: [(&str, &str); 22] = [
             (
                 "ToggleLane",
                 "the two marks at the returns lane's foot (ADR-0030 §3) — \
@@ -6231,11 +6199,6 @@ mod tests {
                  and the playlist page's counts (doc 11 §5 P2) — present \
                  exactly while there is an edit to take back, which is \
                  exactly when the chord acts",
-            ),
-            (
-                "AlbumStep",
-                "the Album place header's `‹ Prev` / `Next ›` pair \
-                 (doc 07 §3.2; doc 11 §5 P3)",
             ),
             ("PlayPause", "the bottom bar's play/pause button"),
             (
