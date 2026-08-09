@@ -6011,19 +6011,21 @@ mod tests {
             spine.contains("bounds.width - theme::HANG"),
             "the index rail no longer hangs from HANG"
         );
-        // **The rail is the only thing against that edge** (ADR-0022): the wall
-        // draws no scrollbar, so the collection's right-hand side is one
-        // vertical strip doing one job rather than two doing the same one. The
-        // scrolling is untouched — a zero-width bar is a bar iced paints
-        // nothing for — which is why this is asserted as *which geometry the
-        // wall asks for* rather than as the absence of a `scrollable`.
+        // **The wall's bar does not compete with the rail** (the owner's
+        // decision, 2026-08-09, rewriting ADR-0022's two-vertical-strips
+        // entry). The wall draws a bar now, and what this holds down is that it
+        // stays the lesser of the two marks against that edge: narrower than
+        // every list's, and far narrower than the rail's ink. Asserted as
+        // *which geometry the wall asks for* rather than as the presence of a
+        // `scrollable`, which is what it always was.
         assert!(
             read("shelf.rs").contains("theme::wall_scrollbar()"),
-            "the wall has a scrollbar again, two pixels from the index rail"
+            "the wall asks for some other scrollbar geometry than its own"
         );
         const {
-            assert!(WALL_SCROLLBAR_W == 0.0);
-            assert!(SCROLLBAR_W > 0.0);
+            assert!(WALL_SCROLLBAR_W > 0.0);
+            assert!(WALL_SCROLLBAR_W < SCROLLBAR_W);
+            assert!(WALL_SCROLLBAR_W * 4.0 < INDEX_W);
         }
         // The lane arithmetic agrees: the rail's gutter is the same token.
         const { assert!(INDEX_LANE_W == INDEX_CLEARANCE + INDEX_W + HANG) }

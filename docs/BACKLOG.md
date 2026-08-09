@@ -403,6 +403,61 @@
 - **No shortcut discovery in the interface.** The bindings are in the README
   and nowhere the user can see them while running — no `?` overlay, no menu.
 
+## The window's own chrome
+
+**Drawing baz's own title bar — researched, not built.** The owner
+(2026-08-09): *"get rid of the bar at the top, you know, the native chrome, and
+just… implement those buttons in our app to be in the same sort of position. I
+think that would look a lot cleaner."*
+
+The good news first: **on Wayland that bar is already drawn inside baz's own
+process.** GNOME expects applications to decorate themselves, so winit 0.30
+pulls in `sctk-adwaita` (in `Cargo.lock`, via winit's
+`wayland-csd-adwaita` feature) and draws the title bar itself. Turning it off
+is one field — `window::Settings { decorations: false }`
+(`iced_core-0.13.2/src/window/settings.rs:53`) — and the three buttons are all
+available as tasks: `window::minimize`, `window::toggle_maximize`,
+`window::close`. Dragging the window by our own strip is `window::drag`
+(`iced_runtime-0.13.0/src/window.rs:40`), which is the same "start an
+interactive move" the compositor gives a real title bar. Double-click to
+maximise is `toggle_maximize`; the right-click system menu is
+`window::show_system_menu`. All of it exists.
+
+**The blocker is resize.** iced 0.13 exposes no `drag_resize_window`: the whole
+`window::Action` enum is `iced_runtime-0.13.0/src/window.rs:24–161` and there
+is no resize-direction variant anywhere in `iced_runtime`, `iced_winit` or
+`iced_core`. winit 0.30 *has* `Window::drag_resize_window(ResizeDirection)`;
+iced simply does not surface it. So `decorations: false` today buys the clean
+strip and **loses the pointer resize edges**, on both Wayland and X11. That is
+not a trade worth making silently for a window whose whole job is to be resized
+to the wall you want.
+
+Three ways out, in the order they should be considered:
+
+1. **Expose the winit call.** One `Action::DragResize(Id, ResizeDirection)`
+   variant, one arm in `iced_winit`'s runner, one `window::drag_resize` helper
+   — perhaps thirty lines, upstreamable. It needs a patched iced, which under
+   this project's rules is a reviewed dependency decision rather than a
+   detail: a `[patch.crates-io]` on a fork pins baz to a tree the owner
+   maintains until the change lands upstream.
+2. **Hand-roll it** — an 8 px hit band at the window's edges that on drag
+   computes a new size and origin and spends `window::resize` + `window::move_to`
+   each frame. It works, and it will visibly lag under Wayland because every
+   step is a round trip the compositor would otherwise have done itself. It
+   also re-implements, badly, the one thing the platform is definitely better
+   at.
+3. **Keep `decorations: true` and restyle nothing** — the honest null option,
+   and the one to take if 1 is not wanted, because 2 buys a cleaner top edge at
+   the cost of the gesture people use most.
+
+**If it ships**, the strip is where the buttons go, at the right, in the
+[`theme::TRANSPORT_HIT`] box every other icon control uses; `docs/design/10`
+§3.1's rule already admits close (`Glyph::Close` is drawn), and minimise and
+maximise would be two more glyphs on the sheet in the same 0.14–0.15 stroke
+band. The drag region is *the strip's empty space*, which needs stating
+carefully: every control in the strip must keep its own press, so the drag is
+what the gaps do, not what the bar does.
+
 ## The wall's hover options
 
 **The bar's cover depends on the wall's thumbnail LRU.** `App::bar_cover`
