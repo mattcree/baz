@@ -126,6 +126,15 @@ a condition.** If it wants to run when nobody pressed it, it is refused.
   **not even an inert provenance comment** at v1 — a comment naming a rule is
   an invitation to build the control that re-runs it.
 
+**The heading is `DRAWS`**, in Home's existing caps section rule. It is the
+product's own word — doc 09 §S7 calls a shuffle result a draw, and
+`docs/REFUSALS.md` already says *"a draw is a thing you start, never a thing
+that starts itself"*, which is this section's governing rule written down by a
+document that was not thinking about it. `FOR YOU` and `SUGGESTIONS` are
+refused as claims this design does not make. This is the one decision here with
+no argument strong enough to survive the owner disliking the word; if he wants
+another, the word changes and nothing else does.
+
 The friction budget's *intent → sound in one press* is deliberately not met
 here, and that is the trade: `Play all` and `Shuffle` have their scope on the
 screen you press them from and a dynamic draw does not. One extra press buys

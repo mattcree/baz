@@ -386,7 +386,32 @@ The listener who wants the row's answer again presses the row again. That the
 answer may differ is not a bug; it is the entire meaning of the sentence, which
 is in the present tense.
 
-### 5.3 What it costs the page
+### 5.3 The heading
+
+Home's grammar is a caps section rule over its content — `CONTINUE`,
+`RECENTLY ADDED` — so this section needs one word, and the rows below it are
+already whole sentences, so the word only has to say what *kind* of thing they
+are.
+
+**`DRAWS`.** It is the product's own vocabulary rather than a new one: doc 09
+§S7 calls a shuffle result *a draw*, `shuffle.rs` names its type `Pool` and its
+verb `draw`, and `docs/REFUSALS.md` says *"a draw is a thing you start, never a
+thing that starts itself"* — which is this section's governing rule stated in
+advance, by a document that was not thinking about it. A heading that carries
+that connotation is doing real work.
+
+Considered and not taken: **`FOR YOU`** and every variant of it — the streaming
+world's own phrase, and it claims the one thing this design refuses to claim;
+**`SUGGESTIONS`**, for the same reason one step quieter; **`PUT SOMETHING
+ON`**, warm and true but a sentence over a stack of sentences, which reads as
+noise; and **`UNHEARD`**, accurate for two of the three rows and wrong for the
+third.
+
+This is the one decision in the document with no argument strong enough to
+survive the owner disliking the word. If he wants another, the word changes and
+nothing else does.
+
+### 5.4 What it costs the page
 
 Home gains **one section rule and up to three rows**. Each row is one line of
 text at the room's body measure and a count inside its own sentence — no
