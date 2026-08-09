@@ -442,6 +442,17 @@ ICED_BACKEND=tiny-skia baz    # smooth here => it is wgpu surface reconfiguratio
 ICED_PRESENT_MODE=immediate baz   # smooth here => it is vsync/swapchain
 ```
 
+**Measured since, and partly fixed.** `BAZ_MSG_LOG=1` (new, see
+`docs/DEVELOPMENT.md`) says **87 messages a second** under a dragged edge:
+three per resize step — `WindowResized`, then `Scrolled` twice. Idle is
+silent. Two of the three were doing the full thumbnail scan the first had just
+done, and `request_visible_thumbs` now guards on the visible album range, so
+they cost a comparison. The **message count is structural** and unchanged: the
+second `Scrolled` is iced republishing a viewport whose `content_bounds` moved,
+which is true and worth being told. What is left to find is why three cheap
+messages a step feel like treacle on the owner's machine and not in the
+harness — run the meter there.
+
 **One thing worth fixing regardless of the outcome**, found while looking:
 `Message::WindowResized` calls `request_visible_thumbs()` on **every** resize
 event (`app.rs:3759-3772`), and `art::load_thumb` (`art.rs:131-139`) does a

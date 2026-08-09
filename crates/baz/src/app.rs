@@ -34,8 +34,8 @@
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use baz_core::history::{History, HistoryLedger};
@@ -172,6 +172,64 @@ fn window_settings() -> window::Settings {
         settings.platform_specific.application_id = String::from(mpris::DESKTOP_ENTRY);
     }
     settings
+}
+
+/// **The message meter** — `BAZ_MSG_LOG=1`, the sibling of `BAZ_FRAME_LOG`.
+///
+/// Prints one line a second naming every message variant that arrived in it
+/// and how many times, busiest first, and nothing at all in a second where
+/// nothing arrived. It exists because *"something is firing a lot"* is a
+/// hypothesis a log can settle in ten seconds and a reader cannot settle at
+/// all: the shell's messages come from six subscriptions, a scrollable that
+/// republishes its viewport on every layout change, and a window that
+/// reconfigures on every drag step, and which of those is the loud one is not
+/// a thing to reason about.
+///
+/// Off by default and **free when off**: one relaxed atomic load per message,
+/// resolved once from the environment. The variant name is taken from `Debug`
+/// up to its first `(`, which is the same trick `menu.rs`'s mirror test uses,
+/// and it is only formatted when the meter is on.
+fn note_message(message: &Message) {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    /// 0 unresolved, 1 off, 2 on.
+    static STATE: AtomicU8 = AtomicU8::new(0);
+    static TALLY: LazyLock<Mutex<(HashMap<String, u32>, Instant)>> =
+        LazyLock::new(|| Mutex::new((HashMap::new(), Instant::now())));
+
+    let mut state = STATE.load(Ordering::Relaxed);
+    if state == 0 {
+        state = if std::env::var_os("BAZ_MSG_LOG").is_some() {
+            2
+        } else {
+            1
+        };
+        STATE.store(state, Ordering::Relaxed);
+    }
+    if state == 1 {
+        return;
+    }
+    let debug = format!("{message:?}");
+    let name = debug
+        .split_once('(')
+        .map_or(debug.as_str(), |(head, _)| head);
+    let Ok(mut tally) = TALLY.lock() else {
+        return;
+    };
+    *tally.0.entry(name.to_owned()).or_default() += 1;
+    let now = Instant::now();
+    if now.duration_since(tally.1) < Duration::from_secs(1) {
+        return;
+    }
+    let mut counted: Vec<(String, u32)> = tally.0.drain().collect();
+    tally.1 = now;
+    drop(tally);
+    counted.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let total: u32 = counted.iter().map(|(_, n)| n).sum();
+    let listed: Vec<String> = counted
+        .iter()
+        .map(|(name, n)| format!("{name} {n}"))
+        .collect();
+    println!("[msg] {total}/s  {}", listed.join("  ·  "));
 }
 
 /// Top-level messages; one enum across both screens keeps the seams simple.
@@ -1018,6 +1076,7 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        note_message(&message);
         // The volume is its own small machine and every one of its messages
         // resolves to "tell the state machine, maybe tell the engine", so it
         // is answered first and separately rather than as nine more arms
@@ -3505,6 +3564,12 @@ pub(crate) struct Shelf {
     pub(crate) edition_choice: HashMap<u64, vm::EditionKey>,
     /// Decoded-thumbnail LRU; capacity/budget documented in [`art`].
     pub(crate) thumbs: LruCache<u64, iced_image::Handle>,
+    /// The album range [`Shelf::request_visible_thumbs`] last asked about, so
+    /// the two redundant requests every resize step delivers cost a
+    /// comparison instead of a pass over the library. `None` until the first
+    /// ask, and reset by anything that changes *which* albums the range names
+    /// rather than where it sits — see [`Shelf::forget_requested`].
+    last_requested: Option<(usize, usize)>,
     /// Albums with a decode in flight (dedupes requests while scrolling).
     pending: HashSet<u64>,
     /// Albums known to have no (decodable) art — render the gradient and
@@ -3678,6 +3743,7 @@ impl Shelf {
             thumbs: LruCache::new(
                 NonZeroUsize::new(art::THUMB_CACHE_ENTRIES).unwrap_or(NonZeroUsize::MIN),
             ),
+            last_requested: None,
             pending: HashSet::new(),
             no_art: HashSet::new(),
             scan_rx: Some(scan_rx),
@@ -3753,7 +3819,15 @@ impl Shelf {
             Message::Scrolled(viewport) => {
                 self.scroll_offset = viewport.absolute_offset().y;
                 let bounds = viewport.bounds();
-                self.grid_size = Size::new(bounds.width, bounds.height);
+                // The scrollable's *outer* bounds. The rows are laid out inside
+                // the lane its own bar reserves, so the grid is told what the
+                // rows actually get — otherwise the estimate and the
+                // measurement disagree by exactly the bar's width, and at a
+                // boundary width that is one column too many.
+                self.grid_size = Size::new(
+                    (bounds.width - theme::WALL_SCROLLBAR_W).max(0.0),
+                    bounds.height,
+                );
                 self.request_visible_thumbs()
             }
             Message::WindowResized(size) => {
@@ -4134,7 +4208,7 @@ impl Shelf {
     /// the double-click's grid hold all existed to make a re-hang survivable;
     /// none of them has anything left to do.
     fn grid_width(&self) -> f32 {
-        (self.window_w - theme::INDEX_LANE_W).max(0.0)
+        (self.window_w - theme::INDEX_LANE_W - theme::WALL_SCROLLBAR_W).max(0.0)
     }
 
     /// Advance the shelf's own transitions.
@@ -4205,6 +4279,10 @@ impl Shelf {
     /// and its contents cannot disagree about which albums survived.
     fn refilter(&mut self) {
         self.visible = vm::visible_indices(&self.albums, &self.library, &self.query);
+        // The range guard names *positions*, and every album behind them has
+        // just moved. Rows 0..24 of a filtered wall are not the rows 0..24 of
+        // the wall before it.
+        self.forget_requested();
         // The Songs section's rows: the ranked head of the same match set
         // that filtered the wall (doc 09 §5 — the two sections are one
         // query's two projections). Rebuilt here rather than per frame so a
@@ -4624,6 +4702,16 @@ impl Shelf {
         task
     }
 
+    /// Drop the range guard in [`Shelf::request_visible_thumbs`].
+    ///
+    /// Called wherever *which* albums a range names has changed — a new
+    /// filter, a new arrangement, a scan that added records. The guard is an
+    /// answer cached against a question about positions, and these are the
+    /// events that change what a position means.
+    fn forget_requested(&mut self) {
+        self.last_requested = None;
+    }
+
     /// Kick off off-thread decodes for every visible tile whose thumbnail is
     /// neither cached, in flight, nor known-absent. Ported from the spike;
     /// `get` (not `peek`) refreshes LRU recency for visible entries.
@@ -4632,6 +4720,24 @@ impl Shelf {
             .shelves()
             .visible_albums(self.scroll_offset, self.grid_size.height);
         let (start, end) = (start.min(self.visible.len()), end.min(self.visible.len()));
+        // **Nothing new is on screen, so there is nothing to ask for.**
+        //
+        // Every resize step delivers *three* of these — `WindowResized` with
+        // its estimate, then `Scrolled` when the scrollable measures its real
+        // bounds, then `Scrolled` again when the grid that changed underneath
+        // it changed the content's height (iced republishes a viewport whose
+        // `content_bounds` moved, `iced_widget-0.13.4/src/scrollable.rs:1249`).
+        // Measured at 87 messages a second under a dragged edge, and the work
+        // behind each is a pass over every group in the library plus a walk of
+        // the visible slice. Two of the three ask for exactly what the first
+        // asked for.
+        //
+        // The guard is the *answer*, not the question: the range of albums on
+        // screen. A drag that reveals no new record now costs one comparison.
+        if self.last_requested == Some((start, end)) {
+            return Task::none();
+        }
+        self.last_requested = Some((start, end));
         let mut tasks = Vec::new();
         for &album_index in &self.visible[start..end] {
             let Some(album) = self.albums.get(album_index) else {
