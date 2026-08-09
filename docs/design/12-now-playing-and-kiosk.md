@@ -1284,9 +1284,10 @@ Three properties follow, and each is structural rather than careful:
    dropped; the loop parks in `Wait` (`iced_winit/src/program.rs:830–846`). No
    teardown code exists to be forgotten, because there is no handle to hold.
 2. **Toggling off removes the clock**, by the identical mechanism —
-   `ambient.animating()` is `T1.drifting || T2.on`, and T3 is deliberately not
-   in it because a feed that changes on track change needs no clock at all
-   (§8.5).
+   `ambient.animating()` is `T1.drifting || T2.on`. T3 is deliberately *not* in
+   that term because the feed is not animated: it advances on a 20 s dwell, so
+   it gets its own far slower arm under the same guard, and §8.5 prices it
+   honestly at three wakeups a minute rather than claiming it is free.
 3. **The rest of the product is untouched, provably.** ADR-0020's idle
    assertion is *a test* (`0020-motion.md`: *"the suite asserts the subscription
    is inactive when no tween is running"*). This adds one assertion of the same
@@ -1476,3 +1477,185 @@ gets to stop arguing and start specifying.
   re-proposing it costs an observation rather than an argument: a 1 px shift
   once a minute is one frame per 60 s, which is exactly `REFRESH_TICK`'s
   existing bill (`app.rs:82`).
+
+---
+
+## 8. The feed: what baz already knows
+
+> *"I also like the idea of just seeing related stuff appearing in like a feed
+> of random facts."*
+
+### 8.0 The premise: this is baz's strongest hand, not its weakest
+
+The instinct with *"related stuff"* is to reach for a network, and that instinct
+is wrong here — not for purity, but because **baz can say things no streaming
+service can**. A service knows the record; it does not know *your* copy of it,
+or that you first played it in 2019, or that it is a 24-bit rip reaching your
+DAC untouched. Doc 03 reached this conclusion from the other direction and
+stated it flatly:
+
+> *"Power lives in **what the product knows about your files** — the twenty-field
+> readout, the facets, the tag tools."* (`03:626–629`)
+
+*"You have played this 34 times since 2019"* is context no streaming service can
+give you, and it is already in a file on the listener's disk. So the feed is
+designed **excellent with zero network first**, and §8.6's enrichment is a layer
+the composition must not have a hole in when it is absent.
+
+### 8.1 The inventory, and what each fact is worth
+
+Everything below is on disk today. The last column is the honest one: whether it
+is *interesting*, because a feed of boring true facts is worse than no feed.
+
+| # | Fact | Source, cited | Worth reading? |
+|---|---|---|---|
+| F1 | **"Played 34 times since March 2019"** | `TrackHistory::plays`, `first_played_unix_s` (`history/read.rs:150–159`) | **The best one.** It is the ledger's own permitted form (`REFUSALS.md:71–73`), and it is the fact nobody else has |
+| F2 | **"Last played 8 months ago"** | `TrackHistory::last_played_unix_s` | **Strong.** Re-encountering something you had forgotten is the surface's best moment |
+| F3 | **"You have never played this before"** | `Recency::Never`, the ledger's *positive* statement, distinct from `Unrecorded` (`0018-play-history-ledger.md:5–11`) | **Strong**, and honest — it is a thing the ledger knows, not an absence |
+| F4 | **The signal path in full** — source rate, output rate, whether anything converted, whether the device is held exclusively, whether any gain stage touches the samples | `PlayerState::signal_path()` (`player.rs:2016–2027`) — **dead code today**, kept because *"a diagnostics readout is ADR-0009's next step"* | **Strong for Karl** (`research/05-personas.md:35`), and it is already computed and currently thrown away |
+| F5 | **"FLAC · 24-bit · 96 kHz · 47.2 MB"** | the condition report; `EditionVm::bit_depth` (`vm.rs:195–202`, `:1041`), `format_size` (`vm.rs:1079`) | Solid, and already rendered elsewhere |
+| F6 | **"Measured −14.2 LUFS, peak −0.3 dBFS"** | ADR-0015's analysis; `Loudness::integrated_lufs` / `sample_peak` (`loudness.rs:390–397`) | **Underrated.** It is a real measurement baz performed, to a named standard, and it explains why this record is louder than the last |
+| F7 | **"Released 1988 · Art rock"** | the scan's tag read, folded into `vm::AlbumVm` | Weak alone, fine in rotation |
+| F8 | **"Track 6 of 6 · the last on side two"** | track/disc numbers | Pleasant; the record's own structure |
+| F9 | **"From *Sunday Morning.m3u*"** | `queue_provenance()` (`player.rs:1722`) | Good — it answers *why is this playing* |
+| F10 | **"Then 2 albums · 1:58:00 left"** | `continuation_note()` (`player.rs:1695`) | Already in the bar; **excluded** from the feed for that reason (§6.0's rule) |
+| F11 | **"One of 47 records by this artist in your collection"** | derivable from the index, no new storage | **Strong.** It is the record's position in *your* collection, which is the sentence §5.5 wanted to be true |
+
+**Three honest absences**, stated so nothing below quietly assumes them:
+
+- **baz does not store when a record was added.** `FileStamp` holds `mtime_ns`
+  and size (`library.rs:231`, `:246`), and a file's mtime is when it was *last
+  written*, not when it entered the collection — a re-tag rewrites it. *"Added
+  in 2019"* would therefore be a plausible-looking lie. It is **not shipped**;
+  §13 D4 ranks the first-seen column that would make it true.
+- **baz does not read embedded lyrics.** Nothing in the scan asks for them.
+- **baz holds no MusicBrainz IDs**, and every enrichment source worth having is
+  MBID-keyed (`VISION.md` pillar 5) — which is the strongest single argument for
+  finishing the local feed before designing the network layer.
+
+### 8.2 The rotation rule, in one sentence
+
+The ledger's discipline here is the no-invisible-pool rule — *"a shuffle whose
+source you cannot see is a recommendation engine wearing a dice icon"*
+(`REFUSALS.md:40–47`). A rotating fact is close enough to that line that the
+rule which picks facts must be statable in a sentence. It is:
+
+> **The feed shows one fact at a time, cycling in a fixed order through exactly
+> the facts this record has, advancing every 20 seconds, on every track change,
+> and whenever you press it.**
+
+Four properties, each deliberate:
+
+- **The pool is the record.** Not the collection, not a recommendation set, not
+  anything the listener cannot enumerate. Every fact on screen is about the
+  thing currently sounding, and pressing through the cycle shows you the whole
+  pool in under a minute. **The pool is visible by exhaustion**, which is the
+  strongest form of the ledger's requirement.
+- **The order is fixed, not random**, despite the brief's *"random facts"*. A
+  fixed cycle is what makes the pool inspectable; a random draw would mean a
+  fact you saw once and could not get back. The order is F1 → F2/F3 → F11 →
+  F6 → F4 → F5 → F9 → F7 → F8, ranked by the *worth reading* column, so the
+  best fact is the one you see on a track change. **It feels varied because
+  records differ in which facts they have**, which is variety from the data
+  rather than from a die.
+- **Facts a record does not have are absent, not empty.** No dashes, no "unknown"
+  — a record with no ReplayGain analysis simply has no F6 in its cycle, exactly
+  as S3's signal register is *absent, not empty*.
+- **It advances on a press**, which makes it a control rather than a
+  performance, and satisfies `REFUSALS.md:249–250` — the line is a labelled,
+  pointer-reachable target, not a thing that only happens *to* you.
+
+### 8.3 Why it is one line and not a panel
+
+The brief says *"a feed"*, and the temptation is a scrolling column. It is one
+line, for §1.2's reason: **at 3 m a column of `SIZE_BODY` 13 is not small, it is
+absent.** A feed you cannot read from the chair you left the screen for is
+decoration. One line at `SIZE_BODY` on the placard column, at the work's own
+width, is legible at 60 cm and — at kiosk scale, where §11.3 steps the type — at
+3 m as well.
+
+It also keeps the reserved-slot promise (`bottom_bar.rs:74–86`): **one line
+high, always**, whether the fact is short or long, so nothing on the surface
+moves when the fact changes. A fact longer than the width elides; it does not
+wrap and it does not reflow the composition.
+
+### 8.4 The engagement-stats line, and which side this falls on
+
+`REFUSALS.md:68–73` is the entry that binds hardest here, and it is worth
+quoting rather than paraphrasing:
+
+> **No engagement stats.** No Wrapped, no streaks, no charts, no "top artists of
+> the year", no listening-time totals. **History records; it never performs.**
+>
+> What history is allowed to surface: the PLAYED group key, the inspector card
+> ("PLAYED — N times since YYYY", plus a column of date stamps), and the pull's
+> weighting. Nothing else.
+
+**The finding: F1 is not near the line — it is the permitted item, verbatim.**
+The entry enumerates three permitted surfaces and one of them is *"PLAYED — N
+times since YYYY"*. F1 is that string. And §1 established that this permission
+**lost its home** when ADR-0022 deleted the inspector: the fact has been
+permitted and homeless since. So the feed is not asking for a new licence; it is
+the room an existing one has been waiting for.
+
+**Where the line actually is, and the three things kept on the far side:**
+
+| Refused | Why it is the refused thing |
+|---|---|
+| **`listened_ms` as a total** — "you have listened to 4.2 hours of this artist" | A listening-time total, refused by name. The field exists (`history/read.rs:157`) and is **deliberately not rendered** |
+| **Any cross-track or cross-artist aggregation** — "your most played record this month" | This is a chart. The pool would be the collection rather than the record, which also breaks §8.2 |
+| **Any framing that congratulates** — "you're on a 6-day streak", "your #1 record" | *History records; it never performs.* The tone test is that every fact reads as an **archivist's note** (`REFUSALS.md:348–350`'s posture for the condition report), stated flatly, with no second person doing anything impressive |
+
+**The tone rule, made concrete.** *"Played 34 times since March 2019"* is a
+record. *"You've played this 34 times — one of your favourites!"* is a
+performance. The difference is not the number; it is whether the sentence has an
+opinion about the listener. Every string in F1–F11 is written in the first form,
+and that is a reviewable property rather than a matter of taste.
+
+**F11's edge case, admitted.** *"One of 47 records by this artist in your
+collection"* is an aggregation — over the collection, not over history. It is
+permitted because it is a fact about **the library's contents**, which is what
+the wall already displays and what group keys already count; it says nothing
+about listening. Had it been *"your 3rd most-played artist"*, it would be a
+chart and refused.
+
+### 8.5 What the feed costs
+
+Honestly, and it is not zero:
+
+- **The data is already in memory.** The history snapshot is read once at open
+  (`app.rs:3422–3431`) and the tags come from the index. No disk read happens to
+  render a fact.
+- **The clock is `time::every(20 s)` — three wakeups a minute**, under the same
+  structural guard as §7.3 (place on screen, T3 on). For scale, baz already runs
+  `REFRESH_TICK` at one wakeup a minute while idle (`app.rs:82`, installed at
+  `app.rs:3912–3921`), and ADR-0020's accepted idle cost includes it. Three is
+  the same order of magnitude, it is stated rather than hidden, and it is
+  **gone** when the place is not showing.
+- **One new subscription to `PlayRecorded`.** For the count to be current rather
+  than stale, the ledger must be re-read when a play is recorded. Today
+  `Event::PlayRecorded` **has no consumer in `crates/baz` at all** — §12 step 5
+  is that wiring, and it is the only place in this document where a readout needs
+  new plumbing rather than a new view.
+
+### 8.6 The network layer, if it is ever built
+
+Every constraint below is a requirement, not a preference, and none of it is in
+§12's plan — it is ranked in §13 as **D2**, deliberately behind everything local.
+
+- **Individually opt-in**, per source, off by default (`README.md:22–24`,
+  `VISION.md` pillar 3). Not one "enable online features" switch.
+- **Blocked on an identifier baz does not store.** MusicBrainz, Discogs and
+  Wikipedia are all MBID-keyed; §8.1's third absence is the real first step, and
+  it is a scan-and-schema change rather than a UI one.
+- **Cached to disk, and the cache is the user's** — same posture as the ledger:
+  a plain local file they can inspect, back up or delete.
+- **Attributed on the fact itself.** A fact from Wikipedia says so, in the line,
+  because a screen that mixes *measured from your file* with *scraped from the
+  web* without marking which is which is the beginning of snake oil
+  (`REFUSALS.md:348–350`).
+- **Refusable and failure-silent.** No network, no spinner, no error — the
+  cycle simply has fewer facts in it, exactly as a record with no ReplayGain has
+  no F6. This is the property that makes the local design load-bearing: **if the
+  network layer's failure mode is "the feed is slightly shorter", the surface was
+  designed correctly.**
