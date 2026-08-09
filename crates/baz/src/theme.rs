@@ -4054,11 +4054,26 @@ mod tests {
             let source = std::fs::read_to_string(&path)
                 .expect("a source file baz ships")
                 .replace("\r\n", "\n");
-            let source = source.split("#[cfg(test)]").next().unwrap_or_default();
-            if source.contains("WORK_TITLE") {
+            // Code lines only. A module that *names* the token in prose to
+            // say it is deliberately not using it — `views/now_playing.rs`
+            // does exactly that — is not a consumer, and a test that could
+            // not tell the difference would punish the file for explaining
+            // itself.
+            let code: String = source
+                .split("#[cfg(test)]")
+                .next()
+                .unwrap_or_default()
+                .lines()
+                .filter(|line| {
+                    let line = line.trim_start();
+                    !(line.starts_with("//") || line.starts_with("/*"))
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if code.contains("WORK_TITLE") {
                 users.push(relative.clone());
             }
-            if source.contains("font::SERIF") {
+            if code.contains("font::SERIF") {
                 names_family.push(relative);
             }
         }

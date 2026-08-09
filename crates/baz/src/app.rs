@@ -3675,9 +3675,13 @@ impl App {
                 self.body_width(),
                 collecting,
             ),
-            (Screen::Shelf(state), Place::NowPlaying) => {
-                views::now_playing::view(state, &self.player, self.body_width())
-            }
+            (Screen::Shelf(state), Place::NowPlaying) => views::now_playing::view(
+                state,
+                &self.player,
+                ink,
+                self.body_width(),
+                self.body_height(),
+            ),
             (Screen::Shelf(state), Place::Settings) => {
                 // Built here rather than inside the view: the folders come from
                 // the shell's own list and their contents from the index, and a
@@ -3804,6 +3808,26 @@ impl App {
             Screen::Shelf(state) if self.place.wears_lane() => state.body_width(),
             _ => self.window.width,
         }
+    }
+
+    /// **The height a place's body gets**: the window, less the now-playing
+    /// bar and its hairline.
+    ///
+    /// [`Self::body_width`]'s other half, and it exists for the same reason: a
+    /// place that sized itself against the *window* would compose over the bar
+    /// and have its last row cut off by it — which is exactly what the first
+    /// render of the Now playing place did, with the artwork clipped at the
+    /// top and the transport off the bottom edge.
+    ///
+    /// Only that place asks. It is the one place whose composition is bounded
+    /// in both axes, because it is the one place that must fit without
+    /// scrolling. The two new places wear no strip of their own — the returns
+    /// lane is the route in and out of them — so nothing comes off the top.
+    fn body_height(&self) -> f32 {
+        if *self.player.availability() == Availability::NotBuilt {
+            return self.window.height;
+        }
+        (self.window.height - theme::BAR_CONTENT_H - 1.0).max(0.0)
     }
 
     /// Whether the playlist panel is on screen: summoned, over a shelf, and

@@ -159,7 +159,7 @@ park
 shot 07-home-without-an-interrupted-run-1280
 click "$NOW_X" "$NOW_Y"
 park
-shot 08-now-playing-1280
+shot 08-now-playing-sounding-1280
 click "$LIB_X" "$LIB_Y"
 
 # **The panel**: the affordance the owner named, and the ghost row that
@@ -215,11 +215,24 @@ fi
 echo "  --- session.toml after the quit ---"
 sed -n '1,6p' "$S/config/baz/session.toml" 2>/dev/null || echo "  (none written)"
 
-# **Home, with an interrupted run** — the same baz, reopened.
+# **Home, with an interrupted run** — the same baz, reopened. And the Now
+# playing place with nothing sounding, which is the same relaunch: the run is
+# loaded and silent until `Resume` is pressed, so this frame is the honest
+# "nothing is playing" state rather than a contrivance.
 launch $W $H
 click "$HOME_X" "$HOME_Y"
 park
 shot 16-home-with-an-interrupted-run-1280
+click "$NOW_X" "$NOW_Y"
+park
+shot 17-now-playing-silent-1280
+# …and `Resume` puts the run back on where it stopped.
+click "$HOME_X" "$HOME_Y"
+click 500 180
+sleep 2
+click "$NOW_X" "$NOW_Y"
+park
+shot 18-now-playing-after-resume-1280
 stop
 
 # --------------------------------------------------------------- 1920 × 1080
@@ -231,6 +244,15 @@ shot 20-lane-open-1920
 key ctrl+b
 park
 shot 21-lane-collapsed-1920
+key ctrl+b
+# The Now playing place at 1920 — the same surface, bigger, which is the whole
+# of what makes the kiosk mode this surface at a larger size.
+click "$HOME_X" "$HOME_Y"
+click 500 180
+sleep 2
+click "$NOW_X" "$NOW_Y"
+park
+shot 23-now-playing-1920
 stop
 
 # A launch with the lane stored collapsed — the state survives a restart.

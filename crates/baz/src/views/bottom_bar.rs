@@ -648,10 +648,26 @@ fn signal_path(player: &PlayerState) -> Element<'_, Message> {
 /// control in the app; and glyphs over the playing cover need the playing cover
 /// to be *on screen*, which after a filter or a long scroll it is not.
 /// `docs/REFUSALS.md`'s visible-control rule makes it binding.
-fn transport_row(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
+/// **The transport, on its own** — the three glyph buttons, without the bar's
+/// zone padding.
+///
+/// Shared with the Now playing place (ADR-0030 as the owner extended it): that
+/// place needs the transport at its own scale and in its own composition, and
+/// a second set of three buttons sending the same three messages would be
+/// two controls per intention, which L8.6 forbids. One row, two callers, the
+/// same tooltips and the same enablement.
+///
+/// The bar keeps its own wrapper ([`transport_row`]) because the zone's lead
+/// is derived from the *band*, which the place does not have.
+pub(crate) fn transport(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
+    transport_glyphs(player, ink)
+}
+
+/// The three glyph buttons, and nothing around them.
+fn transport_glyphs(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
     let pending = player.transport_pending();
     let toggle = player.play_pause();
-    let transport = row![
+    row![
         glyph_button(
             icon::Glyph::Previous,
             "Previous track",
@@ -680,7 +696,12 @@ fn transport_row(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
             ink,
         ),
     ]
-    .spacing(theme::GAP_SM);
+    .spacing(theme::GAP_SM)
+    .into()
+}
+
+fn transport_row(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
+    let transport = transport_glyphs(player, ink);
     // **The zone states the band's lead rather than borrowing the row's
     // centring** (law L4). `BAR_LEAD` is derived — whatever is left of
     // [`theme::BAR_CONTENT_H`] once the transport has taken its 32, halved — so

@@ -263,7 +263,7 @@ fn continue_band<'a>(
 /// The amber is licensed: this is playback truth, which is the accent's one
 /// meaning. The tick is what turns a proportion into a *position* — a bar
 /// alone reads as "how much", and a mark on it reads as "where".
-fn needle(elapsed_ms: u64, total_ms: u64, width: f32) -> Element<'static, Message> {
+pub(crate) fn needle(elapsed_ms: u64, total_ms: u64, width: f32) -> Element<'static, Message> {
     let room = theme::active();
     let (filled, rest) = needle_runs(elapsed_ms, total_ms, width);
     let lane = |w: f32, colour: iced::Color, h: f32| {
