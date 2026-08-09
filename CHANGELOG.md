@@ -526,6 +526,34 @@ next commit.
   whether the widget consumed the key and never second-guesses the answer.
 - Presentation split into a `views/` module tree, verified pixel-identical
   across six screens before and after the move (ADR-0006).
+- **Controls and iconography, by rule** (design doc 10, ADR-0026 —
+  accepted). One rule now decides every control's form: icon-only where the
+  symbol is universal *and* the semantics are exactly baz's, word-only where
+  the act is baz's own, glyph-plus-word where the act is conventional and
+  the scope is not. What that means on screen: the Settings door is **the
+  gear** (a 32 px glyph button with a tooltip, in the transport's own
+  hover-ink anatomy); the search well wears **the magnifier** and carries
+  the collection counts as its placeholder, with the match count
+  (`7 / 1284`) in a reserved slot beside the caret; `Play all` leads its
+  cluster with the play triangle (no accent — the lamp stays the pages'
+  one commitment); and every row slot draws one mark technology — `+`, ↑,
+  ↓ and the settings steppers' −/+ are drawn glyphs now, matching the ✕
+  beside them in stroke and ink, each named by its tooltip. `Shuffle` and
+  `Pull` deliberately stay words: the crossed-arrows convention promises a
+  mode baz refuses to have, and the pull has no convention at all.
+- **The Library strip has a charter and a budget law (L9)**, asserted in
+  code: every tenant declares a reserved width, the sum must fit the
+  declared single-line floor, and below 960 px the strip **splits into two
+  lines** (frame line: well and doors; library line: arrangement and acts)
+  instead of overflowing — which it previously did at the shipped window
+  whenever a scan with skipped files was running. The well is fluid
+  (280 → 200), 600 px is the strip's floor and the window's declared
+  minimum width, and the app's layout estimate reads the resolved strip
+  height so the virtualizer cannot be told the wrong regime. The bottom
+  bar is deliberately untouched — examined against the form rule and
+  passed as shipped, verified by pixel diff.
+- The Settings place's header is `place_header` now — the frame is one
+  function in five places rather than two that could drift.
 
 **Desktop integration (Linux)**
 

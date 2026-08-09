@@ -356,6 +356,21 @@
   entry above). Wall membership, rail sorting and search-corpus membership
   for playlists stay deferred (ADR-0024 §A2); the sleeve (§A1) is the
   vocabulary any outcome keeps.
+- **The settings steppers' marks do not ride the transport's hover tween.**
+  Doc 10 §7 step 6 swapped their font `−`/`+` for the drawn glyph pair at
+  the resting ink; the row-slot glyphs draw at the hovered weight because
+  they exist only under the pointer, but the steppers stand at rest, and
+  brightening their marks on hover would need two more `motion::Control`
+  identities and the `mouse_area` wiring the transport carries. The button
+  ground answers hover meanwhile, which is what every word control gets;
+  wire the ink if the steppers ever read as dead.
+- **The strip's split regime never hosts a third line** (doc 10 §8, stated
+  so a future proposal meets the reason): a tenant that does not fit the L9
+  budget re-homes by subject (doc 07's L8) or displaces an argued
+  incumbent — the budget law's answer is re-homing, not accretion. The
+  Marquee lens's switcher form (ADR-0017 step 18) is likewise left to its
+  own design: `WALL · MARQUEE` will be a state row in the state row's
+  vocabulary, and nothing shipped pre-empts its keys.
 - **No keyboard route out of the search field.** Transport keys are bound
   (`crates/baz/src/keys.rs`), but iced 0.13's `text_input` captures every key
   press while focused except Tab and the vertical arrows, so while the search
