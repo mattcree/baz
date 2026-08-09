@@ -21,6 +21,10 @@
 //!   ReplayGain.
 //! - [`bottom_bar`] — now-playing, transport, the two timestamps, and the
 //!   needle flush on the window's bottom edge.
+//! - [`context_menu`] — the mirror layer's float (doc 09 §5.2): the card of
+//!   verbs at the pointer, over whichever place and the bar alike. Not a
+//!   surface of its own — every item is a press some visible control also
+//!   makes ([`crate::menu`]).
 //!
 //! # There is one kind of surface now, and a bar
 //!
@@ -59,6 +63,7 @@
 
 pub(crate) mod album;
 pub(crate) mod bottom_bar;
+pub(crate) mod context_menu;
 pub(crate) mod playlist;
 pub(crate) mod playlist_panel;
 pub(crate) mod queue;

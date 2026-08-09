@@ -41,6 +41,7 @@ mod font;
 mod groove;
 mod icon;
 mod keys;
+mod menu;
 mod motion;
 mod mpris;
 mod needle;

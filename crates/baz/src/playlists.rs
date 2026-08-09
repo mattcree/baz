@@ -411,6 +411,19 @@ impl Playlists {
         self.rows.iter().find(|row| row.id == id)
     }
 
+    /// Whether a list by this name stands in the folder **right now** — the
+    /// folder's own answer, not [`Self::rows`]', because the rows are only
+    /// refreshed while the panel is being used and the context menu asks at
+    /// a right-press, panel or no panel (doc 09 §6: a rename or delete
+    /// under the run withdraws the verb rather than letting it dangle).
+    #[must_use]
+    pub(crate) fn holds(&self, name: &str) -> bool {
+        self.folder
+            .as_ref()
+            .and_then(|folder| folder.list().ok())
+            .is_some_and(|listed| listed.iter().any(|file| file.name == name))
+    }
+
     /// The `Playlists` door, and <kbd>Ctrl</kbd>+<kbd>P</kbd>: summon the
     /// panel, or close it. Closing puts down everything the panel was holding
     /// — a pick, a half-typed name — because a closed panel holding a pick
@@ -1317,6 +1330,125 @@ mod tests {
         playlists.submit_new(&library);
         let fresh = playlists.row(playlist_id("Fresh")).expect("created");
         assert_eq!(fresh.entries, 1, "the pick completed into the new list");
+    }
+
+    /// **S4, headless, at the layer every route ends in** (doc 09 §4): the
+    /// sounding song reaches the current playlist in two gestures from
+    /// anywhere — right-click the bar, press `Add to "{name}"`.
+    ///
+    /// Given a queue whose provenance names a playlist that still exists;
+    /// when the bar's menu is built, then the item is listed, naming the
+    /// list, and its presses are exactly the sounding row's `+` and the
+    /// picker's hoisted row; when those presses land here, then the *file*
+    /// gains the track — its entries checked exactly, order and all, the
+    /// fingerprint of the artefact — and **the run is untouched**: the
+    /// queue record is bit-for-bit what it was (the decoupling rule,
+    /// ADR-0024 §1, restated by 09 §6), and the shell arm the pick lands in
+    /// reaches no engine at all, pinned in its source below.
+    #[test]
+    fn s4_the_bars_menu_sends_the_sounding_song_to_the_current_playlists_file_only() {
+        use crate::app::Message;
+
+        let (_keep, folder) = folder();
+        let library = library();
+        let mut playlists = Playlists::over(folder);
+        let id = {
+            let folder = playlists.folder.as_ref().expect("folder");
+            write_list(folder, "Road Trip", &["/m/low/sunflower.flac"])
+        };
+        // Given: the run was reified from "Road Trip" and is sounding at
+        // row 0. The record is a value; nothing below may change it.
+        let run = QueueVm {
+            album: Some("Apollo".to_owned()),
+            artist: "Eno".to_owned(),
+            items: vec![item("An Ending", "/m/eno/ascent.flac")],
+            provenance: Some("Road Trip".to_owned()),
+        };
+        let before = run.clone();
+        // The menu's facts, derived exactly as `App::menu_facts` derives
+        // them: provenance, filtered through the folder's own listing.
+        let current = run
+            .provenance
+            .as_deref()
+            .filter(|name| playlists.holds(name))
+            .map(|name| (playlist_id(name), name.to_owned()));
+        assert!(current.is_some(), "the file stands, so the verb does");
+        let facts = crate::menu::Facts {
+            engine_ready: true,
+            collecting: playlists.available(),
+            current,
+            playing_album: Some(7),
+            playing_queue_row: Some(0),
+        };
+        // When the bar is right-clicked: the item is listed, named —
+        let listed = crate::menu::items(crate::menu::Target::NowPlaying, &facts);
+        let add = listed
+            .iter()
+            .find(|entry| entry.label == "Add to \u{201c}Road Trip\u{201d}")
+            .expect("S4's verb, naming the current playlist");
+        // — and its presses are the sounding row's `+` then the hoisted
+        // pick, in that order.
+        assert!(
+            matches!(
+                add.presses.as_slice(),
+                [Message::AddQueuedToPlaylist(0), Message::PickPlaylist(picked)]
+                    if *picked == id
+            ),
+            "{:?}",
+            add.presses
+        );
+        // When the presses land (their arms' own calls, at this layer):
+        let sounding = &run.items[0];
+        playlists.begin_pick(
+            Some(&library),
+            format!("Add \u{201c}{}\u{201d}", sounding.title),
+            entries_for_items(std::slice::from_ref(sounding)),
+            vec![sounding.clone()],
+        );
+        playlists.pick(id, &library);
+        // Then the file gained the track — exactly, in order, and nothing
+        // else changed in it.
+        let written = playlists
+            .folder
+            .as_ref()
+            .expect("folder")
+            .list()
+            .expect("list")
+            .into_iter()
+            .find(|file| file.name == "Road Trip")
+            .expect("the file still stands")
+            .read()
+            .expect("read");
+        let entries: Vec<PathBuf> = written.entries().map(|entry| entry.path.clone()).collect();
+        assert_eq!(
+            entries,
+            vec![track("/m/low/sunflower.flac"), track("/m/eno/ascent.flac")],
+            "the artefact's exact contents: what it held, then the append"
+        );
+        // …and the run is untouched: the record is what it was, provenance
+        // included — the file is the kept thing, the run is tonight's
+        // snapshot.
+        assert_eq!(run, before, "the live queue is unchanged");
+        // The shell arm the pick lands in reaches no engine — pinned in its
+        // source, so a future "append to both" cannot arrive silently (the
+        // tempting alternative 09 §6 weighed and refused).
+        let shell = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("the shell's source")
+        .replace("\r\n", "\n");
+        let arm = shell
+            .split_once("Message::PickPlaylist(id) => {")
+            .expect("the pick arm exists")
+            .1;
+        let arm = &arm[..arm.find("\n            }\n").expect("an arm ends")];
+        for forbidden in ["playback.send", "UpdateQueue", "note_queue"] {
+            assert!(
+                !arm.contains(forbidden),
+                "a file pick reached for `{forbidden}` — the append goes to \
+                 the file only (09 §6)"
+            );
+        }
     }
 
     #[test]

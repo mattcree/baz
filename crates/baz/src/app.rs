@@ -45,7 +45,7 @@ use baz_core::replaygain::ReplayGainSettings;
 use iced::keyboard;
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
 use iced::widget::{column, image as iced_image, scrollable, text_input};
-use iced::{Element, Size, Subscription, Task, window};
+use iced::{Element, Point, Size, Subscription, Task, window};
 use lru::LruCache;
 
 use crate::motion::{Control, Ink, Keyed, Tween};
@@ -55,8 +55,8 @@ use crate::playback::{Playback, PlayerEvent};
 use crate::player::{Availability, PlayerState};
 use crate::scan::ScanUpdate;
 use crate::{
-    art, config, font, keys, motion, mpris, player, queue_edit, scan, shelf, shuffle, theme, views,
-    vm,
+    art, config, font, keys, menu, motion, mpris, player, queue_edit, scan, shelf, shuffle, theme,
+    views, vm,
 };
 
 /// The top bar's height, used for the pre-first-scroll estimate of the grid
@@ -334,6 +334,13 @@ pub(crate) enum Message {
     /// neighbour — the no-drag reorder route the visible-control rule
     /// requires (ADR-0024 §4).
     PlaylistShiftEntry(usize, i32),
+    /// A playlist row's `+`: hold that row's track and open the panel as the
+    /// picker — the transfer slot the queue's rows carry, completing
+    /// doc 09 §8.2's "same editor" anatomy on the page's side (and the
+    /// visible twin §5.2's mirror rule requires of the page rows' menu
+    /// items). File edits stay where they were: this reads the row, writes
+    /// nothing.
+    PlaylistAddEntry(usize),
     /// The playlist page's `Rename`: open the name field, seeded with the
     /// current name.
     PlaylistRenameStart,
@@ -605,6 +612,25 @@ pub(crate) enum Message {
     PointerPressed,
     /// The left button came up. Ends the press wherever it landed.
     PointerReleased,
+    /// A right press on one of §5.2's four menu objects (doc 09): open the
+    /// context menu for `target` at the pointer — the [`Point`] is the
+    /// press's window position, read by [`crate::menu::area`] because
+    /// `mouse_area`'s own `on_right_press` message carries none and the
+    /// float opens *at the pointer*, flipped inside the window at its
+    /// edges.
+    ///
+    /// Opening while another menu stands replaces it — the overlay state is
+    /// a single `Option`, so "one menu at a time" is structure, not policy.
+    OpenMenu(menu::Target, Point),
+    /// A left press on the open menu's backdrop: put the menu down. The
+    /// press is spent on the closing — it reaches no control underneath —
+    /// which is what a press outside an open menu means everywhere else on
+    /// the desktop.
+    CloseMenu,
+    /// The open menu's item `index` was pressed: close the menu and make
+    /// the presses the item mirrors (§5.2's rule — every one a message
+    /// some visible control also sends; [`crate::menu::Item`]).
+    MenuItemPressed(usize),
 }
 
 struct App {
@@ -652,6 +678,15 @@ struct App {
     /// Which track row of the **record's page** the pointer is on — the same
     /// mechanism again, for the row's reserved `+` slot (ADR-0024 §6).
     hovered_album_row: Option<usize>,
+    /// The open context menu, if one stands (doc 09 §5.2) — `None` at rest.
+    ///
+    /// **One `Option` is the whole overlay state**, which is what makes
+    /// "one menu at a time" structural: opening another replaces this one,
+    /// and every close — <kbd>Esc</kbd> (the peel's outermost layer), a
+    /// press outside, an item press, any navigation — is `None` by one
+    /// assignment. The items are captured at open, so a press sends exactly
+    /// what was offered on screen ([`crate::menu::Menu`]).
+    menu: Option<menu::Menu>,
     /// The playlist surfaces: the panel, the open page, and the shelf of
     /// files behind both ([`crate::playlists`], ADR-0024 §4–§6).
     ///
@@ -859,6 +894,7 @@ impl App {
             queue_scroll: 0.0,
             hovered_playlist_row: None,
             hovered_album_row: None,
+            menu: None,
             playlists: crate::playlists::Playlists::start(),
             window: WINDOW,
             playback,
@@ -887,6 +923,7 @@ impl App {
         // cannot move a pixel of layout, and the modifier layer, which decides
         // whether a keystroke was even text.
         for machine in [
+            Self::update_menu,
             Self::update_motion,
             Self::update_modified_input,
             Self::update_playlists,
@@ -1199,6 +1236,88 @@ impl App {
         }
     }
 
+    /// The context menu's own small machine (doc 09 §5.2): open at the
+    /// pointer, close, and make an item's presses. First among the machines
+    /// because the menu is the topmost layer wherever it stands — a message
+    /// that is the menu's is nobody else's.
+    fn update_menu(&mut self, message: &Message) -> Option<Task<Message>> {
+        match message {
+            Message::OpenMenu(target, at) => {
+                // The items are decided now, against the facts as they
+                // stand, and captured — the menu shows what the listener
+                // saw, and a press sends exactly what was on screen. A
+                // target none of whose verbs can act offers nothing: no
+                // card of disabled words, and no card at all.
+                let listed = menu::items(*target, &self.menu_facts());
+                self.menu = (!listed.is_empty()).then(|| menu::Menu {
+                    at: *at,
+                    items: listed,
+                });
+                Some(Task::none())
+            }
+            Message::CloseMenu => {
+                self.menu = None;
+                Some(Task::none())
+            }
+            Message::MenuItemPressed(index) => {
+                let Some(open) = self.menu.take() else {
+                    return Some(Task::none());
+                };
+                let Some(item) = open.items.into_iter().nth(*index) else {
+                    return Some(Task::none());
+                };
+                // **The accelerator makes the presses the hand would have
+                // made** — each message re-enters the ordinary update loop,
+                // so a menu press and a control press are one code path by
+                // construction (the mirror rule's mechanical half).
+                let panel_was_open = self.playlists.panel_open;
+                let tasks: Vec<Task<Message>> = item
+                    .presses
+                    .into_iter()
+                    .map(|press| self.update(press))
+                    .collect();
+                // The picker summoned by the item's own intermediate press
+                // and completed by its last does not outlive the gesture: a
+                // right-click `Queue` must not leave a panel standing the
+                // listener never asked for. A panel that was already open
+                // stays open (its counts just changed — closing it would
+                // hide the effect of the press), and an item whose *point*
+                // is the picker — `Add to playlist…` — leaves a pick in
+                // flight, so the panel stays for it too.
+                if !panel_was_open && self.playlists.pending.is_none() {
+                    self.playlists.close_panel();
+                }
+                Some(Task::batch(tasks))
+            }
+            _ => None,
+        }
+    }
+
+    /// The readings the menu builder decides items against
+    /// ([`menu::Facts`]) — snapshots, so [`menu::items`] stays a pure
+    /// function the mirror test can sweep without an `App`.
+    fn menu_facts(&self) -> menu::Facts {
+        menu::Facts {
+            engine_ready: self.player.engine_ready(),
+            collecting: self.playlists.available(),
+            current: self.current_playlist(),
+            playing_album: self.player.playing_album(),
+            playing_queue_row: self.player.playing_queue_row(),
+        }
+    }
+
+    /// The **current playlist** (09 §6): playing provenance naming a file
+    /// that still exists — checked against the folder itself rather than
+    /// the panel's rows, which are only refreshed while the panel is used.
+    /// A rename or delete under the run answers `None`, and the menu's
+    /// `Add to "{name}"` withdraws rather than dangling.
+    fn current_playlist(&self) -> Option<(u64, String)> {
+        let name = self.player.queue_provenance()?;
+        self.playlists
+            .holds(name)
+            .then(|| (crate::playlists::playlist_id(name), name.to_owned()))
+    }
+
     /// Answer a message that belongs to the **playlist surfaces** — the
     /// panel, the page, the adds and the queue place's save — reporting
     /// whether it was one (`Some`), and with which follow-up task.
@@ -1234,10 +1353,14 @@ impl App {
                 // page is opened only once its file actually read.
                 let leaving = self.place == Place::Playlist(*id);
                 if leaving {
+                    self.menu = None;
                     self.place = self.place.playlist(*id);
                 } else if let Screen::Shelf(state) = &self.screen
                     && self.playlists.open_page(*id, &state.library)
                 {
+                    // The place changes, so an open menu goes with it
+                    // (`go`'s rule).
+                    self.menu = None;
                     self.place = self.place.playlist(*id);
                 }
             }
@@ -1282,6 +1405,7 @@ impl App {
                     self.playlists.shift_entry(*row, *delta, &state.library);
                 }
             }
+            Message::PlaylistAddEntry(row) => self.add_playlist_entry_to_picker(*row),
             Message::PlaylistRenameStart => {
                 if let Some(open) = &mut self.playlists.open {
                     let seeded = open.name().to_owned();
@@ -1489,6 +1613,32 @@ impl App {
             .begin_pick(Some(&state.library), label, entries, vec![item]);
     }
 
+    /// One **playlist-page row's** track toward the picker — the page's `+`
+    /// (doc 09 §8.2's "same editor" anatomy, the page's own side of the slot
+    /// the queue rows carry; the visible twin §5.2's mirror rule requires of
+    /// the page rows' menu items).
+    ///
+    /// The track is read through the row's `playable_position` into the
+    /// page's own queue shape — exactly what a press on the row would play —
+    /// so a missing entry (no position) asks for nothing, and what the
+    /// picker holds is what was pointed at. The file is not touched: this is
+    /// a read of the page, never an edit to it.
+    fn add_playlist_entry_to_picker(&mut self, row: usize) {
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        let Some(item) = self.playlists.open.as_ref().and_then(|open| {
+            let position = open.rows.get(row)?.playable_position?;
+            open.queue.items.get(position).cloned()
+        }) else {
+            return;
+        };
+        let entries = crate::playlists::entries_for_items(std::slice::from_ref(&item));
+        let label = format!("Add \u{201c}{}\u{201d}", item.title);
+        self.playlists
+            .begin_pick(Some(&state.library), label, entries, vec![item]);
+    }
+
     /// The playlist page's `Play`: the playable subset as the queue, playing
     /// (ADR-0024 §4). `SetQueue` then `Play` — `play_album`'s exact shape,
     /// because playing a playlist **copies** it into the queue and from that
@@ -1665,6 +1815,11 @@ impl App {
     /// folder question.
     fn go(&mut self, door: impl FnOnce(Place) -> Place) -> Task<Message> {
         if matches!(self.screen, Screen::Shelf(_)) {
+            // A menu is about something *in* the place it was opened over;
+            // it does not survive the place leaving (a keyboard door can
+            // navigate under an open menu — the pointer routes all close it
+            // on their own press).
+            self.menu = None;
             self.place = door(self.place);
         }
         Task::none()
@@ -1684,6 +1839,8 @@ impl App {
             return Task::none();
         };
         state.opened = Some(id);
+        // The place changes, so an open menu goes with it (`go`'s rule).
+        self.menu = None;
         self.place = self.place.album(id);
         Task::none()
     }
@@ -1698,6 +1855,8 @@ impl App {
     /// themselves. `Ctrl+R` re-pulls; this is the *"Esc returns"* half of the
     /// same sentence (`docs/design/critique/02-surfaces.md`).
     fn leave(&mut self) -> Task<Message> {
+        // The place changes, so an open menu goes with it (`go`'s rule).
+        self.menu = None;
         let leaving = self.place.showing_album();
         self.place = self.place.back();
         if let (Screen::Shelf(state), Some(id)) = (&mut self.screen, leaving)
@@ -1747,17 +1906,19 @@ impl App {
     /// spent one rule on each; ADR-0022 left one kind of surface, so the key's
     /// whole first question is *am I at home*:
     ///
-    /// 1. **The playlist panel's layers**, when it is summoned: its name
+    /// 1. **The context menu**, when one stands (doc 09 §5.2): it opens at
+    ///    the pointer over everything — the panel included — so it is the
+    ///    outermost layer and the first one down.
+    /// 2. **The playlist panel's layers**, when it is summoned: its name
     ///    field, a pick in flight, then the panel — it floats over every
-    ///    place it exists in, so it is always the top
-    ///    ([`crate::playlists::Playlists::peel`]; the armed layer died with
-    ///    the collecting mode, 09 §9).
-    /// 2. **The place's own transient fields** ([`Self::peel_place_states`]):
+    ///    place it exists in ([`crate::playlists::Playlists::peel`]; the
+    ///    armed layer died with the collecting mode, 09 §9).
+    /// 3. **The place's own transient fields** ([`Self::peel_place_states`]):
     ///    a rename mid-type, an armed delete, the queue's save field.
-    /// 3. **The place**, when it is not the Library. Backing out is what
+    /// 4. **The place**, when it is not the Library. Backing out is what
     ///    <kbd>Esc</kbd> means in a record's page, in the queue and in the
     ///    settings alike, and it is the same press as their `‹ Library`.
-    /// 4. Then the Library's own layers, in [`Shelf::peel`]'s order: the pull's
+    /// 5. Then the Library's own layers, in [`Shelf::peel`]'s order: the pull's
     ///    offer, the search query, the shuffle pool's marks.
     ///
     /// (In the search field itself iced 0.13's `text_input` consumes
@@ -1765,6 +1926,12 @@ impl App {
     /// documented two-press behaviour, and §4.6 of the design spec owns the
     /// fix.)
     fn escape(&mut self) -> Task<Message> {
+        // The context menu is the outermost layer wherever it stands — it
+        // floats over the panel itself — so it peels before everything, one
+        // layer per press (doc 09 §5.2).
+        if self.menu.take().is_some() {
+            return Task::none();
+        }
         // The playlist panel floats *over* every place it exists in, so its
         // layers peel first: the name field, a pick in flight, the panel
         // itself — one per press (ADR-0024 §5–§6, as amended by doc 09).
@@ -2570,6 +2737,7 @@ impl App {
                     &self.player,
                     self.window.width,
                     self.hovered_playlist_row,
+                    collecting,
                 ),
                 // The playlist vanished under its page — deleted or renamed
                 // on disk. The wall is the honest answer, drawn rather than
@@ -2617,14 +2785,29 @@ impl App {
         // The persistent bottom bar lives under every place — unless this build
         // has no audio output at all, in which case playback UI is hidden
         // entirely.
-        if *self.player.availability() == Availability::NotBuilt {
-            return screen;
+        let whole: Element<'_, Message> = if *self.player.availability() == Availability::NotBuilt {
+            screen
+        } else {
+            column![
+                screen,
+                views::bottom_bar::view(&self.player, self.place, ink),
+            ]
+            .into()
+        };
+        // **The context menu** (doc 09 §5.2), floated at the pointer by the
+        // same ADR-0016 mechanics as the panel — but stacked over the *whole
+        // window*, bar included, because the bar's own now-playing menu
+        // opens over the bar. Under the card sits a full-window backdrop
+        // whose left press puts the menu down; a right press falls through
+        // it to whatever row is beneath, whose own `menu::area` replaces
+        // the menu — one at a time by construction. Wheel travel passes
+        // beside both, and nothing reflows by a pixel: layers, not columns.
+        match &self.menu {
+            Some(open) if matches!(self.screen, Screen::Shelf(_)) => {
+                iced::widget::stack![whole, views::context_menu::layer(open, self.window)].into()
+            }
+            _ => whole,
         }
-        column![
-            screen,
-            views::bottom_bar::view(&self.player, self.place, ink),
-        ]
-        .into()
     }
 
     /// Whether the playlist panel is on screen: summoned, over a shelf, and
@@ -4869,6 +5052,89 @@ mod tests {
         assert!(
             !clear.contains("text_input::focus(search_id())"),
             "Escape re-focuses the well it just emptied"
+        );
+    }
+
+    /// **The context menu's state machine, pinned in the source of the arms
+    /// that spend it** (doc 09 §5.2) — for
+    /// [`Self::the_pull_offers_a_record_and_sends_no_command_at_all`]'s
+    /// reason: there is no `Shelf` to build without a database and a scan
+    /// thread, and the items themselves are `menu::items`' — a pure
+    /// function, swept exhaustively in `menu.rs`. What must hold *here* is
+    /// the shell's contract:
+    ///
+    /// - **One menu at a time is structure, not policy**: the whole overlay
+    ///   state is a single `Option` field, so opening another replaces the
+    ///   first by assignment and there is nothing else that *could* hold a
+    ///   second card.
+    /// - **<kbd>Esc</kbd> peels the menu first** — it floats over the
+    ///   panel, so it is the outermost layer, and one press takes exactly
+    ///   one layer (the peel's standing rule).
+    /// - **An item press closes and then fires**: the menu is `take`n
+    ///   before a single press is dispatched, each press re-enters the
+    ///   ordinary update loop (`self.update` — the mirror rule's mechanical
+    ///   half: a menu press and a control press are one code path), and the
+    ///   picker summoned mid-gesture by a completed composite does not
+    ///   outlive it.
+    /// - **An empty answer opens nothing**: a target none of whose verbs
+    ///   can act offers no card of disabled words.
+    #[test]
+    fn the_menu_opens_once_peels_first_and_an_item_press_closes_then_fires() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        // One Option field is the whole overlay state. (The needle is
+        // assembled at runtime so this test's own source is not a match.)
+        let field = ["menu: Option<menu::", "Menu>,"].concat();
+        assert_eq!(
+            source.matches(&field).count(),
+            1,
+            "the overlay state is one `Option` field — a second holder would \
+             let two menus stand"
+        );
+        // Esc: the menu peels before every panel layer.
+        let escape = source
+            .split_once("fn escape(&mut self)")
+            .expect("the shell's Escape")
+            .1;
+        let escape = &escape[..escape.find("\n    }\n").expect("a function ends")];
+        let menu_peel = escape
+            .find("self.menu.take()")
+            .expect("Escape peels the menu");
+        let panel_peel = escape
+            .find("self.playlists.peel()")
+            .expect("Escape peels the panel");
+        assert!(
+            menu_peel < panel_peel,
+            "the menu floats over the panel, so it must peel first"
+        );
+        // The item arm: take, then dispatch through the one update loop,
+        // then put the gesture's own scaffolding away.
+        let arm = source
+            .split_once("Message::MenuItemPressed(index) => {")
+            .expect("the item arm exists")
+            .1;
+        let arm = &arm[..arm.find("\n            }\n").expect("an arm ends")];
+        let took = arm.find("self.menu.take()").expect("the press closes");
+        let fired = arm
+            .find("self.update(press)")
+            .expect("the press fires through the ordinary update loop");
+        assert!(took < fired, "closed before a single press is dispatched");
+        assert!(
+            arm.contains("self.playlists.close_panel()"),
+            "a completed composite's picker does not outlive the gesture"
+        );
+        // The open arm refuses an empty card.
+        let open = source
+            .split_once("Message::OpenMenu(target, at) => {")
+            .expect("the open arm exists")
+            .1;
+        assert!(
+            open[..open.find("\n            }\n").expect("an arm ends")]
+                .contains("!listed.is_empty()"),
+            "a target with nothing to offer opens nothing"
         );
     }
 

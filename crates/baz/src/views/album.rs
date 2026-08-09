@@ -672,18 +672,23 @@ fn track_row(
     .padding(theme::pad(theme::GAP_XS, 0.0))
     .style(move |_theme, status| theme::track_row(room, status, playing))
     .on_press_maybe(press);
+    // The row's right press opens its mirror menu (doc 09 §5.2): the same
+    // verbs the row's own controls speak, at the pointer.
+    let target = crate::menu::Target::Track { album, row: index };
     if !collecting.available {
-        return body.into();
+        return crate::menu::area(body, target);
     }
     let offered = collecting.panel_open || hovered;
-    mouse_area(
-        row![body, add_slot(album, index, offered)]
-            .spacing(theme::GAP_XS)
-            .align_y(iced::Alignment::Center),
+    crate::menu::area(
+        mouse_area(
+            row![body, add_slot(album, index, offered)]
+                .spacing(theme::GAP_XS)
+                .align_y(iced::Alignment::Center),
+        )
+        .on_enter(Message::AlbumRowEntered(index))
+        .on_exit(Message::AlbumRowLeft(index)),
+        target,
     )
-    .on_enter(Message::AlbumRowEntered(index))
-    .on_exit(Message::AlbumRowLeft(index))
-    .into()
 }
 
 /// The track's `+` slot: the queue ✕'s exact anatomy — [`theme::STEPPER_HIT`]

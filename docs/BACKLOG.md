@@ -322,9 +322,11 @@
   inside W8's band-C budget. The dedicated `Queue album` control is
   **withdrawn before being built** (a second control sending the picker
   row's message — L8.6). Its one-press accelerators resolve to the picker's
-  Queue row as their on-screen control: **shift-click shipped** (doc 09 §13
-  step 7 — shift turns *open the record* into *queue the record*, nothing
-  sounding unasked); the context menu's `Queue` item awaits step 4.
+  Queue row as their on-screen control, and both shipped: **shift-click**
+  (doc 09 §13 step 7 — shift turns *open the record* into *queue the
+  record*, nothing sounding unasked) and **the context menu's `Queue` item**
+  (step 4 — the mirror layer's presses are the `+` then the picker's Queue
+  row, made for you).
 - **Playlist reorder and add have no drag** (ADR-0024 §6 layer 3, deliberately
   last). iced 0.13 has no pointer capture, so the drag needs the hand-built
   widget on the `groove.rs` precedent — one investment paying playlist add,
@@ -342,24 +344,18 @@
   learn where their music does.
 - **Where playlists sit in the information hierarchy** — **answered by the
   implicit-playlists study (design doc 09)**: one kind of list, one sounding
-  and unnamed, one transfer gesture. Steps 1–3 and 5–7 of its §13 are
-  shipped (the armed collecting mode removed; the picker's Queue row, the
-  hoisted playing list, playing provenance; the Songs section over the
-  wall; queue-place edit parity — ▲▼, the `+` slot, and the place's
-  virtualization; `Play all` in the Library strip; shift-click as the
-  queue-append accelerator). What remains is steps 4 and 8, each shipping
-  whole: the context-menu mirror layer (§5.2 — and with it S4's two-gesture
-  *"add to the current playlist"* from anywhere), and the drag. Wall
-  membership, rail sorting and search-corpus membership for playlists stay
-  deferred (ADR-0024 §A2); the sleeve (§A1) is the vocabulary any outcome
-  keeps.
-- **The Songs section answers the pointer with a press and a door, and
-  nothing else yet.** Until step 4, its rows follow the product's current
-  interaction classes exactly: no gesture-only routes, no menus anywhere;
-  the right-click mirror menu is §5.2 (step 4). Shift-click (step 7,
-  shipped) accelerates only the message its rows already send for the
-  record's *door* — a shifted press on the record name queues the record,
-  as it does on a sleeve.
+  and unnamed, one transfer gesture. Steps 1–7 of its §13 are shipped (the
+  armed collecting mode removed; the picker's Queue row, the hoisted
+  playing list, playing provenance; the Songs section over the wall;
+  the context-menu mirror layer of §5.2 — and with it S4's two-gesture
+  *"add to the current playlist"* from anywhere, right-click the bar and
+  press the item; queue-place edit parity — ▲▼, the `+` slot on the queue's
+  and the playlist page's rows alike, and the place's virtualization;
+  `Play all` in the Library strip; shift-click as the queue-append
+  accelerator). **Only step 8 remains, shipping whole: the drag** (its own
+  entry above). Wall membership, rail sorting and search-corpus membership
+  for playlists stay deferred (ADR-0024 §A2); the sleeve (§A1) is the
+  vocabulary any outcome keeps.
 - **No keyboard route out of the search field.** Transport keys are bound
   (`crates/baz/src/keys.rs`), but iced 0.13's `text_input` captures every key
   press while focused except Tab and the vertical arrows, so while the search

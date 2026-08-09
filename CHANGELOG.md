@@ -243,6 +243,33 @@ next commit.
   40 000-row queue builds a bounded slice): February's
   select-all-into-a-playlist is one press, and the result is an ordinary
   queue — readable, jumpable, editable, saveable, ending in silence.
+- **The context menu, as a mirror layer** (doc 09 §5.2, step 4 of its §13 —
+  the last step before the drag; ADR-0024's amendment item 4, accepted):
+  right-click opens a float of short verbs **at the pointer**, flipped to
+  stay inside the window at its edges, on four objects and no more — track
+  rows wherever they appear (album page, Songs section, playlist page:
+  `Play · Queue · Add to "{current}" · Add to playlist…`), queue rows
+  (`Play · Add to "{current}" · Add to playlist… · Remove`), album tiles
+  (`Open · Play album · Queue album · Add to playlist…`), and the bar's
+  now-playing block (`Go to record · Add to "{current}" · Add to
+  playlist…`). Governed exactly as the keyboard is: **every item sends only
+  messages some visible on-screen control also sends** — pinned by
+  `every_menu_item_is_a_press_some_control_also_makes`, the keyboard
+  sweep's exact shape — so the menu is an accelerator layer, never the only
+  route, and no bar slot, no new key binding and no submenu arrives with
+  it. `Add to "{current}"` appears exactly while playing provenance names a
+  file that still exists (absent, not disabled, otherwise) and appends to
+  the **file only**, the run untouched — which closes S4: the sounding
+  song reaches the current playlist in two gestures from anywhere,
+  right-click the bar and press the item. One menu at a time by
+  construction (the overlay state is a single `Option`); Esc peels it
+  first, a press outside puts it down, an item press closes and fires; the
+  float is the panel's ADR-0016 mechanics (stack + `opaque`, no scrim,
+  surface step + hairline, nothing reflows by a pixel). With the mirror
+  in place the playlist page's rows gain the **transfer `+`** in the queue
+  row's exact outer slot — the last piece of §8.2's "same editor" claim,
+  and the visible twin the page rows' menu items mirror. Captures at
+  `docs/design/impl/context-menus/`.
 - **Shift-click queues the record** (doc 09 §13 step 7; ADR-0023 §3's
   append accelerator): shift held, the press that would open a record's
   page appends it to the run instead — `UpdateQueue` through the picker

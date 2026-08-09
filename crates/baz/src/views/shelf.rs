@@ -315,22 +315,33 @@ fn song_row<'a>(
     .padding(theme::pad(theme::GAP_XS, 0.0))
     .style(move |_theme, status| theme::track_row(room, status, playing))
     .on_press_maybe(press);
+    // The row's right press opens the track menu (doc 09 §5.2) — the album
+    // page's exact target, because a resolved song row *is* that record's
+    // row: same press, same `+`, same mirror. Unresolved, there is nothing
+    // for a verb to act on, so there is no menu either.
+    let target = resolved.map(|(id, row)| crate::menu::Target::Track { album: id, row });
+    let with_menu = |element: Element<'a, Message>| match target {
+        Some(target) => crate::menu::area(element, target),
+        None => element,
+    };
     if !collecting.available {
-        return body.into();
+        return with_menu(body.into());
     }
     let offered = collecting.panel_open || hovered;
     let slot: Element<'a, Message> = match resolved {
         Some((id, row)) => add_slot(id, row, offered),
         None => Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into(),
     };
-    mouse_area(
-        row![body, slot]
-            .spacing(theme::GAP_XS)
-            .align_y(iced::Alignment::Center),
+    with_menu(
+        mouse_area(
+            row![body, slot]
+                .spacing(theme::GAP_XS)
+                .align_y(iced::Alignment::Center),
+        )
+        .on_enter(Message::SongRowEntered(index))
+        .on_exit(Message::SongRowLeft(index))
+        .into(),
     )
-    .on_enter(Message::SongRowEntered(index))
-    .on_exit(Message::SongRowLeft(index))
-    .into()
 }
 
 /// The record's name as **a door to its page** — the one navigation inside a
@@ -836,35 +847,40 @@ fn tile<'a>(
     let label_block = column![caption_block, state_rule(hovered, selected, edge)]
         .spacing(theme::GAP_XS)
         .width(Length::Fixed(edge));
-    mouse_area(
-        button(
-            column![sleeve, label_block]
-                .spacing(theme::GAP_LG)
-                .width(Length::Fixed(edge)),
+    // The tile's right press opens its mirror menu (doc 09 §5.2): open,
+    // play, queue, add — every verb a press some visible control also
+    // makes.
+    crate::menu::area(
+        mouse_area(
+            button(
+                column![sleeve, label_block]
+                    .spacing(theme::GAP_LG)
+                    .width(Length::Fixed(edge)),
+            )
+            .width(Length::Fixed(edge))
+            // The work, its label and the label's rule — not the row. The row's
+            // remaining hang is the gap to the row below, and a hit area that
+            // swallowed it would make the whole wall one contiguous target with no
+            // space between the works. `RULE_LANE_H` of that gap is spent on the
+            // state rule, which is part of the label rather than part of the gap;
+            // what is left between two works is still more than three quarters of a
+            // hang.
+            //
+            // **The grid's hang, not `theme::HANG`.** This read the token, and at
+            // `Dense` — where the hang is 28 — that made the box 12 px shorter than
+            // the label it holds, so every tile on the wall clipped its artist line
+            // while the title stayed. Caught on the pixels rather than in the
+            // arithmetic, because the arithmetic was in a different file from the
+            // number it was wrong about.
+            .height(Length::Fixed(hang.row_h - hang.hang + RULE_LANE_H))
+            .padding(0)
+            .style(move |_theme, status| theme::tile(room, status, selected))
+            .on_press(Message::AlbumClicked(album.id)),
         )
-        .width(Length::Fixed(edge))
-        // The work, its label and the label's rule — not the row. The row's
-        // remaining hang is the gap to the row below, and a hit area that
-        // swallowed it would make the whole wall one contiguous target with no
-        // space between the works. `RULE_LANE_H` of that gap is spent on the
-        // state rule, which is part of the label rather than part of the gap;
-        // what is left between two works is still more than three quarters of a
-        // hang.
-        //
-        // **The grid's hang, not `theme::HANG`.** This read the token, and at
-        // `Dense` — where the hang is 28 — that made the box 12 px shorter than
-        // the label it holds, so every tile on the wall clipped its artist line
-        // while the title stayed. Caught on the pixels rather than in the
-        // arithmetic, because the arithmetic was in a different file from the
-        // number it was wrong about.
-        .height(Length::Fixed(hang.row_h - hang.hang + RULE_LANE_H))
-        .padding(0)
-        .style(move |_theme, status| theme::tile(room, status, selected))
-        .on_press(Message::AlbumClicked(album.id)),
+        .on_enter(Message::TileEntered(album.id))
+        .on_exit(Message::TileLeft(album.id)),
+        crate::menu::Target::Album { album: album.id },
     )
-    .on_enter(Message::TileEntered(album.id))
-    .on_exit(Message::TileLeft(album.id))
-    .into()
 }
 
 /// What the state rule costs the tile vertically: the gap under the label plus

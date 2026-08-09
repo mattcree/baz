@@ -501,10 +501,15 @@ fn queue_row(
         // stands (the album page's own rule).
         slots = slots.push(transfer_slot(index, collecting.panel_open || hovered));
     }
-    mouse_area(slots)
-        .on_enter(Message::QueueRowEntered(index))
-        .on_exit(Message::QueueRowLeft(index))
-        .into()
+    // The row's right press opens its mirror menu (doc 09 §5.2): play,
+    // the transfer verbs, remove — each a press this row's own controls
+    // already make.
+    crate::menu::area(
+        mouse_area(slots)
+            .on_enter(Message::QueueRowEntered(index))
+            .on_exit(Message::QueueRowLeft(index)),
+        crate::menu::Target::QueueRow { row: index },
+    )
 }
 
 /// One reorder stepper's reserved slot: ↑ or ↓ while the pointer is on the
