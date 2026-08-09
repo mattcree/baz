@@ -505,3 +505,208 @@ in the bar; ③ press `F11`. Then nothing, for eight hours.
   moves**: the type block sits where it sits whether or not there is a picture,
   because reserved slots are the bar's promise (`bottom_bar.rs:74–86`) and this
   surface inherits it.
+
+---
+
+## 6. Input: the kiosk that can be paused
+
+*A kiosk that cannot be paused is a design failure; a kiosk covered in chrome
+is not a kiosk.* Both halves are true, and the tension dissolves against
+§1.2's two distances rather than being split.
+
+### 6.1 The decision: the bar is in it, unchanged
+
+ADR-0022's second rule — *"the bar is in every place, unchanged, and it is the
+only thing that is"* (`0022-places-and-nothing-else.md:91`) — **is not amended
+here.** The kiosk is a place; the bar is in it; the transport, the needle, the
+volume and the doors all work exactly as they do everywhere else.
+
+The alternatives were weighed and each fails on a named rule:
+
+| Alternative | Fails on |
+|---|---|
+| **Hover-revealed transport** | Refused outright: *"no control's only affordance is hover"* (`REFUSALS.md:174–175`). ADR-0028 has just re-confirmed that this entry outranks a quietness preference, and it is the mitigation for a toolkit with no accessibility tree — which is precisely the wrong thing to trade for a tidier picture. Doc 10 §6.3 already lists it as refused rather than merely rejected |
+| **A bar re-laid for this place** (drop the wall label, keep the transport) | A bar that changes shape per place is a bar you cannot learn. Doc 10 §4.4's finding stands: *"the transport a listener uses forty times a session does not move a pixel under this study."* The ratchet's permitted move — replacing a slot with a better statement of the same fact — is about the bar's own evolution, not about the bar becoming five bars |
+| **No bar, plus a kiosk-local transport** | Two transports in one product, and the second one unlearned. It also re-opens every arithmetic ADR-0022 settled |
+| **No bar, no transport** | S1's listener cannot pause the music from the screen they are looking at |
+
+### 6.2 Why the duplication is acceptable, stated rather than hidden
+
+The bar's left zone is *"the wall label at bar scale"* (`system.md:64–65`), and
+this place states the same title and artist at room scale. That is a real
+duplication and L6 would normally call it a hierarchy fault.
+
+It survives on §1.2's observation, which is a fact about eyes rather than a
+preference: **at 3 m, `SIZE_BODY` 13 and `SIZE_META` 12 are not small, they are
+absent.** The bar does not compete with the far-field statement because it is
+not legible from where the far-field statement is being read. At 60 cm both are
+legible, and there the bar is not a redundant caption — it is the control
+surface the hand is going to, with the transport, the needle and the fader on
+it.
+
+So the two zones are not two statements of one fact to one reader. They are one
+statement each to two readers, and the product already had both.
+
+### 6.3 What the place itself accepts
+
+Exactly two things, both of which already exist as widgets:
+
+- **The needle**, at kiosk scale (§5.4). It is already interactive, already
+  hit-tested through the same module that draws it (`player.rs:527–531` — *"the
+  line that is drawn and the line that is clicked can never be two different
+  lines"*), and already carries its own hover preview. Nothing new is invented;
+  it is the same widget given room.
+- **The fullscreen glyph** (§3.2), one `TRANSPORT_HIT` 32 box, at rest, in the
+  place's top-right corner, tooltipped per the icon-only law.
+
+And one thing it deliberately refuses: **the artwork is not a control.** A
+click on the sleeve is a gesture with no visible affordance, and the ledger
+forbids both halves of that — nothing may be drawn on a sleeve to advertise it
+(`REFUSALS.md:89–91`), and no action may be gesture-only (`REFUSALS.md:174–175`,
+doc 09 §5.2's reading). The route to the record's page is the bar's
+now-playing block, in this place as in every other.
+
+---
+
+## 7. Motion, idle cost, and burn-in
+
+This is the section the brief's first two constraints live in, and they pull
+against each other: **constraint 1** says a screen left running for eight hours
+is the ultimate test of the 0.0 % idle claim, and **constraint 2** says a static
+screen for eight hours is an OLED hazard whose standard mitigation is to move
+pixels. Both are right. The resolution is that the screen is neither static nor
+animated — **it is a slideshow with a four-minute frame rate**, and that fact
+does the burn-in work that motion would otherwise have to do.
+
+### 7.1 The redraw ledger
+
+The honest accounting, in frames, with every number cited rather than
+estimated:
+
+| State | What drives a redraw | Rate |
+|---|---|---|
+| Library at rest, today | `REFRESH_TICK`, the periodic-rescan clock | **1 wake/minute** (`app.rs:82`) |
+| Any place, a tween live | `motion::TICK`, installed **only while `moving()`** | 125 Hz, for ≤ 200 ms (`motion.rs:63`, `app.rs:3345–3353`) |
+| **Kiosk, playing** | `Event::Progress`, from the engine | **4 Hz** (`engine.rs:562`) |
+| **Kiosk, paused** | nothing — `Progress` is not emitted while paused | **0** (`protocol.rs:435–438`; pump pause gate `engine.rs:1518–1523`) |
+| **Kiosk, stopped / queue ended** | nothing | **0** |
+
+Three things follow, and they are the whole of this document's answer to
+constraint 1:
+
+1. **The kiosk introduces no clock of its own.** It installs no
+   `window::frames()`, no `time::every`, no subscription that the Library place
+   does not already have. Its redraw rate is the engine's event rate, and the
+   engine's event rate is derived from *delivered audio* rather than from a
+   clock (`engine.rs:557–561`), so it is 4 Hz of playing time and exactly zero
+   when nothing is playing.
+2. **The eight-hour test is passed by construction, not by tuning.** ADR-0020's
+   claim is that the subscription is inactive when no tween is running, asserted
+   by a test rather than promised. The kiosk does not weaken that assertion —
+   it is the first surface on which it is *load-bearing for hours at a time*,
+   which is an argument for the claim rather than against it.
+3. **4 Hz is not new.** The bar has been redrawing at 4 Hz while music plays
+   since the needle shipped; the kiosk redraws the same window at the same rate
+   with a different picture in it. The marginal cost of this surface over the
+   Library place, while playing, is one artwork quad and a few text runs per
+   frame — and the Library place is drawing up to 120 tiles per frame in
+   ADR-0020's own measurement setup.
+
+**What is refused, by name.** Each of these was considered because the brief
+invited it, and each breaks a property the project measured and shipped:
+
+| Refused | Why |
+|---|---|
+| A drifting gradient, a slow pan/zoom over the artwork ("Ken Burns") | Requires a redraw while the window is idle — the clause everything else hangs on (`REFUSALS.md:243–245`). Also draws *on* artwork, refused separately |
+| A pulsing or breathing glow on the halo | Same, plus the halo is `LAMP_GLOW` and the accent may not be animated into decoration (`REFUSALS.md:250–252`: *"motion states what changed; it never decorates"*) |
+| A rotating record, a spinning disc | Refused twice over: the redraw clause, and skeuomorphism's ban on *"any circle pretending to be a record"* (`REFUSALS.md:257–261`) |
+| An album-art crossfade on track change | Refused by name in ADR-0020 §3 and `REFUSALS.md:241–243`. A track change is a hard cut |
+| A spectrum analyser at rest | §10. It is the one item here with a real case, and it needs its own ADR |
+
+**What makes it feel alive instead**, since "nothing moves" is only an
+acceptable answer if something else is doing the work:
+
+- **Scale.** A 720 px sleeve is not a 320 px sleeve; the material of a record
+  sleeve — grain, print texture, the photograph — is legible at kiosk size and
+  invisible at wall size. The artwork is doing the aesthetic work, which is
+  exactly the direction's own thesis: *"the works are lit; the room is not"*
+  (`system.md:25`).
+- **Type at a scale the product has never used.** `SIZE_HERO` 28 is the
+  largest token baz owns and it exists for the first-run question. This surface
+  needs a step beyond it (§5.2), and a title set that large is an event on a
+  near-black field.
+- **The needle advancing**, which was never animation: *"the two movements that
+  were never animation are unchanged: the needle advancing with playback (data
+  arriving) and scrolling"* (`REFUSALS.md:247–248`).
+- **The track changing.** Every three to five minutes the entire surface
+  becomes a different picture and a different set of words. Over an eight-hour
+  evening that is on the order of **100–160 complete content changes**. A
+  surface that fully repaints itself 130 times an evening is not a static
+  screen, and §7.2 is where that stops being an aesthetic observation and
+  becomes the engineering answer.
+
+### 7.2 Burn-in, and why the palette is the mitigation
+
+**The hazard is real and specific.** OLED wear is cumulative and per-subpixel:
+an emitter's brightness degrades roughly in proportion to the total light it has
+emitted, so a region that is bright and *unchanging* for many hours ages
+relative to its neighbours and leaves a visible ghost. That is why the standard
+mitigations in shipping products are all either *move the bright thing* (pixel
+shifting/orbiting) or *make it dimmer* (logo-luminance limiting, static-content
+detection).
+
+**Both standard mitigations argue with §7.1**, and pixel shifting argues with it
+directly: moving pixels on a timer is a redraw while the window is idle, which
+is the one clause ADR-0020 kept as an absolute. So the tension the brief names
+is genuine. Here is how it resolves.
+
+**First: this room is already the mitigation.** Closing Time's wall is
+`#0C0D0E` (`system.md:150`) — a near-black at the very bottom of the display's
+range, where an OLED subpixel is emitting almost nothing and therefore ageing
+almost not at all. The product's palette was chosen for a gallery-at-night
+look, and the same choice makes it close to the least hazardous full-screen
+content a display can be asked to hold. Roughly:
+
+```
+1920 × 1080 kiosk, one 720 px sleeve, the type block, the bar
+────────────────────────────────────────────────────────────────
+the room  (#0C0D0E, near-zero emission)          ~74 % of pixels
+the artwork (bright, arbitrary, CHANGES/track)   ~25 % of pixels
+ivory type + bar furniture (small, CHANGES/track) ~1 % of pixels
+```
+
+The only large bright region is the artwork, and **the artwork is the thing
+that changes every three to five minutes.** The regions that are static — the
+room, the bar's band, the hairline — are the regions that are near-black. The
+hazard and the stasis are in different places, which is the property that makes
+this safe without moving anything.
+
+**Second: the genuinely static case is the stopped one, and S5 already answers
+it.** A kiosk left paused overnight *is* an unchanging frame. But a stopped
+kiosk holds no artwork and states silence in words (§5.5) — so the frame it
+holds for those hours is overwhelmingly `#0C0D0E` with one quiet line on it.
+The honest empty state and the burn-in answer turn out to be the same design,
+which is the strongest sign that both are right.
+
+**Third: the mitigation that costs a redraw is priced, and declined.** If
+real-world evidence ever shows the above to be insufficient, the available move
+is a **one-pixel nudge of the whole composition on a slow timer**. Its cost is
+knowable in advance, and it is small:
+
+> A 1 px shift once per minute is **one frame per 60 s**. baz already runs a
+> 60-second timer at rest in the Library place — `REFRESH_TICK`
+> (`app.rs:82`, installed at `app.rs:3366`) — and that timer is inside
+> ADR-0020's accepted idle cost today. So the nudge is provably no more
+> expensive than a clock the product already runs while doing nothing.
+
+It is **not adopted**, for two reasons: the content already changes 130 times an
+evening, and a mitigation with no measured problem to solve is decoration with a
+technical justification. It is recorded here at its price so that re-proposing
+it costs an observation rather than an argument — and so that if it is ever
+adopted, nobody has to re-derive whether it breaks the motion law. It does not;
+it costs one frame a minute, which is `REFRESH_TICK`'s bill exactly.
+
+**What is refused outright**: global dimming after a timeout (it would make the
+artwork a liar about its own colours, and the room is already dark), and
+"screensaver" behaviour that replaces the content with something else while
+music is still playing (the screen's whole job is to state what is playing).
