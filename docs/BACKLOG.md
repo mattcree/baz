@@ -594,6 +594,21 @@ Three questions only the owner can answer:
 
 ### 3. `Play all` → an implicit playlist — the vocabulary exists, the type does not
 
+> **Answered by [ADR-0033](adr/0033-dynamic-playlists.md) (2026-08-10), which
+> is the same question from the other end.** The type is not a type: **a
+> dynamic playlist is a rule that draws into the queue when pressed**, and both
+> traps below dissolve rather than get handled. *Provenance*: a draw has no
+> file, so it sets none, and the picker never offers `Add to "Everything"` —
+> doc 09 §6's own rule that a control which cannot act must not pretend it can.
+> *The wall's order*: the list is neither a place nor a stored snapshot, it is
+> a **press** — it derives once, into the queue, which is a snapshot you are
+> looking at, which is `shuffle::Pool`'s own answer to its own version of this
+> (*"a pool that silently re-derived itself would be a pool you could not
+> see"*). The `Everything` rule is specified and **gated on Queue-place
+> virtualization** (doc 09 §7.1's existing gate); the three that ship first do
+> not need it. `Pull`'s arithmetic survives its control's removal as one of
+> them, which also closes doc 11 P9.
+
 Doc 09 §2 **already lists the wall as an implicit playlist** (`:130`): *"| The
 wall, in its arrangement | the group key and the filter | by arranging | no |
 the wall itself |"*, and `:148` states the model — *"baz has one kind of list.

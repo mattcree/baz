@@ -50,6 +50,34 @@ the library" is the empty query, one `Esc` away.
 owned by them thereafter. Refused: generation without a request, mutation
 without an edit, and any candidate pool the person cannot see.
 
+**A row that states its rule and does nothing until it is pressed is not an
+unbidden offer. It is a door with its rule written on it: the request is the
+press, the pool is the sentence, and the proof is the queue.** So Home may
+carry **dynamic playlists** — *"12 records you have never played"*, *"34
+records you have not played in over a year"*, *"9 records you have only heard
+part of"* — each of which draws, when pressed, into the queue, in silence, and
+is then an ordinary run: readable to its end, editable, `Save as playlist` away
+from being kept, and ending in silence. **A rule may never be a condition**: if
+it wants to run when nobody pressed it, it is still refused.
+
+*Rewritten on the owner's decision, 2026-08-10* — *"we had documented
+intentions to create a dynamic set of playlists… this could be a good place to
+do this?"*, of the Home place. This entry, and ADR-0030 §6's refusal of the
+pull from Home (*"an unbidden offer is generation without a request"*), between
+them forbade what he asked for, and the preamble says his decision settles it.
+[ADR-0033](adr/0033-dynamic-playlists.md) carries the decision and
+[doc 14](design/14-dynamic-playlists.md) the argument. Every clause above
+survives the new reading intact — *asked for by a person* is the press, *owned
+thereafter* is `Save as playlist` and nothing else ever writing the file, *no
+mutation without an edit* is that nothing rewrites anything, and *no pool the
+person cannot see* is the sentence naming its own size before the queue shows
+its contents. What the entry was written against is untouched and still
+refused: a list that already exists, made for you, whose pool you cannot
+inspect. The constraint that replaced the blanket refusal is the **sentence
+rule** — *every rule states itself in one sentence, and the sentence is what
+the listener presses* — and `every_rule_states_itself_in_one_sentence` is what
+holds it there.
+
 *Amended by ADR-0024 §6 under the editing rule.* The entry's force is against
 what it was written against — playlists that generate themselves, unbidden, as
 engagement surfaces — and its old gloss (*"every crate and every mixtape is
@@ -69,8 +97,27 @@ nothing else moved.
 the year", no listening-time totals. **History records; it never performs.**
 
 What history is allowed to surface: the PLAYED group key, the inspector card
-("PLAYED — N times since YYYY", plus a column of date stamps), and the pull's
-weighting. Nothing else.
+("PLAYED — N times since YYYY", plus a column of date stamps), the pull's
+weighting, and **the dynamic playlists' sentences** (ADR-0033). Nothing else.
+
+*Extended on the owner's decision, 2026-08-10*, and the extension is narrower
+than it looks. A sentence may state **how many records are in the pool behind
+the door** — that is a fact about the shelf, and it is the anti-invisible-pool
+rule met by saying how big the thing is before you open it. It may not state a
+figure about the **listener**: no hours, no totals, no counts of plays, no
+streak, no "most played", nothing ranked by how often you did something.
+`crates/baz-core/src/dynamic.rs` is built entirely on the public
+`History::track`, so `history/read.rs`'s own fence — *"There is deliberately no
+fourth [question]… the way to not build [charts] is to not provide the surface
+that makes them easy"* — is **not** breached: no method was added to the
+ledger, and none may be.
+
+Still refused, specifically, and each was a real candidate: a *"you keep
+skipping this"* row (the ledger has `skips` and `pull_weight`'s own doc refuses
+them — *"down-weighting what you skipped would make the pull start having
+opinions about your taste"*), a most-played row, and anything blending two
+signals into a score, because a blended row cannot be stated in a true
+sentence.
 
 **The ledger is the user's.** Append-only, one line per play, in a plain local
 file they can grep, back up or burn. Scrobbling to Last.fm or ListenBrainz is an

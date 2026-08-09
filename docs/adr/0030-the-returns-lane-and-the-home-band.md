@@ -193,6 +193,40 @@
 > Frames — the band present, the band gone, and the same band back on a pause:
 > [`docs/design/impl/home-continue/`](../design/impl/home-continue/README.md).
 
+> ## Fourth amendment (2026-08-10) — Home gains a third section
+>
+> The owner: *"we had documented intentions to create a dynamic set of
+> playlists… this could be a good place to do this?"* — *this place* being
+> Home. §6's inventory admitted two facts and *Deliberately not done* said
+> *"No second home band beyond the two §6 admits; a third needs an argument
+> that beats the L8.6 test the other five failed."*
+>
+> **The argument is owed and [ADR-0033](0033-dynamic-playlists.md) §10 is it**,
+> in one table: the lane draws what you have **touched**, `RECENTLY ADDED` what
+> has **arrived**, `CONTINUE` where you **stopped**, and the new section what
+> you own and have **not heard**. No surface in baz draws the fourth fact, and
+> it is the only one of the four about the *unvisited* part of a collection —
+> which is the part an album-first product exists to get you into. Every
+> candidate that would have duplicated the lane was refused by name in
+> `docs/design/14-dynamic-playlists.md` §3.4.
+>
+> **§6's refusal of the pull is reversed and rewritten**, not argued with. It
+> read *"the pull (an act you press; an unbidden offer is generation without a
+> request)"*. What replaces it: **a row that states its rule and does nothing
+> until it is pressed is a door with its rule written on it** — the request is
+> the press, the pool is the sentence, the proof is the queue. The pull's
+> arithmetic (`History::pull_weight`) survives its control's deletion as the
+> sentence *"34 records you have not played in over a year"*.
+>
+> **§6's other four refusals are untouched**, and one of them is what keeps
+> this narrow: *recently played* and *playlists* are still the lane's content,
+> and every engagement statistic is still not close.
+>
+> **§4's responsiveness contract is inherited unchanged and extended by one
+> row**: a rule is drawn when Home is entered and when a play lands, **never in
+> a frame** — measured at 3.3 ms per rule over 100 000 tracks, which is a fifth
+> of one.
+
 **Status**: accepted and shipped, as amended above (2026-08-09) · extracts the decisions of
 [`docs/design/13-everyday-flow.md`](../design/13-everyday-flow.md) §2, §3,
 §5 and §7 · **supersedes `docs/REFUSALS.md`'s no-resident-side-surfaces
