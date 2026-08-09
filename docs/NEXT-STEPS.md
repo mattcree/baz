@@ -2,7 +2,8 @@
 
 > Concrete, ordered, with acceptance criteria. Standards in `ENGINEERING.md`;
 > vision in `VISION.md`; deliberate deferrals in `BACKLOG.md`; what actually
-> landed in `CHANGELOG.md`. Updated 2026-08-10.
+> landed in `CHANGELOG.md`; **what the owner asked for and where it got to is
+> `REQUESTS.md`**. Updated 2026-08-10.
 >
 > **Status**: Phases 0–3 ✅. baz scans several folders, shows the collection,
 > plays it gaplessly and bit-perfectly, searches by song and by record, edits
@@ -127,6 +128,10 @@ measurements have never been taken because the feature does not exist yet.
 
 ## Standing rules while executing
 
+- **Every ask from the owner goes into `REQUESTS.md` when it is made**, and
+  leaves only as shipped or as declined with his agreement. It exists because
+  three instructions were reported back to him as "decisions waiting" instead
+  of being built.
 - CI is the guide: main goes red, main gets fixed, before anything else.
 - Every stack-level choice becomes a short ADR at the moment it is made.
 - `REFUSALS.md` binds contributors and agents, **not the owner**: his decision
