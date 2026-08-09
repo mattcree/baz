@@ -7,10 +7,28 @@ Cargo.lock, which means it can fall out of step with it — and the symptom
 would be a Flathub build failing long after the dependency change that broke
 it. This turns that into a CI failure on the pull request instead.
 
-It verifies, not regenerates: the check is that the set of
-(name, version, sha256) triples in Cargo.lock is exactly the set the manifest
-vendors. Regeneration stays the job of the upstream tool, which is the one
-that knows the vendoring layout:
+It verifies, not regenerates. Two things are checked, and the second exists
+because the first was not enough:
+
+1. the set of (name, version, sha256) triples in Cargo.lock is exactly the set
+   the manifest vendors;
+2. every vendored crate also gets its `.cargo-checksum.json`, and the vendor
+   config is present.
+
+**Why (2).** A vendored crate directory that cargo will accept is *two* entries
+in this file: the `archive` that unpacks the `.crate`, and an `inline` that
+writes `.cargo-checksum.json` beside it. Cargo reads the second for every
+crate in the directory before it resolves anything, so one missing inline
+fails the whole build with an error naming a crate that has nothing to do with
+what is being compiled. That is exactly what the committed file did — seven
+archives had no checksum beside them, check (1) passed because it only looked
+at archives, and the first Flatpak build anyone ran died on
+`failed to load checksum '.cargo-checksum.json' of block2 v0.6.2` while
+resolving `cpal`. The generator produces both halves; a hand-edit or a partial
+regeneration produces one.
+
+Regeneration stays the job of the upstream tool, which is the one that knows
+the vendoring layout:
 
     pip install tomlkit aiohttp        # in a virtualenv
     curl -sLO https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
@@ -56,9 +74,8 @@ def from_lock() -> set[tuple[str, str, str]]:
 
 def from_sources() -> set[tuple[str, str, str]]:
     """The crates cargo-sources.json vendors, as (name, version, sha256)."""
-    entries = json.loads(SOURCES.read_text(encoding="utf-8"))
     have = set()
-    for entry in entries:
+    for entry in _entries():
         if entry.get("type") != "archive":
             continue  # inline .cargo-checksum.json files and the vendor config
         url = entry["url"]
@@ -71,19 +88,69 @@ def from_sources() -> set[tuple[str, str, str]]:
     return have
 
 
+def _entries() -> list[dict]:
+    return json.loads(SOURCES.read_text(encoding="utf-8"))
+
+
+def vendor_layout_is_complete() -> list[str]:
+    """Complaints about the vendor directory the sources lay down, if any.
+
+    Cargo scans every directory under the replaced source before it resolves a
+    single dependency, so a crate unpacked without its `.cargo-checksum.json`
+    fails the build — with an error that names the crate missing the file
+    rather than anything to do with what was being compiled.
+    """
+    entries = _entries()
+    unpacked = {e["dest"] for e in entries if e.get("type") == "archive"}
+    checksummed = {
+        e["dest"] for e in entries if e.get("dest-filename") == ".cargo-checksum.json"
+    }
+    config = {
+        e.get("dest-filename")
+        for e in entries
+        if e.get("dest") == "cargo" and str(e.get("dest-filename", "")).startswith("config")
+    }
+
+    problems = []
+    for dest in sorted(unpacked - checksummed):
+        problems.append(f"{dest} is unpacked with no .cargo-checksum.json beside it")
+    for dest in sorted(checksummed - unpacked):
+        problems.append(f"{dest} has a .cargo-checksum.json but nothing is unpacked there")
+    if not config:
+        problems.append(
+            "no cargo/config(.toml) entry: nothing tells cargo to replace crates-io "
+            "with the vendored directory"
+        )
+    return problems
+
+
 def main() -> int:
     wanted, have = from_lock(), from_sources()
+    ok = True
+
     if wanted == have:
         print(f"cargo-sources.json matches Cargo.lock ({len(wanted)} crates)")
-        return 0
+    else:
+        ok = False
+        for label, diff in (("missing from", wanted - have), ("stale in", have - wanted)):
+            for name, version, _ in sorted(diff):
+                print(f"{label} cargo-sources.json: {name} {version}", file=sys.stderr)
 
-    for label, diff in (("missing from", wanted - have), ("stale in", have - wanted)):
-        for name, version, _ in sorted(diff):
-            print(f"{label} cargo-sources.json: {name} {version}", file=sys.stderr)
+    problems = vendor_layout_is_complete()
+    if problems:
+        ok = False
+        for problem in problems:
+            print(f"vendor layout: {problem}", file=sys.stderr)
+    else:
+        print(f"every vendored crate carries its checksum ({len(have)} of {len(have)})")
+
+    if ok:
+        return 0
     print(
-        "\ncargo-sources.json is out of step with Cargo.lock. Regenerate it "
-        "with flatpak-cargo-generator.py (command in this script's docstring) "
-        "and commit the result alongside the lockfile change.",
+        "\ncargo-sources.json is out of step with Cargo.lock, or is not a "
+        "complete vendor directory. Regenerate it with "
+        "flatpak-cargo-generator.py (command in this script's docstring) and "
+        "commit the result alongside the lockfile change — do not hand-edit it.",
         file=sys.stderr,
     )
     return 1

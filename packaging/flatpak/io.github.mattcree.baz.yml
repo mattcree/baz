@@ -77,10 +77,25 @@ modules:
       #   needs ALSA headers, which the freedesktop SDK has.
       - cargo --offline build --release --locked -p baz --features device-output
       - install -Dm755 target/release/baz /app/bin/baz
-      - install -Dm644 io.github.mattcree.baz.desktop
+      # The desktop entry, the AppStream metadata and the icons are installed
+      # from the repository's own `packaging/` tree — the copies CI validates.
+      # They are not carried as separate `type: file` sources: a path relative
+      # to the manifest resolves here but not in the flathub/ repository the
+      # manifest is copied into, where the manifest sits at the root and
+      # `../packaging/…` is outside the checkout.
+      - install -Dm644 packaging/io.github.mattcree.baz.desktop
         /app/share/applications/io.github.mattcree.baz.desktop
-      - install -Dm644 io.github.mattcree.baz.metainfo.xml
+      - install -Dm644 packaging/flatpak/io.github.mattcree.baz.metainfo.xml
         /app/share/metainfo/io.github.mattcree.baz.metainfo.xml
+      # The icon, in the hicolor layout AppStream and every launcher expect.
+      # The basename is the application id, so the desktop entry's bare
+      # `Icon=io.github.mattcree.baz` resolves without a path.
+      - install -Dm644 packaging/icons/hicolor/scalable/apps/io.github.mattcree.baz.svg
+        /app/share/icons/hicolor/scalable/apps/io.github.mattcree.baz.svg
+      - for s in 16 24 32 48 64 128 256 512; do
+        install -Dm644 "packaging/icons/hicolor/${s}x${s}/apps/io.github.mattcree.baz.png"
+        "/app/share/icons/hicolor/${s}x${s}/apps/io.github.mattcree.baz.png";
+        done
     sources:
       # Flathub requires a tag *and* the commit it resolves to, so the build
       # cannot follow a moved tag. Both are placeholders until the maintainer
@@ -95,10 +110,3 @@ modules:
       # CI checks it against Cargo.lock on every PR (check-cargo-sources.py),
       # so a stale copy is caught before it reaches a build.
       - cargo-sources.json
-      # The desktop entry and the AppStream metadata are installed from the
-      # repository copies validated by CI, not from a second copy that could
-      # disagree with them.
-      - type: file
-        path: ../io.github.mattcree.baz.desktop
-      - type: file
-        path: io.github.mattcree.baz.metainfo.xml

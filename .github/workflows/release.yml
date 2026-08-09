@@ -192,9 +192,13 @@ jobs:
 
           # Desktop integration files, for anyone installing the tarball by
           # hand rather than through Flatpak (docs/INSTALL.md says where).
+          # The icons travel in the hicolor layout they are installed in, so
+          # the install is a copy of a tree rather than eight named files, and
+          # the desktop entry's bare `Icon=io.github.mattcree.baz` resolves.
           if [ "${{ runner.os }}" = "Linux" ]; then
             cp packaging/io.github.mattcree.baz.desktop "$stage/"
             cp packaging/flatpak/io.github.mattcree.baz.metainfo.xml "$stage/"
+            cp -r packaging/icons/hicolor "$stage/icons"
           fi
 
           ls -l "$stage"

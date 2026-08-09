@@ -44,8 +44,14 @@ flatpak-builder --user --install --force-clean build-dir \
   packaging/flatpak/io.github.mattcree.baz.yml
 ```
 
-That builds the tag named in the manifest, not your working tree — see
-`packaging/flatpak/README.md` for building the checkout itself.
+**Until the first tag exists, that command cannot work as written**: the
+manifest's `git` source names `tag: v0.1.0` and a placeholder commit, and
+nothing has been tagged. Swap in a `dir` source pointing at your checkout —
+`packaging/flatpak/README.md` §"Building it" has the two lines — and it builds.
+That has been done and it works; the build takes about fifteen minutes from
+cold and wants roughly 10 GB of scratch space, which is more than a `/tmp` on
+tmpfs is likely to have. Put `build-dir` and flatpak-builder's `--state-dir`
+somewhere on real disk.
 
 ## Release binaries
 
@@ -72,15 +78,24 @@ cd baz-<version>-linux-x86_64
 install -Dm755 baz ~/.local/bin/baz
 ```
 
-The Linux archive also carries the desktop entry and AppStream metadata, for a
-menu entry and working media-key integration:
+The Linux archive also carries the desktop entry, the AppStream metadata and
+the icons, for a menu entry with baz's own artwork and working media-key
+integration:
 
 ```sh
 install -Dm644 io.github.mattcree.baz.desktop \
   ~/.local/share/applications/io.github.mattcree.baz.desktop
 install -Dm644 io.github.mattcree.baz.metainfo.xml \
   ~/.local/share/metainfo/io.github.mattcree.baz.metainfo.xml
+cp -r icons/. ~/.local/share/icons/hicolor/
+gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null || true
 ```
+
+The `icons/` directory in the archive is already in the hicolor layout, so the
+copy is the whole install; the entry's `Icon=io.github.mattcree.baz` then
+resolves at whatever size the launcher asks for.
+`gtk-update-icon-cache` only makes the lookup faster — the icon resolves
+without it.
 
 `Exec=baz` in that entry assumes the binary is on `PATH`; edit it to an
 absolute path if you put it elsewhere.
@@ -94,9 +109,20 @@ identity decision the project has not made. Check the SHA-256 against
 CI run that built the binaries, from a tag, and the workflow that did it is
 `.github/workflows/release.yml`.
 
-**Linux runtime requirements**: glibc (the artifact is a `gnu` target, not
-`musl`) and ALSA at runtime, which every desktop Linux has. baz needs no GUI
-system libraries: the toolkit is pure Rust and SQLite is compiled in.
+**Linux runtime requirements**, read off the shipped binary rather than
+assumed. It links four libraries — `libasound.so.2`, `libc`, `libm`,
+`libgcc_s` — so glibc (the artifact is a `gnu` target, not `musl`) and ALSA are
+the hard requirements. It has **no build-time dependency on any GUI library**:
+nothing GTK, Qt or webview is involved, SQLite is compiled in, and the toolkit
+is Rust.
+
+That is not the same as needing no GUI libraries at runtime. winit opens the
+display by `dlopen`, so the binary also wants, at the moment it opens a window:
+`libxkbcommon.so.0` always, plus `libwayland-client.so.0` on a Wayland session
+or `libX11.so.6` and `libxcb.so.1` on X11, and `libEGL.so.1` and a working
+Vulkan or GL driver for wgpu to render through. Every desktop Linux install
+already has all of these — a headless server does not, and neither does a
+minimal container.
 
 ## From source
 
@@ -136,13 +162,30 @@ container with everything, and `docs/DEVELOPMENT.md` covers the rest.
 
 ## Where baz keeps its things
 
-Nothing is written next to your music. baz uses the platform's own locations:
+Nothing is written next to your music. baz uses the platform's own locations —
+`dirs::config_dir()` and `dirs::data_dir()`, each with a `baz` folder inside:
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
-| Config | `~/.config/baz/config.toml` | `~/Library/Application Support/baz/` | `%APPDATA%\baz\` |
-| Library database | `~/.local/share/baz/library.db` | `~/Library/Application Support/baz/` | `%APPDATA%\baz\` |
+| Config | `~/.config/baz/config.toml` | `~/Library/Application Support/baz/config.toml` | `%APPDATA%\baz\config.toml` |
+| Library database | `~/.local/share/baz/library.db` | `~/Library/Application Support/baz/library.db` | `%APPDATA%\baz\library.db` |
+| Playlists | `~/.local/share/baz/playlists/` | `~/Library/Application Support/baz/playlists/` | `%APPDATA%\baz\playlists\` |
+| Play history | `~/.local/share/baz/history.tsv` | `~/Library/Application Support/baz/history.tsv` | `%APPDATA%\baz\history.tsv` |
 
-Under Flatpak these live in `~/.var/app/io.github.mattcree.baz/`. Deleting the
-database costs you one rescan and nothing else — your files are the source of
-truth, and baz never edits them.
+`%APPDATA%` is the **roaming** one (`FOLDERID_RoamingAppData`,
+`C:\Users\<you>\AppData\Roaming`), for both columns. On Linux the two respect
+`$XDG_CONFIG_HOME` and `$XDG_DATA_HOME` when they are set. macOS has one
+directory where the other platforms have two, which is Apple's arrangement, not
+baz's — config and data share `Application Support` there.
+
+**Your playlists are ordinary files.** `playlists/` holds one UTF-8 `.m3u8` per
+playlist, written by baz and readable by anything (ADR-0024); `.m3u` files
+dropped in beside them are read but never rewritten. That folder is not
+configurable today. Back it up like any other folder of documents — nothing
+else in this table is worth backing up.
+
+Under Flatpak all of it lives under `~/.var/app/io.github.mattcree.baz/`, in
+`config/baz/` and `data/baz/` respectively. Deleting the database costs you one
+rescan and nothing else — your files are the source of truth, and baz never
+edits them. Deleting `playlists/` costs you your playlists, because they are
+the only copy.
