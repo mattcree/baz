@@ -1938,3 +1938,431 @@ because the ambient register is what the far field is reading.
 - **No headroom claim, no "audiophile" framing.** `REFUSALS.md:348–350`. The
   meter reports a number and names its standard. It does not say the number is
   good.
+
+---
+
+## 10. The visualizer, deferred with a price
+
+> *"maybe we could have a visualizer mode at some point"* — the owner's own
+> *"at some point"*, which this section takes at face value.
+
+**What changed.** Under the old posture the visualizer was blocked on the motion
+law, and this section would have been an argument. Under the ruling it is not
+blocked on anything in principle — §7.1's class admits it exactly as it admits
+the field. So the deferral is now about **cost and sequence**, which is a much
+healthier reason.
+
+**Why it is still deferred, in one sentence**: everything in §5–§9 makes the
+surface better for the listener who leaves it running, and a visualizer makes it
+better for the listener who is *watching it*, which is a smaller audience and a
+larger build.
+
+**What it would actually cost**, so that re-proposing it is a decision rather
+than a fresh study:
+
+| Piece | Cost | Already paid by this study? |
+|---|---|---|
+| A real-time tap on the audio | — | **Yes.** §9.2's tap is exactly it |
+| An FFT for a spectrum display | ~1024-point, per 100 ms step, on the engine thread — or better, on the UI side from a shared sample ring | **No.** New, and it is the one piece with real per-sample cost |
+| A sample ring shared to the UI | The meter publishes two floats; a visualizer needs *waveform*, which is a ring buffer and a second crossing discipline | **No** |
+| Continuous GPU work | A `shader` widget, as §7.5 | **Yes**, mechanically |
+| The frame budget and its measurement | §7.4's harness and gate | **Yes**, extends directly |
+
+**So the marginal work is the FFT and the sample ring**, and the marginal risk is
+that a spectrum analyser is the single easiest way to make this surface look like
+every other music player — which is the thing baz exists not to be. §2.2's
+finding stands: the tradition's visualizers are unbounded by design, and the
+interesting design question is not *how do we draw one* but *what would baz's
+own be*, which nobody has answered yet and which should not be answered in a
+hurry inside a document about something else.
+
+**Ranked as D1 in §13** — first among the deferred, because the tap it needs
+will exist the moment §12 step 8 lands.
+
+---
+
+## 11. Kiosk mode: one drag and one key
+
+### 11.1 The decision, and the toolkit fact behind it
+
+> **The kiosk is `Place::NowPlaying` full-screen in baz's one window. There is
+> no second window.**
+
+§0.3(2) is the evidence, verified against the installed source rather than
+recalled: **iced 0.13 has no monitor enumeration in its public API at all** —
+`MonitorHandle`, `available_monitors` and `primary_monitor` appear nowhere in
+`iced`, `iced_core` or `iced_runtime`. winit models it
+(`Fullscreen::Borderless(Option<MonitorHandle>)`, used at
+`iced_winit/src/conversion.rs:398`) but iced never exposes the `Option`; it
+chooses for you. Even the escape hatch fails: `window::run_with_handle` yields a
+`raw_window_handle::WindowHandle`, not winit's `Window`
+(`iced_winit/src/program.rs:1404–1413`), so there is no `current_monitor()` to
+ask.
+
+**So a second window cannot be put on the monitor you name.** It would appear
+wherever the compositor decides, and you would drag it — which is the gesture
+the single-window answer uses directly, without the `daemon` migration.
+
+**And §7.3 found a second, stronger reason.** iced's control flow is **global,
+not per-window** (`iced_winit/src/program.rs:471–488`), and after any message
+batch **every** window is redraw-requested (`program.rs:1089–1097`). In a
+two-window baz, the kiosk's ambient clock would pace the main window too, and
+ADR-0020's 0.0 % idle claim would become false for the whole product the moment
+the kiosk opened. **The single-window design is what keeps the ambient motion
+free elsewhere**, which turns a toolkit limitation into a design constraint worth
+having.
+
+**What delivers the brief**, and it works today on both display servers:
+
+> Put the window on the monitor you want — the gesture every desktop already
+> has — press `Now playing` in the lane, press `F11`. The place fills **that**
+> monitor, because `Mode::Fullscreen` lands on the monitor the window currently
+> occupies (`iced_winit/src/program.rs:1331–1338`; `Mode`'s own doc says *"the
+> whole screen of its **current monitor**"*, `iced_core/src/window/mode.rs:7`).
+
+Two notes that make it better than it sounds:
+
+- **The desktop can automate it.** Both major Linux compositors match window
+  rules on `app_id`, and baz ships a desktop entry and an `app_id`
+  (`packaging/`). A user who wants baz to open fullscreen on `DP-2` every time
+  writes three lines of compositor config. baz should not grow a monitor picker
+  to serve that: the window manager is the one component that knows what the
+  monitors are called.
+- **The cost of reopening this is recorded.** If iced ever exposes winit's
+  `Fullscreen::Borderless(Option<MonitorHandle>)`, a second window on a named
+  monitor becomes a small change on top of a `daemon` migration — and §7.3's
+  global-control-flow objection would still have to be answered. §13 records
+  both, so re-proposing it means citing a toolkit change *and* solving the idle
+  coupling, rather than re-arguing taste.
+
+`F11` is a **window** act, not a place act: it works in every place, exactly as
+`Esc` peels fullscreen before it peels the place (§3.3). The kiosk does not own
+a private key.
+
+### 11.2 What changes at kiosk size
+
+**The bug this fixes first.** §5.5's table shows the shipped clamp giving a 4K
+panel a **720 px** work in a **3744 × 2079** body — 19 % of the width. That is
+not a kiosk, and it is the direct consequence of `NOW_PLAYING_MAX` being a fixed
+constant standing in for a fact about the decode (§0.4 b). §5.2 deletes it, and
+the work becomes as large as the viewport and **the source file** allow — 1809 px
+at 4K from a 3000 px cover.
+
+**The type scale, which is the rest of the answer.** baz's largest token is
+`SIZE_HERO` 28 (`theme.rs:845`), sized for a 60 cm reading of a 1280 px window.
+At 3 m on a 4K panel it is not small, it is **absent** (§1.2). So the kiosk
+introduces a scale step — and it is derived, not a second token sheet:
+
+```
+kiosk_scale(edge) = (edge / 720).clamp(1.0, 2.5)
+```
+
+Keyed to `edge` — the work's own resolved size — rather than to the window,
+because `edge` is already the surface's one derived measure
+(`now_playing.rs:49–72`) and because it is the thing the type sits under and
+aligns to. A bigger sleeve gets bigger type by construction, and the placard
+never outgrows the work it labels.
+
+| Element | Token | 1920 (edge 729) | 4K (edge 1809) |
+|---|---|---|---|
+| Title | `SIZE_HERO` 28 | 28 | **70** |
+| Artist (tracked caps) | `SIZE_HEADING` 10 | 10 | **25** |
+| Album | `SIZE_BODY` 13 | 13 | **33** |
+| Feed line | `SIZE_BODY` 13 | 13 | **33** |
+| Figures | `SIZE_META` 12 | 12 | **30** |
+| Needle | `NEEDLE_H` 2 | 2 | **5** |
+
+The clamp's floor of 1.0 is what keeps every window at or below 720 px of work
+**pixel-identical to what ships today**, so this change cannot regress the
+desktop case. The ceiling of 2.5 stops a very large source producing type that
+is absurd at 60 cm on the same panel.
+
+**What does not change at any size**, and this is the property that made the
+shipped surface right in the first place: the composition. There is no separate
+kiosk layout, no second view function, no mode. `now_playing.rs`'s own test —
+*"the kiosk is this surface at a larger size, and it is a property of the
+arithmetic rather than a plan"* (`now_playing.rs:214–234`) — is extended with
+the new terms rather than replaced.
+
+### 11.3 The screensaver, and the two things the desktop must be told
+
+A kiosk that a screen blanker turns off after ten minutes is not one, and baz
+already has the machinery: **it speaks D-Bus** for MPRIS2 over `zbus`, on its own
+session-bus thread, with the exact posture this needs — *"with no D-Bus session
+bus, baz prints one line and runs exactly as before"* (`README.md:127–137`).
+
+- **Inhibit the screensaver while the kiosk is full-screen and music is
+  playing**, via `org.freedesktop.ScreenSaver.Inhibit`, released the moment
+  either condition stops being true. **Not while merely paused** — a paused
+  kiosk holding a near-black frame is exactly when the display *should* be
+  allowed to sleep, which is also §7.6's static case.
+- **Failure is silent and total.** No bus, no inhibitor, no message, no
+  degradation of anything else — the same failure mode MPRIS already has.
+
+Refused: inhibiting system **sleep** (baz is not entitled to keep a machine
+awake), and any inhibition while the surface is not full-screen.
+
+---
+
+## 12. The implementation plan
+
+Ordered so the **highest relief per unit of work lands first**, and so that
+every step is shippable on its own — a release could stop after any of them and
+the surface would be better than it was, not half-built.
+
+The engine work is deliberately **last**, not because it is least valuable but
+because steps 1–6 are all front-end changes to a place that already exists,
+while step 8 touches the realtime path and ADR-0009's promise. Front-loading the
+riskiest work would mean the visible improvements wait on it.
+
+---
+
+**Step 1 — Delete the duplicate transport.** *(One line. Do this first.)*
+
+Remove `crate::views::bottom_bar::transport(player, ink)` from
+`now_playing.rs:168` and its `GAP_XL`. Drop `TRANSPORT_HIT` from `below` in
+`art_edge` (`now_playing.rs:61–66`), which grows the artwork by 32 px at every
+height-bound size for free.
+
+*Ships*: the owner's stated ask, a defect fixed, and a larger sleeve.
+*Test*: `the_place_draws_no_transport` — the place's element tree contains no
+transport widget; the bar's is untouched. Existing `art_edge` tests updated for
+the new `below`.
+
+---
+
+**Step 2 — The hero decode, and the refusal made true.** *(§5.2)*
+
+`art::load_hero(first_track, HERO_PX = 1024)` beside `load_thumb`, same
+resolution order, `image.thumbnail` (downscale-only). A 2-entry LRU on `Shelf`
+keyed by album id, filled for the sounding record and its successor. `art_edge`
+gains its third term (`hero_px`); **`NOW_PLAYING_MAX` is deleted.**
+
+*Ships*: artwork at its real size — 1000 px at 2560, up from 720 — and
+`REFUSALS.md`'s artwork entry becomes true on this surface for the first time
+(§0.4 b).
+*Test*: `the_now_playing_surface_never_draws_art_larger_than_its_source`, swept
+over `hero_px ∈ {120, 320, 500, 1024}` × sides 400–4000, mirroring
+`shelf.rs:1509–1530`.
+*Gate*: memory — the 2-entry hero cache must not exceed 8 MiB.
+
+---
+
+**Step 3 — The field, static.** *(§5.3, no motion yet)*
+
+Palette extraction from the decoded hero (three clamped colours), composited as
+an ordinary gradient behind the place's body. **No shader, no clock, no
+toggle yet** — this is the still state, which every backend draws and which
+§7.5 needs as the fallback anyway.
+
+*Ships*: the single largest visual change in this document, at zero per-frame
+cost, on every renderer.
+*Test*: extraction is deterministic for a given cover; the composite never
+exceeds L 0.22; a cover with no chroma yields the room rather than a grey wash.
+
+---
+
+**Step 4 — The kiosk type scale.** *(§11.2)*
+
+`kiosk_scale(edge)` and its application to the placard, the feed and the needle.
+
+*Ships*: 4K becomes a kiosk rather than a postage stamp.
+*Test*: `the_type_scale_is_identity_below_720` — every size token at
+`edge ≤ 720` is pixel-identical to today, so the desktop case cannot regress;
+and monotonicity plus the 2.5 ceiling across 400–4000.
+
+---
+
+**Step 5 — The feed.** *(§8)*
+
+F1–F11 as a `Fact` enum with one formatter each, the fixed cycle (§8.2), the
+20 s dwell under §7.3's guard, the press-to-advance, and the
+**`Event::PlayRecorded` subscription** so the count is current — the one piece of
+new plumbing, since `PlayRecorded` has no consumer in `crates/baz` today.
+
+*Ships*: the ledger's permitted card gets the home it lost when ADR-0022 deleted
+the inspector (§1), and `signal_path()` stops being dead code.
+*Test*: a record with no history yields F3 and never a dash; the cycle contains
+only facts the record has; **no formatter emits a total, an aggregate over
+history, or a second-person congratulation** (§8.4's tone rule, as a test over
+the string table).
+
+---
+
+**Step 6 — The toggles.** *(§7.2)*
+
+T1/T2/T3 as three booleans, the `Ambient` word-door and its menu, the Settings
+rows, persistence. T2 and T1-drift are wired to nothing yet; this step is the
+control surface arriving before the things it controls.
+
+*Ships*: nothing visible on its own — this is the step that makes 7 and 8 safe.
+*Test*: **`the_ambient_clock_is_absent_outside_its_place`** (§7.3), asserted over
+every place × every toggle combination. This test is what makes steps 7 and 8
+unable to regress the product's idle.
+
+---
+
+**Step 7 — The field drifts.** *(§7.5, and the first measurement gate)*
+
+The `shader` widget (no manifest change — `wgpu` is already default, §0.3(7)),
+a time uniform, the `window::frames()` arm under §7.3's guard, and the
+**`unavailable` fallback to step 3's static field** when the backend is
+tiny-skia.
+
+*Ships*: the surface becomes ambient.
+***Gate — this step does not merge until §7.4's four thresholds pass on the real
+GPU***, including at 3840 × 2160. The harness is doc 04 §1.3's, extended with an
+`ambient` driver and GPU instrumentation. Per doc 04's own precedent this puts a
+window on the maintainer's display for a few minutes; **that intrusion is the
+deliverable** and must not be substituted with a software-rasterised number.
+
+---
+
+**Step 8 — The meter.** *(§9 — the only step that touches the realtime path)*
+
+In `baz-core`: `pub(crate)` on `KWeighting`; a `LiveMeter` with fixed-size
+accumulation and no `Vec` growth; `SharedMeter`'s two `AtomicU32`s;
+`Command::SetMetering(bool)` swapping the session's `Option<LiveMeter>`; the
+`observe(&[f32])` tap on `a`/`b` in `pump`. In `crates/baz`: the instrument
+register, the field's response, and the three ballistics.
+
+*Ships*: the last piece of the brief.
+*Tests, and they are the point*:
+- **Bit-exactness**: the existing ADR-0009 suite must pass **unmodified**. The
+  tap cannot mutate — `&[f32]` — so this is a regression guard, not the proof.
+- **Compliance vectors** per §9.1: VU reaches 99 % in 300 ms ± tolerance with
+  1–1.5 % overshoot; PPM falls 24 dB in 2.8 s; momentary agrees with
+  `loudness.rs`'s integrated figure on a steady tone. **The published constants
+  are read from the standards at implementation time, not from this document.**
+- **No allocation on the pump path**, asserted the way baz already asserts
+  realtime contracts in `device.rs` and `volume.rs:432–437`.
+- **Zero when off**: with `SetMetering(false)`, the session holds no
+  `LiveMeter`.
+*Gate*: §7.4's thresholds re-run with the meter live.
+
+---
+
+## 13. Deferred, and re-verification — ranked
+
+Everything this study declined, in the order it should be picked up.
+
+**Deferred work:**
+
+| | Item | Why deferred | What would trigger it |
+|---|---|---|---|
+| **D1** | **The visualizer** (§10) | The marginal work is an FFT and a sample ring; the marginal *risk* is looking like every other player. The interesting question — *what would baz's own be* — is unanswered and should not be answered in a hurry | Step 8 lands the tap it needs. Then it wants its own study, not a section |
+| **D2** | **Network enrichment** (§8.6) | Blocked on an identifier baz does not store: every good source is MBID-keyed and baz holds no MBIDs. That is a scan-and-schema change, not a UI one | The local feed shipping and proving the composition has no hole in it |
+| **D3** | **Embedded lyrics** | A new scan capability (`lofty` can read the frames); and at 3 m a scrolling lyric column is the wrong object for the far field | A demand this study did not find |
+| **D4** | **A first-seen column in the index** | Would make *"added to your collection in 2019"* true. Today only `mtime` exists and a re-tag rewrites it, so the fact would be a plausible-looking lie (§8.1) | A schema change for another reason, which this would ride along with |
+| **D5** | **A second window on a named monitor** (§11.1) | Two blockers, not one: iced exposes no monitor handle, **and** global control flow would couple the kiosk's clock to the main window's idle | iced exposing `MonitorHandle` **and** an answer to the idle coupling. Both, not either |
+| **D6** | **A periodic pixel nudge for burn-in** (§7.6) | The drift already moves the large areas; nudging type would make it shimmer | Real-world evidence of ghosting on a drifting field. Priced at one frame per 60 s so re-proposing costs an observation, not an argument |
+
+**Re-verification — claims in this document that are weaker than the rest:**
+
+| | Claim | Current standing | Before it is leaned on |
+|---|---|---|---|
+| **R1** | The VU and PPM ballistic constants (§9.1) | Stated from the standards by name; **not read from the published documents in this session** | Read IEC 60268-17 and IEC 60268-10 directly at step 8, exactly as ADR-0015 asserted its coefficients against BS.1770-4's own tables |
+| **R2** | Roon's Display mode and Plexamp's screensaver (§2) | **Not independently verified** — doc 03 recorded that Plexamp's UI page 301s and its layout *"was not seen"* | Direct examination before any composition decision cites them. Nothing in §5–§9 currently rests on either |
+| **R3** | The GPU cost estimates (§7.4) | **Labelled estimates**, from the shape of the work | Step 7's gate, which is the measurement itself |
+
+---
+
+## 14. The ledger entries, rewritten
+
+Per `REFUSALS.md:6–14`, an entry the owner reverses *"gets rewritten to say what
+was decided and why, and that is the whole of the process."* These are drafted
+in the ledger's own voice, in the form it already uses for the hover veil
+(`REFUSALS.md:113–121`) and the wall's scrollbar (`REFUSALS.md:235–243`) — the
+old text quoted, the decision recorded, and **the constraint that replaced the
+blanket refusal** named along with the test that holds it.
+
+### 14.1 Artwork and its source
+
+> **Artwork is never *upscaled*: no sleeve is drawn larger than the pixels its
+> file actually contains.** The wall holds this at `ART_MAX == THUMB_PX`
+> (`the_wall_never_draws_art_larger_than_its_source`); the now-playing surface
+> holds it against its own decode, whose size it reads rather than assumes
+> (`the_now_playing_surface_never_draws_art_larger_than_its_source`).
+>
+> **A field derived from a cover is not the cover.** The now-playing surface
+> draws a wash built from three colours sampled out of the artwork, with
+> lightness and chroma clamped into the room's range — the same rule the
+> art-derived lamp already follows, at a larger size. It is not invertible, it
+> carries no resolution, and *larger than its source* is not a predicate that
+> applies to it. What it may not do is exceed L 0.22, because the sleeve must
+> stay the brightest object on the screen.
+>
+> *Rewritten on the owner's decision, 2026-08-09* — *"it would be nice if the
+> album art was somehow more prominent, like it takes up the background"*. This
+> entry used to read **"No artwork is ever drawn larger than its source.
+> `ART_MAX == THUMB_PX`, asserted in code"**, and the equation had come to stand
+> for the rule: the now-playing place shipped drawing a 320 px thumbnail at
+> 720 px, so the entry was **already false** in the one place nobody had
+> checked. What was always meant is the first paragraph; the second records what
+> the owner asked for and the constraint that keeps it honest.
+
+### 14.2 The scrim
+
+> **No scrim, ever.** Dimming ten thousand covers to show twelve rows is the
+> exact mistake the palette exists to avoid. A scrim is a surface laid over *the
+> collection* to make something else readable.
+>
+> Unchanged by the hover veil, and unchanged by the now-playing field, for the
+> same reason in both cases: the veil is a mark on **one** object under the
+> pointer that stops before that object is hidden, and the field sits **under**
+> everything and dims nothing — it is the room's own colour, changed by the
+> record. Neither is a layer over the collection.
+>
+> *Extended on the owner's decision, 2026-08-09.* The entry is not weakened; the
+> distinction it already drew for the veil is drawn once more.
+
+### 14.3 Skeuomorphism, and the meter
+
+> The record supplies **physics, structure and vocabulary** — the stack, sides,
+> groove spacing, "drop the needle". It never supplies **surface**. Banned:
+> vinyl discs peeking from sleeves, wood grain, tonearms, wear, patina, and any
+> circle pretending to be a record.
+>
+> **A meter is admitted as a measurement and refused as an object.** Permitted:
+> the reading, drawn in baz's own vocabulary — a line, a mark, a numeral, the
+> room's inks — with its standard named and its ballistics tested against the
+> published document (EBU R128 / ITU-R BS.1770-4 momentary by default;
+> IEC 60268-17 VU and IEC 60268-10 PPM offered). Refused, and these are the
+> surface the entry has always been about: a beige panel, a glass face, a
+> printed arc scale, a pivoting needle, a bezel, a lamp behind the dial.
+>
+> *Rewritten on the owner's decision, 2026-08-09* — *"some nice VU meter stuff
+> over it in a stylised way"*. This entry used to name **VU meters** in the ban
+> list, between wood grain and wear. What was being banned was the *instrument
+> as furniture*, which is what every other item in that list is; a real
+> measurement of the audio is data, and this ledger already distinguishes the
+> two when it calls the art-derived lamp *data* rather than decoration. The
+> entry's own sentence draws the line: *physics, structure and vocabulary —
+> never surface.*
+
+### 14.4 Motion, and the ambient class
+
+> Appended to the motion entry, after the fisheye paragraph:
+>
+> **One surface is allowed to be ambient, because being looked at is its
+> purpose.** `Place::NowPlaying` may run continuous, user-started ambient
+> content — a field that drifts, a meter that moves — under ADR-0020 §7's
+> discipline: it is a thing you start and never a thing that starts itself; it
+> exists only on a surface whose purpose is to be looked at, and a second such
+> surface needs an argument that beats this one; it **states nothing**, so it
+> can never be the only carrier of a fact; and it costs **exactly nothing** when
+> its toggles are off or its place is not on screen, because the subscription is
+> a function of state and an absent arm has no timer to stop
+> (`the_ambient_clock_is_absent_outside_its_place`).
+>
+> The rest of the product's idle is unchanged and still measured at 0.0 %. The
+> clause everything else hangs on — *anything requiring a redraw while the
+> window is idle* — still forbids exactly what it was written against:
+> decorative motion **nobody asked for**, anywhere else in baz.
+>
+> *Amended on the owner's decision, 2026-08-09* — *"ambient motion is fine as
+> long as the performance remains top tier."* The bar this entry sets on that
+> one surface is therefore **performance rather than abstinence**, and it is a
+> number rather than an adjective: `docs/design/12-now-playing-and-kiosk.md`
+> §7.4 carries the thresholds and the method, and no ambient work merges without
+> them.
