@@ -102,6 +102,7 @@ pub(crate) fn view<'a>(
     place: Place,
     rows: &'a [Touched],
     sounding: bool,
+    playing: Option<u64>,
     window_w: f32,
 ) -> Element<'a, Message> {
     let room = theme::active();
@@ -125,7 +126,13 @@ pub(crate) fn view<'a>(
 
     let mut list = column![];
     for entry in rows {
-        list = list.push(lane_row(shelf, playlists, entry, open));
+        // **Which row is sounding** — doc 13 §2.6's claim, delivered. A list is
+        // never "the sounding record" however many of its tracks are in the
+        // run: the fact is about a record, and a list that lit because one of
+        // its members was playing would be the invisible-pool posture in a
+        // sleeve.
+        let sounds = matches!(entry.subject, Subject::Record(id) if Some(id) == playing);
+        list = list.push(lane_row(shelf, playlists, entry, open, sounds));
     }
     let list = scrollable(list)
         .direction(scrollable::Direction::Vertical(theme::wall_scrollbar()))
@@ -500,6 +507,7 @@ fn lane_row<'a>(
     playlists: &'a Playlists,
     entry: &'a Touched,
     open: bool,
+    playing: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
     // **[`theme::SIDEBAR_SLEEVE`] 48 in both states**, and that is a
@@ -530,17 +538,33 @@ fn lane_row<'a>(
         Subject::Record(id) => Message::AlbumClicked(id),
         Subject::Playlist(id) => Message::OpenPlaylist(id),
     };
+    // **The lamp dot before the name**, when this record is the one sounding
+    // (doc 13 §2.6). The *row's* vocabulary rather than the tile's: the wall
+    // marks a playing record with a halo around its art and a dot before its
+    // title, and every row list in the product — the queue, a playlist's page —
+    // marks it with the dot and the row's own card ([`theme::track_row`]'s
+    // `playing`). A lane row is a row, so it takes the row's form; a warmed
+    // halo would also need the lamp's own clock plumbed into a surface ADR-0030
+    // §4 costs at zero idle CPU.
+    let mut named = row![]
+        .spacing(theme::GAP_XS)
+        .align_y(iced::Alignment::Center);
+    if playing && open {
+        named = named.push(lamp_dot());
+    }
     let body: Element<'a, Message> = if open {
         row![
             sleeve,
             container(
                 column![
-                    text(entry.name.clone())
-                        .size(theme::SIZE_BODY)
-                        .line_height(theme::LEADING_BODY)
-                        .font(theme::MEDIUM)
-                        .color(room.paper)
-                        .wrapping(text::Wrapping::None),
+                    named.push(
+                        text(entry.name.clone())
+                            .size(theme::SIZE_BODY)
+                            .line_height(theme::LEADING_BODY)
+                            .font(theme::MEDIUM)
+                            .color(room.paper)
+                            .wrapping(text::Wrapping::None)
+                    ),
                     text(entry.under.clone())
                         .size(theme::SIZE_META)
                         .line_height(theme::LEADING_META)
@@ -571,7 +595,10 @@ fn lane_row<'a>(
     .width(Length::Fill)
     .height(Length::Fixed(theme::SIDEBAR_ROW_H))
     .padding(theme::pad(0.0, if open { theme::GAP_SM } else { 0.0 }))
-    .style(move |_theme, status| theme::track_row(room, room.recess, status, false))
+    // The card the sounding row keeps whatever the pointer is doing — and the
+    // one mark that survives the collapse, where there is no name to set a dot
+    // before and 96 px still has to answer *which of these is on?*
+    .style(move |_theme, status| theme::track_row(room, room.recess, status, playing))
     .on_press(press);
     if open {
         return row_button.into();
@@ -814,6 +841,37 @@ mod tests {
         assert!(
             !row.contains("theme::PANEL_SLEEVE"),
             "the lane draws the playlist panel's sleeve"
+        );
+    }
+
+    /// **The sounding record is marked in the lane** — doc 13 §2.6's claim,
+    /// which the shipped lane did not keep: every row drew
+    /// [`theme::track_row`] with `playing` hard-coded `false`, so the surface
+    /// whose whole subject is *things you have touched* could not say which of
+    /// them was on.
+    ///
+    /// The dot before the name and the row's card, which is the **row's**
+    /// vocabulary — what the queue and a playlist's page already draw — rather
+    /// than the tile's halo, which would want the lamp's clock in a surface
+    /// ADR-0030 §4 costs at zero idle CPU. And a **record** only: a list is
+    /// never "the sounding record" however many of its tracks are in the run.
+    #[test]
+    fn the_sounding_record_is_the_marked_row() {
+        let source = source();
+        let view = body(&source, "pub(crate) fn view<'a>(");
+        assert!(
+            view.contains("Subject::Record(id) if Some(id) == playing"),
+            "the lane no longer asks which of its rows is sounding, or asks it \
+             of lists as well as records"
+        );
+        let row = body(&source, "fn lane_row<'a>(");
+        assert!(
+            row.contains("if playing && open {") && row.contains("named.push(lamp_dot())"),
+            "the sounding row lost its lamp dot"
+        );
+        assert!(
+            row.contains("theme::track_row(room, room.recess, status, playing)"),
+            "the sounding row lost the card that survives the collapse"
         );
     }
 }

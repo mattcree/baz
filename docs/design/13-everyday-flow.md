@@ -468,6 +468,16 @@ change it.**
 - **The playing record** takes the lamp dot before its name and the halo
   around its sleeve — the wall's exact vocabulary (`shelf.rs:916–941`),
   amber only for playback truth, never for selection.
+
+  > **Built as the dot and the row's card, not the halo** (2026-08-09; the
+  > shipped lane had neither, which is the defect this note closes). A lane row
+  > is a *row*, and every row list in the product already marks the sounding
+  > one this way — the queue's, a playlist's page — through
+  > `theme::track_row`'s own `playing`. The halo is the **tile's** form and it
+  > is a warmed 200 ms transition, so drawing it here would put the lamp's
+  > clock into a surface §2.5 costs at *zero* idle CPU. The card is also the
+  > only one of the two that survives the collapse, where there is no name to
+  > set a dot before and 96 px still has to answer *which of these is on?*
 - **No seam, no ground, no shadow.** This is the one place a shipped law
   gets overruled in the open. The panel draws a 1 px seam down its left
   edge (`playlist_panel.rs:169–173`) because it *floats* over the wall and

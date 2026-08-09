@@ -3791,6 +3791,12 @@ impl App {
                     self.place,
                     &self.lane,
                     self.player.now_playing_path().is_some(),
+                    // Two facts, not one: *anything* is sounding lights the
+                    // head's `Now playing` dot, and *this record* is sounding
+                    // lights its own row. They differ for a file the library
+                    // does not hold — the head still answers, the list has
+                    // nothing to mark.
+                    self.player.playing_album(),
                     self.window.width,
                 ),
                 screen

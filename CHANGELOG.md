@@ -871,6 +871,13 @@ next commit.
   derivation — 48 with one `GAP_SM` above and below — describing a row nothing
   was drawing, against doc 13 §9.2's 48. Measured off the shipped frame at
   40 × 40.
+- **The returns lane marks the record that is sounding.** Doc 13 §2.6 promised
+  the lamp dot before its name; every row drew the row style with `playing`
+  hard-coded false, so the surface whose subject is *things you have touched*
+  could not say which of them was on. The dot and the row's card now — the
+  vocabulary the queue and a playlist's page already use — and the card is what
+  survives the collapse, where there is no name to set a dot before. A list is
+  never marked, however many of its tracks are in the run.
 - **A playlist's sleeve gets real artwork rather than getting it by luck.** The
   collage is read out of the wall's thumbnail cache and nothing was putting the
   records a list quotes *into* that cache: the lane's own art request yields its

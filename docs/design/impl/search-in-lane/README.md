@@ -168,6 +168,18 @@ Comparing the shipped frames against doc 13 and ADR-0030:
   records it quotes happened to scroll onto the wall: real artwork **by luck**,
   which is not what ADR-0030 §2 claims. The shell now names them, four per list,
   on the same guard.
+- **The lane could not say which record was sounding.** Doc 13 §2.6: *"the
+  playing record takes the lamp dot before its name and the halo around its
+  sleeve."* Every lane row drew `theme::track_row` with `playing` hard-coded
+  `false`, so the surface whose whole subject is *things you have touched* said
+  nothing about which of them was on —
+  `lane-and-home/03-lane-open-sounding-1280.png` shows `Ochre` sounding, in the
+  bar and on the wall, and unmarked in the lane. It takes the **row's**
+  vocabulary now: the dot before the name and the card the sounding row keeps
+  whatever the pointer is doing, which is what the queue and a playlist's page
+  already draw, and which is the one mark that survives the collapse. Not the
+  tile's warmed halo — that wants the lamp's own clock in a surface ADR-0030 §4
+  costs at zero idle CPU. Visible in `01` and `07` here.
 - **The "empty sleeve squares" were not a defect.** In `01-lane-open-1280.png`
   the three lists wear a near-black tile with one faint bar, and all three are
   pixel-identical. That is real artwork: `mkfixture.sh`'s **`mono`** family,
