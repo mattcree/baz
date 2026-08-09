@@ -1,5 +1,46 @@
 # ADR-0024: Playlists — files the user owns, a page, and one summoned panel
 
+> **Proposed amendment (2026-08-09), from
+> [`docs/design/09-implicit-playlists.md`](../design/09-implicit-playlists.md)**
+> — the implicit-playlist study, on the owner's report that the shipped
+> collecting UX splits the hierarchy (*"I don't want people to have to
+> context switch constantly… we are thinking there are implicit playlists
+> everywhere"*). Six changes; §1–§3 (the storage model and every honesty
+> clause) and §7 (the generator guarantees) are untouched:
+>
+> 1. **§6 layer 2 — the armed collecting mode — is withdrawn.** Shipped
+>    2026-08-09, removed on the owner's own observation (09 §9): it was a
+>    second list-building grammar and a mode. The panel's per-row receive
+>    `+` goes with it; panel rows carry one control (the door), plus
+>    whole-row as target while picking. The drag remains the future
+>    one-press form; the two-press pick remains the modeless floor.
+> 2. **The picker gains the Queue as its first row** and hoists the
+>    current playlist (ADR-0023's amended provenance) second, marked
+>    *playing* (09 §8.1). At rest the panel's Queue row is a readout, not
+>    a door. **The single-tenant clause is restated, not weakened**: the
+>    panel's tenant is *ordered lists of tracks* — the unnamed one
+>    included, which is the unification's claim that there is one kind —
+>    and it still may never hold anything of another subject.
+> 3. **The queue place reaches edit parity** (09 §8.2): the playlist
+>    page's ▲▼ slots and the transfer `+` join its rows, making the queue
+>    and playlist pages one editor; `Save as playlist` is named as *the*
+>    creation act — a playlist outlives its playing when it is named, and
+>    not before (09 §8.3).
+> 4. **A context-menu mirror layer is introduced** (09 §5.2): right-click
+>    menus on track rows, queue rows, tiles, and the bar's now-playing
+>    block, governed as the keyboard is — every item sends a message some
+>    visible control also sends, pinned by the same shape of test — which
+>    is what admits *"send to current playlist"* in two gestures from
+>    anywhere without breaching the visible-control rule.
+> 5. **Search answers in songs** (09 §5): a ranked `Songs` section above
+>    the filtered wall, from track results `Library::search` already
+>    returns; a result's press is a needle-drop; the sections stay
+>    separate, per the owner's brief.
+> 6. **`Add to "{current}"` appends to the file only** (09 §6): the run
+>    stays tonight's snapshot — §1's decoupling holds in both directions,
+>    and the both-at-once gesture is refused as the two-structure
+>    confusion returning.
+
 **Status**: accepted (2026-08-09) — §1–§3 shipped as `baz_core::playlist`;
 §4–§6 shipped as `Place::Playlist`, the panel, the add layers 1–2, and
 `Save as playlist`, with §6's **layer 3 (the drag) pending** on the shared
