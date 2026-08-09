@@ -313,8 +313,8 @@
   and finished with doc 09 §13 step 5: a row click jumps, the ✕ removes,
   the ▲▼ steppers reorder (`queue_edit::shifted`, the cursor following its
   track), and the `+` transfers toward the picker — the queue place and the
-  playlist page are one editor (09 §8.2). Only the drag remains, tracked in
-  its own entry below.
+  playlist page are one editor (09 §8.2). The drag shipped last, closing the
+  step (its own entry below).
 - ~~**The queue cannot be built from a record.**~~ — **closed by the
   picker's Queue row** (doc 09 §8.1; ADR-0023's accepted amendment): `Add
   to…` on the record's page, or a track row's `+`, then the picker's first
@@ -327,11 +327,18 @@
   record*, nothing sounding unasked) and **the context menu's `Queue` item**
   (step 4 — the mirror layer's presses are the `+` then the picker's Queue
   row, made for you).
-- **Playlist reorder and add have no drag** (ADR-0024 §6 layer 3, deliberately
-  last). iced 0.13 has no pointer capture, so the drag needs the hand-built
-  widget on the `groove.rs` precedent — one investment paying playlist add,
-  playlist reorder and queue reorder alike. Until it lands the ▲▼ steppers and
-  the two-press adds are the routes, which is the ADR's own shipping order.
+- ~~**Playlist reorder and add have no drag**~~ (ADR-0024 §6 layer 3,
+  deliberately last; resequenced by doc 11 P5) — **shipped**, as the
+  hand-built widget on the `groove.rs` precedent (`crates/baz/src/drag.rs`):
+  one investment paying all three surfaces — queue reorder, playlist
+  reorder, and drag-to-add onto the standing panel's rows. Press a row past
+  the 8 px threshold and an insertion line rides the boundaries; release
+  commits one whole-list `UpdateQueue` or one atomic file save; a drop on a
+  panel row appends to that file. Esc discards; `CursorLeft`/`Unfocused`
+  commit (the groove's capture lessons, inherited and pinned by tests). The
+  ▲▼ steppers, the `+` and the picker remain the visible routes — the drag
+  is sugar, exactly as the ADR ordered it. Captures at
+  `docs/design/impl/drag/`.
 - **A missing playlist entry cannot be repaired in place.** ADR-0024 §3
   specifies the surface — candidate matches (same filename under a current
   root) proposed per entry, confirmed by the user, the confirmation being the
@@ -352,8 +359,9 @@
   press the item; queue-place edit parity — ▲▼, the `+` slot on the queue's
   and the playlist page's rows alike, and the place's virtualization;
   `Play all` in the Library strip; shift-click as the queue-append
-  accelerator). **Only step 8 remains, shipping whole: the drag** (its own
-  entry above). Wall membership, rail sorting and search-corpus membership
+  accelerator). **Step 8 — the drag — shipped whole** (its own entry
+  above), which closes §13: all eight steps are on screen.
+  Wall membership, rail sorting and search-corpus membership
   for playlists stay deferred (ADR-0024 §A2); the sleeve (§A1) is the
   vocabulary any outcome keeps.
 - **The settings steppers' marks do not ride the transport's hover tween.**

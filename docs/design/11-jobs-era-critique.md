@@ -770,6 +770,16 @@ adjudicates.
 
 ### P5 — The drag is not sugar: build the pointer-capture widget now · **adopt**
 
+> **Shipped (2026-08-09)** — `crates/baz/src/drag.rs`, closing doc 09 §13
+> step 8 (the last of its steps) and flipping ADR-0024 §6 layer 3 to
+> shipped. Exactly as proposed: one hand-built widget on the `groove.rs`
+> precedent unlocks the three surfaces — queue reorder, playlist reorder,
+> drag-to-add onto the standing panel's rows — with
+> `CursorLeft`/`Unfocused` committing the gesture (doc 04 §2.2's
+> workaround, cited below) and <kbd>Esc</kbd> discarding it. The steppers,
+> picker and menus remain, as this proposal itself requires. Captures at
+> `docs/design/impl/drag/`.
+
 - **Principle**: direct manipulation as the *primary* gesture, the picker as
   fallback (iTunes lesson; the owner's own verbatim ask).
 - **Existing rationale, steelmanned**: ADR-0024 §6 — iced 0.13 has no pointer

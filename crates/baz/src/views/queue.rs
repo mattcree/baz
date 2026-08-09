@@ -91,6 +91,12 @@ pub(crate) fn save_name_id() -> text_input::Id {
 /// render-ready reading, which is why the element is `'static`: the contents
 /// are a projection of engine events and a request-side record, not a borrow of
 /// the library, so nothing on screen can outlive a view-model rebuild mid-scan.
+#[expect(
+    clippy::too_many_lines,
+    reason = "the place is one composition — the summary strip, the save \
+              field, and the windowed rows loop — and the loop's boxing \
+              rules must stay in sight of the spacers they keep honest"
+)]
 pub(crate) fn view<'a>(
     player: &'a PlayerState,
     window: iced::Size,
@@ -98,6 +104,7 @@ pub(crate) fn view<'a>(
     saving: Option<&'a NameEntry>,
     collecting: Collecting,
     scroll: f32,
+    drag: Option<&'a crate::drag::DragState>,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let measure =
@@ -170,6 +177,8 @@ pub(crate) fn view<'a>(
                         live,
                         hovered == Some(index),
                         collecting,
+                        drag.and_then(|held| held.line_for_row(crate::drag::List::Queue, index)),
+                        drag.is_some_and(|held| held.list == crate::drag::List::Queue),
                     ))
                     .height(Length::Fixed(queue_window::row_pitch(two_line)))
                     .align_y(alignment::Vertical::Top)
@@ -397,6 +406,21 @@ fn empty_state() -> Element<'static, Message> {
 ///   would slide sideways as the pointer crossed a row. (The `+` alone is
 ///   also drawn at rest while the panel stands, the album page's own rule:
 ///   the picker on screen is the task the mark belongs to.)
+///
+/// **The row's body is a drag source** (doc 09 §13 step 8; [`crate::drag`]
+/// carries the gesture and its laws): press and move past the threshold to
+/// lift the row — reorder against the insertion line, or carry it over the
+/// standing panel's rows to add — while a sub-threshold press stays this
+/// row's ordinary click. Sugar only: the ▲▼ steppers, the ✕ and the `+`
+/// remain exactly as above. `line` is the insertion edge this row draws
+/// while a drag is in flight; `observing` has the row measure the held
+/// pointer against its own bounds — both from the shell's one drag state.
+#[expect(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "a row is one anatomy and these are its readings; a struct \
+              would name this call site and nothing else"
+)]
 fn queue_row(
     row_state: QueueRow,
     index: usize,
@@ -404,6 +428,8 @@ fn queue_row(
     live: bool,
     hovered: bool,
     collecting: Collecting,
+    insert_line: Option<crate::drag::Edge>,
+    observing: bool,
 ) -> Element<'static, Message> {
     let room = theme::active();
     let playing = row_state.state == QueueRowState::Playing;
@@ -476,6 +502,23 @@ fn queue_row(
     .padding(theme::pad(theme::GAP_XS, 0.0))
     .style(move |_theme, status| theme::track_row(room, status, playing))
     .on_press_maybe(live.then_some(Message::JumpToQueued(index)));
+    // The drag wrapper owns the pointer for the body (crate::drag's module
+    // docs): live rows lift on threshold and still click under it; every
+    // row of the list measures a drag in flight against its own bounds.
+    let mut source = crate::drag::Source::new(body, room);
+    if live {
+        source = source.wires(crate::drag::Wires::new(
+            move |at| Message::DragLift(crate::drag::List::Queue, index, at),
+            Message::DragMoved,
+            Message::DragDropped,
+            Some(Message::JumpToQueued(index)),
+        ));
+    }
+    if observing {
+        source = source
+            .observe(move |before| Message::DragOverRow(crate::drag::List::Queue, index, before));
+    }
+    let body: Element<'static, Message> = source.line(insert_line).into();
     let offered = live && hovered;
     let mut slots = row![
         body,
@@ -723,6 +766,25 @@ mod tests {
         assert!(
             source.contains("Space::with_width(Length::Fixed(theme::STEPPER_HIT))"),
             "an unoffered slot is a space of exactly the control's width"
+        );
+
+        // Step 8: the row's body is a drag source, and the drag is sugar —
+        // it wraps the body *beside* the reserved slots above, all of
+        // which the assertions before this one prove still stand. The
+        // sub-threshold click is the row's own press, and the observation
+        // wire is what makes the insertion index exact under this place's
+        // virtualization.
+        assert!(
+            source.contains("crate::drag::Source::new(body, room)"),
+            "the row's body is wrapped as a drag source"
+        );
+        assert!(
+            source.contains("Some(Message::JumpToQueued(index)),"),
+            "a sub-threshold press is still the row's click"
+        );
+        assert!(
+            source.contains("Message::DragOverRow(crate::drag::List::Queue, index, before)"),
+            "every row measures a drag in flight against its own bounds"
         );
     }
 }

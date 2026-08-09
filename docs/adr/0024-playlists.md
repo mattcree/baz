@@ -67,8 +67,10 @@
 **Status**: accepted (2026-08-09) — §1–§3 shipped as `baz_core::playlist`;
 §4–§6 shipped as `Place::Playlist`, the panel, the add layers 1–2, and
 `Save as playlist`, with §6's **layer 2 since withdrawn** (the amendment
-above; doc 09 §9) and its **layer 3 (the drag) pending** on the shared
-pointer-capture widget, and §3's repair surface (`Locate…`) not yet built;
+above; doc 09 §9) and its **layer 3 (the drag) shipped** (2026-08-09, the
+shared pointer-capture widget `crates/baz/src/drag.rs` — doc 11 P5's
+resequencing, doc 09 §13 step 8), and §3's repair surface (`Locate…`) not
+yet built;
 §7 remains ground rules for a feature that does not exist ·
 **amended 2026-08-09** — the playlist's sleeve, §A1–§A2 ·
 extracts the decisions of
@@ -247,6 +249,21 @@ decision.
    playlist reorder — one investment, three surfaces. It ships last and is
    sugar over routes that already work; *"really easy to drag"* must not
    mean *"waiting on the hardest widget in the plan"*.
+   *Shipped (2026-08-09), resequenced by doc 11 P5 and closing doc 09 §13
+   step 8 — the last of its steps*: `crates/baz/src/drag.rs`, one per-row
+   wrapper paying all three surfaces. Press a row of either editor past an
+   8 px threshold and the row is in the hand — a ghost card names it at
+   the pointer, an insertion line rides the row boundaries (measured by
+   the rows themselves, exact under the queue's virtual window) — and
+   release commits **one** edit: a whole-list `UpdateQueue`
+   (`queue_edit::moved`; the music keeps playing), one atomic file save
+   (`Playlists::move_entry`), or, dropped on a standing panel's playlist
+   row, that file's append — the picker row's own act, made direct.
+   Sub-threshold stays the row's click; Esc discards;
+   `CursorLeft`/`Unfocused` commit at the line (the groove's capture
+   lessons, inherited and pinned by tests). The steppers, the `+`, the
+   picker and the menus all remain — the drag is sugar, exactly as
+   ordered here. Captures at `docs/design/impl/drag/`.
 
 ### 7. Generated playlists: the guarantees any generator inherits
 

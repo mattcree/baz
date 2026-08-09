@@ -64,6 +64,7 @@
 pub(crate) mod album;
 pub(crate) mod bottom_bar;
 pub(crate) mod context_menu;
+pub(crate) mod drag_ghost;
 pub(crate) mod playlist;
 pub(crate) mod playlist_panel;
 pub(crate) mod queue;

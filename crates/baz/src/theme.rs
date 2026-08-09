@@ -1331,6 +1331,10 @@ pub const DETENT_H: f32 = 5.0;
 /// mark. The mark is lifted clear of the knob rather than drawn under it —
 /// see [`crate::groove::Detent`].
 pub const DETENT_GAP: f32 = 2.0;
+/// Height of the reorder drag's insertion line ([`crate::drag`]) — the
+/// needle's own 2 px, the thinnest mark this room treats as a statement
+/// rather than a border.
+pub const INSERT_LINE_H: f32 = 2.0;
 /// Hit height of the volume groove: the rail plus, on each side, room for
 /// the knob and the detent mark above it. Taller than [`RAIL_HIT`] because
 /// the mark has to live somewhere the handle is not.
@@ -1373,6 +1377,19 @@ pub fn detent_ink(p: &Palette, engaged: bool) -> Color {
     } else {
         p.hairline(p.recess)
     }
+}
+
+/// The reorder drag's insertion line ([`crate::drag`]): where the lifted
+/// row will land, stated in ink the room already owns.
+///
+/// [`Palette::paper_dim`], not the accent — where a row is *going* is a fact
+/// about the hand, not about what is playing (the detent's own argument) —
+/// and not a hairline: a mark the eye must follow mid-gesture is a
+/// statement, and the engaged detent already prices a 2 px statement at
+/// full-ish ink.
+#[must_use]
+pub const fn insert_line_ink(p: &Palette) -> Color {
+    p.paper_dim
 }
 
 // ---------------------------------------------------------------------------

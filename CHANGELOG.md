@@ -277,6 +277,25 @@ next commit.
   the tail as its own headed group. The visible on-screen route to the
   same act is the picker's Queue row (`Add to…` → `Queue`), which the
   gesture accelerates the way a key binding accelerates a button.
+- **Drag to reorder, drag to add** (doc 09 §13 step 8 — the last of its
+  steps; ADR-0024 §6 layer 3, resequenced by doc 11 P5): press any row of
+  the two list editors — the queue place or a playlist's page — move past
+  an 8 px threshold, and the row is in the hand: a quiet ghost card names
+  it at the pointer, an insertion line rides the boundaries between rows,
+  and release commits **one** whole-list edit — one `UpdateQueue` for the
+  run (the music keeps playing, the cursor follows its track by path), one
+  atomic file save for the artefact. Carried over the standing panel's
+  playlist rows instead, the drop appends the track to that file — the
+  picker row's own append, made direct. A sub-threshold press is still the
+  row's ordinary click; <kbd>Esc</kbd> discards the gesture; the pointer
+  leaving the window or the window losing focus commits it where the line
+  was (the groove's own capture lessons, inherited whole — iced 0.13 still
+  has no pointer grab, and `crates/baz/src/drag.rs` documents what is done
+  about it). **Sugar only**: the ▲▼ steppers, the ✕, the `+`, the picker
+  and the context menu all remain exactly as shipped — the drag is
+  pointer-only by nature, and the visible controls stay the accessible
+  route the visible-control rule requires. Captures at
+  `docs/design/impl/drag/`.
 - **Playing provenance** (doc 09 §6): a queue reified from a playlist file —
   its `Play`, or a click on its rows — records the file's *name* on the
   request-side queue record. Origin, never a live link: it survives every
@@ -683,10 +702,10 @@ next commit.
   `AnalysisCommand` and reports progress on the event stream; the control is a
   parallel unit, exactly as the volume slider and the ReplayGain mode selector
   were before them.
-- **Playlist reorder has steppers, not yet a drag.** iced 0.13 has no pointer
-  capture, so drag-to-reorder (and drag-to-add, ADR-0024 §6 layer 3) waits on
-  the hand-built widget that will serve queue and playlist alike; the ▲▼
-  steppers and the two-press adds are the routes that ship. The missing-entry
+- **The drag commits at the window's edge on X11.** iced 0.13 has no pointer
+  capture, so a reorder drag that crosses the window edge ends and commits
+  there (the groove's own documented price); on Wayland the compositor holds
+  the implicit grab and the drag survives the crossing. The missing-entry
   repair surface (`Locate…`, ADR-0024 §3) is designed and not yet built.
 - No cue sheets, no watch folders, no tag editing, no application
   icon, and no exclusive-mode output (which is also what puts hardware volume

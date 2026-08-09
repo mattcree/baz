@@ -378,6 +378,36 @@ pub(crate) enum Message {
     /// The pointer left a playlist row. Carries which, for the reason
     /// [`Self::QueueRowLeft`] carries which row.
     PlaylistRowLeft(usize),
+    /// A row's press travelled past [`crate::drag::THRESHOLD_PX`]: the row
+    /// is in the hand (doc 09 §13 step 8, doc 11 P5 — the reorder drag,
+    /// sugar over the steppers and the picker, which all remain). Carries
+    /// which editor, which row, and where the pointer was when the gesture
+    /// became a drag.
+    DragLift(crate::drag::List, usize, Point),
+    /// The held pointer moved — anywhere, the [`crate::groove`] discipline —
+    /// so the ghost can follow it.
+    DragMoved(Point),
+    /// A row of the dragged list measured the held pointer inside its own
+    /// bounds: which row, and whether the pointer is in its upper half —
+    /// the insertion slot is decided from exactly this
+    /// ([`crate::drag::slot`]), which is what keeps the index exact under
+    /// [`crate::queue_window`]'s virtualization with no window-coordinate
+    /// estimate anywhere.
+    DragOverRow(crate::drag::List, usize, bool),
+    /// The held pointer entered a panel playlist row: the drop becomes that
+    /// file's append — drag-to-add, the picker row's own gesture made
+    /// direct (09 §8.1; the picker remains the route when the panel is
+    /// closed).
+    DragOverPanel(u64),
+    /// The held pointer left a panel playlist row. Carries which, for the
+    /// reason [`Self::QueueRowLeft`] carries which row.
+    DragLeftPanel(u64),
+    /// The drag ended — an ordinary release, or the pointer stopped being
+    /// ours (`CursorLeft`/`Unfocused`, doc 04 §2.2). One commit: a
+    /// whole-list `UpdateQueue`, one saved file, or one append — decided
+    /// against [`crate::drag::DragState`], and a drop on the no-op slot
+    /// asks for nothing. <kbd>Esc</kbd> is the discard and never sends this.
+    DragDropped,
     /// The pointer entered a track row on the record's page, so the row can
     /// offer its `+` when the panel is closed.
     AlbumRowEntered(usize),
@@ -684,6 +714,12 @@ struct App {
     /// Which track row of the **record's page** the pointer is on — the same
     /// mechanism again, for the row's reserved `+` slot (ADR-0024 §6).
     hovered_album_row: Option<usize>,
+    /// The reorder drag in flight, `None` at rest ([`crate::drag`],
+    /// doc 09 §13 step 8). **One `Option` is the whole gesture state** —
+    /// the menu's own construction — so one drag at a time is structural,
+    /// and <kbd>Esc</kbd> discards it by one assignment before any other
+    /// layer peels.
+    drag: Option<crate::drag::DragState>,
     /// The open context menu, if one stands (doc 09 §5.2) — `None` at rest.
     ///
     /// **One `Option` is the whole overlay state**, which is what makes
@@ -900,6 +936,7 @@ impl App {
             queue_scroll: 0.0,
             hovered_playlist_row: None,
             hovered_album_row: None,
+            drag: None,
             menu: None,
             playlists: crate::playlists::Playlists::start(),
             window: WINDOW,
@@ -933,6 +970,7 @@ impl App {
             Self::update_motion,
             Self::update_modified_input,
             Self::update_playlists,
+            Self::update_drag,
         ] {
             if let Some(task) = machine(self, &message) {
                 return task;
@@ -1249,6 +1287,14 @@ impl App {
     fn update_menu(&mut self, message: &Message) -> Option<Task<Message>> {
         match message {
             Message::OpenMenu(target, at) => {
+                // Not over a drag: a right press mid-hold would float a
+                // menu over a gesture whose release is still owed, and the
+                // stack level it adds would reshape the tree under the
+                // held row (the ghost layer's own note). The hand finishes
+                // one gesture before it starts another.
+                if self.drag.is_some() {
+                    return Some(Task::none());
+                }
                 // The items are decided now, against the facts as they
                 // stand, and captured — the menu shows what the listener
                 // saw, and a press sends exactly what was on screen. A
@@ -1824,8 +1870,11 @@ impl App {
             // A menu is about something *in* the place it was opened over;
             // it does not survive the place leaving (a keyboard door can
             // navigate under an open menu — the pointer routes all close it
-            // on their own press).
+            // on their own press). A drag is about rows in the place, so
+            // the same rule discards it — a keyboard door mid-hold must not
+            // leave a ghost over a place with no rows to land on.
             self.menu = None;
+            self.drag = None;
             self.place = door(self.place);
         }
         Task::none()
@@ -1845,8 +1894,10 @@ impl App {
             return Task::none();
         };
         state.opened = Some(id);
-        // The place changes, so an open menu goes with it (`go`'s rule).
+        // The place changes, so an open menu and any drag go with it
+        // (`go`'s rule).
         self.menu = None;
+        self.drag = None;
         self.place = self.place.album(id);
         Task::none()
     }
@@ -1861,8 +1912,10 @@ impl App {
     /// themselves. `Ctrl+R` re-pulls; this is the *"Esc returns"* half of the
     /// same sentence (`docs/design/critique/02-surfaces.md`).
     fn leave(&mut self) -> Task<Message> {
-        // The place changes, so an open menu goes with it (`go`'s rule).
+        // The place changes, so an open menu and any drag go with it
+        // (`go`'s rule).
         self.menu = None;
+        self.drag = None;
         let leaving = self.place.showing_album();
         self.place = self.place.back();
         if let (Screen::Shelf(state), Some(id)) = (&mut self.screen, leaving)
@@ -1932,6 +1985,13 @@ impl App {
     /// documented two-press behaviour, and §4.6 of the design spec owns the
     /// fix.)
     fn escape(&mut self) -> Task<Message> {
+        // A drag in flight peels before every layer: the hand is
+        // mid-gesture, and Esc is the gesture's one explicit discard —
+        // the lifted row goes back, nothing is sent ([`crate::drag`];
+        // commit belongs to the release, never to Esc).
+        if self.drag.take().is_some() {
+            return Task::none();
+        }
         // The context menu is the outermost layer wherever it stands — it
         // floats over the panel itself — so it peels before everything, one
         // layer per press (doc 09 §5.2).
@@ -2670,6 +2730,142 @@ impl App {
         self.publish_mpris(false);
     }
 
+    /// Everything the reorder **drag** says while it is in flight
+    /// (doc 09 §13 step 8; [`crate::drag`] holds the state machine and the
+    /// arithmetic, this routes). Its own small machine for the volume's
+    /// reason: a handful of arms that belong to one fact — a single
+    /// `Option` on the shell — kept out of the big match.
+    fn update_drag(&mut self, message: &Message) -> Option<Task<Message>> {
+        match message {
+            Message::DragLift(list, index, at) => self.lift_row(*list, *index, *at),
+            Message::DragMoved(at) => {
+                if let Some(drag) = &mut self.drag {
+                    drag.at = *at;
+                }
+            }
+            Message::DragOverRow(list, index, before) => {
+                if let Some(drag) = &mut self.drag
+                    && drag.list == *list
+                {
+                    drag.over_row(*index, *before);
+                }
+            }
+            Message::DragOverPanel(id) => {
+                if let Some(drag) = &mut self.drag {
+                    drag.over_panel = Some(*id);
+                }
+            }
+            // Conditional, for [`Message::QueueRowLeft`]'s reason: entering
+            // the next row and leaving the last arrive from one move, in
+            // widget order.
+            Message::DragLeftPanel(id) => {
+                if let Some(drag) = &mut self.drag
+                    && drag.over_panel == Some(*id)
+                {
+                    drag.over_panel = None;
+                }
+            }
+            Message::DragDropped => self.drop_drag(),
+            _ => return None,
+        }
+        Some(Task::none())
+    }
+
+    /// A row crossed the drag threshold: put it in the hand. The payload is
+    /// read from the same record the row was drawn from — the queue's
+    /// request-side record, the page's own queue shape — so what the drag
+    /// holds is exactly what was pointed at, and a row a fresh edit just
+    /// removed lifts nothing ([`crate::queue_edit`]'s stale-picture rule,
+    /// applied at the lift).
+    fn lift_row(&mut self, list: crate::drag::List, index: usize, at: Point) {
+        self.drag = match list {
+            crate::drag::List::Queue => self.player.queue().and_then(|queue| {
+                let item = queue.items.get(index)?.clone();
+                Some(crate::drag::DragState::begin(
+                    list,
+                    index,
+                    queue.items.len(),
+                    item.title.clone(),
+                    Some(item),
+                    at,
+                ))
+            }),
+            crate::drag::List::Playlist => self.playlists.open.as_ref().and_then(|open| {
+                let row = open.rows.get(index)?;
+                // A missing entry reorders — its position is real — but
+                // transfers nothing: no payload, so a panel drop is a no-op
+                // (the `+`'s own rule, held by the drag).
+                let payload = row
+                    .playable_position
+                    .and_then(|position| open.queue.items.get(position).cloned());
+                Some(crate::drag::DragState::begin(
+                    list,
+                    index,
+                    open.rows.len(),
+                    row.title.clone(),
+                    payload,
+                    at,
+                ))
+            }),
+        };
+    }
+
+    /// The drag ended: one commit, decided against the state the line and
+    /// the ghost were drawn from — so what happens is what was on screen.
+    /// A drop on a panel row appends to that file (the picker row's own
+    /// append, made direct); anywhere else commits the insertion slot as
+    /// one reorder; the no-op slot asks for nothing.
+    fn drop_drag(&mut self) {
+        let Some(drag) = self.drag.take() else {
+            return;
+        };
+        // `panel_on_screen` re-checked at the drop: a keyboard door can
+        // dismiss the panel under a held pointer, and no exit event retires
+        // `over_panel` for an unmounted row — the drop must not append to a
+        // list that is no longer on screen.
+        if let Some(id) = drag.over_panel
+            && self.panel_on_screen()
+        {
+            if let (Some(item), Screen::Shelf(state)) = (drag.payload, &self.screen) {
+                let entries = crate::playlists::entries_for_items(std::slice::from_ref(&item));
+                self.playlists.append(id, entries, &state.library);
+            }
+            return;
+        }
+        let Some(to) = drag.destination() else {
+            return;
+        };
+        match drag.list {
+            crate::drag::List::Queue => self.move_queued(drag.from, to),
+            crate::drag::List::Playlist => {
+                if let Screen::Shelf(state) = &self.screen {
+                    self.playlists.move_entry(drag.from, to, &state.library);
+                }
+            }
+        }
+    }
+
+    /// Reposition queue row `from` at `to` — the drag's commit on the run.
+    /// [`Self::shift_queued`]'s exact shape over [`queue_edit::moved`]'s
+    /// pure edit: the whole new queue as one [`Command::UpdateQueue`], the
+    /// music keeps playing, the cursor follows its track by path.
+    fn move_queued(&mut self, from: usize, to: usize) {
+        let Some(edited) = self
+            .player
+            .queue()
+            .and_then(|queue| queue_edit::moved(queue, from, to))
+        else {
+            return;
+        };
+        let paths = edited.paths();
+        if self.playback.send(Command::UpdateQueue { paths }) {
+            self.player.note_queue_edited(edited);
+        } else {
+            self.player.engine_closed();
+        }
+        self.publish_mpris(false);
+    }
+
     /// Send a transport command, marking it pending on acceptance and
     /// downgrading to engine-closed state when the channel is gone.
     fn send_transport(&mut self, command: Command) {
@@ -2733,10 +2929,14 @@ impl App {
             (Screen::Shelf(_), Place::Queue) => views::queue::view(
                 &self.player,
                 self.window,
-                self.hovered_queue_row,
+                // The hover slots go quiet while a row is in the hand: the
+                // gesture's own statements — the ghost and the line — are
+                // the surface's voice mid-drag.
+                self.drag.as_ref().map_or(self.hovered_queue_row, |_| None),
                 self.playlists.saving_queue.as_ref(),
                 collecting,
                 self.queue_scroll,
+                self.drag.as_ref(),
             ),
             (Screen::Shelf(state), Place::Playlist(id)) => match self.playlists.page(id) {
                 Some(open) => views::playlist::view(
@@ -2744,8 +2944,11 @@ impl App {
                     open,
                     &self.player,
                     self.window.width,
-                    self.hovered_playlist_row,
+                    self.drag
+                        .as_ref()
+                        .map_or(self.hovered_playlist_row, |_| None),
                     collecting,
+                    self.drag.as_ref(),
                 ),
                 // The playlist vanished under its page — deleted or renamed
                 // on disk. The wall is the honest answer, drawn rather than
@@ -2781,6 +2984,7 @@ impl App {
                     state,
                     &self.playlists,
                     &self.player,
+                    self.drag.as_ref(),
                 )))
                 .width(iced::Length::Fill)
                 .height(iced::Length::Fill)
@@ -2810,12 +3014,33 @@ impl App {
         // it to whatever row is beneath, whose own `menu::area` replaces
         // the menu — one at a time by construction. Wheel travel passes
         // beside both, and nothing reflows by a pixel: layers, not columns.
-        match &self.menu {
+        let whole: Element<'_, Message> = match &self.menu {
             Some(open) if matches!(self.screen, Screen::Shelf(_)) => {
                 iced::widget::stack![whole, views::context_menu::layer(open, self.window)].into()
             }
             _ => whole,
-        }
+        };
+        // **The drag's ghost** — the lifted row's title following the
+        // pointer (doc 09 §13 step 8) — on its own topmost layer: it rides
+        // over the panel it may be headed for. The layer is all
+        // pass-through — text in a container captures nothing — so unlike
+        // the menu it costs no press and blocks no row underneath from
+        // measuring the pointer.
+        //
+        // The layer is stacked **always**, an empty pass-through at rest,
+        // and this is load-bearing rather than tidiness: iced diffs the
+        // widget tree by position and tag, so a stack level that appeared
+        // only at the lift would reshape the tree under every widget on
+        // screen at exactly that moment — resetting, among everything
+        // else, the drag source's own held phase, and the gesture would
+        // die the frame it began. (Measured, not conjectured: the first
+        // headless probe of the drag shipped the conditional form and the
+        // ghost froze at the lift point.)
+        let ghost: Element<'_, Message> = match &self.drag {
+            Some(drag) => views::drag_ghost::layer(drag, self.window),
+            None => iced::widget::Space::new(0.0, 0.0).into(),
+        };
+        iced::widget::stack![whole, ghost].into()
     }
 
     /// Whether the playlist panel is on screen: summoned, over a shelf, and
