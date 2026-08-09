@@ -4207,7 +4207,7 @@ impl Shelf {
         ink: Ink,
     ) -> Element<'a, Message> {
         column![
-            views::top_bar::view(self, ink),
+            views::top_bar::view(self, self.window_w, ink),
             views::shelf::view(self, player, lamp, collecting)
         ]
         .into()

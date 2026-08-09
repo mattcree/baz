@@ -415,9 +415,11 @@ mod tests {
     /// The row is five words, each in a button with [`theme::GAP_XS`] of
     /// padding on both sides and [`theme::GAP_MD`] between them, sitting after
     /// the search well and the gap that separates the two clusters. The right
-    /// of the bar holds the counts and the `Settings` word. Measured against
-    /// the 1280 px window baz opens at, with the widest counts line a large
-    /// library can produce.
+    /// of the bar holds the gear alone at rest. Measured against the 1280 px
+    /// window baz opens at, with the well at its 280 px ceiling — and the
+    /// counts, which now live *inside* the well (doc 10 §7 step 2), are
+    /// measured against the well's own text lane rather than against the
+    /// strip.
     #[test]
     fn the_group_key_row_fits_the_top_bar_at_the_shipped_window() {
         use baz_core::index::GroupKey;
@@ -433,7 +435,11 @@ mod tests {
             })
             .sum::<f32>()
             + 4.0 * theme::GAP_MD;
-        let well = crate::views::top_bar::SEARCH_W;
+        let well = crate::views::top_bar::well_width(1280.0);
+        assert!(
+            (well - crate::views::top_bar::WELL_MAX).abs() < f32::EPSILON,
+            "at the shipped window the well stands at its ceiling"
+        );
         let left = 2.0f32.mul_add(theme::GAP_LG, well + theme::GAP_XL + keys);
 
         // The strip's right side at rest is the gear alone — a
@@ -453,6 +459,26 @@ mod tests {
         // And the five words really are the bulk of what was added, so this is
         // measuring the row rather than the well beside it.
         assert!(keys > 200.0 && keys < 420.0, "the key row is {keys:.1} px");
+
+        // The placeholder the counts became: the owner-scale line fits the
+        // well's text lane at the *floor* — past the magnifier's reserved
+        // lane on the left and the input's own padding — and a line from a
+        // library thirty times that size fits at the ceiling. A placeholder
+        // longer than its lane clips rather than reflows, so this is the
+        // bound that keeps the ordinary case whole.
+        let sans = sans();
+        let lane =
+            |well: f32| well - (theme::GAP_MD + theme::ICON_PX + theme::GAP_SM) - theme::GAP_MD;
+        assert!(
+            sans.width("1284 albums · 9902 tracks", theme::SIZE_META)
+                <= lane(crate::views::top_bar::WELL_MIN),
+            "the owner-scale counts overflow the well at its floor"
+        );
+        assert!(
+            sans.width("40000 albums · 512345 tracks", theme::SIZE_META)
+                <= lane(crate::views::top_bar::WELL_MAX),
+            "a huge library's counts overflow the well at its ceiling"
+        );
     }
 
     /// **The index rail's lane holds the labels the keys actually produce** —

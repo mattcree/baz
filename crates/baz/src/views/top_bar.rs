@@ -35,14 +35,37 @@ use crate::motion::{Control, Ink};
 
 use crate::{icon, theme};
 
-/// The search field's width in the top bar (logical px).
-pub(crate) const SEARCH_W: f32 = 360.0;
+/// The search well's width floor (logical px) — what it stands at when the
+/// window has spent the fluid range.
+pub(crate) const WELL_MIN: f32 = 200.0;
+
+/// The search well's width ceiling (logical px) — 280 at the shipped window
+/// and above.
+///
+/// It was `SEARCH_W` 360, sized in the era when you *aimed* at the field;
+/// under type-anywhere (ADR-0017 §1.2) you reach it by typing, and 280 holds
+/// a long query beside the reserved match slot (doc 10 §2.3). The 80 px the
+/// ceiling gives back is the strip's second reclamation.
+pub(crate) const WELL_MAX: f32 = 280.0;
+
+/// The well's width at `window_width`: `clamp(W − 1000, 200, 280)`
+/// (doc 10 §4.1) — 280 at ≥ 1280, spending its fluid 80 px between 1040 and
+/// 960, then holding the floor. The well is the strip's **one** fluid
+/// tenant, which is what makes the collapse order one step: first this
+/// range, then the split (§4.3).
+pub(crate) fn well_width(window_width: f32) -> f32 {
+    (window_width - 1000.0).clamp(WELL_MIN, WELL_MAX)
+}
 
 /// The slim top bar: the search well on the left, quiet status and the route
 /// to the settings on the right, a hairline rule below.
-pub(crate) fn view(shelf: &Shelf, ink: Ink) -> Element<'_, Message> {
+///
+/// `window_width` decides the well's width and nothing else yet — the
+/// parameter every regime needs (doc 10 §7 step 3); the strip itself takes
+/// no other reading of it until the split (step 5).
+pub(crate) fn view(shelf: &Shelf, window_width: f32, ink: Ink) -> Element<'_, Message> {
     let room = theme::active();
-    let search = well(shelf, SEARCH_W);
+    let search = well(shelf, well_width(window_width));
     let mut keys = row![]
         .spacing(theme::GAP_MD)
         .align_y(iced::Alignment::Center);
