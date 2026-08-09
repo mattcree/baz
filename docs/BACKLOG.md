@@ -403,6 +403,152 @@
 - **No shortcut discovery in the interface.** The bindings are in the README
   and nowhere the user can see them while running — no `?` overlay, no menu.
 
+## The strip demolition — four removals the owner asked for
+
+2026-08-09: *"I think the pull option will just disappear, and so will the
+shuffle. Shuffle is the sort of thing I expect to be at the playlist level. As
+in if we're currently playing a playlist, I can toggle it on or off. The play
+all thing also does not need to exist. That should be existing as a kind of
+playlist that is implicit."* Plus, from the same brief, the `Queue` door
+leaving the bar as the now-playing block becomes the route to what is playing.
+
+None of these is blocked — the ledger binds contributors and agents, not the
+owner. What follows is the **cost**, mapped before anything is touched, because
+four source-scanning tests (`app.rs:5381`, `:5439`, `:5601`,
+`theme.rs:6531`) assert against literal function names and **panic** rather
+than fail if the function is gone. Every edit below must land with its test
+rewritten in the same commit.
+
+### 1. `Pull` — self-contained, do it first
+
+Touches `app.rs` (message `:523`, arm `:1120`, `draw_pull` `:2741-2790`,
+`Shelf::pull` `:3589`, `struct Pull` `:3595-3626`, the Escape peel `:4008`),
+`keys.rs` (`Ctrl+R` at `:418`), `top_bar.rs:276-280`, `album.rs:299-345`
+(the `The pull · Last played 3 years ago` line), `shuffle.rs:190-314` (~125
+lines of pure code), `font.rs:519`. `baz-core`'s `History::pull_weight` and
+`PULL_NEVER_WEIGHT` become dead.
+
+It shares exactly one thing with shuffle — `shuffle::Pool::from_wall` — and
+owns no engine state, no persisted state, no queue: it sends **no command at
+all**, it navigates. Tests to rewrite: four in `shuffle.rs:639-732`,
+`app.rs:5381` (which also asserts the shuffle half — items 1 and 2 collide
+inside one test), `app.rs:5601` (the ordered Escape triple),
+`app.rs:5190`'s `CONTROLS: [_; 22]`.
+
+**It also closes doc 11 P9**, which is an open question addressed to the owner
+— *"`Pull`: explain it or rename it · present-to-owner"* — by answering it
+with removal. That verdict wants writing down, not just deleting.
+
+### 2. `Shuffle` as a playlist-level toggle — three real questions first
+
+**This turns an act into a mode**, and four places in the product are built on
+it being an act:
+
+- `docs/adr/0023-playback-model.md:73-74`: the engine's queue has *"no shuffle
+  flag, no repeat flag and no continuation policy"*, and `:193` keeps both as
+  *"front-end expressions over `SetQueue`/`UpdateQueue`"*.
+- **ADR-0024 §1 honesty clause 1 is the direct blocker** (`:115-116`): *"The
+  playlist a user edits is exactly what plays — entries, order, verbatim; **no
+  shuffle-on-play**, no dedup, no silent skipping."*
+- Doc 10 §3.2 refuses the crossed-arrows glyph *specifically* because it is
+  *"a mode toggle with a lit state"* and baz's shuffle *"is an act"*. Reversing
+  the semantics **un-blocks the glyph**; the two decisions are joined.
+- `REFUSALS.md`'s *no invisible shuffle pools* is satisfiable today only
+  because the pool is the wall and the wall can mark itself — dimmed covers
+  plus rings (`shelf.rs:885-935`). **A playlist is not a wall**, and
+  `views/playlist.rs` has no equivalent marking, so the visibility mitigation
+  disappears with the surface.
+
+Three questions only the owner can answer:
+
+1. **What does toggling *off* restore?** Playing a playlist *copies* it and
+   decouples (ADR-0024 §1, `:108-111`); nothing keeps the pre-shuffle order.
+   Off would need either a re-read of the `.m3u8` (writing back into a
+   decoupled run) or a new `original_order` field on `QueueVm` — which is the
+   *"live context object that keeps acting after the gesture"* ADR-0023 §1
+   refuses at `:97-99`.
+2. **What is "currently playing a playlist"?** It is
+   `QueueVm.provenance: Option<String>` — and doc 09 `:620` calls provenance
+   *"a statement about **origin**, never a live link"*. A toggle keyed to it
+   makes it a live link.
+3. **How does the pool stay visible** on a surface that cannot dim covers?
+
+### 3. `Play all` → an implicit playlist — the vocabulary exists, the type does not
+
+Doc 09 §2 **already lists the wall as an implicit playlist** (`:130`): *"| The
+wall, in its arrangement | the group key and the filter | by arranging | no |
+the wall itself |"*, and `:148` states the model — *"baz has one kind of list.
+One of them is sounding and has no name; the rest are named and silent."*
+
+But **"implicit playlist" is design vocabulary, not a type**: `grep -rn
+"implicit playlist" crates/` returns one comment (`vm.rs:912`). There is no
+`Playlist` abstraction a non-file list can inhabit — `playlists.rs` is entirely
+folder-and-`.m3u8`-backed, and `Place::Playlist(u64)` hashes a *filename*
+because ADR-0024 §2 makes filename = name. ADR-0024 §1 defines a playlist as
+*"stored in a file that person owns"* (`:103`), so the implicit list is not one
+under the ADR's own definition; that sentence needs amending under the editing
+rule.
+
+Two traps:
+
+- **Giving the wall's run provenance** immediately makes the picker offer
+  *Add to "Everything"*, which has no file to write to (`menu.rs:662` pins the
+  coupling).
+- **The wall's order is not stored** — it is recomputed from `group_key` +
+  `query` every frame. An implicit list that is a *place* re-derives on every
+  visit; a *snapshot* is the silently-re-deriving pool problem in a new coat
+  (`shuffle.rs:86-89`).
+
+`Play all`'s scope rule must survive whatever shape it takes
+(`REFUSALS.md:43-47`): *"its scope is exactly what the wall shows, in the
+wall's own order — playing what you cannot see is refused."*
+
+### 4. The `Queue` door leaves the bar — the ratchet's escape hatch does not quite fit
+
+The ratchet (`REFUSALS.md:137-142`) permits exactly one removal: *"Replacing a
+slot with a **better statement of the same fact**."* The door's fact is **how
+much is left** (`queue_size_note`, `player.rs:1663`). A now-playing block that
+opens the current playlist states **where the run came from**. Doc 09 §6
+(`:632`) treats those as separate readouts (`Road Trip · 3 of 12 · 38:12
+left`). So the replacement either carries the count too, or this is a removal
+rather than a replacement and the entry gets rewritten rather than satisfied.
+
+Two more collisions:
+
+- **`Ctrl+U` would become keyboard-only.** `keys.rs:401` binds it to
+  `ToggleQueue`, and `app.rs:5187` exists to make keyboard-only actions
+  impossible — its own doc says *"There are no exceptions left."*
+- **The now-playing block already means something else.** It presses
+  `ShowPlayingAlbum` → the record's **page** (`bottom_bar.rs:465`, tooltip
+  *"Go to the record that is playing"*, mirrored by `menu.rs:303`'s *"Go to
+  record"*). `bottom_bar.rs:452-457` argues explicitly that this block must
+  **not** have a lit state, because that would make it a door rather than a
+  record control — repointing it inverts that argument. And
+  `REFUSALS.md:215-223` names *both* halves: the `Queue` door as a survivor of
+  prior removal attempts, and the now-playing block as the labelled control for
+  *get back to what is playing*.
+
+`Place` itself is cheap: `place.rs` is 303 lines and pure, a new member is the
+enum plus a 6-line door fn plus an exhaustive match the compiler finds. The
+hand-enumerated tests are `place.rs:204`, `:226`, `:246` (the `showing` sum at
+`:291` counts members and asserts `== 1`), and `app.rs:5915`. And
+`views/queue.rs` already carries the playlist page's full edit set, so a
+"current playlist" place is mostly a header swap rather than a new list.
+
+### Cross-cutting
+
+If 1-3 all land, `top_bar.rs`'s `draws()` and `play_all()` disappear and
+`ACTS_W` 182 drops to zero — which removes the reason the strip's two-line
+split at 960 px exists (`theme.rs:6500-6517`, ADR-0026 §3's *"asserted in
+code"* budget). The Library strip would then hold: the well and its counts,
+five group keys, `Playlists`, the gear. **That is a smaller strip than any
+mockup in doc 10**, and it is worth drawing before it is built.
+
+Three *"every X is a press some control also makes"* tables need re-counting by
+hand: `app.rs:5190` (22), `menu.rs:586` (11), `menu.rs:609` (2). Two render
+harnesses (`impl/shuffle-and-pull/`, `impl/queue-parity/`) document surfaces
+that would no longer exist.
+
 ## The window's own chrome
 
 **Drawing baz's own title bar — researched, not built.** The owner
