@@ -727,10 +727,10 @@ lane; ③ `F11`. Then nothing, for eight hours.
 - Given the kiosk is showing, when the `Ambient` door is pressed, then three
   labelled switches appear — field, meter, feed — and the same three are in
   Settings (§7.2).
-- Given all three toggles are off, when the kiosk is showing and music is
+- Given all four toggles are off, when the kiosk is showing and music is
   playing, then the surface draws only on data arriving, and `view()` is not
   called on any clock of its own.
-- Given all three toggles are off, when the surface is idle, then process CPU is
+- Given all four toggles are off, when the surface is idle, then process CPU is
   **0.0 %** and the frame count after settling is **zero** — bit-for-bit the
   figure ADR-0020 shipped.
 - Given any toggle state, when the listener navigates to any other place, then
@@ -1120,7 +1120,8 @@ the whole of what `REFUSALS.md:249–250` asks:
   is the same widget given room.
 - **The fullscreen glyph** (§3.2), one `TRANSPORT_HIT` 32 box, at rest, in the
   place's top-right corner, tooltipped per the icon-only law.
-- **The `Ambient` word-door** (§7.2), beside it, opening the three toggles.
+- **The `Ambient` word-door** (§7.2), beside it, opening the four toggles and
+  the ballistics selector.
 - **The feed line** (§8.2), which advances on a press — which is what makes the
   rotation a control rather than a performance.
 
@@ -1198,20 +1199,32 @@ hard cut.
 
 ### 7.2 What is toggle-able, where, and what the defaults are
 
-Three independent switches, because they have genuinely different costs and
+**Four** independent switches, because they have genuinely different costs and
 genuinely different audiences:
 
 | # | Toggle | What it controls | Default | Cost when on |
 |---|---|---|---|---|
 | **T1** | **Ambient field** | The derived wash (§5.3), and whether it **drifts** or is still | **On, drifting** | §7.4 |
-| **T2** | **Meter** | The two registers of §9 — the field's response and the instrument | **On** | §7.4 |
-| **T3** | **Feed** | The rotating fact line (§8) | **On** | ~0 (§8.5) |
+| **T2** | **Spectrum** | The bars (§10) — the surface's primary visual | **On** | §10.9 |
+| **T3** | **Meter** | The R128 instrument readout (§9.5) | **Off** | §7.4 |
+| **T4** | **Feed** | The rotating fact line (§8) | **On** | 3 wakes/min (§8.5) |
 
-**Why these three and not one.** A single "ambient mode" switch would bundle a
-GPU cost, an audio-thread cost and a disk read into one control, so a listener
-who wants the facts but not the meter would have to take both. Three switches,
-three subsystems, and each one's *off* is a real structural saving rather than a
-skipped draw call.
+Plus one selector, not a switch: **Ballistics** — *Loudness · VU · PPM* —
+governing **both** the meter's integration and the bars' decay, so the surface
+cannot have two unrelated speed settings (§10.6).
+
+**Why four and not one.** A single "ambient mode" switch would bundle a GPU
+cost, an FFT, an engine-thread tap and a disk read into one control, so a
+listener who wants the facts but not the bars would have to take both. Four
+switches, four subsystems, and each one's *off* is a real structural saving
+rather than a skipped draw call.
+
+**Why T2 is on and T3 is off.** They answer different questions and only one is
+a *visual*: the bars are what the owner asked to see, they read from three
+metres, and they are the surface's primary motion. The R128 readout is a
+**reading** — a precise number for a specific question, legible at 60 cm — and a
+kiosk that opens covered in decibel figures is an instrument panel rather than
+something you leave on. Both are available; the visual is the default.
 
 **Why the defaults are on.** Under the old posture these defaults would have
 been defensive; under the ruling they are aesthetic, and the aesthetic answer is
@@ -1225,13 +1238,14 @@ it opt-in would ship the hazard by default.
 **Where the controls live: both, and they are different controls.**
 
 - **On the surface** — a single **`Ambient`** word-door in the place's
-  top-right, opening a small menu with the three switches. It is a labelled,
+  top-right, opening a small menu with the four switches and the ballistics
+  selector. It is a labelled,
   pointer-reachable control at rest, which `REFUSALS.md:249–250` requires and
   which a hover-revealed gear would violate. It is a *word* and not a glyph for
   doc 10 §3.4's reason: the enumerated symbol list is closed at two, the gear
   and the magnifier (`system.md:876–879`), and no universal symbol means
   *ambient*.
-- **In Settings** — the same three switches, in the playback section, because
+- **In Settings** — the same four switches and selector, in the playback section, because
   Settings is where a person looks for a setting and because a listener who
   turned the field off from a chair needs somewhere to find it again that is not
   the surface they turned it off on.
@@ -1244,8 +1258,9 @@ ADR-0020 §2 already specifies that every transition *"degrades to a hard cut by
 passing a zero duration, which is how a reduce motion setting will be
 implemented"*. T1's still/drifting sub-state is that mechanism for this class,
 and if a global reduce-motion preference is ever read from the desktop it sets
-T1 to still and leaves T2 and T3 alone — a meter is not motion for motion's
-sake, and a rotating fact is not an animation at all.
+T1 to still and leaves T2, T3 and T4 alone — a spectrum and a meter are
+readings rather than motion for motion's sake, and a rotating fact is not an
+animation at all.
 
 ### 7.3 The structural zero, and why it is not a promise
 
@@ -1279,10 +1294,11 @@ Three properties follow, and each is structural rather than careful:
    dropped; the loop parks in `Wait` (`iced_winit/src/program.rs:830–846`). No
    teardown code exists to be forgotten, because there is no handle to hold.
 2. **Toggling off removes the clock**, by the identical mechanism —
-   `ambient.animating()` is `T1.drifting || T2.on`. T3 is deliberately *not* in
-   that term because the feed is not animated: it advances on a 20 s dwell, so
-   it gets its own far slower arm under the same guard, and §8.5 prices it
-   honestly at three wakeups a minute rather than claiming it is free.
+   `ambient.animating()` is `T1.drifting || T2.on || T3.on`. **T4 is
+   deliberately *not* in that term** because the feed is not animated: it
+   advances on a 20 s dwell, so it gets its own far slower arm under the same
+   guard, and §8.5 prices it honestly at three wakeups a minute rather than
+   claiming it is free.
 3. **The rest of the product is untouched, provably.** ADR-0020's idle
    assertion is *a test* (`0020-motion.md`: *"the suite asserts the subscription
    is inactive when no tween is running"*). This adds one assertion of the same
@@ -1349,7 +1365,7 @@ a new one, so the numbers are comparable to the ones already in the project:
 | **Instruments** | process CPU from `/proc/self/stat` (as doc 04); `view()` call count in a `Cell` inside `view` (passive, as doc 04); **frame time from `RedrawRequested` deltas**; **GPU busy % and VRAM from `amdgpu_top`/`radeontop`**, which doc 04 lacked |
 | **Windows** | 1280 × 800 · 1920 × 1080 · **3840 × 2160**, all lane-collapsed |
 | **Phases** | 3 s warm-up · 60 s ambient with music playing · toggles off · 60 s idle |
-| **Control** | the same binary with all three toggles off, which must reproduce doc 04's `off` driver exactly |
+| **Control** | the same binary with all four toggles off, which must reproduce doc 04's `off` driver exactly |
 
 **The acceptance gate — the numbers that define "top tier".** §12 step 7 does
 not pass unless all four hold on the real GPU:
@@ -1622,7 +1638,7 @@ Honestly, and it is not zero:
   (`app.rs:4212`, read via `read_history()` at `app.rs:5757–5773`) and the tags come from the index. No disk read happens to
   render a fact.
 - **The clock is `time::every(20 s)` — three wakeups a minute**, under the same
-  structural guard as §7.3 (place on screen, T3 on). For scale, baz already runs
+  structural guard as §7.3 (place on screen, T4 on). For scale, baz already runs
   `REFRESH_TICK` at one wakeup a minute while idle (`app.rs:82`, installed at
   `app.rs:3921`), and ADR-0020's accepted idle cost includes it. Three is
   the same order of magnitude, it is stated rather than hidden, and it is
@@ -1813,7 +1829,7 @@ if let Some(meter) = &mut self.meter {
 - **When it is `None`, the K-weighting filters do not exist**, so the cost is
   not "a skipped multiply" — it is an absent object.
 
-**And the whole chain switches off together.** T2 off ⇒ no `Command::SetMetering`
+**And the whole chain switches off together.** T3 off ⇒ no `Command::SetMetering`
 ⇒ no `LiveMeter` in the engine ⇒ no atomic being written ⇒ no
 `window::frames()` arm in the subscription (§7.3) ⇒ the loop parks. **Each layer's
 off state is the absence of a thing rather than a guard around it**, which is
@@ -1883,31 +1899,38 @@ decision re-made rather than defended**, which is what the clause asks for.
 
 ### 9.5 The two registers, and where they are drawn
 
-This is where the owner's *"stylised… somewhat ambient"* and §1.2's two
-distances turn out to be the same requirement. **One measurement, two readouts:**
+§1.2's two distances want two different things from one measurement, and the
+surface now has a distinct instrument for each.
 
-**The ambient register — the field responds.** The field's overall luminance and
-the scale of its wash track the momentary reading, gently: a mapping from LUFS
-to a narrow luminance band, heavily smoothed, never exceeding §5.3's L 0.22
-ceiling. From 3 m you do not read a number — **the room breathes with the
-music**. This is the "VU meter stuff over it" the brief asks for, drawn **over
-the field, never over the sleeve** (§5.4).
+**The far-field register is the spectrum (§10), and it is on by default.** The
+owner's *"stylised… somewhat ambient"* and *"bars going up and down"* resolve to
+the same object: light organised into columns, over the field, never over the
+sleeve (§5.4), readable from three metres as movement rather than as a number.
+It **states nothing** (§7.1's last clause), which is what the ambient class
+requires — nobody reads a level off a bank of bars, and it is not asked to carry
+one.
 
-Two constraints keep it honest:
-- **It is bounded and slow.** The luminance band is narrow enough that a loud
-  passage cannot make the field compete with the artwork, which is the one thing
-  §5.3 promised.
-- **It states nothing** (§7.1's last clause). Nobody can read a level off a
-  breathing room, and it is not asked to carry one. It is the ambient class
-  doing what the ambient class is for.
+*(An earlier draft made the far-field register a global luminance response of
+the field to momentary loudness — the room breathing. The bars are the same idea
+resolved into something you can actually see, and they are what the owner asked
+for, so the breathing field is **not built**. It is recorded here so that
+re-proposing it is a decision rather than a rediscovery: it would be nearly free,
+since the field's shader already has the loudness value as a uniform.)*
 
-**The instrument register — the meter proper.** On the placard column, at the
-work's own width, `METER_H` 24: a horizontal scale with the current reading, the
-peak hold, and — the detail that makes it worth having — **a fixed mark at this
-record's own integrated loudness (F6)**, so the live reading is legible as
-*louder or quieter than this record's average* rather than as an abstract
-number. At 60 cm it is an instrument; at 3 m it is a moving line, which is fine,
-because the ambient register is what the far field is reading.
+**The near-field register is the meter proper, and it is off by default.** On
+the placard column, at the work's own width, `METER_H` 24: a horizontal dB scale
+with the momentary reading, the peak hold, and — the detail that makes it worth
+having — **a fixed mark at this record's own integrated loudness (F6)**, so the
+live reading is legible as *louder or quieter than this record's average* rather
+than as an abstract number.
+
+**Why the meter is not the default, stated rather than assumed.** It is a
+*reading*, and a kiosk that opens covered in decibel figures is an instrument
+panel rather than something you leave running. The bars answer *what is the
+music doing*; the meter answers *what level is it*, which is a question a
+smaller number of people ask at a smaller distance. Both ship; the visual is
+what greets you. §10.7 is the guarantee that turning both on cannot produce two
+stories about the same instant.
 
 ### 9.6 Why the meter is not amber, and other refusals kept
 
@@ -2542,8 +2565,9 @@ the string table).
 
 **Step 6 — The toggles.** *(§7.2)*
 
-T1/T2/T3 as three booleans, the `Ambient` word-door and its menu, the Settings
-rows, persistence. T2 and T1-drift are wired to nothing yet; this step is the
+T1–T4 as four booleans plus the ballistics selector, the `Ambient` word-door and
+its menu, the Settings rows, persistence. T2, T3 and T1-drift are wired to
+nothing yet; this step is the
 control surface arriving before the things it controls.
 
 *Ships*: nothing visible on its own — this is the step that makes 7 and 8 safe.
