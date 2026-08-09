@@ -239,3 +239,269 @@ So the resolution §5 and §6 are built on:
 That is what lets this screen be a kiosk *and* keep every visible control the
 accessibility refusal requires — and it costs exactly nothing, because both
 halves already exist.
+
+---
+
+## 3. The screen: a place, and two acts
+
+### 3.1 `Place::NowPlaying` — the sixth member
+
+The surface is a **place**: a sixth member of `place.rs`'s enum, with the door
+behaviour every other member already has (`place.rs:109–152`'s shape — a door
+that closes itself and nothing else), and `back()` returning `Library` like
+all of them.
+
+The alternative — a second window — is refused on evidence rather than taste,
+and the evidence is §0.3(2): **iced 0.13 cannot open a window on a monitor you
+name.** A second window would appear wherever the compositor decides, which on
+Wayland is "wherever it likes" and on X11 is a pixel offset that means nothing
+on a multi-monitor desktop with a heterogeneous layout. So a second window does
+not deliver the brief's *"your other monitor"* — it delivers *a second window
+you must then drag anyway*, plus a `daemon` migration, plus §0.3(4)'s coalesced
+control flow, plus a second surface to hold in the places model that ADR-0022
+spent a whole decision reducing to one.
+
+**What actually delivers the brief is one drag and one key**, and it works
+today on both display servers:
+
+> Put the window on the monitor you want it on — the gesture every desktop
+> already has — press the door, press `F11`. The place fills that monitor,
+> because `Mode::Fullscreen` lands on **the monitor the window is currently
+> on** (§0.3(3)).
+
+That is not a workaround; it is the shortest path to the stated goal, and it
+composes with the platform instead of fighting it. Two notes that make it
+better than it sounds:
+
+- **The desktop can automate it.** Both major Linux compositors match window
+  rules on `app_id`, and baz already ships a desktop entry and an `app_id`
+  (`packaging/`). A user who wants baz to open fullscreen on `DP-2` every time
+  writes three lines of compositor config. baz does not need — and should not
+  grow — a monitor picker to serve that; the window manager is where that
+  decision has always lived, and it is the one place that knows what the
+  monitors are called.
+- **The cost of the refused alternative is recorded, not hidden.** If iced ever
+  exposes winit's `Fullscreen::Borderless(Option<MonitorHandle>)`, a *second
+  window on a named monitor* becomes a twenty-line change on top of a `daemon`
+  migration. §13 records that as the one thing that would reopen this decision,
+  so re-proposing it means citing a toolkit change rather than re-arguing taste.
+
+### 3.2 The two acts, kept separate
+
+The brief bundles two things — *a dedicated now-playing screen* and *full
+screen* — and the temptation is to build one control that does both. Doc 10
+§3.1's second clause is exactly the rule against it: a control may not wear a
+symbol whose convention promises one scope while acting on another. They are
+two acts with two subjects, and they get two controls:
+
+| Act | Subject | Control | Accelerator |
+|---|---|---|---|
+| Go to the now-playing screen | what is sounding → **the bar** (L8) | a word-door, `Now playing`, beside `Queue · N` | — |
+| Make the window fill the display | this window → **the place's own body** (L8) | one glyph, the universal expand mark, in the place's top-right | `F11` |
+
+Both are ordinary and both are visible, which is what the accessibility refusal
+requires (`REFUSALS.md:174–175`). Three consequences, each argued:
+
+- **The bar gains a slot, which the ratchet explicitly permits** — *"A slot may
+  be added to the now-playing bar. None may be removed for tidiness"*
+  (`REFUSALS.md:100–101`). It is a word and not a glyph because L8.4's door rule
+  stands and the enumerated symbol list is closed at two, the gear and the
+  magnifier (`system.md:876–879`); no universal symbol distinguishes *this
+  screen* from *queue* from *playlist*, which is the same finding that kept the
+  `Queue` door a word (doc 10 §3.4).
+- **The door is offered even when nothing is sounding**, which is a deliberate
+  departure from the now-playing block's rule (*"not offered when nothing is
+  sounding, because a control that cannot act must not pretend it can"*,
+  `0022-places-and-nothing-else.md:136–137`). The distinction is real: `Go to
+  record` has no record to go to, whereas this place has something true to say
+  with nothing playing (§5.5) — and setting the screen up *before* starting the
+  music is the natural order for the brief's own use case.
+- **Fullscreen is a window act, not a place act.** `F11` works in every place;
+  it is not the kiosk's private key. This matters because the alternative —
+  fullscreen that only exists inside one place — would make leaving the place
+  and leaving fullscreen the same gesture, which is the micro-mode the ledger
+  refuses in another form (`REFUSALS.md:113–118`).
+
+### 3.3 Leaving: `Esc` peels, exactly as it already does
+
+baz's `Esc` is already a peeling rule rather than a back button — *"leave the
+search field, then peel one layer: the queue, else the settings, else the pull,
+else the query…"* (`README.md:43`). Fullscreen and the place are two layers, so
+they peel in the order they were put on:
+
+1. **`Esc` in the fullscreen kiosk** → leaves fullscreen, stays in the place.
+   This is the convention every browser and video player has taught, and
+   breaking it here would strand a user who cannot find their window
+   decorations.
+2. **`Esc` again** → `Place::back()` → the Library, with the wall's scroll,
+   query and arrangement untouched, exactly as leaving any other place.
+3. The door and `‹ Library` do what they do in every place.
+
+No new rule, no new key, and nothing about `Esc` changes anywhere else.
+
+---
+
+## 4. The user stories
+
+The industry artifacts doc 09 §4 established: each scenario as a **user
+story**, its **task flow** from where the listener actually is, and
+**acceptance criteria** in Given/When/Then, written to be implemented and
+tested as stated. Personas are `research/05-personas.md`'s.
+
+### S1 — Leave it running on the other monitor
+
+> As a listener with a spare display, I want to put baz's now-playing screen on
+> it full screen and leave it there for the evening, so that the room has
+> something worth looking at and my main screen is free for work.
+
+**Task flow**: ① drag the window to the second monitor; ② press `Now playing`
+in the bar; ③ press `F11`. Then nothing, for eight hours.
+
+**Acceptance criteria**
+
+- Given the window is on a given monitor, when `F11` is pressed, then the
+  window fills **that** monitor and no other, and the place fills the window.
+- Given the kiosk is showing and a track is playing, when nothing is
+  interacted with for an hour, then the process's UI redraw rate is exactly the
+  engine's `Event::Progress` cadence — 4 Hz (`engine.rs:562`) — and no clock,
+  tween, or subscription in the front end is running that was not running in the
+  Library place (§7.1).
+- Given the kiosk is showing and playback is **paused or stopped**, when nothing
+  is interacted with, then **no frame is drawn at all** beyond the one that
+  stated the change: `Progress` is not emitted while paused or stopped
+  (`protocol.rs:435–438`, enforced structurally by the pump's pause gate at
+  `engine.rs:1518–1523`), and the front end installs no timer of its own here.
+  The measured idle claim of ADR-0020 holds on this surface unmodified.
+- Given eight hours have passed with music playing, when the display is
+  examined, then the only pixels that held one colour throughout are the room
+  itself and the bar's furniture, both at or near `#0C0D0E` (§7.2).
+- Given the track changes, when the new record's artwork and type arrive, then
+  they replace the old ones as a **hard cut** — no crossfade, which is refused
+  by name (`REFUSALS.md:241–243`, ADR-0020 §3).
+
+### S2 — Look at what is playing, properly
+
+> As a listener at the machine, I want one press to see the record I am
+> hearing at a size worth looking at, so that "what is this?" is answered
+> without leaving what I was doing for long.
+
+**Task flow**: ① `Now playing` in the bar; ② look; ③ `Esc`.
+
+**Acceptance criteria**
+
+- Given any place, when `Now playing` is pressed, then the kiosk replaces it as
+  an ordinary place change — a **hard cut**, per ADR-0022's rule 4 and
+  `REFUSALS.md:229–231` (*"the surfaces either side of a navigation share no
+  element to move"*).
+- Given the kiosk, when `Esc` or `‹ Library` is pressed and the window is not
+  fullscreen, then the Library returns with its scroll, query and arrangement
+  untouched (`place.rs:41–46`).
+- Given the kiosk is showing, when a track change occurs, then every readout on
+  it updates from the same `PlayerState` the bar reads, so the two surfaces
+  cannot disagree — the property `bottom_bar.rs:85–86` already asserts for the
+  bar's own zones.
+- Given the kiosk is showing, when the pointer rests anywhere on it, then no
+  control appears that was not already visible (§6).
+
+### S3 — Verify the chain
+
+> As Karl, I want the whole signal path stated in one place — what the file is,
+> what the device is running at, whether anything converted it, and whether any
+> gain stage touched the samples — so that I can confirm the claim rather than
+> trust it.
+
+**Task flow**: ① `Now playing`; ② read the signal register.
+
+**Acceptance criteria**
+
+- Given a `SignalPath` event has been received, when the kiosk renders, then it
+  states the **whole** reading from `PlayerState::signal_path()`
+  (`player.rs:2026–2028`) — source rate, output rate, the chain's state, the
+  conversion reason when there is one, and the volume path — not the bar's
+  two-word summary.
+- Given the chain is `Exclusive { conversion: None }`, when the kiosk renders,
+  then it says so — **which the bar today does not**, because `bit_exact()`
+  compares `chain == SignalChain::Direct` exactly (`player.rs:1541–1545`) and an
+  exclusive chain therefore renders no note at all (`player.rs:2051–2053`).
+  §12 step 3 records this as a defect found by this study, with the protocol's
+  own guidance as the fix (`protocol.rs:924–927`: ask through `is_exclusive()`
+  and `conversion_reason()`, do not enumerate variants).
+- Given no `SignalPath` has been received — nothing has played this session —
+  when the kiosk renders, then the signal register is **absent, not empty**, and
+  states nothing. A slot that says nothing is not filled with a dash.
+- Given any state, when the register renders, then its words are flat: no
+  "degraded", no "fallback", no boast, no badge, no colour carrying a verdict
+  (ADR-0009 §5, and `REFUSALS.md:274–276`).
+
+### S4 — Be told something you did not know
+
+> As Devon, I want the screen to tell me something about this record that I
+> would not otherwise have thought about, so that leaving it on is rewarding
+> rather than merely decorative.
+
+**Task flow**: ① `Now playing`; ② read.
+
+**Acceptance criteria**
+
+- Given the ledger has records for the sounding track, when the kiosk renders,
+  then it states the permitted card — *"PLAYED — N times since YYYY"* — in the
+  ledger's own permitted form (`REFUSALS.md:58–60`), read from
+  `TrackHistory` (`history/read.rs:140–159`).
+- Given the ledger has **no** record for this track, when the kiosk renders,
+  then it says so as a positive statement — *"not played before"* — which is
+  what the ledger actually knows (`Recency::Never` is the positive statement,
+  distinct from `Unrecorded`, `0018-play-history-ledger.md:5–11`).
+- Given any state, when the ledger register renders, then it shows **no totals,
+  no streaks, no charts, no listening-time sum, and no cross-track
+  aggregation** — `TrackHistory::listened_ms` exists and is deliberately not
+  rendered (§8.2), because a listening-time total is refused by name
+  (`REFUSALS.md:55–57`).
+- Given a play is recorded while the kiosk is showing, when
+  `Event::PlayRecorded` arrives, then the ledger register re-reads and the count
+  is current. Today the history snapshot is read **once at open**
+  (`app.rs:3422–3431`) and `PlayRecorded` has no consumer in `crates/baz` at
+  all; §12 step 4 is that wiring, and it is the only place in this document
+  where a kiosk readout needs new plumbing rather than a new view.
+
+### S5 — Nothing is playing
+
+> As anyone who walks past the screen, I want it to be honestly quiet when the
+> music has stopped, so that the machine is not pretending.
+
+**Acceptance criteria**
+
+- Given the queue has ended or playback is stopped, when the kiosk renders,
+  then it states silence in words, holds no artwork, and draws no transport
+  state that is not true — the queue place's own posture
+  (`views/queue.rs:190–196`) at room scale, and the ledger's *"silence is a
+  feature"* (`REFUSALS.md:19–21`) drawn rather than merely honoured.
+- Given the stopped kiosk, when it has been stopped for any length of time,
+  then it is drawing **no frames** and the surface is overwhelmingly the room's
+  own `#0C0D0E` — which is simultaneously the honest empty state and the whole
+  of the burn-in answer for the static case (§7.2).
+- Given the engine was never built with `device-output`, when the kiosk is
+  opened, then it says what the bar says — the availability note
+  (`player.rs:2005–2012`) — rather than an empty frame.
+
+### S6 — The artwork is missing
+
+> As Marta, whose older rips have no embedded cover, I want the screen to be
+> composed rather than broken when there is no picture.
+
+**Acceptance criteria**
+
+- Given no `ArtSource` resolves for the record (`art.rs:68–70` returns `None`),
+  when the kiosk renders, then it draws the wall's own deterministic gradient
+  placeholder at kiosk scale — the same object the shelf already draws, not a
+  new empty-state illustration.
+- Given the source artwork is **smaller** than the kiosk's target size, when it
+  renders, then it is drawn **at its own pixel size**, centred, and never scaled
+  up — the refusal *no artwork is ever drawn larger than its source*
+  (`REFUSALS.md:92–93`) applied to a surface whose target is much larger than
+  the wall's, and asserted by the kiosk's own test (§12 step 2), the way
+  `the_wall_never_draws_art_larger_than_its_source` (`shelf.rs:1513`) asserts it
+  for the wall.
+- Given the artwork is missing, when the composition renders, then **no lane
+  moves**: the type block sits where it sits whether or not there is a picture,
+  because reserved slots are the bar's promise (`bottom_bar.rs:74–86`) and this
+  surface inherits it.
