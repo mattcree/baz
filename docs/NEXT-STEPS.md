@@ -2,13 +2,14 @@
 
 > Concrete, ordered, with acceptance criteria. Standards in `ENGINEERING.md`;
 > vision in `VISION.md`; deliberate deferrals in `BACKLOG.md`; what actually
-> landed in `CHANGELOG.md`. Updated 2026-08-09.
+> landed in `CHANGELOG.md`. Updated 2026-08-10.
 >
 > **Status**: Phases 0–3 ✅. baz scans several folders, shows the collection,
 > plays it gaplessly and bit-perfectly, searches by song and by record, edits
-> its queue, keeps playlists as files you own, and undoes what it did. 28 ADRs,
-> 11 design studies, ~970 tests, CI green on three platforms. **Nothing has
-> been released.**
+> its queue, keeps playlists as files you own, and undoes what it did. It has
+> a resident sidebar, a Home, a Now playing place, and one press to sound from
+> the wall. 33 ADRs, 13 design studies, 1047 tests, CI green on three
+> platforms. **Nothing has been released.**
 
 ## Where the work actually stands
 
@@ -25,7 +26,11 @@ chapter's reasoning lives:
 | Controls, iconography, the strip budget | shipped | ADR-0026, design 10 |
 | Forgiveness: undo, trash-backed delete | shipped | ADR-0027, design 11 P2 |
 | Direct manipulation: drag to reorder and to add | shipped | design 09 §13 step 8, design 11 P5 |
-| Density's visible control | in flight | design 11 P8 (owner's call, 2026-08-09) |
+| Density's visible control | shipped | ADR-0028, design 11 P8 |
+| One press to sound from the wall: the hover options | shipped | the owner's design, 2026-08-09 |
+| The returns lane, `Home`, `Now playing`, search in the lane | shipped | ADR-0030, design 13 |
+| The `CONTINUE` band — the question asked in the silence | shipped | ADR-0030's third amendment |
+| The ambient Now playing: field, meter, spectrum, feed, toggles | **designed, unbuilt** | ADR-0029, design 12 |
 
 ## Next, in order
 
@@ -73,7 +78,34 @@ building it.
 - **Shortcut discovery** — the bindings live in the README and nowhere a
   running baz can show them.
 
-### 3. The chapters not yet begun
+### 3. Build the ambient Now playing
+
+Designed in full and not started: the cover-derived field, the R128 momentary
+meter, the **spectrum analyser** (whose FFT costs no new crate — `rubato`
+already pulls `realfft` into every build), the local facts feed, and the four
+toggles. ADR-0029 and `docs/design/12-now-playing-and-kiosk.md` carry the plan:
+nine steps, or **1 → 2 → 6 → 8** to reach the bars in four. The owner's rule
+governs it — *"ambient motion is fine as long as the performance remains top
+tier"* — so §7.4's harness and its four thresholds are the gate, and the
+measurements have never been taken because the feature does not exist yet.
+
+### 4. Three decisions waiting on the owner
+
+- **The borderless window.** Wayland already draws that title bar inside baz's
+  own process, so turning it off is one field — but iced 0.13 exposes no
+  edge-drag resize anywhere in `window::Action`, so going borderless today
+  loses pointer resizing. The route is a ~30-line upstream-shaped iced patch,
+  which means a forked dependency.
+- **Shuffle as a toggle.** It has a mechanical problem, not just a
+  philosophical one: turning it *off* has nothing to restore, since playing a
+  playlist copies it and decouples. Reversing act → mode would also un-block
+  the crossed-arrows glyph that doc 10 refuses only because shuffle is an act.
+- **Whether `Pull` goes.** Self-contained, sends no engine command, and its
+  removal would answer design 11's P9 (*"explain it or rename it"*) a third
+  way. If it, `Shuffle` and `Play all` all went, the strip's acts lane drops to
+  zero and the two-line split loses its reason to exist.
+
+### 5. The chapters not yet begun
 
 - **Steered shuffle / generated playlists.** The ground rules are already
   law (ADR-0024 §7, design 09 S10): an ordinary editable file, asked for by
@@ -97,5 +129,7 @@ building it.
 
 - CI is the guide: main goes red, main gets fixed, before anything else.
 - Every stack-level choice becomes a short ADR at the moment it is made.
-- A design decision that contradicts `REFUSALS.md` needs an ADR that beats
-  the entry's argument — the ledger's own editing rule.
+- `REFUSALS.md` binds contributors and agents, **not the owner**: his decision
+  is sufficient, and an entry he reverses is rewritten to record it. For
+  everyone else the editing rule stands — removing an entry needs an argument
+  that beats it.
