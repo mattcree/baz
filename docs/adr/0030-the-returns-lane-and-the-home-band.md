@@ -124,6 +124,74 @@
 > strip is one line at every width in either lane state (648 wanted, 720
 > narrowest). Frames and the full arithmetic:
 > [`docs/design/impl/search-in-lane/`](../design/impl/search-in-lane/README.md).
+>
+> ## Third amendment (2026-08-09) — `CONTINUE` is the question you ask in the silence
+>
+> The owner, looking at the shipped band: *"when you click 'continue' and on
+> the home thing it does not update to show what is currently playing"*. §6
+> specified the band as a reading of the snapshot, and a snapshot is a record
+> of where you **were** — so pressing `Resume` left a frozen placard on screen
+> while something else was sounding. The first answer drafted for this was a
+> band with **two readings**, `CONTINUE` and `NOW PLAYING`, swapping on the
+> engine at identical geometry. The owner replaced it with a better one:
+> *"in fact, keep it simple with the continue part… once you select resume, it
+> just disappears"*, *"or takes you to now playing"*, *"it just reappears when
+> you stop the player"*.
+>
+> **§6's rule for `CONTINUE` is replaced by one predicate:**
+>
+> > **The band stands whenever there is a run to carry on with and nothing is
+> > sounding.** Start anything, anywhere in the product, and it is gone; stop,
+> > and it is back, describing where you now are.
+>
+> §6's *inventory* is untouched for the third time — the two facts are still
+> the two facts, and the five refusals still stand. What changes is when one of
+> them is on screen and where its content comes from.
+>
+> **1. It is a predicate, not a lifecycle**, and one function answers it
+> (`views::home::standing`). Sounding: no band. **Paused**: the band, describing
+> **what you paused** at the engine's own confirmed position — not the launch
+> snapshot, which by then names the start of that same track. **A run that
+> ended**: no band; this is the one case the word *stopped* does not settle on
+> its own, and it goes the other way from a pause, because a run played to its
+> end has no *where you stopped* and `docs/REFUSALS.md` states the silence at
+> the end of a run as a feature. **Nothing sounded yet**: the launch snapshot,
+> which is the only state in which it is read at all.
+>
+> **2. Why this is better than the two-reading band, and not merely smaller.**
+> It has no path where the band is wrongly absent; it is useful after *every*
+> stop rather than only after a launch (pause an album halfway, come to Home,
+> the way back in is there); and it **deletes an idle cost rather than
+> budgeting for one** — a `NOW PLAYING` reading would have wanted a live
+> position while the music ran, and a band that is *absent* while the music
+> runs wants nothing, so Home carries no subscription and no clock, and the
+> needle it draws is one the engine has stopped moving. §6 also has a standing
+> reason to prefer it: what is sounding is the bar's job in every place, and
+> `Now playing` is a place of its own one row up in the head. A Home band that
+> described the sounding track was the same fact in three places at once.
+>
+> **3. `Resume` starts the run *and* goes to `Now playing`** — the one play
+> gesture in the product that navigates, and the exception is deliberate.
+> `Play` on a tile, a record's page or a playlist says *play this*, and
+> answering it by leaving the surface you are choosing from would be the
+> interface taking the wheel; `Resume` says *pick up where I left off*, and the
+> place that describes where you are is the answer to it rather than a side
+> effect. It is also what makes the disappearance coherent: you are not left
+> standing on Home watching a placard go.
+>
+> **4. Two consequences below the surface**, both repairs. `Now playing` no
+> longer answers a start-in-flight with *"Nothing playing."* — a sentence that
+> appears and vanishes is read, where a blank that fills is not. And the guard
+> that stops a restored run overwriting the interrupted point is now **one pure
+> function shared by both writers** (`app::next_snapshot`), stated as *has
+> anything sounded* rather than *is a row playing*. That closes two holes the
+> narrower reading left: the **exit path**, which wrote unconditionally, so
+> opening baz and closing it again without pressing anything spent the position
+> anyway; and an **unmounted library**, whose unresolvable snapshot produced no
+> queue and was then deleted outright.
+>
+> Frames — the band present, the band gone, and the same band back on a pause:
+> [`docs/design/impl/home-continue/`](../design/impl/home-continue/README.md).
 
 **Status**: accepted and shipped, as amended above (2026-08-09) · extracts the decisions of
 [`docs/design/13-everyday-flow.md`](../design/13-everyday-flow.md) §2, §3,

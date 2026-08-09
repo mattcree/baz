@@ -805,6 +805,26 @@ next commit.
 
 ### Changed
 
+- **Home's `CONTINUE` band is the question you ask in the silence** (ADR-0030's
+  third amendment). It used to be a reading of the launch snapshot, so pressing
+  `Resume` left a frozen placard describing where you *were* on screen while
+  something else was sounding. It is now one predicate: **the band stands
+  whenever there is a run to carry on with and nothing is sounding.** Start
+  anything, anywhere in the product, and it is gone; stop, and it is back,
+  describing where you now are. Paused, it shows **what you paused** at the
+  engine's own position; a run played to its *end* leaves no band, because a
+  finished run has no "where you stopped" and the silence at the end of a run is
+  a feature; only before anything has sounded is the snapshot read at all. It
+  costs nothing at rest — a band that is absent while the music runs wants no
+  position, so Home has no clock and no subscription, and the needle it draws is
+  one the engine has stopped moving.
+- **`Resume` starts the run and takes you to `Now playing`** — the one play
+  gesture in baz that navigates, and deliberately: `Play` says *play this* and
+  leaves you where you are choosing from, where `Resume` says *pick up where I
+  left off*, which the place describing where you are is the answer to. It has
+  two shapes now, matching the band's two: a paused run is a plain `Play`
+  (seeking it back to the snapshot's cursor would restart the track you are
+  halfway through), and the interrupted run is `JumpTo` then `Seek` as before.
 - **The queue survives a quit** (ADR-0023 §6, unbuilt until something wanted
   it). `session.toml` beside the config holds the paths, the cursor, the
   elapsed position and the provenance, written when the run moves and again on
@@ -866,6 +886,27 @@ next commit.
 
 ### Fixed
 
+- **Opening baz and closing it again no longer costs you your place.** The
+  guard that stops a restored run overwriting the interrupted point protected
+  the *"the run moved"* writer and not the *exit* writer, which writes
+  unconditionally — so launching and quitting without pressing anything wrote a
+  cursor of 0 and a position of 0 over the snapshot. Both writers now share one
+  pure function (`app::next_snapshot`), stated as **has anything sounded**
+  rather than *is a row playing*, which is also the only fact that separates a
+  run restored at launch from a run that has just ended.
+- **A library that is not mounted yet no longer deletes the interrupted run.**
+  A snapshot whose files do not resolve produces no queue, and the old *no
+  queue ⇒ write an empty snapshot* arm then cleared the file outright. A NAS
+  that was not up when baz opened is an ordinary thing to meet.
+- **The `Now playing` place no longer flashes "Nothing playing." on the way
+  in.** `Resume` navigates there in the same press that asks the engine to
+  begin, and the engine's confirmation is a frame or two behind it. While a
+  transport command awaits its confirming event the surface stays bare instead:
+  a sentence that appears and vanishes is read, and a blank that fills is not.
+- **A run played to its end is written away** rather than left on disk, so the
+  band cannot come back after a relaunch offering to replay something you
+  finished — the same judgement the band makes on screen, made once on disk so
+  the two cannot disagree.
 - **A returns-lane row's sleeve is 48 px, not 40.** The expanded lane drew the
   *playlist panel's* `PANEL_SLEEVE`, which left `SIDEBAR_ROW_H`'s own
   derivation — 48 with one `GAP_SM` above and below — describing a row nothing
