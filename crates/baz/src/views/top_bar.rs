@@ -49,29 +49,69 @@ pub(crate) const WELL_MIN: f32 = 200.0;
 pub(crate) const WELL_MAX: f32 = 280.0;
 
 /// The well's width at `window_width`: `clamp(W − 1000, 200, 280)`
-/// (doc 10 §4.1) — 280 at ≥ 1280, spending its fluid 80 px between 1040 and
-/// 960, then holding the floor. The well is the strip's **one** fluid
-/// tenant, which is what makes the collapse order one step: first this
-/// range, then the split (§4.3).
+/// (doc 10 §4.1) — 280 at ≥ 1280, spending its fluid 80 px down to 1200,
+/// then holding the floor. The well is the strip's **one** fluid tenant,
+/// which is what makes the collapse order one step rather than a cascade:
+/// first this range, then the split (§4.3).
 pub(crate) fn well_width(window_width: f32) -> f32 {
     (window_width - 1000.0).clamp(WELL_MIN, WELL_MAX)
 }
 
-/// The slim top bar: the search well on the left, quiet status and the route
-/// to the settings on the right, a hairline rule below.
+/// The group-key row's reserved width (logical px): five tracked caps words
+/// in their `GAP_XS`-padded buttons with `GAP_MD` between them, measured in
+/// `font.rs` against this declaration — L9's arithmetic needs every tenant
+/// to *declare*, and the declaration is only worth asserting if the face is
+/// measured against it.
+pub(crate) const KEYS_W: f32 = 314.0;
+
+/// The acts cluster's reserved width (logical px): the triangle and its
+/// word, `Shuffle`, `Pull`, their paddings and the two `GAP_XS` gaps.
+pub(crate) const ACTS_W: f32 = 182.0;
+
+/// The `Playlists` door's reserved width (logical px): the word in its
+/// `GAP_SM` padding.
+pub(crate) const PLAYLISTS_W: f32 = 64.0;
+
+/// The slim top bar — one line at [`theme::TOP_BAR_SPLIT`] and above, two
+/// below it, a hairline rule under either.
 ///
-/// `window_width` decides the well's width and nothing else yet — the
-/// parameter every regime needs (doc 10 §7 step 3); the strip itself takes
-/// no other reading of it until the split (step 5).
+/// `window_width` decides the well's width and which regime the strip is in,
+/// and nothing else. **The split is the charter drawn** (doc 10 §4.3): below
+/// 960 the frame's furniture — the well and the two doors — stays on the
+/// window line, and the library's verbs and states take a line of their own.
+/// Nothing hides, nothing overflows, no menu appears; every control keeps
+/// its exact form, and the collapse order is one step — first the well
+/// spends its fluid 80 px, then the strip splits. Below
+/// [`theme::TOP_BAR_FLOOR`] nothing further collapses: 600 is the strip's
+/// declared floor and the window's sensible minimum.
+///
+/// The resolved height is [`theme::top_bar_h`], and `app.rs`'s viewport
+/// estimate reads the same function — the pair of tokens and the breakpoint
+/// are one decision, not two that must agree.
 pub(crate) fn view(shelf: &Shelf, window_width: f32, ink: Ink) -> Element<'_, Message> {
     let room = theme::active();
     let search = well(shelf, well_width(window_width));
-    let mut keys = row![]
+    let mut keys_row = row![]
         .spacing(theme::GAP_MD)
         .align_y(iced::Alignment::Center);
     for key in GroupKey::ALL {
-        keys = keys.push(group_key(key, key == shelf.group_key));
+        keys_row = keys_row.push(group_key(key, key == shelf.group_key));
     }
+    // **Every tenant stands in its reserved width** (L9): the clusters are
+    // fixed-width slots — `font.rs` measures the words against the
+    // reservations — so the budget the law adds up is the geometry actually
+    // drawn, and the left cluster's landmarks survive a resize (doc 10
+    // §4.2: at 1440 and 1920 the keys, acts and doors do not move relative
+    // to the well; slack is air, not drift).
+    let keys = container(keys_row)
+        .width(Length::Fixed(KEYS_W))
+        .align_x(alignment::Horizontal::Left);
+    let acts = container(draws())
+        .width(Length::Fixed(ACTS_W))
+        .align_x(alignment::Horizontal::Left);
+    let playlists = container(playlists_door())
+        .width(Length::Fixed(PLAYLISTS_W))
+        .align_x(alignment::Horizontal::Left);
     // The status row holds only the transient notes now — the counts moved
     // into the well they describe (doc 10 §4.1; L8.3's valve run in reverse:
     // the fact goes to where it is watched). What the move freed is exactly
@@ -107,6 +147,37 @@ pub(crate) fn view(shelf: &Shelf, window_width: f32, ink: Ink) -> Element<'_, Me
                 .color(room.alert),
         );
     }
+    if window_width < theme::TOP_BAR_SPLIT {
+        // **The two-line regime** (doc 10 §4.3). The frame line: the well,
+        // the transient notes in the slack, then the doors at the corner.
+        // The library line: the arrangement's states, then the wall's acts.
+        // The seam is the charter's own division — frame furniture above,
+        // library verbs below — and both lines keep every control at its
+        // exact single-line form.
+        let frame_line = row![
+            search,
+            Space::with_width(Length::Fill),
+            status,
+            playlists,
+            settings_gear(ink),
+        ]
+        .spacing(theme::GAP_LG)
+        .align_y(iced::Alignment::Center);
+        let library_line = row![keys, acts]
+            .spacing(theme::GAP_XL)
+            .align_y(iced::Alignment::Center);
+        return column![
+            container(
+                // One lead above, between and below the two lines — the
+                // strip's own `TOP_BAR_PAD_V`, three times — which is the
+                // whole of `TOP_BAR_2LINE_H`'s arithmetic: 8+32+8+32+8+1.
+                column![frame_line, library_line].spacing(theme::TOP_BAR_PAD_V)
+            )
+            .padding(theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)),
+            horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
+        ]
+        .into();
+    }
     status = status.push(settings_gear(ink));
     column![
         container(
@@ -114,13 +185,17 @@ pub(crate) fn view(shelf: &Shelf, window_width: f32, ink: Ink) -> Element<'_, Me
                 // The well and the keys are one cluster — both are about the
                 // library — held apart by the ladder's largest gap so they
                 // read as two groups on one line rather than as six controls.
-                row![search, keys, draws(), playlists_door()]
+                row![search, keys, acts, playlists]
                     .spacing(theme::GAP_XL)
                     .align_y(iced::Alignment::Center),
+                // The strip's one flexible region. The row's `GAP_SM` counts
+                // once each side of it, which is the 16 px status lead the
+                // budget arithmetic reserves (doc 10 §4.2) — at the regime
+                // floor the fill is zero and the lead is what remains.
                 Space::with_width(Length::Fill),
                 status
             ]
-            .spacing(theme::GAP_LG)
+            .spacing(theme::GAP_SM)
             .align_y(iced::Alignment::Center),
         )
         // **One window gutter.** The bar hung from `GAP_LG` while the wall under

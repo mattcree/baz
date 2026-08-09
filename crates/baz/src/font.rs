@@ -481,6 +481,58 @@ mod tests {
         );
     }
 
+    /// **The strip's declared reservations hold their measured words** —
+    /// L9's other half (doc 10 §7 step 7). `theme.rs` asserts the budget as
+    /// const arithmetic over the declarations in `views::top_bar`; this
+    /// measures each cluster's real words, paddings and gaps in the face
+    /// that draws them against its declaration, so neither a font change nor
+    /// a relabel can quietly overflow the budget the law adds up.
+    #[test]
+    fn the_strips_declared_tenant_widths_hold_their_measured_words() {
+        use baz_core::index::GroupKey;
+
+        let medium = Face::parse(SANS_MEDIUM);
+
+        // The group-key row: five tracked caps words, `GAP_XS` padding each
+        // side, `GAP_MD` between.
+        let keys: f32 = GroupKey::ALL
+            .iter()
+            .map(|key| {
+                medium.width(
+                    &theme::tracked(&key.label().to_uppercase()),
+                    theme::SIZE_META,
+                ) + 2.0 * theme::GAP_XS
+            })
+            .sum::<f32>()
+            + 4.0 * theme::GAP_MD;
+        assert!(
+            keys <= crate::views::top_bar::KEYS_W,
+            "the key row measures {keys:.2} px against a declared {}",
+            crate::views::top_bar::KEYS_W
+        );
+
+        // The acts cluster: the triangle and its word, then two words, each
+        // in `GAP_SM` padding, with `GAP_XS` between the three.
+        let word = |label: &str| medium.width(label, theme::SIZE_META);
+        let acts = (2.0 * theme::GAP_SM + theme::ICON_PX + theme::GAP_SM + word("Play all"))
+            + (2.0 * theme::GAP_SM + word("Shuffle"))
+            + (2.0 * theme::GAP_SM + word("Pull"))
+            + 2.0 * theme::GAP_XS;
+        assert!(
+            acts <= crate::views::top_bar::ACTS_W,
+            "the acts cluster measures {acts:.2} px against a declared {}",
+            crate::views::top_bar::ACTS_W
+        );
+
+        // The Playlists door: one word in `GAP_SM` padding.
+        let playlists = 2.0 * theme::GAP_SM + word("Playlists");
+        assert!(
+            playlists <= crate::views::top_bar::PLAYLISTS_W,
+            "the Playlists door measures {playlists:.2} px against a declared {}",
+            crate::views::top_bar::PLAYLISTS_W
+        );
+    }
+
     /// **The index rail's lane holds the labels the keys actually produce** —
     /// or, where it cannot, the test says so by name rather than the wall
     /// discovering it.

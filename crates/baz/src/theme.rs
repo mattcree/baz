@@ -1589,6 +1589,48 @@ pub const TOP_BAR_PAD_V: f32 = GAP_SM;
 /// three pixels was three pixels of shelf mis-virtualized on the first frame.
 pub const TOP_BAR_H: f32 = 2.0 * TOP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
 
+/// Window width below which the Library strip splits into its two lines
+/// (logical px) — the single-line regime's floor, from the budget arithmetic
+/// doc 10 §4.2 lays out: the tenants' reserved widths and the frame's
+/// gutters sum to 958 with the well at its 200 px floor, so the seam is
+/// declared at **960** and asserted in this module's own tests
+/// (`the_strip_holds_its_tenants_at_the_single_line_floor`, the L9 budget
+/// law).
+pub const TOP_BAR_SPLIT: f32 = 960.0;
+
+/// The strip's floor, and the window's sensible minimum (logical px) —
+/// **600**, from the two-line regime's own arithmetic (doc 10 §4.3): the
+/// library line's tenants sum to 598. Below it nothing further collapses —
+/// there is no third regime, and a proposal that needs one has outgrown the
+/// strip (doc 10 §8).
+pub const TOP_BAR_FLOOR: f32 = 600.0;
+
+/// Height of the two-line Library strip, hairline included — **89**
+/// (doc 10 §4.3): the strip's one vertical lead above, between and below its
+/// two 32 px lines, then the hairline. `8 + 32 + 8 + 32 + 8 + 1`.
+///
+/// A pair of tokens and a breakpoint rather than a measurement: the app's
+/// layout estimate reads the **resolved** height ([`top_bar_h`]), because
+/// the virtualizer's pre-first-scroll viewport is derived from this number
+/// and an estimate that disagreed with the drawing has already cost the rail
+/// its capacity math once.
+pub const TOP_BAR_2LINE_H: f32 = 3.0 * TOP_BAR_PAD_V + 2.0 * TRANSPORT_HIT + 1.0;
+
+/// The Library strip's resolved height at `window_width`: [`TOP_BAR_H`] in
+/// the single-line regime, [`TOP_BAR_2LINE_H`] below [`TOP_BAR_SPLIT`].
+///
+/// The one function every consumer of the strip's height must read — the
+/// strip's own view and `app.rs`'s viewport estimate both — so the two
+/// regimes cannot disagree about where the seam is.
+#[must_use]
+pub fn top_bar_h(window_width: f32) -> f32 {
+    if window_width < TOP_BAR_SPLIT {
+        TOP_BAR_2LINE_H
+    } else {
+        TOP_BAR_H
+    }
+}
+
 /// Vertical padding that makes a text well exactly [`TRANSPORT_HIT`] tall.
 ///
 /// iced lays a `text_input` out as its padding plus one line box — the 1 px
@@ -5868,6 +5910,78 @@ mod tests {
             offenders.is_empty(),
             "a control stands at a third height: {offenders:#?}"
         );
+    }
+
+    /// **L9 — a strip declares its tenants and holds them at its floor**
+    /// (`.interface-design/system.md` §13, via doc 10 §2.3's charter and
+    /// ADR-0026 §3).
+    ///
+    /// The Library strip's population was bounded by nothing: L8 admits by
+    /// subject, each admission was locally argued, and at the shipped window
+    /// the tenants claimed 97.6 % of the line — so a transient scan note
+    /// pushed the only route to Settings off the window's edge. The law is
+    /// the budget as **const arithmetic**, in the shape the bottom bar
+    /// already uses for its own floor
+    /// (`views/bottom_bar.rs::the_transport_row_is_the_column_it_used_to_be_centred_in`):
+    /// every tenant's reserved width is declared in `views::top_bar`, the
+    /// sum plus the frame's gutters must fit the declared single-line floor,
+    /// and the two-line pair must fit the strip's floor. `font.rs` holds the
+    /// measured words against the declarations, so the two halves — face and
+    /// arithmetic — cannot drift apart.
+    #[test]
+    fn the_strip_holds_its_tenants_at_the_single_line_floor() {
+        use crate::views::top_bar;
+
+        /// The single-line regime, at the well's floor (doc 10 §4.2): the
+        /// gutter, the well, the three `GAP_XL` seams and the left cluster,
+        /// the fill's two `GAP_SM` flanks (the status lead), the gear, the
+        /// gutter.
+        const SINGLE_LINE: f32 = HANG
+            + top_bar::WELL_MIN
+            + GAP_XL
+            + top_bar::KEYS_W
+            + GAP_XL
+            + top_bar::ACTS_W
+            + GAP_XL
+            + top_bar::PLAYLISTS_W
+            + 2.0 * GAP_SM
+            + TRANSPORT_HIT
+            + HANG;
+
+        /// The frame line below the split (doc 10 §4.3): the well, the
+        /// empty status slot's flanks, the two doors — `GAP_LG` between the
+        /// row's five members.
+        const FRAME_LINE: f32 =
+            HANG + top_bar::WELL_MIN + 4.0 * GAP_LG + top_bar::PLAYLISTS_W + TRANSPORT_HIT + HANG;
+
+        /// The library line: the states, one seam, the acts.
+        const LIBRARY_LINE: f32 = HANG + top_bar::KEYS_W + GAP_XL + top_bar::ACTS_W + HANG;
+
+        const { assert!(SINGLE_LINE <= TOP_BAR_SPLIT) }
+        const { assert!(FRAME_LINE <= TOP_BAR_FLOOR) }
+        const { assert!(LIBRARY_LINE <= TOP_BAR_FLOOR) }
+
+        // The two-line band is the single-line band's own lead three times
+        // around two control rows — 8+32+8+32+8, plus the hairline: 89
+        // against 49. A pair of tokens and a breakpoint, not a measurement.
+        const { assert!(TOP_BAR_2LINE_H == 3.0 * TOP_BAR_PAD_V + 2.0 * TRANSPORT_HIT + 1.0) }
+        const { assert!(TOP_BAR_H == 49.0 && TOP_BAR_2LINE_H == 89.0) }
+        const { assert!(TOP_BAR_FLOOR < TOP_BAR_SPLIT) }
+
+        // The well is the strip's one fluid tenant: an 80 px range, spent
+        // before the split so the collapse order is one step, and pinned at
+        // the floor for every width below its ramp.
+        const { assert!(top_bar::WELL_MAX - top_bar::WELL_MIN == 80.0) }
+        assert!((top_bar::well_width(1280.0) - top_bar::WELL_MAX).abs() < f32::EPSILON);
+        assert!((top_bar::well_width(1200.0) - top_bar::WELL_MIN).abs() < f32::EPSILON);
+        assert!((top_bar::well_width(TOP_BAR_FLOOR) - top_bar::WELL_MIN).abs() < f32::EPSILON);
+
+        // And the resolved height is the regime the width says it is — the
+        // function `app.rs`'s viewport estimate reads, asserted at the seam
+        // itself.
+        assert!((top_bar_h(TOP_BAR_SPLIT) - TOP_BAR_H).abs() < f32::EPSILON);
+        assert!((top_bar_h(TOP_BAR_SPLIT - 1.0) - TOP_BAR_2LINE_H).abs() < f32::EPSILON);
+        assert!((top_bar_h(TOP_BAR_FLOOR) - TOP_BAR_2LINE_H).abs() < f32::EPSILON);
     }
 
     /// Every `.rs` file under `root`, recursively.

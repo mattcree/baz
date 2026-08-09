@@ -59,16 +59,15 @@ use crate::{
     views, vm,
 };
 
-/// The top bar's height, used for the pre-first-scroll estimate of the grid
-/// viewport (real bounds arrive with every scroll event).
-///
-/// It was a local `56.0` against a bar that drew **53**, which the composition
-/// audit caught: nothing was drawn wrong, because the first layout replaces the
-/// estimate with a measurement, but a virtualizer whose first frame is three
-/// pixels out is three pixels of shelf resolved against a viewport that does not
-/// exist. The number is [`theme::TOP_BAR_H`] now — the same arithmetic the bar
-/// is composed from — so the estimate cannot drift from the drawing again.
-const TOP_BAR_H: f32 = theme::TOP_BAR_H;
+// The top bar's height — used for the pre-first-scroll estimate of the grid
+// viewport (real bounds arrive with every scroll event) — is
+// [`theme::top_bar_h`] **resolved against the window's width**, never the
+// single-line constant. It was a local `56.0` against a bar that drew 53,
+// which the composition audit caught; it became `theme::TOP_BAR_H` so the
+// estimate could not drift from the drawing — and with the strip's two-line
+// regime (doc 10 §4.3) the same discipline means asking the theme which
+// regime the width resolves to, because an estimate 40 px out below 960
+// would be the rail's capacity bug all over again.
 /// Initial window size.
 const WINDOW: Size = Size::new(1280.0, 860.0);
 
@@ -159,6 +158,13 @@ fn window_settings() -> window::Settings {
     )]
     let mut settings = window::Settings {
         size: WINDOW,
+        // The strip's floor is the window's declared minimum width
+        // (doc 10 §4.3): at 600 the two-line strip holds every tenant, and
+        // below it nothing further collapses — there is no third regime, so
+        // the honest move is to not offer the widths the layout does not
+        // answer. Height is left unbounded; the study declares no floor for
+        // it.
+        min_size: Some(Size::new(theme::TOP_BAR_FLOOR, 0.0)),
         ..window::Settings::default()
     };
     #[cfg(target_os = "linux")]
@@ -3191,7 +3197,7 @@ impl Shelf {
             scroll_offset: 0.0,
             grid_size: Size::new(
                 WINDOW.width - theme::INDEX_LANE_W,
-                WINDOW.height - TOP_BAR_H,
+                WINDOW.height - theme::top_bar_h(WINDOW.width),
             ),
             last_scan_log: Instant::now(),
             hovered_album: None,
@@ -3259,7 +3265,13 @@ impl Shelf {
                 // Estimate until the next scroll event reports real bounds.
                 // The rail's lane comes off here too, because the scrollable
                 // the next `Scrolled` will measure has already given it up.
-                self.grid_size = Size::new(self.grid_width(), (size.height - TOP_BAR_H).max(100.0));
+                // The strip's height is *resolved* against this very width —
+                // below the split the strip is two lines, and an estimate
+                // that assumed one would mis-virtualize 40 px of shelf.
+                self.grid_size = Size::new(
+                    self.grid_width(),
+                    (size.height - theme::top_bar_h(size.width)).max(100.0),
+                );
                 self.request_visible_thumbs()
             }
             Message::TileEntered(id) => {
