@@ -59,6 +59,7 @@ mod shelf;
 mod shuffle;
 mod spine;
 mod theme;
+mod undo;
 mod views;
 mod vm;
 
@@ -73,6 +74,11 @@ fn main() -> iced::Result {
             env!("CARGO_PKG_VERSION")
         );
         println!("usage: baz [MUSIC_DIR]");
+        // The `baz DIR` teaching lived on the first-run screen until doc 11
+        // §5 P1 moved it here, where its audience lives: someone reading
+        // --help is exactly the person the sentence is for.
+        println!("       MUSIC_DIR points baz at a folder for this run and is remembered;");
+        println!("       without it, baz opens the folders it already knows.");
         return Ok(());
     }
     app::run(started, arg.map(PathBuf::from))

@@ -34,9 +34,15 @@
 //! - **The lamp dot marks a row only when the queue is exactly this list**
 //!   ([`PlayerState::playing_row_in`]) — a page listing something other than
 //!   what the engine holds marks nothing.
-//! - **Delete states what survives**: *"The file goes; your music stays"* —
-//!   every destructive confirmation in baz names the survivor (ADR-0022's
-//!   voice, adopted by ADR-0024).
+//! - **Delete is one press, into the platform trash** (doc 11 §5 P2): the
+//!   confirm dialog and its sentence — *"The file goes; your music stays"* —
+//!   retired with honour, because the trash keeps the promise the sentence
+//!   made. Forgiveness beats warning: reversibility first, per the 1992
+//!   HIG's own ranking, and the desktop's Restore is the road back.
+//! - **Undo stands beside the counts while there is an edit to take back**
+//!   (P2 again): remove, reorder and append are whole-file rewrites, and
+//!   the file as it stood is one press — or <kbd>Ctrl</kbd>+<kbd>Z</kbd> —
+//!   away, through the same fingerprint guard as the edit it reverses.
 
 use iced::widget::{
     Column, Space, button, column, container, image as iced_image, mouse_area, row, scrollable,
@@ -69,6 +75,7 @@ pub(crate) fn view<'a>(
     window_width: f32,
     hovered: Option<usize>,
     collecting: Collecting,
+    can_undo: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let content = (window_width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).max(0.0);
@@ -104,8 +111,8 @@ pub(crate) fn view<'a>(
     let body: Element<'a, Message> = if open.rows.is_empty() {
         // The words the armed mode left behind went with it (doc 09 §9):
         // the route in is the transfer gesture — a row's `+`, or the
-        // record page's `Add to…`, then this list in the picker.
-        text("Nothing here yet. Press + on any track row, or Add to… on a record's page, and pick this list.")
+        // record page's `Add to playlist…`, then this list in the picker.
+        text("Nothing here yet. Press + on any track row, or Add to playlist… on a record's page, and pick this list.")
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
             .color(room.paper_faint)
@@ -114,7 +121,7 @@ pub(crate) fn view<'a>(
         Column::with_children(rows).spacing(theme::GAP_XS).into()
     };
     let main = column![
-        identity_block(open),
+        identity_block(open, can_undo),
         column![section_rule("Tracks"), body].spacing(theme::GAP_SM),
     ]
     .spacing(theme::GAP_XL);
@@ -135,7 +142,7 @@ pub(crate) fn view<'a>(
         .into()
     };
     column![
-        place_header("Playlist", "Esc returns to the wall"),
+        place_header("Playlist", "Esc returns to Library"),
         scrollable(
             container(page)
                 .width(Length::Fill)
@@ -164,7 +171,11 @@ fn aside<'a>(shelf: &'a Shelf, open: &'a OpenPlaylist, live: bool) -> Element<'a
         row![
             word_act("Queue", live && playable, Message::PlaylistQueue),
             word_act("Rename", true, Message::PlaylistRenameStart),
-            word_act("Delete", true, Message::PlaylistDeleteArm),
+            // One press, into the platform trash (doc 11 §5 P2): the
+            // confirm died when the act became reversible — the desktop's
+            // own Restore is the road back, so a warning would be the
+            // fallback posture shipped as the default.
+            word_act("Delete", true, Message::PlaylistDelete),
         ]
         .spacing(theme::GAP_SM)
         .align_y(iced::Alignment::Center),
@@ -173,17 +184,29 @@ fn aside<'a>(shelf: &'a Shelf, open: &'a OpenPlaylist, live: bool) -> Element<'a
     if let Some(renaming) = &open.renaming {
         block = block.push(rename_field(renaming));
     }
-    if open.delete_armed {
-        block = block.push(delete_confirm(open.name()));
-    }
     block.into()
 }
 
 /// The main column's identity block: **the name at hero scale over the
 /// counts** — `38 of 40 · 2 missing` when entries are missing — the album
-/// header's falling order with the fields a made thing has.
-fn identity_block(open: &OpenPlaylist) -> Element<'_, Message> {
+/// header's falling order with the fields a made thing has. Beside the
+/// counts, exactly while there is an edit to take back, stands the
+/// transient `Undo` (doc 11 §5 P2) — the queue place's word, on the page
+/// that is its sibling editor.
+fn identity_block(open: &OpenPlaylist, can_undo: bool) -> Element<'_, Message> {
     let room = theme::active();
+    let mut summary = row![
+        text(open.counts_line())
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_faint)
+            .wrapping(text::Wrapping::None),
+    ]
+    .spacing(theme::GAP_SM)
+    .align_y(iced::Alignment::Center);
+    if can_undo {
+        summary = summary.push(undo_control());
+    }
     column![
         container(
             text(open.name().to_owned())
@@ -194,12 +217,33 @@ fn identity_block(open: &OpenPlaylist) -> Element<'_, Message> {
         )
         .max_height(2.0 * theme::LINE_HERO)
         .clip(true),
-        text(open.counts_line())
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(room.paper_faint),
+        summary,
     ]
     .spacing(theme::GAP_XS)
+    .into()
+}
+
+/// **Undo** — the file as it stood before the last recorded edit, one press
+/// away (doc 11 §5 P2): the queue place's word and rule, worn by the page.
+/// Drawn only while the history holds something; `Ctrl+Z` is the
+/// accelerator this word makes legal.
+fn undo_control() -> Element<'static, Message> {
+    let room = theme::active();
+    button(
+        container(
+            text("Undo")
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .wrapping(text::Wrapping::None),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_SM))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press(Message::Undo)
     .into()
 }
 
@@ -290,29 +334,6 @@ fn rename_field(entry: &NameEntry) -> Element<'_, Message> {
         );
     }
     block.into()
-}
-
-/// The armed delete, in the roots ADR's voice: every destructive
-/// confirmation in baz states what survives. Stacked rather than in a row,
-/// because it now lives in the aside's 320 px lane.
-fn delete_confirm(name: &str) -> Element<'_, Message> {
-    let room = theme::active();
-    column![
-        text(format!(
-            "Delete \u{201c}{name}\u{201d}? The file goes; your music stays."
-        ))
-        .size(theme::SIZE_META)
-        .line_height(theme::LEADING_META)
-        .color(room.paper_dim),
-        row![
-            word_act("Delete", true, Message::PlaylistDeleteConfirm),
-            word_act("Keep", true, Message::PlaylistDeleteCancel),
-        ]
-        .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Center),
-    ]
-    .spacing(theme::GAP_XS)
-    .into()
 }
 
 /// A record's name where its run begins — the queue place's group-header

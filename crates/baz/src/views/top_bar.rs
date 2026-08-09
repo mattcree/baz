@@ -259,8 +259,25 @@ pub(crate) fn view(shelf: &Shelf, window_width: f32, ink: Ink) -> Element<'_, Me
 fn draws() -> Element<'static, Message> {
     row![
         play_all(),
-        draw_word("Shuffle", Message::Shuffle),
-        draw_word("Pull", Message::Pull),
+        // The two draw words teach at the moment of relevance (doc 11 §5
+        // P6.2): each carries a tooltip saying what the press will do, in
+        // words, before the first press ever risks it. `Shuffle`'s word is
+        // almost enough but its bound is not in it; `Pull` has no
+        // convention at all (ADR-0026) and until now no explanation before
+        // the press — the era licensed poetic names only with explanation
+        // at first contact. ("What the Library shows", not "the wall":
+        // room vocabulary stays internal, P4's rule applied to P6's
+        // sentences.)
+        draw_word(
+            "Shuffle",
+            Message::Shuffle,
+            "Play 8 records drawn from what the Library shows",
+        ),
+        draw_word(
+            "Pull",
+            Message::Pull,
+            "Offer one record you haven't played in years — nothing plays until you say so",
+        ),
     ]
     .spacing(theme::GAP_XS)
     .align_y(iced::Alignment::Center)
@@ -308,10 +325,18 @@ fn play_all() -> Element<'static, Message> {
 }
 
 /// One of the two draw words: [`theme::TRANSPORT_HIT`] tall like every control
-/// in the product (law L7), centred in its box by the box (law L3).
-fn draw_word(label: &'static str, message: Message) -> Element<'static, Message> {
+/// in the product (law L7), centred in its box by the box (law L3), with a
+/// tooltip naming what the press does (doc 11 §5 P6.2) — the mechanism the
+/// gear already spends, now spent where the words are load-bearing and not
+/// quite enough. Below the control, the gear's own position rule: the strip
+/// is the window's top edge and a tip above it would clip.
+fn draw_word(
+    label: &'static str,
+    message: Message,
+    tip: &'static str,
+) -> Element<'static, Message> {
     let room = theme::active();
-    button(
+    let control = button(
         container(
             text(label)
                 .size(theme::SIZE_META)
@@ -325,7 +350,17 @@ fn draw_word(label: &'static str, message: Message) -> Element<'static, Message>
     .height(Length::Fixed(theme::TRANSPORT_HIT))
     .padding(theme::pad(0.0, theme::GAP_SM))
     .style(move |_theme, status| theme::word_button(room, room.wall, status))
-    .on_press(message)
+    .on_press(message);
+    tooltip(
+        control,
+        text(tip)
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Bottom,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
     .into()
 }
 

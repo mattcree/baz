@@ -567,6 +567,39 @@ next commit.
 - A desktop entry, and the window's Wayland `app_id` / X11 `WM_CLASS`, so a
   launcher can associate the running window with the entry that started it.
 
+**Forgiveness and the first minute** (design doc 11 §5, the adopt tier)
+
+- **Undo for list edits** (ADR-0027): a bounded history of whole-list
+  snapshots per surface. `Ctrl+Z` — or the transient `Undo` word that
+  appears beside the Queue place's summary and the playlist page's counts —
+  takes back a remove, a reorder or an append. A queue undo restores the
+  *list* through `UpdateQueue`, never the playback position: nothing ever
+  sounds because of an undo. A playlist undo is one atomic whole-file
+  rewrite through the same external-edit fingerprint guard as the edit it
+  reverses.
+- **Playlist `Delete` moves the file to the platform trash** instead of
+  unlinking it (the `trash` crate; freedesktop trash on Linux, so any file
+  manager can Restore). One press — the two-press confirm and its sentence
+  are retired, because the act is reversible now.
+- **The first-run screen gains `Browse…`** — the desktop's own folder
+  picker beside the typed path (ADR-0025's two-door shape, arriving at the
+  screen it was first deferred from) — and the typed path's check moved off
+  the UI thread onto the blocking pool. The window also accepts a dropped
+  folder where the toolkit delivers drops (X11; winit 0.30 has no Wayland
+  file-drop support), without advertising it where it cannot. The
+  `baz DIR` teaching moved to `--help`.
+- **`‹ Prev` / `Next ›` in the Album place's header** (doc 07 §3.2's own
+  prescription, unpaid until now): step between records in the wall's
+  current arrangement — same order, same filtered set — with `Ctrl+[` /
+  `Ctrl+]` as the accelerators. Comparing two releases is one press per
+  release again.
+- **Teaching at the moment of relevance**: the tile menu's `Queue album`
+  prints its `Shift-click` accelerator (a word, not `⇧` — the face has no
+  arrow and doc 10 §3.6 bans borrowed characters); `Shuffle` and `Pull` carry tooltips
+  saying what a press does; the queue's empty state states the refusal
+  *with* its answers ("Shuffle draws again; Play all plays the Library.");
+  the Songs rule notes "Enter plays the first match."
+
 **Distribution**
 
 - Release workflow building Linux x86\_64, Windows x86\_64 and a universal
@@ -579,6 +612,13 @@ next commit.
 
 ### Changed
 
+- **One vocabulary in the shipping copy** (doc 11 §5 P4): every place
+  header now says *"Esc returns to Library"* — "the wall" was the design
+  corpus's own name leaking on screen — the record page's `Add to…` names
+  its object as `Add to playlist…`, and a sweep test pins the whole
+  room-vocabulary list out of user-facing strings (it caught two further
+  leaks on arrival: the first-run scan line and the empty library's
+  heading).
 - **`config.toml` is now read and written with the `toml` crate**, replacing
   the hand-rolled single-key writer whose own documentation named this as the
   plan of record once the configuration grew past a couple of keys. It grew
@@ -597,6 +637,12 @@ next commit.
 
 ### Removed
 
+- **The playlist delete confirmation.** *"Delete "{name}"? The file goes;
+  your music stays."* was the correct fallback while deletion was
+  irreversible; the trash makes it reversible, and the 1992 HIG's ranking —
+  reversibility first, warnings only where undo cannot reach — then retires
+  the dialog (ADR-0027). The product now ships zero routine confirmation
+  dialogs.
 - `.opus` no longer appears in the library. Symphonia ships no Opus decoder in
   any released version, and the alternatives cost either a C library on every
   platform or an unmaintained parser on a path that reads hostile input.

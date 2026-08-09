@@ -314,7 +314,7 @@ pub(crate) enum Message {
     /// The name field was submitted; the storage layer's name rule decides,
     /// and its refusal lands under the field in its own words.
     NewPlaylistSubmit,
-    /// The record page's `Add to…`: the record, whole (the selected
+    /// The record page's `Add to playlist…`: the record, whole (the selected
     /// edition), held while the panel opens as the picker — pick a
     /// destination, the Queue first among them (09 §8.1).
     AddAlbumToPlaylist(u64),
@@ -356,13 +356,31 @@ pub(crate) enum Message {
     /// extension, refused in place by the storage layer's rule. The place
     /// moves with the name.
     PlaylistRenameSubmit,
-    /// The playlist page's `Delete`, first press: arm the confirmation —
-    /// *"The file goes; your music stays"* — and nothing else.
-    PlaylistDeleteArm,
-    /// The confirming press: the file goes; the page leaves for the wall.
-    PlaylistDeleteConfirm,
-    /// The armed deletion was declined.
-    PlaylistDeleteCancel,
+    /// The playlist page's `Delete`: the file moves to the platform trash;
+    /// the page leaves for the Library. One press, no confirm — the trash is
+    /// the safety net the confirm dialog used to stand in for (doc 11 §5
+    /// P2: reversibility first; the warning was the fallback and the
+    /// fallback is no longer needed).
+    PlaylistDelete,
+    /// The place's transient `Undo` word, and <kbd>Ctrl</kbd>+<kbd>Z</kbd>
+    /// over it: take back the last recorded edit on the list surface the
+    /// window is showing — the Queue place's run, or the open playlist
+    /// page's file (doc 11 §5 P2; [`crate::undo`]).
+    ///
+    /// **Nothing sounds because of an undo.** A queue undo restores the
+    /// *list* through [`Command::UpdateQueue`] — never the playback
+    /// position, never a `Play` — and a playlist undo is one atomic file
+    /// rewrite through the same fingerprint guard as the edit it reverses.
+    Undo,
+    /// The Album place's `‹ Prev` / `Next ›` pair (doc 07 §3.2, shipped by
+    /// doc 11 §5 P3), and <kbd>Ctrl</kbd>+<kbd>[</kbd> /
+    /// <kbd>Ctrl</kbd>+<kbd>]</kbd> over it: step to the neighbouring
+    /// record **along the wall's current arrangement** — the same order, the
+    /// same filtered set, so the pool is always the visible one (the
+    /// shuffle rule's logic, applied to navigation). `-1` is the previous
+    /// record, `+1` the next; outside the Album place, or on a record the
+    /// wall no longer shows, the step asks for nothing.
+    AlbumStep(i32),
     /// The queue place's `Save as playlist`: become a name field
     /// (ADR-0024 §4 — the transient frozen into an artefact).
     SaveQueueStart,
@@ -637,6 +655,23 @@ pub(crate) enum Message {
     /// the presses the item mirrors (§5.2's rule — every one a message
     /// some visible control also sends; [`crate::menu::Item`]).
     MenuItemPressed(usize),
+    /// A folder (or file) was dropped on the window — the first-run screen's
+    /// drop target (doc 11 §5 P1: see-and-point; the era's window-as-target
+    /// since drag and drop existed).
+    ///
+    /// Wired for what the toolkit actually delivers: winit 0.30 publishes
+    /// `DroppedFile` on X11 and **not on Wayland** (its Wayland backend has
+    /// no data-device handling at all), so this is an accelerator where the
+    /// platform provides it and absent where it does not — the `Browse…`
+    /// button and the typed path are the routes that exist everywhere,
+    /// which is why the screen's copy does not advertise dropping. The
+    /// deferral is recorded against ADR-0025 per P1's adopt-modified text.
+    FileDropped(PathBuf),
+    /// A file drag entered the window (X11 only, as above): the first-run
+    /// screen says where it would land.
+    FileHovered,
+    /// The file drag left the window without dropping.
+    FileHoverLeft,
 }
 
 struct App {
@@ -684,6 +719,13 @@ struct App {
     /// Which track row of the **record's page** the pointer is on — the same
     /// mechanism again, for the row's reserved `+` slot (ADR-0024 §6).
     hovered_album_row: Option<usize>,
+    /// The Queue place's edit history: the run as it stood before each of
+    /// the last few edits — remove, reorder, append — newest last
+    /// ([`crate::undo`], doc 11 §5 P2). Cleared when the run ends and when
+    /// the Queue place is left; restored lists go out as
+    /// [`Command::UpdateQueue`] and nothing else, so an undo can never
+    /// sound.
+    queue_undo: crate::undo::History<vm::QueueVm>,
     /// The open context menu, if one stands (doc 09 §5.2) — `None` at rest.
     ///
     /// **One `Option` is the whole overlay state**, which is what makes
@@ -797,6 +839,10 @@ pub(crate) struct Setup {
     pub(crate) input: String,
     /// Why the last submission did not open a shelf, if it did not.
     pub(crate) error: Option<String>,
+    /// Whether a file drag is over the window right now
+    /// ([`Message::FileHovered`] — X11 only; see [`Message::FileDropped`]).
+    /// The screen answers with one quiet line saying the drop will be taken.
+    pub(crate) hovering_drop: bool,
 }
 
 impl App {
@@ -900,6 +946,7 @@ impl App {
             queue_scroll: 0.0,
             hovered_playlist_row: None,
             hovered_album_row: None,
+            queue_undo: crate::undo::History::new(),
             menu: None,
             playlists: crate::playlists::Playlists::start(),
             window: WINDOW,
@@ -1036,15 +1083,88 @@ impl App {
             // Best effort by nature: a Wayland compositor is entitled to
             // refuse a focus request, and refusing is not an error here.
             Message::Raise => window::get_latest().and_then(window::gain_focus),
+            Message::Undo => self.undo_edit(),
+            Message::AlbumStep(delta) => self.step_album(delta),
+            message if matches!(self.screen, Screen::Setup(_)) => self.update_setup(message),
             message => match &mut self.screen {
-                Screen::Setup(setup) => {
-                    if let Message::SetupInput(value) = message {
-                        setup.input = value;
-                    }
-                    Task::none()
-                }
                 Screen::Shelf(state) => state.update(message),
+                Screen::Setup(_) => Task::none(),
             },
+        }
+    }
+
+    /// The first-run screen's own messages: the typed field, the `Browse…`
+    /// picker, and the drop target (doc 11 §5 P1). Reached only while the
+    /// screen *is* the setup screen — the same messages over a shelf belong
+    /// to the Settings place's folder machine.
+    ///
+    /// All three doors converge on [`Self::open_first_shelf`], and the two
+    /// that name an unvetted path — the typed field and the drop — go
+    /// through [`check_folder`] on the blocking pool first (ADR-0025's NAS
+    /// honesty, now on the first door too: a dead mount's `stat` waits for
+    /// minutes, and the first frame must never wait with it). A picked
+    /// folder skips the stat for the Settings door's own reason: the dialog
+    /// walked the real filesystem to offer it.
+    fn update_setup(&mut self, message: Message) -> Task<Message> {
+        let Screen::Setup(setup) = &mut self.screen else {
+            return Task::none();
+        };
+        match message {
+            Message::SetupInput(value) => {
+                setup.input = value;
+                Task::none()
+            }
+            Message::PickMusicFolder => pick_folder(),
+            // A picked folder opens without a fresh stat (the dialog walked
+            // the real filesystem to offer it); a checked path arrives
+            // already vetted by the pool.
+            Message::MusicFolderPicked(Some(dir)) | Message::MusicFolderChecked(Ok(dir)) => {
+                self.open_first_shelf(dir)
+            }
+            Message::MusicFolderChecked(Err(words)) => {
+                setup.error = Some(words);
+                Task::none()
+            }
+            Message::FileDropped(path) => {
+                setup.hovering_drop = false;
+                setup.error = None;
+                // The dropped path lands in the field too, so whatever the
+                // check says is said about something the listener can see —
+                // and correct by typing, if a file was dropped where its
+                // folder was meant.
+                if let Some(text) = path.to_str() {
+                    text.clone_into(&mut setup.input);
+                }
+                Task::perform(check_folder(path), Message::MusicFolderChecked)
+            }
+            Message::FileHovered => {
+                setup.hovering_drop = true;
+                Task::none()
+            }
+            Message::FileHoverLeft => {
+                setup.hovering_drop = false;
+                Task::none()
+            }
+            _ => Task::none(),
+        }
+    }
+
+    /// Setup → Shelf: open the very first shelf over `dir`, or say in place
+    /// why not. The one seam all three first-run doors — typed, picked,
+    /// dropped — converge on.
+    fn open_first_shelf(&mut self, dir: PathBuf) -> Task<Message> {
+        let Screen::Setup(setup) = &mut self.screen else {
+            return Task::none();
+        };
+        match Shelf::open(vec![dir], self.group_key, self.density) {
+            Ok((state, task)) => {
+                self.screen = Screen::Shelf(Box::new(state));
+                task
+            }
+            Err(error) => {
+                setup.error = Some(error);
+                Task::none()
+            }
         }
     }
 
@@ -1360,14 +1480,18 @@ impl App {
                 let leaving = self.place == Place::Playlist(*id);
                 if leaving {
                     self.menu = None;
+                    let from = self.place;
                     self.place = self.place.playlist(*id);
+                    self.note_place_left(from);
                 } else if let Screen::Shelf(state) = &self.screen
                     && self.playlists.open_page(*id, &state.library)
                 {
                     // The place changes, so an open menu goes with it
                     // (`go`'s rule).
                     self.menu = None;
+                    let from = self.place;
                     self.place = self.place.playlist(*id);
+                    self.note_place_left(from);
                 }
             }
             Message::PickPlaylist(id) => {
@@ -1440,28 +1564,22 @@ impl App {
                 {
                     // The place follows the name: the id *is* the name,
                     // hashed, so a rename mints a new one.
+                    let from = self.place;
                     self.place = Place::Playlist(renamed);
+                    self.note_place_left(from);
                 }
             }
-            Message::PlaylistDeleteArm => {
-                if let Some(open) = &mut self.playlists.open {
-                    open.delete_armed = true;
-                }
-            }
-            Message::PlaylistDeleteCancel => {
-                if let Some(open) = &mut self.playlists.open {
-                    open.delete_armed = false;
-                }
-            }
-            Message::PlaylistDeleteConfirm => {
+            Message::PlaylistDelete => {
                 let library = match &self.screen {
                     Screen::Shelf(state) => Some(&state.library),
                     Screen::Setup(_) => None,
                 };
                 if self.playlists.delete_open(library) && matches!(self.place, Place::Playlist(_)) {
-                    // The page's subject is gone; the wall is the honest
-                    // answer, by the same route Esc takes.
+                    // The page's subject is in the trash; the Library is the
+                    // honest answer, by the same route Esc takes.
+                    let from = self.place;
                     self.place = self.place.back();
+                    self.note_place_left(from);
                 }
             }
             Message::SaveQueueStart => {
@@ -1715,6 +1833,16 @@ impl App {
     /// without starting it, so nothing sounds unasked (`app.rs`'s own rule,
     /// cited by 09 §8.1).
     fn append_to_run(&mut self, mut addition: vm::QueueVm) {
+        // What the run held before the append — the empty list when it held
+        // nothing — kept for the Queue place's `Undo` (doc 11 §5 P2: an
+        // append is an edit a hand can take back, and taking back an append
+        // to nothing restores nothing, which cannot sound).
+        let before = self.player.queue().cloned().unwrap_or(vm::QueueVm {
+            album: None,
+            artist: String::new(),
+            items: Vec::new(),
+            provenance: None,
+        });
         let edited = if let Some(held) = self.player.queue() {
             let mut edited = held.clone();
             edited.items.extend(addition.items);
@@ -1732,6 +1860,7 @@ impl App {
         let paths = edited.paths();
         if self.playback.send(Command::UpdateQueue { paths }) {
             self.player.note_queue_edited(edited);
+            self.queue_undo.push(before);
         } else {
             self.player.engine_closed();
         }
@@ -1826,7 +1955,9 @@ impl App {
             // navigate under an open menu — the pointer routes all close it
             // on their own press).
             self.menu = None;
+            let from = self.place;
             self.place = door(self.place);
+            self.note_place_left(from);
         }
         Task::none()
     }
@@ -1847,7 +1978,9 @@ impl App {
         state.opened = Some(id);
         // The place changes, so an open menu goes with it (`go`'s rule).
         self.menu = None;
+        let from = self.place;
         self.place = self.place.album(id);
+        self.note_place_left(from);
         Task::none()
     }
 
@@ -1864,41 +1997,37 @@ impl App {
         // The place changes, so an open menu goes with it (`go`'s rule).
         self.menu = None;
         let leaving = self.place.showing_album();
+        let from = self.place;
         self.place = self.place.back();
+        self.note_place_left(from);
         if let (Screen::Shelf(state), Some(id)) = (&mut self.screen, leaving)
             && state.pull.as_ref().is_some_and(|pull| pull.album == id)
         {
             state.pull = None;
         }
-        // A place's transient fields do not outlive the place: a rename field
-        // or an armed delete left standing behind a navigation would greet
-        // the next visit mid-gesture.
+        // A place's transient fields do not outlive the place: a rename
+        // field left standing behind a navigation would greet the next
+        // visit mid-gesture.
         if let Some(open) = &mut self.playlists.open {
             open.renaming = None;
-            open.delete_armed = false;
         }
         self.playlists.saving_queue = None;
         Task::none()
     }
 
     /// <kbd>Esc</kbd>'s place-level share of the peel: the transient fields
-    /// standing *on* the current place — a rename mid-type, an armed delete,
-    /// the queue's save field — each one press, before the place itself
-    /// leaves.
+    /// standing *on* the current place — a rename mid-type, the queue's
+    /// save field — each one press, before the place itself leaves. (The
+    /// armed delete peeled here until doc 11 §5 P2 retired the confirm:
+    /// deletion is one press into the trash now, so there is no armed layer
+    /// left to peel.)
     fn peel_place_states(&mut self) -> bool {
         match self.place {
             Place::Playlist(_) => {
                 let Some(open) = &mut self.playlists.open else {
                     return false;
                 };
-                if open.renaming.take().is_some() {
-                    return true;
-                }
-                if open.delete_armed {
-                    open.delete_armed = false;
-                    return true;
-                }
-                false
+                open.renaming.take().is_some()
             }
             Place::Queue => self.playlists.saving_queue.take().is_some(),
             _ => false,
@@ -1957,7 +2086,16 @@ impl App {
         }
     }
 
-    /// Setup → Shelf transition: validate the typed folder and open it.
+    /// Setup → Shelf transition: send the typed folder off to be looked at
+    /// on the **blocking pool** ([`check_folder`]), coming back as
+    /// [`Message::MusicFolderChecked`].
+    ///
+    /// It used to `stat` right here, on the UI thread — the defect ADR-0025
+    /// §3 cited when it deferred the picker from this screen. Reusing the
+    /// Settings door's off-thread look removes the stat instead of
+    /// inheriting it (doc 11 §5 P1): a typed path can name the share that is
+    /// configured but not mounted, and against a dead hard mount that stat
+    /// sits for minutes.
     fn submit_setup(&mut self) -> Task<Message> {
         let Screen::Setup(setup) = &mut self.screen else {
             return Task::none();
@@ -1966,20 +2104,7 @@ impl App {
         if dir.as_os_str().is_empty() {
             return Task::none();
         }
-        if !dir.is_dir() {
-            setup.error = Some(format!("`{}` is not a directory", dir.display()));
-            return Task::none();
-        }
-        match Shelf::open(vec![dir], self.group_key, self.density) {
-            Ok((state, task)) => {
-                self.screen = Screen::Shelf(Box::new(state));
-                task
-            }
-            Err(error) => {
-                setup.error = Some(error);
-                Task::none()
-            }
-        }
+        Task::perform(check_folder(dir), Message::MusicFolderChecked)
     }
 
     /// Fold a bridge message into the state machine, with a stdout trace of
@@ -2010,7 +2135,13 @@ impl App {
                     Event::TrackFailed { path, reason } => {
                         println!("[playback] track skipped: {} ({reason})", path.display());
                     }
-                    Event::QueueEnded => println!("[playback] queue ended"),
+                    Event::QueueEnded => {
+                        println!("[playback] queue ended");
+                        // The run the history described is over — the third
+                        // of P2's three ends for an edit history (next
+                        // edit, navigation, the run ending).
+                        self.queue_undo.clear();
+                    }
                     // The signal-path readout, logged as plain information —
                     // it says what the chain is doing, not that anything is
                     // wrong (see crate::playback's "Signal path").
@@ -2301,7 +2432,7 @@ impl App {
     /// picker's **Queue** row (ADR-0023 §3's stack; doc 09 §13 step 7).
     ///
     /// The visible-control rule (`docs/REFUSALS.md`: no action's only route
-    /// is a gesture) is satisfied by the picker's Queue row: `Add to…` on
+    /// is a gesture) is satisfied by the picker's Queue row: `Add to playlist…` on
     /// the record's page → the picker's first row sends the identical
     /// append, on screen, in two presses — this gesture is an accelerator
     /// over that control, exactly as a key binding is over a button, and it
@@ -2623,16 +2754,20 @@ impl App {
     /// so the playing position survives the moment between the send and the
     /// engine's `QueueChanged`.
     fn remove_queued(&mut self, row: usize) {
-        let Some(edited) = self
+        let Some((before, edited)) = self
             .player
             .queue()
-            .and_then(|queue| queue_edit::without(queue, row))
+            .and_then(|queue| Some((queue.clone(), queue_edit::without(queue, row)?)))
         else {
             return;
         };
         let paths = edited.paths();
         if self.playback.send(Command::UpdateQueue { paths }) {
             self.player.note_queue_edited(edited);
+            // The list the edit replaced, kept for the place's `Undo`
+            // (doc 11 §5 P2) — pushed only on an accepted send, so the
+            // history never records an edit the engine never saw.
+            self.queue_undo.push(before);
         } else {
             self.player.engine_closed();
         }
@@ -2654,20 +2789,99 @@ impl App {
     /// [`baz_core::protocol::Event::QueueChanged`];
     /// until it does, [`vm::QueueVm::playing`] reconciles the same way).
     fn shift_queued(&mut self, row: usize, delta: i32) {
-        let Some(edited) = self
+        let Some((before, edited)) = self
             .player
             .queue()
-            .and_then(|queue| queue_edit::shifted(queue, row, delta))
+            .and_then(|queue| Some((queue.clone(), queue_edit::shifted(queue, row, delta)?)))
         else {
             return;
         };
         let paths = edited.paths();
         if self.playback.send(Command::UpdateQueue { paths }) {
             self.player.note_queue_edited(edited);
+            // [`Self::remove_queued`]'s history rule, for the reorder.
+            self.queue_undo.push(before);
         } else {
             self.player.engine_closed();
         }
         self.publish_mpris(false);
+    }
+
+    /// The place's transient `Undo`, resolved against **which list surface
+    /// the window is showing** (doc 11 §5 P2): the Queue place takes back a
+    /// run edit, an open playlist page takes back a file edit, and anywhere
+    /// else the press asks for nothing — undo is one history per surface,
+    /// never a global stack, and its accelerator is legal exactly where its
+    /// visible twin stands.
+    fn undo_edit(&mut self) -> Task<Message> {
+        match self.place {
+            Place::Queue => self.undo_queue_edit(),
+            Place::Playlist(_) => {
+                if let Screen::Shelf(state) = &self.screen {
+                    self.playlists.undo_open(&state.library);
+                }
+            }
+            _ => {}
+        }
+        Task::none()
+    }
+
+    /// Restore the run as it stood before the last recorded edit.
+    ///
+    /// **The list, never the playback position** (P2's exact scope): the
+    /// restored queue goes out as [`Command::UpdateQueue`] — ADR-0014's
+    /// guarantee that no delivered sample is disturbed — with no `Play`, no
+    /// `SetQueue` and no `JumpTo` anywhere on this path, so nothing ever
+    /// sounds, stops, or moves because of an undo. The cursor finds its
+    /// track again by path, exactly as it does through every other edit.
+    fn undo_queue_edit(&mut self) {
+        let Some(restored) = self.queue_undo.pop() else {
+            return;
+        };
+        let paths = restored.paths();
+        if self.playback.send(Command::UpdateQueue { paths }) {
+            self.player.note_queue_edited(restored);
+        } else {
+            self.player.engine_closed();
+        }
+        self.publish_mpris(false);
+    }
+
+    /// The Album place's `‹ Prev` / `Next ›` (doc 07 §3.2; doc 11 §5 P3):
+    /// step to the neighbouring record along the wall's current
+    /// arrangement. A step off either end, a step from anywhere that is not
+    /// a record's page, and a step from a record the wall no longer shows
+    /// (filtered out, or vanished under a rescan) all ask for nothing —
+    /// the pool is the visible one, always.
+    fn step_album(&mut self, delta: i32) -> Task<Message> {
+        let Place::Album(id) = self.place else {
+            return Task::none();
+        };
+        let Screen::Shelf(state) = &self.screen else {
+            return Task::none();
+        };
+        let (previous, next) = vm::neighbours(&state.albums, &state.visible, id);
+        let target = if delta < 0 { previous } else { next };
+        match target {
+            Some(neighbour) => self.open_album(neighbour),
+            None => Task::none(),
+        }
+    }
+
+    /// Bookkeeping for a place change: an edit history belongs to the
+    /// surface that shows its `Undo` word, and leaving that surface is one
+    /// of the three things that end it (P2: "until the next edit, a
+    /// navigation, or the run ending").
+    fn note_place_left(&mut self, from: Place) {
+        if from == self.place {
+            return;
+        }
+        if from == Place::Queue {
+            self.queue_undo.clear();
+        }
+        if matches!(from, Place::Playlist(_)) {
+            self.playlists.clear_undo();
+        }
     }
 
     /// Send a transport command, marking it pending on acceptance and
@@ -2723,6 +2937,9 @@ impl App {
                     lamp,
                     self.playlists.collecting(),
                     self.hovered_album_row,
+                    // The header pair's pool is the wall as it stands:
+                    // same order, same filtered set (doc 11 §5 P3).
+                    vm::neighbours(&state.albums, &state.visible, id),
                 ),
                 // The record vanished under a rescan while its page was open.
                 // The wall is the honest answer — better than a page about
@@ -2737,6 +2954,7 @@ impl App {
                 self.playlists.saving_queue.as_ref(),
                 collecting,
                 self.queue_scroll,
+                self.queue_undo.can_undo(),
             ),
             (Screen::Shelf(state), Place::Playlist(id)) => match self.playlists.page(id) {
                 Some(open) => views::playlist::view(
@@ -2746,6 +2964,7 @@ impl App {
                     self.window.width,
                     self.hovered_playlist_row,
                     collecting,
+                    self.playlists.can_undo_open(),
                 ),
                 // The playlist vanished under its page — deleted or renamed
                 // on disk. The wall is the honest answer, drawn rather than
@@ -2868,6 +3087,18 @@ impl App {
                         | iced::mouse::ScrollDelta::Pixels { y, .. } => y,
                     }))
                 }
+                // The window as a drop target (doc 11 §5 P1) — what the
+                // toolkit actually delivers: winit 0.30 publishes these on
+                // X11 and not on Wayland (see [`Message::FileDropped`]).
+                // The setup screen answers them; everywhere else they fall
+                // through the shelf's own arm to nothing.
+                iced::Event::Window(window::Event::FileDropped(path)) => {
+                    Some(Message::FileDropped(path))
+                }
+                iced::Event::Window(window::Event::FileHovered(_)) => Some(Message::FileHovered),
+                iced::Event::Window(window::Event::FilesHoveredLeft) => {
+                    Some(Message::FileHoverLeft)
+                }
                 _ => None,
             }),
             window::resize_events().map(|(_, size)| Message::WindowResized(size)),
@@ -2914,7 +3145,11 @@ impl Setup {
             .filter(|p| p.is_dir())
             .and_then(|p| p.to_str().map(str::to_owned))
             .unwrap_or_default();
-        Self { input, error }
+        Self {
+            input,
+            error,
+            hovering_drop: false,
+        }
     }
 }
 
@@ -4692,7 +4927,19 @@ mod tests {
 
         /// Message tag → the on-screen control that sends the same message,
         /// or the reason there is none.
-        const CONTROLS: [(&str, &str); 20] = [
+        const CONTROLS: [(&str, &str); 22] = [
+            (
+                "Undo",
+                "the transient `Undo` word beside the Queue place's summary \
+                 and the playlist page's counts (doc 11 §5 P2) — present \
+                 exactly while there is an edit to take back, which is \
+                 exactly when the chord acts",
+            ),
+            (
+                "AlbumStep",
+                "the Album place header's `‹ Prev` / `Next ›` pair \
+                 (doc 07 §3.2; doc 11 §5 P3)",
+            ),
             ("PlayPause", "the bottom bar's play/pause button"),
             (
                 "TogglePlaylists",
@@ -4781,6 +5028,9 @@ mod tests {
             Key::Character("5".into()),
             Key::Character("6".into()),
             Key::Character("k".into()),
+            Key::Character("z".into()),
+            Key::Character("[".into()),
+            Key::Character("]".into()),
         ];
         let modifier_sets = [
             Modifiers::empty(),
@@ -5008,6 +5258,62 @@ mod tests {
         assert!(arm.contains("self.modifiers.shift()"));
         assert!(arm.contains("self.queue_album(id)"));
         assert!(arm.contains("self.open_album(id)"));
+    }
+
+    /// **An undo restores the list, and nothing ever sounds because of it**
+    /// (doc 11 §5 P2's exact scope). The queue's undo path is pinned the
+    /// way shift-click's is: it goes out as `UpdateQueue` — ADR-0014's
+    /// no-sample-disturbed edit — and reaches for no transport verb, no
+    /// `SetQueue`, no `JumpTo`: the *list* comes back, never the playback
+    /// position.
+    #[test]
+    fn an_undo_restores_the_list_and_never_sounds() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        let start = source
+            .find("fn undo_queue_edit(&mut self")
+            .expect("undo_queue_edit exists");
+        let rest = &source[start..];
+        let undo = &rest[..rest.find("\n    }\n").expect("a function ends")];
+        assert!(
+            undo.contains("Command::UpdateQueue"),
+            "the restored run goes out as the whole-list edit"
+        );
+        assert!(
+            undo.contains("self.queue_undo.pop()"),
+            "undo spends the bounded history and nothing else"
+        );
+        for forbidden in [
+            "Command::SetQueue",
+            "Command::Play",
+            "Command::JumpTo",
+            "note_transport_sent",
+        ] {
+            assert!(
+                !undo.contains(forbidden),
+                "undo reached for `{forbidden}` — a queue undo restores the \
+                 list, not the playback position, and nothing sounds because \
+                 of an undo (doc 11 §5 P2)"
+            );
+        }
+
+        // The history's three ends (P2: the next edit replaces, a navigation
+        // clears, the run ending clears): the clears are wired where the
+        // navigation and the run's end actually happen.
+        assert!(
+            source.contains("fn note_place_left"),
+            "leaving a surface clears its history"
+        );
+        let ended = source
+            .find("Event::QueueEnded => {")
+            .expect("the run's end is handled");
+        assert!(
+            source[ended..ended + 400].contains("self.queue_undo.clear()"),
+            "the run ending clears the run's edit history"
+        );
     }
 
     /// **Escape returns the pull before it touches anything else on the wall.**

@@ -61,6 +61,14 @@ walkdir = "2"       # directory traversal (Unlicense OR MIT)
 # baz_core::playback.
 symphonia = { version = "0.5", default-features = false, features = ["wav", "pcm", "flac", "mp3", "isomp4", "aac", "alac", "ogg", "vorbis"] }  # demux/decode (MPL-2.0 — allowlisted in deny.toml)
 tokio = { version = "1", features = ["rt"] }  # async runtime for the iced shell only (MIT)
+# Playlist deletion moves the file to the platform trash instead of unlinking
+# it (doc 11 §5 P2 — forgiveness: reversible-first, the confirm dialog
+# retired). Freedesktop trash spec on Linux, Recycle Bin / Finder Trash
+# elsewhere. (MIT OR Apache-2.0.) Priced like `rfd` was in ADR-0025: on Linux
+# it adds chrono + urlencoding + scopeguard to the compiled graph; the rest of
+# the lock growth is Windows/macOS target-gated. `cargo deny check` green —
+# the pricing is recorded in ADR-0027.
+trash = "5.2.6"
 # `config.toml` (MIT OR Apache-2.0). Adopted when ReplayGain's persisted
 # setting took the configuration from one key to five — the switch `config.rs`
 # and `docs/BACKLOG.md` both named as the plan of record for exactly that

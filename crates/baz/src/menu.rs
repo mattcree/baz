@@ -103,6 +103,14 @@ pub(crate) struct Item {
     /// the mirrored gesture is itself two presses (the `+` then a picker
     /// row).
     pub(crate) presses: Vec<Message>,
+    /// The gesture that accelerates this exact act, printed quietly at the
+    /// row's right edge — the era's menu convention (`⌘Q` beside Quit),
+    /// applied to the mirror layer (doc 11 §5 P6.1), as a word — doc 10 §3.6
+    /// bans borrowed characters, and the face has no `⇧`. `None` for the many
+    /// items whose only accelerator is the control itself; the one carrier
+    /// today is the tile menu's `Queue album`, whose shift-click twin was
+    /// taught nowhere on screen.
+    pub(crate) accelerator: Option<&'static str>,
 }
 
 /// An open menu: what was clicked, where, and the items as they were offered.
@@ -158,17 +166,28 @@ pub(crate) struct Facts {
 )]
 pub(crate) fn items(target: Target, facts: &Facts) -> Vec<Item> {
     let mut listed: Vec<Item> = Vec::new();
-    let mut push = |label: String, presses: Vec<Message>| listed.push(Item { label, presses });
+    let mut push = |label: String, presses: Vec<Message>, accelerator: Option<&'static str>| {
+        listed.push(Item {
+            label,
+            presses,
+            accelerator,
+        });
+    };
     match target {
         Target::Track { album, row } => {
             // `Play` · `Queue` · `Add to "{current}"` · `Add to playlist…`
             if facts.engine_ready {
-                push("Play".to_owned(), vec![Message::PlayTrack(album, row)]);
+                push(
+                    "Play".to_owned(),
+                    vec![Message::PlayTrack(album, row)],
+                    None,
+                );
             }
             if facts.collecting {
                 push(
                     "Queue".to_owned(),
                     vec![Message::AddTrackToPlaylist(album, row), Message::PickQueue],
+                    None,
                 );
                 if let Some((id, name)) = &facts.current {
                     push(
@@ -177,18 +196,20 @@ pub(crate) fn items(target: Target, facts: &Facts) -> Vec<Item> {
                             Message::AddTrackToPlaylist(album, row),
                             Message::PickPlaylist(*id),
                         ],
+                        None,
                     );
                 }
                 push(
                     "Add to playlist…".to_owned(),
                     vec![Message::AddTrackToPlaylist(album, row)],
+                    None,
                 );
             }
         }
         Target::QueueRow { row } => {
             // `Play` · `Add to "{current}"` · `Add to playlist…` · `Remove`
             if facts.engine_ready {
-                push("Play".to_owned(), vec![Message::JumpToQueued(row)]);
+                push("Play".to_owned(), vec![Message::JumpToQueued(row)], None);
             }
             if facts.collecting {
                 if let Some((id, name)) = &facts.current {
@@ -198,29 +219,46 @@ pub(crate) fn items(target: Target, facts: &Facts) -> Vec<Item> {
                             Message::AddQueuedToPlaylist(row),
                             Message::PickPlaylist(*id),
                         ],
+                        None,
                     );
                 }
                 push(
                     "Add to playlist…".to_owned(),
                     vec![Message::AddQueuedToPlaylist(row)],
+                    None,
                 );
             }
-            push("Remove".to_owned(), vec![Message::RemoveQueued(row)]);
+            push("Remove".to_owned(), vec![Message::RemoveQueued(row)], None);
         }
         Target::Album { album } => {
             // `Open` · `Play album` · `Queue album` · `Add to playlist…`
-            push("Open".to_owned(), vec![Message::AlbumClicked(album)]);
+            push("Open".to_owned(), vec![Message::AlbumClicked(album)], None);
             if facts.engine_ready {
-                push("Play album".to_owned(), vec![Message::PlayAlbum(album)]);
+                push(
+                    "Play album".to_owned(),
+                    vec![Message::PlayAlbum(album)],
+                    None,
+                );
             }
             if facts.collecting {
+                // The one item with a printed accelerator (doc 11 §5 P6.1):
+                // shift-click a sleeve queues the record, and until this
+                // column the gesture was taught nowhere a user could
+                // stumble on it. The menu row is exactly where the era
+                // printed accelerators — beside the verb they accelerate.
                 push(
                     "Queue album".to_owned(),
                     vec![Message::AddAlbumToPlaylist(album), Message::PickQueue],
+                    // A word, not `⇧`: doc 10 §3.6 — a slot carries a drawn
+                    // glyph or a word, never a character borrowed from a
+                    // face that may not have it, and IBM Plex draws U+21E7
+                    // as tofu (verified on a rendered frame).
+                    Some("Shift-click"),
                 );
                 push(
                     "Add to playlist…".to_owned(),
                     vec![Message::AddAlbumToPlaylist(album)],
+                    None,
                 );
             }
         }
@@ -232,22 +270,29 @@ pub(crate) fn items(target: Target, facts: &Facts) -> Vec<Item> {
                 return listed;
             }
             if facts.engine_ready {
-                push("Play".to_owned(), vec![Message::PlaylistPlayTrack(row)]);
+                push(
+                    "Play".to_owned(),
+                    vec![Message::PlaylistPlayTrack(row)],
+                    None,
+                );
             }
             if facts.collecting {
                 push(
                     "Queue".to_owned(),
                     vec![Message::PlaylistAddEntry(row), Message::PickQueue],
+                    None,
                 );
                 if let Some((id, name)) = &facts.current {
                     push(
                         add_to(name),
                         vec![Message::PlaylistAddEntry(row), Message::PickPlaylist(*id)],
+                        None,
                     );
                 }
                 push(
                     "Add to playlist…".to_owned(),
                     vec![Message::PlaylistAddEntry(row)],
+                    None,
                 );
             }
         }
@@ -256,7 +301,11 @@ pub(crate) fn items(target: Target, facts: &Facts) -> Vec<Item> {
             // every item resolved against the *sounding* row, which is why
             // S4 is two gestures from anywhere: the bar is everywhere.
             if facts.playing_album.is_some() {
-                push("Go to record".to_owned(), vec![Message::ShowPlayingAlbum]);
+                push(
+                    "Go to record".to_owned(),
+                    vec![Message::ShowPlayingAlbum],
+                    None,
+                );
             }
             if let Some(row) = facts.playing_queue_row
                 && facts.collecting
@@ -268,11 +317,13 @@ pub(crate) fn items(target: Target, facts: &Facts) -> Vec<Item> {
                             Message::AddQueuedToPlaylist(row),
                             Message::PickPlaylist(*id),
                         ],
+                        None,
                     );
                 }
                 push(
                     "Add to playlist…".to_owned(),
                     vec![Message::AddQueuedToPlaylist(row)],
+                    None,
                 );
             }
         }
@@ -551,7 +602,7 @@ mod tests {
                 "PlaylistAddEntry",
                 "the playlist page row's reserved `+` slot",
             ),
-            ("AddAlbumToPlaylist", "the record page's `Add to…`"),
+            ("AddAlbumToPlaylist", "the record page's `Add to playlist…`"),
             ("RemoveQueued", "the queue row's ✕"),
             // `PickQueue` / `PickPlaylist` are below as the picker's own rows.
         ];
@@ -655,6 +706,33 @@ mod tests {
             ..with
         };
         assert!(items(Target::NowPlaying, &silent).is_empty());
+    }
+
+    /// **The accelerator column carries exactly the gestures that exist**
+    /// (doc 11 §5 P6.1): `Queue album` prints its shift-click twin — the
+    /// one modifier gesture that was taught nowhere on screen — and no
+    /// other item invents one. The era printed `⌘Q` beside Quit; a hint
+    /// beside a verb with no gesture would be a lie in the same type.
+    #[test]
+    fn only_queue_album_prints_an_accelerator_and_it_is_shift_click() {
+        for target in every_target() {
+            for facts in every_facts() {
+                for item in items(target, &facts) {
+                    match item.label.as_str() {
+                        "Queue album" => assert_eq!(
+                            item.accelerator,
+                            Some("Shift-click"),
+                            "the tile menu's queueing verb teaches its gesture"
+                        ),
+                        _ => assert_eq!(
+                            item.accelerator, None,
+                            "`{}` has no gesture to print",
+                            item.label
+                        ),
+                    }
+                }
+            }
+        }
     }
 
     /// A missing playlist entry's menu offers nothing: its row is not a

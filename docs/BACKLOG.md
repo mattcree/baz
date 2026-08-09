@@ -279,8 +279,12 @@
   XDG portal (`rfd` 0.17, portal-only: one new crate on Linux, no gtk, deny
   green). The text well stays beside it, load-bearing rather than legacy: a
   dialog cannot name an unmounted share, and every act keeps a visible pointer
-  target when no portal service is running. The first-run screen still asks
-  for a typed path only.
+  target when no portal service is running. ~~The first-run screen still asks
+  for a typed path only.~~ — **shipped** (doc 11 §5 P1): the first-run screen
+  now carries the same `Browse…` beside its field, checks the typed path on
+  the blocking pool, and takes a dropped folder where the toolkit delivers
+  drops (X11 only; winit 0.30's Wayland backend has none — recorded in
+  ADR-0025 §3's superseded clause).
 - **Music folders cannot be reordered in the interface.** The order is data
   (scan order, list order, and the order a nested pair is resolved in) and
   `config.toml` is editable by hand, but a drag handle is a control with its own
