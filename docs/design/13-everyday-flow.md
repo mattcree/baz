@@ -479,7 +479,21 @@ change it.**
   > only one of the two that survives the collapse, where there is no name to
   > set a dot before and 96 px still has to answer *which of these is on?*
 - **No seam, no ground, no shadow.** This is the one place a shipped law
-  gets overruled in the open. The panel draws a 1 px seam down its left
+  gets overruled in the open.
+
+  > **Built the other way, and left that way pending the owner's word**
+  > (2026-08-09). The shipped lane stands on `Palette::recess` — one plane
+  > *below* the wall — with a 1 px seam down its right edge
+  > (`views/lane.rs`'s "The ground", `theme::lane_ground`,
+  > `theme::lane_seam`). The argument for it is in that file: on the recess a
+  > hovered row steps up onto the wall's own colour, so the whole row-hover
+  > family works without a special case, and the lane reads as cut *into* the
+  > room rather than stuck onto it. The argument below — that the 40 px clear
+  > margin makes the separation real without ink — is untouched by that and is
+  > still true. **Two defensible answers; the build took the second and this
+  > paragraph is the first.** Named here rather than quietly reconciled,
+  > because "the design does not match" is a complaint the owner has actually
+  > made and this is one of the places it is literally true. The panel draws a 1 px seam down its left
   edge (`playlist_panel.rs:169–173`) because it *floats* over the wall and
   needs to say where it ends. A resident lane does not float, and the index
   rail — the surface it is most like — deliberately has *"no ground, no

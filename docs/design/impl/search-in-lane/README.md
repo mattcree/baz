@@ -180,6 +180,20 @@ Comparing the shipped frames against doc 13 and ADR-0030:
   already draw, and which is the one mark that survives the collapse. Not the
   tile's warmed halo — that wants the lamp's own clock in a surface ADR-0030 §4
   costs at zero idle CPU. Visible in `01` and `07` here.
+- **The lane has a ground and a seam where doc 13 §2.6 argued for neither.**
+  Not fixed, and not a defect — **two defensible answers, and the owner's
+  call.** §2.6 argued the lane should follow the index rail: no ground, no
+  edge, the separation carried by the 40 px of clear wall the grid's own margin
+  guarantees. The build stands it on `Palette::recess` with a 1 px seam, and
+  `views/lane.rs` argues that too: on the recess a hovered row steps up onto
+  the wall's own colour, so the row-hover family works with no special case,
+  and the lane reads as cut *into* the room. Both paragraphs now sit beside
+  each other in §2.6. It is named here because *"the design does not match"* is
+  a complaint the owner has actually made, and this is one of the places it is
+  literally true.
+- **The record page's `4 of 25` position readout (doc 13 §5.3) is still
+  unbuilt.** Unchanged by this work and not in its scope; noted so the list of
+  differences is complete.
 - **The "empty sleeve squares" were not a defect.** In `01-lane-open-1280.png`
   the three lists wear a near-black tile with one faint bar, and all three are
   pixel-identical. That is real artwork: `mkfixture.sh`'s **`mono`** family,
