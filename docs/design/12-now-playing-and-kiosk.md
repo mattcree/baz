@@ -171,30 +171,89 @@ is the room those three have been waiting for.
 
 ### 0.3 What the toolkit will actually do
 
-Verified against the installed source in `~/.cargo/registry`, not from
-memory. The four answers that decide §3:
+Verified against the installed source in `~/.cargo/registry`, not from memory.
+baz resolves to **iced 0.13.1** (iced_winit 0.13.0, iced_widget 0.13.4,
+iced_graphics 0.13.0), with `features = ["advanced", "image", "tokio"]` and
+default features on (`Cargo.toml:26`). Seven answers, and the last three decide
+§5, §7 and §9 rather than §11:
 
-1. **More than one window in one process: yes, but only through
-   `iced::daemon`.** `iced::application` can open a second window, but every
-   window renders the same `view`; a daemon's `view` takes a `window::Id` and
-   can answer differently per window. baz is an `application` today. The
-   migration is real but shallow — the entry point, the `view`/`title`
-   signatures, and a window-id-keyed piece of state.
-2. **Choosing which monitor a window opens on: no.** iced 0.13 exposes no
-   monitor enumeration and no monitor handle. `window::Settings::position`
-   offers `Position::Specific`, which is an X11-only pixel offset and inert on
-   Wayland. Underneath, winit *does* model it (`Fullscreen::Borderless(Option<MonitorHandle>)`),
-   so this is a gap in iced's surface, not in the platform — but it is not
-   reachable from baz today without patching the toolkit.
-3. **Fullscreen: yes, borderless.** `window::change_mode(id, Mode::Fullscreen)`
-   — and it lands on **the monitor the window is currently on**. That single
-   fact is what makes §3's answer both possible and cheap.
-4. **Redraw discipline: the event loop parks.** iced 0.13's winit loop uses
-   `ControlFlow::Wait` when no window has requested a redraw, so a window with
-   no animation and no events costs no wakeups — which is the mechanism behind
-   ADR-0020's measured 0.0 %. One caveat that matters for §10: control flow is
-   **coalesced across windows**, so in a two-window program one animating
-   window keeps the whole loop awake.
+1. **More than one window in one process: yes, and `iced::daemon` is not
+   feature-gated** (`iced/src/lib.rs:490`, `:629`). `iced::application` can
+   already open a second window — the shell has a full `WindowManager` — but
+   `Program::view` **discards** the window id for an application
+   (`application.rs:116–122`) and forwards it for a daemon (`daemon.rs:66–72`),
+   so every window of an application renders the same `view`. The one runtime
+   difference is `run(settings, Some(window))` vs `run(settings, None)`
+   (`application.rs:167`, `daemon.rs:115`), read as `is_daemon` at
+   `iced_winit/src/program.rs:205`. *(The `multi-window` cargo feature is
+   vestigial for this purpose: it gates only a legacy trait module, and there
+   are zero `cfg(feature = "multi-window")` in iced_winit.)*
+2. **Choosing which monitor a window opens on: no.** `window::Settings`
+   (`iced_core/src/window/settings.rs:33–76`) has no monitor field, and there
+   is **no monitor enumeration in the public API at all** — `MonitorHandle`,
+   `available_monitors` and `primary_monitor` appear nowhere in `iced`,
+   `iced_core` or `iced_runtime`, only in iced_winit's internals
+   (`program.rs:510`, `window_manager.rs:104`). winit's
+   `Fullscreen::Borderless(Option<MonitorHandle>)` *is* used
+   (`conversion.rs:398`) but never re-exported; the `Option` is always iced's
+   choice, never yours. `Position::Specific(Point)` exists and converts to a
+   bare `LogicalPosition` with **no monitor offset applied**
+   (`conversion.rs:326–331`) — i.e. global desktop coordinates — so it would
+   work *if* you knew the target monitor's origin, and iced gives you no way to
+   learn it. Nor do the escape hatches: `window::run_with_handle` yields a
+   `raw_window_handle::WindowHandle`, not winit's `Window`
+   (`iced_winit/src/program.rs:1404–1413`), so there is no `current_monitor()`
+   to ask.
+3. **Fullscreen: yes, borderless, and always on the monitor the window is
+   already on.** `window::change_mode(id, Mode::Fullscreen)`
+   (`iced_runtime/src/window.rs:323`) reaches
+   `window.raw.set_fullscreen(conversion::fullscreen(window.raw.current_monitor(), mode))`
+   (`iced_winit/src/program.rs:1331–1338`). `Mode`'s own doc says it:
+   *"the whole screen of its **current monitor**"* (`iced_core/src/window/mode.rs:7`).
+   That single fact is what makes §11's answer both possible and cheap.
+4. **Redraw discipline: the event loop parks in `Wait`.** After each redraw,
+   the flow is set from the UI state — `Wait` unless a `RedrawRequest` is
+   outstanding (`iced_winit/src/program.rs:830–846`) — and `ControlFlow::Poll`
+   appears only on the wasm boot path (`program.rs:358–359`). This is the
+   mechanism behind ADR-0020's measured 0.0 %. Two caveats that matter below:
+   the flow is **one global setting, not per-window**, with explicit coalescing
+   arms (`program.rs:471–488`); and after any message batch **every** window is
+   redraw-requested (`program.rs:1089–1097`), so a timer subscription paces the
+   whole process, not one surface.
+5. **`window::frames()` is vsync-paced, not a timer** — it listens for
+   `RedrawRequested` (`iced_runtime/src/window.rs:164–177`), which is
+   synthesized from winit's own event (`iced_winit/src/program.rs:785–787`).
+   Its docs say the rate is *"the refresh rate of the first application
+   window… normally managed by the graphics driver and/or the OS"*. It yields a
+   bare `Instant` with the window id **ignored**, so it cannot tell you which
+   window drew. `window::redraw_events()` **does not exist in 0.13**; the whole
+   set is `frames`, `events`, `open_events`, `close_events`, `resize_events`,
+   `close_requests`.
+6. **`Canvas` exists but is not compiled into baz today.** It is gated on the
+   `canvas` feature (`iced_widget/src/lib.rs:116–121`), which chains
+   `iced/Cargo.toml:105` → `iced_widget/Cargo.toml:91` → `iced_renderer/geometry`
+   and is **not** in `default`. Enabling it is a one-line manifest change and
+   **no new crate**. The important negative: its `Cache` does *not* help a
+   moving meter. `Cache` skips tessellation only while the geometry is
+   unchanged — *"will not redraw its geometry unless the dimensions of its layer
+   change or it is explicitly cleared"* (`iced_graphics/src/geometry/cache.rs:7–10`,
+   fast path at `:76–79`) — so a value that moves means `clear()` and a full
+   re-tessellation **every frame**. There is no dirty-region invalidation.
+   `Cache::with_group` (`cache.rs:41–45`) is the mitigation: static chrome in
+   one cache, the moving mark in another, so only the small thing re-tessellates.
+7. **The `shader` widget — a real custom wgpu pipeline — is available right
+   now, with no manifest change.** It is gated on the `wgpu` feature
+   (`iced_widget/src/lib.rs:95–100`), and `wgpu` is in iced's `default`
+   (`iced/Cargo.toml:107–112`, `:137–140`), which baz does not disable. The
+   trait is `Program<Message>` with `draw(&self, state, cursor, bounds) ->
+   Self::Primitive` (`iced_widget/src/shader/program.rs:13–62`), and the
+   `Primitive` gets `prepare`/`render` against the live device and queue;
+   `iced_widget/src/shader.rs:21` re-exports raw `wgpu` itself.
+   **The caveat that shapes §7.5**: the shader widget only renders under the
+   wgpu backend, and `tiny-skia` is also in iced's default features as a
+   fallback. On a machine that falls back to software rendering, a shader
+   widget draws nothing — so anything built on it needs a defined degradation,
+   not a blank rectangle.
 
 And one platform note that costs nothing: **baz already speaks D-Bus.** MPRIS2
 ships (`README.md:127–137`) over `zbus`, on its own session-bus thread, with
@@ -352,6 +411,97 @@ So the resolution §5 and §6 are built on:
 That is what lets this screen be a kiosk *and* keep every visible control the
 accessibility refusal requires — and it costs exactly nothing, because both
 halves already exist.
+
+---
+
+## 2. Prior art: five traditions, and what each one gets wrong
+
+**On sourcing.** Doc 03 set this project's standard and also its warning:
+*"reading a review saying 'Plexamp is beautiful' is [not enough]"*
+(`03-interface-prior-art.md:38`), and it recorded an honest failure —
+*"Plexamp's current layout was not seen… `plexamp.com` is a JS-rendered page
+[and] the Plexamp UI now 301s to the support index"* (`03:104–106`). That
+constraint has not changed. So the table below marks each claim by how it is
+known, and **§13 ranks re-verifying the two weakest ones** before anything is
+built on them.
+
+| Source | Claim | Known how |
+|---|---|---|
+| **Apple Music** full-screen | The background is **twisted and blurred copies of the artwork in a Metal shader, not colour sampling** | doc 03's own audit, `03:235` |
+| **YouTube Music** | A **blurred enlarged copy of the art behind itself**, while a 48 px thumbnail in the bar duplicates 860 px of art on the same screen | doc 03's own audit, `03:232` |
+| **Amberol** | **No blur of the art at all** — the whole window is washed with a **three-gradient composite built from the cover's palette** | doc 03's own audit, `03:236` |
+| **Spotify** | Page header gradient from the **dominant colour** | doc 03's own audit, `03:233` |
+| **Winamp** windowshade | 275 × 14 px retaining a working transport; *"the player can become the whole window when the collection is not what you need"* | doc 03's own audit, `03:610–618` |
+| **Roon** "Display" mode | A dedicated full-screen now-playing view intended for a second screen or a tablet left on a shelf | product documentation; **not independently verified here** — §13 R2 |
+| **Plexamp** screensaver / visualizer | A now-playing surface that becomes ambient after idle | doc 03 recorded it could not fetch the UI (`03:104–106`); **not independently verified** — §13 R2 |
+| **foobar2000 / Winamp** visualization culture | MilkDrop, AVS, and the spectrum-analyser default; 102,634 Winamp skins, *"half illegible"* | doc 03's skinning analysis, `03:592–606` |
+
+### 2.1 The finding: two families, and only one of them is honest
+
+The four sourced treatments of "art as background" split cleanly, and the split
+is the whole of §5's decision:
+
+- **Blur the artwork itself** — Apple Music (shader), YouTube Music (enlarged
+  copy). The background *is* the cover, transformed. It is beautiful, and it is
+  the thing baz's own ledger objected to under two entries at once: it draws a
+  copy of the work larger than the work, and the copy competes with the original
+  a few hundred pixels away. YouTube Music's version is doc 03's own example of
+  the failure — *"a 48 px thumb in the bar **duplicating the 860 px art on the
+  same screen**"*.
+- **Derive a palette and paint with it** — Amberol (three gradients composited
+  from the cover's palette), Spotify (dominant colour). The background is **not
+  the artwork**; it is a *reading* of it. Nothing is upscaled because nothing is
+  copied.
+
+**baz takes the second family, and it is not a compromise — it is the one that
+matches what this product already believes.** The ledger already says colour
+read from a record is data: *"the art-derived lamp is **data** — hue read from
+the record, lightness and chroma pinned — not a preference"*
+(`REFUSALS.md:267–269`). A field built from the cover's own palette is that
+sentence at a larger size. §5.3 makes the argument in full, because it is the
+one this study must make explicitly rather than assume.
+
+### 2.2 What the visualization tradition actually teaches
+
+MilkDrop and AVS are the strongest evidence in this document *for* the owner's
+brief and the strongest *against* the way it is usually implemented. Two
+findings:
+
+- **People genuinely leave these running.** The tradition is not a footnote; it
+  is why "visualizer" is a word. Doc 03's windowshade finding is the same
+  observation from the other end — users kept a mode alive for two decades
+  because *"letting you see what's playing… with minimal distraction"* is a real
+  posture, not a niche one.
+- **They are unbounded by design, and that is what makes them unshippable
+  as-is.** A MilkDrop preset renders every frame at whatever cost it likes,
+  because it was built for a foreground window on a machine doing nothing else.
+  This surface is for a **second** monitor beside work. The owner's own bar —
+  *"as long as the performance remains top tier"* — is precisely the constraint
+  the tradition never had, and §7 treats it as the design's spine rather than
+  its footnote.
+
+### 2.3 The meter, where nearly everyone is wrong
+
+Almost every "VU meter" in a music player is not one. The distinction is not
+pedantry; it is the difference between a readout that means something and a
+decoration that moves:
+
+- A **true VU** is defined by its *ballistics*, not its looks: IEC 60268-17
+  specifies a 300 ms integration to 99 % of a steady tone's reading, with
+  1–1.5 % overshoot. It reads **average** level and deliberately misses
+  transients. Its 0 VU is a reference level, not full scale.
+- A **PPM** (IEC 60268-10) is the opposite instrument: ~10 ms integration to
+  catch peaks, with a deliberately slow fallback (1.5–2.8 s per 20 dB,
+  depending on type) so the eye can read what the ear missed.
+- A **digital peak meter** is neither: it is sample-accurate with no
+  integration at all, and the number it shows is dBFS.
+- **Momentary loudness** (EBU R128 / ITU-R BS.1770) is a fourth thing: K-weighted
+  mean square over a 400 ms window, which is the closest of the four to *how
+  loud this sounds right now*.
+
+Products that draw a beige panel with a swinging needle and drive it from a peak
+sample are showing a PPM wearing a VU's clothes. §9 refuses to do that, and the
+choice it makes is argued there.
 
 ---
 
