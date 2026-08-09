@@ -684,7 +684,7 @@ lane; ③ `F11`. Then nothing, for eight hours.
   pool is exhaustible, which is how it is visible** (§8.2).
 - Given a play is recorded while the kiosk is showing, when
   `Event::PlayRecorded` arrives, then the count is current. Today the history
-  snapshot is read once at open (`app.rs:3422–3431`) and `PlayRecorded` has no
+  snapshot is read once at open (`app.rs:4212`, read via `read_history()` at `app.rs:5757–5773`) and `PlayRecorded` has no
   consumer in `crates/baz` at all; §12 step 5 is that wiring.
 
 ### S5 — Verify the chain
@@ -973,7 +973,7 @@ Two readings of that table, and both are design findings:
 - **At 4K with a modest cover the work is 27 % of the body**, and that is where
   the field stops being decoration and becomes the composition. Without it, a
   1000 px square floating in 3744 px of `#0C0D0E` is not a kiosk, it is a
-  postage stamp in a void. §11.3 is the type scale that goes with it.
+  postage stamp in a void. §11.2 is the type scale that goes with it.
 
 **1920 × 1080, lane collapsed — the case the brief describes:**
 
@@ -1086,12 +1086,12 @@ The alternatives were weighed and each fails on a named rule:
 
 | Alternative | Fails on |
 |---|---|
-| **Hover-revealed transport** | Refused outright: *"no control's only affordance is hover"* (`REFUSALS.md:174–175`). ADR-0028 has just re-confirmed that this entry outranks a quietness preference, and it is the mitigation for a toolkit with no accessibility tree — which is precisely the wrong thing to trade for a tidier picture. Doc 10 §6.3 already lists it as refused rather than merely rejected |
+| **Hover-revealed transport** | Refused outright: *"no control's only affordance is hover"* (`REFUSALS.md:249–250`). ADR-0028 has just re-confirmed that this entry outranks a quietness preference, and it is the mitigation for a toolkit with no accessibility tree — which is precisely the wrong thing to trade for a tidier picture. Doc 10 §6.3 already lists it as refused rather than merely rejected |
 | **A bar re-laid for this place** (drop the wall label, keep the transport) | A bar that changes shape per place is a bar you cannot learn. Doc 10 §4.4's finding stands: *"the transport a listener uses forty times a session does not move a pixel under this study."* The ratchet's permitted move — replacing a slot with a better statement of the same fact — is about the bar's own evolution, not about the bar becoming five bars |
 | **No bar, plus a kiosk-local transport** | Two transports in one product, and the second one unlearned. It also re-opens every arithmetic ADR-0022 settled |
 | **No bar, no transport** | S1's listener cannot pause the music from the screen they are looking at |
 
-### 6.2 Why the duplication is acceptable, stated rather than hidden
+### 6.2 The one duplication that survives, and why it is not the transport's
 
 The bar's left zone is *"the wall label at bar scale"* (`system.md:64–65`), and
 this place states the same title and artist at room scale. That is a real
@@ -1110,20 +1110,24 @@ statement each to two readers, and the product already had both.
 
 ### 6.3 What the place itself accepts
 
-Exactly two things, both of which already exist as widgets:
+**Four things, and the list is closed.** Every one is visible at rest, which is
+the whole of what `REFUSALS.md:249–250` asks:
 
-- **The needle**, at kiosk scale (§5.4). It is already interactive, already
+- **The needle**, at the work's width (§5.5). Already interactive, already
   hit-tested through the same module that draws it (`player.rs:527–531` — *"the
   line that is drawn and the line that is clicked can never be two different
-  lines"*), and already carries its own hover preview. Nothing new is invented;
-  it is the same widget given room.
+  lines"*), and already carrying its own hover preview. Nothing is invented; it
+  is the same widget given room.
 - **The fullscreen glyph** (§3.2), one `TRANSPORT_HIT` 32 box, at rest, in the
   place's top-right corner, tooltipped per the icon-only law.
+- **The `Ambient` word-door** (§7.2), beside it, opening the three toggles.
+- **The feed line** (§8.2), which advances on a press — which is what makes the
+  rotation a control rather than a performance.
 
 And one thing it deliberately refuses: **the artwork is not a control.** A
 click on the sleeve is a gesture with no visible affordance, and the ledger
 forbids both halves of that — nothing may be drawn on a sleeve to advertise it
-(`REFUSALS.md:89–91`), and no action may be gesture-only (`REFUSALS.md:174–175`,
+(`REFUSALS.md:107–111`), and no action may be gesture-only (`REFUSALS.md:249–250`,
 doc 09 §5.2's reading). The route to the record's page is the bar's
 now-playing block, in this place as in every other.
 
@@ -1174,7 +1178,7 @@ this needs:
 >   that is `Place::NowPlaying` and nothing else, and a second such surface
 >   needs an argument that beats this one;
 > - it is **a thing you start, never a thing that starts itself** — the same
->   sentence the ledger already applies to shuffle (`REFUSALS.md:35–36`), and
+>   sentence the ledger already applies to shuffle (`REFUSALS.md:37–38`), and
 >   the reason the toggles in §7.2 are first-class rather than a preference
 >   panel;
 > - it costs **exactly nothing when it is off or when its surface is not on
@@ -1528,7 +1532,7 @@ is *interesting*, because a feed of boring true facts is worse than no feed.
 
 The ledger's discipline here is the no-invisible-pool rule — *"a shuffle whose
 source you cannot see is a recommendation engine wearing a dice icon"*
-(`REFUSALS.md:40–47`). A rotating fact is close enough to that line that the
+(`REFUSALS.md:41–47`). A rotating fact is close enough to that line that the
 rule which picks facts must be statable in a sentence. It is:
 
 > **The feed shows one fact at a time, cycling in a fixed order through exactly
@@ -1562,7 +1566,7 @@ The brief says *"a feed"*, and the temptation is a scrolling column. It is one
 line, for §1.2's reason: **at 3 m a column of `SIZE_BODY` 13 is not small, it is
 absent.** A feed you cannot read from the chair you left the screen for is
 decoration. One line at `SIZE_BODY` on the placard column, at the work's own
-width, is legible at 60 cm and — at kiosk scale, where §11.3 steps the type — at
+width, is legible at 60 cm and — at kiosk scale, where §11.2 steps the type — at
 3 m as well.
 
 It also keeps the reserved-slot promise (`bottom_bar.rs:74–86`): **one line
@@ -1615,12 +1619,12 @@ chart and refused.
 Honestly, and it is not zero:
 
 - **The data is already in memory.** The history snapshot is read once at open
-  (`app.rs:3422–3431`) and the tags come from the index. No disk read happens to
+  (`app.rs:4212`, read via `read_history()` at `app.rs:5757–5773`) and the tags come from the index. No disk read happens to
   render a fact.
 - **The clock is `time::every(20 s)` — three wakeups a minute**, under the same
   structural guard as §7.3 (place on screen, T3 on). For scale, baz already runs
   `REFRESH_TICK` at one wakeup a minute while idle (`app.rs:82`, installed at
-  `app.rs:3912–3921`), and ADR-0020's accepted idle cost includes it. Three is
+  `app.rs:3921`), and ADR-0020's accepted idle cost includes it. Three is
   the same order of magnitude, it is stated rather than hidden, and it is
   **gone** when the place is not showing.
 - **One new subscription to `PlayRecorded`.** For the count to be current rather
