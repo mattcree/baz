@@ -12,6 +12,11 @@
 > just leave it full screen on your other monitor"*, and *"maybe we could have
 > a visualizer mode at some point, but also VU options"*.
 >
+> And then, on what the meter should actually be: **"is it a spectrum analyzer
+> or graphic thing with the bars going up and down… that would be nice"** — which
+> promotes the visualizer from *"at some point"* to now, and makes the bars this
+> surface's primary visual (§10).
+>
 > And the ruling that settles §7, given while this draft was being finished:
 > **"ambient motion is fine as long as the performance remains top tier."**
 >
@@ -44,14 +49,16 @@
 >    resolves it with a **derived ambient field**: not the artwork, a *reading*
 >    of it, in the same sense the ledger already calls an art-derived lamp
 >    **data**. The refusal is rewritten to say what it always meant.
-> 3. **The meter is a real measurement or it is furniture.** It is **not a VU**;
->    it is a **momentary-loudness meter to EBU R128 / ITU-R BS.1770-4** with a
->    sample-peak overlay, because baz already owns that filter, derived and
->    vector-tested (`loudness.rs:1`, ADR-0015 §1). Ballistics are specified,
->    the standard is named, and *"VU options"* is answered with three
->    ballistics rather than one. The tap is **read-only by type** — `&[f32]`,
->    never `&mut` — so bit-exactness is not promised, it is unspoiled by
->    construction. §9.
+> 3. **Two instruments, one tap, and they cannot disagree.** The **spectrum
+>    analyser** is the primary visual (§10): a 2048-point real FFT over 24–64
+>    geometric bands, drawn as light inside the field's own shader. It costs
+>    **zero new crates** — `realfft` is already in `Cargo.lock`, because
+>    `rubato`, baz's resampler, depends on it. Beside it, the **momentary-loudness
+>    meter to EBU R128 / ITU-R BS.1770-4** survives as the *reading* (§9), because
+>    baz already owns that filter, derived and vector-tested (ADR-0015 §1). Both
+>    read the same samples at the same instant, pre-gain; §10.7 is the guarantee
+>    and its tests. The tap is **read-only by type** — `&[f32]`, never `&mut` —
+>    so bit-exactness is not promised, it is unspoiled by construction.
 > 4. **The feed is excellent with the network unplugged**, because the ledger,
 >    the tags, the measured loudness and the signal path are already on disk.
 >    Its rotation rule is one sentence, and it falls on the permitted side of
@@ -906,11 +913,16 @@ The z-order, and the one rule that governs it:
 ```
 z3   the placard, the meter's instrument register, the feed   (type)
 z2   the work — true size, centred, its halo                  (artwork)
+z1.5 the spectrum — full bleed, masked under the column       (light)
 z1   the field — full bleed, derived, ambient                 (light)
 z0   the room, #0C0D0E                                        (ground)
      ─────────────────────────────────────────────────────────
      the bar, outside the place entirely (app.rs:3744–3752)
 ```
+
+z1 and z1.5 are **one shader**, not two layers: the field and the bars are
+evaluated in the same fragment pass (§10.8), which is why the bars cost a
+uniform upload rather than N quads.
 
 > **Nothing is drawn on the sleeve. Everything ambient is drawn on the field.**
 
@@ -2741,11 +2753,20 @@ blanket refusal** named along with the test that holds it.
 >
 > **A meter is admitted as a measurement and refused as an object.** Permitted:
 > the reading, drawn in baz's own vocabulary — a line, a mark, a numeral, the
-> room's inks — with its standard named and its ballistics tested against the
-> published document (EBU R128 / ITU-R BS.1770-4 momentary by default;
-> IEC 60268-17 VU and IEC 60268-10 PPM offered). Refused, and these are the
-> surface the entry has always been about: a beige panel, a glass face, a
-> printed arc scale, a pivoting needle, a bezel, a lamp behind the dial.
+> room's inks or the cover's own palette — with its standard named and its
+> ballistics tested against the published document (EBU R128 / ITU-R BS.1770-4
+> momentary by default; IEC 60268-17 VU and IEC 60268-10 PPM offered). Refused,
+> and these are the surface the entry has always been about: a beige panel, a
+> glass face, a printed arc scale, a pivoting needle, a bezel, a lamp behind the
+> dial.
+>
+> **The spectrum analyser is admitted on the same terms**, and it is the
+> now-playing surface's primary visual: a real transform of the audio, drawn as
+> light in colours sampled from the record, below the artwork's luminance so the
+> sleeve stays the brightest object. Refused for the same reason the dial's
+> bezel is: a harsh fixed-hue bank, a gloss or bevel on a bar, a mirrored
+> reflection, and the accent — amber states playback truth, and a spectrum is a
+> property of the audio rather than of playback.
 >
 > *Rewritten on the owner's decision, 2026-08-09* — *"some nice VU meter stuff
 > over it in a stylised way"*. This entry used to name **VU meters** in the ban
@@ -2762,8 +2783,8 @@ blanket refusal** named along with the test that holds it.
 >
 > **One surface is allowed to be ambient, because being looked at is its
 > purpose.** `Place::NowPlaying` may run continuous, user-started ambient
-> content — a field that drifts, a meter that moves — under ADR-0020 §7's
-> discipline: it is a thing you start and never a thing that starts itself; it
+> content — a field that drifts, a spectrum analyser, a meter that moves — under
+> ADR-0020 §7's discipline: it is a thing you start and never a thing that starts itself; it
 > exists only on a surface whose purpose is to be looked at, and a second such
 > surface needs an argument that beats this one; it **states nothing**, so it
 > can never be the only carrier of a fact; and it costs **exactly nothing** when
