@@ -638,3 +638,1114 @@ The home band is the surface that wants it. **They unblock each other**,
 and that is the strongest argument in §3: the best thing a baz home page
 can hold is a feature the product already decided to build and never found
 a reason to.
+
+---
+
+## 4. The wall's verbs
+
+### 4.1 What the owner asked for, and what exists
+
+Three verbs revealed by hovering a tile, drawn above it: **play now**,
+**send all to current playlist**, **view details**. Two of the three are
+already controls (`Play album` on the record's page; `Open` is the tile's
+own press). The third — *send all to current playlist* — **does not exist
+at album scope anywhere in the product**: `Add to "{current}"` is offered
+on track rows, queue rows, playlist-page rows and the bar's now-playing
+block (`menu.rs:192–201`, `:214–223`, `:285–291`, `:313–321`) and on no
+album object at all. §4.4 closes that gap.
+
+And the *group* exists too. Frame `02` is a photograph of it: right-press a
+sleeve and `Open · Play album · Queue album · Add to playlist…` floats
+beside the record you pointed at, 232 px wide, its top-left corner at the
+pointer, edge-flipped so it is never clipped. **Two gestures, no navigation,
+the wall untouched behind it** — which is better on every axis than the
+flow the owner is complaining about except one: the reveal is a right-press,
+and nothing on the wall says so.
+
+### 4.2 Why the hover reveal would be worse, measured
+
+This is not a principle argument. The drawn design does not fit.
+
+**The space it would have to fit in.** The wall's clear space between one
+row's state rule and the next row's sleeve is the step's hang less the
+rule's lane — `RULE_LANE_H = GAP_XS + SELECTION_EDGE` = 6
+(`shelf.rs:1037`):
+
+| Density | hang | clear wall between rows |
+|---|---:|---:|
+| Spacious | 48 | **42** |
+| Balanced | 40 | **34** |
+| Dense | 28 | **22** |
+
+**What would have to go in it.** A card of three items is
+`3 × TRANSPORT_HIT + 2 × GAP_XS` = **104 px**; four items **136**
+(`menu::extent`, `menu.rs:344–354`). It overshoots by 62–114 px at every
+step, so it must cover a neighbouring record — and laterally it is
+`MENU_W` 232 against a tile pitch of 283 at the shipped window, so it
+covers most of one. The flattest legal alternative, a single row of words
+at L7's one control height, is 32 px: it does not fit at `Dense` at all,
+and at `Balanced` it fits with 1 px of air on each side. It also cannot
+carry the owner's own verbs — hanging from the art's width it would give
+three items 80 px each, and `Add to "Road Trip"` is why `MENU_W` is 232.
+
+**And it would make the wall twitch.** Today, crossing the wall changes a
+1 px rule to 2 px and lifts one caption line by one rung, over a 90 ms
+tween (`shelf.rs:972–976`; frame `01`). Crossing a 1280 px wall passes over
+three or four tiles, so a hover group means three or four opaque cards
+appearing and vanishing in one movement that was aimed at the index rail.
+The usual fix is a dwell delay, which trades the twitch for a wait and
+needs a clock — and the owner's own bar is *responsiveness*.
+
+**Nobody does it this way, and the reason is geometric.** Every product
+that reveals a play affordance on a cover grid draws it **inside the
+object's own bounds** (§10.2: Apple Music, Plex, Spotify, Tidal all on the
+artwork or its card; MusicBee and foobar2000 reveal nothing on hover at
+all). An object's own bounds are the one region guaranteed to belong to no
+other object, which is why a full-bleed grid has nowhere else to put it.
+baz draws nothing on artwork — so the placement that makes the pattern work
+is the one baz does not have.
+
+> **Decision: no hover-revealed verb group on the wall.** Recorded in §11
+> with the measurements, so a proposal that has an answer to the geometry
+> meets a number rather than a wall.
+
+### 4.3 Is the hover group just the menu, unhidden?
+
+It is the strongest version of the ask — the card, the verbs, the geometry
+and the mirror rule all exist already — and it is still no, for two reasons
+specific to the menu:
+
+1. **The card is `opaque` and captures presses** (`app.rs:3236–3249`,
+   `menu.rs:449–468`), with a full-window backdrop under it whose left
+   press dismisses it. A wall that grows an opaque card wherever the
+   pointer rests is a wall whose next click is spent putting something down
+   that you did not ask for.
+2. **A menu that opens itself is not an accelerator any more.** The menu's
+   whole licence is that it mirrors visible controls (`menu.rs:1–22`,
+   tested at `:581`). Unhidden, it is a resident surface with a floating
+   position, and it would be the second thing on the wall competing for the
+   pointer with the tile itself.
+
+What survives is the useful half: **the menu already is the adjacent group
+the owner is describing.** It needs one verb and one teacher.
+
+### 4.4 `Add to "{current}"` at album scope
+
+With a current playlist standing — playing provenance naming a `.m3u8`
+that still exists (doc 09 §6) — a record's whole selected edition is
+appended to **that file**. The run is untouched: *keep it* is
+`Add to "Road Trip"`, *hear it tonight* is `Queue album`, and doing both is
+both gestures. The decoupling is doc 09 §6's and the both-at-once gesture
+stays refused, for the reason §10.4's Plexamp entry demonstrates — two
+verbs that claim different things and do the same thing are worse than one.
+
+It costs nothing to build: the item's presses are `AddAlbumToPlaylist(id)`
+then `PickPlaylist(id)`, both already in the mirror table with a named
+visible twin (`menu.rs:586–615`). No new message, no new control.
+
+```
+Open                                     the tile's own press
+Play album                  Ctrl-click   the page's Play album        ← §4.6
+Queue album                 Shift-click  the picker's Queue row
+Add to “Road Trip”                       the card's hoisted row       ← new
+Add to playlist…                         the page's Add to playlist…
+```
+
+Five items is `5 × 32 + 8` = **168 px**, against the four-item 136 in frame
+`02`; the edge flip already holds any height inside the window
+(`menu.rs:359–372`, tested at `:761`).
+
+It does **not** get a resident control on the record's page. The aside
+holds `Play album` and `Add to playlist…`; a third word-act naming a file
+that may not exist next frame is a control that comes and goes, to save one
+press on a route that exists.
+
+### 4.5 Teaching the reveal
+
+The gesture is taught nowhere on the wall — doc 11 §2.7 found this and named
+it (*"The menus mirror controls; nothing mirrors the gestures"*), and the
+repair that shipped prints `Shift-click` *inside* the menu, which teaches
+the accelerator to people who already found the menu.
+
+The teacher goes where the person has **just paid the cost it would have
+saved**: the record's page, reached by a tile press, whose header note lane
+is one quiet meta line today.
+
+```
+‹ Library   Album   ‹ Prev · 4 of 25 · Next ›     Right-click a sleeve to play it from Library
+```
+
+One string, one lane that exists, in the voice the product already teaches
+in (`Enter plays the first match.`, `Esc clears the search.`, `When a queue
+ends, baz stops.`). Deliberately modest: adding a fourth kind of teaching
+surface to carry one gesture is the tour doc 11 P6 refused.
+
+### 4.6 One press to sound from the wall · **present-to-owner**
+
+Everything above leaves sound from the wall at two presses; the owner asked
+for one. The candidate that fits every constraint the product actually has
+is a **modifier press on the tile meaning `Play album`** — the exact
+construction already shipped for *sound-later* (shift-click queues the
+record, `app.rs:1054–1061`), pointed at *sound-now*.
+
+- It draws nothing on a sleeve and reveals nothing on hover.
+- It has no timing window: the press's meaning depends on a key that is
+  down or not, which is a state the hand chose rather than one the clock
+  chose.
+- It has a visible twin twice over — `Play album` on the page and in the
+  tile's menu — so it is taught exactly where shift-click is taught, in the
+  menu's accelerator column (§4.4's table).
+- One arm in `Message::AlbumClicked`, one string. The existing test
+  `shift_click_queues_the_record_and_nothing_sounds_unasked`
+  (`app.rs:5460`) gains a sibling.
+
+**Against it**: three meanings for one press on the product's most-pressed
+object; `Ctrl`-click is the platform's add-to-selection chord, and the wall
+may one day have a selection; and it is a second meaning for a press, which
+is what ADR-0022 pointed away from when it aimed any return of one-press
+sound at the shift-click stack.
+
+**For it**: W1 (*put on an album*) is band A and is the product's home
+intent; one-press sound-now already exists at every scope in the product
+*except a single record*, which is the unit the wall is made of; and a
+product with a one-press *later* and no one-press *now* has its two
+gestures the wrong way round.
+
+Presented rather than adopted, with the arm and the accelerator drawn, so
+the answer is a decision rather than a design exercise.
+
+---
+
+## 5. Depth, and what the lane already answers
+
+### 5.1 The tree, measured
+
+Every navigation baz has, with its depth from home:
+
+| From | To | Route | Depth |
+|---|---|---|---|
+| Library | Album | a tile's press (`shelf.rs:1021`) | 1 |
+| Library | Album | a Songs row's record door (`shelf.rs:361–379`) | 1 |
+| Library | Queue | the bar's `Queue` door, `Ctrl+U` | 1 |
+| Library | Playlist | a lane row (was a panel row, `playlist_panel.rs:399`) | 1 |
+| Library | Settings | the gear, `Ctrl+,` | 1 |
+| anywhere | Album | the bar's now-playing block | 1 |
+| Album | Album | `‹ Prev` / `Next ›` (`album.rs:169–191`) | 1 → 1 |
+
+**The maximum depth of baz's navigation tree is one, from every place.**
+`Place` is five members and an enum, and `Place::back` is total because
+there is nothing for it to be partial about (`place.rs:171`). A breadcrumb
+here would render `Library › Album` — the header's back door and the
+header's title, with a separator between them (§10.5 for the guidance that
+excludes exactly this case). Miller columns over a one-level tree render
+one column.
+
+### 5.2 The lane is the answer he described
+
+*"When there's a master details view, often you can pop back up a level
+quite easily because you can already see the depth that you've went into
+with the options on the left."*
+
+That is not a request for a level counter. It is a description of **a
+master pane that stays on screen while you are in the detail** — and the
+lane is exactly that, in every place but Settings. Open a record from the
+lane and the lane is still there with the record's row in it; open a
+playlist and the same. The felt problem was never depth; it was that the
+window replaced everything you had, and the lane is the thing that stops
+it doing that.
+
+Two mitigations already shipped and are worth restating because they are
+what the lane completes rather than replaces: the wall keeps its scroll,
+query and arrangement across every navigation, and marks the record you
+last opened (`shelf.rs:950–956`); and `‹ Prev` / `Next ›` step the wall's
+own visible order from inside the page (doc 11 P3).
+
+### 5.3 The one thing still missing: position
+
+A record's page says `Album`. It does not say which of 25 records it is,
+nor that the wall behind it is filtered to 7. The step pair *computes* all
+of this — it is `vm::neighbours` over the wall's visible order — and states
+none of it (frame `04`: two doors with no position between them).
+
+> **The step pair states the position it already computes.**
+
+```
+‹ Library   Album   ‹ Prev  ·  4 of 25  ·  Next ›            Esc returns to Library
+                                 ▲
+                    the position in the wall's current arrangement — and
+                    therefore the scope: a filtered wall says `2 of 7`
+```
+
+- A **readout**, not a control: no message, no press. L8.3's escape valve
+  in its ordinary direction.
+- It goes in the header's **existing optional-tenant slot**
+  (`place_header_with`, `views/mod.rs:245–258`), so the frame stays one
+  function in five places.
+- Reserved `POSITION_W`, sized for `99 of 9999` at `SIZE_META` in the
+  bundled Medium and asserted against its measured word, so stepping from
+  `9 of 25` to `10 of 25` moves neither door.
+- **Absent when there is nothing to say**: a record the wall no longer
+  shows has no neighbours at all (`vm.rs:1092`, tested at `:2496–2503`),
+  its doors are already inert, and it states no position rather than
+  `0 of 0`.
+
+### 5.4 What is not proposed
+
+**No back stack.** `Place::back` stays total. There is one reachable path
+where this orphans you — Queue place → the bar's now-playing block → the
+record's page → `Esc` → Library rather than the Queue — and it is band D,
+it is a *teleport* rather than a descent, and the standard guidance treats
+Up and Back as identical inside a single task (§10.5). With the lane
+resident, the case matters less again: what you left is still on screen.
+
+---
+
+## 6. The picking posture
+
+### 6.1 The complaint, found in the code and photographed
+
+The owner is describing `views/playlist_panel.rs:122–129`, verbatim:
+
+```rust
+    // A pick in flight: the panel is the picker, and it says what is in the
+    // hand so the next press is legible before it is made.
+    if let Some(pending) = &playlists.pending {
+        body = body.push(
+            text(format!("{} — pick a destination", pending.label))
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.paper_dim),
+        );
+    }
+```
+
+`pending.label` is `format!("Add \u{201c}{}\u{201d}", …)` (`app.rs:1718–1721`
+for a record, `:1756` for a track, `:1784` for a queue row, `:1810` for a
+playlist row), so the rendered line is `Add “Violet Ledger” — pick a
+destination`. Frame `03` is that line on screen, and everything he says
+about it is true: it is set at **`SIZE_META` 12** in **`paper_dim`**, under
+a `Playlists` heading at `SIZE_EMPHASIS` 15 Medium and level with `Esc
+closes`. **The panel's only statement of what it is now for is quieter than
+its own title.**
+
+But the copy is the smaller half. Three interaction defects are in the same
+frame:
+
+1. **The destination is thrown across the window.** The panel is anchored
+   to the window's right edge whatever the gesture was
+   (`app.rs:3216–3218`). At 1280 its rows begin at `1280 − 341 + GAP_XL` =
+   **963**; the tile right-pressed in frame `03` is centred at x 444. That
+   is **≈ 682 px** of pointer travel to the first destination. In the menu
+   (frame `02`) the second press is **≈ 127 px** away.
+2. **The distance is set by the window, not by the gesture.** At 1920 the
+   same pick costs 640 px more. A gesture whose cost rises with the size of
+   the display has not been designed; it has been inherited from where the
+   surface happens to live.
+3. **The surface is enormously larger than the task** — 340 px at full
+   window height to offer three destinations — and while it stands it
+   covers the index rail and the density detents.
+
+### 6.2 The card at the pointer
+
+> **A pick opens a card at the pointer, headed by the sentence, holding the
+> destinations and nothing else.**
+
+```
+        ● pointer
+        ┌─ PICKER_W 280 ────────────────────────────┐
+        │                                           │ GAP_SM 8
+        │ Add “Violet Ledger” to…                   │ LINE_BODY 20   SIZE_BODY, paper
+        │ 9 tracks · 45:26                          │ LINE_META 16   SIZE_META, dim
+        │                                           │ GAP_SM 8
+        ├───────────────────────────────────────────┤ 1  hairline
+        │                                           │ GAP_SM 8
+        │ ▫ 48  Queue                   8 · 32:10   │ 64
+        │ ▫ 48  Road Trip — playing    14 · 51:08   │ 64
+        │ ▫ 48  Late Nights            23 · 1:40:11 │ 64
+        │                                           │ GAP_XS 4
+        │    New playlist                           │ 32
+        │                                           │ GAP_SM 8
+        └───────────────────────────────────────────┘
+             Esc cancels · a press outside puts it down
+```
+
+**`PICKER_W` is 280 — the same number as `SIDEBAR_W`**, and the row is the
+lane's row (`SIDEBAR_ROW_H` 64, `SIDEBAR_SLEEVE` 48). That is the point: a
+list looks like itself wherever it appears, so the destinations on the card
+are visibly the same objects as the rows in the lane. Three destinations is
+`8+20+16+8+1+8 + 3×64 + 4+32+8` = **297 px**. `PICKER_MAX_H` **400** caps
+it at five rows plus chrome; beyond that the rows scroll inside the card
+with the heading and `New playlist` pinned outside the scroll.
+
+**Placement** is `menu::anchor`'s rule exactly — top-left corner at the
+pointer, flipped at any edge it would cross, clamped as a last resort
+(`menu.rs:359–372`) — one shared function, so the two floats cannot
+disagree about where an edge is.
+
+**What each line is for:**
+
+- **`Add “Violet Ledger” to…`** at `SIZE_BODY` 13 in full paper, Medium:
+  the verb, the object, and an ellipsis promising the list below. A surface
+  whose whole reason for existing is a question states the question at the
+  size its own name would have taken. This is the copy fix, and it is the
+  smaller half of the change by design.
+- **`9 tracks · 45:26`** — what is in the hand, in figures. The shipped
+  picker never states it, and it is what distinguishes *this record* from
+  *this track* when the label alone is ambiguous.
+- **The rows lose their `Add` word** (`playlist_panel.rs:227–232`,
+  `:369–374`), which was the design compensating for a heading nobody
+  read. With the heading carrying the verb, a row is a destination and says
+  so by being one.
+
+**Order** is unchanged and already pure and tested —
+`playlists::picker_order` (`playlists.rs:526–531`, tested at `:1845–1856`):
+the **Queue** first, the **current playlist** hoisted and marked *playing*,
+then the folder's order, then `New playlist`.
+
+**Dismissal** is the product's one model, because it is the menu's:
+`Esc` peels the card before every other layer, a left press outside puts it
+down and is never a spent click, a right press outside falls through.
+
+**`New playlist`** turns the row into the name field the panel already has
+(`playlist_panel.rs:273–296`) with the storage layer's refusals under it in
+its own words; submitting creates and completes the pick
+(`playlists.rs:516–518`). The card grows downward from its anchored corner,
+or upward where the flip put it.
+
+### 6.3 What changes, exactly
+
+| Gesture | Today | After |
+|---|---|---|
+| A track row's `+` | opens the panel at the window's edge | the card, at the `+` |
+| The record page's `Add to playlist…` | opens the panel | the card, at the control |
+| A menu's `Add to playlist…` | opens the panel | the card, where the menu was |
+| A menu's `Add to "{current}"` / `Queue` / `Queue album` | two messages, no surface shown | **unchanged** |
+| Drag a row onto a playlist | onto a *standing panel's* row | onto **the lane's** row — always available |
+| `Playlists` door, `Ctrl+P` | opens the panel | **gone**; the lane is resident (§2.7) |
+
+The two-message menu items are the row that matters: they never *showed*
+the picker, they made both presses (`menu.rs:189–190`, `:194–199`). They
+keep working unchanged; only the surface that draws the second press moved.
+
+---
+
+## 7. The panel
+
+Answered in §2.7 and recorded here so the brief's fourth question has an
+answer under its own heading: **the panel does not survive.** Its three
+jobs go to the lane (the index, resident and complete), the lane again (the
+drop target, now always available rather than only while it was open) and
+the card (the picker). Nothing is left for it to do, and the owner's *"I
+don't hate it, but I don't really love it either"* is explained by the fact
+that it was carrying three jobs because there was nowhere else to put them.
+
+ADR-0024 §5's five justifications, re-run one last time: **one tenant** —
+moot; **summoned, not resident** — the lane is resident and that is now the
+point; **simultaneity while collecting** — the lane provides it
+continuously; **overlays without reflow** — the lane re-hangs once, on
+purpose, by the one press that means to (§2.4); **absent in Settings** —
+inherited by the lane verbatim.
+
+---
+
+## 8. The user stories
+
+Doc 09 §4's artifacts, continuing its numbering: a **user story**, its
+**task flow** in exact presses, and **acceptance criteria** in
+Given/When/Then, written to be implemented and tested as stated.
+
+### S11 — Come back to what I was in the middle of
+
+> As a listener who closed baz mid-record last night, I want the first
+> thing I see to be where I was, so that resuming costs one press and no
+> searching.
+
+**Task flow**: ① launch; the `CONTINUE` band is the first thing in the
+body; ② `Resume`.
+
+- Given a queue snapshot exists from a previous session, when baz launches,
+  then the queue is restored **paused** and nothing sounds (ADR-0023 §6).
+- Given the restored queue, when the Library place renders with an empty
+  query, then the body leads with a `CONTINUE` band naming the track, its
+  record and artist, and the position as `3:12 of 6:27`.
+- Given the band, when `Resume` is pressed, then playback continues from
+  the stored elapsed position — an ordinary `Play`, no new engine command.
+- Given no snapshot, or a snapshot whose files no longer resolve, when the
+  body renders, then the band is **absent, not empty**.
+- Given a non-empty query, when the body renders, then the band is absent
+  and the `Songs` section holds the slot — never both.
+
+### S12 — Get back to something I was playing yesterday
+
+> As a listener who wants the record I had on last night, I want it on
+> screen without searching for it, so that returning is recognition rather
+> than recall.
+
+**Task flow**: ① it is in the lane; ② press it → its page.
+
+- Given a record whose track was played, when the play is recorded in the
+  ledger, then that record's lane entry is timestamped and the lane
+  re-sorts, newest first.
+- Given more than `RECENT_ALBUMS` 24 records have been played, when the
+  lane renders, then it holds the newest 24 and the rest are reachable on
+  the wall.
+- Given a lane row is pressed, then that record's page opens
+  (`AlbumClicked`) — the same message the tile sends.
+- Given two entries with the same timestamp, when the lane renders, then
+  they are ordered by name ascending, so two launches over the same data
+  draw the same lane.
+- Given a record is playing, when its lane row renders, then it carries the
+  lamp dot and its sleeve carries the halo — the wall's exact vocabulary,
+  and the accent means nothing else.
+
+### S13 — See every list I have, without summoning anything
+
+> As a listener with a shelf of kept lists, I want them permanently in
+> view, and I never want a surface to appear because I pressed something
+> else.
+
+**Task flow**: ① they are in the lane.
+
+- Given any number of playlists, when the lane renders, then **every** one
+  of them is in it — the lane is the complete index, and the 24-entry cap
+  applies to records only.
+- Given a playlist is played or its file is written by the user's own edit,
+  then its lane entry is timestamped and the lane re-sorts.
+- Given a lane playlist row is pressed, then its page opens
+  (`OpenPlaylist`), and the lane is still beside it.
+- Given any transfer gesture anywhere in the product, when it is made, then
+  **no panel opens** — the picker is the card (§6) and the panel does not
+  exist.
+- Given a playlist row, when it renders, then its sleeve is the 2 × 2
+  collage of the records it quotes, or the first record's face below four
+  (ADR-0024 §A1), and **nothing else distinguishes it from a record row**.
+
+### S14 — Give the wall more room
+
+> As a listener who wants to look at covers, I want the lane out of the
+> way in one press, and I want the wall to behave.
+
+**Task flow**: ① press the `Collapsed` mark at the lane's foot, or
+`Ctrl+B`.
+
+- Given the lane is expanded, when the `Collapsed` mark is pressed, then
+  the lane becomes `SIDEBAR_RAIL_W` 96, the wall re-hangs **once, in one
+  frame**, and no transition runs.
+- Given the re-hang, when the wall renders, then the shelf that was at the
+  top of the viewport is still at the top, and the record last opened still
+  carries its 2 px rule.
+- Given the current state, when its own mark renders, then that mark is at
+  full glyph ink and **inert**, and the other is at the resting ink and
+  pressable — the density detents' rule (ADR-0028).
+- Given either mark, when it renders, then it carries a tooltip naming its
+  state (`Expanded`, `Collapsed`) — the icon-only law's accessible name.
+- Given the state changes, when baz is relaunched, then the lane is in the
+  state it was left in — one bool in `config.toml`, beside the density step.
+- Given a window narrower than `SIDEBAR_FLOOR` 1000, when the place
+  renders, then the lane is collapsed and the `Expanded` mark is inert.
+- Given the collapsed lane, when a row renders, then it is the sleeve
+  alone, carrying a tooltip with the record's or playlist's name, and its
+  press is unchanged.
+
+### S15 — Put a track somewhere, without crossing the window
+
+> As a listener who wants to keep the song I am hearing, I want the
+> destinations where my hand already is.
+
+**Task flow**: ① a row's `+`, or right-press → `Add to playlist…`;
+② press a destination on the card.
+
+- Given any transfer control is pressed, then the card opens **at the
+  pointer**.
+- Given the card renders, then its heading is `Add “{label}” to…` at
+  `SIZE_BODY` in full paper, with a second line stating what is held in
+  figures, and **no line on the card is quieter than the sentence that says
+  what the card is for**.
+- Given the card renders, then its rows are, in order: `Queue`, the current
+  playlist marked *playing* when provenance stands, the folder's order,
+  `New playlist`.
+- Given the `Queue` row is pressed, then the held music is appended to the
+  run (`UpdateQueue`); appending to an empty stopped engine loads it
+  without starting it (`app.rs:1363–1366`).
+- Given a named row is pressed, then that **file** is appended and the card
+  closes.
+- Given `New playlist` is pressed, then the row becomes a name field with
+  the caret in it; on submit the file is created and the pick completed,
+  and the storage layer's refusals surface in the field in its own words.
+- Given `Esc`, then the card closes and the pick is put down, before any
+  other layer. Given a left press outside, then the card closes and the
+  press does nothing else.
+- Given more destinations than `PICKER_MAX_H` 400 holds, then the rows
+  scroll inside the card and the heading and `New playlist` stay put.
+
+### S16 — Send a whole record to the list I'm living in
+
+> As a listener playing one of my playlists who has just found a record
+> that belongs in it, I want the whole record in that list in one short
+> gesture, without interrupting what I'm hearing.
+
+**Task flow**: ① right-press the sleeve; ② `Add to "Road Trip"`.
+
+- Given provenance names a playlist that still exists, when a tile is
+  right-pressed, then the menu carries `Add to "{name}"` between `Queue
+  album` and `Add to playlist…`; otherwise the item is **absent, not
+  disabled** (`playlists::holds`, `playlists.rs:440–445`).
+- Given the item is pressed, then the **file** gains the record's selected
+  edition, whole, in order, with `#EXTINF` metadata, and **the live queue
+  is unchanged** — not one delivered sample disturbed.
+- Given the record has editions, then what is appended is the **selected**
+  edition — the tracks the page lists and `Play album` would queue
+  (`app.rs:1712–1717`).
+- Given the append lands, then the lane's row for that playlist re-reads
+  its counts and re-sorts to the head — the effect is in view.
+
+### S17 — Start a record from the wall without leaving it
+
+> As a listener browsing my shelves, I want to start a record I am pointing
+> at without the collection disappearing.
+
+**Task flow**: ① right-press the sleeve; ② `Play album`.
+
+- Given the Library place and a ready engine, when a tile is right-pressed,
+  then the menu opens at the pointer with `Open · Play album · Queue album
+  · Add to "{current}"? · Add to playlist…` in that order, and the wall
+  behind it has not moved by a pixel.
+- Given `Play album` is pressed, then the record's selected edition becomes
+  the queue and the first track sounds, the menu closes, and **the place is
+  still Library**.
+- Given a tile at the window's right or bottom edge, when it is
+  right-pressed, then the card flips to the pointer's other side and is
+  wholly on screen.
+- Given the record's page is opened by a tile press, then its header note
+  teaches the gesture that would have saved the trip.
+
+### S18 — See what is new
+
+> As a listener who has just added music, I want to find it without
+> re-arranging the wall.
+
+- Given the library holds at least `2 × columns` records and some were
+  added after the first scan, when the Library place renders with an empty
+  query, then a `RECENTLY ADDED` band holds **one row of the wall's own
+  tiles**, newest `first_seen_ns` first.
+- Given fewer than `2 × columns` records, or a library whose rows were all
+  created by one first scan, then the band is **absent** — it never shows a
+  row already visible whole below it.
+- Given a band tile, then it is the wall's tile in every respect: hover,
+  press, right-press menu, shift-click, halo.
+- Given the wall is scrolled, then the bands scroll away with it — they are
+  the head of the body, not pinned.
+
+---
+
+## 9. The layouts, measured
+
+All numbers logical px on the 4 px lattice. The grid figures are
+`Grid::new`'s own arithmetic at `Balanced`
+(`shelf.rs:355–385`; `hang` 40, `ART_MIN` 240, `ART_TARGET` 272, `ART_MAX`
+320), resolved for `window − sidebar − INDEX_LANE_W` where `INDEX_LANE_W`
+is 108:
+
+```
+columns = clamp( round_half_up((w + 40) / 312),  1,  floor((w − 40) / 280) )
+art     = clamp( (w − (columns+1)·40) / columns,  ART_FLOOR,  320 )
+gutter  = clamp( (w − 80 − columns·art) / (columns−1),  0,  80 )
+margin  = (w − block) / 2
+```
+
+### 9.1 The wall, in both states, at three widths
+
+| Window | State | Grid width | Columns | Art | Gutter | Margin |
+|---:|---|---:|---:|---:|---:|---:|
+| **1280** | today (no lane) | 1172 | 4 | 243 | 40 | 40 |
+| | expanded (−280) | 892 | **3** | 244 | 40 | 40 |
+| | collapsed (−96) | 1076 | **3** | **305** | 40 | 40 |
+| **1440** | today | 1332 | 4 | 283 | 40 | 40 |
+| | expanded | 1052 | **3** | 297 | 40 | 40 |
+| | collapsed | 1236 | **4** | 259 | 40 | 40 |
+| **1920** | today | 1812 | 6 | 255 | 40 | 40 |
+| | expanded | 1532 | **5** | 258 | 40 | 40 |
+| | collapsed | 1716 | **5** | **295** | 40 | 40 |
+
+Three things worth reading off it:
+
+1. **At two of the three widths the collapse does not change the column
+   count at all — the covers just get bigger** (1280: 244 → 305, +25 %;
+   1920: 258 → 295, +14 %). That is the best possible version of this
+   gesture: it reads as *zoom*, not as *reflow*, which is also what it
+   means.
+2. **At 1440 it does change the count** (3 ↔ 4), because the wanted count
+   and the `ART_MIN` ceiling land on either side of the boundary there.
+   This is unavoidable — §2.4(b) — and it is why the answer is the
+   structural one about which press may re-hang, not a choice of widths.
+3. **The margin is 40 in every row, and that is a proof rather than a
+   coincidence.** When the art is uncapped, the gutter is exactly `hang`
+   and the margin is exactly `hang`; when the art is capped the block is
+   smaller and the margin is larger. So the nearest cover is **never closer
+   than 40 px to the lane**, at any width, in either state — which is why
+   the lane needs no drawn seam (§2.6).
+
+### 9.2 The whole window, expanded, at 1280 × 860
+
+```
+0    24        72   96                                        1172        1280
+├────┼─────────┼────┤                                          ├───────────┤
+│         the returns lane, 280            │      the wall, 892       │ rail 108│
+├──────────────────────────────────────────┴─────────────────────────┴─────────┤ 49  top bar
+│  Recent                                   ┌──────┐ ┌──────┐ ┌──────┐         │
+│  ┌──┐ Violet Ledger                       │ 244  │ │ 244  │ │ 244  │      #  │
+│  │48│ Anne-Marie Puig                     └──────┘ └──────┘ └──────┘      A  │
+│  └──┘                                     Teal      Red Shift  Ochre      B  │
+│  ┌──┐ Road Trip                                                           C  │
+│  │▨▨│ 14 · 51:08                          ┌──────┐ ┌──────┐ ┌──────┐      …  │
+│  └──┘                                     │ 244  │ │ 244  │ │ 244  │         │
+│   ⋮                                       └──────┘ └──────┘ └──────┘      ▫  │
+│  ▮▯                                                                       ▫▫ │
+├──────────────────────────────────────────────────────────────────────────────┤ 81  bar
+```
+
+Rows visible in the lane: the lane's height at 860 is
+`860 − TOP_BAR_H 49 − 83` = 728; less `GAP_XL` 24 + heading 20 + `GAP_SM` 8
+at the head and `STEPPER_HIT` 24 + `GAP_XL` 24 at the foot = 628, over
+`SIDEBAR_ROW_H` 64 → **9 rows**, scrolling. At 1080 the same arithmetic
+gives **13**.
+
+### 9.3 Content share, both readings
+
+`03` §2.3's number is the product's positioning claim, so it is re-measured
+honestly rather than quietly:
+
+| At 1280 | The wall | The wall + the lane |
+|---|---:|---:|
+| today | **91.6 %** | 91.6 % |
+| collapsed | 84.1 % | **91.6 %** |
+| expanded | 69.7 % | **91.6 %** |
+
+The wall's own share falls. **The user's own content share does not move at
+all**, because every pixel the lane takes from the wall it gives back as
+covers — the lane's only chrome is one caps-tracked word and two 24 px
+marks. That is the honest reading, and it is the reason this surface is not
+the thing `03` §2.3 was warning about: the tradition it measured spends its
+window on *empty containers*, and this one spends it on the user's records.
+
+### 9.4 The alternative the owner may prefer: `Place::Home`
+
+Drawn so that overruling §3.2 is a decision rather than a redesign.
+
+```
+┌──────────────┬───────────────────────────────────────────────┬─────┐
+│ Recent       │  ─── CONTINUE ──────────────────────────────  │     │
+│ ┌──┐ Violet  │   ┌──┐ Anhydrous 2            [ ▶ Resume ]     │     │
+│ │48│ Ledger  │   │64│ Violet Ledger · 3:12 of 6:27            │     │
+│ └──┘         │   └──┘                                         │     │
+│ ┌──┐ Road    │  ─── RECENTLY ADDED ────────────────────────   │     │
+│ │▨▨│ Trip    │   ▫▫▫▫  ▫▫▫▫  ▫▫▫▫  ▫▫▫▫                       │     │
+│ └──┘         │                                                │     │
+│  ⋮           │  ─── YOUR LISTS ────────────────────────────   │     │
+│              │   ▨▨  ▨▨  ▨▨                                   │     │
+│ ▮▯           │                                                │     │
+└──────────────┴───────────────────────────────────────────────┴─────┘
+                 and `Library` becomes a destination you navigate to
+```
+
+**What it costs, stated:** a fifth place; a route back to the wall, which
+means either a `Library` row in the lane (the lane's first destination, and
+its second subject) or a door in the strip (whose L9 budget is spent); the
+launch frame stops being the collection, which is the `VISION.md` pillar
+and `03` §2.3's number; and `YOUR LISTS` duplicates the lane, which is
+L8.6's own test. **What it buys:** the owner's word, *page*, and room for
+future bands that the head of the body cannot hold.
+
+§3.2's recommendation stands, and this drawing is what it is being
+recommended against.
+
+---
+
+## 10. Prior art
+
+The owner asked for Spotify to be taken seriously — *"state of the art"*
+for some operations while he dislikes much of its UX — so this section is
+precise about which is which. Vendor documentation is preferred; community
+sources are marked. `03-interface-prior-art.md`'s findings are cited by
+section where they still stand.
+
+### 10.1 Spotify's left pane, and where baz should and should not follow
+
+| Aspect | Spotify | baz's lane |
+|---|---|---|
+| Contents | Playlists, albums, artists, podcasts in one list | Records and playlists only — one subject (§2.1) |
+| Default order | Recents | Last touched — **the same idea, and it is the right one** |
+| Other orders | Recently Added, Alphabetical, Creator, Custom, via a sort control | **None.** The order is the design |
+| Filter | A search-within-library field and type chips | None; the lane is short enough to read |
+| Collapse | Yes, to a narrow icon rail of cover art | Yes, `SIDEBAR_RAIL_W` 96 (§2.3) |
+| Resize | Draggable | No |
+| Pinning | Yes | No, at v1 (§11) |
+
+**Follow**: the recents ordering, and the collapse-to-covers. Both are what
+the owner asked for by name, and the ordering is honest because every event
+in it is one the user caused.
+
+**Do not follow**: the sort control and the filter chips. They are the
+answer to a pane that holds four kinds of thing and thousands of rows; baz's
+holds one kind and about thirty. `REFUSALS.md`'s view-options entry names a
+sort dropdown specifically, and adding one to a list this short would be
+chrome answering a problem the design does not have.
+
+**The lesson `03` already recorded, applying here**: R11's three vendors who
+bought visual calm by removing control density and reversed inside two
+years. Spotify's own 2023 library redesign is in that ledger. The lane is
+therefore specified with *no* removable facts — the counts, the artist line
+and the sleeve are all present at the expanded width, and the collapse
+removes text rather than facts, because every collapsed row carries its
+name in a tooltip.
+
+### 10.2 Hover-to-play on a cover grid: everybody draws it inside the object
+
+- **Apple Music** (macOS): *"Move the pointer over any song or album, then
+  click the Play button"* —
+  [Apple](https://support.apple.com/guide/music/play-songs-from-your-library-mus36265ad9/mac).
+  Drawn on the artwork.
+- **Plex Web**: *"hover the mouse over the item poster almost anywhere and
+  press the ► button that slides up"* —
+  [Plex](https://support.plex.tv/articles/200392126-using-the-library-view/).
+  On the poster.
+- **Spotify**: the play control sits on the card, corner-anchored, and was
+  **retrofitted** from a user request —
+  [Spotify Community idea 6135](https://community.spotify.com/t5/Closed-Ideas/Play-button-when-you-hover-over-album-cover-on-playlist-and/idi-p/6135) [community].
+- **Tidal** (web): a play icon on hover with *"3 dots … to the right of the
+  play icon"* —
+  [Tidal](https://support.tidal.com/hc/en-us/articles/115005843325-Web-Player-How-to-Favorite-and-Delete-Content).
+- **MusicBee**: **no hover overlay.** Double-click in Album Covers view
+  drills down rather than playing; playing an album from that view by
+  double-click is an open request —
+  [MusicBee wiki](https://musicbee.fandom.com/wiki/Album_Covers_and_Artists_Views),
+  [forum 14221](https://getmusicbee.com/forum/index.php?topic=14221.0) [community].
+- **foobar2000**: **no hover overlay.** Play is a double-click on a track in
+  a playlist; the Album List panel's double-click defaults to
+  Expand/Collapse —
+  [foobar2000 FAQ](https://www.foobar2000.org/FAQ),
+  [HA wiki](https://wiki.hydrogenaudio.org/index.php?title=Foobar2000%3AComponents%2FAlbum_List_Panel_%28foo_uie_albumlist%29).
+
+**Five of five that reveal a play affordance draw it inside the object's own
+bounds; the two local-library players the audience arrives from reveal
+nothing on hover at all.** That is §4.2's finding, and `03` §7.3 already
+priced baz's difference here as a deliberate, medium-risk break with a
+load-bearing convention. What this study adds is *why* the convention is
+load-bearing: an object's own bounds are the only region a full-bleed grid
+can spare.
+
+### 10.3 Timing, if a hover reveal ever were built
+
+- **WCAG 2.1 SC 1.4.13** requires hover-triggered content to be
+  **Dismissible**, **Hoverable** and **Persistent** —
+  [W3C](https://www.w3.org/WAI/WCAG21/Understanding/content-on-hover-or-focus.html).
+- **Nielsen Norman on timing**: feedback within **0.1 s**; reveal after
+  **0.3–0.5 s** of rest; collapse after **> 0.5 s** away — and *"the more
+  the revealed content obscures other elements, the longer the dwell should
+  be"* —
+  [NN/g](https://www.nngroup.com/articles/timing-exposing-content/).
+
+A group that covers a whole neighbouring record sits at the long end of
+that scale by NN/g's own rule, which is a half-second wait bought with a
+timer — against the owner's stated bar of responsiveness.
+
+### 10.4 Add-to-playlist, and album-scoped queueing
+
+| Product | Picker form | Album-level queue verb |
+|---|---|---|
+| **Spotify** | Inline submenu **with a search field inside it**, shipped after the submenu became unusable at scale — [implemented idea 5031948](https://community.spotify.com/t5/Implemented-Ideas/All-Platforms-Playlists-Search-among-my-playlists-on-quot-add-to/idi-p/5031948) [community] | Removed in the desktop redesign, restored after complaint — [idea 4952753](https://community.spotify.com/t5/Implemented-Ideas/Desktop-Bring-back-add-album-to-queue-option/idi-p/4952753) [community] |
+| **Apple Music** | Submenu, creation inside it: *"choose **Add to Playlist > New Playlist**"* — [Apple](https://support.apple.com/guide/music/create-edit-and-delete-playlists-musd5d051981/mac) | `Play Next`, `Add to Queue` on whole albums — [Apple](https://support.apple.com/guide/music/queue-your-songs-musb1e6d1c76/mac) |
+| **MusicBee** | `Send To` submenu | A `Play More` submenu holding `Queue Album Next` / `Queue Album Last` — [MusicBee wiki](https://musicbee.fandom.com/wiki/Playback) |
+| **YouTube Music** | *"more → **Add to playlist** → **New playlist** or an existing playlist"* — [Google](https://support.google.com/youtubemusic/answer/7205933) | — |
+| **foobar2000** | `Add to`, `Insert into`, `Send to` — [HA wiki](https://wiki.hydrogenaudio.org/index.php?title=Foobar2000_Mobile%3AUI%3APlaylist) | — |
+| **Plexamp** | — | `Play Next` and `Add to queue` **do the same thing** — a defect reported for years, [Plex forums 599567](https://forums.plex.tv/t/add-to-queue-does-the-same-thing-as-play-next/599567) [community] |
+
+**Four of five put the destination list at the pointer**, one press from the
+gesture that started the transfer, and **none of them throws it to the far
+edge of the window**. This is where the owner is right that Spotify is
+state of the art, and it is §6's whole argument.
+
+Three lessons taken: the destination is pointer-local; creation lives
+inside the picker; and **Plexamp is the warning for §4.4** — `Queue album`
+(the run, tonight) and `Add to "{current}"` (the file, kept) must stay
+visibly and behaviourally distinct.
+
+Not followed: the **submenu**. Material 3 caps nesting at *"one level
+deep"* and notes submenus are *"best used on large screens"*
+([Material 3](https://m3.material.io/components/menus/guidelines)); Spotify's
+own record shows the failure mode; and baz's `+` slots are not menus, so a
+submenu would mean two destination surfaces.
+
+**And the card is not a menu, on the era's own distinction**: *"Use an
+action sheet — not a menu — to provide choices related to the action people
+initiated"*, because *"people expect a menu to appear when they chose to
+reveal it"*
+([Apple HIG](https://developer.apple.com/design/human-interface-guidelines/action-sheets)).
+A pick is exactly that. It is drawn like a menu because baz has one float
+mechanism; it is governed like a control surface because its rows are
+controls. Apple's *"Minimize the use of modality"*
+([HIG](https://developer.apple.com/design/human-interface-guidelines/modality))
+is why it takes no scrim, which the ledger refuses anyway.
+
+### 10.5 Depth, back, and showing your place
+
+- **Nielsen Norman on breadcrumbs**: they exist for *"making users aware of
+  their current location within the hierarchical structure"* — and
+  *"breadcrumbs aren't necessary (or useful) for sites with flat
+  hierarchies that are only 1 or 2 levels deep"*
+  ([NN/g](https://www.nngroup.com/articles/breadcrumbs/)). baz's tree is one
+  level deep from every place (§5.1).
+- **Miller columns** *"allow multiple levels of the hierarchy to be open at
+  once, and provide a visual representation of the current location"*,
+  descending from the NeXTSTEP File Viewer (1986); the 1980 Yale
+  attribution is carried by
+  [Wikipedia](https://en.wikipedia.org/wiki/Miller_columns) but flagged
+  *citation needed* there, so it is reported as attributed rather than
+  established. With one level the pattern degenerates to a list beside a
+  detail — which is what the lane beside a page already is.
+- **Back versus Up**: *"Within your app's task, the Up and Back buttons
+  behave identically"*, and Up *"never exits your app"*
+  ([Android](https://developer.android.com/guide/navigation/principles)).
+  baz has one task and one start destination, so `Esc`-returns-to-Library
+  is the standard's own answer (§5.4).
+- **The two products the owner named have the weakest history in the
+  survey.** Spotify's keyboard-shortcuts page documents **no** back or
+  forward shortcut
+  ([Spotify](https://support.spotify.com/us/article/keyboard-shortcuts/));
+  Apple Music macOS lists none either
+  ([Apple](https://support.apple.com/guide/music/keyboard-shortcuts-mus1019/mac)).
+  Worth knowing before importing one.
+- **Lightroom's Filmstrip** *"located at the bottom of the workspace in
+  every module, displays thumbnails of the contents of the folder,
+  collection, keyword set, or metadata criteria that is currently selected"*
+  ([Adobe](https://helpx.adobe.com/lightroom-classic/help/workspace-basics.html)).
+  This is `03` §7.2(5)'s finding and doc 11 P10's named door — and the lane
+  is the same idea rotated: the peer set follows you into the detail view.
+
+### 10.6 The evidence that cuts against this study
+
+A prior-art section that only supports its own conclusions is a
+rationalisation.
+
+**(a) NN/g says band-A actions do not belong in a context menu**:
+*"Contextual menus are not appropriate for actions users rely on
+frequently. They are best used for secondary or low-priority options"*
+([NN/g](https://www.nngroup.com/articles/contextual-menus-guidelines/)).
+Putting on a record is band A. So §4 does **not** claim the tile menu is
+the answer to one-gesture play: the primary visible route stays the page's
+`Play album`, the menu is the accelerator for the hand that already knows,
+and this finding is precisely why §4.6 is presented to the owner rather
+than dropped. If band-A play may not live behind a right-click, may not
+live on a sleeve and may not live behind a timer, then the modifier press
+is the last candidate standing or the two-press price is permanent.
+
+**(b) Icon-only navigation is measurably worse than labelled navigation**,
+and hidden navigation roughly halves discoverability
+([NN/g](https://www.nngroup.com/videos/hamburger-menus/)). Applied here:
+the collapsed lane is icon-only by construction, which is why every
+collapsed row carries a tooltip (§2.3), why the *expanded* state is the one
+that persists by default, and why the collapse is a state the user chose
+rather than a default they must discover their way out of. It is also the
+sharpest available statement of why §6.1's *"very minor tip"* is a real
+defect and not a nitpick: subtlety in the one line that explains a surface
+is measured, repeatable harm.
+
+**(c) One convergence worth recording**: NN/g's contextual-menu rule is
+*"make sure the commands in contextual menus are also available from the
+application's main menu"*
+([NN/g](https://www.nngroup.com/articles/contextual-menus/)) — which is doc
+09 §5.2's mirror rule, arrived at independently and enforced by a test
+(`menu.rs:581`).
+
+---
+
+## 11. Considered and rejected
+
+1. **A hover-revealed verb group on the wall.** §4.2 — 42 / 34 / 22 px of
+   clear wall against a 104 px card; a wall that twitches under a crossing
+   pointer; a dwell timer against a responsiveness bar. Not a principle
+   objection: an answer to the geometry would reopen it.
+2. **The context menu, opened on hover.** §4.3 — the card is `opaque` and
+   captures presses; a menu that opens itself is no longer an accelerator.
+3. **The lane overlaying the wall instead of taking width.** §2.4(a) — at
+   1280 an expanded lane would cover 60 % of the first column of covers. A
+   surface that permanently hides content is worse than one that re-lays it.
+4. **A width tween on the collapse.** §2.4(1) — it would re-resolve
+   `Grid::new` on every frame of the tween and pop columns mid-slide. One
+   frame is both cheaper and better.
+5. **The queue in the lane.** §2.1 — its subject is playback, not things
+   you have touched; admitting it is finding 1 reproduced on day one. It
+   keeps its door, its ambient continuation line and its place.
+6. **A `Library` row, a `Settings` row, or any destination in the lane.**
+   §2.8 — that is a nav rail, refused by doc 07 L8.4, and it is the lane's
+   second subject.
+7. **A sort control or a filter row in the lane.** §10.1 — the answer to a
+   pane holding four kinds and thousands of rows; baz's holds one kind and
+   about thirty, and a sort dropdown is named in the view-options refusal.
+8. **Pinning.** §2.2 — a pinned set is a second ordering the list must
+   arbitrate against the first, which is finding 5 arriving as a feature
+   request. Worth revisiting if the lane's 24 records turn out to churn
+   past something the owner wants held.
+9. **A drawn seam or a surface step under the lane.** §2.6 — the grid's
+   margin is provably ≥ 40 px at every width, so the gap is already there
+   and a line would be ink added to it. The index rail's own posture.
+10. **Breadcrumbs, Miller columns, a back stack.** §5.1, §5.4, §10.5.
+11. **`Place::Home` as the launch destination.** §3.2, drawn in §9.4 — a
+    fifth place, a route back to the wall that is either a nav rail or a
+    strip tenant, a launch frame that is not the collection, and a
+    `YOUR LISTS` band that duplicates the lane.
+12. **The pull on the home band.** §3.1 — the pull is an act you press; an
+    unbidden offer is generation without a request.
+13. **"Recently played" as a home band.** §3.1 — it is the lane's content,
+    and one fact drawn twice is L8.6's own test.
+14. **An `Add to playlist ▸` submenu.** §10.4 — nesting guidance, Spotify's
+    own failure mode, and it answers only the menu route.
+15. **A modal dialog for the pick.** No dialogs in the product, no scrim by
+    refusal, and Apple's own guidance is to minimise modality.
+16. **Fixing only the picker's copy.** §6.1 — the fallback if the card is
+    refused, not the answer: it leaves the 682 px trip, the window-width
+    dependence and the 340 px surface untouched.
+17. **A search field inside the card.** Spotify's answer at scale
+    (§10.4). **Deferred**, not refused: the hoist plus the folder's order
+    answers it until someone has more lists than `PICKER_MAX_H` holds, and
+    a second text field in a float is a focus-and-dismissal problem worth
+    solving when someone has it.
+18. **A tooltip on every wall tile teaching the right-press.** §4.5 — a
+    thousand objects wearing chrome to carry one sentence.
+
+---
+
+## 12. The proposals, ranked and tiered
+
+| # | Proposal | Cost | Tier |
+|---|---|---|---|
+| **P1** | **The returns lane** — one subject, last-touched order, two widths, collapse at the foot, `Ctrl+B` (§2) | One view, one ordered list maintained by events, five tokens, two glyphs | **adopt** |
+| **P2** | **The panel dies** — its three jobs go to the lane and the card (§2.7, §7) | Deletions: `playlist_panel.rs`, `PANEL_W`, `panel_open`, the strip door, `Ctrl+P` | **adopt** |
+| **P3** | **The picker becomes a card at the pointer** (§6) | One float on `menu::anchor`'s geometry; two tokens | **adopt** |
+| **P4** | **The card's sentence becomes its heading**, with what is held stated in figures (§6.2) | Strings and two type sizes | **adopt** |
+| **P5** | **The home band** — `CONTINUE` and `RECENTLY ADDED` at the head of the Library body (§3) | Two bands, both absent-not-empty; **depends on P6** for the first | **adopt** |
+| **P6** | **Ship ADR-0023 §6's queue snapshot** — persist on exit, restore paused (§3.4) | Already specified and costed there: *"one new persisted snapshot, zero engine changes"* | **adopt** — it is the home band's best content and closes W2 |
+| **P7** | **`Add to "{current}"` at album scope** on the tile menu (§4.4) | Zero new messages, zero new controls | **adopt** |
+| **P8** | **`‹ Prev · 4 of 25 · Next ›`** — the step pair states its position (§5.3) | One readout, one reserved token | **adopt** |
+| **P9** | **Teach the tile menu** in the record page's header note (§4.5) | One string | **adopt-modified** — modest by design |
+| **P10** | **One press to sound from the wall**, as a modifier press (§4.6) | One arm, one accelerator string | **present-to-owner** |
+| **P11** | **`Place::Home`** as a real fifth place, drawn in §9.4 | A fifth place, a route back to the wall, the launch frame | **present-to-owner** |
+| **P12** | Hover-revealed verbs; the lane overlaying; the queue in the lane; sort/filter/pinning; breadcrumbs; a back stack | — | **rejected-with-reasons** (§11) |
+
+P1–P9 are one coherent programme. P1+P2 are a single change seen from two
+sides, and P5 is the reason to do P6 at last.
+
+---
+
+## 13. The implementation plan
+
+Ordered so the highest-relief change lands first, each step whole and
+shippable.
+
+1. **The lane, expanded only.** `views/sidebar.rs`; the returns list as
+   state built once at launch and maintained by `TrackStarted` and playlist
+   writes; rows from the existing thumbnail cache; `SIDEBAR_W`,
+   `SIDEBAR_SLEEVE`, `SIDEBAR_ROW_H` in `theme.rs` with the lattice
+   assertions their neighbours carry. `Shelf::grid_width` gains its second
+   term, and the 1 px-step width sweep (`app.rs:5980`, `theme.rs:3940`)
+   re-runs over 300–2560 in both states — that sweep is the acceptance test
+   for this step.
+2. **The collapse.** `SIDEBAR_RAIL_W`, the two marks at the foot in the
+   density detents' anatomy, two glyphs in `icon.rs` with the sheet's
+   coverage and stroke-band tests, the `config.toml` bool, `Ctrl+B`, the
+   `SIDEBAR_FLOOR` 1000 regime asserted as const arithmetic. The
+   shelf-anchored scroll fix-up (§2.4(2)) lands here and is the step's
+   other test: *the shelf at the top of the viewport is the same shelf
+   after a re-hang.*
+3. **The panel dies** (P2). Deletions only, once the lane holds every
+   playlist and receives drops.
+4. **The card** (P3, P4). `views/picker.rs` on `menu::anchor`/`extent`'s
+   geometry and `app.rs:3236–3249`'s stacking; `PICKER_W` 280,
+   `PICKER_MAX_H` 400; `App::escape` peels it first. `picker_order` moves
+   unchanged. One test earns its keep: `no_transfer_gesture_opens_a_panel`,
+   swept over every message that reached `begin_pick`.
+5. **The queue snapshot** (P6). ADR-0023 §6 as written: persist paths,
+   cursor and elapsed on exit; restore as `SetQueue` + `Seek`, paused.
+6. **The home band** (P5). `CONTINUE` reading the restored snapshot;
+   `RECENTLY ADDED` reading `first_seen_ns`; both absent-not-empty; the
+   body's head is the band under an empty query and the `Songs` section
+   otherwise.
+7. **`Add to "{current}"` on the tile menu** (P7). One arm in
+   `menu::items`' `Target::Album` branch; the mirror test passes with no
+   new `CONTROLS` row.
+8. **The position readout** (P8) and **the teacher** (P9). One token, two
+   strings.
+9. **P10 / P11 if the owner takes them.**
+
+Steps 1–3 are the release; 4 is the one the owner's third complaint names;
+5–6 are the home page and the feature it finally justifies.
+
+---
+
+## 14. What this study does not decide
+
+- **Whether playlists join the wall.** ADR-0024 §A2 deferred wall
+  membership, rail sorting and search-corpus membership; the lane gives
+  playlists a resident home, which weakens the case for the wall but does
+  not settle it.
+- **Whether the lane ever holds artists.** It holds objects you can open;
+  artists are not a place today.
+- **Whether the drag ever starts on a tile.** Tiles are not drag sources
+  (`drag.rs` pays the queue, the playlist page and the panel — the panel's
+  share transfers to the lane).
+- **The Marquee lens**, and whether it has a lane at all.
+- **`Locate…`**, the playlist repair surface ADR-0024 §3 specified and
+  nobody has built.
+
+---
+
+## 15. Summary
+
+The owner sent two briefs and they are one request. *"You can already see
+the depth that you've went into with the options on the left"* is a
+description of the sidebar the second brief asks for, which is why this
+study has a spine instead of four separate answers.
+
+**The returns lane** holds one kind of thing — things you have touched:
+every playlist, and the last twenty-four records you played — in one order,
+last touched first, with ties broken by name so two launches draw the same
+lane. It has no sort control, no filter, no pinning and no destinations,
+because each of those is a second subject or a second ordering, and a
+second of either is how the last side surface died. It collapses to a 96 px
+column of covers and back in one frame, and the reflow problem that killed
+the last one is answered structurally rather than mitigated: **the collapse
+is the only press in the product that lands outside the wall**, so nothing
+on the wall can be mid-gesture when it fires. At two of three measured
+widths it does not even change the column count — the covers simply get
+25 % bigger, which reads as zoom because that is what it is.
+
+**The panel does not survive it**, and should not: it was carrying three
+jobs because there was nowhere else to put them. The lane is a better index
+(resident, complete) and a better drop target (always there, not only when
+summoned), and the third job — the picker — goes to **a card at the
+pointer**, which is the real answer to *"a very minor tip at the very
+top"*. That complaint was never about the wording: pressing `Add to
+playlist…` throws the destination 682 px across a 1280 px window and
+1322 px across a 1920 one, because the surface is anchored to the window
+rather than to the gesture. Four of the five products surveyed put it at
+the pointer, and on this operation the owner is right that Spotify is state
+of the art.
+
+**Home is the head of the wall**, not a fifth place — you are always
+already there, and the two facts that survive an honest inventory are
+exactly the two the lane cannot carry: what you were in the middle of, and
+what is new. The first of them makes ADR-0023 §6 worth building at last: a
+queue that restores paused has never shipped because nothing on screen
+wanted it, and now something does.
+
+**And the verbs the owner wants beside a hovered sleeve already float
+beside a pressed one.** The tile's menu is short one item —
+`Add to "{current}"` at album scope, the only verb in his list that exists
+nowhere — and one teacher, which goes on the page where the trip it would
+have saved was just paid. Revealing them on hover is declined on
+measurements rather than on principle: 34 px of clear wall against a 104 px
+card, and a wall that would twitch under every pointer crossing it. Whether
+sound from the wall should cost one press is his call, and §4.6 hands him
+the one candidate that fits every constraint the product actually has,
+drawn and priced.
+
