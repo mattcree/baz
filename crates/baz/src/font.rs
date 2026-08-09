@@ -474,49 +474,73 @@ mod tests {
             })
             .sum::<f32>()
             + 4.0 * theme::GAP_MD;
-        let well = crate::views::top_bar::well_width(1280.0);
+        // **At the shipped window the strip has no well**: the lane holds it
+        // (ADR-0030's search amendment), so the strip's left cluster is the
+        // states and the acts, hanging from the window gutter, and the strip's
+        // own width is the window less the expanded lane.
         assert!(
-            (well - crate::views::top_bar::WELL_MAX).abs() < f32::EPSILON,
-            "at the shipped window the well stands at its ceiling"
+            !theme::strip_holds_the_well(1280.0),
+            "at the shipped window the well is the lane's"
         );
-        let left = 2.0f32.mul_add(theme::GAP_LG, well + theme::GAP_XL + keys);
+        let strip = 1280.0 - theme::sidebar_w(1280.0, true);
+        let left = theme::HANG + keys + theme::GAP_XL + crate::views::top_bar::ACTS_W;
 
         // The strip's right side at rest is the gear alone — a
         // `TRANSPORT_HIT` square, not a word with a reserved width (doc 10
-        // §7 step 1) — and the counts live inside the well now (step 2), so
-        // the widest readout the strip used to carry is off this budget
-        // entirely.
-        let right = theme::TRANSPORT_HIT;
+        // §7 step 1) — over the window's own gutter.
+        let right = theme::TRANSPORT_HIT + theme::HANG;
 
-        let window = 1280.0_f32;
         assert!(
-            left + theme::GAP_LG + right <= window,
-            "the top bar wants {:.1} px at 1280: {left:.1} left (well {well} \
-             + keys {keys:.1}) and {right:.1} right",
+            left + theme::GAP_LG + right <= strip,
+            "the strip wants {:.1} px of {strip:.0}: {left:.1} left \
+             (keys {keys:.1}) and {right:.1} right",
             left + theme::GAP_LG + right
         );
-        // And the five words really are the bulk of what was added, so this is
-        // measuring the row rather than the well beside it.
+        // And the five words really are the bulk of the cluster, so this is
+        // measuring the row rather than the acts beside it.
         assert!(keys > 200.0 && keys < 420.0, "the key row is {keys:.1} px");
+    }
 
-        // The placeholder the counts became: the owner-scale line fits the
-        // well's text lane at the *floor* — past the magnifier's reserved
-        // lane on the left and the input's own padding — and a line from a
-        // library thirty times that size fits at the ceiling. A placeholder
-        // longer than its lane clips rather than reflows, so this is the
-        // bound that keeps the ordinary case whole.
+    /// **The well's two figures fit the lane's measure, and its query fits
+    /// beside them** — the reason the counts came out of the well when the
+    /// well went into the lane.
+    ///
+    /// In the strip the counts were the placeholder and the match count sat in
+    /// a reserved [`crate::views::top_bar::MATCH_W`] 88 slot *inside* the
+    /// field. At [`theme::SIDEBAR_MEASURE`] 232 that slot would leave the
+    /// query 100 px, so both figures moved onto the readout line under the
+    /// field and both now measure against the whole lane. Longer than the lane
+    /// clips rather than reflows, so this is the bound that keeps the ordinary
+    /// case whole — and the owner-scale line and a library thirty times that
+    /// size are both checked, because the figures tick up during a scan.
+    #[test]
+    fn the_lanes_well_holds_its_readout_at_the_lane_measure() {
         let sans = sans();
-        let lane =
-            |well: f32| well - (theme::GAP_MD + theme::ICON_PX + theme::GAP_SM) - theme::GAP_MD;
+        // The readout hangs between the head's word vertical and the field's
+        // own trailing padding — the query's lane, exactly.
+        let lane = theme::SIDEBAR_MEASURE - theme::SIDEBAR_HEAD_TEXT_X - theme::GAP_MD;
+        for line in [
+            "1284 albums · 9902 tracks",
+            "40000 albums · 512345 tracks",
+            "9902 of 40000 albums",
+        ] {
+            let measured = sans.width(line, theme::SIZE_META);
+            assert!(
+                measured <= lane,
+                "{line:?} measures {measured:.1} px against the lane's {lane:.0}"
+            );
+        }
+        // And the strip's own form, at the one regime it is still drawn in:
+        // the counts as the placeholder, past the magnifier's reserved lane
+        // and the input's own padding.
+        let strip_lane = crate::views::top_bar::WELL_W
+            - (theme::GAP_MD + theme::ICON_PX + theme::GAP_SM)
+            - theme::GAP_MD;
+        let measured = sans.width("1284 albums · 9902 tracks", theme::SIZE_META);
         assert!(
-            sans.width("1284 albums · 9902 tracks", theme::SIZE_META)
-                <= lane(crate::views::top_bar::WELL_MIN),
-            "the owner-scale counts overflow the well at its floor"
-        );
-        assert!(
-            sans.width("40000 albums · 512345 tracks", theme::SIZE_META)
-                <= lane(crate::views::top_bar::WELL_MAX),
-            "a huge library's counts overflow the well at its ceiling"
+            measured <= strip_lane,
+            "the owner-scale counts measure {measured:.1} px against the \
+             strip well's {strip_lane:.0}"
         );
     }
 
