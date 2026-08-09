@@ -476,6 +476,65 @@ mod tests {
         }
     }
 
+    /// **Every row-shaped control names the ground it stands on.**
+    ///
+    /// [`theme::track_row`]'s hover used to be the constant
+    /// `Palette::plinth`, which is right for a row on the wall and mute for a
+    /// row on the panel — whose own ground *is* `plinth`, so its rows painted
+    /// the colour already under them. The owner named it (2026-08-09, *"a bit…
+    /// unresponsive"*); the fix was to make the hover a *relation*
+    /// (`Palette::step_up`), which only works if every call site says what it
+    /// stands on.
+    ///
+    /// Asserted over the source because the failure is invisible in a
+    /// rendering and silent in a type: a ground of the wrong plane compiles,
+    /// draws, and answers the pointer with nothing. A future surface composed
+    /// on a new plane fails the build rather than the review.
+    #[test]
+    fn every_row_shaped_control_names_the_ground_it_stands_on() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut sites = 0_u32;
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(root.join("views"))
+            .expect("the views directory")
+            .map(|entry| entry.expect("entry").path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
+            .collect();
+        files.sort();
+        for path in files {
+            let source = std::fs::read_to_string(&path)
+                .expect("a view source")
+                .replace("\r\n", "\n");
+            let source = source
+                .split("#[cfg(test)]")
+                .next()
+                .expect("a source has a head");
+            let name = path.file_name().expect("a file name").to_string_lossy();
+            for (at, _) in source.match_indices("theme::track_row(") {
+                // Comments name the function too; only calls are call sites.
+                let line_start = source[..at].rfind('\n').map_or(0, |index| index + 1);
+                if source[line_start..at].trim_start().starts_with("//") {
+                    continue;
+                }
+                let tail: String = source[at..].chars().take(80).collect();
+                let arguments = tail
+                    .split_once('(')
+                    .map(|(_, rest)| rest.replace(['\n', ' '], ""))
+                    .unwrap_or_default();
+                assert!(
+                    arguments.starts_with("room,room."),
+                    "{name}: a row must name the surface it stands on — \
+                     `theme::track_row(room, <ground>, …)` — and this one \
+                     reads `{}`",
+                    arguments.chars().take(40).collect::<String>()
+                );
+                sites += 1;
+            }
+        }
+        // Not vacuous: the wall's rows, the panel's, the menu card's and the
+        // returns lane's are all in the walk.
+        assert!(sites >= 6, "only {sites} row call sites found");
+    }
+
     /// The Shuffle tooltip's figure is [`crate::shuffle::SLEEVES`], not a
     /// number that can drift from it: the tooltip teaches the bounded draw
     /// (doc 11 §5 P6.2), and a bound taught wrong would be worse than one

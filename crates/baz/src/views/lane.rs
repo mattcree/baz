@@ -153,25 +153,28 @@ fn destination_row(
     // rather than set after the word: collapsed there is no word to set it
     // after, and *is anything on?* is precisely the question a 96 px lane has
     // to keep answering.
+    // Collapsed, the glyph is the only thing in the row, so it centres on the
+    // lane's own axis — the same axis the sleeves below it centre on. Open, it
+    // stands at the left of its box with the word after it.
+    let glyph_x = if open {
+        alignment::Horizontal::Left
+    } else {
+        alignment::Horizontal::Center
+    };
+    let boxed = |content: Element<'static, Message>, x| {
+        container(content)
+            .width(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
+            .height(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
+            .align_x(x)
+    };
     let glyph_block: Element<'static, Message> = if to == Destination::NowPlaying && sounding {
         iced::widget::stack![
-            container(mark)
-                .width(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
-                .height(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
-                .align_x(alignment::Horizontal::Left)
-                .align_y(alignment::Vertical::Center),
-            container(lamp_dot())
-                .width(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
-                .height(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
-                .align_x(alignment::Horizontal::Right)
-                .align_y(alignment::Vertical::Top),
+            boxed(mark.into(), glyph_x).align_y(alignment::Vertical::Center),
+            boxed(lamp_dot(), alignment::Horizontal::Right).align_y(alignment::Vertical::Top),
         ]
         .into()
     } else {
-        container(mark)
-            .width(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
-            .height(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
-            .align_x(alignment::Horizontal::Left)
+        boxed(mark.into(), glyph_x)
             .align_y(alignment::Vertical::Center)
             .into()
     };
@@ -192,12 +195,17 @@ fn destination_row(
         container(line)
             .width(Length::Fill)
             .height(Length::Fill)
+            .align_x(glyph_x)
             .align_y(alignment::Vertical::Center)
             .clip(true),
     )
     .width(Length::Fill)
     .height(Length::Fixed(theme::SIDEBAR_DEST_H))
-    .padding(theme::pad(0.0, theme::GAP_SM))
+    // Collapsed, the row's flanks go: the glyph centres on the lane's own
+    // axis, which is the axis the sleeves below it centre on, and a rail
+    // whose head and body stood on two different verticals would read as two
+    // surfaces.
+    .padding(theme::pad(0.0, if open { theme::GAP_SM } else { 0.0 }))
     // The row family, on the lane's own ground: one step up under the
     // pointer, the whole hit area painted (`theme::track_row`).
     .style(move |_theme, status| theme::track_row(room, room.recess, status, here))

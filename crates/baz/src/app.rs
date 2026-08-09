@@ -943,6 +943,10 @@ struct App {
     /// The two stamps [`Self::lane`] was built from: the shelf's and the
     /// playlists'.
     lane_mark: (u64, u64),
+    /// Whether a scan was running when the last message was answered — the
+    /// falling edge is when the lists are re-read (see
+    /// [`Self::sync_lists_with_the_library`]).
+    was_scanning: bool,
     /// Which section of the Settings place is showing (an index into
     /// `views::settings::SECTIONS`).
     ///
@@ -1080,6 +1084,7 @@ impl App {
             lane_open,
             lane: Vec::new(),
             lane_mark: (u64::MAX, u64::MAX),
+            was_scanning: true,
             modifiers: keyboard::Modifiers::empty(),
             started,
             first_frame_logged: false,
@@ -1103,6 +1108,17 @@ impl App {
             warmth: Tween::settled(0.0).with_curve(motion::Curve::Linear),
             saved_replay_gain,
         };
+        // **The lists, re-read against the library** — once, here.
+        // `Playlists::start` lists the folder before there is a library to
+        // resolve entry paths against, so every sleeve came back empty; that
+        // was invisible while the only surface showing them was a panel you
+        // had to summon (and summoning refreshed them). The returns lane is
+        // resident, so the first frame shows them, and a list wearing the
+        // rest tile on launch and its collage after the first press would be
+        // one object drawn two ways.
+        if let Screen::Shelf(state) = &app.screen {
+            app.playlists.refresh(Some(&state.library));
+        }
         // One publish before the first frame, so a desktop widget that asks
         // straight away gets the seeded volume and the real `Can*` flags
         // rather than the server's own defaults. The MPRIS thread may not
@@ -1113,6 +1129,7 @@ impl App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.route(message);
+        self.sync_lists_with_the_library();
         // **The lane, re-merged when — and only when — one of its two halves
         // says it moved**, and *after* the message rather than before it:
         // iced draws the frame this call produced, so a sync that ran first
@@ -2122,6 +2139,27 @@ impl App {
             Message::ToggleLane => Some(self.toggle_lane()),
             _ => None,
         }
+    }
+
+    /// **Re-read the lists when a scan finishes**, and at no other time.
+    ///
+    /// A playlist's sleeve is a collage of the records it quotes, resolved
+    /// against the library (ADR-0024 §A1) — so on a first run, where the
+    /// library is empty until the scan lands, every list wears the rest tile.
+    /// That was invisible while the only surface showing lists was a panel you
+    /// had to summon, because summoning refreshed them. The returns lane is
+    /// resident and shows them on the first frame, so the falling edge of the
+    /// scan is where the folder is re-read: one pass, at the moment the facts
+    /// it needs exist, and never per frame.
+    fn sync_lists_with_the_library(&mut self) {
+        let scanning = matches!(&self.screen, Screen::Shelf(state) if state.scanning);
+        if self.was_scanning
+            && !scanning
+            && let Screen::Shelf(state) = &self.screen
+        {
+            self.playlists.refresh(Some(&state.library));
+        }
+        self.was_scanning = scanning;
     }
 
     /// Re-merge [`Self::lane`] if either half has been rebuilt since it was

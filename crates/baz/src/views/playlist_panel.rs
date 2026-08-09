@@ -48,13 +48,15 @@
 //! carries one control, and the panel is a directory, not a workspace.
 
 use iced::widget::{
-    Column, Space, button, column, container, mouse_area, row, scrollable, text, text_input,
+    Column, Space, button, column, container, image as iced_image, mouse_area, row, scrollable,
+    text, text_input,
 };
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
+use crate::icon;
 use crate::player::PlayerState;
-use crate::playlists::{NameEntry, PanelRow, Playlists, playlist_id};
+use crate::playlists::{PanelRow, Playlists, playlist_id};
 use crate::theme;
 use crate::views::playlist_sleeve;
 use crate::vm;
@@ -128,10 +130,20 @@ pub(crate) fn view<'a>(
         );
     }
     // The rows, in the picker's one order (09 §8.1): the Queue first, the
-    // playing list second when one stands, the named lists, `New playlist`
-    // last. At rest the same shape minus the hoist: the Queue as a readout at
-    // the head, the folder's own order below it.
-    let mut listed: Vec<Element<'_, Message>> = vec![queue_row(player, picking)];
+    // playing list second when one stands, then the named lists. At rest the
+    // same shape minus the hoist: the Queue as a readout at the head, the
+    // folder's own order below it.
+    //
+    // **`New playlist` is the ghost row at the head of the lists**, and that
+    // reverses 09 §8.1's picker diagram, which put creation last — *"the
+    // furthest destination, under every list that already exists"*. The
+    // owner's call, 2026-08-09: *"new playlist should appear like a ghost
+    // playlist item and when you select, it starts to allow text entry."*
+    // Top, and stable: a control that migrates to the end of a growing list
+    // is a control you have to hunt for, and the head of a list of things
+    // reads as *make one* where the foot reads as *and one more*.
+    let mut listed: Vec<Element<'_, Message>> =
+        vec![queue_row(player, picking), ghost_row(playlists)];
     if playlists.rows.is_empty() {
         listed.push(empty_words(playlists));
     } else {
@@ -157,12 +169,6 @@ pub(crate) fn view<'a>(
             .style(move |_theme, status| theme::scrollbar(room, room.plinth, status))
             .height(Length::Fill),
     );
-    // `New playlist`, the last row (09 §8.1's picker diagram): creation is
-    // the furthest destination, under every list that already exists.
-    body = body.push(match &playlists.naming {
-        None => new_playlist_door(),
-        Some(entry) => name_field(entry),
-    });
     // One hairline down the left edge is the seam between the panel and the
     // wall it floats over — the surface step does the rest; a shadow is
     // refused (`docs/REFUSALS.md`).
@@ -246,13 +252,111 @@ fn queue_row(player: &PlayerState, picking: bool) -> Element<'static, Message> {
         .into()
 }
 
-/// `New playlist`, at rest: a quiet word that becomes a name field on press —
-/// the roots field's two-state anatomy (ADR-0022's add-a-folder row).
-fn new_playlist_door() -> Element<'static, Message> {
+/// **The ghost row** — `New playlist`, drawn as the playlist you have not
+/// made yet.
+///
+/// The owner's shape, 2026-08-09: *"new playlist should appear like a ghost
+/// playlist item and when you select, it starts to allow text entry"*, and
+/// *"then a save button makes it a real playlist"*. It replaces the quiet
+/// word that stood under the list.
+///
+/// # Why it is drawn as a row and not as a word
+///
+/// **Identical geometry to a real row** — the same height, the same sleeve
+/// slot at [`theme::PANEL_SLEEVE`], the same label position — so nothing moves
+/// when the ghost becomes a real list. That is the whole point of the shape:
+/// you can see the object you are about to make, in the place its kind lives.
+/// The sleeve slot carries the drawn [`icon::Glyph::Plus`] in a recessed
+/// square ([`theme::ghost_sleeve`]) and never anything resembling artwork —
+/// a placeholder that looked like a cover would be the interface inventing a
+/// record.
+///
+/// # It is a control, so it answers the pointer
+///
+/// Dim at rest, full paper under the pointer, through the *same*
+/// [`theme::track_row`] treatment its neighbours get on the same ground. That
+/// is what makes it read as *a playlist you have not made yet* rather than as
+/// a disabled row — and it is the whole of the owner's other complaint, that
+/// a pressable thing that does not answer the pointer is unresponsive.
+///
+/// # In entry
+///
+/// The label becomes a field in place, the caret landing without a second
+/// press ([`Message::NewPlaylistStart`] focuses it). `Save` sits at the row's
+/// right end, where a real row's own affordances sit, so the ghost keeps
+/// matching its neighbours' anatomy; <kbd>Enter</kbd> is its accelerator and
+/// <kbd>Esc</kbd> cancels back to the ghost ([`Playlists::peel`]). There is no
+/// `Cancel` control beside it: `Esc` and a press outside are the dismissal
+/// vocabulary everywhere else in the product, and a two-button row would
+/// out-weigh every real list beside it.
+///
+/// **`Save` is inert while the name is empty or refused**
+/// ([`Playlists::naming_can_save`]) and the refusal's words stand under the
+/// field in the room's alert ink, from the storage layer's own vocabulary —
+/// no dialog, and nothing translated.
+fn ghost_row(playlists: &Playlists) -> Element<'_, Message> {
     let room = theme::active();
-    button(
+    let sleeve = container(
+        iced_image(icon::handle(icon::Glyph::Plus))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(theme::GLYPH_OPACITY),
+    )
+    .width(Length::Fixed(theme::PANEL_SLEEVE))
+    .height(Length::Fixed(theme::PANEL_SLEEVE))
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center)
+    .style(move |_theme| theme::ghost_sleeve(room));
+
+    let Some(entry) = &playlists.naming else {
+        // At rest: the row, with the word where a list's name would be. One
+        // quiet line under it says what pressing does, in the same slot a
+        // real row spends on its counts — so the two rows are the same
+        // object at two moments rather than two shapes.
+        return button(
+            row![
+                sleeve,
+                container(
+                    column![
+                        text("New playlist")
+                            .size(theme::SIZE_BODY)
+                            .line_height(theme::LEADING_BODY)
+                            .font(theme::MEDIUM)
+                            .color(room.paper_dim)
+                            .wrapping(text::Wrapping::None),
+                        text("Name it, and it is yours")
+                            .size(theme::SIZE_META)
+                            .line_height(theme::LEADING_META)
+                            .color(room.paper_faint)
+                            .wrapping(text::Wrapping::None),
+                    ]
+                    .spacing(theme::GAP_XXS)
+                )
+                .width(Length::Fill),
+            ]
+            .spacing(theme::GAP_SM)
+            .align_y(iced::Alignment::Center),
+        )
+        .width(Length::Fill)
+        .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+        .style(move |_theme, status| theme::track_row(room, room.plinth, status, false))
+        .on_press(Message::NewPlaylistStart)
+        .into();
+    };
+
+    let can_save = playlists.naming_can_save();
+    let field = text_input("Name the playlist…", &entry.text)
+        .id(new_name_id())
+        .on_input(Message::NewPlaylistInput)
+        .on_submit(Message::NewPlaylistSubmit)
+        .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+        .size(theme::SIZE_BODY)
+        .line_height(theme::LEADING_BODY)
+        .width(Length::Fill)
+        .style(move |_theme, status| theme::input(room, status));
+    let save = button(
         container(
-            text("New playlist")
+            text("Save")
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
                 .font(theme::MEDIUM)
@@ -264,38 +368,34 @@ fn new_playlist_door() -> Element<'static, Message> {
     .height(Length::Fixed(theme::TRANSPORT_HIT))
     .padding(theme::pad(0.0, theme::GAP_SM))
     .style(move |_theme, status| theme::word_button(room, room.plinth, status))
-    .on_press(Message::NewPlaylistStart)
-    .into()
-}
-
-/// The name field the `New playlist` row becomes, with the storage layer's
-/// refusal under it in plain words when the last submission was refused.
-fn name_field(entry: &NameEntry) -> Element<'_, Message> {
-    let room = theme::active();
+    // Inert, and *visibly* inert: `on_press_maybe` with no message is the
+    // product's own disabled control, and `word_button` draws that state.
+    .on_press_maybe(can_save.then_some(Message::NewPlaylistSubmit));
     let mut block = column![
-        text_input("Name the playlist…", &entry.text)
-            .id(new_name_id())
-            .on_input(Message::NewPlaylistInput)
-            .on_submit(Message::NewPlaylistSubmit)
-            .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
-            .size(theme::SIZE_BODY)
-            .line_height(theme::LEADING_BODY)
-            .width(Length::Fill)
-            .style(move |_theme, status| theme::input(room, status)),
+        row![field, save]
+            .spacing(theme::GAP_SM)
+            .align_y(iced::Alignment::Center)
     ]
     .spacing(theme::GAP_XS);
-    if let Some(error) = &entry.error {
+    if let Some(refusal) = playlists.naming_refusal() {
         block = block.push(
-            text(error.clone())
+            text(refusal)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
                 .color(room.alert),
         );
     }
-    block.into()
+    container(
+        row![sleeve, container(block).width(Length::Fill)]
+            .spacing(theme::GAP_SM)
+            .align_y(iced::Alignment::Center),
+    )
+    .width(Length::Fill)
+    .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+    .into()
 }
 
-/// One playlist's row: the sleeve, then the name over its counts — one
+/// One playlist's row: the sleeve, then the name over its counts/// One playlist's row: the sleeve, then the name over its counts — one
 /// control, the door to its page (09 §9's shrinking: the receive `+` is
 /// gone, and a row is a directory entry rather than a workspace).
 ///

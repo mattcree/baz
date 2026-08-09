@@ -3686,6 +3686,29 @@ pub fn panel(p: &Palette) -> container::Style {
 /// page's own bound — a playlist tile is never drawn larger than a record's.
 pub const PANEL_SLEEVE: f32 = 40.0;
 
+/// **The ghost row's sleeve slot** (the owner's `New playlist`, 2026-08-09):
+/// the surface *below* the panel with a hairline edge, holding the drawn
+/// [`crate::icon::Glyph::Plus`].
+///
+/// A recess rather than a step up, and that is the whole of what makes it read
+/// as *not made yet*: every real sleeve beside it is an opaque object at or
+/// above the panel's own plane, and this one is a hole in the panel where an
+/// object will go. Deliberately quieter even than
+/// [`playlist_rest_tile`] — that stands for a made thing with nothing to
+/// quote; this stands for a thing that does not exist.
+#[must_use]
+pub fn ghost_sleeve(p: &Palette) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(p.recess)),
+        border: Border {
+            color: p.hairline(p.recess),
+            width: 1.0,
+            radius: RADIUS_SEGMENT.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
 /// The rest tile of a playlist with nothing to quote (ADR-0024 §A1.3): the
 /// surface step with a hairline edge, the name in ink on it.
 ///
@@ -6946,13 +6969,20 @@ mod tests {
     ///
     /// - **a glyph beside a word is not icon-only** — the word is the name
     ///   (`play_album`, the playlist page's `play_control`, the strip's
-    ///   `play_all`);
+    ///   `play_all`, and the panel's `ghost_row`, whose plus stands in the
+    ///   sleeve slot beside the words `New playlist`);
     /// - **the well's magnifier is not a control** — the well is the
     ///   control; the glyph is its label (doc 10 §4.1), and the well itself
     ///   is reachable by every printable key.
     #[test]
     fn every_icon_only_control_carries_a_tooltip() {
-        const EXEMPT: [&str; 4] = ["play_album", "play_control", "play_all", "well"];
+        const EXEMPT: [&str; 5] = [
+            "play_album",
+            "play_control",
+            "play_all",
+            "well",
+            "ghost_row",
+        ];
         let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
         let mut bare: Vec<String> = Vec::new();
         let mut checked = 0_u32;

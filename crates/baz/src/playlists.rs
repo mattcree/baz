@@ -640,6 +640,53 @@ impl Playlists {
         }
     }
 
+    /// **Why the name being typed cannot be saved yet**, in the storage
+    /// layer's own words — or `None` when it can.
+    ///
+    /// The ghost row's `Save` control reads this and is inert while it is
+    /// `Some`, which is the visible-control rule's other half: *a control
+    /// that cannot act must not pretend it can*. The refusal is the one
+    /// `Folder::create` would give, asked before the press rather than after
+    /// it, so the words a listener reads are the words the act would have
+    /// produced.
+    ///
+    /// An **empty** field is not a refusal — it is the field at rest, and a
+    /// row that shouted at you for not having typed yet would be worse than
+    /// one that waited. It reports `None` here and `false` from
+    /// [`Self::naming_can_save`], which is exactly the difference between
+    /// *nothing to say* and *nothing to do*.
+    #[must_use]
+    pub(crate) fn naming_refusal(&self) -> Option<String> {
+        let naming = self.naming.as_ref()?;
+        // The last submission's own refusal outranks anything derived: it is
+        // what actually happened, and it may name something no check here can
+        // see (a permission, a full disk).
+        if let Some(error) = &naming.error {
+            return Some(error.clone());
+        }
+        let name = naming.text.trim();
+        if name.is_empty() {
+            return None;
+        }
+        if let Err(error) = baz_core::playlist::validate_name(name) {
+            return Some(error.to_string());
+        }
+        if self.holds(name) {
+            return Some(format!("There is already a playlist called {name:?}."));
+        }
+        None
+    }
+
+    /// Whether the ghost row's `Save` may act: something typed, and nothing
+    /// refusing it.
+    #[must_use]
+    pub(crate) fn naming_can_save(&self) -> bool {
+        self.naming
+            .as_ref()
+            .is_some_and(|naming| !naming.text.trim().is_empty())
+            && self.naming_refusal().is_none()
+    }
+
     /// The panel's `New playlist` was submitted: create the file, and when a
     /// pick was in flight, complete it into the new list (create-from-a-record
     /// is two gestures, ADR-0024 §6).
@@ -647,6 +694,12 @@ impl Playlists {
     /// On refusal the storage layer's words land in the field's error line —
     /// surfaced plainly, not translated.
     pub(crate) fn submit_new(&mut self, library: &Library) {
+        // A press that cannot act does nothing at all — the `Save` control is
+        // already inert, and Enter is its accelerator, so the two must refuse
+        // the same name in the same way (the mirror rule).
+        if !self.naming_can_save() {
+            return;
+        }
         let Some(naming) = &mut self.naming else {
             return;
         };
@@ -1505,37 +1558,60 @@ mod tests {
         assert_eq!(playlists.page(id).expect("open").rows.len(), 2);
     }
 
+    /// **The name rules refuse before the press, not after it** — the ghost
+    /// row's `Save` reads [`Playlists::naming_refusal`] and is inert while it
+    /// speaks, so the refusal a listener reads is the one the act would have
+    /// produced rather than the one it did.
+    ///
+    /// The words are the storage layer's, unchanged: baz does not translate a
+    /// refusal into a friendlier lie about what happened.
     #[test]
-    fn the_name_rules_refusal_lands_in_the_fields_own_words() {
+    fn the_name_rules_refuse_before_the_press_in_the_storage_layers_words() {
         let (_keep, folder) = folder();
         let library = library();
         let mut playlists = Playlists::over(folder);
+
+        // Nothing typed: nothing to say, and nothing to do. The two readings
+        // are different on purpose — a row that shouted at you for not having
+        // typed yet would be worse than one that waited.
+        playlists.naming = Some(NameEntry::default());
+        assert_eq!(playlists.naming_refusal(), None);
+        assert!(!playlists.naming_can_save());
+
+        // A broken rule, named before the press — and the press does nothing.
         playlists.naming = Some(NameEntry {
             text: "a/b".to_owned(),
             error: None,
         });
+        let refusal = playlists.naming_refusal().expect("the refusal is surfaced");
+        assert!(refusal.contains("path separator"), "{refusal:?}");
+        assert!(!playlists.naming_can_save());
         playlists.submit_new(&library);
-        let naming = playlists.naming.as_ref().expect("the field survives");
-        let error = naming.error.as_deref().expect("the refusal is surfaced");
-        assert!(error.contains("path separator"), "{error:?}");
-        // A taken name is refused in the same lane.
+        assert!(
+            playlists.naming.is_some(),
+            "an inert control's accelerator must be inert too"
+        );
+
+        // A good name goes through, and the ghost returns.
         playlists.naming = Some(NameEntry {
             text: "Mix".to_owned(),
             error: None,
         });
+        assert!(playlists.naming_can_save());
         playlists.submit_new(&library);
         assert!(playlists.naming.is_none(), "a good name goes through");
+
+        // …and the collision it just created is refused in the same lane,
+        // before the press, by name.
         playlists.naming = Some(NameEntry {
             text: "Mix".to_owned(),
             error: None,
         });
-        playlists.submit_new(&library);
-        let error = playlists
-            .naming
-            .as_ref()
-            .and_then(|naming| naming.error.as_deref())
+        let refusal = playlists
+            .naming_refusal()
             .expect("the collision is surfaced");
-        assert!(error.contains("already exists"), "{error:?}");
+        assert!(refusal.contains("already"), "{refusal:?}");
+        assert!(!playlists.naming_can_save());
     }
 
     #[test]
