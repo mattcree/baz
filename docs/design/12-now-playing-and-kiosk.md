@@ -2485,9 +2485,10 @@ every step is shippable on its own — a release could stop after any of them an
 the surface would be better than it was, not half-built.
 
 The engine work is deliberately **last**, not because it is least valuable but
-because steps 1–6 are all front-end changes to a place that already exists,
-while step 8 touches the realtime path and ADR-0009's promise. Front-loading the
-riskiest work would mean the visible improvements wait on it.
+because steps 1–7 are all front-end changes to a place that already exists,
+while steps 8 and 9 touch the pump path and ADR-0009's promise. Front-loading
+the riskiest work would mean the visible improvements wait on it — and the
+closing note under step 9 gives the shorter path if the bars are wanted first.
 
 ---
 
@@ -2593,27 +2594,66 @@ deliverable** and must not be substituted with a software-rasterised number.
 
 ---
 
-**Step 8 — The meter.** *(§9 — the only step that touches the realtime path)*
+**Step 8 — The tap, and the spectrum.** *(§10 — the headline visual, and the
+first step that touches the engine)*
+
+In `baz-core`: `SpectrumRing` (16 384 `f32`, overwriting, single writer);
+`Command::SetSpectrum(bool)` swapping the session's `Option<SpectrumRing>`; the
+`write_downmixed(&[f32])` tap on `a`/`b` in `pump`. In `crates/baz`: a
+`realfft` planner and owned scratch buffers, Hann windowing, the geometric
+banding, the attack/decay and peak-hold ballistics, and the bars in the field's
+shader with the `Canvas` fallback.
+
+*Ships*: **the thing the owner asked to see.**
+*Tests*:
+- **Bit-exactness**: the existing ADR-0009 suite passes **unmodified**. The tap
+  takes `&[f32]`, so this is a regression guard rather than the proof.
+- **`the_bars_are_still_at_digital_silence`** — an all-zero window puts every
+  bar at exactly zero height, not near it (§10.5).
+- **`the_bars_do_not_move_with_the_volume`** — sweeping the fader changes no
+  bar, because the tap is pre-gain.
+- **No allocation per frame**: `process_with_scratch` with owned buffers, and no
+  allocation on the pump path, asserted as `device.rs` and `volume.rs:432–437`
+  already do.
+- **`a_slow_reader_never_blocks_the_writer`** — the ring's writer completes with
+  no reader present and with a reader stalled.
+*Gate*: §10.9's thresholds, including the FFT's < 1 ms and the 4K frame time.
+
+---
+
+**Step 9 — The meter.** *(§9 — a second consumer of step 8's tap)*
 
 In `baz-core`: `pub(crate)` on `KWeighting`; a `LiveMeter` with fixed-size
 accumulation and no `Vec` growth; `SharedMeter`'s two `AtomicU32`s;
 `Command::SetMetering(bool)` swapping the session's `Option<LiveMeter>`; the
-`observe(&[f32])` tap on `a`/`b` in `pump`. In `crates/baz`: the instrument
-register, the field's response, and the three ballistics.
+`observe(&[f32])` call beside step 8's ring write, on the same slices at the
+same instant. In `crates/baz`: the instrument register and the shared ballistics
+selector.
 
-*Ships*: the last piece of the brief.
-*Tests, and they are the point*:
-- **Bit-exactness**: the existing ADR-0009 suite must pass **unmodified**. The
-  tap cannot mutate — `&[f32]` — so this is a regression guard, not the proof.
+*Ships*: the precise reading, for the person who wants it.
+*Tests*:
 - **Compliance vectors** per §9.1: VU reaches 99 % in 300 ms ± tolerance with
   1–1.5 % overshoot; PPM falls 24 dB in 2.8 s; momentary agrees with
   `loudness.rs`'s integrated figure on a steady tone. **The published constants
-  are read from the standards at implementation time, not from this document.**
-- **No allocation on the pump path**, asserted the way baz already asserts
-  realtime contracts in `device.rs` and `volume.rs:432–437`.
-- **Zero when off**: with `SetMetering(false)`, the session holds no
-  `LiveMeter`.
-*Gate*: §7.4's thresholds re-run with the meter live.
+  are read from the standards at implementation time, not from this document**
+  (§13 R1).
+- **The agreement tests of §10.7**: `the_meter_and_the_bars_agree_on_silence`
+  and `..._on_a_full_scale_sine`, plus
+  `neither_instrument_moves_with_the_volume`.
+- **Zero when off**: with `SetMetering(false)` the session holds no `LiveMeter`.
+*Gate*: §7.4's thresholds re-run with both instruments live.
+
+---
+
+**A note on the order.** Steps 1–7 are front-end work on a place that already
+exists; step 8 is the first to touch `baz-core`, which is why the engine work
+sits behind the visible wins rather than in front of them. **If the owner wants
+the bars sooner than this order delivers them**, the shortest honest path is
+**1 → 2 → 6 → 8**: the transport fix, the artwork at its real size, the toggles,
+and the spectrum — with the static field (3), the type scale (4) and the feed
+(5) following. That path reaches the headline visual in four steps instead of
+eight and gives up nothing structurally; it only means the bars arrive over a
+plain `#0C0D0E` room rather than over the derived field for a release or two.
 
 ---
 
@@ -2625,7 +2665,7 @@ Everything this study declined, in the order it should be picked up.
 
 | | Item | Why deferred | What would trigger it |
 |---|---|---|---|
-| **D1** | **The visualizer** (§10) | The marginal work is an FFT and a sample ring; the marginal *risk* is looking like every other player. The interesting question — *what would baz's own be* — is unanswered and should not be answered in a hurry | Step 8 lands the tap it needs. Then it wants its own study, not a section |
+| **D1** | **A 4096-point transform for the lowest octave** (§10.4) | With 21.5 Hz bins the 32–64 Hz octave holds ~1.5 bins, so the bottom bars share them and move together. That is the data being honest; a second transform is the only fix that is not interpolation | The bass reading as visibly ganged on real material, once step 8 ships |
 | **D2** | **Network enrichment** (§8.6) | Blocked on an identifier baz does not store: every good source is MBID-keyed and baz holds no MBIDs. That is a scan-and-schema change, not a UI one | The local feed shipping and proving the composition has no hole in it |
 | **D3** | **Embedded lyrics** | A new scan capability (`lofty` can read the frames); and at 3 m a scrolling lyric column is the wrong object for the far field | A demand this study did not find |
 | **D4** | **A first-seen column in the index** | Would make *"added to your collection in 2019"* true. Today only `mtime` exists and a re-tag rewrites it, so the fact would be a plausible-looking lie (§8.1) | A schema change for another reason, which this would ride along with |
@@ -2636,9 +2676,10 @@ Everything this study declined, in the order it should be picked up.
 
 | | Claim | Current standing | Before it is leaned on |
 |---|---|---|---|
-| **R1** | The VU and PPM ballistic constants (§9.1) | Stated from the standards by name; **not read from the published documents in this session** | Read IEC 60268-17 and IEC 60268-10 directly at step 8, exactly as ADR-0015 asserted its coefficients against BS.1770-4's own tables |
-| **R2** | Roon's Display mode and Plexamp's screensaver (§2) | **Not independently verified** — doc 03 recorded that Plexamp's UI page 301s and its layout *"was not seen"* | Direct examination before any composition decision cites them. Nothing in §5–§9 currently rests on either |
+| **R1** | The VU and PPM ballistic constants (§9.1) | Stated from the standards by name; **not read from the published documents in this session** | Read IEC 60268-17 and IEC 60268-10 directly at step 9, exactly as ADR-0015 asserted its coefficients against BS.1770-4's own tables |
+| **R2** | Roon's Display mode and Plexamp's screensaver (§2) | **Not independently verified** — doc 03 recorded that Plexamp's UI page 301s and its layout *"was not seen"* | Direct examination before any composition decision cites them. Nothing in §5–§10 currently rests on either |
 | **R3** | The GPU cost estimates (§7.4) | **Labelled estimates**, from the shape of the work | Step 7's gate, which is the measurement itself |
+| **R4** | The FFT cost estimate — 20–60 µs per frame (§10.3) | **Labelled an estimate**, from the butterfly count | Step 8's gate, which measures it directly against a < 1 ms threshold |
 
 ---
 
