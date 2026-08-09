@@ -14,11 +14,11 @@ use iced::{Element, Length, alignment};
 use crate::app::{Message, Shelf, scroll_id};
 use crate::player::PlayerState;
 use crate::playlists::Collecting;
-use crate::shelf::{Grid, Run, Shelves};
+use crate::shelf::{Density, Grid, Run, Shelves};
 use crate::spine::{Slot, Spine};
 use crate::views::album::add_slot;
 use crate::views::{gradient_block, section_rule};
-use crate::{rail, theme, vm};
+use crate::{icon, rail, theme, vm};
 
 /// **The wall**: the shelved, virtualized grid, its pinned group header, and
 /// the index rail down its right-hand side.
@@ -594,6 +594,15 @@ fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
 /// estimated height is exactly how it once overflowed the window; see
 /// [`Spine`]'s docs). This function owns everything the rail *says*: what the
 /// entries are, and which one the wall is standing on.
+///
+/// # The lane's foot carries the density detents
+///
+/// Below the spine's strip, the three density marks ([`density_control`],
+/// ADR-0028) close the lane. The spine's height is what the marks leave it,
+/// and its per-frame elision absorbs the shorter lane exactly as it absorbs
+/// a short window — the fisheye never sees the marks because they are
+/// outside its bounds, and the lane's *width* is [`theme::INDEX_LANE_W`] at
+/// every step, so the wall beside it cannot reflow by a pixel.
 fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
     let runs = shelves.runs();
     let headers: Vec<vm::GroupHeaderVm> = runs
@@ -625,7 +634,132 @@ fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
             current: Some(index) == current,
         })
         .collect();
-    Spine::new(slots, current, theme::active(), Message::RailJumped).into()
+    column![
+        Spine::new(slots, current, theme::active(), Message::RailJumped),
+        density_control(shelf.grid().density),
+    ]
+    .width(Length::Fixed(theme::INDEX_LANE_W))
+    .into()
+}
+
+/// The lane inset that stands a mark's ink on the lane's own edge: the
+/// sprite is centred in its [`theme::STEPPER_HIT`] box, so the box overhangs
+/// the window gutter by this much and the sprite's right edge lands on
+/// `W − HANG` — the same line the rail's letters hang from. The wall's
+/// permitted-edge list (law L5) gains nothing.
+const MARK_INSET: f32 = (theme::STEPPER_HIT - theme::ICON_PX) / 2.0;
+
+/// **The density detents** (ADR-0028, doc 11 §5 P8 — the owner's choice):
+/// three marks at the foot of the index rail's lane, one per
+/// [`Density::ALL`] step, loosest at the top — the direction
+/// <kbd>Ctrl</kbd>+<kbd>=</kbd> walks.
+///
+/// # Why here
+///
+/// Density reads *the viewport, and nothing else* (doc 07 L8.1), so its home
+/// is the place's body — and the lane is the body's one resident
+/// view-subject strip, already reading the arrangement and the viewport. The
+/// wall's own leading band was the other candidate and fails three ways: it
+/// scrolls away, the pinned header claims it the moment the wall moves, and
+/// its height is the step's hang, so a control there would resize itself as
+/// its own effect. The lane's width is constant at every step and window;
+/// nothing about the grid's algebra changes.
+///
+/// # What each mark is
+///
+/// A [`theme::STEPPER_HIT`] box (law L7's named secondary) holding the
+/// step's sprite — the wall itself at that hang: one work, four, nine. The
+/// current step is the full-ink mark ([`theme::GLYPH_OPACITY_HOVER`] against
+/// the others' [`theme::GLYPH_OPACITY`]) — the group-key row's active
+/// treatment translated to sprite ink, and **never the accent**: density is
+/// not playback truth. The wall is the primary readout — the covers' own
+/// size states the step — so the lift confirms rather than carries.
+///
+/// # The press is the gesture's own message
+///
+/// A mark sends [`Message::DensityStep`] with [`Density::steps_to`]'s delta
+/// — the exact signed notch count the <kbd>Ctrl</kbd>+scroll /
+/// <kbd>Ctrl</kbd>+<kbd>±</kbd> gesture would spend, making keys and wheel
+/// *accelerators of a visible control* rather than the control itself
+/// (the mirror rule, doc 07 L8.7; `docs/REFUSALS.md` as amended by
+/// ADR-0028). The **active mark is inert** — pressing the step you are on
+/// would do nothing, and a control that does nothing when pressed is the lie
+/// the rail's absent letters already refuse. It is the fact; the other two
+/// are the controls (L8.3's split).
+fn density_control(current: Density) -> Element<'static, Message> {
+    let mut marks = column![];
+    for step in Density::ALL {
+        marks = marks.push(density_mark(step, current));
+    }
+    container(marks)
+        .width(Length::Fixed(theme::INDEX_LANE_W))
+        .align_x(alignment::Horizontal::Right)
+        .padding(iced::Padding {
+            // The sprite's ink on `W − HANG`, the lane's one declared edge.
+            right: theme::HANG - MARK_INSET,
+            // One hang of air above the bar — the wall's own trailing unit,
+            // and the room's gutter does not zoom (law L1).
+            bottom: theme::HANG,
+            ..iced::Padding::ZERO
+        })
+        .into()
+}
+
+/// One detent of [`density_control`]: the step's glyph in a
+/// [`theme::STEPPER_HIT`] box, named by its tooltip (the icon-only law,
+/// doc 10 §3.1 — the tooltip is the accessible name in a toolkit with no
+/// accessibility tree), the hover wash [`theme::transport`]'s — the lane's
+/// established press vocabulary, the same family as the spine's winner chip.
+fn density_mark(step: Density, current: Density) -> Element<'static, Message> {
+    let room = theme::active();
+    let active = step == current;
+    let glyph = match step {
+        Density::Spacious => icon::Glyph::DensitySpacious,
+        Density::Balanced => icon::Glyph::DensityBalanced,
+        Density::Dense => icon::Glyph::DensityDense,
+    };
+    let mark = container(
+        iced_image(icon::handle(glyph))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(if active {
+                theme::GLYPH_OPACITY_HOVER
+            } else {
+                theme::GLYPH_OPACITY
+            }),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    // The active mark is the fact and takes no press; the other two are the
+    // controls and send the gesture's exact message (function docs).
+    let boxed: Element<'static, Message> = if active {
+        container(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .into()
+    } else {
+        button(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .padding(0)
+            .style(move |_theme, status| theme::transport(room, room.wall, status))
+            .on_press(Message::DensityStep(current.steps_to(step)))
+            .into()
+    };
+    iced::widget::tooltip(
+        boxed,
+        text(step.label())
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        // Leftwards: the marks stand on the window's right edge.
+        iced::widget::tooltip::Position::Left,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
+    .into()
 }
 
 /// The shelf with nothing to show: a zero-result search, the first moments of
@@ -1008,6 +1142,117 @@ mod tests {
             row.contains(".padding(theme::pad(theme::GAP_XS, 0.0))"),
             "a songs row hangs from the block's own edges (law L5)"
         );
+    }
+
+    /// **A density mark's press is the gesture's exact message** (ADR-0028;
+    /// the mirror rule, doc 07 L8.7; the discipline of
+    /// `every_menu_item_is_a_press_some_control_also_makes`).
+    ///
+    /// Two halves. The pure half: the delta a mark sends walks
+    /// `Density::step` — the gesture's own function — onto the pressed step,
+    /// for every pair, so the marks and the zoom cannot drift apart. The
+    /// wiring half, source-pinned the way the songs-section test pins its
+    /// geometry: the one press in `density_mark` is
+    /// `Message::DensityStep(current.steps_to(step))` — no `DensitySet`, no
+    /// second grammar — and the active mark takes the inert branch, because
+    /// a control that does nothing when pressed is the lie the rail's
+    /// absent letters already refuse.
+    #[test]
+    fn the_density_marks_mirror_the_gestures_exact_messages() {
+        for current in Density::ALL {
+            for target in Density::ALL {
+                assert_eq!(
+                    current.step(current.steps_to(target)),
+                    target,
+                    "{} mark pressed at {}",
+                    target.label(),
+                    current.label()
+                );
+            }
+        }
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/shelf.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        let mark = source
+            .split_once("fn density_mark")
+            .expect("the density mark exists")
+            .1;
+        let mark = &mark[..mark.find("\n}\n").expect("a function ends")];
+        assert!(
+            mark.contains(".on_press(Message::DensityStep(current.steps_to(step)))"),
+            "a mark's press is the gesture's message with the mirror delta"
+        );
+        assert_eq!(
+            mark.matches(".on_press").count(),
+            1,
+            "one press, one message: the marks add no second grammar"
+        );
+        assert!(
+            mark.contains("if active {\n        container(mark)"),
+            "the active mark is inert — the fact, not a control"
+        );
+        // And every mark carries its name: the icon-only law's tooltip
+        // clause (the sweep in `theme` walks this function too; this pins
+        // the name being the step's own word).
+        assert!(
+            mark.contains("text(step.label())"),
+            "the tooltip is the step's name"
+        );
+    }
+
+    /// **The density marks stand in the lane's own geometry** (ADR-0028) —
+    /// the placement half of the control, in the lane the owner's choice
+    /// named, without disturbing an edge, a height or a width the laws
+    /// already pin.
+    #[test]
+    fn the_density_marks_stand_in_the_lanes_own_geometry() {
+        // Law L7: each mark is the named secondary square, and the band of
+        // three sits on the lattice (law L2).
+        const { assert!(super::MARK_INSET == (theme::STEPPER_HIT - theme::ICON_PX) / 2.0) }
+        const { assert!((3.0 * theme::STEPPER_HIT) % 4.0 == 0.0) }
+        // Law L5/L1: the box overhangs the gutter by exactly the sprite's
+        // centring inset, so the ink lands on `W − HANG` — the lane's one
+        // declared edge — and the inset padding is itself on the lattice.
+        const { assert!((theme::HANG - super::MARK_INSET) % 4.0 == 0.0) }
+        // The lane's width is untouched at every step: the marks live inside
+        // `INDEX_LANE_W`, which is what keeps every wall-width test true
+        // without a character changing.
+        const { assert!(theme::STEPPER_HIT + (theme::HANG - super::MARK_INSET) < theme::INDEX_LANE_W) }
+
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/shelf.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        // The lane is the spine over the marks, at the lane's width…
+        let lane = source
+            .split_once("fn index_rail")
+            .expect("the index rail exists")
+            .1;
+        let lane = &lane[..lane.find("\n}\n").expect("a function ends")];
+        assert!(
+            lane.contains("density_control(shelf.grid().density)"),
+            "the lane's foot carries the detents, fed by the grid that hung \
+             the frame"
+        );
+        assert!(
+            lane.contains(".width(Length::Fixed(theme::INDEX_LANE_W))"),
+            "the lane keeps its declared width"
+        );
+        // …and the control spends the lane's own numbers: right-aligned onto
+        // the ink edge, one un-zoomed hang of air above the bar, the steps
+        // in `ALL`'s loosest-first order — the direction Ctrl+= walks.
+        let control = source
+            .split_once("fn density_control")
+            .expect("the density control exists")
+            .1;
+        let control = &control[..control.find("\n}\n").expect("a function ends")];
+        assert!(control.contains("right: theme::HANG - MARK_INSET"));
+        assert!(control.contains("bottom: theme::HANG"));
+        assert!(control.contains("for step in Density::ALL"));
+        assert!(control.contains("alignment::Horizontal::Right"));
     }
 
     /// **A tile's box holds the tile, at every density and every width.**

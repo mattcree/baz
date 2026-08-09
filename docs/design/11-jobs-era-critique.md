@@ -978,6 +978,23 @@ adjudicates.
   openly, argument supplied; (b) amends the accessibility entry's scope by
   ADR.
 
+> **Shipped** (2026-08-09) as **ADR-0028**, **the owner choosing (a)** — the
+> visible handle, not the exemption. Three detent marks stand at the foot of
+> the index rail's lane — of P8's two candidate homes, the lane beat the
+> wall's leading band because it neither scrolls away, nor shares its band
+> with the pinned header, nor resizes as its own effect; and it is the
+> body's one resident view-subject strip, so the two L8.1 view controls now
+> share one lane. Each mark is the wall itself at its step (one, four, nine
+> works in one shared field), the current step reads at full glyph ink
+> (the group-key row's active treatment, never the accent) and is inert —
+> the fact, while the other two are the controls — and a mark's press sends
+> `DensityStep` with the gesture's exact notch count
+> (`Density::steps_to`, mirror-tested), so `Ctrl+scroll` and `Ctrl+-`/`=`
+> are accelerators of a visible control now. The REFUSALS entry was
+> narrowed rather than deleted, its argument engaged in the ADR: menus,
+> choosers, sliders and Settings rows stay refused; only "no grid-size
+> picker" as applied to three quiet detents in the place's own body falls.
+
 ### P9 — `Pull`: explain it or rename it · **present-to-owner**
 
 - **Principle**: language a first-timer can name (§1.5); see-and-point

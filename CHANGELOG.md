@@ -331,6 +331,22 @@ next commit.
 
 **Interface**
 
+- **The wall's density has a visible control** (ADR-0028; doc 11 §5 P8, the
+  owner choosing the visible handle): three detent marks at the foot of the
+  index rail's lane — each the wall itself at its hang, one, four, nine works
+  in one shared glyph field — named `Spacious` / `Balanced` / `Dense` by their
+  tooltips. The current step reads at full glyph ink (never the accent —
+  density is not playback truth) and is inert; a press on either other mark
+  sends the exact `DensityStep` delta the zoom gesture would spend, so
+  <kbd>Ctrl</kbd>+scroll and <kbd>Ctrl</kbd>+<kbd>-</kbd> /
+  <kbd>Ctrl</kbd>+<kbd>=</kbd> are now accelerators of a visible control
+  rather than the action's only route — closing the law-contradiction doc 11
+  named (*no action may be gesture-only*). The REFUSALS view-options entry is
+  narrowed under the ledger's editing rule, not deleted: menus, choosers, free
+  zoom sliders and Settings rows stay refused, the three named steps stay
+  three, the step still persists as state, and the wall's width algebra is
+  untouched at every step (the marks live inside the lane's constant 108 px).
+  Captures at `docs/design/impl/density-control/`.
 - **Search answers in songs** (design doc 09 §5, step 3 of its §13; ADR-0023
   §2's amendment, accepted): while a query is live the Library place's body
   opens with a ranked **Songs** section — up to eight track rows, ADR-0021's

@@ -206,10 +206,13 @@ pub(crate) enum Message {
     /// ranks `Library::search` by fit, then field, then library order —
     /// which is why step 12 had to land before step 11 could.
     PlayFirstMatch,
-    /// <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd>, or
-    /// <kbd>Ctrl</kbd>+scroll on the wall: step the density. `+1` loosens the
-    /// hang and `-1` tightens it; both saturate (see
-    /// [`shelf::Density::step`]).
+    /// Step the density: a press on one of the three detent marks at the
+    /// foot of the index rail's lane (ADR-0028), or its accelerators —
+    /// <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd> and
+    /// <kbd>Ctrl</kbd>+scroll on the wall. `+1` loosens the hang and `-1`
+    /// tightens it; both saturate, and a mark sends the exact signed notch
+    /// count between here and its step (see [`shelf::Density::step`],
+    /// [`shelf::Density::steps_to`]).
     DensityStep(i32),
     /// The modifier keys that are down, as iced last reported them.
     ///
@@ -5142,8 +5145,9 @@ mod tests {
     /// Type-anywhere (ADR-0017 §1.2) adds four messages to this table and none
     /// of them is keyboard-only: the query has the search well ADR-0017 kept,
     /// the top match has the record page's `Play album`, the arrangement has
-    /// the top bar's row of words, and the zoom has <kbd>Ctrl</kbd>+scroll on
-    /// the wall itself.
+    /// the top bar's row of words, and the zoom has the density marks at the
+    /// foot of the index rail's lane (ADR-0028 — the row that once argued
+    /// the gesture was its own control).
     #[test]
     #[expect(
         clippy::too_many_lines,
@@ -5211,9 +5215,11 @@ mod tests {
             ),
             (
                 "DensityStep",
-                "Ctrl+scroll on the wall — the gesture *is* the pointer \
-                 control (ADR-0017 §1.3), and `docs/REFUSALS.md` refuses the \
-                 view-options menu that would be the other way to spell it",
+                "the three density marks at the foot of the index rail's \
+                 lane (ADR-0028) — each sends this message with the exact \
+                 delta the gesture would spend, so Ctrl+scroll and Ctrl+-/= \
+                 are accelerators of a visible control now, not the control \
+                 itself",
             ),
             (
                 "GroupKeySelected",
@@ -5853,8 +5859,10 @@ mod tests {
         density = step(density, 1);
         assert_eq!(density, shelf::Density::Spacious);
 
-        // Both halves of the gesture produce the same message, which is what
-        // makes the keyboard and the wheel one control rather than two.
+        // Both halves of the gesture produce the same message — and the
+        // density marks send the same message with the mirror delta
+        // (`shelf::Density::steps_to`, `views::shelf`'s mirror test) — which
+        // is what makes keys, wheel and marks one control rather than three.
         let from_key = keys::binding_for(
             &Key::Character("=".into()),
             Modifiers::COMMAND,

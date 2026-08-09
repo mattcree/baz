@@ -61,10 +61,12 @@ Three other documents bind the answer before it is written:
   keyboard-only, and no control's only affordance is hover.* This makes
   placement compulsory: an action cannot be "somewhere in the keyboard". It also
   makes deletion expensive, which is why §5 is short.
-- **[`docs/REFUSALS.md`](../REFUSALS.md), no view-options menus.** No grid-size
-  picker, no list-mode toggle, no column chooser, no sort dropdown. There is no
-  overflow menu to sweep a control into, so every control must have a real home.
-  A law that could answer "put it in a menu" would not have to be a law.
+- **[`docs/REFUSALS.md`](../REFUSALS.md), no view-options menus.** No list-mode
+  toggle, no column chooser, no sort dropdown, no free zoom slider (the
+  grid-size clause narrowed by ADR-0028 to exactly those forms; three detents
+  in the place's own body are not a menu). There is no overflow menu to sweep a
+  control into, so every control must have a real home. A law that could answer
+  "put it in a menu" would not have to be a law.
 - **`.interface-design/system.md` §13, L5 and L6.** Each surface declares the
   alignment edges it permits and the hierarchy it intends. Adding a control to a
   surface is therefore already an argued act at the composition level; this law
@@ -262,7 +264,7 @@ discriminates:
 | Next / Previous / needle | the queue the engine holds | playback | the bar |
 | Volume / mute | the engine's output stage | playback | the bar |
 | Index rail | the arrangement and the viewport | view | the wall's own edge |
-| Density | the viewport, and nothing else | view | a gesture, no chrome |
+| Density | the viewport, and nothing else | view | three detent marks on the rail's lane; the gesture accelerates them (ADR-0028 — this row read *a gesture, no chrome* until doc 11 §5 P8 showed that answer contradicted the visible-control rule) |
 | ReplayGain | `config.toml` | preference | the Settings place |
 
 This is the clause that answers the brief's hardest question — *where does an

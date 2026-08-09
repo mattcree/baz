@@ -130,16 +130,23 @@ fn round_half_up(value: f32) -> f32 {
 /// either side of the default, and you are never more than two presses from
 /// any of them.
 ///
-/// # A gesture, not a setting
+/// # A control in the place's body, not a setting
 ///
 /// ADR-0017 §1.3 takes the better half of the critique's argument — *Settings
 /// must never be the answer to a **view** question* — and supersedes
-/// `02` §2.7's placement in Settings → Appearance. The control is
+/// `02` §2.7's placement in Settings → Appearance. The step persists in
+/// `config.toml` as *state*, the way the group key does, rather than as a
+/// preference somebody goes somewhere to set, and there is still no density
+/// row and no zoom readout.
+///
+/// The visible control is **three detent marks at the foot of the index
+/// rail's lane** (ADR-0028, doc 11 §5 P8 — the owner's choice): density
+/// reads the viewport, so its home is the place's body (doc 07 L8.1), and
+/// the lane is the body's one resident view-subject strip.
 /// <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd> and
-/// <kbd>Ctrl</kbd>+scroll; the step persists in `config.toml` as *state*, the
-/// way the group key does, rather than as a preference somebody goes somewhere
-/// to set. There is no density row, no grid-size picker and no zoom readout —
-/// `docs/REFUSALS.md` refuses view-options menus by name.
+/// <kbd>Ctrl</kbd>+scroll remain as the marks' accelerators, sending the
+/// same [`crate::app::Message::DensityStep`] a mark's press sends
+/// ([`Self::steps_to`] — the mirror rule, L8.7).
 ///
 /// # Why these four numbers per step
 ///
@@ -271,6 +278,27 @@ impl Density {
         let last = i64::try_from(Self::ALL.len() - 1).unwrap_or(0);
         let index = usize::try_from(there.clamp(0, last)).unwrap_or(0);
         Self::ALL.get(index).copied().unwrap_or(self)
+    }
+
+    /// The [`Self::step`] delta that lands on `target` from here — what a
+    /// density mark's press sends (ADR-0028).
+    ///
+    /// The marks mirror the gesture rather than growing a message of their
+    /// own: a press on `target`'s mark is `DensityStep(steps_to)`, which is
+    /// exactly the signed number of gesture notches between the two steps,
+    /// so one press of a mark and |delta| presses of the key are the same
+    /// walk (the mirror rule, doc 07 L8.7 — pinned by
+    /// `a_marks_delta_is_the_gestures_own_notches`). Zero from a step to
+    /// itself, which is why the active mark is inert rather than wired: a
+    /// message that does nothing is not sent.
+    #[must_use]
+    pub fn steps_to(self, target: Self) -> i32 {
+        let position = |step: Self| {
+            i32::try_from(Self::ALL.iter().position(|s| *s == step).unwrap_or(1)).unwrap_or(1)
+        };
+        // `step` walks a positive delta towards index 0 (loosest), so the
+        // delta that lands on `target` is here − there.
+        position(self) - position(target)
     }
 }
 
@@ -980,6 +1008,44 @@ mod tests {
         // The ladder is loosest-first, which is what makes `step`'s sign the
         // direction a listener presses in.
         assert_eq!(Density::ALL, [Spacious, Balanced, Dense]);
+    }
+
+    /// **A mark's delta is the gesture's own notches** (ADR-0028): for every
+    /// pair of steps, one `DensityStep(steps_to)` lands exactly where |delta|
+    /// presses of the ±1 gesture land, and the sign is the direction the
+    /// gesture would press in. The detent control and the zoom are one
+    /// control spelled twice, by arithmetic rather than by promise.
+    #[test]
+    fn a_marks_delta_is_the_gestures_own_notches() {
+        for here in Density::ALL {
+            for target in Density::ALL {
+                let delta = here.steps_to(target);
+                // One press of the mark…
+                assert_eq!(
+                    here.step(delta),
+                    target,
+                    "{} → {}: DensityStep({delta}) misses",
+                    here.label(),
+                    target.label()
+                );
+                // …is the same walk as |delta| notches of the gesture.
+                let mut walked = here;
+                for _ in 0..delta.unsigned_abs() {
+                    walked = walked.step(delta.signum());
+                }
+                assert_eq!(
+                    walked,
+                    target,
+                    "{} → {}: {delta} is not the gesture's own notch count",
+                    here.label(),
+                    target.label()
+                );
+                // A mark never needs more presses than the ladder has rungs.
+                assert!(delta.unsigned_abs() < u32::try_from(Density::ALL.len()).unwrap_or(0));
+            }
+            // The step you are on is delta zero — the inert mark's reason.
+            assert_eq!(here.steps_to(here), 0);
+        }
     }
 
     /// The nine widths `.interface-design/system.md` §7 tabulates, reproduced

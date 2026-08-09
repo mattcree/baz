@@ -375,17 +375,26 @@ different and every layout bug unreproducible. Steps parameterise the hang
 rather than overriding it, so §7's properties (`gutter == HANG` when uncapped,
 `art ∈ [ART_MIN, ART_MAX]`) hold at every step.
 
-**A gesture, not a Settings row.** ADR-0017 §1.3 supersedes this section's
-original placement in *Settings → Appearance*, on the critique's better
-argument: *Settings must never be the answer to a **view** question.* The
-control is `Ctrl+-` / `Ctrl+=` and `Ctrl+scroll` on the wall; the current step
-persists in `config.toml` as **state**, the way the group key does, not as a
-preference somebody goes somewhere to set. There is no density row, no
-grid-size picker and no zoom readout (`docs/REFUSALS.md`).
+**A control in the place's body, not a Settings row.** ADR-0017 §1.3
+supersedes this section's original placement in *Settings → Appearance*, on
+the critique's better argument: *Settings must never be the answer to a
+**view** question.* The current step persists in `config.toml` as **state**,
+the way the group key does, not as a preference somebody goes somewhere to
+set, and there is still no density row and no zoom readout.
 
-**Built** (ADR-0017 step 6). `crates/baz/src/shelf.rs`'s `Density` supplies the
-grid's four numbers and `Grid::new(width, density)` is the same arithmetic
-around them.
+The visible control is **three detent marks at the foot of the index rail's
+lane** (ADR-0028, closing doc 11 §5 P8's law-contradiction — a gesture-only
+action broke the visible-control rule): each mark is the wall at its step
+(one, four, nine works in one shared glyph field), the current step reads at
+full glyph ink and is inert, and a mark's press sends the gesture's exact
+`DensityStep` delta, so `Ctrl+-` / `Ctrl+=` and `Ctrl+scroll` are the marks'
+accelerators. No menu, no slider, no readout row — the wall itself is the
+readout.
+
+**Built** (ADR-0017 step 6; the marks by ADR-0028). `crates/baz/src/shelf.rs`'s
+`Density` supplies the grid's four numbers and `Grid::new(width, density)` is
+the same arithmetic around them; `views/shelf.rs`'s `density_control` is the
+marks.
 
 | Step | `HANG` | `ART_MIN` | `ART_TARGET` | `ART_MAX` |
 |---|---|---|---|---|

@@ -34,6 +34,15 @@
 
 ## Known gaps in shipped features
 
+- **The density cache still decodes one size for three steps.** `02` §2.7
+  prices it: at `Dense` the LRU holds 320² thumbnails for ~200 px tiles —
+  2.5× the pixels needed. The density-aware decode size stays deliberately
+  untaken (it would make the cache's contents depend on the setting, which
+  means invalidating the whole cache on a step change), and ADR-0028's
+  visible detents make the step easier to reach without changing that
+  arithmetic. What would reverse it: a measured decode-latency or memory
+  problem on a real large library at `Dense`.
+
 - **A rare flake in `a_rate_change_is_refused_by_the_bit_perfect_default`**
   (`crates/baz-core/tests/playback.rs`). Observed **once in 13 runs** during a
   full-workspace run with four test binaries competing, on a machine also

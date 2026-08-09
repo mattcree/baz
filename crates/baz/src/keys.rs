@@ -172,9 +172,13 @@
 //! <kbd>Ctrl</kbd>+<kbd>-</kbd> and <kbd>Ctrl</kbd>+<kbd>=</kbd> step the
 //! wall's density (ADR-0017 step 6, [`crate::shelf::Density`]), and
 //! <kbd>Ctrl</kbd>+scroll is the same gesture with a pointer
-//! ([`wheel_binding`]). The two keys are the zoom pair every browser, editor
-//! and image viewer has trained: the physical keys are adjacent, they are
-//! *not* letters, and neither is anything baz could have spent on the query.
+//! ([`wheel_binding`]). Both are **accelerators of a visible control** — the
+//! three detent marks at the foot of the index rail's lane (ADR-0028), which
+//! send the identical message with the mirror delta — exactly as the digits
+//! accelerate the group keys' row. The two keys are the zoom pair every
+//! browser, editor and image viewer has trained: the physical keys are
+//! adjacent, they are *not* letters, and neither is anything baz could have
+//! spent on the query.
 //!
 //! Shift is tolerated on both, because `+` is Shift+`=` on most layouts and a
 //! listener pressing <kbd>Ctrl</kbd>+<kbd>+</kbd> means the same thing as one
@@ -533,11 +537,13 @@ pub(crate) fn field_edit_is_query(modifiers: Modifiers) -> bool {
     !modifiers.command()
 }
 
-/// **<kbd>Ctrl</kbd>+scroll is the zoom's pointer half** — the same gesture as
-/// <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd>, and the reason
-/// density can be a gesture at all without breaking §4's visible-control rule:
-/// the wall itself is the control, and it is as pointer-reachable as a slider
-/// would be without being a view-options menu (`docs/REFUSALS.md`).
+/// **<kbd>Ctrl</kbd>+scroll is the zoom's pointer accelerator** — the same
+/// gesture as <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd>,
+/// over the same message the density marks at the foot of the index rail's
+/// lane send (ADR-0028). The visible-control rule is met by the marks; the
+/// gesture is the fast route, the way a key is, and its old claim to *be*
+/// the control is retired — a gesture-only action was the contradiction
+/// doc 11 §5 P8 named.
 ///
 /// Pure, like [`binding_for`], and for the same reason: it is one decision
 /// about one event, and the state it would otherwise need — which modifiers
