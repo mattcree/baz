@@ -6,6 +6,30 @@
 
 ## Product decisions to honour later
 
+- **The lane and the panel both list playlists**, and that is an accepted
+  transitional state rather than a design (ADR-0030's amendment). The panel
+  cannot go while it is the picker for `Add to…` — ADR-0031's card at the
+  pointer is unbuilt — and the owner has since said the panel *"might be
+  alright for keeps"*. What is open is the **division of labour**, not the
+  panel's existence: today the lane is the index (resident, complete, ordered
+  by touch) and the panel is the picker and the workshop (create, rename,
+  delete, drop-target). If the panel keeps its place, its list of names is the
+  duplicate and the argument for removing *that* is L8.6's; if it goes, its
+  three jobs move to the card and the lane. **Owner decision, not an agent's.**
+- **`Resume` restores the run silently rather than paused.** ADR-0023 §6 says
+  *paused*; the engine's command table makes "loaded and paused at a non-zero
+  cursor" unrepresentable without an engine change, which §6 costed at zero
+  (`crate::session` argues it). If the engine ever gains a command that selects
+  a queue position **without** starting playback, the restore becomes two
+  commands instead of one press and the transport reads *paused* on launch.
+  That is the one change that would reopen this.
+- **The two-line strip split could move from 960 to 872.** Removing the
+  `Playlists` door freed 88 px and the single line now fits at 872, but
+  `TOP_BAR_SPLIT` was left at 960: lowering it changes when the strip splits
+  for every user, which is a visible behaviour change and not a consequence of
+  this work. The arithmetic is pinned either way
+  (`the_strip_holds_its_tenants_at_the_single_line_floor`).
+
 - **Shuffle and auto-queueing must prefer the highest-quality edition.** When a
   track exists in several formats (ADR-0007), any automatic selection — library
   shuffle, mood-steered radio, "play something" — picks the best available

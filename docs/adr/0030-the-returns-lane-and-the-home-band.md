@@ -1,11 +1,77 @@
 # ADR-0030: The returns lane, and the home band
 
-**Status**: proposed (2026-08-09) · extracts the decisions of
+> ## Amendment (2026-08-09) — the owner's decisions, recorded not argued
+>
+> `docs/REFUSALS.md`'s preamble: *"The owner's decision is sufficient on its
+> own; an entry he reverses gets rewritten to say what was decided and why,
+> and that is the whole of the process. Nobody argues with a document to
+> change their own product."* This record was written to be decided on, and it
+> was. **Four things changed, and the body below is left as it was proposed so
+> that what was recommended and what was chosen can both be read.**
+>
+> **1. Home is a place, not a band.** §3.2 recommended the band at the head of
+> the Library's body and §9.4 drew `Place::Home` as the alternative it was
+> being recommended against. The owner chose §9.4. What §9.4 priced as the
+> cost — *"a fifth place needs a route back to the wall, which is either a nav
+> rail or a strip tenant"* — is paid by item 2, which was being built anyway,
+> and it costs the strip nothing.
+>
+> §6's inventory is **unchanged**: `CONTINUE` and `RECENTLY ADDED`, and the
+> five refusals beside them, were an argument about *facts* rather than about
+> geometry, so moving the surface does not touch them. §9.4's own `YOUR LISTS`
+> band is **not** built — it duplicates the lane, which is L8.6's test, and
+> nothing about choosing the page revives it.
+>
+> **2. The lane's head holds three fixed destinations, always.** In his words:
+> *"home will appear at the top of the left hand sidebar always either way and
+> it will contain the top level concerns. think spotify"*, and *"as an
+> extension we will want a Now playing page at the top with the Home and
+> Library"*.
+>
+> This **reverses §1's refusal of destination rows** (*"any destination row
+> (`Library`, `Settings`) — that is a nav rail, refused by doc 07 L8.4"*). The
+> concession is recorded rather than smoothed over: the head is a *second
+> subject* in a surface whose whole defence was that it had one. What limits
+> the damage is the shape it was given — **a closed set of exactly three**,
+> above a hairline, with the list below it still holding one subject and one
+> order. A fourth destination is the nav rail L8.4 refused, and it is not
+> admitted by this amendment.
+>
+> **3. `Place::NowPlaying` is a seventh member**, from the same sentence.
+> `docs/design/12-now-playing-and-kiosk.md` (unfinished) argued this surface
+> for its own reasons; what ships is a first version, and its measures are
+> derived from the viewport so the kiosk mode is the same surface larger.
+>
+> **4. The playlist panel stays.** §5 removed it. It cannot go yet: ADR-0031's
+> card at the pointer is not built, and the panel is still the picker for
+> `Add to…`. Only its **strip door** is removed, which is what §5's argument
+> actually rests on — the lane is the resident index, so a labelled door to a
+> second index is two controls answering one question. Lists appearing in both
+> the lane and the panel is an accepted transitional state.
+>
+> Then the owner looked at the panel and said it *"might be alright for
+> keeps"*, and asked for two things on it: rows that visibly answer the
+> pointer, and `New playlist` as a **ghost playlist row** that becomes a field
+> in place with a `Save` control. Both shipped. §5's *"nothing remains"* is
+> therefore wrong as written; the panel has a future, and this record no longer
+> claims otherwise.
+>
+> **What did not change**, because he did not touch it: `Place::Library` is
+> still the launch frame (`VISION.md`'s first pillar) and still what
+> <kbd>Esc</kbd> returns to. §1's membership and order, §2's widths, §3's hard
+> cut and §4's responsiveness contract are all built exactly as written.
+>
+> **Shipped 2026-08-09**, in four commits: the lane, the panel's ghost row and
+> the row-hover correction, `Place::Home`, `Place::NowPlaying`. Captures and
+> the measured column-count table are at
+> [`docs/design/impl/lane-and-home/`](../design/impl/lane-and-home/README.md).
+
+**Status**: accepted and shipped, as amended above (2026-08-09) · extracts the decisions of
 [`docs/design/13-everyday-flow.md`](../design/13-everyday-flow.md) §2, §3,
 §5 and §7 · **supersedes `docs/REFUSALS.md`'s no-resident-side-surfaces
 entry and `11-jobs-era-critique.md` P10** · **restates ADR-0022's
-one-place-at-a-time sentence** · **removes the playlist panel** and with it
-ADR-0024 §5's one-summoned-panel exception · gives ADR-0023 §6's unbuilt
+one-place-at-a-time sentence** · **removes the playlist panel's strip door**
+(the panel itself stays — see the amendment) · gives ADR-0023 §6's unbuilt
 queue snapshot a surface · adds one resident surface, five tokens, two
 glyphs and one persisted bool; no engine command, no protocol message ·
 the owner's brief, verbatim: *"let's do the ground work for adding a home

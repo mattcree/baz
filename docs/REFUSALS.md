@@ -173,12 +173,33 @@ too short"* — the needle's bar was correct in every token and had no air at al
 
 ## Surfaces
 
-**baz has no resident side surfaces, and no surface that is a slot.** No
-sidebar, no inspector, no rail, no drawer, no popover. **The window holds one
-place at a time and the now-playing bar is in every one of them** (ADR-0022).
-One summoned, single-tenant panel exists: the playlist panel (ADR-0024) —
-opened by its labelled door for the duration of a collecting task, overlaying
-without reflow, closed at rest. **It may never gain a second tenant.**
+**baz has one resident side surface, and no surface that is a slot.** No
+inspector, no drawer, no popover. **The window holds one place at a time, with
+the returns lane to its left in every place but Settings, and the now-playing
+bar under all of them** (ADR-0022 as ADR-0030 restates it). One summoned,
+single-tenant panel exists beside it: the playlist panel (ADR-0024) — summoned
+by <kbd>Ctrl</kbd>+<kbd>P</kbd> for the duration of a collecting task,
+overlaying without reflow, closed at rest. **Neither may ever gain a second
+tenant.**
+
+*Rewritten on the owner's decision, 2026-08-09* — *"let's do the ground work
+for adding a home page and left hand side bar… we can collapse it into only an
+icon list. similar to Spotify"*. This entry said *no resident side surfaces*
+and it was rejected twice before it was written down; the owner reversed it,
+and the preamble says that settles it. What the reversal is **not** is a
+licence for panels generally: what was rejected twice was a **slot** — a
+340 px column that showed the selected album, then the queue, then Settings,
+with arbitration state and a re-hang of the wall on every tile press. The lane
+has one subject (*things you have touched*), one list, one order, no
+arbitration, and one press that may re-hang the wall — the press whose subject
+*is* the wall's width, and which lands outside it. ADR-0030 §1 tabulates each
+of the five findings that killed the rail against the thing that makes it
+unreachable here. **A second resident surface needs an argument that beats
+this one, and so does a second tenant in this one.**
+
+The head's three destinations are the owner's too, and they are the one
+concession worth naming: a nav rail is refused (doc 07 L8.4) and the head is a
+**closed set of three**. A fourth is the refused thing.
 
 Rejected twice by the owner before this was written down — *"an example of a
 strange UI is the two side panels we have now"*, and then *"I really hate the
