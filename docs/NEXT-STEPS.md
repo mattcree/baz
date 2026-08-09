@@ -1,71 +1,88 @@
 # baz — Next Steps
 
-> Concrete, ordered, with acceptance criteria. Standards in `ENGINEERING.md`; vision in `VISION.md`. Updated 2026-08-07.
+> Concrete, ordered, with acceptance criteria. Standards in `ENGINEERING.md`;
+> vision in `VISION.md`; deliberate deferrals in `BACKLOG.md`; what actually
+> landed in `CHANGELOG.md`. Updated 2026-08-09.
 >
-> **Status**: Phase 0 ✅ (ADRs 0001–0003) · Phase 1 ✅ (spikes complete and deleted; results in ADR-0004/0005, code at `git show dc13d7e`) · Phase 2 ✅ (`b8bcac6`; CI green on github.com/mattcree/baz run 1: 9/9 jobs incl. 3-OS tests; crates.io reservation skipped per amended ADR-0002) · **Phase 3 (v0.1 vertical slice) is underway.**
+> **Status**: Phases 0–3 ✅. baz scans several folders, shows the collection,
+> plays it gaplessly and bit-perfectly, searches by song and by record, edits
+> its queue, keeps playlists as files you own, and undoes what it did. 28 ADRs,
+> 11 design studies, ~970 tests, CI green on three platforms. **Nothing has
+> been released.**
 
-## Phase 0 — Decisions (hours, not days)
+## Where the work actually stands
 
-| # | Decision | Options / notes | Done when |
-|---|---|---|---|
-| 0.1 | License | GPL-3 (fooyin/Navidrome precedent, protects against proprietary forks) vs MPL-2 (embedding-friendly) | ADR-0001 written |
-| 0.2 | Name check | "baz" on crates.io, GitHub, Flathub, winget, Homebrew; decide binary name (`baz`? `bazplayer`?) | ADR-0002 written |
-| 0.3 | Ratify stack | Rust workspace + headless `baz-core`; GUI decided by the Phase 1 spike, not by taste | ADR-0003 written |
-| 0.4 | Repo home | GitHub org/user, issue tracker conventions | repo exists (see Phase 2) |
+The plan this file used to hold is spent. What replaced it, and where each
+chapter's reasoning lives:
 
-## Phase 1 — The two spikes (throwaway code, real answers)
+| Chapter | State | Reasoning |
+|---|---|---|
+| Engine: gapless, seek, bit-perfect, ReplayGain, volume, exclusive output | shipped | ADR-0004/0007/0009/0011/0012/0013/0015 |
+| Library: several roots, refresh, unavailable-folder honesty, picker | shipped | ADR-0022, ADR-0025 |
+| Interface: places, motion, group keys, search ranking, the index rail | shipped | ADR-0016–0022, design 01–07 |
+| Playback model, named and stated | shipped | ADR-0023, design 08–09 |
+| Playlists: `.m3u8` files, page, panel, sleeves, one transfer gesture | shipped | ADR-0024, design 08–09 |
+| Controls, iconography, the strip budget | shipped | ADR-0026, design 10 |
+| Forgiveness: undo, trash-backed delete | shipped | ADR-0027, design 11 P2 |
+| Direct manipulation: drag to reorder and to add | shipped | design 09 §13 step 8, design 11 P5 |
+| Density's visible control | in flight | design 11 P8 (owner's call, 2026-08-09) |
 
-Both spikes are explicitly disposable: they answer questions, they do not become the codebase.
+## Next, in order
 
-### Spike A — GUI: the 100k-track shelf
-The go/no-go on Tauri vs iced. Build the same brutal demo twice:
-a virtualized album-shelf grid over 100k synthetic tracks (10k albums with art), with search-as-you-type filtering.
+### 1. Cut v0.1 — the first tag
 
-**Measure** (all three OSes, worst-case Linux/WebKitGTK is the decider):
-- cold start to interactive
-- keystroke → filtered-view latency (target: < 16 ms perceived, instrument it)
-- scroll smoothness at speed over the art grid (dropped frames)
-- RSS memory at idle and after heavy scrolling
+**The largest gap in the project is that none of this is installable.** The
+README says pre-alpha and the releases page is empty; `RELEASING.md` and
+`INSTALL.md` both describe a process nobody has run. Everything below is
+smaller than this.
 
-**Accept**: the winner hits targets on all platforms; if Tauri fails only on WebKitGTK, that is a fail (Linux is not a second-class citizen — that's the wound we're healing).
+1. **An application icon.** `packaging/baz.desktop` carries no `Icon=` key
+   because no file exists to name (`BACKLOG.md`). Draw one, install it, add
+   the key in the same change.
+2. **Dry-run the release**: follow `RELEASING.md` end to end on a throwaway
+   tag, and fix what it turns out to have assumed.
+3. **Verify the Flatpak actually builds** from `packaging/flatpak/` — the
+   vendored-crate list is checked in CI, but the manifest has never been
+   built.
+4. **Tag `v0.1.0`** and publish the three binaries CI already produces.
 
-### Spike B — Audio: the gapless engine core
-Symphonia decode → ring buffer → cpal output, playing two FLACs gaplessly.
+**Accept**: a stranger on Linux, Windows or macOS can download or
+`flatpak install` baz, point it at a folder, and hear music — without
+building it.
 
-**Prove**:
-- sample-level continuity across the track boundary (synthesized-sine test from `ENGINEERING.md`, verified by loopback capture or output-buffer inspection)
-- decode-ahead of track N+1 while N plays, without touching the audio thread's guarantees
-- behavior across a sample-rate change at a track boundary (documented strategy: reopen stream vs resample — measure the gap)
-- one platform exclusive-mode proof (ALSA `hw:` or WASAPI exclusive via the `wasapi` crate) with bit-exactness sanity check
+### 2. Close the honest gaps in what already ships
 
-**Accept**: gapless verified by test, not by ear; a written note on the sample-rate-change strategy becomes ADR-0004.
+- **Opus** — refused four ways with the reversal conditions written down
+  (`BACKLOG.md`); re-check whether Symphonia has merged a decoder.
+- **Vorbis seek loses one lapped block** (23.2 ms, measured and pinned).
+- **`Locate…` for missing playlist entries** — ADR-0024 §3 specifies the
+  repair surface; the page only counts and shows the broken path today.
+- **Shortcut discovery** — the bindings live in the README and nowhere a
+  running baz can show them.
 
-## Phase 2 — Scaffold: repo + CI before features (milestone zero)
+### 3. The chapters not yet begun
 
-1. `git init`, workspace layout: `crates/baz-core`, `crates/baz-ui` (winner of Spike A), `xtask` for automation.
-2. Install the full CI pipeline from `ENGINEERING.md` — fmt, clippy `-D warnings`, tests, doc build, cargo-deny, MSRV, coverage, 3-OS matrix — **green on the empty workspace**.
-3. `README.md` (vision one-pager + development-model statement incl. the AI policy), `CONTRIBUTING.md` (points at `ENGINEERING.md`), `LICENSE`, ADRs 0001–0004, CI badges.
-4. First fuzz target wired (even if it fuzzes a trivial parser) so the scheduled-fuzzing lane exists from day one.
+- **Steered shuffle / generated playlists.** The ground rules are already
+  law (ADR-0024 §7, design 09 S10): an ordinary editable file, asked for by
+  a person, no hidden pool. The signal — bliss-rs or equivalent local
+  analysis — is unbuilt. `VISION.md` stages this; nothing about it is
+  urgent.
+- **Enrichment, scrobbling, tagging** — the paid-parity extensions, each
+  individually opt-in, none prioritized over the core.
 
-**Accept**: a stranger cloning the repo sees a project that takes itself seriously before it does anything.
+## Two standing constraints that outlive this file
 
-## Phase 3 — v0.1 "it plays": one vertical slice
-
-Scope (from `VISION.md`, deliberately minimal):
-- scan a directory → SQLite + in-RAM index (tags via lofty or equivalent; folder-structure inference for untagged files)
-- shelf view with album art, populating live during scan
-- click album → gapless playback, front to back
-- search-as-you-type over the whole library
-- fixed layout with hideable panels; media keys + MPRIS on Linux
-
-**Accept**: the `research/05` first-run target — under 60 seconds and two decisions (pick folder, click album) from launch to music on a messy real-world library — plus all engine behavior covered by the test suite, benchmarks recorded as the baseline.
-
-## Phase 4 and beyond (sketch, revisit after v0.1)
-
-v0.2 correctness depth (ReplayGain, cues, watch folders, batch tagging, exclusive outputs) → v0.3 flow (bliss analysis, steered shuffle) → v0.4 context (enrichment pane, scrobbling, palette theming) → paid-parity extensions per the `research/06` hit-list. Order is re-derived from real usage after v0.1, not locked today.
+- **Accessibility is blocked at the toolkit**, not at baz. iced 0.13
+  publishes no accessibility tree; the README says so before install, and
+  ADR-0017 §4 refuses to inherit the gap quietly. If AccessKit lands in
+  iced, baz's side is small — every control is already a labelled widget
+  rather than a positional mark. **Revisit at every iced upgrade.**
+- **iced 0.14 exists and is not taken.** No feature needs it today; it is
+  worth an ADR when one does, or when AccessKit arrives.
 
 ## Standing rules while executing
 
-- No feature lands before Phase 2's pipeline exists. No exceptions — this is the credibility mechanism.
-- Spikes are deleted, not "cleaned up later."
-- Every stack-level choice becomes a short ADR at the moment it's made.
+- CI is the guide: main goes red, main gets fixed, before anything else.
+- Every stack-level choice becomes a short ADR at the moment it is made.
+- A design decision that contradicts `REFUSALS.md` needs an ADR that beats
+  the entry's argument — the ledger's own editing rule.
