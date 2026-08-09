@@ -832,6 +832,15 @@ fn entry_for(item: &QueueItemVm) -> Entry {
     }
 }
 
+/// The entries a run of **queue items** contributes — what the queue
+/// place's `+` holds toward the picker (doc 09 §8.2): the same
+/// `Artist - Title` `#EXTINF` convention as [`entries_for_tracks`], built
+/// from the request-side record the rows themselves are drawn from.
+#[must_use]
+pub(crate) fn entries_for_items(items: &[QueueItemVm]) -> Vec<Entry> {
+    items.iter().map(entry_for).collect()
+}
+
 /// The entries a record contributes: the selected edition's tracks, in the
 /// page's own order, each with its `#EXTINF` line.
 #[must_use]

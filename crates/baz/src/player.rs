@@ -1577,33 +1577,24 @@ impl PlayerState {
         })
     }
 
-    /// The queue panel's render-ready state, or `None` when nothing has been
-    /// queued in this session — in which case the panel says so rather than
+    /// The queue place's render-ready state, or `None` when nothing has been
+    /// queued in this session — in which case the place says so rather than
     /// drawing an empty list.
     ///
-    /// # What this deliberately does not offer
+    /// # A view over engine truth, whose rows are now controls
     ///
-    /// A *view*, and only a view. Every control a queue usually carries needs
-    /// an engine command that does not exist, and inventing a front-end
-    /// imitation of one would be exactly the dishonesty the module's rules
-    /// exist to prevent. Precisely:
-    ///
-    /// - **Click a row to jump to it** wants something like
-    ///   `Command::JumpTo { position: usize }` (the queue-relative sibling of
-    ///   `Seek`, which is track-relative). The protocol has
-    ///   [`Next`](baz_core::protocol::Command::Next) and
-    ///   [`Previous`](baz_core::protocol::Command::Previous) and nothing that
-    ///   names a position, so reaching row 9 means eight `Next`s — eight
-    ///   starts, eight `SignalPath` reports, and eight tracks of audio briefly
-    ///   reaching the sink. That is not a jump.
-    /// - **Remove a track** and **reorder the queue** want a `SetQueue` that
-    ///   *keeps playing*. Today's is documented to stop: "any playback in
-    ///   progress stops (the engine emits `Stopped`)". So the obvious
-    ///   implementation — re-send the queue minus one track — would silence
-    ///   the music to delete a track the listener was not listening to.
-    ///
-    /// Each of those is one engine command away from being a small view
-    /// change here, and until that command exists the rows are text.
+    /// This function is still only a *reading* — it decides nothing and
+    /// sends nothing — but the commands its doc once recorded as missing
+    /// exist (ADR-0014 closed the engine half), and the place spends them
+    /// on every row: a click is
+    /// [`JumpTo`](baz_core::protocol::Command::JumpTo) (the row's index *is*
+    /// a queue position, because these rows are drawn from the record of
+    /// what was sent), and the ✕ and ▲▼ go out as whole-list
+    /// [`UpdateQueue`](baz_core::protocol::Command::UpdateQueue)s through
+    /// [`crate::queue_edit`]'s pure ops — an edit that does not touch the
+    /// playing track disturbs no delivered sample, which is why removing or
+    /// reordering under playback is ordinary here (doc 09 §8.2's edit
+    /// parity).
     #[must_use]
     pub fn queue_list(&self) -> Option<QueueList> {
         let queue = self.queue.as_ref()?;
@@ -5651,6 +5642,104 @@ mod tests {
         assert_eq!(
             states(&player.queue_list().expect("a queue")),
             vec![QueueRowState::Playing]
+        );
+    }
+
+    /// **S7 / doc 09 §8.2 — reorder under playback: the cursor follows its
+    /// track.** Given a run with the second row sounding, when the sounding
+    /// row is stepped down (or the row above it is stepped past it), then
+    /// the lamp marks the row the *track* moved to — never the index the
+    /// engine last named — and the engine's `QueueChanged` confirms the same
+    /// answer. The music was never asked to stop: the edit is the same
+    /// whole-list `UpdateQueue` the ✕ sends.
+    #[test]
+    fn a_reorder_under_playback_keeps_the_cursor_on_its_track() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(geogaddi_queue());
+        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
+        assert_eq!(player.playing_row(), Some(1));
+
+        // ▲ on the sounding row: it swaps with the row above, so the track
+        // that is playing is now row 0 — and the mark is there before the
+        // engine says a word, found by path.
+        let edited = crate::queue_edit::shifted(player.queue().expect("a queue"), 1, -1)
+            .expect("the sounding row has a row above");
+        player.note_queue_edited(edited);
+        assert_eq!(
+            player.playing_row(),
+            Some(0),
+            "the cursor follows its track through the reorder"
+        );
+        assert_eq!(
+            states(&player.queue_list().expect("a queue")),
+            vec![QueueRowState::Playing, QueueRowState::Upcoming],
+            "what sounded second now reads first, still marked; nothing is 'played'"
+        );
+
+        // …and the engine's re-derived answer agrees rather than corrects.
+        player.apply(
+            &Event::QueueChanged {
+                len: 2,
+                position: Some(0),
+            },
+            &albums,
+        );
+        assert_eq!(player.playing_row(), Some(0));
+    }
+
+    /// **S9a / doc 09 §13 step 7 — the append accelerator's queue shape.**
+    /// Given a record sounding, when another record is appended to the run
+    /// (shift-click's `UpdateQueue`, the picker Queue row's exact edit),
+    /// then the run keeps its header and its cursor, the addition arrives
+    /// as its own headed group after the existing tail — albums listed as
+    /// albums, never flattened (ADR-0014) — and nothing behind the cursor
+    /// moves.
+    #[test]
+    fn an_appended_record_joins_the_tail_as_its_own_headed_group() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(geogaddi_queue());
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+
+        // The append: the held run extended by the second record's items —
+        // `App::append_to_run`'s exact edit over the same record.
+        let mut edited = player.queue().expect("a queue").clone();
+        edited.items.extend(vm::album_queue(&albums[1], None).items);
+        player.note_queue_edited(edited);
+
+        let list = player.queue_list().expect("a queue");
+        assert_eq!(
+            list.album.as_deref(),
+            Some("Geogaddi"),
+            "the run's header stays"
+        );
+        assert_eq!(player.playing_row(), Some(0), "the cursor did not move");
+        assert_eq!(
+            states(&list),
+            vec![
+                QueueRowState::Playing,
+                QueueRowState::Upcoming,
+                QueueRowState::Upcoming
+            ]
+        );
+        // The head breaks exactly where the appended record begins, naming it.
+        let heads: Vec<Option<String>> = list
+            .rows
+            .iter()
+            .map(|row| row.head.as_ref().map(|head| head.artist.clone()))
+            .collect();
+        assert_eq!(
+            heads[0], None,
+            "the first record is named by the list's header"
+        );
+        assert_eq!(
+            heads[1], None,
+            "a row continuing its record carries no head"
+        );
+        assert!(
+            heads[2].is_some(),
+            "the appended record opens under its own name"
         );
     }
 

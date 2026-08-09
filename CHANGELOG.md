@@ -220,6 +220,36 @@ next commit.
   unmarked — the gesture did what it said. ADR-0023 §3's dedicated `Queue
   album` control is withdrawn before being built (two controls, one message —
   L8.6); the picker's Queue row is the queue-append.
+- **Queue-place edit parity** (doc 09 §8.2, step 5 of its §13; ADR-0024's
+  amendment item 3, accepted): the queue's rows carry the playlist page's
+  whole reserved edit set — the ▲▼ steppers in the page's exact slots,
+  swapping an entry with its neighbour through the pure `queue_edit::shifted`
+  and sent as the whole-list `UpdateQueue` (the music keeps playing,
+  ADR-0014; the cursor follows its track through the reorder, found by path
+  until the engine's `QueueChanged` confirms), the existing ✕, and the
+  transfer `+` toward the picker, on the sounding row too. The queue place
+  and the playlist page are now **the same editor**, differing only in their
+  header blocks — the builder's audible workbench (S9a) is complete.
+- **`Play all`** (doc 09 §7.1, S6; step 6 of its §13; ADR-0023's amendment
+  item 4, accepted): one word in the Library strip, leading `Shuffle` and
+  `Pull` — the wall's current scope reified into the queue, whole records in
+  the arrangement's own order, playing from the top. **The scope is the
+  wall, always**: a query plays the matches, a YEAR arrangement plays the
+  collection chronologically, "everything" is the empty query, and an empty
+  wall does nothing and claims nothing. No pool is claimed and no
+  confirmation interposes at any scale, because **the queue place is now
+  virtualized** (`queue_window`, §7.1's named gate — the wall's
+  spacer-window discipline at list scale, pinned by a test that a
+  40 000-row queue builds a bounded slice): February's
+  select-all-into-a-playlist is one press, and the result is an ordinary
+  queue — readable, jumpable, editable, saveable, ending in silence.
+- **Shift-click queues the record** (doc 09 §13 step 7; ADR-0023 §3's
+  append accelerator): shift held, the press that would open a record's
+  page appends it to the run instead — `UpdateQueue` through the picker
+  Queue row's exact shape, nothing sounding unasked, the record joining
+  the tail as its own headed group. The visible on-screen route to the
+  same act is the picker's Queue row (`Add to…` → `Queue`), which the
+  gesture accelerates the way a key binding accelerates a button.
 - **Playing provenance** (doc 09 §6): a queue reified from a playlist file —
   its `Play`, or a click on its rows — records the file's *name* on the
   request-side queue record. Origin, never a live link: it survives every
@@ -520,6 +550,16 @@ next commit.
 
 ### Fixed
 
+- **The reorder steppers now render.** The playlist page's ▲▼ shipped as
+  U+25B4/U+25BE literals, but IBM Plex Sans — the product's one face —
+  carries no triangle glyphs at any code point, so the steppers rasterised
+  as tofu boxes; no capture had ever hovered a row to see it. Both editors
+  (the playlist page, and the queue place that joined it at doc 09 §13
+  step 5) now use ↑/↓, which are in the face. Caught by the queue-parity
+  captures' first run (`docs/design/impl/queue-parity/`).
+- **The empty playlist page no longer recommends the removed armed mode.**
+  Its words now name the transfer gesture — a row's `+`, or the record
+  page's `Add to…`, then the list in the picker.
 - **The rail panels' scrollbar no longer covers the duration column.** iced
   draws a `scrollable`'s bar over the right edge of its contents rather than
   beside them, so a track list long enough to scroll clipped every duration by

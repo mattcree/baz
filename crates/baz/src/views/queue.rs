@@ -43,6 +43,17 @@
 //! way the record's page marks the playing track — the amber lamp dot, in place
 //! of the row's number — because that is the one thing on this surface that
 //! *is* playback truth, and the palette reserves the accent for exactly that.
+//!
+//! # Edit parity, and the virtual window
+//!
+//! Since doc 09 §13 step 5 the rows carry the playlist page's whole reserved
+//! edit set — ▲▼ steppers, ✕, and the transfer `+` — so the queue place and
+//! the playlist page are **the same editor** (09 §8.2), differing only in
+//! their header blocks: the artefact's name and acts there, the run's
+//! provenance-led summary and `Save as playlist` here. And since `Play all`
+//! (09 §7.1) can reify a whole library into this list, the rows are drawn
+//! through [`crate::queue_window`]'s virtual window — everything off screen
+//! is two spacers, the wall's own discipline at list scale.
 
 use iced::widget::{
     Column, Space, button, column, container, image as iced_image, mouse_area, row, scrollable,
@@ -52,7 +63,8 @@ use iced::{Element, Length, alignment};
 
 use crate::app::Message;
 use crate::player::{PlayerState, QueueRow, QueueRowState};
-use crate::playlists::NameEntry;
+use crate::playlists::{Collecting, NameEntry};
+use crate::queue_window::{self, RowShape};
 use crate::views::{place_header, place_pad};
 use crate::{icon, theme};
 
@@ -62,13 +74,18 @@ pub(crate) fn save_name_id() -> text_input::Id {
     text_input::Id::new("baz-queue-save")
 }
 
-/// The **Queue** place: the header strip, the summary, and the rows.
+/// The **Queue** place: the header strip, the summary, and the rows —
+/// **virtualized**, so `Play all`'s five-figure queue costs the frame what a
+/// twelve-track record does (doc 09 §7.1's implementation gate;
+/// [`crate::queue_window`] owns the arithmetic, this file draws the slice it
+/// is handed, exactly as the wall's `views/shelf.rs` does for
+/// [`crate::shelf::Grid`]).
 ///
-/// `window_width` decides one thing — how wide the list is set. It grows with
-/// the window until [`theme::LIST_MEASURE`] and then stops, centring in what is
-/// left, for the reason the record's page does the same: a row whose title is
-/// at one end of 1800 px and whose duration is at the other is two words, not a
-/// row.
+/// `window` decides two things: the width sets the list's measure — it grows
+/// until [`theme::LIST_MEASURE`] and then stops, centring in what is left,
+/// for the reason the record's page does the same — and the height bounds
+/// the virtual window's span. `scroll` is where the place's one scrollable
+/// last said it was ([`Message::QueueScrolled`]).
 ///
 /// Every string here is *owned*, straight from [`PlayerState::queue_list`]'s
 /// render-ready reading, which is why the element is `'static`: the contents
@@ -76,34 +93,90 @@ pub(crate) fn save_name_id() -> text_input::Id {
 /// the library, so nothing on screen can outlive a view-model rebuild mid-scan.
 pub(crate) fn view<'a>(
     player: &'a PlayerState,
-    window_width: f32,
+    window: iced::Size,
     hovered: Option<usize>,
     saving: Option<&'a NameEntry>,
+    collecting: Collecting,
+    scroll: f32,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let measure =
-        (window_width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).clamp(0.0, theme::LIST_MEASURE);
+        (window.width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).clamp(0.0, theme::LIST_MEASURE);
     // A row is only a control when there is an engine to send its command to.
     let live = player.engine_ready();
     let body: Element<'a, Message> = match player.queue_list() {
         None => empty_state(),
         Some(list) => {
-            // A record's name where the record begins, then its tracks —
-            // **albums listed as albums, never flattened** (ADR-0014).
-            let mut rows: Vec<Element<'static, Message>> = Vec::new();
-            for (index, row_state) in list.rows.into_iter().enumerate() {
-                if let Some(head) = row_state.head.clone() {
-                    rows.push(album_group(
-                        head.album.as_deref(),
-                        &head.artist,
-                        // One `GAP_MD` of air before a new record, taken above
-                        // the name rather than below it, so the break belongs
-                        // to the record it opens.
-                        theme::GAP_MD,
-                    ));
+            // The window over the rows: every element outside it is part of
+            // one of two spacers. What the arithmetic needs of each row is
+            // its shape — a header opening above it, an artist line under
+            // its title — and the offsets are handed straight to the module
+            // (`queue_window::MARGIN` absorbs the estimate below).
+            let shapes: Vec<RowShape> = list
+                .rows
+                .iter()
+                .map(|row_state| RowShape {
+                    head: row_state.head.as_ref().map(|head| head.album.is_some()),
+                    two_line: row_state.artist.is_some(),
+                })
+                .collect();
+            // Where the rows column begins inside the scrollable content:
+            // the place's top pad, the summary strip, the column gaps and
+            // the list's own head block. An estimate — the save field, when
+            // open, moves it by less than the module's margin absorbs.
+            let head_two_line = list.album.is_some();
+            let rows_top = theme::HANG
+                + theme::TRANSPORT_HIT
+                + 2.0 * theme::GAP_LG
+                + theme::LINE_BODY
+                + if head_two_line {
+                    theme::GAP_XXS + theme::LINE_META
+                } else {
+                    0.0
                 }
-                rows.push(queue_row(row_state, index, live, hovered == Some(index)));
+                + theme::GAP_XS;
+            let win = queue_window::window(&shapes, scroll - rows_top, window.height);
+            // A record's name where the record begins, then its tracks —
+            // **albums listed as albums, never flattened** (ADR-0014). Each
+            // element is boxed at exactly the pitch the module declared for
+            // it (spacing 0; the gap is folded into the pitch), so the
+            // spacers and the drawn slice cannot disagree about the list.
+            let mut rows: Vec<Element<'static, Message>> = Vec::new();
+            rows.push(Space::with_height(Length::Fixed(win.top)).into());
+            for index in win.first..win.end {
+                let row_state = list.rows[index].clone();
+                if let Some(head) = row_state.head.clone() {
+                    rows.push(
+                        container(album_group(
+                            head.album.as_deref(),
+                            &head.artist,
+                            // One `GAP_MD` of air around a new record's name,
+                            // so the break belongs to the record it opens.
+                            theme::GAP_MD,
+                        ))
+                        .height(Length::Fixed(queue_window::header_pitch(
+                            head.album.is_some(),
+                        )))
+                        .align_y(alignment::Vertical::Top)
+                        .into(),
+                    );
+                }
+                let two_line = row_state.artist.is_some();
+                rows.push(
+                    container(queue_row(
+                        row_state,
+                        index,
+                        list.rows.len(),
+                        live,
+                        hovered == Some(index),
+                        collecting,
+                    ))
+                    .height(Length::Fixed(queue_window::row_pitch(two_line)))
+                    .align_y(alignment::Vertical::Top)
+                    .into(),
+                );
             }
+            rows.push(Space::with_height(Length::Fixed(win.bottom)).into());
             column![
                 // The summary shares its line with the one act the transient
                 // earns: freezing tonight's run into a file (ADR-0024 §4,
@@ -123,7 +196,7 @@ pub(crate) fn view<'a>(
                 save_field(saving),
                 column![
                     album_group(list.album.as_deref(), &list.artist, 0.0),
-                    Column::with_children(rows).spacing(theme::GAP_XS),
+                    Column::with_children(rows),
                 ]
                 .spacing(theme::GAP_XS),
             ]
@@ -143,6 +216,7 @@ pub(crate) fn view<'a>(
                 .padding(place_pad())
                 .align_x(alignment::Horizontal::Center)
         )
+        .on_scroll(Message::QueueScrolled)
         .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
         .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
         .width(Length::Fill)
@@ -281,8 +355,9 @@ fn empty_state() -> Element<'static, Message> {
 }
 
 /// One queue row: position (or the lamp dot when it is playing), title over its
-/// artist where there is one, right-aligned duration — and two things a
-/// listener can do to it.
+/// artist where there is one, right-aligned duration — and the full reserved
+/// edit set a list in baz carries (doc 09 §8.2: **the queue place and the
+/// playlist page are the same editor**).
 ///
 /// **Clicking the row plays from there.** ADR-0014's `JumpTo`, and this list is
 /// the one place it needs no decision at all: the rows are drawn from the
@@ -290,26 +365,45 @@ fn empty_state() -> Element<'static, Message> {
 /// position. Nothing is re-queued, and the mark follows `TrackStarted` rather
 /// than the click.
 ///
+/// **The ▲▼ steppers reorder** — the playlist page's exact slots
+/// (`views/playlist.rs`), sending the whole edited list as `UpdateQueue`
+/// through the pure [`queue_edit::shifted`](crate::queue_edit::shifted): the
+/// music keeps playing (ADR-0014's guarantee), and the cursor follows its
+/// track — the sounding row moves like any other, because the engine finds
+/// it again by path.
+///
 /// **The ✕ takes the entry out**, through `UpdateQueue` and the pure
 /// [`queue_edit`](crate::queue_edit) helper — an edit that does not touch the
 /// playing track does not disturb one delivered sample, which is the guarantee
 /// ADR-0014 exists to make and the reason this is not a `SetQueue`.
+///
+/// **The `+` is the transfer slot** (doc 09 §8.1): one press holds this row's
+/// track and opens the panel as the picker — a destination list, the Queue's
+/// own row first among them — so a run being auditioned can seed a kept list
+/// row by row (S9a). It is on the sounding row too: the track you are hearing
+/// is the one most worth keeping. Drawn at the row's outer edge, where the
+/// album page's rows put the same slot; the ▲▼✕ keep the playlist page's
+/// exact positions.
 ///
 /// Two fixed-slot rules, because a list that changes under the reader is
 /// exactly where movement is least affordable:
 ///
 /// - the number column is [`theme::TRACK_NO_W`] wide whichever it holds, so the
 ///   dot arriving as a track starts moves no text;
-/// - **the ✕'s slot is reserved whether or not the ✕ is in it.** The control
-///   appears on hover — a column of permanent crosses down a list of what you
-///   are about to hear is a column of invitations to destroy something — but if
-///   its width came and went with it, every duration would slide sideways as
-///   the pointer crossed a row.
+/// - **every edit slot is reserved whether or not its control is in it.** The
+///   controls appear on hover — a column of permanent crosses down a list of
+///   what you are about to hear is a column of invitations to destroy
+///   something — but if their width came and went with them, every duration
+///   would slide sideways as the pointer crossed a row. (The `+` alone is
+///   also drawn at rest while the panel stands, the album page's own rule:
+///   the picker on screen is the task the mark belongs to.)
 fn queue_row(
     row_state: QueueRow,
     index: usize,
+    total: usize,
     live: bool,
     hovered: bool,
+    collecting: Collecting,
 ) -> Element<'static, Message> {
     let room = theme::active();
     let playing = row_state.state == QueueRowState::Playing;
@@ -382,13 +476,108 @@ fn queue_row(
     .padding(theme::pad(theme::GAP_XS, 0.0))
     .style(move |_theme, status| theme::track_row(room, status, playing))
     .on_press_maybe(live.then_some(Message::JumpToQueued(index)));
-    mouse_area(
-        row![body, remove_slot(index, live && hovered)]
-            .spacing(theme::GAP_XS)
-            .align_y(iced::Alignment::Center),
+    let offered = live && hovered;
+    let mut slots = row![
+        body,
+        step_slot(
+            "\u{2191}",
+            index > 0,
+            offered,
+            Message::ShiftQueued(index, -1)
+        ),
+        step_slot(
+            "\u{2193}",
+            index + 1 < total,
+            offered,
+            Message::ShiftQueued(index, 1),
+        ),
+        remove_slot(index, offered),
+    ]
+    .spacing(theme::GAP_XS)
+    .align_y(iced::Alignment::Center);
+    if collecting.available {
+        // The transfer slot needs no engine — a pick can land in a file —
+        // so it is offered on hover alone, and at rest while the panel
+        // stands (the album page's own rule).
+        slots = slots.push(transfer_slot(index, collecting.panel_open || hovered));
+    }
+    mouse_area(slots)
+        .on_enter(Message::QueueRowEntered(index))
+        .on_exit(Message::QueueRowLeft(index))
+        .into()
+}
+
+/// One reorder stepper's reserved slot: ↑ or ↓ while the pointer is on the
+/// row, and a space of exactly the same width when it is not — the playlist
+/// page's `step_slot`, spending the queue's own message
+/// ([`Message::ShiftQueued`]) so the two editors stay one anatomy
+/// (doc 09 §8.2). U+2191/U+2193 rather than the docs' ▲▼ shorthand for the
+/// playlist page's reason: IBM Plex Sans carries no triangles, and these
+/// arrows are in the face (see `views/playlist.rs`'s `step_slot`).
+fn step_slot(
+    glyph: &'static str,
+    can: bool,
+    offered: bool,
+    message: Message,
+) -> Element<'static, Message> {
+    let room = theme::active();
+    if !offered {
+        return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
+    }
+    button(
+        container(
+            text(glyph)
+                .size(theme::SIZE_BODY)
+                .line_height(theme::LEADING_BODY)
+                .color(if can { room.paper } else { room.paper_muted }),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(alignment::Horizontal::Center)
+        .align_y(alignment::Vertical::Center),
     )
-    .on_enter(Message::QueueRowEntered(index))
-    .on_exit(Message::QueueRowLeft(index))
+    .width(Length::Fixed(theme::STEPPER_HIT))
+    .height(Length::Fixed(theme::STEPPER_HIT))
+    .padding(0)
+    .style(move |_theme, status| theme::transport(room, room.wall, status))
+    .on_press_maybe(can.then_some(message))
+    .into()
+}
+
+/// The row's transfer slot: the album page's `+` anatomy, holding this row's
+/// track and opening the picker (doc 09 §8.1 — pick a destination, the Queue
+/// first among them).
+fn transfer_slot(index: usize, offered: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    if !offered {
+        return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
+    }
+    tooltip(
+        button(
+            container(
+                text("+")
+                    .size(theme::SIZE_BODY)
+                    .line_height(theme::LEADING_BODY)
+                    .color(room.paper),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(alignment::Horizontal::Center)
+            .align_y(alignment::Vertical::Center),
+        )
+        .width(Length::Fixed(theme::STEPPER_HIT))
+        .height(Length::Fixed(theme::STEPPER_HIT))
+        .padding(0)
+        .style(move |_theme, status| theme::transport(room, room.wall, status))
+        .on_press(Message::AddQueuedToPlaylist(index)),
+        text("Add to a playlist, or the queue")
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Left,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
     .into()
 }
 
@@ -448,4 +637,64 @@ fn lamp_dot() -> Element<'static, Message> {
     ))
     .style(move |_theme| theme::lamp_dot(room))
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    /// **The place draws the window's slice and nothing else** (doc 09 §7.1's
+    /// gate on `Play all`), and **its rows carry the playlist page's whole
+    /// edit set** (09 §8.2 — one editor).
+    ///
+    /// Pinned over the source the way `views/shelf.rs` pins its own ruler:
+    /// the properties are about which widgets this file builds, there is no
+    /// `PlayerState` to construct without an engine, and the literals below
+    /// are exactly what a reviewer would have to delete to break them.
+    #[test]
+    fn the_queue_place_is_virtual_and_its_rows_are_the_playlist_editors() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/queue.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+
+        // The window: the rows loop spends `queue_window`'s slice, both
+        // spacers are built, and every drawn element is boxed at the pitch
+        // the module declared — which is what keeps the spacers honest.
+        assert!(
+            source.contains("queue_window::window(&shapes, scroll - rows_top, window.height)"),
+            "the rows are windowed by the pure module"
+        );
+        assert!(
+            source.contains("for index in win.first..win.end"),
+            "only the window's slice is built"
+        );
+        assert!(
+            source.contains("Space::with_height(Length::Fixed(win.top))")
+                && source.contains("Space::with_height(Length::Fixed(win.bottom))"),
+            "everything off screen is two spacers"
+        );
+        assert!(
+            source.contains("queue_window::row_pitch(two_line)")
+                && source.contains("queue_window::header_pitch("),
+            "drawn elements are boxed at the module's own pitches"
+        );
+
+        // The parity slots: ▲▼ on the queue's own edit message, the ✕, and
+        // the transfer `+` toward the picker — every slot reserved.
+        for spent in [
+            "Message::ShiftQueued(index, -1)",
+            "Message::ShiftQueued(index, 1)",
+            "Message::RemoveQueued(index)",
+            "Message::AddQueuedToPlaylist(index)",
+        ] {
+            assert!(
+                source.contains(spent),
+                "a queue row's reserved slots spend `{spent}`"
+            );
+        }
+        assert!(
+            source.contains("Space::with_width(Length::Fixed(theme::STEPPER_HIT))"),
+            "an unoffered slot is a space of exactly the control's width"
+        );
+    }
 }

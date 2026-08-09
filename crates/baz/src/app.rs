@@ -207,9 +207,11 @@ pub(crate) enum Message {
     DensityStep(i32),
     /// The modifier keys that are down, as iced last reported them.
     ///
-    /// Held for one job, and it is [`Self::Wheel`]'s: iced 0.13's
-    /// `WheelScrolled` carries no modifier state, so <kbd>Ctrl</kbd>+scroll
-    /// cannot be recognised from the wheel event alone.
+    /// Held for the two inputs iced 0.13 reports without modifier state:
+    /// [`Self::Wheel`] (`WheelScrolled` carries none, so
+    /// <kbd>Ctrl</kbd>+scroll cannot be recognised from the wheel event
+    /// alone) and a `button`'s press ([`Self::AlbumClicked`] resolves
+    /// shift-click against it, doc 09 §13 step 7).
     ModifiersChanged(keyboard::Modifiers),
     /// A wheel notch, with its vertical travel. Answered against the modifiers
     /// above by [`keys::wheel_binding`]; a plain scroll is the `scrollable`'s
@@ -248,6 +250,23 @@ pub(crate) enum Message {
     /// A row's ✕ in the **Queue** place: take that entry out of the queue
     /// without stopping the music ([`Command::UpdateQueue`], ADR-0014).
     RemoveQueued(usize),
+    /// A row's ▲ (`-1`) or ▼ (`+1`) stepper in the **Queue** place: swap the
+    /// entry with its neighbour — the playlist page's reorder, on the run
+    /// (doc 09 §8.2; [`Command::UpdateQueue`], so the music keeps playing
+    /// and the cursor follows its track).
+    ShiftQueued(usize, i32),
+    /// A row's `+` in the **Queue** place: hold that row's track and open
+    /// the panel as the picker (doc 09 §8.1's transfer gesture, reaching the
+    /// queue's own editor at step 5) — pick a destination, a file or the
+    /// run itself.
+    AddQueuedToPlaylist(usize),
+    /// The **Queue** place scrolled; carries the real viewport geometry.
+    ///
+    /// What [`Self::Scrolled`] is to the wall this is to the queue place:
+    /// the offset [`crate::queue_window`]'s virtual window is computed
+    /// against, held so `Play all`'s five-figure run costs the frame what a
+    /// record does (doc 09 §7.1's gate).
+    QueueScrolled(Viewport),
     /// The pointer entered a queue row, so the row can offer its ✕.
     ///
     /// Pure view state and the only hover baz tracks itself: iced 0.13 gives a
@@ -378,6 +397,16 @@ pub(crate) enum Message {
     /// on. What replaced it is the page's own `Play album` — a 320 × 32 target
     /// in a fixed place, where the gesture it succeeds had a 400 ms window.
     /// ADR-0022 records the trade.
+    ///
+    /// **Shift held, the same press queues the record instead** (doc 09 §13
+    /// step 7): the one-press accelerator over the picker's Queue row —
+    /// see [`App::queue_album`] for how the visible-control rule is met. A
+    /// `button`'s press carries no modifier state in iced 0.13, so the arm
+    /// resolves it against the hand-kept `modifiers` — and every control
+    /// that sends this message gains the accelerator with it (the sleeve,
+    /// and the songs section's record door), which is the consistency the
+    /// shared message makes structural: shift turns *open the record* into
+    /// *queue the record*, wherever it is said.
     AlbumClicked(u64),
     /// The pointer entered an album's tile, so the tile can draw its hover
     /// rule under the wall label.
@@ -400,6 +429,17 @@ pub(crate) enum Message {
     /// [`PlayerState::play_from`](crate::player::PlayerState::play_from)'s
     /// decision, not the view's.
     PlayTrack(u64, usize),
+    /// **Play everything the wall shows** — the Library strip's `Play all`
+    /// (doc 09 §7.1, S6).
+    ///
+    /// Reifies the wall's current scope — every visible record, whole, in
+    /// the arrangement's own order — into the queue and plays from the top.
+    /// The scope is always on screen: a query or a group key narrows it,
+    /// "everything in the library" is the empty query, and an empty wall
+    /// means nothing happens and nothing is claimed. Shuffle's sibling,
+    /// never a mode: one draws the wall in order, the other draws
+    /// [`shuffle::SLEEVES`] from it by chance, and both end in silence.
+    PlayAll,
     /// **Shuffle what the wall shows** — the top bar's `Shuffle`.
     ///
     /// Draws [`shuffle::SLEEVES`] whole records out of the pool the wall is
@@ -595,6 +635,16 @@ struct App {
     /// one answer. The ✕'s slot is reserved either way, so this changes what is
     /// drawn in it and never the geometry around it.
     hovered_queue_row: Option<usize>,
+    /// How far the **Queue** place is scrolled, as its scrollable last
+    /// reported ([`Message::QueueScrolled`]) — the offset the place's
+    /// virtual window is computed against (`crate::queue_window`).
+    ///
+    /// Reset to the top when the place is entered, because that is where a
+    /// fresh scrollable actually stands: iced 0.13 keys widget state by
+    /// tree position, so leaving the place unmounts the scrollable and
+    /// coming back re-creates it at zero — a remembered offset would window
+    /// rows the widget is not showing.
+    queue_scroll: f32,
     /// Which row of a **playlist's page** the pointer is on — the same
     /// mechanism as [`Self::hovered_queue_row`], for the page's ✕ and ▲▼
     /// slots.
@@ -683,9 +733,11 @@ struct App {
     density: shelf::Density,
     /// Which modifier keys are down, as iced last reported them.
     ///
-    /// The one piece of input state baz tracks itself, and it is tracked for
-    /// exactly one reason: iced 0.13's `WheelScrolled` carries no modifiers,
-    /// so <kbd>Ctrl</kbd>+scroll cannot be told from a scroll without it. Key
+    /// The one piece of input state baz tracks itself, consulted only where
+    /// iced 0.13 reports an input without its modifiers: `WheelScrolled`
+    /// (so <kbd>Ctrl</kbd>+scroll cannot be told from a scroll without it)
+    /// and a `button`'s `on_press` (so shift-click-queues-the-record,
+    /// doc 09 §13 step 7, cannot be told from a click without it). Key
     /// *presses* never consult this — they carry their own modifiers, and
     /// [`keys::binding_for`] reads those (see its focus-rule note on why a
     /// hand-kept flag is the wrong instrument wherever the toolkit reports the
@@ -804,6 +856,7 @@ impl App {
             screen,
             place: Place::default(),
             hovered_queue_row: None,
+            queue_scroll: 0.0,
             hovered_playlist_row: None,
             hovered_album_row: None,
             playlists: crate::playlists::Playlists::start(),
@@ -857,8 +910,24 @@ impl App {
             // and the Library's own state — scroll, query, arrangement — is
             // untouched by all of them, which is what makes coming back free.
             Message::ToggleSettings => self.go(Place::settings),
-            Message::ToggleQueue => self.go(Place::queue),
-            Message::AlbumClicked(id) => self.open_album(id),
+            Message::ToggleQueue => {
+                // Wherever the door leads, the place's scrollable starts at
+                // the top the next time it exists (see `queue_scroll`).
+                self.queue_scroll = 0.0;
+                self.go(Place::queue)
+            }
+            // **Shift-click a sleeve queues the record** — the one-press
+            // accelerator over the picker's Queue row (ADR-0023 §3's stack;
+            // doc 09 §13 step 7). A plain press navigates, exactly as
+            // before.
+            Message::AlbumClicked(id) => {
+                if self.modifiers.shift() {
+                    self.queue_album(id);
+                    Task::none()
+                } else {
+                    self.open_album(id)
+                }
+            }
             Message::ShowPlayingAlbum => match self.player.playing_album() {
                 // Nothing is sounding, so there is no record to be taken to.
                 // The control is not offered in that state (see
@@ -899,6 +968,10 @@ impl App {
             }
             Message::Shuffle => {
                 self.start_shuffle();
+                Task::none()
+            }
+            Message::PlayAll => {
+                self.play_all();
                 Task::none()
             }
             Message::Pull => self.draw_pull(),
@@ -1195,6 +1268,7 @@ impl App {
             }
             Message::AddAlbumToPlaylist(id) => self.add_album_to_playlist(*id),
             Message::AddTrackToPlaylist(id, row) => self.add_track_to_playlist(*id, *row),
+            Message::AddQueuedToPlaylist(row) => self.add_queued_to_playlist(*row),
             Message::PlaylistPlay => self.play_playlist(),
             Message::PlaylistQueue => self.queue_playlist(),
             Message::PlaylistPlayTrack(row) => self.play_playlist_track(*row),
@@ -1387,6 +1461,34 @@ impl App {
             .begin_pick(Some(&state.library), label, entries, items);
     }
 
+    /// One **queue row's** track toward the picker — the queue place's `+`
+    /// (doc 09 §8.2, the place reaching §8.1's one transfer gesture): hold
+    /// what the row shows, summon the panel as the picker.
+    ///
+    /// The track is read from the request-side queue record
+    /// ([`PlayerState::queue`]), which is the same value the row was drawn
+    /// from — so what the picker holds is exactly what was pointed at, and a
+    /// row a fresh edit has just removed asks for nothing. It works on the
+    /// sounding row too: the track you are hearing is the one most worth
+    /// keeping (S8's whole premise, row-sized).
+    fn add_queued_to_playlist(&mut self, row: usize) {
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        let Some(item) = self
+            .player
+            .queue()
+            .and_then(|queue| queue.items.get(row))
+            .cloned()
+        else {
+            return;
+        };
+        let entries = crate::playlists::entries_for_items(std::slice::from_ref(&item));
+        let label = format!("Add \u{201c}{}\u{201d}", item.title);
+        self.playlists
+            .begin_pick(Some(&state.library), label, entries, vec![item]);
+    }
+
     /// The playlist page's `Play`: the playable subset as the queue, playing
     /// (ADR-0024 §4). `SetQueue` then `Play` — `play_album`'s exact shape,
     /// because playing a playlist **copies** it into the queue and from that
@@ -1545,6 +1647,10 @@ impl App {
             Message::QueueRowLeft(_) => {}
             Message::JumpToQueued(position) => self.jump_to_queued(position),
             Message::RemoveQueued(row) => self.remove_queued(row),
+            Message::ShiftQueued(row, delta) => self.shift_queued(row, delta),
+            Message::QueueScrolled(viewport) => {
+                self.queue_scroll = viewport.absolute_offset().y;
+            }
             _ => return false,
         }
         true
@@ -2017,6 +2123,36 @@ impl App {
         self.publish_mpris(false);
     }
 
+    /// **Append the record to the run** — a shift-click on its sleeve (or on
+    /// any control that opens its page), the one-press accelerator over the
+    /// picker's **Queue** row (ADR-0023 §3's stack; doc 09 §13 step 7).
+    ///
+    /// The visible-control rule (`docs/REFUSALS.md`: no action's only route
+    /// is a gesture) is satisfied by the picker's Queue row: `Add to…` on
+    /// the record's page → the picker's first row sends the identical
+    /// append, on screen, in two presses — this gesture is an accelerator
+    /// over that control, exactly as a key binding is over a button, and it
+    /// resolves to the same act ([`Self::append_to_run`]'s one shape).
+    ///
+    /// **Nothing sounds unasked**: an append is `UpdateQueue`, never a play
+    /// gesture — the music keeps playing, the record joins the tail as its
+    /// own headed group (albums listed as albums, never flattened,
+    /// ADR-0014), and appending to an empty stopped engine loads the queue
+    /// without starting it.
+    fn queue_album(&mut self, id: u64) {
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        let Some(album) = state.albums.iter().find(|album| album.id == id) else {
+            return;
+        };
+        let addition = vm::album_queue(album, state.edition_choice.get(&id).copied());
+        if addition.is_empty() {
+            return;
+        }
+        self.append_to_run(addition);
+    }
+
     /// Play `id` from row `row` of its selected edition — a click on a track
     /// row of the album inspector (ADR-0014, and §3.2 step 4 of the UX spec).
     ///
@@ -2163,6 +2299,63 @@ impl App {
         self.publish_mpris(false);
     }
 
+    /// **Play everything the wall shows** (doc 09 §7.1, S6): the wall is a
+    /// list, so play it.
+    ///
+    /// One press reifies the wall's scope — every record `Shelf::visible`
+    /// holds, whole, in the arrangement's own order — into the queue
+    /// ([`vm::stacked_queue`], the shape shuffle already sends) and plays
+    /// from the top. **The scope is the wall, always**: a query or a group
+    /// key narrows it, a YEAR-arranged wall plays the collection in
+    /// chronological order, and "everything in the library" is the empty
+    /// query, one <kbd>Esc</kbd> away. Playing what you cannot see is
+    /// refused for the reason shuffle's invisible pool is
+    /// (`docs/REFUSALS.md`) — which is why this reads `visible` and nothing
+    /// wider, and why an empty wall means nothing happens and nothing is
+    /// claimed (shuffle's own empty-pool rule). No confirmation stands
+    /// between the press and the sound at any scale: the queue place is
+    /// virtualized (`crate::queue_window`, §7.1's named gate), so a
+    /// five-figure run is an ordinary queue — readable, jumpable, editable,
+    /// saveable, and it **ends**.
+    ///
+    /// **Shuffle's sibling, never a mode.** No pool is claimed — the wall
+    /// keeps every cover at full ink, because nothing was drawn *from* it —
+    /// and the marks of a superseded draw come off ([`Self::draws_are_over`]),
+    /// exactly as any other deliberate queue replacement takes them.
+    fn play_all(&mut self) {
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        let picks: Vec<(&vm::AlbumVm, Option<vm::EditionKey>)> = state
+            .visible
+            .iter()
+            .filter_map(|&index| state.albums.get(index))
+            .map(|album| (album, state.edition_choice.get(&album.id).copied()))
+            .collect();
+        let queue = vm::stacked_queue(&picks);
+        if queue.is_empty() {
+            // The wall is showing nothing — an empty library, or a query
+            // that matched no record. Nothing to play, so nothing happens
+            // and nothing is claimed. Silence is the correct answer here
+            // too.
+            return;
+        }
+        println!(
+            "[play-all] {} records · {} tracks — the wall, in its arrangement",
+            picks.len(),
+            queue.len()
+        );
+        self.draws_are_over();
+        let paths = queue.paths();
+        if self.playback.send(Command::SetQueue { paths }) && self.playback.send(Command::Play) {
+            self.player.note_queue_sent(queue);
+            self.player.note_transport_sent();
+        } else {
+            self.player.engine_closed();
+        }
+        self.publish_mpris(false);
+    }
+
     /// **The pull** (ADR-0017 step 19): draw one record, and offer it.
     ///
     /// Weighted toward the long unplayed by [`shuffle::pull`], which weighs on
@@ -2275,6 +2468,35 @@ impl App {
         self.publish_mpris(false);
     }
 
+    /// Swap row `row` with its neighbour `delta` away — a click on a row's
+    /// ▲▼ stepper in **Queue** (doc 09 §8.2: the playlist page's reorder,
+    /// grown onto the run's own editor).
+    ///
+    /// [`Self::remove_queued`]'s exact shape over
+    /// [`queue_edit::shifted`]'s pure edit: the whole new queue as
+    /// [`Command::UpdateQueue`], never a delta and never a `SetQueue` — the
+    /// music keeps playing (ADR-0014's guarantee), the sounding row moves
+    /// like any other, and the cursor follows its track because both sides
+    /// find it again by path (the engine re-derives and announces
+    /// [`Event::QueueChanged`](baz_core::protocol::Event::QueueChanged);
+    /// until it does, [`vm::QueueVm::playing`] reconciles the same way).
+    fn shift_queued(&mut self, row: usize, delta: i32) {
+        let Some(edited) = self
+            .player
+            .queue()
+            .and_then(|queue| queue_edit::shifted(queue, row, delta))
+        else {
+            return;
+        };
+        let paths = edited.paths();
+        if self.playback.send(Command::UpdateQueue { paths }) {
+            self.player.note_queue_edited(edited);
+        } else {
+            self.player.engine_closed();
+        }
+        self.publish_mpris(false);
+    }
+
     /// Send a transport command, marking it pending on acceptance and
     /// downgrading to engine-closed state when the channel is gone.
     fn send_transport(&mut self, command: Command) {
@@ -2335,9 +2557,11 @@ impl App {
             },
             (Screen::Shelf(_), Place::Queue) => views::queue::view(
                 &self.player,
-                self.window.width,
+                self.window,
                 self.hovered_queue_row,
                 self.playlists.saving_queue.as_ref(),
+                collecting,
+                self.queue_scroll,
             ),
             (Screen::Shelf(state), Place::Playlist(id)) => match self.playlists.page(id) {
                 Some(open) => views::playlist::view(
@@ -4480,6 +4704,112 @@ mod tests {
         assert!(shuffle.contains("Command::Play"));
         // And what it sends is a queue of whole records, never a flattened one.
         assert!(shuffle.contains("vm::stacked_queue"));
+    }
+
+    /// **S6 — `Play all` reifies the wall's scope, plays from the top, and is
+    /// shuffle's sibling rather than a mode** (doc 09 §7.1).
+    ///
+    /// Pinned over the source for the pull test's reason — there is no
+    /// `Shelf` to construct without a database and a scan thread — with each
+    /// criterion named by the literal a reviewer would have to move:
+    ///
+    /// - *the scope is the wall*: the queue is built from `state.visible`,
+    ///   in its order, as whole records (`vm::stacked_queue` — the shape
+    ///   whose order-preservation `vm`'s own tests pin);
+    /// - *the first track sounds*: `SetQueue` then `Play`, one press,
+    ///   no confirmation at any scale — §7.1's answer to the 10 000-track
+    ///   question is the virtual window, not a dialog;
+    /// - *an empty wall does nothing and claims nothing*;
+    /// - *sibling, not mode*: no pool is claimed, and the marks of a
+    ///   superseded draw come off exactly as any deliberate replacement
+    ///   takes them.
+    #[test]
+    fn play_all_reifies_the_wall_in_order_and_claims_no_pool() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        let start = source
+            .find("fn play_all(&mut self")
+            .expect("play_all exists");
+        let rest = &source[start..];
+        let play_all = &rest[..rest.find("\n    }\n").expect("a function ends")];
+
+        assert!(
+            // rustfmt sets the chain one call per line, so the receiver and
+            // the field arrive split.
+            play_all.contains(".visible"),
+            "the scope is the wall — the visible set, nothing wider"
+        );
+        assert!(
+            play_all.contains("vm::stacked_queue"),
+            "whole records, in the wall's arrangement order"
+        );
+        assert!(
+            play_all.contains("Command::SetQueue") && play_all.contains("Command::Play"),
+            "one press, and the first track sounds"
+        );
+        assert!(
+            play_all.contains("if queue.is_empty()"),
+            "an empty wall: nothing happens and nothing is claimed"
+        );
+        assert!(
+            !play_all.contains("pool = Some"),
+            "no pool is claimed — Play all is shuffle's sibling, never a mode"
+        );
+        assert!(
+            play_all.contains("self.draws_are_over()"),
+            "a superseded draw's marks come off the wall"
+        );
+    }
+
+    /// **Step 7 — shift-click queues the record, and nothing sounds
+    /// unasked** (doc 09 §13; ADR-0023 §3's stack).
+    ///
+    /// The accelerator resolves through the one append shape the picker's
+    /// Queue row spends (`append_to_run` — `UpdateQueue`, never a play
+    /// gesture), and the press arm consults the hand-kept modifier state
+    /// because iced 0.13 reports a `button`'s press without it. The plain
+    /// press still navigates.
+    #[test]
+    fn shift_click_queues_the_record_and_nothing_sounds_unasked() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+
+        let start = source
+            .find("fn queue_album(&mut self")
+            .expect("queue_album exists");
+        let rest = &source[start..];
+        let queue_album = &rest[..rest.find("\n    }\n").expect("a function ends")];
+        assert!(
+            queue_album.contains("vm::album_queue"),
+            "the record whole — the selected edition, ADR-0014's group"
+        );
+        assert!(
+            queue_album.contains("self.append_to_run(addition)"),
+            "the picker Queue row's exact append — one shape for every route"
+        );
+        for forbidden in ["Command::SetQueue", "Command::Play", "note_transport_sent"] {
+            assert!(
+                !queue_album.contains(forbidden),
+                "shift-click reached for `{forbidden}` — an append is not a \
+                 play gesture, and nothing sounds unasked (ADR-0023 §3)"
+            );
+        }
+
+        // The press arm: shift queues, plain opens — resolved against the
+        // hand-kept modifiers, the one instrument a button press leaves.
+        let arm_start = source
+            .find("Message::AlbumClicked(id) => {")
+            .expect("the tile press arm exists");
+        let arm = &source[arm_start..arm_start + 400];
+        assert!(arm.contains("self.modifiers.shift()"));
+        assert!(arm.contains("self.queue_album(id)"));
+        assert!(arm.contains("self.open_album(id)"));
     }
 
     /// **Escape returns the pull before it touches anything else on the wall.**

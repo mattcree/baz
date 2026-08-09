@@ -128,30 +128,37 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
     .into()
 }
 
-/// **The two draws**: `Shuffle` and `Pull`, as words, beside the arrangement.
+/// **The wall's three acts**: `Play all`, `Shuffle` and `Pull`, as words,
+/// beside the arrangement.
 ///
 /// # Why they are here and not in the transport
 ///
-/// Both are questions asked *of the collection* — "play what I am looking at",
-/// "suggest something I have not heard" — and the answer to each is decided
-/// entirely by what the wall is showing. That is this bar's subject. The
-/// now-playing bar's subject is the record that is sounding, and neither of
-/// these is about that record; putting them there would also mean moving the
-/// transport, which `docs/REFUSALS.md` does not permit for tidiness and would
-/// not be tidy anyway.
+/// All three are questions asked *of the collection* — "play what I am looking
+/// at, in order", "play what I am looking at, by chance", "suggest something I
+/// have not heard" — and the answer to each is decided entirely by what the
+/// wall is showing. That is this bar's subject (L8.1: a control goes where
+/// what it reads is). The now-playing bar's subject is the record that is
+/// sounding, and none of these is about that record; putting them there would
+/// also mean moving the transport, which `docs/REFUSALS.md` does not permit
+/// for tidiness and would not be tidy anyway.
 ///
 /// They sit *after* the group keys, in the same cluster, because the cluster
-/// reads left to right as **narrow, then arrange, then draw** — the order the
-/// gestures actually happen in.
+/// reads left to right as **narrow, then arrange, then play or draw** — the
+/// order the gestures actually happen in. `Play all` leads the three
+/// (doc 09 §7.1, S6): it is the plainest of them — the wall, front to back —
+/// and the one press that makes February's select-all-to-a-playlist workaround
+/// one word. Its scope *is* the wall: the empty query plays everything, a
+/// filter plays the matches, a YEAR arrangement plays the collection in
+/// chronological order.
 ///
 /// # They are controls, and that is not optional
 ///
 /// `docs/REFUSALS.md`: *"Every action in baz has a visible, pointer-reachable
 /// control. No action is keyboard-only, and no control's only affordance is
-/// hover."* The pull has a key (<kbd>Ctrl</kbd>+<kbd>R</kbd>) and shuffle has
-/// none; both have this. Each sends the identical message its keyboard route
-/// sends, which is the same discipline the group keys and the transport already
-/// keep.
+/// hover."* The pull has a key (<kbd>Ctrl</kbd>+<kbd>R</kbd>); shuffle and
+/// `Play all` have none; all three have this. Each sends the identical message
+/// any other route sends, which is the same discipline the group keys and the
+/// transport already keep.
 ///
 /// # And they are words
 ///
@@ -167,6 +174,7 @@ pub(crate) fn view(shelf: &Shelf) -> Element<'_, Message> {
 /// thing, and no third.
 fn draws() -> Element<'static, Message> {
     row![
+        draw_word("Play all", Message::PlayAll),
         draw_word("Shuffle", Message::Shuffle),
         draw_word("Pull", Message::Pull),
     ]

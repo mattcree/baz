@@ -27,7 +27,11 @@ when an album ends.* Nothing happens.
 **No invisible shuffle pools.** Shuffle draws only from what the wall currently
 shows — a shelf, the filter's matches, everything — and the pool is visible:
 non-pool covers dim, the next draws carry faint rings. A shuffle whose source
-you cannot see is a recommendation engine wearing a dice icon.
+you cannot see is a recommendation engine wearing a dice icon. `Play all`
+(doc 09 §7.1) keeps the same rule from the other direction: its scope is
+exactly what the wall shows, in the wall's own order — playing what you
+cannot see is refused for the reason drawing from it is, and "everything in
+the library" is the empty query, one `Esc` away.
 
 **No auto-generated playlists.** Every playlist is asked for by a person and
 owned by them thereafter. Refused: generation without a request, mutation

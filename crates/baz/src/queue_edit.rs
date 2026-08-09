@@ -54,6 +54,37 @@ pub fn without(queue: &QueueVm, index: usize) -> Option<QueueVm> {
     Some(edited)
 }
 
+/// The queue with entry `index` swapped one place along — the list a row's
+/// ▲ (`delta` −1) or ▼ (`delta` +1) stepper means (doc 09 §8.2: the playlist
+/// page's reorder, grown onto the queue's own editor).
+///
+/// A swap with a neighbour rather than an arbitrary move, because that is
+/// what the steppers say: one press, one place. `None` when `index` is not
+/// in the queue (a click on a stale picture — [`without`]'s rule), when the
+/// step would leave the list (▲ on the first row, ▼ on the last; the view
+/// disables those steppers, and this is the same refusal made where the edit
+/// is computed), or when `delta` is not a single step.
+///
+/// The **playing entry moves like any other**: the edit goes out as
+/// [`UpdateQueue`](baz_core::protocol::Command::UpdateQueue), which ADR-0014
+/// guarantees disturbs no delivered sample, and the cursor follows its track
+/// — the engine re-derives the position by path and announces it, and until
+/// it does the front end finds the row the same way
+/// ([`QueueVm::playing`](crate::vm::QueueVm::playing)).
+#[must_use]
+pub fn shifted(queue: &QueueVm, index: usize, delta: i32) -> Option<QueueVm> {
+    if !matches!(delta, -1 | 1) || index >= queue.items.len() {
+        return None;
+    }
+    let neighbour = index.checked_add_signed(delta as isize)?;
+    if neighbour >= queue.items.len() {
+        return None;
+    }
+    let mut edited = queue.clone();
+    edited.items.swap(index, neighbour);
+    Some(edited)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -160,6 +191,81 @@ mod tests {
         let edited = without(&original, 2).expect("the second copy of a");
         assert_eq!(titles(&edited), ["a", "b"]);
         assert_eq!(edited.paths()[0], PathBuf::from("/m/a.flac"));
+    }
+
+    /// S9a / doc 09 §8.2 — **a stepper press swaps the entry with its
+    /// neighbour and nothing else moves**: the playlist page's reorder
+    /// semantics (`playlists::shift_entry`), on the queue's own record.
+    #[test]
+    fn shifting_swaps_with_the_neighbour_and_keeps_the_rest() {
+        let original = queue(&["a", "b", "c", "d"]);
+        let down = shifted(&original, 1, 1).expect("b has a row below");
+        assert_eq!(titles(&down), ["a", "c", "b", "d"]);
+        let up = shifted(&original, 1, -1).expect("b has a row above");
+        assert_eq!(titles(&up), ["b", "a", "c", "d"]);
+        assert_eq!(
+            titles(&original),
+            ["a", "b", "c", "d"],
+            "the record the edit was computed from must not be mutated"
+        );
+    }
+
+    /// A step off either end asks for nothing — the view disables those
+    /// steppers, and the edit refuses the same press independently.
+    #[test]
+    fn a_step_off_either_end_asks_for_nothing() {
+        let original = queue(&["a", "b", "c"]);
+        assert!(shifted(&original, 0, -1).is_none(), "▲ on the first row");
+        assert!(shifted(&original, 2, 1).is_none(), "▼ on the last row");
+        assert!(shifted(&original, 3, -1).is_none(), "a stale row");
+        assert!(shifted(&original, usize::MAX, 1).is_none());
+        assert!(shifted(&queue(&[]), 0, 1).is_none());
+        // The steppers speak in single steps; anything else is not a press
+        // this module knows.
+        assert!(shifted(&original, 1, 2).is_none());
+        assert!(shifted(&original, 1, 0).is_none());
+    }
+
+    /// The paths sent are exactly the rows shown after a reorder, and the
+    /// queue's identity — header and provenance — travels with the edit
+    /// (09 §6: a run that has been reordered is still "the run I started
+    /// from Road Trip").
+    #[test]
+    fn a_reorder_sends_the_rows_it_shows_and_keeps_provenance() {
+        let edited = shifted(&queue(&["a", "b", "c"]), 0, 1).expect("row 0 down");
+        assert_eq!(
+            edited.paths(),
+            vec![
+                PathBuf::from("/m/b.flac"),
+                PathBuf::from("/m/a.flac"),
+                PathBuf::from("/m/c.flac"),
+            ]
+        );
+        assert_eq!(edited.album.as_deref(), Some("Geogaddi"));
+        assert_eq!(edited.artist, "Boards of Canada");
+        assert_eq!(edited.provenance.as_deref(), Some("Road Trip"));
+    }
+
+    /// ▲ then ▼ (and ▼ then ▲) is the queue it started as — a stepper pair
+    /// that did not round-trip would be an edit the listener never made.
+    #[test]
+    fn a_step_up_undoes_a_step_down() {
+        let original = queue(&["a", "b", "c", "d"]);
+        for index in 0..3 {
+            let down = shifted(&original, index, 1).expect("a row below");
+            let back = shifted(&down, index + 1, -1).expect("the row it became");
+            assert_eq!(titles(&back), titles(&original));
+        }
+    }
+
+    /// A queue listing one file twice moves the occurrence that was pointed
+    /// at — [`without`]'s position-not-identity rule, for the steppers.
+    #[test]
+    fn a_repeated_file_is_moved_by_position_not_by_identity() {
+        let mut original = queue(&["a", "b"]);
+        original.items.push(item("a"));
+        let edited = shifted(&original, 2, -1).expect("the second copy of a");
+        assert_eq!(titles(&edited), ["a", "a", "b"]);
     }
 
     /// Removing every entry one at a time, in every order, always ends in an

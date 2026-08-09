@@ -4,11 +4,13 @@
 > [`docs/design/09-implicit-playlists.md`](../design/09-implicit-playlists.md)**
 > — the implicit-playlist study, commissioned on the owner's *"we are
 > thinking there are implicit playlists everywhere."* Four changes to this
-> record, none touching the engine. **Status: items 1–2 accepted and shipped
-> (2026-08-09, doc 09 §13 steps 1–2 — the picker's Queue row and playing
-> provenance; item 1's shift-click and context-menu accelerators await steps
-> 4 and 7); items 3–4 remain proposed** (the songs section and
-> `Play all` are steps 3 and 6):
+> record, none touching the engine. **Status: all four items accepted and
+> shipped** (2026-08-09 — items 1–2 as doc 09 §13 steps 1–2, the picker's
+> Queue row and playing provenance; item 3 as step 3, the songs section;
+> item 4 as steps 5–6, `Play all` over the virtualized queue place, with
+> shuffle's contract already shipped behaviour; item 1's shift-click
+> accelerator as step 7 — **its context-menu accelerator alone awaits
+> step 4**, the mirror layer):
 >
 > 1. **§3's dedicated `Queue album` control is withdrawn before being
 >    built** (it never shipped). The queue-append lives in the unified
@@ -19,6 +21,11 @@
 >    menu's `Queue` item are the one-press accelerators, resolving to the
 >    picker's Queue row as their on-screen control (09 §8.1). `Queue
 >    next`'s deferral and its fixed album-boundary semantics are unchanged.
+>    *Shift-click shipped as step 7 (2026-08-09)*: shift held, the press
+>    that would open a record's page appends it to the run instead —
+>    `UpdateQueue`, nothing sounding unasked — resolved against the
+>    hand-kept modifier state because iced 0.13 reports a button's press
+>    without one. The menu's `Queue` item awaits step 4.
 > 2. **Playing provenance is defined** (09 §6), completing §1's "the
 >    context is recorded, not kept live": a queue reified from a named
 >    playlist carries the source's name on the request-side record; it
@@ -39,6 +46,13 @@
 >    wall's arrangement order — into the queue in one press; a shuffle
 >    draw *is* an implicit playlist (readable, editable, saveable,
 >    ending); §5's silence is unchanged by both.
+>    *Accepted (2026-08-09), shipped as doc 09 §13 steps 5–6*: `Play all`
+>    leads the Library strip's acts, its scope exactly the wall's visible
+>    set, no pool claimed and no confirmation at any scale — §7.1's
+>    virtualization gate is met by the queue place's spacer window
+>    (`queue_window`, pinned bounded at 40 000 rows) — and the draw's
+>    "editable like any queue" criterion is completed by queue-place
+>    reorder (step 5). Captures at `docs/design/impl/queue-parity/`.
 
 **Status**: proposed (2026-08-09) · extracts the decisions of
 [`docs/design/08-playback-and-playlists.md`](../design/08-playback-and-playlists.md)

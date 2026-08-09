@@ -100,7 +100,10 @@ pub(crate) fn view<'a>(
         ));
     }
     let body: Element<'a, Message> = if open.rows.is_empty() {
-        text("Nothing here yet. Arm this playlist in the panel, or press + on a record's page.")
+        // The words the armed mode left behind went with it (doc 09 §9):
+        // the route in is the transfer gesture — a row's `+`, or the
+        // record page's `Add to…`, then this list in the picker.
+        text("Nothing here yet. Press + on any track row, or Add to… on a record's page, and pick this list.")
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
             .color(room.paper_faint)
@@ -436,13 +439,13 @@ fn entry_row(
         row![
             body,
             step_slot(
-                "\u{25b4}",
+                "\u{2191}",
                 index > 0,
                 offered,
                 Message::PlaylistShiftEntry(index, -1)
             ),
             step_slot(
-                "\u{25be}",
+                "\u{2193}",
                 index + 1 < total,
                 offered,
                 Message::PlaylistShiftEntry(index, 1),
@@ -457,9 +460,15 @@ fn entry_row(
     .into()
 }
 
-/// One reorder stepper's reserved slot: ▲ or ▼ while the pointer is on the
+/// One reorder stepper's reserved slot: ↑ or ↓ while the pointer is on the
 /// row, and a space of exactly the same width when it is not — the settings
 /// steppers' size, the queue ✕'s reservation rule.
+///
+/// The arrows are U+2191/U+2193 rather than the design docs' ▲▼ shorthand:
+/// IBM Plex Sans (`assets/fonts`) carries no triangle glyphs at any code
+/// point, so the triangles rasterised as tofu boxes on the shipped page —
+/// caught the first time a capture actually hovered a row. The arrows are
+/// in the face, and they say the same thing.
 fn step_slot(
     glyph: &'static str,
     can: bool,

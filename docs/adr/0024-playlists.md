@@ -9,8 +9,11 @@
 > clause) and §7 (the generator guarantees) are untouched. **Status: items
 > 1, 2 and 6 accepted and shipped (2026-08-09, doc 09 §13 steps 1–2 — the
 > armed mode removed, the picker's Queue row and hoisted playing list, the
-> file-only append); items 3–5 remain proposed** (queue-place edit parity,
-> the context menu and the songs section are steps 5, 4 and 3):
+> file-only append); item 5 accepted and shipped (2026-08-09, step 3 — the
+> songs section, captures at `docs/design/impl/songs-search/`); item 3
+> accepted and shipped (2026-08-09, step 5 — queue-place edit parity,
+> captures at `docs/design/impl/queue-parity/`); item 4 — the context
+> menu, step 4 — remains proposed**:
 >
 > 1. **§6 layer 2 — the armed collecting mode — is withdrawn.** Shipped
 >    2026-08-09, removed on the owner's own observation (09 §9): it was a
@@ -30,6 +33,12 @@
 >    and playlist pages one editor; `Save as playlist` is named as *the*
 >    creation act — a playlist outlives its playing when it is named, and
 >    not before (09 §8.3).
+>    *Accepted (2026-08-09), shipped as doc 09 §13 step 5*: the ▲▼ go out
+>    as whole-list `UpdateQueue` through the pure `queue_edit::shifted` —
+>    the music keeps playing, the cursor follows its track — and the `+`
+>    (the sounding row's included) holds the row's track toward the
+>    picker. The rows are drawn through the place's new virtual window
+>    (`queue_window`), which is also `Play all`'s §7.1 gate.
 > 4. **A context-menu mirror layer is introduced** (09 §5.2): right-click
 >    menus on track rows, queue rows, tiles, and the bar's now-playing
 >    block, governed as the keyboard is — every item sends a message some

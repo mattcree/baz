@@ -50,6 +50,7 @@ mod player;
 mod playlists;
 mod pointer;
 mod queue_edit;
+mod queue_window;
 mod rail;
 mod replaygain;
 mod scan;
