@@ -1,5 +1,37 @@
 # ADR-0023: The playback model — one list with a cursor, and the queue as a record of a choice
 
+> **Proposed amendment (2026-08-09), from
+> [`docs/design/09-implicit-playlists.md`](../design/09-implicit-playlists.md)**
+> — the implicit-playlist study, commissioned on the owner's *"we are
+> thinking there are implicit playlists everywhere."* Four changes to this
+> record, none touching the engine:
+>
+> 1. **§3's dedicated `Queue album` control is withdrawn before being
+>    built** (it never shipped). The queue-append lives in the unified
+>    transfer gesture instead — `Add to…` / a row's `+` / the context menu
+>    opens the picker, whose **first row is the Queue** — because a
+>    dedicated control beside a picker containing the queue would be two
+>    controls sending one message, which L8.6 forbids. Shift-click and the
+>    menu's `Queue` item are the one-press accelerators, resolving to the
+>    picker's Queue row as their on-screen control (09 §8.1). `Queue
+>    next`'s deferral and its fixed album-boundary semantics are unchanged.
+> 2. **Playing provenance is defined** (09 §6), completing §1's "the
+>    context is recorded, not kept live": a queue reified from a named
+>    playlist carries the source's name on the request-side record; it
+>    survives edits and `QueueEnded`, is replaced only by a replacing
+>    `SetQueue`, and powers the Queue place's summary and the *"add to the
+>    current playlist"* verb. Origin, never a live link — Plexamp's
+>    `playQueueSourceURI`, adopted by name.
+> 3. **A song search result's press is a needle-drop** (09 §5): §2's rule
+>    extended verbatim to the new `Songs` section — the song's record is
+>    queued whole, the cursor on the song, and `Enter` plays the
+>    top-ranked song the same way (superseding the album-level answer).
+> 4. **Play-everything and shuffle are specified as this model's cases**
+>    (09 §7): `Play all` reifies the wall — every visible record, in the
+>    wall's arrangement order — into the queue in one press; a shuffle
+>    draw *is* an implicit playlist (readable, editable, saveable,
+>    ending); §5's silence is unchanged by both.
+
 **Status**: proposed (2026-08-09) · extracts the decisions of
 [`docs/design/08-playback-and-playlists.md`](../design/08-playback-and-playlists.md)
 §1–§3 · changes no engine command and no protocol message — every gesture here
