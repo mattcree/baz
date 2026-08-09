@@ -90,6 +90,21 @@ pub(crate) fn view<'a>(
 ) -> Element<'a, Message> {
     let room = theme::active();
     let Some(now) = player.now_playing() else {
+        // **A start in flight is not silence.** `Resume` on the Home place
+        // navigates here in the same press that asks the engine to begin
+        // (`App::resume_the_run`), and the engine's `TrackStarted` is a frame
+        // or two behind the press — so for those frames there is a record on
+        // its way and no record yet to draw.
+        //
+        // The place stays bare rather than announcing silence it is about to
+        // contradict. A sentence that appears and vanishes is *read*, and
+        // "Nothing playing." is the one thing this surface must never say
+        // while something is starting; a blank that fills is not read at all.
+        // The condition is the engine's own — a transport command awaiting its
+        // confirming event — so nothing here has to know which press sent it.
+        if player.transport_pending() {
+            return Space::new(Length::Fill, Length::Fill).into();
+        }
         // **Nothing is sounding**, said once and plainly. Not an error, not an
         // empty frame with a grey square in it: silence is a feature
         // (`docs/REFUSALS.md`), and a place whose subject is absent says so.

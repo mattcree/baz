@@ -2200,17 +2200,56 @@ impl App {
         iced::exit()
     }
 
-    /// **`Resume`**: the interrupted run, put back on where it stopped.
+    /// **`Resume`**: the run put back on where the band said it was — and the
+    /// one play gesture in the product that navigates.
     ///
-    /// `JumpTo` at the cursor then `Seek` to the position — the two commands
-    /// the snapshot exists to spend, and the one press ADR-0023 §6 promises.
-    /// The cursor is resolved *by path* against the queue as it stands, so a
-    /// rescan that dropped rows before it does not resume the wrong track.
+    /// **Two shapes**, because [`views::home::standing`] has two things the
+    /// band can be describing and this must not disagree with it:
+    ///
+    /// - **A paused session.** The engine already holds the track and the
+    ///   position, so the press is a plain [`Command::Play`] and nothing is
+    ///   jumped or sought. Spending the snapshot's cursor here would seek a
+    ///   run back to the start of the track it is halfway through — the
+    ///   snapshot's position is written at track boundaries, so by then it
+    ///   reads zero.
+    /// - **The interrupted run, at launch.** `JumpTo` at the cursor then
+    ///   `Seek` to the position: the two commands the snapshot exists to
+    ///   spend, and the one press ADR-0023 §6 promises. The cursor is resolved
+    ///   *by path* against the queue as it stands, so a rescan that dropped
+    ///   rows before it does not resume the wrong track.
     ///
     /// It does nothing at all rather than something approximate when the
     /// track is gone: playing something the listener did not point at is the
     /// failure ADR-0023 §2 already refuses by name.
+    ///
+    /// **Then it goes to `Now playing`** — the owner: *"or takes you to now
+    /// playing"*. Three things about that are deliberate:
+    ///
+    /// 1. **It is part of this press**, not a second gesture, and it is the
+    ///    front end's own act: it does not wait on [`Event::TrackStarted`] to
+    ///    land. A place that arrived a frame after the press would be the
+    ///    interface acknowledging you late, and the shell does not need the
+    ///    engine's permission to change which surface it is drawing.
+    /// 2. **It happens last**, after the commands are away and after the
+    ///    MPRIS publish, for the reason every other route here follows: this
+    ///    codebase has been bitten by *announcing* a state before publishing
+    ///    it, never by the reverse.
+    /// 3. **Only where something was actually asked for.** A `Now playing`
+    ///    place reached by a press that sent nothing would read "Nothing
+    ///    playing.", which is a worse answer than staying put.
     fn resume_the_run(&mut self) -> Task<Message> {
+        // **A paused run is already where it needs to be.** The engine is
+        // holding the track and the position; all it is waiting for is to be
+        // let go.
+        if self.player.now_playing_path().is_some() {
+            if !self.playback.send(Command::Play) {
+                self.player.engine_closed();
+                return Task::none();
+            }
+            self.player.note_transport_sent();
+            self.publish_mpris(false);
+            return self.go(|place| place.go(crate::lane::Destination::NowPlaying));
+        }
         let Some(path) = self.resume.current().map(std::path::Path::to_path_buf) else {
             return Task::none();
         };
@@ -2235,7 +2274,7 @@ impl App {
             self.playback.send(Command::Seek { position_ms });
         }
         self.publish_mpris(false);
-        Task::none()
+        self.go(|place| place.go(crate::lane::Destination::NowPlaying))
     }
 
     /// Hand the snapshot's run back to the engine at launch, silently.
@@ -2282,27 +2321,15 @@ impl App {
             return;
         }
         self.written = mark;
-        // **A loaded run that has not been started keeps the snapshot it came
-        // from**, and this is the clause the whole feature turns on. Launch
-        // hands the queue back to the engine (`restore_the_run`), which moves
-        // this mark from nothing to twelve tracks — and a write here would
-        // record a cursor of 0 and a position of 0, overwriting the
-        // interrupted point with *the fact that it was restored*. The
-        // listener would lose their place by opening baz, which is the exact
-        // opposite of what ADR-0023 §6 is for.
-        //
-        // So the run is written when the engine says where it is, and not
-        // before: `playing_queue_row` is `Some` only after a `TrackStarted`.
-        // The one exception is the run *ending* — an empty queue is written,
-        // because a `CONTINUE` band offering a run the listener finished
-        // would be the interface remembering something that is over.
-        if self.player.playing_queue_row().is_none() && self.player.queued() > 0 {
-            return;
-        }
+        // What may and may not be written is [`next_snapshot`]'s single
+        // answer, shared with the exit path — the guard that protects the
+        // listener's place must not exist in two copies.
         self.remember_the_run(0);
     }
 
-    /// Write the snapshot, with `position_ms` into the track the cursor is on.
+    /// Write the snapshot, with `position_ms` into the track the cursor is on
+    /// — or leave the file alone, when [`next_snapshot`] says this process has
+    /// nothing truer to say than it already does.
     ///
     /// Best effort by nature, and every failure is a line on stdout: a player
     /// that could not remember where it got to is a player that starts at the
@@ -2311,18 +2338,8 @@ impl App {
         let Some(path) = crate::session::session_file() else {
             return;
         };
-        let snapshot = match self.player.queue() {
-            Some(queue) if !queue.is_empty() => crate::session::Snapshot {
-                paths: queue.paths(),
-                cursor: self.player.playing_queue_row().unwrap_or(0),
-                position_ms,
-                provenance: queue.provenance.clone(),
-            },
-            // The run ended, or was never started: an empty snapshot, written
-            // rather than left stale. A `CONTINUE` band offering a run the
-            // listener finished would be the interface remembering something
-            // that is over.
-            _ => crate::session::Snapshot::default(),
+        let Some(snapshot) = next_snapshot(&self.player, position_ms) else {
+            return;
         };
         self.resume.clone_from(&snapshot);
         if let Err(error) = crate::session::store(&path, &snapshot) {
@@ -5813,6 +5830,75 @@ fn persist_lane(open: bool) {
     persist(|config| config.sidebar_open = open);
 }
 
+/// **What `session.toml` should say about the run** — or `None` for *leave the
+/// file exactly as it is*.
+///
+/// Pure, and the **single** answer to that question: both writers go through
+/// it ([`App::sync_snapshot`] on every move of the run, [`App::leave_for_good`]
+/// on the way out), because a guard that protects the listener's place must
+/// not exist in two copies that can drift apart.
+///
+/// # Nothing has sounded ⇒ nothing is written
+///
+/// The clause the whole feature turns on, and it is one line. Launch hands the
+/// restored queue back to the engine ([`App::restore_the_run`]), which moves
+/// every mark this shell watches — and a write at that moment records a cursor
+/// of 0 and a position of 0, overwriting the interrupted point with *the fact
+/// that it was restored*. **The listener would lose their place by opening
+/// baz**, which is the exact opposite of what ADR-0023 §6 is for.
+///
+/// Stating it as *has anything sounded* rather than as *is a row playing*
+/// closes two holes that the narrower reading left open, and both are real:
+///
+/// - **The way out.** [`App::leave_for_good`] writes unconditionally, so
+///   opening baz and closing it again without pressing anything used to spend
+///   the interrupted position exactly as a restore-time write would have. The
+///   run is now still the run you left.
+/// - **A library that is not mounted yet.** A snapshot whose files do not
+///   resolve produces no queue at all, and the old *no queue ⇒ write an empty
+///   snapshot* arm then deleted the run outright. A NAS that was not up when
+///   baz opened no longer costs the listener their place.
+///
+/// It also has a quiet second consequence the Home place depends on: while
+/// nothing has sounded, `App::resume` cannot change under the `CONTINUE` band
+/// that is reading it, so what the band shows cannot drift mid-frame.
+///
+/// # And once something has
+///
+/// The engine's account, whatever it is. A row is playing (or paused) and that
+/// row is the run; **the queue has ended and the run is written away**, because
+/// a run played to its end is not a run that was interrupted and an offer to
+/// carry on with something you completed is the interface remembering
+/// something that is over — the same judgement `views::home::standing` makes on
+/// screen, so the two cannot disagree across a restart.
+///
+/// A queue merely *replaced* is deliberately not that: the phase is still
+/// whatever it was and the engine's next `TrackStarted` is already on its way,
+/// so the file is left alone rather than blanked and rewritten a millisecond
+/// later.
+fn next_snapshot(player: &PlayerState, position_ms: u64) -> Option<crate::session::Snapshot> {
+    if !player.has_sounded() {
+        return None;
+    }
+    match player.queue() {
+        Some(queue) if !queue.is_empty() => match player.playing_queue_row() {
+            Some(cursor) => Some(crate::session::Snapshot {
+                paths: queue.paths(),
+                cursor,
+                position_ms,
+                provenance: queue.provenance.clone(),
+            }),
+            None if player.phase() == player::Phase::Stopped => {
+                Some(crate::session::Snapshot::default())
+            }
+            None => None,
+        },
+        // Something sounded and there is no queue behind it any more: there is
+        // no run left to remember.
+        _ => Some(crate::session::Snapshot::default()),
+    }
+}
+
 /// **The interrupted run, read once** (ADR-0023 §6).
 ///
 /// A missing file is an empty snapshot and not an error: a fresh install has
@@ -7103,6 +7189,201 @@ mod tests {
             tile.tick(start + later);
             warmth.tick(start + later);
             assert!(!moving!());
+        }
+    }
+
+    /// The run baz launched with, as [`App::restore_the_run`] hands it back to
+    /// the engine: three files, queued and silent.
+    fn restored() -> vm::QueueVm {
+        let item = |title: &str, path: &str| vm::QueueItemVm {
+            title: title.to_owned(),
+            artist: None,
+            album: Some("Anhydrous".to_owned()),
+            album_artist: None,
+            duration: Some(Duration::from_secs(387)),
+            path: PathBuf::from(path),
+        };
+        vm::QueueVm {
+            album: Some("Anhydrous".to_owned()),
+            artist: "Bola".to_owned(),
+            items: vec![
+                item("Anhydrous 1", "/m/1.flac"),
+                item("Anhydrous 2", "/m/2.flac"),
+                item("Anhydrous 3", "/m/3.flac"),
+            ],
+            provenance: Some("Road Trip".to_owned()),
+        }
+    }
+
+    /// **Opening baz and closing it again keeps the listener's place.**
+    ///
+    /// The bug this guards is the one the `CONTINUE` band exists to serve and
+    /// the one that would silently destroy it: restoring the run moves every
+    /// mark the shell watches, so a write at that moment records cursor 0 and
+    /// position 0 and the interrupted point is gone. It is checked on **both**
+    /// writers, because the narrower *is a row playing* reading of this guard
+    /// protected [`App::sync_snapshot`] and left [`App::leave_for_good`] —
+    /// which writes unconditionally, on the way out — spending the position
+    /// anyway.
+    #[test]
+    fn opening_baz_and_closing_it_again_keeps_the_listeners_place() {
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(restored());
+        assert!(!player.has_sounded(), "the queue is loaded and silent");
+        assert_eq!(
+            next_snapshot(&player, 0),
+            None,
+            "the run moving at launch may not write: this is the restore, not \
+             a move, and the file already says where the listener was"
+        );
+        assert_eq!(
+            next_snapshot(&player, 192_000),
+            None,
+            "and neither may the way out — `leave_for_good` writes the elapsed \
+             position, and nothing has elapsed"
+        );
+    }
+
+    /// **A library that is not mounted yet costs no one their place.**
+    ///
+    /// A snapshot whose files do not resolve produces no queue at all, and the
+    /// old *no queue ⇒ write an empty snapshot* arm then deleted the run
+    /// outright. A NAS that was not up when baz opened is an ordinary thing to
+    /// meet (ADR-0025 says so by name) and it must not be a way to lose where
+    /// you were.
+    #[test]
+    fn a_library_that_is_not_mounted_costs_no_one_their_place() {
+        let player = PlayerState::new(Availability::Ready);
+        assert_eq!(next_snapshot(&player, 0), None);
+        assert_eq!(next_snapshot(&player, 192_000), None);
+    }
+
+    /// **Once something has sounded, the file is the engine's account.**
+    ///
+    /// The run is written where the engine says it is — by row, at the
+    /// position handed in — and the provenance travels with it.
+    #[test]
+    fn the_run_is_written_where_the_engine_says_it_is() {
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(restored());
+        player.apply(
+            &Event::TrackStarted {
+                path: PathBuf::from("/m/2.flac"),
+                position: 1,
+            },
+            &[],
+        );
+        let written = next_snapshot(&player, 192_000).expect("the engine said where it is");
+        assert_eq!(written.cursor, 1);
+        assert_eq!(written.position_ms, 192_000);
+        assert_eq!(written.provenance.as_deref(), Some("Road Trip"));
+        assert_eq!(written.current(), Some(Path::new("/m/2.flac")));
+    }
+
+    /// **A run played to its end is written away.**
+    ///
+    /// The same judgement `views::home::standing` makes on screen, made once
+    /// more on disk so the two cannot disagree across a restart: a finished run
+    /// is not an interrupted one, and the `CONTINUE` band must not come back
+    /// after a relaunch offering to replay something the listener completed.
+    ///
+    /// Note what makes this state distinguishable at all — the phase, the
+    /// queue and the playing row are *identical* to the launch state above.
+    /// Only [`PlayerState::has_sounded`] separates them.
+    #[test]
+    fn a_run_played_to_its_end_is_written_away() {
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(restored());
+        player.apply(
+            &Event::TrackStarted {
+                path: PathBuf::from("/m/3.flac"),
+                position: 2,
+            },
+            &[],
+        );
+        player.apply(&Event::QueueEnded, &[]);
+        assert_eq!(player.playing_queue_row(), None);
+        assert!(
+            player.queued() > 0,
+            "the engine keeps the list it was given"
+        );
+        assert_eq!(
+            next_snapshot(&player, 0),
+            Some(crate::session::Snapshot::default()),
+            "the run is over and the file says so"
+        );
+    }
+
+    /// **A queue merely replaced leaves the file alone until the engine
+    /// speaks.**
+    ///
+    /// `SetQueue` clears the row this side of the bridge while the phase is
+    /// still whatever it was and the engine's next `TrackStarted` is already on
+    /// its way. Blanking the file for that millisecond and rewriting it
+    /// immediately would be two writes and one window in which a crash costs
+    /// the run — and it is *not* the run ending, which is the state above.
+    #[test]
+    fn a_queue_replaced_leaves_the_file_alone_until_the_engine_speaks() {
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(restored());
+        player.apply(
+            &Event::TrackStarted {
+                path: PathBuf::from("/m/1.flac"),
+                position: 0,
+            },
+            &[],
+        );
+        player.note_queue_sent(restored());
+        assert_eq!(player.playing_queue_row(), None);
+        assert_eq!(player.phase(), player::Phase::Playing);
+        assert_eq!(next_snapshot(&player, 0), None);
+    }
+
+    /// **`Resume` is the one play gesture that navigates, and it is the only
+    /// one.**
+    ///
+    /// The owner asked for it by name (*"or takes you to now playing"*) and it
+    /// is a deliberate exception, so it is pinned as one: the source of every
+    /// other route into playback is swept for a place change, and only
+    /// [`App::resume_the_run`] may carry it. `Play` on the wall's hover
+    /// options, on a record's page and in a playlist all answer where you are
+    /// standing rather than moving you, and an accidental `self.go(…)` in one
+    /// of them would be the interface taking the wheel.
+    #[test]
+    fn resume_is_the_only_play_gesture_that_navigates() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("this module's own source");
+        let body_of = |name: &str| {
+            let body = source
+                .split_once(&format!("fn {name}("))
+                .unwrap_or_else(|| panic!("{name} is still a function here"))
+                .1;
+            body[..body.find("\n    }\n").expect("a function ends")].to_owned()
+        };
+        let door = "Destination::NowPlaying";
+        assert!(
+            body_of("resume_the_run").matches(door).count() == 2,
+            "`Resume` starts the run *and* goes to `Now playing`, on both of \
+             the two shapes it has — the paused session and the interrupted run"
+        );
+        // Named rather than discovered, and `body_of` panics on a name that
+        // has moved — a sweep that quietly matched nothing would pass forever.
+        for elsewhere in [
+            "play_album",
+            "play_track",
+            "play_all",
+            "play_playlist",
+            "play_playlist_track",
+            "play_first_match",
+        ] {
+            assert!(
+                !body_of(elsewhere).contains("self.go("),
+                "`{elsewhere}` navigates: a play gesture that answers *play \
+                 this* must leave you where you are standing (`views::home`'s \
+                 note on the exception)"
+            );
         }
     }
 }

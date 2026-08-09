@@ -1914,6 +1914,31 @@ impl PlayerState {
         self.track_seq
     }
 
+    /// **Whether anything has sounded in this process at all.** True from the
+    /// first [`Event::TrackStarted`] onwards, and never false again — not on a
+    /// stop, not when the queue ends, not when the engine goes away.
+    ///
+    /// The one question that separates *the run restored at launch and not yet
+    /// begun* from *the run that has just played to its end*. Every other
+    /// reading of this state machine gives those two states the same answers —
+    /// the phase is [`Phase::Stopped`], the queue is loaded, and no row is
+    /// playing in either — and the difference between them is the listener's
+    /// place: the first must leave `session.toml` exactly as it found it, and
+    /// the second must clear it (see `crate::app::next_snapshot`). It is also
+    /// what `crate::views::home` reads to tell *nothing has begun* from
+    /// *nothing is left*.
+    ///
+    /// It is [`Self::track_seq`] read as what its own documentation says it is
+    /// — a **count** of distinct tracks started — rather than a second field
+    /// holding the same fact. The counter is `wrapping_add`ed so that a very
+    /// long-lived session cannot panic on overflow, never because the count is
+    /// expected to come back round: at a track a millisecond it would take
+    /// some six hundred million years.
+    #[must_use]
+    pub fn has_sounded(&self) -> bool {
+        self.track_seq > 0
+    }
+
     /// Path of the track the engine last said it started, while one is
     /// playing or paused.
     #[must_use]
