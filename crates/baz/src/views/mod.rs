@@ -223,9 +223,10 @@ fn sleeve_cell(shelf: &Shelf, album: u64, size: f32) -> Element<'static, Message
 /// It occupies the Library's top-bar geometry exactly — the same vertical
 /// padding, the same [`theme::HANG`] window gutter (law L1), the same hairline
 /// underneath — so that moving between places does not slide the content area
-/// by a pixel. **The frame is the frame in every place**, and with three places
-/// wearing it rather than one, that is a property worth having in one function
-/// instead of three copies that can drift.
+/// by a pixel. **The frame is the frame in every place**, and with four places
+/// wearing it — Album, Queue, Playlist, and since doc 10 §7 step 8 Settings —
+/// it is one function in five places (the Library's own strip being
+/// [`top_bar`]) rather than copies that can drift.
 ///
 /// **Back is a word, not a chevron.** A door is labelled with the name of what
 /// it opens (doc 07 L8.4), and the amendment that let the gear and the

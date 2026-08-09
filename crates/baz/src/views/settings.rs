@@ -78,6 +78,7 @@ use iced::{Element, Length, alignment};
 use crate::app::Message;
 use crate::player::PlayerState;
 use crate::replaygain::{self, MODES};
+use crate::views::place_header;
 use crate::{icon, theme};
 
 /// One music folder, as the Library section draws it (ADR-0022).
@@ -200,7 +201,12 @@ pub(crate) fn view<'a>(
     };
 
     column![
-        header(),
+        // The frame is one function in five places (doc 10 §7 step 8): the
+        // strip the record's page, the queue and the playlist already wear,
+        // with this place's own name and note. Back sends
+        // [`Message::LeavePlace`] — the same landing as the gear's toggle
+        // and <kbd>Esc</kbd>'s peel: the Library.
+        place_header("Settings", "Kept in config.toml, and remembered next time."),
         container(body)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -244,68 +250,11 @@ fn content_width(window_width: f32, beside_the_list: bool) -> f32 {
     (window_width - taken).clamp(theme::SETTINGS_CONTENT_MIN, measure)
 }
 
-/// The place's top strip: the way back, and the place's name.
-///
-/// It occupies the Library's top-bar geometry exactly — the same vertical
-/// padding, the same horizontal inset, the same hairline underneath — so that
-/// moving between the two places does not slide the content area up or down by
-/// a pixel. The frame is the frame in every place (§4.3).
-///
-/// **Back is a word, not a chevron.** baz draws its glyphs itself from a small
-/// deliberate set ([`crate::icon`]), and a back arrow would be a new one for a
-/// control that has a short and unambiguous name — the same argument that keeps
-/// `Settings` a word in the top bar it returns to. It sends the message
-/// <kbd>Ctrl</kbd>+<kbd>,</kbd> sends and the message the top bar's control
-/// sends, so all three are one press.
-fn header() -> Element<'static, Message> {
-    let room = theme::active();
-    let back = button(
-        // Centred in its own box, like `Settings` across the frame from it
-        // (law L3).
-        container(
-            text("‹ Library")
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .font(theme::MEDIUM)
-                .wrapping(text::Wrapping::None),
-        )
-        .height(Length::Fill)
-        .align_y(alignment::Vertical::Center),
-    )
-    // The same height as the top bar's `Settings`, which is the control this
-    // one swaps places with: the two strips are one frame, and a way-back that
-    // stood shorter than the control it replaced would make the header jump on
-    // every navigation.
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_SM))
-    .style(move |_theme, status| theme::word_button(room, room.wall, status))
-    .on_press(Message::ToggleSettings);
-    column![
-        container(
-            row![
-                back,
-                text("Settings")
-                    .size(theme::SIZE_EMPHASIS)
-                    .line_height(theme::LEADING_EMPHASIS)
-                    .font(theme::MEDIUM),
-                Space::with_width(Length::Fill),
-                text("Kept in config.toml, and remembered next time.")
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_faint)
-                    .wrapping(text::Wrapping::None),
-            ]
-            .spacing(theme::GAP_LG)
-            .align_y(iced::Alignment::Center),
-        )
-        // The Library's top bar's geometry, exactly — the same padding, the same
-        // one window gutter, the same hairline — because the two strips are one
-        // frame and navigating between the places may not slide it.
-        .padding(theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)),
-        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
-    ]
-    .into()
-}
+// The place's own header function is gone (doc 10 §7 step 8): the strip is
+// [`crate::views::place_header`], one function in five places, so the frame
+// cannot drift between them. What this file used to argue for its private
+// copy — the same padding, the same window gutter, the same hairline, Back
+// centred in its box — is now argued once, where the strip is drawn.
 
 /// The section list: the place's spine, as a column beside the content.
 ///

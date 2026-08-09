@@ -5442,19 +5442,20 @@ mod tests {
         };
         // The top strip, in **every** place — they are one frame and must hang
         // from one line, or navigating between them would slide the content
-        // area. `views::mod.rs` carries the strip the record's page and the
-        // queue both wear ([`crate::views::place_header`]); `settings.rs` draws
-        // its own because it has a section spine beside it.
+        // area. `views::mod.rs` carries the strip every place that is not the
+        // Library wears ([`crate::views::place_header`]); the Library's own
+        // strip is `top_bar.rs`.
         let expected = "theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)";
-        for name in ["top_bar.rs", "settings.rs", "mod.rs"] {
+        for name in ["top_bar.rs", "mod.rs"] {
             assert!(
                 read(name).contains(expected),
                 "{name} no longer hangs its window-edge strip from HANG"
             );
         }
-        // …and the two places that share it really do use it, rather than
-        // reinventing a strip of their own.
-        for name in ["album.rs", "queue.rs"] {
+        // …and the four places that share it really do use it, rather than
+        // reinventing a strip of their own — Settings included, since doc 10
+        // §7 step 8 folded its private copy into the one function.
+        for name in ["album.rs", "queue.rs", "playlist.rs", "settings.rs"] {
             assert!(
                 read(name).contains("place_header("),
                 "{name} draws a header of its own instead of the frame's"
