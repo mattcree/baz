@@ -46,7 +46,7 @@ use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
 use crate::player::PlayerState;
-use crate::playlists::{NameEntry, OpenPlaylist, PageRow};
+use crate::playlists::{Collecting, NameEntry, OpenPlaylist, PageRow};
 use crate::views::{place_header, place_pad, playlist_sleeve, section_rule};
 use crate::{icon, theme};
 
@@ -68,6 +68,7 @@ pub(crate) fn view<'a>(
     player: &'a PlayerState,
     window_width: f32,
     hovered: Option<usize>,
+    collecting: Collecting,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let content = (window_width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).max(0.0);
@@ -97,6 +98,7 @@ pub(crate) fn view<'a>(
             live,
             playing,
             hovered == Some(index),
+            collecting,
         ));
     }
     let body: Element<'a, Message> = if open.rows.is_empty() {
@@ -352,6 +354,18 @@ fn record_head(album: &str, artist: &str, first: bool) -> Element<'static, Messa
 /// invitations to destroy something — and hover is not their only route in
 /// the product's terms: the file itself is the user's, editable in any text
 /// editor, and the page re-reads it (ADR-0024 §2).
+///
+/// Since doc 09 §13 step 4 the row also carries the **transfer `+`** in the
+/// queue row's outer slot — the last piece of §8.2's "same editor" claim,
+/// and the visible twin the row's context-menu items mirror (§5.2). A
+/// missing entry gets no `+` for the ✕'s opposite reason: there is nothing
+/// there to transfer.
+#[expect(
+    clippy::too_many_lines,
+    reason = "a row is one anatomy — marker, title, duration, four reserved \
+              slots — and splitting it would put half the reservation rules \
+              out of sight of the other half"
+)]
 fn entry_row(
     page_row: &PageRow,
     index: usize,
@@ -359,6 +373,7 @@ fn entry_row(
     live: bool,
     playing: bool,
     hovered: bool,
+    collecting: Collecting,
 ) -> Element<'_, Message> {
     let room = theme::active();
     let ink = if page_row.missing {
@@ -435,28 +450,83 @@ fn entry_row(
     // there is nothing there to play.
     .on_press_maybe((live && !page_row.missing).then_some(Message::PlaylistPlayTrack(index)));
     let offered = hovered;
-    mouse_area(
-        row![
-            body,
-            step_slot(
-                "\u{2191}",
-                index > 0,
-                offered,
-                Message::PlaylistShiftEntry(index, -1)
-            ),
-            step_slot(
-                "\u{2193}",
-                index + 1 < total,
-                offered,
-                Message::PlaylistShiftEntry(index, 1),
-            ),
-            remove_slot(index, offered),
-        ]
-        .spacing(theme::GAP_XS)
-        .align_y(iced::Alignment::Center),
+    let mut slots = row![
+        body,
+        step_slot(
+            "\u{2191}",
+            index > 0,
+            offered,
+            Message::PlaylistShiftEntry(index, -1)
+        ),
+        step_slot(
+            "\u{2193}",
+            index + 1 < total,
+            offered,
+            Message::PlaylistShiftEntry(index, 1),
+        ),
+        remove_slot(index, offered),
+    ]
+    .spacing(theme::GAP_XS)
+    .align_y(iced::Alignment::Center);
+    if collecting.available {
+        // The transfer slot, in the queue row's outer position and by its
+        // rule: no engine needed (a pick can land in a file), offered on
+        // hover and at rest while the panel stands. A missing entry keeps
+        // the reserved space and no control.
+        slots = slots.push(transfer_slot(
+            index,
+            !page_row.missing && (collecting.panel_open || hovered),
+        ));
+    }
+    // The row's right press opens its mirror menu (doc 09 §5.2): play and
+    // the transfer verbs, each a press this row's own controls already
+    // make. A missing entry's menu offers nothing, exactly as its row does.
+    crate::menu::area(
+        mouse_area(slots)
+            .on_enter(Message::PlaylistRowEntered(index))
+            .on_exit(Message::PlaylistRowLeft(index)),
+        crate::menu::Target::PlaylistTrack {
+            row: index,
+            missing: page_row.missing,
+        },
     )
-    .on_enter(Message::PlaylistRowEntered(index))
-    .on_exit(Message::PlaylistRowLeft(index))
+}
+
+/// The row's transfer `+` — the queue row's exact anatomy and tooltip,
+/// sending the page's own message ([`Message::PlaylistAddEntry`]): hold this
+/// row's track, open the panel as the picker (doc 09 §8.1's one gesture,
+/// reaching the page's rows at step 4 as §8.2's parity promised).
+fn transfer_slot(index: usize, offered: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    if !offered {
+        return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
+    }
+    tooltip(
+        button(
+            container(
+                text("+")
+                    .size(theme::SIZE_BODY)
+                    .line_height(theme::LEADING_BODY)
+                    .color(room.paper),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(alignment::Horizontal::Center)
+            .align_y(alignment::Vertical::Center),
+        )
+        .width(Length::Fixed(theme::STEPPER_HIT))
+        .height(Length::Fixed(theme::STEPPER_HIT))
+        .padding(0)
+        .style(move |_theme, status| theme::transport(room, room.wall, status))
+        .on_press(Message::PlaylistAddEntry(index)),
+        text("Add to a playlist, or the queue")
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Left,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
     .into()
 }
 

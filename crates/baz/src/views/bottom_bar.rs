@@ -415,21 +415,29 @@ fn back_to_playing(player: &PlayerState) -> Element<'_, Message> {
     // taking you back to the wall, and a now-playing block that lit up would be
     // the bar claiming a state about the *record* rather than about the door.
     // The page's own `‹ Library` is the labelled way out.
-    tooltip(
-        button(lines)
-            .width(Length::Fill)
-            .padding(0)
-            .style(move |_theme, status| theme::now_playing_text(room, status))
-            .on_press(Message::ShowPlayingAlbum),
-        text("Go to the record that is playing")
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        tooltip::Position::Top,
+    //
+    // The block's right press opens its mirror menu (doc 09 §5.2) — what
+    // makes S4 two gestures *from anywhere*: the sounding track is always
+    // in the bar, so `Add to "{current}"` is always one right-click away.
+    // The bar gains no slot for it; the menu is a layer, and the ratchet
+    // (`docs/REFUSALS.md`) is untouched.
+    crate::menu::area(
+        tooltip(
+            button(lines)
+                .width(Length::Fill)
+                .padding(0)
+                .style(move |_theme, status| theme::now_playing_text(room, status))
+                .on_press(Message::ShowPlayingAlbum),
+            text("Go to the record that is playing")
+                .size(theme::SIZE_CAPTION)
+                .line_height(theme::LEADING_CAPTION),
+            tooltip::Position::Top,
+        )
+        .gap(theme::GAP_XS)
+        .padding(theme::GAP_XS)
+        .style(move |_theme| theme::tooltip(room)),
+        crate::menu::Target::NowPlaying,
     )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
 }
 
 /// The now-playing lines proper: the current track as a

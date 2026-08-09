@@ -1723,6 +1723,19 @@ impl PlayerState {
         self.queue.as_ref()?.provenance.as_deref()
     }
 
+    /// The sounding row's queue position, for the surfaces whose *subject*
+    /// is the sounding track rather than a listed row — today the bar's
+    /// context menu (doc 09 §5.2), whose transfer items spend the queue
+    /// row's own messages on the row the engine confirms is playing.
+    ///
+    /// Exactly [`Self::playing_row`]'s answer, published: never optimistic,
+    /// `None` while nothing is confirmed sounding, so the menu's verbs
+    /// withdraw rather than aiming at a row that is not there.
+    #[must_use]
+    pub fn playing_queue_row(&self) -> Option<usize> {
+        self.playing_row()
+    }
+
     /// Which row of the recorded queue the engine is playing, reconciled
     /// against the path it named (module docs; [`QueueVm::playing`] carries the
     /// rule). Requires both an engine-reported position and a current track,

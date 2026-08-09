@@ -3238,6 +3238,37 @@ pub fn panel_seam(p: &Palette) -> container::Style {
     }
 }
 
+/// The context menu's card width (logical px) — doc 09 §5.2's mirror layer.
+///
+/// On the 4 px lattice. Wide enough that `Add to "{name}"` keeps a real
+/// name before clipping, narrow enough that the card stays a note at the
+/// pointer rather than a surface; the items' verbs are deliberately short
+/// (§5.2), so the width is spent on the one label that quotes the user's
+/// own words.
+pub const MENU_W: f32 = 232.0;
+
+/// The context menu's card (doc 09 §5.2): the panel's exact separation
+/// strategy at float scale — the surface step ([`Palette::plinth`]) plus a
+/// 1 px hairline, **no shadow** (`docs/REFUSALS.md` reserves shadows for
+/// the playing halo, the same clause [`panel`] cites), and the float
+/// family's [`RADIUS_CHIP`] corner shared with [`tooltip`] and
+/// [`preview_tip`]. The items inside are ordinary [`track_row`] word
+/// buttons, so the card introduces no colour the room does not already
+/// have.
+#[must_use]
+pub fn menu(p: &Palette) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(p.plinth)),
+        text_color: Some(p.paper),
+        border: Border {
+            color: p.hairline_strong(p.plinth),
+            width: 1.0,
+            radius: RADIUS_CHIP.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// The bar's drawn height including its hairline — **57**. Stated here
@@ -4407,6 +4438,7 @@ mod tests {
             ("preview_tip", preview_tip(p)),
             ("segmented", segmented(p)),
             ("lamp_dot", lamp_dot(p)),
+            ("menu", menu(p)),
             ("sleeve(resting)", sleeve(p, 0.0)),
             ("sleeve(playing)", sleeve(p, 1.0)),
         ] {
@@ -4995,6 +5027,7 @@ mod tests {
         painted.push(("preview_tip", container_colors(&preview_tip(p))));
         painted.push(("bar", container_colors(&bar(p))));
         painted.push(("tooltip", container_colors(&tooltip(p))));
+        painted.push(("menu", container_colors(&menu(p))));
         painted.push(("hairline", vec![hairline(p, p.wall).color]));
         painted.push((
             "detent_ink",

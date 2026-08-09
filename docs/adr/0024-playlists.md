@@ -12,8 +12,9 @@
 > file-only append); item 5 accepted and shipped (2026-08-09, step 3 — the
 > songs section, captures at `docs/design/impl/songs-search/`); item 3
 > accepted and shipped (2026-08-09, step 5 — queue-place edit parity,
-> captures at `docs/design/impl/queue-parity/`); item 4 — the context
-> menu, step 4 — remains proposed**:
+> captures at `docs/design/impl/queue-parity/`); item 4 accepted and
+> shipped (2026-08-09, step 4 — the context menu as a mirror layer,
+> captures at `docs/design/impl/context-menus/`). All six stand**:
 >
 > 1. **§6 layer 2 — the armed collecting mode — is withdrawn.** Shipped
 >    2026-08-09, removed on the owner's own observation (09 §9): it was a
@@ -45,6 +46,15 @@
 >    visible control also sends, pinned by the same shape of test — which
 >    is what admits *"send to current playlist"* in two gestures from
 >    anywhere without breaching the visible-control rule.
+>    *Accepted (2026-08-09), shipped as doc 09 §13 step 4*: the four menus
+>    of §5.2's table exactly, a float at the pointer on ADR-0016's
+>    mechanics (one at a time by construction — the overlay state is a
+>    single `Option`; Esc peels it first; flipped inside the window at the
+>    edges), the mirror pinned by
+>    `every_menu_item_is_a_press_some_control_also_makes`, and the
+>    playlist page's rows gaining the transfer `+` — §8.2's "same editor"
+>    anatomy completed — as the visible twin their menu items mirror.
+>    Captures at `docs/design/impl/context-menus/`.
 > 5. **Search answers in songs** (09 §5): a ranked `Songs` section above
 >    the filtered wall, from track results `Library::search` already
 >    returns; a result's press is a needle-drop; the sections stay

@@ -5,12 +5,12 @@
 > — the implicit-playlist study, commissioned on the owner's *"we are
 > thinking there are implicit playlists everywhere."* Four changes to this
 > record, none touching the engine. **Status: all four items accepted and
-> shipped** (2026-08-09 — items 1–2 as doc 09 §13 steps 1–2, the picker's
-> Queue row and playing provenance; item 3 as step 3, the songs section;
-> item 4 as steps 5–6, `Play all` over the virtualized queue place, with
-> shuffle's contract already shipped behaviour; item 1's shift-click
-> accelerator as step 7 — **its context-menu accelerator alone awaits
-> step 4**, the mirror layer):
+> shipped, whole** (2026-08-09 — items 1–2 as doc 09 §13 steps 1–2, the
+> picker's Queue row and playing provenance; item 3 as step 3, the songs
+> section; item 4 as steps 5–6, `Play all` over the virtualized queue
+> place, with shuffle's contract already shipped behaviour; item 1's
+> shift-click accelerator as step 7 and its context-menu accelerator as
+> step 4, the mirror layer):
 >
 > 1. **§3's dedicated `Queue album` control is withdrawn before being
 >    built** (it never shipped). The queue-append lives in the unified
@@ -25,7 +25,11 @@
 >    that would open a record's page appends it to the run instead —
 >    `UpdateQueue`, nothing sounding unasked — resolved against the
 >    hand-kept modifier state because iced 0.13 reports a button's press
->    without one. The menu's `Queue` item awaits step 4.
+>    without one. *The menu's `Queue` item shipped as step 4 (2026-08-09,
+>    the mirror layer)*: its presses are the row's `+` then the picker's
+>    Queue row, made for you — two messages visible controls also send,
+>    which is the accelerator resolving to its on-screen control by
+>    construction (`every_menu_item_is_a_press_some_control_also_makes`).
 > 2. **Playing provenance is defined** (09 §6), completing §1's "the
 >    context is recorded, not kept live": a queue reified from a named
 >    playlist carries the source's name on the request-side record; it
