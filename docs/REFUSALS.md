@@ -4,9 +4,22 @@
 > [ADR-0017](adr/0017-design-direction.md) §6 from
 > `docs/design/critique/01-foundations.md`, extended with ours.
 >
-> **The editing rule.** Adding an entry needs a pull request. **Removing one
-> needs an ADR that beats its argument.** A refusal you can delete because you
-> changed your mind is not a refusal; it is a preference.
+> **Who this binds.** Contributors and agents — not the owner. Its job is to
+> stop settled questions being re-litigated by whoever touches the code next,
+> and to stop baz drifting into the generic-music-player defaults it exists to
+> avoid. **The owner's decision is sufficient on its own**; an entry he
+> reverses gets rewritten to say what was decided and why, and that is the
+> whole of the process. Nobody argues with a document to change their own
+> product.
+>
+> **The editing rule, for everyone else.** Adding an entry needs a pull
+> request. Removing one needs an argument that beats it. A refusal a
+> contributor can delete because they changed their mind is not a refusal; it
+> is a preference.
+>
+> **What is actually hard here** is responsiveness and the aesthetic — the
+> product must stay fast and must look excellent. The entries below serve those
+> two ends. Where an entry ever works against them, the entry is wrong.
 >
 > This is a standing document, not a decision record. It is the descendant of
 > `VISION.md`'s "Refuse (the fixes)" and "Betrayal list", and it is where new
