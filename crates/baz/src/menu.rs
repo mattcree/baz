@@ -15,7 +15,7 @@
 //! message*): a menu item is not a second control any more than a key binding
 //! is — it is an accelerator layer over the controls that exist, and the
 //! binding test, not the control table, is what pins it
-//! ([`tests::every_menu_item_is_a_press_some_control_also_makes`], the same
+//! (`tests::every_menu_item_is_a_press_some_control_also_makes`, the same
 //! shape as `app.rs`'s keyboard sweep). An item whose gesture is two presses
 //! in the interface — the track row's `+` and then the picker's Queue row —
 //! carries both messages and makes both presses, which is exactly what the
