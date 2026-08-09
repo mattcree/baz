@@ -66,7 +66,7 @@ use iced::{Element, Length, alignment};
 use crate::app::{Message, Shelf};
 use crate::player::{Availability, PlayerState};
 use crate::playlists::Collecting;
-use crate::views::{gradient_block, place_header, place_pad, section_rule};
+use crate::views::{gradient_block, place_header_led, place_name, place_pad, section_rule};
 use crate::{icon, theme, vm};
 
 /// The record's page: the header strip, then the object beside what is written
@@ -123,7 +123,7 @@ pub(crate) fn view<'a>(
     };
 
     column![
-        place_header("Album"),
+        place_header_led(breadcrumb(album), None),
         // **One scroll for the whole page.** The column had two (the panel and
         // its track list) and the popover had one inside another; a page is one
         // document and turning it over is one gesture. The gutter the bar needs
@@ -140,6 +140,68 @@ pub(crate) fn view<'a>(
         .width(Length::Fill)
         .height(Length::Fill),
     ]
+    .into()
+}
+
+/// **`Artist › Album`** — the record's own context in the header, and the
+/// artist half is a door.
+///
+/// The owner's, replacing the `‹ Prev` / `Next ›` pair that stood here:
+/// *"previous and next on albums doesn't make sense on the album view. we
+/// could add an Artist > album breadcrumb though."* The pair stepped along the
+/// *wall's* current arrangement — a property of the Library place, not on
+/// screen from here — so it offered a door whose destination the listener
+/// could not know before pressing it. A breadcrumb names where this record
+/// actually sits, and it names it with a fact about the record rather than
+/// about the frame.
+///
+/// **The lead is the place's name now**, and that is the point rather than a
+/// side effect: the strip used to read `Album`, which told you the *kind* of
+/// page you were on when the page is entirely made of the answer. Every other
+/// place still leads with its name because for them the name is the only
+/// honest lead — `Queue`, `Settings` and `Now playing` have no subject that
+/// changes.
+///
+/// The separator is `›` in the readout ink and it is **not** pressable: a
+/// breadcrumb's chevron is punctuation, and a chevron that acts is a control
+/// disguised as a comma. The album half is not pressable either — you are
+/// already there, and doc 07's rule that pressing the place you are on must
+/// leave you there is the returns lane's own (`Place::go`).
+fn breadcrumb(album: &vm::AlbumVm) -> Element<'static, Message> {
+    let room = theme::active();
+    let artist = vm::artist_id(&album.artist);
+    let door = button(
+        container(place_name(album.artist.label()))
+            .height(Length::Fill)
+            .align_y(alignment::Vertical::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    // **No horizontal padding**, and that is law L1 rather than taste: the
+    // strip's lead starts at `HANG` in every place, and a door that inset its
+    // own text by `GAP_SM` would put the artist's name eight pixels right of
+    // where the Artist place puts it — a visible slide across the one press
+    // that joins the two. The hover ground is the word's own box, which is
+    // what a breadcrumb wants anyway.
+    .padding(0)
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press(Message::OpenArtist(artist));
+    row![
+        door,
+        text("\u{203a}")
+            .size(theme::SIZE_EMPHASIS)
+            .line_height(theme::LEADING_EMPHASIS)
+            .color(room.paper_faint),
+        place_name(
+            album
+                .title
+                .clone()
+                .unwrap_or_else(|| "Unknown Album".to_owned())
+                .as_str()
+        ),
+    ]
+    .spacing(theme::GAP_SM)
+    .align_y(iced::Alignment::Center)
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
     .into()
 }
 

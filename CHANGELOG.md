@@ -397,6 +397,21 @@ next commit.
   drawn on the artwork.** `RECENTLY ADDED` is one row of the wall's own tiles by
   first-seen, with the wall's own hover options. Both bands are absent, not
   empty.
+- **`Place::Artist`** — an artist's page: their name, their counts, and their
+  records in **the wall's own tile**, so a record behaves the same there as it
+  does on the wall. Reached from the record page's new breadcrumb. It carries
+  `vm::artist_id`'s hash rather than a name — `album_id`'s own first half, the
+  same marker bytes and the same case-folding, so a nameless compilation and a
+  band called "Various Artists" stay two artists exactly as they stay two
+  albums. An artist the library no longer holds answers with the wall, as a
+  vanished record's page does. Deliberately absent: a biography, an artist
+  image, play counts, and a flat list of every track (network, engagement
+  statistics, and ADR-0017 §1.7 respectively).
+- **`Artist › Album` in the record page's header.** The strip used to lead with
+  the word `Album` — the *kind* of page you were on, when the page is entirely
+  made of the answer. It now names where the record sits, and the artist half
+  is a door. Frames and the measured strip height:
+  `docs/design/impl/artist-page/`.
 - **`Place::NowPlaying`** — the sounding record at the size it deserves:
   artwork, identity, the same needle at the work's width, the bar's own
   transport. Every measure is derived from the viewport, so the kiosk
@@ -872,6 +887,17 @@ next commit.
 
 ### Removed
 
+- **`‹ Prev` / `Next ›` in the record page's header**, and the
+  <kbd>Ctrl</kbd>+<kbd>[</kbd> / <kbd>Ctrl</kbd>+<kbd>]</kbd> that accelerated
+  them. The owner: *"previous and next on albums doesn't make sense on the
+  album view."* They stepped along **the wall's current arrangement** — its
+  group key, its query, its sort — none of which is on screen from a record's
+  page, so they were two labelled doors whose destination could not be known
+  before pressing them. The comparison debt doc 07 §3.2 raised them for is paid
+  by the breadcrumb and the Artist place instead, and §3.2 is amended in place
+  rather than merely disobeyed. `vm::neighbours` and the header strip's
+  extra-tenant slot went with them.
+
 - **The playlist delete confirmation.** *"Delete "{name}"? The file goes;
   your music stays."* was the correct fallback while deletion was
   irreversible; the trash makes it reversible, and the 1992 HIG's ranking —
@@ -886,6 +912,14 @@ next commit.
 
 ### Fixed
 
+- **A record's hover options no longer open on another place.** The hovered
+  tile is remembered by the shelf and cleared by the pointer *leaving* it — so
+  navigating out from under the pointer (a tile's own press, or a keyboard
+  door) left the mark set. Invisible while the wall was the only surface
+  drawing tiles; Home's `RECENTLY ADDED` row made it possible and the Artist
+  place made it plain, offering a record's `Play` / `Queue` / `Add to…` /
+  `Open` for a record the pointer was nowhere near. The hovered tile is now
+  cleared where the open menu and the in-flight drag already were.
 - **Playing a list no longer fills the returns lane with the records it
   quotes.** The owner: *"the recent bit shows albums popping up even though it
   was the playlist which was played"*. The lane's `RECENT` half is folded out

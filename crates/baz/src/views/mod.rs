@@ -62,6 +62,7 @@
 //! imported as `geometry` so the two never read as the same thing.
 
 pub(crate) mod album;
+pub(crate) mod artist;
 pub(crate) mod bottom_bar;
 pub(crate) mod context_menu;
 pub(crate) mod drag_ghost;
@@ -258,18 +259,43 @@ pub(crate) fn place_header_with(
     name: &'static str,
     note: Option<&'static str>,
 ) -> Element<'static, Message> {
+    place_header_led(place_name(name), note.map(str::to_owned))
+}
+
+/// **The strip's standard lead**: the place's own name.
+///
+/// It stands where the way-back used to, so the frame's left edge is unchanged
+/// (law L1) and moving between places still slides nothing.
+pub(crate) fn place_name(name: &str) -> Element<'static, Message> {
+    text(name.to_owned())
+        .size(theme::SIZE_EMPHASIS)
+        .line_height(theme::LEADING_EMPHASIS)
+        .font(theme::MEDIUM)
+        .wrapping(text::Wrapping::None)
+        .into()
+}
+
+/// [`place_header`], with an arbitrary **lead** and an optional quiet statement
+/// at the strip's right edge.
+///
+/// Four of the places lead with [`place_name`] and nothing else. Two do not,
+/// and they are the pair the owner's breadcrumb joins: the Album place leads
+/// with `Artist › Album`, whose first half is a door, and the Artist place
+/// leads with the artist's name — a *runtime* string, which is why the lead is
+/// an `Element` here rather than a `&'static str`.
+///
+/// **The strip stays one function** so the geometry cannot drift between the
+/// places that lead with a control and the ones that lead with a word. That is
+/// the same reason the extra-tenant slot was deleted with the `‹ Prev` /
+/// `Next ›` pair it was built for rather than left open.
+pub(crate) fn place_header_led(
+    lead: Element<'static, Message>,
+    note: Option<String>,
+) -> Element<'static, Message> {
     let room = theme::active();
-    // The place's name leads the strip. It stands where the way-back used to,
-    // so the frame's left edge is unchanged (law L1) and moving between places
-    // still slides nothing.
-    let mut strip = row![
-        text(name)
-            .size(theme::SIZE_EMPHASIS)
-            .line_height(theme::LEADING_EMPHASIS)
-            .font(theme::MEDIUM),
-    ]
-    .spacing(theme::GAP_LG)
-    .align_y(iced::Alignment::Center);
+    let mut strip = row![lead]
+        .spacing(theme::GAP_LG)
+        .align_y(iced::Alignment::Center);
     strip = strip.push(Space::with_width(Length::Fill));
     if let Some(note) = note {
         strip = strip.push(

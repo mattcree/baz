@@ -1175,6 +1175,39 @@ pub fn album_id(artist: AlbumArtist<'_>, album: Option<&str>) -> u64 {
     fnv1a(hash, &[0x00])
 }
 
+/// **Deterministic artist identity** — [`album_id`]'s first half, alone.
+///
+/// The Artist place carries this rather than a name, for the reason
+/// [`Place::Album`](crate::place::Place::Album) carries an id: a `Copy` handle
+/// the shell resolves against the wall on every frame, so a place cannot hold a
+/// borrowed string that outlives the rescan that rebuilt it.
+///
+/// It is **the same bytes, the same marker and the same fold** as the artist
+/// half of `album_id`, which is what makes the two agree by construction: the
+/// three [`AlbumArtistVm`] states each get their own marker, so a record filed
+/// under a literal "Various Artists" tag and a nameless compilation are two
+/// artists here exactly as they are two albums there. Case-folded with
+/// `str::to_lowercase`, mirroring the grouping key `Library::albums` uses — so
+/// the wall's own `Artist` shelves and this id draw the same line between two
+/// spellings of one name.
+///
+/// Not a hash of the *label*: [`AlbumArtistVm::label`] answers `Various
+/// Artists` for a nameless compilation, and hashing that would make one
+/// compilation's page and one real band called "Various Artists" the same
+/// place.
+#[must_use]
+pub fn artist_id(artist: &AlbumArtistVm) -> u64 {
+    let hash = fnv1a(0xcbf2_9ce4_8422_2325, &[]);
+    let hash = match artist {
+        AlbumArtistVm::Unknown => fnv1a(hash, &[0x01]),
+        AlbumArtistVm::Various => fnv1a(hash, &[0x02]),
+        AlbumArtistVm::Named(name) => fnv1a(hash, name.to_lowercase().as_bytes()),
+    };
+    // The same 0x00 terminator `album_id` writes after its artist field, so
+    // this is a prefix of that fold rather than a second scheme beside it.
+    fnv1a(hash, &[0x00])
+}
+
 /// One FNV-1a 64 round over `bytes`, continuing from `hash`.
 fn fnv1a(mut hash: u64, bytes: &[u8]) -> u64 {
     for &b in bytes {
@@ -2490,6 +2523,56 @@ mod tests {
         assert_eq!(alone.items, album_queue(&albums[0], None).items);
         // Nothing drawn is an empty queue, which the caller must not send.
         assert!(stacked_queue(&[]).is_empty());
+    }
+
+    /// **The artist id is `album_id`'s own first half**, so the two can never
+    /// disagree about where the line between two artists falls.
+    ///
+    /// Checked rather than asserted: every record by one artist folds to one
+    /// id, two spellings of one name fold together (the wall's `to_lowercase`
+    /// grouping key, mirrored), and the three `AlbumArtistVm` states stay
+    /// three — a nameless compilation is not the band called "Various
+    /// Artists", which is the collision the marker bytes exist to prevent.
+    #[test]
+    fn one_artist_is_one_id_however_their_records_are_spelled() {
+        let library = library_with(vec![
+            meta("Boards of Canada", "Geogaddi", "Music Is Math", 1),
+            meta("boards of canada", "Campfire Headphase", "Dayvan Cowboy", 1),
+            meta("Talk Talk", "Laughing Stock", "Myrhman", 1),
+        ]);
+        let albums = build_albums(&library);
+        let id = |title: &str| {
+            artist_id(
+                &albums
+                    .iter()
+                    .find(|a| a.title.as_deref() == Some(title))
+                    .expect("the fixture's record")
+                    .artist,
+            )
+        };
+        assert_eq!(
+            id("Geogaddi"),
+            id("Campfire Headphase"),
+            "two spellings of one name are one artist, as they are on the wall"
+        );
+        assert_ne!(id("Geogaddi"), id("Laughing Stock"));
+
+        // The three states are three artists, and the literal-tag case is the
+        // one that would collide under a hash of the *label*.
+        let named = AlbumArtistVm::Named("Various Artists".to_owned());
+        assert_ne!(
+            artist_id(&named),
+            artist_id(&AlbumArtistVm::Various),
+            "a band called Various Artists is not the nameless compilation"
+        );
+        assert_ne!(
+            artist_id(&AlbumArtistVm::Various),
+            artist_id(&AlbumArtistVm::Unknown)
+        );
+        assert_ne!(
+            artist_id(&AlbumArtistVm::Unknown),
+            artist_id(&AlbumArtistVm::Named(String::new()))
+        );
     }
 
     #[test]

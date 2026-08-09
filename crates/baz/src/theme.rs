@@ -6608,13 +6608,19 @@ mod tests {
         // …and the four places that share it really do use it, rather than
         // reinventing a strip of their own — Settings included, since doc 10
         // §7 step 8 folded its private copy into the one function.
+        //
+        // Two of them lead with something other than a bare place name and so
+        // spend the `_led` door: the Album place's `Artist › Album` breadcrumb
+        // and the Artist place's own name, which is a runtime string. They are
+        // still the *same strip* — that is what the shared function is for, and
+        // it is why the breadcrumb did not get a header of its own.
         for (name, strip) in [
-            ("album.rs", "place_header("),
+            ("album.rs", "place_header_led("),
+            ("artist.rs", "place_header_led("),
             ("queue.rs", "place_header("),
             ("playlist.rs", "place_header("),
             // Settings is the one place with a *note* — a statement about
-            // itself, not a keyboard hint — so it spends the `_with` form
-            // that the Album place's stepper pair also uses.
+            // itself, not a keyboard hint — so it spends the `_with` form.
             ("settings.rs", "place_header_with("),
         ] {
             assert!(

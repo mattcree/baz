@@ -388,6 +388,14 @@ pub(crate) enum Message {
     /// A panel row's name was pressed: open that playlist's page — or come
     /// back from it, when it is the page already showing ([`Place::playlist`]).
     OpenPlaylist(u64),
+    /// **The album page's breadcrumb was pressed**: open that artist's page.
+    ///
+    /// The owner's *"we could add an Artist > album breadcrumb though. and
+    /// have an artist page."* Carries [`crate::vm::artist_id`]'s hash rather
+    /// than a name, for the reason every other place-opening message carries
+    /// an id: a message is a value, and a borrowed name could not outlive the
+    /// rescan that rebuilt the wall it came from.
+    OpenArtist(u64),
     /// A pick-mode press on a panel row: append what the hand holds to that
     /// playlist's *file* — the run is untouched, whichever list it is, the
     /// playing one included (09 §6's decoupling; S4).
@@ -1238,6 +1246,10 @@ impl App {
             // The wall's hover `Queue` option: the shift-click gesture's own
             // append, reached by a named control instead of a held key.
             Message::QueueAlbum(id) => self.queue_album(id),
+            // **The album page's breadcrumb**: up to the artist. `go` carries
+            // the toggle, so pressing the artist you are already reading puts
+            // the page down, exactly as a tile pressed twice does.
+            Message::OpenArtist(id) => self.go(|place| place.artist(id)),
             Message::ShowPlayingAlbum => match self.player.playing_album() {
                 // Nothing is sounding, so there is no record to be taken to.
                 // The control is not offered in that state (see
@@ -2537,7 +2549,7 @@ impl App {
     /// places, so a media key or a stray binding cannot navigate away from the
     /// folder question.
     fn go(&mut self, door: impl FnOnce(Place) -> Place) -> Task<Message> {
-        if matches!(self.screen, Screen::Shelf(_)) {
+        if let Screen::Shelf(state) = &mut self.screen {
             // A menu is about something *in* the place it was opened over;
             // it does not survive the place leaving (a keyboard door can
             // navigate under an open menu — the pointer routes all close it
@@ -2546,6 +2558,18 @@ impl App {
             // leave a ghost over a place with no rows to land on.
             self.menu = None;
             self.drag = None;
+            // **And the hovered tile, for the same reason.** `TileLeft` is
+            // published by a `mouse_area` the pointer actually leaves, so
+            // navigating *out from under* the pointer — a keyboard door, or
+            // the tile's own press — leaves the mark set on a record the
+            // pointer is no longer near. That was invisible while the wall
+            // was the only surface drawing tiles, because coming back put the
+            // pointer where it had left it. It stopped being invisible the
+            // moment a second and third place drew the wall's own tile: Home's
+            // `RECENTLY ADDED` row and the Artist place would offer a
+            // record's hover options unbidden, on the record you had happened
+            // to touch on the way out.
+            state.hovered_album = None;
             let from = self.place;
             self.place = door(self.place);
             self.note_place_left(from);
@@ -3701,8 +3725,6 @@ impl App {
                     lamp,
                     self.playlists.collecting(),
                     self.hovered_album_row,
-                    // The header pair's pool is the wall as it stands:
-                    // same order, same filtered set (doc 11 §5 P3).
                 ),
                 // The record vanished under a rescan while its page was open.
                 // The wall is the honest answer — better than a page about
@@ -3710,6 +3732,17 @@ impl App {
                 // view function may not change state.
                 None => state.view(&self.player, lamp, collecting, ink),
             },
+            (Screen::Shelf(state), Place::Artist(id)) => {
+                // The artist vanished under a rescan while their page was
+                // open — renamed, or their last record removed. The wall is
+                // the honest answer, drawn rather than navigated to, exactly
+                // as a vanished record's page is.
+                if views::artist::label(state, id).is_some() {
+                    views::artist::view(state, &self.player, id, self.body_width(), collecting)
+                } else {
+                    state.view(&self.player, lamp, collecting, ink)
+                }
+            }
             (Screen::Shelf(_), Place::Queue) => views::queue::view(
                 &self.player,
                 iced::Size::new(self.body_width(), self.window.height),
@@ -7311,6 +7344,110 @@ mod tests {
         assert_eq!(player.playing_queue_row(), None);
         assert_eq!(player.phase(), player::Phase::Playing);
         assert_eq!(next_snapshot(&player, 0), None);
+    }
+
+    /// **A place change clears the hovered tile**, with the open menu and the
+    /// drag it already cleared.
+    ///
+    /// `TileLeft` is published by a `mouse_area` the pointer actually leaves,
+    /// so navigating *out from under* the pointer — a keyboard door, or the
+    /// tile's own press — never delivers one. The mark survived, and while the
+    /// wall was the only surface drawing tiles that was invisible: coming back
+    /// put the pointer where it had left it. Home's `RECENTLY ADDED` row and
+    /// the Artist place both draw `views::shelf::tile`, so the stale mark
+    /// became a record's hover options offered unbidden on another place, for
+    /// a record the pointer is nowhere near.
+    #[test]
+    fn navigating_leaves_no_tile_under_a_pointer_that_moved_on() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("this module's own source");
+        let body = source
+            .split_once("fn go(&mut self, door: impl FnOnce(Place) -> Place)")
+            .expect("the one place transition")
+            .1;
+        let body = &body[..body.find("\n    }\n").expect("a function ends")];
+        for cleared in [
+            "self.menu = None;",
+            "self.drag = None;",
+            "hovered_album = None;",
+        ] {
+            assert!(
+                body.contains(cleared),
+                "a place change must not outlive `{cleared}` — the three are \
+                 one rule: what was about the place you left does not follow you"
+            );
+        }
+        // …and the tile's own press goes through `go`'s rule rather than
+        // around it, which is what makes the clearing total.
+        let opened = source
+            .split_once("fn open_album(&mut self, id: u64) -> Task<Message> {")
+            .expect("the tile's press")
+            .1;
+        let opened = &opened[..opened.find("\n    }\n").expect("a function ends")];
+        assert!(
+            opened.contains("self.menu = None;") && opened.contains("self.drag = None;"),
+            "open_album keeps `go`'s rule by hand; if it stops, it must call `go`"
+        );
+    }
+
+    /// **The breadcrumb's door and the page it opens agree on who the artist
+    /// is**, and a page whose artist has gone answers with the wall.
+    ///
+    /// Two files have to hold one identity here — `views/album.rs` builds the
+    /// door and `views/artist.rs` decides which records belong behind it — and
+    /// if either reached for the artist's *label* instead of
+    /// [`vm::artist_id`], the door would open a page that is empty for exactly
+    /// the records the marker bytes exist to keep apart (a nameless
+    /// compilation, and a band called "Various Artists"). Nothing else in the
+    /// product can catch that, because both halves would still compile and the
+    /// common case would still work.
+    #[test]
+    fn the_breadcrumb_and_the_artist_page_are_one_identity() {
+        let read = |name: &str| {
+            std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("src/views")
+                    .join(name),
+            )
+            .unwrap_or_else(|_| panic!("{name} is still a view"))
+        };
+        let door = read("album.rs");
+        assert!(
+            door.contains("vm::artist_id(&album.artist)")
+                && door.contains("Message::OpenArtist(artist)"),
+            "the breadcrumb's door names the artist by id, not by label"
+        );
+        let page = read("artist.rs");
+        assert!(
+            page.contains("vm::artist_id(&album.artist) == artist"),
+            "the artist page picks its records by the same id the door sends"
+        );
+        // The label is a *reading* on that page and never a key: an artist
+        // resolved by name would merge the two states above.
+        assert!(
+            !page.contains("artist.label() == ") && !page.contains("label() =="),
+            "the artist page compares labels somewhere — ids are the identity"
+        );
+
+        // …and a page whose artist vanished under a rescan answers with the
+        // wall, drawn rather than navigated to, exactly as a vanished record's
+        // page does (a view function may not change state).
+        let arm = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("this module's own source");
+        let arm = arm
+            .split_once("(Screen::Shelf(state), Place::Artist(id)) => {")
+            .expect("the Artist place is routed")
+            .1;
+        let arm = &arm[..arm.find("\n            }\n").expect("an arm ends")];
+        assert!(
+            arm.contains("views::artist::label(state, id).is_some()")
+                && arm.contains("state.view("),
+            "an artist the library no longer holds must fall back to the wall"
+        );
     }
 
     /// **`Resume` is the one play gesture that navigates, and it is the only
