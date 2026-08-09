@@ -2358,6 +2358,17 @@ impl App {
     /// they change exactly when a new record appears in one of those
     /// surfaces, so this is a comparison of three small values on every other
     /// message.
+    ///
+    /// **The lists' quotations are asked for by name**, and that is a
+    /// correction. A playlist's sleeve is a collage of the records it quotes
+    /// (ADR-0024 §A1), read out of the wall's own thumbnail cache — and
+    /// nothing was ever putting those records *into* it. `Shelf::offscreen_art`
+    /// yields the lane's **records**; a list's quotations are the shell's,
+    /// because the shell is what holds [`crate::playlists::Playlists`]. So a
+    /// list drew the deterministic gradient until one of the records it quotes
+    /// happened to scroll onto the wall — real artwork by luck, which is not
+    /// what ADR-0030 §2 claims. Four ids per list, on the same guard, through
+    /// the same cache: a sleeve is one decode however many surfaces draw it.
     fn request_offscreen_art(&mut self) -> Task<Message> {
         let mark = (self.lane_mark, self.place);
         if mark == self.art_mark {
@@ -2365,10 +2376,17 @@ impl App {
         }
         self.art_mark = mark;
         let width = self.body_width();
+        let quoted: Vec<u64> = self
+            .playlists
+            .rows
+            .iter()
+            .flat_map(|row| row.art.iter().copied())
+            .collect();
         let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
         };
-        let ids = state.offscreen_art(width);
+        let mut ids = state.offscreen_art(width);
+        ids.extend(quoted);
         state.request_thumbs_for(&ids)
     }
 
@@ -5464,8 +5482,13 @@ impl Shelf {
         Task::batch(tasks)
     }
 
-    /// The ids the surfaces beside the wall are drawing: the lane's recent
-    /// records and the Home place's newest row.
+    /// The ids the surfaces beside the wall are drawing **that the shelf can
+    /// name**: the lane's recent records and the Home place's newest row.
+    ///
+    /// A lane row that is a *list* names no record here on purpose — the
+    /// records it quotes are `Playlists`' to know, and the shell adds them in
+    /// [`App::request_offscreen_art`] rather than this function reaching into
+    /// a collection the shelf does not hold.
     fn offscreen_art(&self, width: f32) -> Vec<u64> {
         let mut ids: Vec<u64> = self
             .lane_recent
