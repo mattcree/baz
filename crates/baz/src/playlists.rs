@@ -753,6 +753,41 @@ impl Playlists {
         });
     }
 
+    /// The page's reorder **drag**, committed: take the entry at display row
+    /// `from` out and put it back so it displays at row `to` — one edit, one
+    /// atomic save (doc 09 §13 step 8; [`crate::drag`] holds the gesture,
+    /// [`Self::shift_entry`] remains the steppers' route).
+    ///
+    /// Entries move; notes keep their positions relative to the entries
+    /// around them exactly as [`Self::shift_entry`]'s swap leaves them —
+    /// a rewrite never moves what it did not understand — and the insertion
+    /// point is re-read *after* the removal, so a note between two entries
+    /// cannot displace the landing.
+    pub(crate) fn move_entry(&mut self, from: usize, to: usize, library: &Library) {
+        if from == to {
+            return;
+        }
+        self.edit_open(library, |playlist| {
+            let entries = entry_indices(playlist);
+            let Some(&lift) = entries.get(from) else {
+                return false;
+            };
+            if to >= entries.len() {
+                return false;
+            }
+            let item = playlist.items_mut().remove(lift);
+            // Where the moved entry must sit to display at row `to`: before
+            // the entry now occupying that display row, or at the very end.
+            let remaining = entry_indices(playlist);
+            let at = remaining
+                .get(to)
+                .copied()
+                .unwrap_or_else(|| playlist.items().len());
+            playlist.items_mut().insert(at, item);
+            true
+        });
+    }
+
     /// The page's rename, submitted: a filesystem rename keeping the
     /// extension, refused by the storage layer's own rule, its words in the
     /// field. Returns the new id when it went through, so the place can move
@@ -1228,6 +1263,56 @@ mod tests {
         playlists.shift_entry(0, -1, &library);
         let open = playlists.page(id).expect("open");
         assert!(open.rows[0].path.ends_with("b.flac"), "the top stays put");
+    }
+
+    /// Doc 09 §13 step 8 — the drag's commit on the artefact: one lift, one
+    /// landing, **one** saved file, the notes untouched on their own lines.
+    #[test]
+    fn a_drag_commit_repositions_one_entry_and_keeps_the_notes() {
+        let (_keep, folder) = folder();
+        let library = library();
+        let mut playlists = Playlists::over(folder);
+        let id = {
+            let folder = playlists.folder.as_ref().expect("folder");
+            let mut playlist = folder.create("Mix").expect("create");
+            playlist
+                .items_mut()
+                .push(Item::Entry(Entry::new(track("/m/a.flac"))));
+            playlist
+                .items_mut()
+                .push(Item::Note(Note::from_text("a comment between entries")));
+            playlist
+                .items_mut()
+                .push(Item::Entry(Entry::new(track("/m/b.flac"))));
+            playlist
+                .items_mut()
+                .push(Item::Entry(Entry::new(track("/m/c.flac"))));
+            playlist.save().expect("save");
+            playlist_id("Mix")
+        };
+        playlists.refresh(Some(&library));
+        assert!(playlists.open_page(id, &library));
+        // The head row, dragged past the tail: displays last, one edit.
+        playlists.move_entry(0, 2, &library);
+        let open = playlists.page(id).expect("open");
+        assert!(open.rows[0].path.ends_with("b.flac"));
+        assert!(open.rows[1].path.ends_with("c.flac"));
+        assert!(open.rows[2].path.ends_with("a.flac"));
+        let text = std::fs::read_to_string(open.playlist.path()).expect("read");
+        assert!(text.contains("# a comment between entries"), "{text:?}");
+        // Back up to the head — the landing is re-read after the removal,
+        // so the note cannot displace it.
+        playlists.move_entry(2, 0, &library);
+        let open = playlists.page(id).expect("open");
+        assert!(open.rows[0].path.ends_with("a.flac"));
+        assert!(open.rows[1].path.ends_with("b.flac"));
+        // A drop where the row already is, or from a row the page does not
+        // have, asks for nothing.
+        playlists.move_entry(1, 1, &library);
+        playlists.move_entry(9, 0, &library);
+        let open = playlists.page(id).expect("open");
+        assert!(open.rows[0].path.ends_with("a.flac"));
+        assert_eq!(open.rows.len(), 3);
     }
 
     #[test]

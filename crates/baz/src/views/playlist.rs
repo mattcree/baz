@@ -69,6 +69,7 @@ pub(crate) fn view<'a>(
     window_width: f32,
     hovered: Option<usize>,
     collecting: Collecting,
+    drag: Option<&'a crate::drag::DragState>,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let content = (window_width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).max(0.0);
@@ -99,6 +100,8 @@ pub(crate) fn view<'a>(
             playing,
             hovered == Some(index),
             collecting,
+            drag.and_then(|held| held.line_for_row(crate::drag::List::Playlist, index)),
+            drag.is_some_and(|held| held.list == crate::drag::List::Playlist),
         ));
     }
     let body: Element<'a, Message> = if open.rows.is_empty() {
@@ -360,8 +363,17 @@ fn record_head(album: &str, artist: &str, first: bool) -> Element<'static, Messa
 /// and the visible twin the row's context-menu items mirror (§5.2). A
 /// missing entry gets no `+` for the ✕'s opposite reason: there is nothing
 /// there to transfer.
+/// **The row's body is a drag source** (doc 09 §13 step 8; [`crate::drag`]):
+/// press and travel lifts the row for a reorder — one saved file on the
+/// drop, [`crate::playlists::Playlists::move_entry`] — or a carry to the
+/// standing panel's rows to add. A missing entry drags too (its position
+/// is real) but carries no payload, so a panel drop moves nothing — the
+/// `+`'s own refusal, held by the drag. Sugar only: the ▲▼, ✕ and `+`
+/// remain, and the sub-threshold press is the row's ordinary click.
 #[expect(
     clippy::too_many_lines,
+    clippy::too_many_arguments,
+    clippy::fn_params_excessive_bools,
     reason = "a row is one anatomy — marker, title, duration, four reserved \
               slots — and splitting it would put half the reservation rules \
               out of sight of the other half"
@@ -374,6 +386,8 @@ fn entry_row(
     playing: bool,
     hovered: bool,
     collecting: Collecting,
+    insert_line: Option<crate::drag::Edge>,
+    observing: bool,
 ) -> Element<'_, Message> {
     let room = theme::active();
     let ink = if page_row.missing {
@@ -449,6 +463,22 @@ fn entry_row(
     // A missing entry is not a control: pressing a row plays from it, and
     // there is nothing there to play.
     .on_press_maybe((live && !page_row.missing).then_some(Message::PlaylistPlayTrack(index)));
+    // The drag wrapper owns the pointer for the body (crate::drag): every
+    // row of the artefact is draggable — a file edit needs no engine, the
+    // steppers' own rule — and the sub-threshold click keeps the button's
+    // exact gate.
+    let mut source = crate::drag::Source::new(body, room).wires(crate::drag::Wires::new(
+        move |at| Message::DragLift(crate::drag::List::Playlist, index, at),
+        Message::DragMoved,
+        Message::DragDropped,
+        (live && !page_row.missing).then_some(Message::PlaylistPlayTrack(index)),
+    ));
+    if observing {
+        source = source.observe(move |before| {
+            Message::DragOverRow(crate::drag::List::Playlist, index, before)
+        });
+    }
+    let body: Element<'_, Message> = source.line(insert_line).into();
     let offered = hovered;
     let mut slots = row![
         body,

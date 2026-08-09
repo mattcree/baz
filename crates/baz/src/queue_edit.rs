@@ -85,6 +85,33 @@ pub fn shifted(queue: &QueueVm, index: usize, delta: i32) -> Option<QueueVm> {
     Some(edited)
 }
 
+/// The queue with entry `from` taken out and put back at `to` (its index in
+/// the list *after* the removal) — the list a completed reorder **drag**
+/// means (doc 09 §13 step 8; [`crate::drag`]'s commit, as [`shifted`] is the
+/// steppers').
+///
+/// One arbitrary reposition rather than a chain of neighbour swaps, because
+/// that is what the gesture says: the row was lifted once and put down once,
+/// and the engine hears **one** whole-list
+/// [`UpdateQueue`](baz_core::protocol::Command::UpdateQueue) for it —
+/// ADR-0014's guarantee that an edit missing the playing track disturbs no
+/// delivered sample, and the cursor follows its track by path exactly as it
+/// does for a swap.
+///
+/// `None` when `from` is not in the queue, when `to` is past the shortened
+/// list, or when the move would change nothing — a drop on the slot the row
+/// came from is a click's worth of nothing, not an edit.
+#[must_use]
+pub fn moved(queue: &QueueVm, from: usize, to: usize) -> Option<QueueVm> {
+    if from >= queue.items.len() || to >= queue.items.len() || from == to {
+        return None;
+    }
+    let mut edited = queue.clone();
+    let item = edited.items.remove(from);
+    edited.items.insert(to, item);
+    Some(edited)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -265,6 +292,66 @@ mod tests {
         let mut original = queue(&["a", "b"]);
         original.items.push(item("a"));
         let edited = shifted(&original, 2, -1).expect("the second copy of a");
+        assert_eq!(titles(&edited), ["a", "a", "b"]);
+    }
+
+    /// Doc 09 §13 step 8 — **a completed drag repositions the entry and
+    /// nothing else moves**: the drag's commit, beside the steppers' swap.
+    #[test]
+    fn a_move_lands_the_entry_where_the_line_said() {
+        let original = queue(&["a", "b", "c", "d"]);
+        let down = moved(&original, 0, 2).expect("a to position 2");
+        assert_eq!(titles(&down), ["b", "c", "a", "d"]);
+        let up = moved(&original, 3, 0).expect("d to the head");
+        assert_eq!(titles(&up), ["d", "a", "b", "c"]);
+        assert_eq!(
+            titles(&original),
+            ["a", "b", "c", "d"],
+            "the record the edit was computed from must not be mutated"
+        );
+        // A one-step move is exactly the stepper's swap.
+        assert_eq!(
+            titles(&moved(&original, 1, 2).expect("one step down")),
+            titles(&shifted(&original, 1, 1).expect("the same step"))
+        );
+    }
+
+    /// A move to nowhere new, or from a row this record does not have, asks
+    /// for nothing — the drag's no-op drop, refused where the edit is
+    /// computed as well as in [`crate::drag::DragState::destination`].
+    #[test]
+    fn a_pointless_or_stale_move_asks_for_nothing() {
+        let original = queue(&["a", "b", "c"]);
+        assert!(moved(&original, 1, 1).is_none(), "dropped where it was");
+        assert!(moved(&original, 3, 0).is_none(), "a stale row");
+        assert!(moved(&original, 0, 3).is_none(), "past the shortened list");
+        assert!(moved(&queue(&[]), 0, 0).is_none());
+    }
+
+    /// The paths sent are exactly the rows shown after a move, and the
+    /// queue's identity — header and provenance — travels with the edit.
+    #[test]
+    fn a_move_sends_the_rows_it_shows_and_keeps_provenance() {
+        let edited = moved(&queue(&["a", "b", "c"]), 2, 0).expect("c to the head");
+        assert_eq!(
+            edited.paths(),
+            vec![
+                PathBuf::from("/m/c.flac"),
+                PathBuf::from("/m/a.flac"),
+                PathBuf::from("/m/b.flac"),
+            ]
+        );
+        assert_eq!(edited.album.as_deref(), Some("Geogaddi"));
+        assert_eq!(edited.provenance.as_deref(), Some("Road Trip"));
+    }
+
+    /// A queue listing one file twice moves the occurrence that was lifted
+    /// — [`without`]'s position-not-identity rule, for the drag.
+    #[test]
+    fn a_repeated_file_is_dragged_by_position_not_by_identity() {
+        let mut original = queue(&["a", "b"]);
+        original.items.push(item("a"));
+        let edited = moved(&original, 2, 0).expect("the second copy of a");
         assert_eq!(titles(&edited), ["a", "a", "b"]);
     }
 

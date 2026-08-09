@@ -47,7 +47,9 @@
 //! collecting mode that used to live on these rows is removed (09 §9); a row
 //! carries one control, and the panel is a directory, not a workspace.
 
-use iced::widget::{Column, Space, button, column, container, row, scrollable, text, text_input};
+use iced::widget::{
+    Column, Space, button, column, container, mouse_area, row, scrollable, text, text_input,
+};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
@@ -79,9 +81,15 @@ pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     playlists: &'a Playlists,
     player: &'a PlayerState,
+    drag: Option<&'a crate::drag::DragState>,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let picking = playlists.pending.is_some();
+    // A drag carrying a track can land on the named rows (doc 09 §13
+    // step 8: drag-to-add, the picker row's append made direct). A drag
+    // with nothing in the hand — a missing entry's row — offers no
+    // targets, exactly as its `+` offers no transfer.
+    let receiving = drag.is_some_and(|held| held.payload.is_some());
     // The playing list, while provenance stands *and* the file still exists —
     // a rename or delete under the run withdraws the hoist rather than
     // letting it dangle (09 §6).
@@ -138,6 +146,8 @@ pub(crate) fn view<'a>(
                 entry,
                 picking,
                 picking && playing == Some(entry.id),
+                receiving,
+                drag.is_some_and(|held| held.over_panel == Some(entry.id)),
             ));
         }
     }
@@ -296,11 +306,26 @@ fn name_field(entry: &NameEntry) -> Element<'_, Message> {
 /// head of the named rows, is `marked` — *playing*, in the quieter voice —
 /// and its pick appends to the **file** only, never the sounding run
 /// (09 §6, S4).
+///
+/// While a **drag** is in flight (`receiving`, doc 09 §13 step 8) the row is
+/// a drop target: it reports the held pointer crossing it, and it draws the
+/// row's own hovered statement while the drop would land here (`hot`) —
+/// the highlight is the room's existing hover, stated from the drag's own
+/// fact rather than left to the cursor, so the frame and the commit cannot
+/// disagree about where the track goes.
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "four independent readings of one row — the pick, the mark, \
+              the drag's standing and its aim — and a struct would name \
+              this call site and nothing else"
+)]
 fn playlist_row<'a>(
     shelf: &'a Shelf,
     entry: &'a PanelRow,
     picking: bool,
     marked: bool,
+    receiving: bool,
+    hot: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
     // The sleeve, at the row's own scale (ADR-0024 §A2): what turns a list
@@ -357,16 +382,32 @@ fn playlist_row<'a>(
         .on_press(Message::PickPlaylist(entry.id))
         .into();
     }
-    button(
+    let door = button(
         row![sleeve, container(name_block).width(Length::Fill)]
             .spacing(theme::GAP_SM)
             .align_y(iced::Alignment::Center),
     )
     .width(Length::Fill)
     .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-    .style(move |_theme, status| theme::track_row(room, status, false))
-    .on_press(Message::OpenPlaylist(entry.id))
-    .into()
+    .style(move |_theme, status| {
+        theme::track_row(
+            room,
+            if hot { button::Status::Hovered } else { status },
+            false,
+        )
+    })
+    .on_press(Message::OpenPlaylist(entry.id));
+    if receiving {
+        // The drop target's ears: enter/exit report the held pointer, and
+        // the release falls through to the drag source's own commit —
+        // nothing here captures it (`mouse_area` publishes without
+        // consuming when only enter/exit are wired).
+        return mouse_area(door)
+            .on_enter(Message::DragOverPanel(entry.id))
+            .on_exit(Message::DragLeftPanel(entry.id))
+            .into();
+    }
+    door.into()
 }
 
 /// No playlists yet: said plainly, with both doors in — the row below, and
