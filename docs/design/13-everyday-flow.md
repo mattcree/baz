@@ -109,8 +109,13 @@ controls may not).
 `docs/REFUSALS.md` says *"baz has no resident side surfaces, and no surface
 that is a slot"*, and `11-jobs-era-critique.md` P10 declined to restore a
 persistent left column partly because the owner had rejected sidebars
-twice. **He has now asked for one, and that decision is his to make.** This
-paragraph is the whole of the ceremony.
+twice. **He has now asked for one, and that decision is his to make.** The
+ledger's own preamble says so — it binds *"contributors and agents — not
+the owner"*, *"the owner's decision is sufficient on its own; an entry he
+reverses gets rewritten to say what was decided and why, and that is the
+whole of the process"* — and it names the two things that are actually hard
+as *"responsiveness and the aesthetic"*. This paragraph is the whole of the
+ceremony; §0.1 is the standard the rest of the document is written to.
 
 What is different this time, stated so the next reader knows it was
 thought about rather than forgotten: the surface that was rejected twice
