@@ -6506,7 +6506,10 @@ mod tests {
             ("album.rs", "place_header_with("),
             ("queue.rs", "place_header("),
             ("playlist.rs", "place_header("),
-            ("settings.rs", "place_header("),
+            // Settings is the one place with a *note* — a statement about
+            // itself, not a keyboard hint — so it spends the `_with` form
+            // that the Album place's stepper pair also uses.
+            ("settings.rs", "place_header_with("),
         ] {
             assert!(
                 read(name).contains(strip),

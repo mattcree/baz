@@ -152,7 +152,7 @@ pub(crate) fn view<'a>(
         .into()
     };
     column![
-        place_header("Playlist", "Esc returns to Library"),
+        place_header("Playlist"),
         scrollable(
             container(page)
                 .width(Length::Fill)

@@ -298,13 +298,6 @@ pub(crate) enum Message {
     /// pull's offer, then the search query, then the shuffle pool's marks (see
     /// [`App::escape`]).
     EscapePressed,
-    /// Every place's `‹ Library`, and the tail of <kbd>Esc</kbd>: go home.
-    ///
-    /// Distinct from the three door messages below because a *back* must not
-    /// toggle: pressing `‹ Library` in the Settings and pressing it on a
-    /// record's page have to mean the same thing, and neither may send you
-    /// somewhere new.
-    LeavePlace,
     /// The bar's labelled `Queue` control, or `Q`: go to the queue place, or
     /// come back from it (see [`crate::place`]).
     ToggleQueue,
@@ -1261,7 +1254,6 @@ impl App {
                 None => Task::none(),
                 Some(id) => self.open_album(id),
             },
-            Message::LeavePlace => self.leave(),
             // The Settings place's spine. Session state and deliberately not
             // persisted: which section you were last reading is not a standing
             // decision.

@@ -229,7 +229,7 @@ pub(crate) fn view<'a>(
         }
     };
     column![
-        place_header("Queue", "Esc returns to Library"),
+        place_header("Queue"),
         // One scroll for the place, with the bar's lane reserved whether or not
         // the list overflows — the same reserved-slot rule the durations
         // depend on, and the reason a thirteenth track arriving shunts none of

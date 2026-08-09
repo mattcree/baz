@@ -78,7 +78,7 @@ use iced::{Element, Length, alignment};
 use crate::app::Message;
 use crate::player::PlayerState;
 use crate::replaygain::{self, MODES};
-use crate::views::place_header;
+use crate::views::place_header_with;
 use crate::{icon, theme};
 
 /// One music folder, as the Library section draws it (ADR-0022).
@@ -206,7 +206,11 @@ pub(crate) fn view<'a>(
         // with this place's own name and note. Back sends
         // [`Message::LeavePlace`] — the same landing as the gear's toggle
         // and <kbd>Esc</kbd>'s peel: the Library.
-        place_header("Settings", "Kept in config.toml, and remembered next time."),
+        place_header_with(
+            "Settings",
+            None,
+            Some("Kept in config.toml, and remembered next time."),
+        ),
         container(body)
             .width(Length::Fill)
             .height(Length::Fill)

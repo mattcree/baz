@@ -129,11 +129,7 @@ pub(crate) fn view<'a>(
     };
 
     column![
-        place_header_with(
-            "Album",
-            Some(step_pair(neighbours)),
-            "Esc returns to Library"
-        ),
+        place_header_with("Album", Some(step_pair(neighbours)), None),
         // **One scroll for the whole page.** The column had two (the panel and
         // its track list) and the popover had one inside another; a page is one
         // document and turning it over is one gesture. The gutter the bar needs
