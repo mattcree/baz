@@ -183,12 +183,52 @@ pub(crate) fn view(shelf: &Shelf, window_width: f32, ink: Ink) -> Element<'_, Me
 /// gear, the magnifier, and `Play all`'s leading triangle.
 fn draws() -> Element<'static, Message> {
     row![
-        draw_word("Play all", Message::PlayAll),
+        play_all(),
         draw_word("Shuffle", Message::Shuffle),
         draw_word("Pull", Message::Pull),
     ]
     .spacing(theme::GAP_XS)
     .align_y(iced::Alignment::Center)
+    .into()
+}
+
+/// **`Play all`, wearing the triangle** (doc 10 §3.5, §7 step 4): `Play
+/// album`'s glyph + word anatomy, in the strip's own quiet ink.
+///
+/// The act is conventional — a triangle means *press = sound now*,
+/// everywhere — but the **scope** (the wall, as arranged) is baz's own, so
+/// the rule of §3.1 lands it in the hybrid form: recognition from the
+/// symbol, semantics from the word. One deliberate difference from `Play
+/// album`: **no lamp.** The accent belongs to the pages' one commitment
+/// (`02` §5.3); here the triangle takes the ordinary resting glyph ink, and
+/// the button is the word-acts' own. The triangle is also the one non-type
+/// mark in the left cluster, anchoring the seam where states (caps words)
+/// end and acts (sentence words) begin.
+fn play_all() -> Element<'static, Message> {
+    let room = theme::active();
+    button(
+        container(
+            row![
+                iced_image(icon::handle(icon::Glyph::Play))
+                    .width(Length::Fixed(theme::ICON_PX))
+                    .height(Length::Fixed(theme::ICON_PX))
+                    .opacity(theme::GLYPH_OPACITY),
+                text("Play all")
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .font(theme::MEDIUM)
+                    .wrapping(text::Wrapping::None),
+            ]
+            .spacing(theme::GAP_SM)
+            .align_y(iced::Alignment::Center),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_SM))
+    .style(move |_theme, status| theme::word_button(room, room.wall, status))
+    .on_press(Message::PlayAll)
     .into()
 }
 
