@@ -79,6 +79,57 @@
   when a volume below unity is scaling the samples — that fact is already on
   screen in the fader beside it.
 
+- **The `ARTIST` group key and the `Artist` place are both called artist**, and
+  a measured proposal exists for fixing it. An agent built the whole thing
+  before its work was discarded as a duplicate; the numbers below are its
+  measurements, kept because re-deriving them is expensive and the decision is
+  the owner's.
+
+  **The proposal**: rename the key's *label* to `A–Z` (it breaks records on the
+  album artist's initial — its shelves read `Unknown`, `#`, `A`, `C`, `Various`
+  and its rail is the alphabet, so `A–Z` names what it produces; `NAME` would
+  still read as a subject and collide again). `GroupKey::code()` stays
+  `"artist"` — it is on-disk config data. Add `ARTISTS` as a sixth word in the
+  same row, held as a `WallSubject` beside `group_key` rather than as a sixth
+  `GroupKey`: ADR-0019 §1 promises every key is a projection where every album
+  appears exactly once, and a key that shelves *artists* falsifies that sweep
+  rather than extending it. Not a lens either — `docs/REFUSALS.md` fixes the
+  lens switcher at two words and both are spoken for (`WALL` · `MARQUEE`).
+
+  **What it costs, measured in the bundled face at `SIZE_META`**: six words
+  put `KEYS_W` 314 → **368**, so `LIBRARY_LINE` 600 → **654**, the window's own
+  minimum 696 → **750**, and `TOP_BAR_SPLIT` 872 → **926**. `SINGLE_LINE_NO_WELL`
+  648 → 702 against `WIDEST_LANE_STRIP` 720 — it holds, but the headroom falls
+  from 72 px to **18**, which is the first thing to check if a seventh word is
+  ever proposed. **And a consequence nobody would predict**: the widest strip
+  that can still hold the well is 904, which is below 926, so the
+  single-line-with-well band 872…904 *ceases to exist* — below `SIDEBAR_FLOOR`
+  the strip is always two lines.
+
+- **An artist is not admitted to the returns lane, and the rule says why.** The
+  lane holds records you have *played* and lists you have *made or edited* —
+  both backed by an external store with a timestamp (the play ledger, `.m3u8`
+  mtimes), which is what makes `(last touched, name)` a total order. An artist
+  has neither, so admitting one means a third store: *places I visited* — a
+  navigation history, which `place.rs` refuses by name. Opening is not touching
+  in this surface's sense; if it were, so would be opening a record's page
+  without playing it, and the lane becomes a browse history. **What would
+  change it**: if an artist ever gains a durable *act* — a follow, a pin, an
+  artist-scoped play the ledger records — the lane's existing rule admits it
+  with no amendment, because it would then be a thing you touched at a recorded
+  moment.
+
+- **An artists wall would cost the rail, density and the sticky headers
+  nothing** — `rail::entries` is a pure function of the shelf headers, and an
+  artists wall headed by `Initial` reuses `rail::artist()` verbatim with no new
+  branch. Two things it *would* need: **one query projected twice, not two
+  queries** (compute `matching_album_ids` once and project records → artists,
+  or the two walls get two chances to disagree and every keystroke costs
+  double), and the readouts following the subject (`views::lane::readout` and
+  the well's counts hard-code *albums*; there is a test pinning those strings).
+  Artist search is not built and the level makes it obvious: ADR-0021 already
+  ranks by *which field the query landed in* and throws that away.
+
 ## Known gaps in shipped features
 
 - **The density cache still decodes one size for three steps.** `02` §2.7
