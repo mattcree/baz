@@ -43,6 +43,23 @@
   arithmetic. What would reverse it: a measured decode-latency or memory
   problem on a real large library at `Dense`.
 
+- **A rare flake in `the_play_recorded_event_follows_the_line_into_the_file`**
+  (`crates/baz-core/tests/history.rs:125`), **Windows only, observed once** —
+  2026-08-09, CI run 31331470261 on `bcbba7f`. It timed out waiting for an
+  event after the full `EVENT_TIMEOUT` of **20 s**, which is long enough that
+  a merely slow runner is an uncomfortable explanation. Re-running the same
+  job on the same commit passed, and the commit that surfaced it **touched no
+  `baz-core` file at all** (a GUI-only change), so the ledger's write path was
+  not modified by anything nearby.
+
+  Left unfixed rather than papered over, on the same terms as the flake
+  below: **do not raise the timeout** — 20 s is already generous, and a longer
+  one would only make the next occurrence slower to learn from. The suspects
+  worth checking first are the ledger's writer thread and its shutdown
+  handshake (`finish()` waits for every queued line), where a Windows file
+  handle or a join that never returns would present exactly as this does. A
+  recurrence turns main red with the log, which is the evidence needed.
+
 - **A rare flake in `a_rate_change_is_refused_by_the_bit_perfect_default`**
   (`crates/baz-core/tests/playback.rs`). Observed **once in 13 runs** during a
   full-workspace run with four test binaries competing, on a machine also
