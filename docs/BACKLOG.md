@@ -6,6 +6,23 @@
 
 ## Product decisions to honour later
 
+- **A list played in a *previous* session still shows as its records in the
+  lane.** The owner: *"the recent bit shows albums popping up even though it
+  was the playlist which was played"*. The live half is fixed — a run reified
+  from a list touches the **list** and not the records it quotes
+  (`lane::played_list`) — but the fix cannot reach across a quit, and the
+  reason is structural rather than lazy. The lane's records half is folded at
+  launch out of `baz-core`'s **play ledger**, which is per *path*; the engine
+  appends it, and the engine is never told a run's provenance — it receives
+  `SetQueue { paths }` and nothing else. So a relaunch re-derives exactly the
+  attribution the fix removes.
+  Closing it properly means **a provenance field on the queue command and a
+  sixth field in the ledger line** (format v1 → v2, and the format is
+  documented inside every ledger file). That reopens **ADR-0018**, which is the
+  owner's decision and not a bug-fix's. The cheap alternative — the front end
+  writing its own small "lists played" file beside `session.toml` — is a second
+  store of a fact the ledger should hold, and is recorded here as *considered
+  and not taken* rather than done quietly. **Owner decision.**
 - **The lane and the panel both list playlists**, and that is an accepted
   transitional state rather than a design (ADR-0030's amendment). The panel
   cannot go while it is the picker for `Add to…` — ADR-0031's card at the

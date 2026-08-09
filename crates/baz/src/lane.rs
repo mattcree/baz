@@ -88,6 +88,37 @@ pub(crate) enum Subject {
     Playlist(u64),
 }
 
+/// **What a play touches** — the list it came from, if it came from one;
+/// otherwise the record the track belongs to.
+///
+/// The owner, looking at the shipped lane: *"the recent bit shows albums
+/// popping up even though it was the playlist which was played"*. He is right,
+/// and the defect is an attribution one: the lane's records half is folded out
+/// of the **play ledger**, which is per *path*, so a run reified from a list
+/// marked every album the list quoted — three or four unrelated records
+/// jumping to the head of the lane, one per track, while the list that was
+/// actually played sat where its file's mtime had left it.
+///
+/// The rule is the lane's own subject sentence read literally. ADR-0030 §1
+/// says it is *things you have touched*; you touched the list. The record is
+/// what the engine read, which is a different question and one the bar already
+/// answers.
+///
+/// **Provenance is the fact that decides it**, and it already exists:
+/// [`QueueVm::provenance`](crate::vm::QueueVm::provenance) is *"the name of the
+/// playlist file this run was reified from"* (ADR-0023's amendment) — origin,
+/// never a live link. It is `None` for every other origin: a record, `Play
+/// all`, a shuffle draw, a stacked queue. So a play attributes to a list
+/// exactly when the run came from one, and nothing here has to guess from the
+/// paths.
+/// `Some(id)` is [`Subject::Playlist`]; `None` means the play attributes to
+/// [`Subject::Record`] as it always did, and the caller resolves *which*
+/// record, because mapping a path to one is the shelf's job and not this
+/// module's.
+pub(crate) fn played_list(provenance: Option<&str>) -> Option<u64> {
+    provenance.map(crate::playlists::playlist_id)
+}
+
 /// One thing the listener has touched, as the shell reports it.
 ///
 /// `at` is seconds since the Unix epoch — the ledger's own unit
@@ -286,6 +317,66 @@ mod tests {
             "a record nobody played is not in the lane"
         );
         assert_eq!(folded.get(&3), Some(&5));
+    }
+
+    /// **A play attributes to the list it came from, and only then.**
+    ///
+    /// The owner: *"the recent bit shows albums popping up even though it was
+    /// the playlist which was played"*. Every origin that is not a list still
+    /// touches the record — a record's own `Play`, `Play all`, a shuffle draw,
+    /// a stacked queue — because for those the record *is* what was pointed
+    /// at, and provenance is `None` for all of them by construction
+    /// (ADR-0023's amendment: it is set only where a play gesture reified a
+    /// playlist file).
+    #[test]
+    fn a_play_attributes_to_the_list_it_came_from_and_otherwise_to_the_record() {
+        assert_eq!(
+            played_list(None),
+            None,
+            "a run with no provenance is a record's"
+        );
+        assert_eq!(
+            played_list(Some("Road Trip")),
+            Some(crate::playlists::playlist_id("Road Trip")),
+            "a run reified from a list is the list's"
+        );
+        // The identity is the *name*'s, which is ADR-0024 §2's rule — the
+        // filename is the name — so the lane's row and the play find each
+        // other without a second key.
+        assert_ne!(
+            played_list(Some("Road Trip")),
+            played_list(Some("Late Shift"))
+        );
+    }
+
+    /// **The list rises, and the records it quotes do not.**
+    ///
+    /// The defect, restated as the lane the owner should have seen: one run,
+    /// reified from `Road Trip`, playing tracks that belong to two records he
+    /// last touched long ago. Before the fix both records jumped the list;
+    /// after it, the list is at the head and the records are where they were.
+    #[test]
+    fn playing_a_list_moves_the_list_and_leaves_its_records_where_they_were() {
+        let played_at = 900;
+        // Two records the run quotes, last played long before it.
+        let records = vec![
+            touched(Subject::Record(10), "Ochre", Some(100)),
+            touched(Subject::Record(11), "Violet Ledger", Some(200)),
+        ];
+        // The run came from a list, so the list is what moves.
+        let list_id = crate::playlists::playlist_id("Road Trip");
+        assert_eq!(played_list(Some("Road Trip")), Some(list_id));
+        let lists = vec![touched(
+            Subject::Playlist(list_id),
+            "Road Trip",
+            Some(played_at),
+        )];
+        let rows = resolve(lists, records);
+        assert_eq!(names(&rows), ["Road Trip", "Violet Ledger", "Ochre"]);
+        assert!(
+            matches!(rows[0].subject, Subject::Playlist(_)),
+            "the thing that was played is at the head of the lane"
+        );
     }
 
     /// The head is a closed set of three, in the owner's order. A fourth

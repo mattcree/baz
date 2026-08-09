@@ -2433,7 +2433,9 @@ impl App {
                 subject: crate::lane::Subject::Playlist(entry.id),
                 name: entry.name.clone(),
                 under: entry.counts(),
-                at: entry.touched_unix_s,
+                // The later of the file's mtime and this run's play — both are
+                // ways of touching a list (`Playlists::touched`).
+                at: self.playlists.touched(entry),
             })
             .collect();
         let records = match &self.screen {
@@ -2742,17 +2744,30 @@ impl App {
                             path.display()
                         );
                         // **The lane's one live update** (ADR-0030 §4): a
-                        // play moves one record to the head, and 24 rows are
+                        // play moves one row to the head, and 24 rows are
                         // re-sorted. The ledger is not re-read — it is a
                         // snapshot taken at launch, and re-reading it here
                         // would be the per-frame file read the contract
                         // refuses. The moment is now; the two agree to within
                         // the length of the play.
-                        if let Screen::Shelf(state) = &mut self.screen {
-                            let now = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map_or(0, |since| since.as_secs());
-                            state.record_played(path, now);
+                        //
+                        // **Which row it moves is the run's provenance, not
+                        // the track's path** — `lane::played_subject` carries
+                        // the owner's defect and the argument. A run reified
+                        // from a list touches the *list*; every other origin
+                        // touches the record.
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |since| since.as_secs());
+                        match crate::lane::played_list(self.player.queue_provenance()) {
+                            Some(id) => {
+                                self.playlists.note_played(id, now);
+                            }
+                            None => {
+                                if let Screen::Shelf(state) = &mut self.screen {
+                                    state.record_played(path, now);
+                                }
+                            }
                         }
                     }
                     Event::TrackFailed { path, reason } => {

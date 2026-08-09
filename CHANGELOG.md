@@ -886,6 +886,20 @@ next commit.
 
 ### Fixed
 
+- **Playing a list no longer fills the returns lane with the records it
+  quotes.** The owner: *"the recent bit shows albums popping up even though it
+  was the playlist which was played"*. The lane's `RECENT` half is folded out
+  of the play ledger, which is per *track path*, so a run reified from a list
+  marked every album the list touched — several unrelated records jumping to
+  the head, one per track, while the list that was actually played sat where
+  its file's mtime had left it. **A play now attributes to the run's
+  provenance**: a run reified from a list touches the *list*, and every other
+  origin (a record, `Play all`, a shuffle draw, a stacked queue) touches the
+  record exactly as before. A list is touched by being played as well as by
+  being edited, and the lane takes whichever is later. One shortfall stands and
+  is recorded in `docs/BACKLOG.md`: across a quit the attribution falls back to
+  the ledger's, because the engine is never told a run's provenance and fixing
+  that reopens ADR-0018's ledger format.
 - **Opening baz and closing it again no longer costs you your place.** The
   guard that stops a restored run overwriting the interrupted point protected
   the *"the run moved"* writer and not the *exit* writer, which writes
