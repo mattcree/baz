@@ -3,14 +3,14 @@
 //!
 //! Three parts, top to bottom:
 //!
-//! 1. **The head** — `Home`, `Library`, `Now playing`, always all three and
-//!    always in that order, and **the search well under them**. The owner's
+//! 1. **The head** — **the search well**, then `Home`, `Library`,
+//!    `Now playing`, always all three and always in that order. The owner's
 //!    decisions: *"home will appear at the top of the left hand sidebar always
 //!    either way and it will contain the top level concerns. think spotify"*,
 //!    extended by *"as an extension we will want a Now playing page at the top
 //!    with the Home and Library"*, and — the one this file's [`well`] answers
 //!    — *"the design does not match properly… the search should really be in
-//!    the sidebar"*.
+//!    the sidebar"*, then *"search belongs at the top"*.
 //!    The place you are in is drawn in full paper ink; the other two rest at
 //!    `paper_dim`. **`Now playing` carries the lamp dot when something is
 //!    sounding** — the accent's one reserved meaning, spent so the lane can
@@ -18,10 +18,9 @@
 //! 2. **`RECENT`** — every playlist and the last
 //!    [`crate::lane::RECENT_ALBUMS`] records, one list, last touched first
 //!    ([`crate::lane`] owns the order and is tested without a window).
-//! 3. **The two marks** at the foot: expanded and collapsed, in the density
-//!    detents' exact anatomy (ADR-0028) — the current state's mark at full
-//!    ink and **inert**, because it is the fact, and the other pressable,
-//!    because it is the control.
+//! 3. **`Collapse`** at the foot — one control, a chevron and its word, the
+//!    chevron pointing the way the lane will move. Collapsed it is the
+//!    chevron alone under its tooltip, like the destinations above it.
 //!
 //! # Why the well is a field here and not a `Search` destination
 //!
@@ -109,19 +108,23 @@ pub(crate) fn view<'a>(
     let open = theme::sidebar_w(window_w, shelf.lane_open) >= theme::SIDEBAR_W;
     let width = theme::sidebar_w(window_w, shelf.lane_open);
 
+    // **The well leads the lane** — *"search belongs at the top"* (owner,
+    // 2026-08-09). It shipped under the three destinations, on the reading
+    // that `Home` being top-of-lane put everything else below it; the owner
+    // read the built thing and placed the well above them instead, which is
+    // also where every product he named for reference puts it.
+    //
+    // It is in the head because the head is the frame's own concerns and
+    // searching the collection is one. Below `SIDEBAR_FLOOR` the lane cannot
+    // open, so the head has no well and no mark for one — the strip carries it
+    // there instead ([`theme::strip_holds_the_well`]).
     let mut head = column![];
+    if theme::sidebar_can_expand(window_w) {
+        head = head.push(well(shelf, open));
+        head = head.push(Space::with_height(Length::Fixed(theme::GAP_SM)));
+    }
     for to in Destination::ALL {
         head = head.push(destination_row(to, place, open, sounding));
-    }
-    // **The well, under the three destinations and above the seam.** It is in
-    // the head because the head is the frame's own concerns and searching the
-    // collection is one; it is *under* the destinations because the owner put
-    // `Home` at the top of the lane and said so twice. Below
-    // `SIDEBAR_FLOOR` the lane cannot open, so the head has no well and no
-    // mark for one — the strip carries it there instead.
-    if theme::sidebar_can_expand(window_w) {
-        head = head.push(Space::with_height(Length::Fixed(theme::GAP_SM)));
-        head = head.push(well(shelf, open));
     }
 
     let mut list = column![];
@@ -618,76 +621,90 @@ fn lane_row<'a>(
     .into()
 }
 
-/// **The two marks** at the lane's foot (ADR-0030 §3), in the density
-/// detents' exact anatomy: [`theme::STEPPER_HIT`] boxes, the current state's
-/// mark at full ink and inert — it is the fact — the other at the resting ink
-/// and pressable, because it is the control.
+/// **One control at the lane's foot**: `Collapse` when the lane is open,
+/// the chevron alone when it is not.
 ///
-/// Below [`theme::SIDEBAR_FLOOR`] the `Expanded` mark is inert whichever state
-/// is stored: expanding there would leave the collection one column of covers,
-/// and a control that produces a state the window cannot hold is a trap. It
-/// draws at the disabled ink so the inertness is visible rather than
-/// discovered by pressing.
+/// It shipped briefly as *two* marks in the density detents' anatomy — one
+/// per state, the current one inert — and the owner read the built thing and
+/// said it was not the design. He is right, and the two cases are not alike:
+/// density has **three** named steps, so marks that name each one are the
+/// only way to say which you are on. The lane has two states, and the one you
+/// are not in is fully described by the word for getting there. A pair of
+/// marks for a binary is a radio group where a switch belongs — and it made
+/// the lane's own state something you had to read two glyphs to learn.
+///
+/// So: a labelled word while there is room for a word, the chevron alone when
+/// there is not, and the chevron always points **the way the lane will move**.
+///
+/// Below [`theme::SIDEBAR_FLOOR`] it is inert and drawn at the disabled ink:
+/// expanding there would leave the collection one column of covers, and a
+/// control that produces a state the window cannot hold is a trap.
 fn marks(open: bool, can_expand: bool) -> Element<'static, Message> {
-    let mut marks = row![].spacing(theme::GAP_XS);
-    for expanded in [true, false] {
-        marks = marks.push(lane_mark(expanded, open, can_expand));
-    }
-    container(marks)
+    container(lane_toggle(open, can_expand))
         .width(Length::Fill)
         .align_x(alignment::Horizontal::Center)
         .padding(theme::pad(theme::GAP_MD, 0.0))
         .into()
 }
 
-/// One of [`marks`]' two marks.
-fn lane_mark(expanded: bool, open: bool, can_expand: bool) -> Element<'static, Message> {
+/// [`marks`]' one control.
+fn lane_toggle(open: bool, can_expand: bool) -> Element<'static, Message> {
     let room = theme::active();
-    let current = expanded == open;
-    let usable = !expanded || can_expand;
-    let glyph = if expanded {
-        icon::Glyph::LaneExpanded
-    } else {
+    // The chevron points the way the lane will move: closing, it points at
+    // the edge it is heading for; opening, away from it.
+    let glyph = if open {
         icon::Glyph::LaneCollapsed
+    } else {
+        icon::Glyph::LaneExpanded
     };
-    let opacity = if current {
-        theme::GLYPH_OPACITY_HOVER
-    } else if usable {
+    let usable = open || can_expand;
+    let opacity = if usable {
         theme::GLYPH_OPACITY
     } else {
         theme::GLYPH_OPACITY_DISABLED
     };
-    let mark = container(
-        iced_image(icon::handle(glyph))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(opacity),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(alignment::Horizontal::Center)
-    .align_y(alignment::Vertical::Center);
-    let boxed: Element<'static, Message> = if current || !usable {
-        container(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .into()
+    let mark = iced_image(icon::handle(glyph))
+        .width(Length::Fixed(theme::ICON_PX))
+        .height(Length::Fixed(theme::ICON_PX))
+        .opacity(opacity);
+    // The word rides with the glyph while the lane is open; collapsed, the
+    // lane is 96 px and the glyph stands alone under its tooltip, exactly as
+    // the destinations above it do.
+    let body: Element<'static, Message> = if open {
+        row![
+            mark,
+            text("Collapse")
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.paper_faint)
+                .wrapping(text::Wrapping::None),
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center)
+        .into()
     } else {
-        button(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .padding(0)
-            .style(move |_theme, status| theme::transport(room, room.recess, status))
-            .on_press(Message::ToggleLane)
-            .into()
+        mark.into()
     };
-    let name = if expanded { "Expanded" } else { "Collapsed" };
+    let boxed = container(body)
+        .height(Length::Fixed(theme::STEPPER_HIT))
+        .align_y(alignment::Vertical::Center);
+    if !usable {
+        return boxed.into();
+    }
+    let pressable = button(boxed)
+        .height(Length::Fixed(theme::STEPPER_HIT))
+        .padding(theme::pad(0.0, theme::GAP_SM))
+        .style(move |_theme, status| theme::transport(room, room.recess, status))
+        .on_press(Message::ToggleLane);
+    if open {
+        return pressable.into();
+    }
     iced::widget::tooltip(
-        boxed,
-        text(name)
+        pressable,
+        text("Expand")
             .size(theme::SIZE_CAPTION)
             .line_height(theme::LEADING_CAPTION),
-        iced::widget::tooltip::Position::Top,
+        iced::widget::tooltip::Position::Right,
     )
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)
@@ -725,8 +742,8 @@ mod tests {
         let source = source();
         let view = body(&source, "pub(crate) fn view<'a>(");
         let head = view
-            .split_once("for to in Destination::ALL")
-            .expect("the head's three destinations")
+            .split_once("let mut head")
+            .expect("the head is built")
             .1;
         let (head, _) = head.split_once("let mut list").expect("the head ends");
         assert!(
@@ -735,17 +752,18 @@ mod tests {
         );
         assert!(
             head.contains("head.push(well(shelf, open))"),
-            "the well is not pushed onto the head, under the destinations"
+            "the well is not pushed onto the head"
         );
-        // And it is *under* them: the owner put `Home` at the top of the lane
-        // and said so twice (ADR-0030's amendment).
-        let at_destinations = view
+        // **The well leads** — the owner's *"search belongs at the top"*. The
+        // order is the claim, so the order is what is pinned: a later edit
+        // that puts the destinations first passes every other assertion here.
+        let well_at = head.find("head.push(well(shelf, open))").expect("the well");
+        let dests_at = head
             .find("for to in Destination::ALL")
-            .expect("the destinations");
-        let at_well = view.find("head.push(well(").expect("the well");
+            .expect("the three destinations");
         assert!(
-            at_destinations < at_well,
-            "the well is drawn above the three destinations"
+            well_at < dests_at,
+            "the well must stand above the three destinations, not below them"
         );
     }
 
