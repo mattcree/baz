@@ -592,6 +592,13 @@ next commit.
 
 **Desktop integration (Linux)**
 
+- **An application icon**, so baz has a face in the launcher, the dock and the
+  window list: an SVG master and the hicolor PNG ladder in `packaging/icons/`,
+  named by the desktop entry and installed by both the Flatpak and the Linux
+  tarball. The mark is a work on the gallery wall under its picture light and
+  its wall label — the placeholder tile baz itself draws for a coverless
+  album — in the visual language's own tokens, with the accent spent only
+  where it means playback truth.
 - **MPRIS2**: both interfaces on the session bus, so GNOME's and KDE's media
   controls, the lock screen, `playerctl` and hardware media keys drive baz and
   show title, artist, album and cover art. `Volume` is readable and writable,

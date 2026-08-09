@@ -405,11 +405,13 @@
 
 ## Platform integration
 
-- **No application icon.** `packaging/baz.desktop` therefore carries no
-  `Icon=` key (a key naming a file no package installs is worse than none),
-  and desktops fall back to a generic launcher icon. Add the key in the same
-  change that adds the artwork; `crates/baz/src/icon.rs` is the in-UI transport
-  glyph sheet, not an app icon.
+- ~~**No application icon.**~~ — **shipped.** `packaging/icons/` holds the SVG
+  master and the hicolor PNG ladder, the desktop entry names it, and the
+  Flatpak and the Linux tarball install it. **The binary still sets no window
+  icon**: winit 0.30 supports that on Windows and X11 only — never Wayland or
+  macOS — so it buys nothing on baz's primary platform and is worth doing for
+  the Windows build alone. The reasoning and the patch are in
+  `packaging/icons/README.md`.
 - **`OpenUri` is not implemented**, so MPRIS's `SupportedUriSchemes` and
   `SupportedMimeTypes` are empty and the desktop entry registers no
   `MimeType=`. baz plays what it scanned; "open this file with baz" is a real
