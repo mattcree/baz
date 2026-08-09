@@ -648,22 +648,13 @@ fn signal_path(player: &PlayerState) -> Element<'_, Message> {
 /// control in the app; and glyphs over the playing cover need the playing cover
 /// to be *on screen*, which after a filter or a long scroll it is not.
 /// `docs/REFUSALS.md`'s visible-control rule makes it binding.
-/// **The transport, on its own** — the three glyph buttons, without the bar's
-/// zone padding.
 ///
-/// Shared with the Now playing place (ADR-0030 as the owner extended it): that
-/// place needs the transport at its own scale and in its own composition, and
-/// a second set of three buttons sending the same three messages would be
-/// two controls per intention, which L8.6 forbids. One row, two callers, the
-/// same tooltips and the same enablement.
-///
-/// The bar keeps its own wrapper ([`transport_row`]) because the zone's lead
-/// is derived from the *band*, which the place does not have.
-pub(crate) fn transport(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
-    transport_glyphs(player, ink)
-}
-
-/// The three glyph buttons, and nothing around them.
+/// **And they stay here only.** The Now playing place drew this row a second
+/// time, a few hundred pixels above the bar that was already under it — the
+/// owner's *"now playing does not need the play pause controls"* and *"ensure
+/// the play next and previous controls are removed"*. The wrapper that shared
+/// it is gone with the second copy: the bar is in every place, so a place that
+/// wants a transport already has one.
 fn transport_glyphs(player: &PlayerState, ink: Ink) -> Element<'_, Message> {
     let pending = player.transport_pending();
     let toggle = player.play_pause();

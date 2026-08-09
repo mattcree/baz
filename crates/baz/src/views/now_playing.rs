@@ -17,7 +17,8 @@
 //! # A first version, and what it is designed to become
 //!
 //! Deliberately simple: the artwork large, the identity under it, the needle
-//! and the position, and the transport. No visualizer and no VU — those are
+//! and the position. No transport — the bar under this place carries it,
+//! and drawing it twice was a defect. No visualizer and no VU — those are
 //! future work and are not allowed to constrain this.
 //!
 //! **The kiosk full-screen mode is this same surface at a larger size**, and
@@ -84,7 +85,6 @@ pub(crate) const NOW_PLAYING_MAX: f32 = 720.0;
 pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     player: &'a PlayerState,
-    ink: crate::motion::Ink,
     width: f32,
     height: f32,
 ) -> Element<'a, Message> {
@@ -176,14 +176,21 @@ pub(crate) fn view<'a>(
         .push(crate::views::home::needle(elapsed, total, edge))
         .push(figures(stamps, room));
 
+    // **No transport here.** The bar is under every place, this one included,
+    // and it already carries play/pause and the two skips — so the page drew
+    // the *same function* a second time, a few hundred pixels above the first
+    // (`bottom_bar::transport`, called from here). The owner: *"now playing
+    // does not need the play pause controls"*, and *"ensure the play next and
+    // previous controls are removed"*. It was a duplicate, not a choice.
+    //
+    // What this surface owes is a reading, not a control: the work at the size
+    // it deserves, who made it, where the needle stands. The one place in the
+    // product where the same fact appears twice on purpose is the lamp — and
+    // that is a mark, not a button.
     container(
-        column![
-            work,
-            placard,
-            crate::views::bottom_bar::transport(player, ink)
-        ]
-        .spacing(theme::GAP_XL)
-        .align_x(alignment::Horizontal::Center),
+        column![work, placard]
+            .spacing(theme::GAP_XL)
+            .align_x(alignment::Horizontal::Center),
     )
     .center(Length::Fill)
     .into()

@@ -1222,6 +1222,28 @@ pub fn lane_ground(p: &Palette) -> container::Style {
     }
 }
 
+/// **The collapsed lane's mark for the place you are in**: the destination's
+/// card, drawn as a square around its glyph rather than as a band across the
+/// rail.
+///
+/// Open, the current destination wears [`track_row`]'s card and hairline like
+/// any emphasised row, and it reads correctly because a word stands in it.
+/// Collapsed there is no word, so that same band became a rectangle drawn
+/// around a lone glyph — the owner's *"in collapsed mode the now playing thing
+/// has a rectangular outline around it"*. Two changes fix it: the card is the
+/// glyph's own box, and **there is no border at all**. The hairline in
+/// `track_row` marks *the row that is sounding*, which is a different fact
+/// from *the place you are standing in*; borrowing it here made a selection
+/// wear playback's mark.
+pub fn lane_current(p: &Palette) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(p.step_up(p.step_up(p.recess)))),
+        text_color: Some(p.paper),
+        border: iced::border::rounded(RADIUS_SEGMENT),
+        ..container::Style::default()
+    }
+}
+
 /// The hairline on the lane's right edge — the one mark that separates it
 /// from the wall.
 ///

@@ -3770,13 +3770,9 @@ impl App {
                 self.body_width(),
                 collecting,
             ),
-            (Screen::Shelf(state), Place::NowPlaying) => views::now_playing::view(
-                state,
-                &self.player,
-                ink,
-                self.body_width(),
-                self.body_height(),
-            ),
+            (Screen::Shelf(state), Place::NowPlaying) => {
+                views::now_playing::view(state, &self.player, self.body_width(), self.body_height())
+            }
             (Screen::Shelf(state), Place::Settings) => {
                 // Built here rather than inside the view: the folders come from
                 // the shell's own list and their contents from the index, and a

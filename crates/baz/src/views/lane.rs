@@ -137,22 +137,32 @@ pub(crate) fn view<'a>(
         let sounds = matches!(entry.subject, Subject::Record(id) if Some(id) == playing);
         list = list.push(lane_row(shelf, playlists, entry, open, sounds));
     }
-    let list = scrollable(list)
+    // **The rows carry the lane's gutter, not the scrollable**, so the bar
+    // rides the lane's own right edge — the owner's *"the scrollbar should be
+    // at the edge of it"*. A scrollbar inset by the gutter reads as belonging
+    // to the list rather than to the surface, and leaves a dead strip between
+    // it and the seam. The rows keep the inset; only the bar reaches the edge.
+    let list = scrollable(list.padding(theme::pad(0.0, theme::GAP_XL)))
         .direction(scrollable::Direction::Vertical(theme::wall_scrollbar()))
         .style(move |_theme, status| theme::scrollbar(room, room.recess, status))
         .width(Length::Fill)
         .height(Length::Fill);
 
+    let flanked = |e: Element<'a, Message>| {
+        container(e)
+            .width(Length::Fill)
+            .padding(theme::pad(0.0, theme::GAP_XL))
+    };
     let body = column![
-        head,
+        flanked(head.into()),
         // The head's one rule: three destinations above it, the things you
         // have touched below. The lane has exactly one seam because it has
         // exactly two parts.
         container(horizontal_rule(1).style(move |_theme| theme::hairline(room, room.recess)))
-            .padding(theme::pad(theme::GAP_MD, 0.0)),
-        heading(open),
+            .padding(theme::pad(theme::GAP_MD, theme::GAP_XL)),
+        flanked(heading(open)),
         list,
-        marks(shelf.lane_open, theme::sidebar_can_expand(window_w)),
+        flanked(marks(shelf.lane_open, theme::sidebar_can_expand(window_w))),
     ]
     .width(Length::Fill)
     .height(Length::Fill);
@@ -164,7 +174,7 @@ pub(crate) fn view<'a>(
     let lane = container(body)
         .width(Length::Fill)
         .height(Length::Fill)
-        .padding(theme::pad(theme::GAP_XL, theme::GAP_XL))
+        .padding(theme::pad(theme::GAP_XL, 0.0))
         .style(move |_theme| theme::lane_ground(room));
 
     row![
@@ -229,16 +239,21 @@ fn destination_row(
             .height(Length::Fixed(theme::SIDEBAR_GLYPH_BOX))
             .align_x(x)
     };
+    let mut glyph_box = boxed(mark.into(), glyph_x).align_y(alignment::Vertical::Center);
+    // Collapsed, the place you are in is marked by a card **the size of the
+    // glyph**, not by a band across the rail — see [`theme::lane_current`] for
+    // why the band was wrong and why it carries no border.
+    if here && !open {
+        glyph_box = glyph_box.style(move |_theme| theme::lane_current(room));
+    }
     let glyph_block: Element<'static, Message> = if to == Destination::NowPlaying && sounding {
         iced::widget::stack![
-            boxed(mark.into(), glyph_x).align_y(alignment::Vertical::Center),
+            glyph_box,
             boxed(lamp_dot(), alignment::Horizontal::Right).align_y(alignment::Vertical::Top),
         ]
         .into()
     } else {
-        boxed(mark.into(), glyph_x)
-            .align_y(alignment::Vertical::Center)
-            .into()
+        glyph_box.into()
     };
     let mut line = row![glyph_block]
         .spacing(theme::GAP_MD)
@@ -270,7 +285,9 @@ fn destination_row(
     .padding(theme::pad(0.0, if open { theme::GAP_SM } else { 0.0 }))
     // The row family, on the lane's own ground: one step up under the
     // pointer, the whole hit area painted (`theme::track_row`).
-    .style(move |_theme, status| theme::track_row(room, room.recess, status, here))
+    // `here` only carries the row's card while there is a word in the row to
+    // stand in it; collapsed the mark is the glyph's own box, above.
+    .style(move |_theme, status| theme::track_row(room, room.recess, status, here && open))
     .on_press(Message::GoTo(to));
     if open {
         return row_button.into();
