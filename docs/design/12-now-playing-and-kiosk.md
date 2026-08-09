@@ -771,6 +771,267 @@ in the bar; ③ press `F11`. Then nothing, for eight hours.
 
 ---
 
+## 5. The composition: a field, a work, a placard
+
+### 5.1 The decision, first
+
+> **The background is a *derived ambient field* — a wash built from the cover's
+> own palette — and the artwork itself is drawn at its true size on top of it,
+> never scaled beyond the pixels the file actually contains.**
+
+Two things are being decided at once and they must not be confused:
+
+1. **What fills the screen.** The field. It is *not the artwork*; §5.3 makes
+   that argument explicitly, because it is the load-bearing one.
+2. **How large the cover may be drawn.** As large as the viewport allows,
+   bounded by **the source file's own pixels** — which means §5.2's decode tier
+   is not an optimisation, it is what makes the refusal true for the first time
+   (§0.4 b).
+
+The rejected alternative — **full-bleed artwork with the entry amended** — is
+rejected on three grounds, only one of which is the ledger:
+
+- **It cannot be done honestly at 4K.** A 1000 px cover — a good one, by 2026
+  standards — filling a 3840 px monitor is a 3.8× upscale. That is not a
+  stylistic choice, it is a visibly soft image, and the surface's whole subject
+  is a piece of visual art.
+- **It is the thing doc 03 already caught being wrong.** YouTube Music's
+  blurred enlarged copy sits behind a 48 px thumbnail *"duplicating the 860 px
+  art on the same screen"* (`03:232`). Full-bleed plus a true-size cover is the
+  same duplication; full-bleed *without* a true-size cover throws away the one
+  object the surface exists to show.
+- **It makes the composition unlayoutable.** A full-bleed image has an aspect
+  ratio and the window has a different one, so something is always cropped —
+  and cropping a record sleeve cuts the type off its own artwork.
+
+The field has none of these problems, because a gradient has no resolution and
+no aspect ratio. **It can fill a 4K panel exactly as well as a 1280 px one, and
+that is not a workaround — it is the reason it is the right object.**
+
+### 5.2 The decode tier, which makes the refusal true
+
+baz decodes art exactly once, to 320 px (`art.rs:131–139`). That is right for a
+wall drawing up to 120 tiles at `ART_MAX` 320 and wrong for a surface drawing
+one work at 1000. So this surface gets **a second decode, of one record**:
+
+```
+art::load_hero(first_track) -> Option<(u32, u32, Vec<u8>)>
+    the same resolution order (art.rs:69–78), decoded with
+    image.thumbnail(HERO_PX, HERO_PX) — downscale-only, exactly as
+    load_thumb does, so a small source stays its own size
+HERO_PX = 1024
+```
+
+**Why 1024, and why a ceiling at all.** It is the largest edge that is smaller
+than the shortest dimension of every panel this surface targets (1080 is the
+smallest kiosk height), so the cover is never the thing limiting the layout —
+the viewport is. And the memory is trivial next to the budget `art.rs:18–35`
+already argues: `1024 × 1024 × 4 B = 4 MiB` per entry, **two entries** (the
+sounding record and the one after it), against the thumbnail cache's 150 MiB.
+That is a **5.3 % increase in baz's art memory** for the surface the owner wants
+to leave running.
+
+**The edge, restated.** The clamp gains a third term, and it is the one that
+matters:
+
+```
+edge = min(width  − 2·HANG,
+           height − 2·HANG − below,
+           hero_px)                    ← the source's own pixels
+       .max(ART_MIN)
+```
+
+`hero_px` is `min(decoded_w, decoded_h)` of what `load_hero` actually returned —
+**not** `HERO_PX`, which is only the decoder's ceiling. A 500 px cover yields
+`hero_px == 500` and is drawn at 500, centred, with the field around it. That is
+S6's acceptance criterion and it is now enforced by arithmetic rather than by a
+constant that happened to be small enough.
+
+`NOW_PLAYING_MAX` **is deleted**. It was a fixed 720 standing in for a fact
+about the decode (`now_playing.rs:74–81` says so in as many words), and once the
+decode reports its own size the constant is the wrong shape of answer — it is
+what made a 4K panel show a 720 px cover in a 3744 px body (§11.2).
+
+**The test that holds it**, mirroring the wall's own
+(`shelf.rs:1509–1530`):
+
+```
+the_now_playing_surface_never_draws_art_larger_than_its_source
+  for hero_px in [120, 320, 500, 1024]:
+    for side in (400..=4000).step_by(7):
+      assert!(art_edge(side, side, hero_px) <= hero_px)
+```
+
+### 5.3 The field is not the artwork — the argument, made explicitly
+
+This is the claim the whole section rests on, so it is made rather than assumed.
+
+**What the field is, precisely.** Three colours sampled from the decoded cover —
+not the average, which is always mud, but a small ordered palette: the most
+common chroma-bearing hue, the darkest, and the lightest, each with lightness
+and chroma **clamped into the room's own range** exactly as the lamp's are. They
+are composited as a slow radial-plus-linear wash over `#0C0D0E`, at a ceiling of
+**L ≈ 0.22** — darker than any sleeve, brighter than the room.
+
+**Why that is data and not a copy of the work.** Four properties, each checkable:
+
+1. **It is not invertible.** Three clamped colours cannot reconstruct an image.
+   You cannot see what the record is from the field; you can only see *that the
+   room changed colour*. A blurred copy, by contrast, is the work — Apple Music's
+   shader background is recognisably the album from across a room, which is
+   exactly why it is beautiful and exactly why it is a copy.
+2. **It has no resolution**, so *"larger than its source"* is not a predicate
+   that applies to it. This is the substantive difference from full-bleed, and
+   it is why §14.1's rewrite is a clarification rather than a repeal: the
+   refusal was always about **the work**, and the field is not the work.
+3. **The ledger already ruled on exactly this object.** *"The art-derived lamp
+   is **data** — hue read from the record, lightness and chroma pinned — not a
+   preference"* (`REFUSALS.md:267–269`). The field is the lamp's own rule, with
+   three colours instead of one and a large area instead of a small one. If
+   hue-read-from-the-record is data at 6 px, it does not become decoration at
+   1920.
+4. **Amberol ships the honest version** — *"the whole window washed with a
+   3-gradient composite from the palette"* (`03:236`) — and it is the one
+   treatment in doc 03's table that draws no copy of the art at all.
+
+**Why it is not a scrim.** The ledger's objection is specific and it is worth
+quoting: *"a scrim is a surface laid over **the collection** to make something
+else readable"* (`REFUSALS.md:126–132`). The field is under everything, laid over
+nothing, and dims no artwork — it is the room's own colour, changed. This is the
+same distinction the ledger itself drew when it admitted the hover veil, and it
+is recorded in §14.2 rather than assumed here.
+
+**The honest cost, stated.** The field is the one element on this surface with
+no precedent in baz, and it is the one most able to look cheap. Two constraints
+keep it from doing so, both testable: it never exceeds L 0.22 (so it cannot
+compete with the sleeve, which is the brightest object by construction), and it
+is **continuous** — no visible banding, which at these lightnesses means
+dithering, and which §7.5 prices.
+
+### 5.4 Where everything sits
+
+The z-order, and the one rule that governs it:
+
+```
+z3   the placard, the meter's instrument register, the feed   (type)
+z2   the work — true size, centred, its halo                  (artwork)
+z1   the field — full bleed, derived, ambient                 (light)
+z0   the room, #0C0D0E                                        (ground)
+     ─────────────────────────────────────────────────────────
+     the bar, outside the place entirely (app.rs:3744–3752)
+```
+
+> **Nothing is drawn on the sleeve. Everything ambient is drawn on the field.**
+
+That sentence is what reconciles the owner's *"VU meter stuff over it"* with
+`REFUSALS.md:107–111`'s *"anything on artwork anywhere but a wall tile — not the
+Songs rows, not the lane, not the record's page"*. What *"takes up the
+background"* is the field; the meter is over **the field**. The sleeve is the
+one object on this screen with nothing on top of it, and it stays that way. The
+owner's brief and the entry ask for the same composition once the field and the
+work are understood as two objects.
+
+The work keeps its halo (`theme::lamp_glow`, `REFUSALS.md:282` — *"no shadows
+except the playing halo, which is not elevation, it is light"*), and that halo
+is now doing real work: it is what separates a sleeve from a field of a similar
+colour, which is the job a border would otherwise be reached for and which
+`REFUSALS.md:279–280` forbids in as many words.
+
+### 5.5 The layouts, measured
+
+Lane open is `SIDEBAR_W` **280** and collapsed is `SIDEBAR_RAIL_W` **96**
+(`theme.rs:1058`, `theme.rs:4677`); the bar is `BAR_H` **81**
+(`theme.rs:3818`, `theme.rs:4224`), and it is outside the place. So
+`body = (window.width − lane) × (window.height − 81)`
+(`app.rs:3798–3826`).
+
+The placard column's height below the work, with the transport gone (§6) and
+the meter and feed arrived:
+
+```
+artist   LINE_HEADING  12      needle   NEEDLE_H      2
+  GAP_XS               4         GAP_SM               8
+title    LINE_HERO     32      figures  LINE_META    16
+  GAP_XS               4         GAP_LG              16
+album    LINE_BODY     20      meter    METER_H      24
+  GAP_LG              16         GAP_LG              16
+                                feed     LINE_BODY   20
+                                ─────────────────────────
+                                below              = 190
+```
+
+`below` was **162** with the transport in it and is **190** with the meter and
+the feed; dropping `TRANSPORT_HIT` 32 pays for most of what arrives.
+
+| Window | Lane | Body | `edge` (1000 px source) | Work as % of body width |
+|---|---|---|---|---|
+| 1280 × 800 | open 280 | 1000 × 719 | **449** (height-bound) | 45 % |
+| 1280 × 800 | collapsed 96 | 1184 × 719 | **449** (height-bound) | 38 % |
+| 1920 × 1080 | collapsed 96 | 1824 × 999 | **729** (height-bound) | 40 % |
+| 2560 × 1440 | collapsed 96 | 2464 × 1359 | **1000** (source-bound) | 41 % |
+| 3840 × 2160 | collapsed 96 | 3744 × 2079 | **1000** (source-bound) | 27 % |
+| 3840 × 2160 | collapsed 96, 3000 px source | 3744 × 2079 | **1809** (height-bound) | 48 % |
+
+Two readings of that table, and both are design findings:
+
+- **The source becomes the binding constraint at 2560 and above**, which is the
+  refusal working rather than a limitation. A listener with 300 × 300 covers
+  gets a small sleeve on a large field, honestly; a listener who rips with
+  1500 px art gets a wall-sized one. **The screen rewards a well-kept
+  collection**, which is a sentence this product should want to be true.
+- **At 4K with a modest cover the work is 27 % of the body**, and that is where
+  the field stops being decoration and becomes the composition. Without it, a
+  1000 px square floating in 3744 px of `#0C0D0E` is not a kiosk, it is a
+  postage stamp in a void. §11.3 is the type scale that goes with it.
+
+**1920 × 1080, lane collapsed — the case the brief describes:**
+
+```
+ ┌──────────────────────────────────────────────────────────────────┐
+ │▓▓▓▓▓ the field: derived wash, full bleed, L ≤ 0.22 ▓▓▓▓▓▓▓▓▓▓▓▓▓▓│
+ │▓ 96 ▓                                                          ▓▓│
+ │▓lane▓                  ┌──────────────┐                        ▓▓│
+ │▓    ▓                  │              │  ← halo, not a border  ▓▓│
+ │▓Home▓                  │   the work   │                        ▓▓│
+ │▓Libr▓                  │   729 × 729  │  true size, ≤ source   ▓▓│
+ │▓Now ▓                  │              │                        ▓▓│
+ │▓ ●  ▓                  └──────────────┘                        ▓▓│
+ │▓    ▓                  T A L K   T A L K          12 ▲         ▓▓│
+ │▓    ▓                  Spirit of Eden               32 ▲       ▓▓│
+ │▓    ▓                  Spirit of Eden · 1988        20 ▲       ▓▓│
+ │▓    ▓                  ├──────────────┤              2  needle ▓▓│
+ │▓    ▓                  3:12              6:27       16 ▲       ▓▓│
+ │▓    ▓                  ▁▂▃▅▃▂▁  −14.2 LUFS          24  meter  ▓▓│
+ │▓    ▓                  Played 34 times since 2019   20  feed   ▓▓│
+ │▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓│
+ ├──────────────────────────────────────────────────────────────────┤
+ │ the bar — 81 px, unchanged, in every place (app.rs:3744–3752)    │
+ └──────────────────────────────────────────────────────────────────┘
+```
+
+Everything in the placard column is `edge` wide and left-aligned to the work's
+own left edge — the wall label's rule at the far field's scale, which is what
+`now_playing.rs:123–145` already does and which nothing here changes.
+
+### 5.6 What the surface still needs of its own
+
+With the transport gone (§6), the answer is short, and it is the test of whether
+§6 was right:
+
+| Element | Why it is not the bar's | Interactive? |
+|---|---|---|
+| The **work** at `edge` | The bar's cover is `BAR_COVER` 52 (`theme.rs:1723`). This is the subject; that is a thumbnail | No — §6.3 |
+| The **placard** at `SIZE_HERO`+ | The bar states it at `SIZE_BODY` 13, which is not legible at 3 m (§1.2) | No |
+| The **needle** at `edge` wide | The bar's is the full window at 2 px. This one is a control you can actually hit from a chair | **Yes** — already hit-tested (`player.rs:527–531`) |
+| The **field** | Nothing in the bar is ambient | No |
+| The **meter** | Nothing in baz measures level in real time at all (§9) | No |
+| The **feed** | Nothing in baz surfaces the ledger since ADR-0022 deleted the inspector (§1) | No |
+
+Two of these six exist today, one is being enlarged, and three are new. That is
+the honest shape of the work, and §12 orders it.
+
+---
+
 ## 6. Input: the kiosk that can be paused
 
 *A kiosk that cannot be paused is a design failure; a kiosk covered in chrome
