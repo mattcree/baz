@@ -943,3 +943,322 @@ the panel is closed at rest, so the occlusion lasts exactly as long as a
 deliberate task. After §4 that task is *browsing your lists* rather than
 *every add in the product*, so the occlusion becomes rarer by the same
 change. Recorded, not proposed against.
+
+---
+
+## 6. The user stories
+
+Doc 09 §4's artifacts, continuing its numbering: each scenario as a **user
+story**, its **task flow** in exact presses from where the listener actually
+is, and **acceptance criteria** in Given/When/Then, written to be implemented
+and tested as stated. Nothing in a criterion is undecided elsewhere.
+
+Vocabulary: **the card** is §4.3's destination picker. **The current
+playlist** is doc 09 §6's playing provenance — a queue reified from a named
+list, while that file still exists. **Needle-drop** is ADR-0023 §2.
+
+### S11 — Start a record from the wall without leaving it
+
+> As a listener browsing my shelves, I want to start a record I am pointing
+> at without the collection disappearing, so that putting music on does not
+> cost me my place.
+
+**Task flow**: ① right-press the sleeve → the menu at the pointer;
+② `Play album`. Two gestures, no navigation, the wall untouched behind the
+card. (The page route stays: press the sleeve, press `Play album`.)
+
+**Acceptance criteria**
+
+- Given the Library place and an engine that is ready, when a tile is
+  right-pressed, then the menu opens with its top-left corner at the
+  pointer, carrying `Open · Play album · Queue album · Add to "{current}"?
+  · Add to playlist…` in that order, and the wall behind it has not moved
+  by a pixel (`app.rs:3236–3249`; frames `01`/`02`).
+- Given the menu is open, when `Play album` is pressed, then the record's
+  selected edition becomes the queue and the first track sounds —
+  `Message::PlayAlbum`, the record page's exact path (`app.rs:1090–1093`)
+  — the menu closes, and **the place is still Library**.
+- Given the menu is open, when the pointer leaves it, then nothing happens:
+  the card is dismissed by `Esc`, by a left press outside, or by an item —
+  never by the pointer's departure.
+- Given a tile at the window's right or bottom edge, when it is
+  right-pressed, then the card is flipped to the pointer's other side and
+  is wholly on screen (`menu::anchor`, `menu.rs:359–372`).
+- Given the record's page is opened by a tile press, when its header
+  renders, then the note lane teaches the gesture that would have saved the
+  trip (§2.5), in one meta line beside the return.
+
+### S12 — Send a whole record to the list I'm living in
+
+> As a listener playing one of my playlists who has just found a record that
+> belongs in it, I want the whole record in that list in one short gesture,
+> so that the list I'm living in grows while I live in it — without the
+> record I'm hearing being interrupted.
+
+**Task flow**: ① right-press the sleeve; ② `Add to "Road Trip"`. Two
+gestures, from the wall, with nothing playing interrupted. Pointer-only
+route without the menu: the record's page → `Add to playlist…` → the card,
+where *Road Trip — playing* is the first named row.
+
+**Acceptance criteria**
+
+- Given a queue whose provenance names a playlist that still exists, when a
+  tile is right-pressed, then the menu carries `Add to "{name}"` between
+  `Queue album` and `Add to playlist…`; when no provenance stands, or the
+  file is gone, the item is **absent, not disabled**
+  (`playlists::holds`, `playlists.rs:440–445`; the rule doc 09 §6 sets).
+- Given `Add to "{name}"` is pressed, when the append lands, then the
+  **file** gains the record's selected edition, whole, in order, with
+  `#EXTINF` metadata — and **the live queue is unchanged**, not one
+  delivered sample disturbed. No card is shown: the item makes both presses
+  itself (`AddAlbumToPlaylist` then `PickPlaylist`), exactly as the track
+  row's item already does (`menu.rs:194–199`).
+- Given the panel is open when the append lands, when it re-renders, then
+  that row's counts have changed — the effect is in view.
+- Given the current playlist's own page is open, when the append lands,
+  then the page re-reads and shows the new rows, and the lamp dot marks
+  nothing rather than lying, because the queue is no longer exactly the
+  listed subset (`player.rs:1756–1761`).
+- Given the record has editions, when the item is pressed, then what is
+  appended is the **selected** edition — the tracks the page lists and
+  `Play album` would queue (`app.rs:1712–1717`).
+
+### S13 — Put a track somewhere, without crossing the window
+
+> As a listener who wants to keep the song I am hearing, I want the list of
+> destinations to appear where my hand already is, so that keeping a thing
+> costs a moment rather than a journey.
+
+**Task flow**: ① press the row's `+` (or right-press → `Add to playlist…`);
+② press a destination on the card. Two presses, both within ~130 px.
+
+**Acceptance criteria**
+
+- Given any transfer control is pressed — a row's `+`, the record page's
+  `Add to playlist…`, a menu's `Add to playlist…` — then the destination
+  card opens **at the pointer**, and the playlist panel does not open.
+- Given the card renders, when it draws its heading, then the heading is
+  `Add “{label}” to…` at `SIZE_BODY` in full paper with a second line
+  stating what is held in figures (`9 tracks · 45:26`, or the track's own
+  duration) — and no line on the card is quieter than the sentence that
+  says what the card is for.
+- Given the card renders, when it draws its rows, then they are, in order:
+  `Queue`, the current playlist marked *playing* when provenance stands,
+  every other list in the folder's order, `New playlist`
+  (`playlists::picker_order`, unchanged).
+- Given the card's `Queue` row is pressed, then the held music is appended
+  to the run (`UpdateQueue`; appending to an empty stopped engine loads it
+  without starting it, `app.rs:1363–1366`), and nothing sounds unasked.
+- Given a named row is pressed, then that **file** is appended and the card
+  closes; the panel's counts, if the panel happens to be open, re-read.
+- Given `New playlist` is pressed, then the row becomes a name field with
+  the caret in it; on submit a new `.m3u8` is created and the pick is
+  completed into it (`playlists.rs:516–518`); the storage layer's refusals
+  surface in the field in its own words (`playlists.rs:502–522`).
+- Given the card is open, when `Esc` is pressed, then the card closes and
+  the pick is put down — **before** any panel layer, exactly as the menu
+  peels first (`App::escape`).
+- Given the card is open, when a left press lands outside it, then the card
+  closes and the press is spent on nothing else.
+- Given more destinations than fit `PICKER_MAX_H` 400, when the card
+  renders, then the row list scrolls inside the card with the heading and
+  `New playlist` pinned outside the scroll.
+
+### S14 — Know where this record sits in what I was looking at
+
+> As a listener who has opened a record from a wall I had arranged and
+> filtered, I want the page to tell me where in that wall I am, so that
+> stepping through releases is navigation rather than guesswork.
+
+**Task flow**: ① open a record; the header states the position; ② `‹ Prev` /
+`Next ›` (or `Ctrl+[` / `Ctrl+]`) step it.
+
+**Acceptance criteria**
+
+- Given a record's page opened from a wall showing N records, when the
+  header renders, then the step pair reads `‹ Prev · {i} of {N} · Next ›`,
+  where `i` and `N` are positions in the wall's **current visible order** —
+  the same list `vm::neighbours` steps (`vm.rs:1095`).
+- Given a query or an arrangement narrows the wall, when the header
+  renders, then `N` is the narrowed count — the scope is stated by being
+  counted.
+- Given a record the wall no longer shows (filtered out, or gone under a
+  rescan), when its page renders, then both doors are inert and **no
+  position is stated** — not `0 of 0` (`vm.rs:1092`, tested at
+  `vm.rs:2496–2503`).
+- Given the position changes from `9 of 25` to `10 of 25`, when it
+  re-renders, then neither door moves: the readout stands in a reserved
+  `POSITION_W` slot.
+- Given any place that is not Album, when its header renders, then it
+  carries no position — the slot is the Album place's alone
+  (`place_header_with`'s optional tenant, `views/mod.rs:245–258`).
+
+### S15 — See and manage my lists
+
+> As a listener with a shelf of kept lists, I want one obvious place to see
+> them, and I never want that place to appear because I pressed something
+> else.
+
+**Task flow**: ① `Playlists`, or `Ctrl+P` → the panel; ② a row → its page,
+with the panel still beside it.
+
+**Acceptance criteria**
+
+- Given any transfer gesture anywhere in the product, when it is made, then
+  **the panel does not open** (`begin_pick`'s auto-summon,
+  `playlists.rs:505–508`, is removed).
+- Given the panel is open, when it renders, then every row carries exactly
+  one control — the door to its page — the Queue row at its head is a
+  readout with no press, and no row carries an `Add` word.
+- Given the panel is open, when `Esc` is pressed, then the peel is two
+  layers deep and no deeper: a name field if one stands, then the panel
+  (`playlists::peel`, one arm shorter).
+- Given a playlist's page is opened from the panel, when it renders, then
+  the panel is still on screen beside it, and the wall's geometry behind
+  both is unchanged.
+
+### S16 — Build a list by dragging into it
+
+> As a listener assembling a list, I want to pick a row up and drop it on
+> the list I mean, so that the product's primary curation gesture is
+> manipulation rather than a stepper.
+
+**Task flow**: ① `Playlists` → the panel; ② press a row of the queue or a
+playlist page past the 8 px threshold and carry it; ③ release on a panel
+row.
+
+**Acceptance criteria** (shipped — ADR-0024 §6.3, `drag.rs:113`,
+`playlist_panel.rs:400–409` — restated as the contract this study preserves)
+
+- Given the panel is open and a row is in the hand, when the pointer
+  crosses a panel row, then that row draws the room's own hovered statement
+  from the drag's fact rather than from the cursor, so the frame and the
+  commit cannot disagree about where the track goes.
+- Given a drop lands on a panel row, when it commits, then that file gains
+  the held track in one atomic save, and the run is untouched.
+- Given a drag with nothing in the hand (a missing entry's row), when it
+  crosses the panel, then no row offers itself as a target.
+- Given the picker has moved to the card, when a drag is in flight, then
+  **the panel is still the destination surface** — this is the simultaneity
+  §5.1 keeps it for.
+
+---
+
+## 7. The layouts, drawn and measured
+
+All numbers logical px on the 4 px lattice (law L2); every one is an
+existing token or arithmetic on existing tokens except the two declared in
+§7.3.
+
+### 7.1 The wall, and why the group has nowhere to stand
+
+At 1280 × 860, `Balanced`, five columns — the shipped default, frame `01`:
+
+```
+x:  40                                                       1172   1180        1280
+    ├──────────────── the wall's grid ────────────────────────┤ 8  ├─ rail 60 ─┤ 40
+                                                                 INDEX_LANE_W 108
+
+    ┌──────────┐  gutter  ┌──────────┐        art = 240 at this width
+    │  sleeve  │          │  sleeve  │
+    │ 240×240  │          │ 240×240  │
+    └──────────┘          └──────────┘
+      GAP_LG 16 ─────────────────────────────  the label's lead
+      Violet Ledger                    CAPTION_LINE_H 20
+      Anne-Marie Puig · 1988           CAPTION_LINE_H 20   } CAPTION_H 40
+      GAP_XS 4
+      ────────────────────────────     SELECTION_EDGE 2    } RULE_LANE_H 6
+   ↕  34 px of clear wall  (hang 40 − RULE_LANE_H 6)
+    ┌──────────┐          ┌──────────┐
+    │  sleeve  │          │  sleeve  │
+```
+
+The clear wall is **42 / 34 / 22** px at Spacious / Balanced / Dense. What
+would have to fit in it:
+
+```
+  a card of three verbs   3 × 32 + 2 × 4 = 104     ✗ over by 62–82 px
+  a card of four verbs    4 × 32 + 2 × 4 = 136     ✗ over by 94–114 px
+  one flat row of verbs   TRANSPORT_HIT   =  32    ✗ at Dense; 1 px of air at Balanced
+```
+
+And laterally, the flat row would hang from the art's own width — 240 at
+Balanced — so three verbs share 80 px each, against the 232 px `MENU_W`
+exists to hold. §2.2's decision, in arithmetic.
+
+### 7.2 The tile's menu, complete
+
+```
+                    ● pointer (444, 250)
+                    ┌─ MENU_W 232 ──────────────────────┐  GAP_XS 4
+                    │ Open                              │  32
+                    │ Play album                        │  32
+                    │ Queue album           Shift-click │  32
+                    │ Add to “Road Trip”                │  32   ← new (§2.6)
+                    │ Add to playlist…                  │  32
+                    └───────────────────────────────────┘  GAP_XS 4
+                       height = 5 × 32 + 8 = 168
+```
+
+Item ink is `SIZE_BODY`; the accelerator is `SIZE_META` in the quiet ink at
+the row's right edge, a **word** and never a borrowed character (doc 10 §3.6
+— the face draws U+21E7 as tofu, verified on a rendered frame). Four items
+when no provenance stands: **136**, exactly what frame `02` shows.
+
+### 7.3 The destination card
+
+```
+        ● pointer
+        ┌─ PICKER_W 280 ────────────────────────────┐
+        │                                           │ GAP_SM 8
+        │ Add “Violet Ledger” to…                   │ LINE_BODY 20   SIZE_BODY, paper
+        │ 9 tracks · 45:26                          │ LINE_META 16   SIZE_META, dim
+        │                                           │ GAP_SM 8
+        ├───────────────────────────────────────────┤ 1  hairline
+        │                                           │ GAP_SM 8
+        │ ▫ 40  Queue                   8 · 32:10   │ 48
+        │ ▫ 40  Road Trip — playing    14 · 51:08   │ 48
+        │ ▫ 40  Late Nights            23 · 1:40:11 │ 48
+        │ ▫ 40  Autumn                  9 · 38:44   │ 48
+        │                                           │ GAP_XS 4
+        │    New playlist                           │ 32
+        │                                           │ GAP_SM 8
+        └───────────────────────────────────────────┘
+            8+20+16+8+1+8 + 4×48 + 4+32+8  =  293
+```
+
+**Two new tokens, and only two:**
+
+| Token | Value | Derivation |
+|---|---:|---|
+| `PICKER_W` | **280** | `PANEL_W` 340 − 2 × `GAP_XL` 24 − 12, on the lattice: the panel's own content measure, which is what the rows were already drawn at |
+| `PICKER_MAX_H` | **400** | six rows (288) plus the chrome (105), rounded up onto the lattice; beyond it the rows scroll and the heading and `New playlist` stay pinned |
+
+A destination row is `PANEL_SLEEVE` 40 + 2 × `GAP_XS` = **48**, which is the
+panel's own row height — the two surfaces draw the same row, so a list looks
+like itself in both. Row internals are the panel's verbatim
+(`playlist_row`'s sleeve, name-over-counts block, `— playing` mark).
+
+### 7.4 The Album place's header, with position
+
+```
+40                                                                          1240
+├─ ‹ Library ─┤ GAP_LG ├ Album ┤ GAP_LG ├ ‹ Prev · 4 of 25 · Next › ┤ ··fill·· ├ note ─┤
+   TRANSPORT_HIT 32      SIZE_EMPHASIS 15    SIZE_META, POSITION_W reserved     SIZE_META faint
+```
+
+`POSITION_W` is sized for `99 of 9999` at `SIZE_META` in the bundled Medium
+and asserted against its measured word, the shape ADR-0026's as-shipped note
+§2 forced into the open (`font.rs::the_strips_declared_tenant_widths_hold_their_measured_words`)
+— a declaration under the measurement is a budget the law cannot honestly
+assert. The strip's L9 sum for the Album place is re-run in the ADR; it has
+three tenants and a note where the Library strip has ten.
+
+### 7.5 What the wall looks like at rest, before and after this study
+
+Nothing. Every proposal above is a float, a menu item, a string, or a
+readout inside a place's header. **The wall's resting frame is byte-identical
+before and after** — the content share `03` §2.3 calls the single most
+important number in the corpus is untouched, and that is a design constraint
+this study accepted rather than an outcome it noticed.
+
