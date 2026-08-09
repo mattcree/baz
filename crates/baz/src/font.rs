@@ -524,13 +524,38 @@ mod tests {
             crate::views::top_bar::ACTS_W
         );
 
-        // The Playlists door: one word in `GAP_SM` padding.
-        let playlists = 2.0 * theme::GAP_SM + word("Playlists");
-        assert!(
-            playlists <= crate::views::top_bar::PLAYLISTS_W,
-            "the Playlists door measures {playlists:.2} px against a declared {}",
-            crate::views::top_bar::PLAYLISTS_W
-        );
+        // The `Playlists` door was measured here until ADR-0030 §5 removed
+        // it: the returns lane is the resident index of lists, so the strip
+        // has no door to that index any more and no word to measure. What it
+        // freed is spent in `theme`'s own budget arithmetic
+        // (`the_strip_holds_its_tenants_at_the_single_line_floor`), which is
+        // where a *width* claim belongs.
+    }
+
+    /// **The returns lane holds its head's three words** at the measure the
+    /// open lane gives them.
+    ///
+    /// The head is the one part of the lane whose copy is fixed and known —
+    /// `Home`, `Library`, `Now playing` — so unlike a record's title it can
+    /// be *held* rather than clipped. `Now playing` is the long one, and the
+    /// glyph, its gap and the row's own padding all come off the measure
+    /// before the word gets it.
+    #[test]
+    fn the_returns_lane_holds_its_three_destinations() {
+        let medium = Face::parse(SANS_MEDIUM);
+        // What a destination row leaves the word: the lane's content measure,
+        // less the row's two `GAP_SM` flanks, the glyph's box and the
+        // `GAP_MD` between it and the word.
+        let measure =
+            theme::MENU_W - 2.0 * theme::GAP_SM - theme::SIDEBAR_GLYPH_BOX - theme::GAP_MD;
+        for label in ["Home", "Library", "Now playing"] {
+            let word = medium.width(label, theme::SIZE_BODY);
+            assert!(
+                word <= measure,
+                "the lane's {label:?} measures {word:.2} px against {measure:.2} \
+                 of room — the head's words are fixed copy and must not clip"
+            );
+        }
     }
 
     /// **The index rail's lane holds the labels the keys actually produce** —

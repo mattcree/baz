@@ -407,6 +407,12 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         // the query, like every letter (ADR-0017 §1.2), and a door is
         // modified — L8.7's layer table, the same argument that moved `Q`.
         Key::Character("p" | "P") if command => Some(Message::TogglePlaylists),
+        // **Ctrl+B returns.** Doc 07 §5.3 deleted it because *"its subject was
+        // a sidebar that no longer exists"*; ADR-0030 built the sidebar again,
+        // its meaning is unchanged, and so the key comes back with it. It is
+        // the accelerator of the two marks at the lane's foot, never the
+        // control itself (the mirror rule).
+        Key::Character("b" | "B") if command => Some(Message::ToggleLane),
 
         // The zoom. Ctrl+`-` tightens the hang, Ctrl+`=` loosens it, and the
         // shifted spellings of both keys mean the same thing (module docs).
@@ -828,22 +834,31 @@ mod tests {
         );
     }
 
-    /// **`Ctrl+B` is unbound.** Bare `b` is a letter of the query, as every
-    /// bare letter now is.
+    /// **`Ctrl+B` is the returns lane's, again.** Bare `b` is a letter of the
+    /// query, as every bare letter is.
     ///
     /// It hid the album inspector and brought it back, and it earned its
     /// modifier by being *the layout key* — the one that changed how much room
-    /// the shelf got. ADR-0022 left no sidebar, so there is no layout to
-    /// change: the key does nothing rather than being given something else to
-    /// do, because a reflex that survives a redesign pointing at a new meaning
-    /// is worse than one that stops.
+    /// the shelf got. Doc 07 §5.3 retired it when ADR-0022 left no sidebar to
+    /// hide: *"a reflex that survives a redesign pointing at a new meaning is
+    /// worse than one that stops."*
+    ///
+    /// ADR-0030 built the subject again. The key returns because **its meaning
+    /// is unchanged** — it is still the one key that changes how much room the
+    /// collection gets — which is the only condition on which a retired reflex
+    /// may be revived. It is the accelerator of the two marks at the lane's
+    /// foot, never the control itself.
     #[test]
-    fn ctrl_b_is_unbound_because_there_is_no_sidebar_left() {
+    fn ctrl_b_collapses_the_returns_lane_again() {
         for key in [ch("b"), ch("B")] {
-            for modifiers in [Modifiers::COMMAND, Modifiers::COMMAND | Modifiers::SHIFT] {
-                assert_eq!(bind(&key, modifiers), None, "{key:?} + {modifiers:?}");
-            }
+            assert_eq!(
+                bind(&key, Modifiers::COMMAND).as_deref(),
+                Some("ToggleLane"),
+                "{key:?}"
+            );
         }
+        // The shifted chord stays unbound: one key, one meaning.
+        assert_eq!(bind(&ch("b"), Modifiers::COMMAND | Modifiers::SHIFT), None);
         assert_eq!(bind(&ch("b"), none()).as_deref(), Some("QueryTyped(\"b\")"));
     }
 

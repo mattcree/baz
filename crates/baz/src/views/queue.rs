@@ -550,7 +550,7 @@ fn queue_row(
     // One indent lane for rows and one heading lane above them — no third edge
     // introduced by a row's own padding (law L5).
     .padding(theme::pad(theme::GAP_XS, 0.0))
-    .style(move |_theme, status| theme::track_row(room, status, playing))
+    .style(move |_theme, status| theme::track_row(room, room.wall, status, playing))
     .on_press_maybe(live.then_some(Message::JumpToQueued(index)));
     // The drag wrapper owns the pointer for the body (crate::drag's module
     // docs): live rows lift on threshold and still click under it; every

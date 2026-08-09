@@ -236,7 +236,7 @@ fn queue_row(player: &PlayerState, picking: bool) -> Element<'static, Message> {
         )
         .width(Length::Fill)
         .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-        .style(move |_theme, status| theme::track_row(room, status, false))
+        .style(move |_theme, status| theme::track_row(room, room.plinth, status, false))
         .on_press(Message::PickQueue)
         .into();
     }
@@ -378,7 +378,7 @@ fn playlist_row<'a>(
         )
         .width(Length::Fill)
         .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
-        .style(move |_theme, status| theme::track_row(room, status, false))
+        .style(move |_theme, status| theme::track_row(room, room.plinth, status, false))
         .on_press(Message::PickPlaylist(entry.id))
         .into();
     }
@@ -392,6 +392,7 @@ fn playlist_row<'a>(
     .style(move |_theme, status| {
         theme::track_row(
             room,
+            room.plinth,
             if hot { button::Status::Hovered } else { status },
             false,
         )

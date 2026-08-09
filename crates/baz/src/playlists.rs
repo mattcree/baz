@@ -95,6 +95,23 @@ pub(crate) struct PanelRow {
     /// `None` when none did (a bare imported path list), so the row does not
     /// claim `0:00` about music it has not measured.
     pub(crate) seconds: Option<u64>,
+    /// **When the file was last written**, in seconds since the Unix epoch —
+    /// the returns lane's order key for a list (ADR-0030 §1: *a playlist is
+    /// touched when it is played, or when its file is written by the user's
+    /// own edit*).
+    ///
+    /// The mtime, from the fingerprint this module already reads for the
+    /// external-edit check, so the lane costs the folder no extra `stat`.
+    /// `None` on a filesystem that reports no usable stamp: the list is still
+    /// in the lane, at the end of the touched rows, because *"every playlist,
+    /// always"* is the membership rule and a missing timestamp is not a
+    /// reason to hide a thing somebody made.
+    ///
+    /// **Playing a list does not move it**, and that is honest rather than
+    /// incomplete: the ledger records tracks, so a play of a list is
+    /// indistinguishable from a play of the records in it. Recording a
+    /// separate played-at per list would be a second history to keep true.
+    pub(crate) touched_unix_s: Option<u64>,
     /// The sleeve's quotations (ADR-0024 §A1): the first four *distinct*
     /// records the library resolves, in playlist order — four for the 2 × 2
     /// collage, fewer meaning "draw the first full-bleed", none meaning the
@@ -269,6 +286,9 @@ pub(crate) struct Playlists {
     undo: crate::undo::History<Vec<Item>>,
     /// Which page id [`Self::undo`]'s snapshots belong to.
     undo_for: Option<u64>,
+    /// Bumped on every [`Self::refresh`] — the shell's cue that the lane's
+    /// lists half has moved, without diffing two vectors of strings.
+    stamp: u64,
     /// How [`Self::delete_open`] removes the file: the **platform trash** in
     /// the product ([`Folder::delete_to_trash`], doc 11 §5 P2), a plain
     /// unlink under the test constructor's tempdir fixtures — where the real
@@ -302,6 +322,7 @@ impl Playlists {
             open: None,
             undo: crate::undo::History::new(),
             undo_for: None,
+            stamp: 0,
             delete: Folder::delete_to_trash,
         };
         playlists.refresh(None);
@@ -322,6 +343,7 @@ impl Playlists {
             open: None,
             undo: crate::undo::History::new(),
             undo_for: None,
+            stamp: 0,
             delete: Folder::delete,
         };
         playlists.refresh(None);
@@ -336,6 +358,7 @@ impl Playlists {
     /// a file dropped into the folder appears the next time the panel is
     /// summoned: last writer wins, no prompt.
     pub(crate) fn refresh(&mut self, library: Option<&Library>) {
+        self.stamp = self.stamp.wrapping_add(1);
         let Some(folder) = &self.folder else {
             return;
         };
@@ -404,10 +427,22 @@ impl Playlists {
                     name: name.clone(),
                     entries,
                     seconds,
+                    // The lane's order key, from the fingerprint the
+                    // external-edit check already read: no extra `stat`, and
+                    // nothing new is written to learn it.
+                    touched_unix_s: playlist
+                        .fingerprint()
+                        .and_then(|stamp| u64::try_from(stamp.mtime_ns / 1_000_000_000).ok()),
                     art,
                 }
             })
             .collect();
+    }
+
+    /// The counter the returns lane watches: see [`Self::stamp`]'s field.
+    #[must_use]
+    pub(crate) fn stamp(&self) -> u64 {
+        self.stamp
     }
 
     /// Whether anything playlist-shaped can happen at all.

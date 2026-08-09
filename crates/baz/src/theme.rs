@@ -250,6 +250,15 @@ const HAIRLINE_A: f32 = 0.07;
 const HAIRLINE_STRONG_A: f32 = 0.15;
 /// Opacity of [`Palette::select_wash`]: the room's ink at **18 %**.
 const SELECT_WASH_A: f32 = 0.18;
+/// The synthetic surface step [`Palette::step_up`] uses **above the ladder's
+/// top plane**: the room's ink at **5 %**.
+///
+/// It is not a fifth plane; it is the ladder's own rise, measured. The real
+/// steps `wall → plinth` and `plinth → plinth_lit` work out at 3.6–4.4 % of
+/// the ink in Closing Time and 5.3–6.3 % in Reading Room, so 5 % sits inside
+/// the band both rooms already draw — which is the property
+/// `a_surface_step_is_the_ladders_own_rise` asserts rather than assumes.
+const SURFACE_STEP_A: f32 = 0.05;
 /// Opacity of [`Palette::lamp_glow`]: the accent at **30 %**, blurred.
 const LAMP_GLOW_A: f32 = 0.30;
 /// Opacity of [`Palette::ink_wash`]: the room's ink at **6 %** — the whole of
@@ -326,6 +335,48 @@ impl Palette {
             g: mix(ink.g, ground.g),
             b: mix(ink.b, ground.b),
             a: 1.0,
+        }
+    }
+
+    /// **One surface step up from `ground`** — the room's four-plane ladder
+    /// walked upward, and the whole of what "the pointer is on this row" is
+    /// allowed to say.
+    ///
+    /// # Why this exists, and what it fixed
+    ///
+    /// The row styles used to name their two surfaces as *values*
+    /// ([`Palette::plinth`] under the pointer, [`Palette::plinth_lit`] for the
+    /// playing row), which is correct exactly as long as every row in the
+    /// product stands on the wall. The playlist panel's rows do not: the
+    /// panel's own ground *is* `plinth`, so a row that painted `plinth` under
+    /// the pointer painted **the colour that was already there**. The rows
+    /// were pressable, correctly wired and completely mute — the owner's
+    /// words, 2026-08-09: *"a more clear indicator that something is a click
+    /// area… right now it's a bit… unresponsive"*.
+    ///
+    /// The fix is not a second style for the panel. It is that a hover is a
+    /// **relation** — one step above whatever you are standing on — and the
+    /// call site already knows its ground, exactly as it does for
+    /// [`Palette::hairline`] and [`word_button`]. Every row-shaped control in
+    /// the product now names its ground and steps from it, so a surface
+    /// composed on a different plane cannot go mute again.
+    ///
+    /// Above the ladder's top plane the step is synthesised at
+    /// [`SURFACE_STEP_A`] rather than saturating, so a control on
+    /// `plinth_lit` — the menu card's rows — still answers the pointer.
+    #[must_use]
+    pub fn step_up(&self, ground: Color) -> Color {
+        let same = |a: Color, b: Color| {
+            (a.r - b.r).abs() < 1e-4 && (a.g - b.g).abs() < 1e-4 && (a.b - b.b).abs() < 1e-4
+        };
+        if same(ground, self.recess) {
+            self.wall
+        } else if same(ground, self.wall) {
+            self.plinth
+        } else if same(ground, self.plinth) {
+            self.plinth_lit
+        } else {
+            Self::ink_over(self.paper, ground, SURFACE_STEP_A)
         }
     }
 
@@ -991,6 +1042,119 @@ pub const INDEX_CLEARANCE: f32 = GAP_SM;
 /// work hangs off its neighbour. That is asserted over the whole width band by
 /// `the_rail_lane_hangs_at_exactly_one_hang_from_the_last_column`.
 pub const INDEX_LANE_W: f32 = INDEX_CLEARANCE + INDEX_W + HANG;
+
+/// **The returns lane, open** (ADR-0030 §2): [`GAP_XL`] 24 + the content lane
+/// 232 + [`GAP_XL`] 24 = **280**.
+///
+/// The content lane is [`MENU_W`] 232 — the product's existing float measure —
+/// so the lane introduces no width of its own, and the two gutters are the
+/// panel-interior gap rather than the window's [`HANG`]: the lane is a surface
+/// *inside* the window rather than one hanging off its edge, which is what its
+/// own ground already says.
+///
+/// It lands on the industry's number from the other direction: Material's
+/// navigation drawer is 280 dp at its default maximum. Corroboration, not
+/// derivation.
+pub const SIDEBAR_W: f32 = GAP_XL + MENU_W + GAP_XL;
+
+/// **The returns lane, collapsed**: [`GAP_XL`] 24 + [`SIDEBAR_SLEEVE`] 48 +
+/// [`GAP_XL`] 24 = **96**. Material's expressive navigation rail, again from
+/// the other direction.
+pub const SIDEBAR_RAIL_W: f32 = GAP_XL + SIDEBAR_SLEEVE + GAP_XL;
+
+/// The sleeve on a lane row: **48**, one step above [`PANEL_SLEEVE`] 40.
+///
+/// Collapsed, the sleeve is the *only* thing identifying the row, so it is
+/// drawn one step larger than the panel's — the same face at the size a person
+/// can recognise a record by without a word beside it.
+pub const SIDEBAR_SLEEVE: f32 = PANEL_SLEEVE + GAP_SM;
+
+/// A lane row's pitch: **64** — [`SIDEBAR_SLEEVE`] 48 and one [`GAP_SM`] above
+/// and below.
+///
+/// It holds the two-line block ([`LINE_BODY`] 20 over [`LINE_META`] 16 = 36)
+/// centred, and it is above the hit-target floor at every density.
+pub const SIDEBAR_ROW_H: f32 = SIDEBAR_SLEEVE + 2.0 * GAP_SM;
+
+/// The head's destination row: **40** — [`TRANSPORT_HIT`] 32, the product's
+/// control hit box, with one [`GAP_SM`] of air under it.
+///
+/// A destination is a *control*, not a listing, so its box is the box every
+/// other pressable thing in the product stands in; the gap is what separates
+/// three of them stacked without a rule between.
+pub const SIDEBAR_DEST_H: f32 = TRANSPORT_HIT + GAP_SM;
+
+/// **The width below which the lane is always collapsed**: **1000**.
+///
+/// The smallest window at which the *expanded* lane still leaves the wall two
+/// columns at or above [`ART_MIN`] — 988 by arithmetic, rounded up onto the 4 px
+/// lattice. Below it the lane draws its rail and the `Expanded` mark is inert:
+/// a control that would leave the collection one column of covers is not a
+/// control, it is a trap.
+pub const SIDEBAR_FLOOR: f32 = 1000.0;
+
+/// **The lane's width at a window width, in the state the listener asked
+/// for** — the one function `Shelf::grid_width`, the composition and every
+/// width test read, so the geometry cannot be resolved two ways.
+///
+/// `open` is what is *persisted*; below [`SIDEBAR_FLOOR`] the answer is the
+/// rail whatever it says (ADR-0030 §3), which is why this takes the width and
+/// not just the bool.
+#[must_use]
+pub fn sidebar_w(window_w: f32, open: bool) -> f32 {
+    if open && window_w >= SIDEBAR_FLOOR {
+        SIDEBAR_W
+    } else {
+        SIDEBAR_RAIL_W
+    }
+}
+
+/// Whether the lane may be expanded at all at this window width — what makes
+/// the `Expanded` mark inert rather than merely unpressed (ADR-0030 §3).
+#[must_use]
+pub fn sidebar_can_expand(window_w: f32) -> bool {
+    window_w >= SIDEBAR_FLOOR
+}
+
+/// The box a head destination's glyph stands in: [`ICON_PX`] 16 with room for
+/// the lamp dot tucked against its top-right corner.
+///
+/// The dot must survive the collapse (the owner's requirement), so it is
+/// stacked *on the glyph* rather than set after the word — which means the
+/// glyph needs a box slightly larger than itself to tuck it into, in both
+/// states, at the same offset. [`GAP_SM`] of headroom is exactly the
+/// [`DOT`] 6 plus the 2 px that keeps it off the ink.
+pub const SIDEBAR_GLYPH_BOX: f32 = ICON_PX + GAP_SM;
+
+/// **The lane's ground**: [`Palette::recess`], one plane *below* the wall.
+///
+/// The lane reads as cut into the room rather than stuck onto it, which is
+/// what a resident surface has to do to stop looking like a panel that forgot
+/// to close. It is also why the lane needs no drawn shadow and no card: a
+/// plane below is a statement the ladder already makes.
+#[must_use]
+pub fn lane_ground(p: &Palette) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(p.recess)),
+        text_color: Some(p.paper),
+        ..container::Style::default()
+    }
+}
+
+/// The hairline on the lane's right edge — the one mark that separates it
+/// from the wall.
+///
+/// [`Palette::hairline_strong`] rather than the plain hairline because it is
+/// read *across* a surface step: the two grounds either side of it already
+/// differ, and a line that is quieter than the step it sits in reads as an
+/// artefact of the step rather than as an edge.
+#[must_use]
+pub fn lane_seam(p: &Palette) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(p.hairline_strong(p.recess))),
+        ..container::Style::default()
+    }
+}
 
 /// Group heading type: **10 px**, the caps size the critique names ("9–10 px
 /// caps at ink 40 %, the only chrome voice").
@@ -2786,13 +2950,37 @@ pub const CAPTION_LINE_H: f32 = SIZE_BODY * LEADING_BODY;
 ///
 /// No accent anywhere: the lamp dot in the number column is the playback
 /// truth, and a row that also washed amber would spend the signal twice.
+///
+/// # `ground` — the parameter that made this style true everywhere
+///
+/// The hover used to be the *value* [`Palette::plinth`], which is right for
+/// every row standing on the wall and wrong for the playlist panel's, whose
+/// ground already **is** `plinth`: the panel's rows painted the colour that was
+/// already under them and answered the pointer with nothing. The owner named it
+/// (2026-08-09, *"a bit… unresponsive"*), and the fix is that a hover is one
+/// step up from wherever the row stands ([`Palette::step_up`]) rather than a
+/// fixed plane. On the wall this is the shipped behaviour to the bit —
+/// `step_up(wall)` is `plinth` and `step_up(step_up(wall))` is `plinth_lit` —
+/// which is what makes the change a correction rather than a repaint.
+///
+/// **The paint is the whole hit area or it is a lie.** Every caller draws this
+/// on the `button` that *is* the row, at `Length::Fill`, with the row's padding
+/// inside it — never on an inner block. A highlight smaller than the pressable
+/// region tells the listener to aim somewhere that is not where the press is.
 #[must_use]
-pub fn track_row(p: &Palette, status: button::Status, playing: bool) -> button::Style {
+pub fn track_row(
+    p: &Palette,
+    ground: Color,
+    status: button::Status,
+    playing: bool,
+) -> button::Style {
+    let lit = p.step_up(ground);
+    let carded = p.step_up(lit);
     let background = match (playing, status) {
         // The playing row keeps its card whatever the pointer is doing, and
         // lifts no further under it: it is already the emphasised row.
-        (true, _) => Some(p.plinth_lit),
-        (false, button::Status::Hovered | button::Status::Pressed) => Some(p.plinth),
+        (true, _) => Some(carded),
+        (false, button::Status::Hovered | button::Status::Pressed) => Some(lit),
         (false, button::Status::Active | button::Status::Disabled) => None,
     };
     button::Style {
@@ -2802,7 +2990,7 @@ pub fn track_row(p: &Palette, status: button::Status, playing: bool) -> button::
         text_color: p.paper,
         border: Border {
             color: if playing {
-                p.hairline_strong(p.plinth_lit)
+                p.hairline_strong(carded)
             } else {
                 Color::TRANSPARENT
             },
@@ -3680,6 +3868,102 @@ mod tests {
         // nothing floats.
     }
 
+    /// **A surface step is the ladder's own rise**, so the synthetic step
+    /// above the top plane is not a fifth colour invented for one call site.
+    ///
+    /// [`SURFACE_STEP_A`]'s 5 % has to sit inside the band the *real* steps
+    /// already draw, in both rooms — otherwise a row on the menu card would
+    /// answer the pointer more loudly or more quietly than a row on the wall,
+    /// and the whole point of [`Palette::step_up`] is that a hover means one
+    /// thing everywhere.
+    #[test]
+    fn a_surface_step_is_the_ladders_own_rise() {
+        let mut low = f32::INFINITY;
+        let mut high = 0.0_f32;
+        for room in Room::ALL {
+            let p = room.palette();
+            for (under, over) in [(p.wall, p.plinth), (p.plinth, p.plinth_lit)] {
+                for (u, o, ink) in [
+                    (under.r, over.r, p.paper.r),
+                    (under.g, over.g, p.paper.g),
+                    (under.b, over.b, p.paper.b),
+                ] {
+                    let rise = (o - u) / (ink - u);
+                    low = low.min(rise);
+                    high = high.max(rise);
+                }
+            }
+        }
+        assert!(
+            low <= SURFACE_STEP_A && SURFACE_STEP_A <= high,
+            "the synthetic step {SURFACE_STEP_A} is outside the ladder's own \
+             rise ({low}…{high}) — a hover would not mean one thing everywhere"
+        );
+    }
+
+    /// **Every row-shaped control answers the pointer on the ground it
+    /// actually stands on** — the owner's *"a bit… unresponsive"*, closed as a
+    /// property rather than as a repaint of one surface.
+    ///
+    /// Two claims. First, the step is *visible*: hovering must not paint the
+    /// ground back onto itself, which is exactly what the playlist panel did
+    /// for as long as [`track_row`]'s hover was the constant
+    /// [`Palette::plinth`] and the panel's own ground was `plinth`. Second, on
+    /// the wall the style is the **shipped** one to the bit, which is what
+    /// makes taking a ground a correction rather than a redesign.
+    #[test]
+    fn a_row_answers_the_pointer_on_every_ground_it_stands_on() {
+        let visible =
+            |a: Color, b: Color| (a.r - b.r).abs() + (a.g - b.g).abs() + (a.b - b.b).abs() > 0.005;
+        for room in Room::ALL {
+            let p = room.palette();
+            // The four grounds a row is composed on today: the wall (album,
+            // queue, playlist and songs rows), the panel and the menu card
+            // (`plinth`), and the plane above them.
+            for ground in [p.wall, p.plinth, p.plinth_lit, p.recess] {
+                let rest = track_row(p, ground, button::Status::Active, false).background;
+                let hovered = track_row(p, ground, button::Status::Hovered, false)
+                    .background
+                    .expect("a hovered row has a ground of its own");
+                assert!(rest.is_none(), "{}: a row at rest paints nothing", p.name);
+                let Background::Color(hovered) = hovered else {
+                    panic!("{}: a row's hover is a colour, not a gradient", p.name);
+                };
+                assert!(
+                    visible(hovered, ground),
+                    "{}: a row hovered on {ground:?} paints {hovered:?} — the \
+                     ground it is already standing on, which is no answer at all",
+                    p.name
+                );
+                // …and the playing row is a further step, so "the pointer is
+                // here" and "this is sounding" stay two different statements.
+                let Some(Background::Color(playing)) =
+                    track_row(p, ground, button::Status::Active, true).background
+                else {
+                    panic!("{}: the playing row keeps its card", p.name);
+                };
+                assert!(visible(playing, hovered), "{}: on {ground:?}", p.name);
+            }
+            // The wall's rows are the shipped values, exactly.
+            let Some(Background::Color(hovered)) =
+                track_row(p, p.wall, button::Status::Hovered, false).background
+            else {
+                panic!("a hovered row on the wall")
+            };
+            let Some(Background::Color(playing)) =
+                track_row(p, p.wall, button::Status::Active, true).background
+            else {
+                panic!("the playing row on the wall")
+            };
+            assert!(!visible(hovered, p.plinth), "{}: hover on the wall", p.name);
+            assert!(
+                !visible(playing, p.plinth_lit),
+                "{}: the playing row on the wall",
+                p.name
+            );
+        }
+    }
+
     /// **The tile's hover mark fades in ink and never in geometry**, and every
     /// point of the fade is an opaque pre-composite — the property the whole
     /// [`Palette::ink_over`] correction bought, held through a transition.
@@ -4204,6 +4488,111 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// **The shelf virtualizes at every width the window can produce — in
+    /// both of the lane's states.**
+    ///
+    /// ADR-0030's own acceptance test. The sweep above ran over
+    /// `window − INDEX_LANE_W`, which was the whole of the wall's width until
+    /// the lane took a term of its own; this is the same sweep with the second
+    /// term in, at 1 px, over both states and every density step. It is the
+    /// answer to *"the collapse must not jank"* stated as arithmetic rather
+    /// than as intent.
+    #[test]
+    fn the_shelf_virtualizes_in_both_of_the_lanes_states() {
+        use crate::shelf::{Density, Grid};
+
+        for window in 300..=2560 {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a window width in pixels is far below f32's exact-integer range"
+            )]
+            let window = window as f32;
+            for stored in [true, false] {
+                let wall = (window - sidebar_w(window, stored) - INDEX_LANE_W).max(0.0);
+                for density in Density::ALL {
+                    let hang = Grid::new(wall, density);
+                    assert!(hang.columns >= 1, "{window} px, open={stored}");
+                    assert!(
+                        hang.art > 0.0 && hang.art <= density.art_max(),
+                        "{window} px, open={stored}, {density:?}: {} px of art",
+                        hang.art
+                    );
+                    assert!(hang.row_h > 0.0, "{window} px, open={stored}");
+                    assert!(
+                        hang.block_width() <= wall + 0.01,
+                        "{window} px, open={stored}: the block overruns the wall"
+                    );
+                    let rows = hang.rows(97);
+                    let (first, end) = hang.visible_rows(0.0, 800.0, rows);
+                    assert!(first < end && end <= rows, "{window} px, open={stored}");
+                }
+            }
+        }
+    }
+
+    /// **The lane's two widths, and the floor that decides between them.**
+    ///
+    /// Three claims, and the third is the one that matters. The widths are
+    /// built from the room's own tokens; the floor is where the *open* lane
+    /// still leaves the collection two columns at or above [`ART_MIN`]; and
+    /// **the stored state is not the drawn state below the floor** — which is
+    /// what makes `Expanded` inert there rather than a control that produces a
+    /// window the wall cannot use.
+    #[test]
+    fn the_lane_has_two_widths_and_a_floor_that_chooses() {
+        use crate::shelf::{Density, Grid};
+
+        const { assert!(SIDEBAR_W == 280.0 && SIDEBAR_RAIL_W == 96.0) }
+        const { assert!(SIDEBAR_W == GAP_XL + MENU_W + GAP_XL) }
+        const { assert!(SIDEBAR_RAIL_W == GAP_XL + SIDEBAR_SLEEVE + GAP_XL) }
+        const { assert!(SIDEBAR_SLEEVE == 48.0 && SIDEBAR_ROW_H == 64.0) }
+        const { assert!(SIDEBAR_DEST_H == 40.0) }
+        // Every one of them on the 4 px lattice (law L2).
+        const {
+            assert!(
+                SIDEBAR_W % 4.0 == 0.0
+                    && SIDEBAR_RAIL_W % 4.0 == 0.0
+                    && SIDEBAR_SLEEVE % 4.0 == 0.0
+                    && SIDEBAR_ROW_H % 4.0 == 0.0
+                    && SIDEBAR_DEST_H % 4.0 == 0.0
+                    && SIDEBAR_FLOOR % 4.0 == 0.0
+            );
+        }
+
+        // The floor, re-derived rather than asserted: the smallest window at
+        // which the open lane leaves two columns at or above ART_MIN.
+        let two_wide = |window: f32| {
+            let wall = (window - SIDEBAR_W - INDEX_LANE_W).max(0.0);
+            let hang = Grid::new(wall, Density::Balanced);
+            hang.columns >= 2 && hang.art >= ART_MIN
+        };
+        let derived = (600..=1400)
+            .find(|w| {
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "a window width in pixels is exact in f32"
+                )]
+                let w = *w as f32;
+                two_wide(w)
+            })
+            .expect("some window is wide enough for an open lane and two columns");
+        assert!(
+            f32::from(u16::try_from(derived).expect("a window width fits u16")) <= SIDEBAR_FLOOR,
+            "the floor {SIDEBAR_FLOOR} is below the width the arithmetic wants ({derived})"
+        );
+        assert!(
+            two_wide(SIDEBAR_FLOOR),
+            "the floor must itself be wide enough"
+        );
+
+        // And the decision: below the floor the stored state is overruled.
+        assert!((sidebar_w(SIDEBAR_FLOOR, true) - SIDEBAR_W).abs() < f32::EPSILON);
+        assert!((sidebar_w(SIDEBAR_FLOOR - 1.0, true) - SIDEBAR_RAIL_W).abs() < f32::EPSILON);
+        assert!((sidebar_w(2560.0, false) - SIDEBAR_RAIL_W).abs() < f32::EPSILON);
+        assert!(sidebar_can_expand(SIDEBAR_FLOOR));
+        assert!(!sidebar_can_expand(SIDEBAR_FLOOR - 1.0));
     }
 
     /// **The shelf break's vertical rhythm is `HANG` and arithmetic on it.**
@@ -6461,6 +6850,18 @@ mod tests {
     fn the_strip_holds_its_tenants_at_the_single_line_floor() {
         use crate::views::top_bar;
 
+        /// The `Playlists` door's own reserved width, kept here as a
+        /// measurement rather than in `views::top_bar` as a reservation:
+        /// there is no door left to reserve for, and a token nothing draws
+        /// with is a comment that can rot.
+        const PLAYLISTS_DOOR_W: f32 = 64.0;
+        /// What the door gave back to the strip: its width and the `GAP_XL`
+        /// seam beside it.
+        const FREED: f32 = PLAYLISTS_DOOR_W + GAP_XL;
+        /// The window a strip at its floor now needs, with the lane's rail
+        /// always beside it.
+        const STRIP_FLOOR_WINDOW: f32 = TOP_BAR_FLOOR + SIDEBAR_RAIL_W;
+
         /// The single-line regime, at the well's floor (doc 10 §4.2): the
         /// gutter, the well, the three `GAP_XL` seams and the left cluster,
         /// the fill's two `GAP_SM` flanks (the status lead), the gear, the
@@ -6471,17 +6872,14 @@ mod tests {
             + top_bar::KEYS_W
             + GAP_XL
             + top_bar::ACTS_W
-            + GAP_XL
-            + top_bar::PLAYLISTS_W
             + 2.0 * GAP_SM
             + TRANSPORT_HIT
             + HANG;
 
         /// The frame line below the split (doc 10 §4.3): the well, the
-        /// empty status slot's flanks, the two doors — `GAP_LG` between the
-        /// row's five members.
-        const FRAME_LINE: f32 =
-            HANG + top_bar::WELL_MIN + 4.0 * GAP_LG + top_bar::PLAYLISTS_W + TRANSPORT_HIT + HANG;
+        /// empty status slot's flanks, the gear — `GAP_LG` between the row's
+        /// four members.
+        const FRAME_LINE: f32 = HANG + top_bar::WELL_MIN + 3.0 * GAP_LG + TRANSPORT_HIT + HANG;
 
         /// The library line: the states, one seam, the acts.
         const LIBRARY_LINE: f32 = HANG + top_bar::KEYS_W + GAP_XL + top_bar::ACTS_W + HANG;
@@ -6489,6 +6887,28 @@ mod tests {
         const { assert!(SINGLE_LINE <= TOP_BAR_SPLIT) }
         const { assert!(FRAME_LINE <= TOP_BAR_FLOOR) }
         const { assert!(LIBRARY_LINE <= TOP_BAR_FLOOR) }
+
+        // **What the `Playlists` door gave back** (ADR-0030 §5): the word's
+        // reserved width and the `GAP_XL` seam beside it — 88 px — so the
+        // single line now fits at **872** where it needed 960.
+        const { assert!(FREED == 88.0) }
+        const { assert!(SINGLE_LINE == 872.0) }
+        const { assert!(SINGLE_LINE + FREED == 960.0) }
+
+        // **The two-line split still earns its keep, and the door's removal
+        // did not buy it away.** The frame line is what the door stood on, so
+        // removing it made *that* line cheaper — but the split exists for the
+        // **library** line, whose two tenants are untouched at 600 px. Between
+        // 600 and 872 there is no single line that fits and a two-line pair
+        // that does, which is exactly the band the split serves.
+        const { assert!(LIBRARY_LINE == TOP_BAR_FLOOR) }
+        const { assert!(TOP_BAR_FLOOR < SINGLE_LINE) }
+        // The strip's width is now the *body's* — the window less the returns
+        // lane — so the split's band is reached at a wider window than
+        // before: `TOP_BAR_SPLIT + SIDEBAR_RAIL_W` collapsed, and
+        // `+ SIDEBAR_W` open. The floor a window must clear for the strip to
+        // hold its tenants at all rises with it.
+        const { assert!(STRIP_FLOOR_WINDOW == 696.0) }
 
         // The two-line band is the single-line band's own lead three times
         // around two control rows — 8+32+8+32+8, plus the hairline: 89

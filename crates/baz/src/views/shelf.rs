@@ -317,7 +317,7 @@ fn song_row<'a>(
     // No horizontal inset: the mark lane starts on the block's own edge and
     // the duration lane ends on it (law L5) — the album page's rule.
     .padding(theme::pad(theme::GAP_XS, 0.0))
-    .style(move |_theme, status| theme::track_row(room, status, playing))
+    .style(move |_theme, status| theme::track_row(room, room.wall, status, playing))
     .on_press_maybe(press);
     // The row's right press opens the track menu (doc 09 §5.2) — the album
     // page's exact target, because a resolved song row *is* that record's

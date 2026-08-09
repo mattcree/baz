@@ -726,7 +726,7 @@ fn track_row(
     // content lane and the duration lane ends on it, so the block a listener
     // reads down shares its edges with the column that holds it (law L5).
     .padding(theme::pad(theme::GAP_XS, 0.0))
-    .style(move |_theme, status| theme::track_row(room, status, playing))
+    .style(move |_theme, status| theme::track_row(room, room.wall, status, playing))
     .on_press_maybe(press);
     // The row's right press opens its mirror menu (doc 09 §5.2): the same
     // verbs the row's own controls speak, at the pointer.

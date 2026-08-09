@@ -137,6 +137,31 @@ pub enum Glyph {
     /// Open: the disclosure chevron — *go to the thing this row names*. The
     /// wall's hover option for the press the tile has always made.
     Open,
+    /// Home: the house. The returns lane's first destination (ADR-0030 as the
+    /// owner amended it) — the one glyph in the set that is a *convention*
+    /// rather than a depiction of a baz object, and it is admitted because the
+    /// owner asked for the Spotify shape by name and a house is what that
+    /// shape's first row wears everywhere it exists.
+    Home,
+    /// Library: four spines standing on a shelf. The collection, depicted as
+    /// the thing a collection physically is — and deliberately not a grid of
+    /// squares, which is what the three density detents already are.
+    Library,
+    /// Now playing: the record, with its label. The lane's third destination.
+    ///
+    /// A ring rather than a disc: a filled circle at this size is a dot, and
+    /// the one dot in the product means the lamp. Drawn as a single outline
+    /// that traces the rim and then the label the other way round, so
+    /// [`encloses`]'s even-odd rule punches the hole — [`Glyph::covers`] takes
+    /// the *union* of outlines, so a second circle could not.
+    NowPlaying,
+    /// The lane, expanded: a frame with a wide left band. One of the two marks
+    /// at the lane's foot, in the density detents' exact anatomy (ADR-0028).
+    LaneExpanded,
+    /// The lane, collapsed: [`Self::LaneExpanded`]'s frame with a narrow left
+    /// band. Self-depicting as a pair — what changes between the two marks is
+    /// what changes on screen.
+    LaneCollapsed,
 }
 
 /// Play — one triangle, sitting a touch right of the box's centre so the
@@ -467,6 +492,162 @@ const OPEN: &[Outline] = &[
     ],
 ];
 
+/// Home — the house: a wide roof over a body, one closed silhouette.
+///
+/// The roof overhangs the walls on both sides, which is the whole of what
+/// makes a seven-vertex polygon read as a house rather than as an arrow on a
+/// box at 16 px.
+const HOME: &[Outline] = &[&[
+    (0.5000, 0.0800),
+    (0.9400, 0.5000),
+    (0.8200, 0.5000),
+    (0.8200, 0.9000),
+    (0.1800, 0.9000),
+    (0.1800, 0.5000),
+    (0.0600, 0.5000),
+]];
+
+/// Library — four spines of different heights standing on a shelf.
+///
+/// The heights are unequal on purpose: four equal bars are a chart, and the
+/// one thing this mark must not be mistaken for is the density detents' grid
+/// two controls away from it.
+const LIBRARY: &[Outline] = &[
+    &[
+        (0.1400, 0.2000),
+        (0.2800, 0.2000),
+        (0.2800, 0.8000),
+        (0.1400, 0.8000),
+    ],
+    &[
+        (0.3400, 0.1200),
+        (0.4800, 0.1200),
+        (0.4800, 0.8000),
+        (0.3400, 0.8000),
+    ],
+    &[
+        (0.5400, 0.2600),
+        (0.6800, 0.2600),
+        (0.6800, 0.8000),
+        (0.5400, 0.8000),
+    ],
+    &[
+        (0.7400, 0.1600),
+        (0.8800, 0.1600),
+        (0.8800, 0.8000),
+        (0.7400, 0.8000),
+    ],
+    &[
+        (0.0800, 0.8000),
+        (0.9200, 0.8000),
+        (0.9200, 0.8900),
+        (0.0800, 0.8900),
+    ],
+];
+
+/// Now playing — the record: the rim, then the label traced the other way
+/// round in the **same** outline, so the even-odd rule leaves the spindle hole
+/// open. See [`Glyph::NowPlaying`] for why it cannot be two circles.
+const NOW_PLAYING: &[Outline] = &[&[
+    (0.9400, 0.5000),
+    (0.9290, 0.5979),
+    (0.8964, 0.6909),
+    (0.8440, 0.7743),
+    (0.7743, 0.8440),
+    (0.6909, 0.8964),
+    (0.5979, 0.9290),
+    (0.5000, 0.9400),
+    (0.4021, 0.9290),
+    (0.3091, 0.8964),
+    (0.2257, 0.8440),
+    (0.1560, 0.7743),
+    (0.1036, 0.6909),
+    (0.0710, 0.5979),
+    (0.0600, 0.5000),
+    (0.0710, 0.4021),
+    (0.1036, 0.3091),
+    (0.1560, 0.2257),
+    (0.2257, 0.1560),
+    (0.3091, 0.1036),
+    (0.4021, 0.0710),
+    (0.5000, 0.0600),
+    (0.5979, 0.0710),
+    (0.6909, 0.1036),
+    (0.7743, 0.1560),
+    (0.8440, 0.2257),
+    (0.8964, 0.3091),
+    (0.9290, 0.4021),
+    (0.9400, 0.5000),
+    (0.6500, 0.5000),
+    (0.6410, 0.4487),
+    (0.6149, 0.4036),
+    (0.5750, 0.3701),
+    (0.5260, 0.3523),
+    (0.4740, 0.3523),
+    (0.4250, 0.3701),
+    (0.3851, 0.4036),
+    (0.3590, 0.4487),
+    (0.3500, 0.5000),
+    (0.3590, 0.5513),
+    (0.3851, 0.5964),
+    (0.4250, 0.6299),
+    (0.4740, 0.6477),
+    (0.5260, 0.6477),
+    (0.5750, 0.6299),
+    (0.6149, 0.5964),
+    (0.6410, 0.5513),
+    (0.6500, 0.5000),
+]];
+
+/// The frame both lane marks stand in: a top, a right and a bottom stroke.
+/// Shared between them so the pair can differ in exactly one thing.
+const LANE_FRAME: [Outline; 3] = [
+    &[
+        (0.0800, 0.2000),
+        (0.9200, 0.2000),
+        (0.9200, 0.2800),
+        (0.0800, 0.2800),
+    ],
+    &[
+        (0.8400, 0.2000),
+        (0.9200, 0.2000),
+        (0.9200, 0.8000),
+        (0.8400, 0.8000),
+    ],
+    &[
+        (0.0800, 0.7200),
+        (0.9200, 0.7200),
+        (0.9200, 0.8000),
+        (0.0800, 0.8000),
+    ],
+];
+
+/// The lane, expanded — the frame with a **wide** left band.
+const LANE_EXPANDED: &[Outline] = &[
+    LANE_FRAME[0],
+    LANE_FRAME[1],
+    LANE_FRAME[2],
+    &[
+        (0.0800, 0.2000),
+        (0.4000, 0.2000),
+        (0.4000, 0.8000),
+        (0.0800, 0.8000),
+    ],
+];
+
+/// The lane, collapsed — the same frame with a **narrow** left band.
+const LANE_COLLAPSED: &[Outline] = &[
+    LANE_FRAME[0],
+    LANE_FRAME[1],
+    LANE_FRAME[2],
+    &[
+        (0.0800, 0.2000),
+        (0.2400, 0.2000),
+        (0.2400, 0.8000),
+        (0.0800, 0.8000),
+    ],
+];
+
 /// Step-down — [`PLUS`]'s horizontal bar, alone: the settings steppers'
 /// `−`, drawn rather than borrowed (U+2212 remains legitimate *in a value*,
 /// where it is a figure; in a control slot it was the accidental fourth
@@ -658,10 +839,15 @@ impl Glyph {
         Self::DensityDense,
         Self::Queue,
         Self::Open,
+        Self::Home,
+        Self::Library,
+        Self::NowPlaying,
+        Self::LaneExpanded,
+        Self::LaneCollapsed,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 18;
+    const COUNT: usize = 23;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -685,6 +871,11 @@ impl Glyph {
             Self::DensityDense => DENSITY_DENSE,
             Self::Queue => QUEUE,
             Self::Open => OPEN,
+            Self::Home => HOME,
+            Self::Library => LIBRARY,
+            Self::NowPlaying => NOW_PLAYING,
+            Self::LaneExpanded => LANE_EXPANDED,
+            Self::LaneCollapsed => LANE_COLLAPSED,
         }
     }
 
@@ -709,6 +900,11 @@ impl Glyph {
             Self::DensityDense => 15,
             Self::Queue => 16,
             Self::Open => 17,
+            Self::Home => 18,
+            Self::Library => 19,
+            Self::NowPlaying => 20,
+            Self::LaneExpanded => 21,
+            Self::LaneCollapsed => 22,
         }
     }
 

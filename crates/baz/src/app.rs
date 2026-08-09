@@ -44,7 +44,7 @@ use baz_core::protocol::{self as protocol, Command, Event, SignalChain};
 use baz_core::replaygain::ReplayGainSettings;
 use iced::keyboard;
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
-use iced::widget::{column, image as iced_image, scrollable, text_input};
+use iced::widget::{column, image as iced_image, row, scrollable, text_input};
 use iced::{Element, Point, Size, Subscription, Task, window};
 use lru::LruCache;
 
@@ -352,10 +352,27 @@ pub(crate) enum Message {
     /// Top bar's Settings toggle, or Ctrl+`,`: go to the settings, or come
     /// back from them.
     ToggleSettings,
-    /// The Library strip's labelled `Playlists` door, or Ctrl+`P`: summon the
-    /// playlist panel, or close it (ADR-0024 §5). A float over the place, not
-    /// a place — the wall does not reflow by a pixel.
+    /// Ctrl+`P`: summon the playlist panel, or close it (ADR-0024 §5). A
+    /// float over the place, not a place — the wall does not reflow by a
+    /// pixel.
+    ///
+    /// Its strip door is gone: the returns lane is the resident index of
+    /// lists, so a labelled door to a *second* index would be two controls
+    /// answering one question (L8.6). The panel keeps its key and its job as
+    /// the picker for `Add to…` (ADR-0031's card at the pointer is not
+    /// built), and the key is now its only summons.
     TogglePlaylists,
+    /// **The returns lane's head, pressed**: go to that destination
+    /// (ADR-0030 as the owner amended it). Not a toggle — see [`Place::go`].
+    GoTo(crate::lane::Destination),
+    /// **The lane's collapse**, from either of the two marks at its foot or
+    /// from Ctrl+`B`.
+    ///
+    /// The one press in the product whose subject is the collection's width,
+    /// and therefore the one press that may re-hang the wall. It lands
+    /// outside the wall, so no gesture on the wall can be in flight when it
+    /// fires (ADR-0030 §3).
+    ToggleLane,
     /// A panel row's name was pressed: open that playlist's page — or come
     /// back from it, when it is the page already showing ([`Place::playlist`]).
     OpenPlaylist(u64),
@@ -911,6 +928,21 @@ struct App {
     /// a shelf to hold it — so the first-run path can hand it to the shelf the
     /// setup screen eventually opens.
     group_key: GroupKey,
+    /// Whether the returns lane opens open, read from the config for
+    /// `group_key`'s reason and handed to the shelf the same way.
+    lane_open: bool,
+    /// **The lane, merged**: the shelf's recent records and every playlist,
+    /// in [`crate::lane::resolve`]'s one order.
+    ///
+    /// Cached rather than rebuilt per frame, and re-merged only when one of
+    /// its two halves says it moved ([`Self::lane_mark`]) — the merge is
+    /// O(playlists), so this is thrift rather than necessity, but the
+    /// contract is *no work per frame* and a cache that is only rebuilt on
+    /// events is how that is kept true as the two halves grow.
+    lane: Vec<crate::lane::Touched>,
+    /// The two stamps [`Self::lane`] was built from: the shelf's and the
+    /// playlists'.
+    lane_mark: (u64, u64),
     /// Which section of the Settings place is showing (an index into
     /// `views::settings::SECTIONS`).
     ///
@@ -1021,6 +1053,7 @@ impl App {
         let density = stored
             .as_ref()
             .map_or(shelf::Density::Balanced, |config| config.density);
+        let lane_open = stored.as_ref().is_none_or(|config| config.sidebar_open);
         // The folders baz holds this run (ADR-0022): what the config remembers,
         // with a `baz DIR` argument **added to the front** rather than replacing
         // them. Pointing baz at a folder for an afternoon must not silently
@@ -1034,7 +1067,7 @@ impl App {
         let (screen, task) = if dirs.is_empty() {
             (Screen::Setup(Setup::fresh(None)), Task::none())
         } else {
-            match Shelf::open(dirs, group_key, density) {
+            match Shelf::open(dirs, group_key, density, lane_open) {
                 Ok((shelf, task)) => (Screen::Shelf(Box::new(shelf)), task),
                 Err(error) => (Screen::Setup(Setup::fresh(Some(error))), Task::none()),
             }
@@ -1044,6 +1077,9 @@ impl App {
             group_key,
             settings_section: 0,
             density,
+            lane_open,
+            lane: Vec::new(),
+            lane_mark: (u64::MAX, u64::MAX),
             modifiers: keyboard::Modifiers::empty(),
             started,
             first_frame_logged: false,
@@ -1076,6 +1112,19 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.route(message);
+        // **The lane, re-merged when — and only when — one of its two halves
+        // says it moved**, and *after* the message rather than before it:
+        // iced draws the frame this call produced, so a sync that ran first
+        // would leave the lane one message behind whatever it describes.
+        self.sync_lane();
+        task
+    }
+
+    /// Everything [`Self::update`] does except keep the lane true — the update
+    /// loop proper, split out so that the one thing that must happen after
+    /// every message can be one line rather than an arm in each of forty.
+    fn route(&mut self, message: Message) -> Task<Message> {
         note_message(&message);
         // The volume is its own small machine and every one of its messages
         // resolves to "tell the state machine, maybe tell the engine", so it
@@ -1085,6 +1134,7 @@ impl App {
         // cannot move a pixel of layout, and the modifier layer, which decides
         // whether a keystroke was even text.
         for machine in [
+            Self::update_lane,
             Self::update_menu,
             Self::update_motion,
             Self::update_modified_input,
@@ -1268,7 +1318,7 @@ impl App {
         let Screen::Setup(setup) = &mut self.screen else {
             return Task::none();
         };
-        match Shelf::open(vec![dir], self.group_key, self.density) {
+        match Shelf::open(vec![dir], self.group_key, self.density, self.lane_open) {
             Ok((state, task)) => {
                 self.screen = Screen::Shelf(Box::new(state));
                 task
@@ -2061,6 +2111,79 @@ impl App {
         true
     }
 
+    /// **The returns lane's own small machine** — the shape `update_playlists`
+    /// and `update_queue` already have: the lane's own two presses, answered
+    /// apart from the shell's forty arms.
+    fn update_lane(&mut self, message: &Message) -> Option<Task<Message>> {
+        match *message {
+            // **A destination, not a door** — `go` takes a transition, and
+            // this one ignores where you were (see [`Place::go`]).
+            Message::GoTo(to) => Some(self.go(move |place| place.go(to))),
+            Message::ToggleLane => Some(self.toggle_lane()),
+            _ => None,
+        }
+    }
+
+    /// Re-merge [`Self::lane`] if either half has been rebuilt since it was
+    /// last built.
+    ///
+    /// The playlists half is *every* list, always — that is what lets the
+    /// panel stop being the only index — and the records half is the shelf's
+    /// already-trimmed 24. Both arrive pre-sorted; the merge re-sorts the
+    /// union because a merge of two sorted lists on one key is a sort of the
+    /// union and spelling it as one is spelling it once.
+    fn sync_lane(&mut self) {
+        let shelf_stamp = match &self.screen {
+            Screen::Shelf(state) => state.lane_stamp,
+            Screen::Setup(_) => 0,
+        };
+        let mark = (shelf_stamp, self.playlists.stamp());
+        if mark == self.lane_mark {
+            return;
+        }
+        self.lane_mark = mark;
+        let lists: Vec<crate::lane::Touched> = self
+            .playlists
+            .rows
+            .iter()
+            .map(|entry| crate::lane::Touched {
+                subject: crate::lane::Subject::Playlist(entry.id),
+                name: entry.name.clone(),
+                under: entry.counts(),
+                at: entry.touched_unix_s,
+            })
+            .collect();
+        let records = match &self.screen {
+            Screen::Shelf(state) => state.lane_recent.clone(),
+            Screen::Setup(_) => Vec::new(),
+        };
+        self.lane = crate::lane::resolve(lists, records);
+    }
+
+    /// **Collapse the lane, or open it** — the one press whose subject is the
+    /// collection's width.
+    ///
+    /// A **hard cut, one frame** (ADR-0030 §3.1): the state flips, the wall is
+    /// re-hung once, and the wall keeps the *shelf* that was at the top of the
+    /// viewport rather than its pixel offset. No tween — tweening the width
+    /// would re-resolve `Grid::new` on every frame of the slide and pop
+    /// columns mid-flight.
+    ///
+    /// Inert below [`theme::SIDEBAR_FLOOR`]: there is nothing to toggle when
+    /// the window can only hold the rail, and the mark says so in its ink.
+    fn toggle_lane(&mut self) -> Task<Message> {
+        let Screen::Shelf(state) = &mut self.screen else {
+            return Task::none();
+        };
+        if !theme::sidebar_can_expand(state.window_w) {
+            return Task::none();
+        }
+        self.lane_open = !self.lane_open;
+        state.lane_open = self.lane_open;
+        persist_lane(self.lane_open);
+        state.rehang()
+    }
+
     /// **Go somewhere**, by whichever door was pressed.
     ///
     /// One function for all three because they are the same act: a door is a
@@ -2211,7 +2334,7 @@ impl App {
         if self.peel_place_states() {
             return Task::none();
         }
-        if !self.place.is_home() {
+        if !self.place.is_library() {
             return self.leave();
         }
         match &mut self.screen {
@@ -2265,6 +2388,19 @@ impl App {
                             "[playback] track started (queue #{position}): {}",
                             path.display()
                         );
+                        // **The lane's one live update** (ADR-0030 §4): a
+                        // play moves one record to the head, and 24 rows are
+                        // re-sorted. The ledger is not re-read — it is a
+                        // snapshot taken at launch, and re-reading it here
+                        // would be the per-frame file read the contract
+                        // refuses. The moment is now; the two agree to within
+                        // the length of the play.
+                        if let Screen::Shelf(state) = &mut self.screen {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map_or(0, |since| since.as_secs());
+                            state.record_played(path, now);
+                        }
                     }
                     Event::TrackFailed { path, reason } => {
                         println!("[playback] track skipped: {} ({reason})", path.display());
@@ -3224,7 +3360,7 @@ impl App {
                     state,
                     album,
                     &self.player,
-                    self.window.width,
+                    self.body_width(),
                     lamp,
                     self.playlists.collecting(),
                     self.hovered_album_row,
@@ -3240,7 +3376,7 @@ impl App {
             },
             (Screen::Shelf(_), Place::Queue) => views::queue::view(
                 &self.player,
-                self.window,
+                iced::Size::new(self.body_width(), self.window.height),
                 // The hover slots go quiet while a row is in the hand: the
                 // gesture's own statements — the ghost and the line — are
                 // the surface's voice mid-drag.
@@ -3256,7 +3392,7 @@ impl App {
                     state,
                     open,
                     &self.player,
-                    self.window.width,
+                    self.body_width(),
                     self.drag
                         .as_ref()
                         .map_or(self.hovered_playlist_row, |_| None),
@@ -3269,6 +3405,17 @@ impl App {
                 // navigated to, exactly as a vanished record's page is.
                 None => state.view(&self.player, lamp, collecting, ink),
             },
+            // **Home** and **Now playing** — the two places the owner added
+            // to ADR-0030 (`place.rs` records the overrule). Their bodies land
+            // in the two commits after this one; what is here is the routing
+            // and the frame, so the lane's head is a live control from the
+            // moment it exists rather than two rows that go nowhere.
+            (Screen::Shelf(state), Place::Home) => {
+                views::home::view(state, &self.player, self.body_width())
+            }
+            (Screen::Shelf(state), Place::NowPlaying) => {
+                views::now_playing::view(state, &self.player, self.body_width())
+            }
             (Screen::Shelf(state), Place::Settings) => {
                 // Built here rather than inside the view: the folders come from
                 // the shell's own list and their contents from the index, and a
@@ -3276,11 +3423,36 @@ impl App {
                 // that knows how roots are counted.
                 views::settings::view(
                     &self.player,
-                    self.window.width,
+                    self.body_width(),
                     self.settings_section,
                     state.library_view(),
                 )
             }
+        };
+        // **The returns lane**, to the left of the place (ADR-0030 §1 as the
+        // owner amended it): resident, in every place but Settings, and a
+        // *column* rather than a layer — it takes width, which is why
+        // `Shelf::grid_width` has a second term and why the collapse is the
+        // one press that may re-hang the collection.
+        //
+        // It is outside the place rather than inside each of them so that the
+        // frame is the frame: navigating cannot slide the lane by a pixel,
+        // and the place's own strip resolves against `body_width` — the
+        // window less the lane — rather than against the window.
+        let screen: Element<'_, Message> = match &self.screen {
+            Screen::Shelf(state) if self.place.wears_lane() => row![
+                views::lane::view(
+                    state,
+                    &self.playlists,
+                    self.place,
+                    &self.lane,
+                    self.player.now_playing_path().is_some(),
+                    self.window.width,
+                ),
+                screen
+            ]
+            .into(),
+            _ => screen,
         };
         // **The playlist panel**, floated over the place by ADR-0016's
         // verified mechanics: a `stack`, the panel wrapped in `opaque` so a
@@ -3355,6 +3527,21 @@ impl App {
             None => iced::widget::Space::new(0.0, 0.0).into(),
         };
         iced::widget::stack![whole, ghost].into()
+    }
+
+    /// **The width a place's body gets**: the window, less the returns lane
+    /// where the place wears one.
+    ///
+    /// Every place resolves its own breakpoints against this rather than
+    /// against the window — the strip's two-line split, the album page's two
+    /// columns, the Settings measure. A body that split against the window
+    /// would split at the wrong moment the instant a column appeared beside
+    /// it, which is exactly the class of bug a resident surface introduces.
+    fn body_width(&self) -> f32 {
+        match &self.screen {
+            Screen::Shelf(state) if self.place.wears_lane() => state.body_width(),
+            _ => self.window.width,
+        }
     }
 
     /// Whether the playlist panel is on screen: summoned, over a shelf, and
@@ -3655,6 +3842,31 @@ pub(crate) struct Shelf {
     ///
     /// A suggestion, holding no playback of its own: see [`Pull`].
     pub(crate) pull: Option<Pull>,
+    /// **Whether the returns lane stands open** (ADR-0030 §3), as the config
+    /// remembers it.
+    ///
+    /// It lives here rather than on the shell because [`Shelf::grid_width`]
+    /// reads it: the lane's width is a term in the wall's, and the wall's
+    /// width is resolved in exactly one place.
+    pub(crate) lane_open: bool,
+    /// **When each record was last played**, in seconds since the Unix epoch —
+    /// the ledger folded onto records, once.
+    ///
+    /// Built at launch from the [`History`] snapshot in one pass over the
+    /// library, and thereafter maintained by *events*: a `TrackStarted`
+    /// updates one entry. That is ADR-0030 §4's responsiveness contract made
+    /// literal — **never a per-frame file read, and no watcher**.
+    lane_played: HashMap<u64, u64>,
+    /// The lane's records half, resolved and trimmed to
+    /// [`crate::lane::RECENT_ALBUMS`]: what the lane draws, less the lists.
+    ///
+    /// Cached rather than derived per frame because deriving it walks every
+    /// album; the lists are merged in at view time, which is O(playlists) and
+    /// independent of the library's size.
+    pub(crate) lane_recent: Vec<crate::lane::Touched>,
+    /// Bumped whenever [`Self::lane_recent`] is rebuilt — the shell's cue to
+    /// re-merge, without comparing two vectors of strings.
+    pub(crate) lane_stamp: u64,
 }
 
 /// **The record the pull drew, and when it was last heard.**
@@ -3696,6 +3908,7 @@ impl Shelf {
         roots: Vec<PathBuf>,
         group_key: GroupKey,
         density: shelf::Density,
+        lane_open: bool,
     ) -> Result<(Self, Task<Message>), String> {
         let t0 = Instant::now();
         let db_path = config::library_db_file()
@@ -3767,7 +3980,13 @@ impl Shelf {
             window_w: WINDOW.width,
             pool: None,
             pull: None,
+            lane_open,
+            lane_played: HashMap::new(),
+            lane_recent: Vec::new(),
+            lane_stamp: 0,
         };
+        // `rebuild_shelves` folds the ledger onto the records it has just
+        // built (ADR-0030 §4): once, here, and never again from the file.
         shelf.rebuild_shelves();
         let shelf_task = shelf.request_visible_thumbs();
         println!(
@@ -4194,7 +4413,37 @@ impl Shelf {
         ])
     }
 
-    /// **The grid's width**: the window's, less the index rail's lane.
+    /// **Re-hang the wall after the lane changed width** — the one re-hang
+    /// the product permits, and the whole of what makes it safe.
+    ///
+    /// Two things happen, in this order. The viewport estimate is corrected
+    /// (the next `Scrolled` will report the real bounds), and then **the wall
+    /// scrolls so the shelf that was at the top of the viewport is still at
+    /// the top**. Not the pixel offset: the columns changed, so every row
+    /// moved, and a preserved offset would land on a different shelf. The
+    /// machinery is [`shelf::Shelves::run_at`], which already maps an offset onto the
+    /// run it is inside, and [`Self::jump_to_shelf`], which is what the index
+    /// rail spends.
+    ///
+    /// The last-opened record's 2 px rule is drawn from data rather than from
+    /// geometry, so it is still on the right tile afterwards — which is the
+    /// anchor the eye actually uses.
+    fn rehang(&mut self) -> Task<Message> {
+        let here = self.shelves().run_at(self.scroll_offset);
+        self.grid_size = Size::new(self.grid_width(), self.grid_size.height);
+        if let Some(run) = here {
+            return self.jump_to_shelf(run);
+        }
+        // Above the first shelf — the top of the wall stays the top.
+        self.scroll_offset = 0.0;
+        Task::batch([
+            scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
+            self.request_visible_thumbs(),
+        ])
+    }
+
+    /// **The grid's width**: the window's, less the returns lane and the index
+    /// rail's lane.
     ///
     /// The two are different numbers and the difference is the rail's
     /// ([`theme::INDEX_LANE_W`]): the wall is what the shelf column occupies and
@@ -4208,7 +4457,22 @@ impl Shelf {
     /// the double-click's grid hold all existed to make a re-hang survivable;
     /// none of them has anything left to do.
     fn grid_width(&self) -> f32 {
-        (self.window_w - theme::INDEX_LANE_W - theme::WALL_SCROLLBAR_W).max(0.0)
+        (self.window_w
+            - theme::sidebar_w(self.window_w, self.lane_open)
+            - theme::INDEX_LANE_W
+            - theme::WALL_SCROLLBAR_W)
+            .max(0.0)
+    }
+
+    /// **The width the place's own body gets**: the window, less the returns
+    /// lane.
+    ///
+    /// The strip, the place headers and every breakpoint inside a place read
+    /// this rather than the window: the lane is a *column*, so a body that
+    /// resolved its two-line split against the window would split at the wrong
+    /// moment and hang its content off a line that is no longer there.
+    pub(crate) fn body_width(&self) -> f32 {
+        (self.window_w - theme::sidebar_w(self.window_w, self.lane_open)).max(0.0)
     }
 
     /// Advance the shelf's own transitions.
@@ -4269,6 +4533,89 @@ impl Shelf {
             });
         }
         self.refilter();
+        // The album ids survive a re-arrangement (see above), so the fold does
+        // too — but a *rescan* can add and remove records, and the lane must
+        // not go on naming one that is gone.
+        if !self.lane_played.is_empty() || self.history.is_some() {
+            self.fold_history_onto_records();
+        }
+    }
+
+    /// **The ledger, folded onto records** — the whole of the lane's reading
+    /// of history, and it happens twice in a process: at launch, and whenever
+    /// the library itself is rebuilt.
+    ///
+    /// One pass over every track. That is the cost ADR-0030 §4 budgets and it
+    /// is paid where the file is already being read; what the contract forbids
+    /// is paying it *per frame*, which is why the result lives in
+    /// [`Self::lane_played`] and is thereafter maintained by events.
+    fn fold_history_onto_records(&mut self) {
+        self.lane_played = match self.history.as_ref() {
+            Some(history) => crate::lane::by_record(
+                self.albums.iter().flat_map(|album| {
+                    album
+                        .editions
+                        .iter()
+                        .flat_map(|edition| edition.tracks.iter())
+                        .map(move |track| (album.id, track.path.as_path()))
+                }),
+                |path| history.track(path).last_played_unix_s,
+            ),
+            None => HashMap::new(),
+        };
+        self.rebuild_lane_recent();
+    }
+
+    /// The lane's records half, re-resolved from [`Self::lane_played`].
+    ///
+    /// O(albums) — a sort of the touched ones and a truncation to 24. Called
+    /// when the fold is rebuilt and when one play moves one record, which is
+    /// exactly the *"a `TrackStarted` updates one entry and re-sorts 24"* the
+    /// contract promises.
+    fn rebuild_lane_recent(&mut self) {
+        let touched: Vec<crate::lane::Touched> = self
+            .albums
+            .iter()
+            .filter_map(|album| {
+                let at = self.lane_played.get(&album.id).copied()?;
+                Some(crate::lane::Touched {
+                    subject: crate::lane::Subject::Record(album.id),
+                    // The wall's own two lines, verbatim — a record must not
+                    // be named one thing on a tile and another in the lane.
+                    name: album
+                        .title
+                        .clone()
+                        .unwrap_or_else(|| "Unknown Album".to_owned()),
+                    under: album.artist.label().to_owned(),
+                    at: Some(at),
+                })
+            })
+            .collect();
+        self.lane_recent = crate::lane::resolve(Vec::new(), touched);
+        self.lane_stamp = self.lane_stamp.wrapping_add(1);
+    }
+
+    /// A play was recorded: the record it belongs to is now the most recently
+    /// touched thing in the lane.
+    ///
+    /// The moment is *now* rather than the ledger's, because the ledger is a
+    /// snapshot read at launch and re-reading it here would be the per-frame
+    /// file read the contract refuses. The two agree to within the length of
+    /// the play.
+    pub(crate) fn record_played(&mut self, path: &std::path::Path, at: u64) {
+        let Some(album) = self.albums.iter().find(|album| {
+            album
+                .editions
+                .iter()
+                .any(|edition| edition.tracks.iter().any(|track| track.path == path))
+        }) else {
+            return;
+        };
+        let id = album.id;
+        if self.lane_played.insert(id, at) == Some(at) {
+            return;
+        }
+        self.rebuild_lane_recent();
     }
 
     /// Recompute `visible` for the current query (wall order preserved —
@@ -4821,7 +5168,7 @@ impl Shelf {
         ink: Ink,
     ) -> Element<'a, Message> {
         column![
-            views::top_bar::view(self, self.window_w, ink),
+            views::top_bar::view(self, self.body_width(), ink),
             views::shelf::view(self, player, lamp, collecting)
         ]
         .into()
@@ -5007,6 +5354,13 @@ fn persist_group_key(key: GroupKey) {
 /// go nowhere to ask for it.
 fn persist_density(density: shelf::Density) {
     persist(|config| config.density = density);
+}
+
+/// Remember whether the returns lane stands open — `persist_density`'s
+/// argument exactly (ADR-0030 §3: one bool in `config.toml`, beside the
+/// density step and the group key, and **no Settings row**).
+fn persist_lane(open: bool) {
+    persist(|config| config.sidebar_open = open);
 }
 
 /// Read the play ledger's snapshot, or say why there is none.
@@ -5251,7 +5605,7 @@ mod tests {
         assert_eq!(place, Place::Settings);
         let place = place.back();
         assert_eq!(place, Place::Library);
-        assert!(place.is_home());
+        assert!(place.is_library());
         // And the enum is the whole of the state: `Place` is `Copy` and holds
         // one album id, so there is nothing here that *could* hold a scroll
         // offset or a query to lose.
@@ -5295,7 +5649,13 @@ mod tests {
 
         /// Message tag → the on-screen control that sends the same message,
         /// or the reason there is none.
-        const CONTROLS: [(&str, &str); 22] = [
+        const CONTROLS: [(&str, &str); 23] = [
+            (
+                "ToggleLane",
+                "the two marks at the returns lane's foot (ADR-0030 §3) — \
+                 the state you are in at full ink and inert, the other \
+                 pressable, in the density detents' exact anatomy",
+            ),
             (
                 "Undo",
                 "the transient `Undo` word beside the Queue place's summary \
@@ -5937,16 +6297,19 @@ mod tests {
             format!("{:?}", Some(Message::ToggleSettings))
         );
 
-        // …and `Ctrl+B` binds to nothing at all. It hid a sidebar; ADR-0022
-        // left none, and a layout key with no layout to change is a key that
-        // does nothing rather than a key that does something else.
-        assert!(
-            keys::binding_for(
-                &Key::Character("b".into()),
-                Modifiers::COMMAND,
-                keys::Focus::Elsewhere,
-            )
-            .is_none()
+        // …and `Ctrl+B` is the returns lane's, again. Doc 07 §5.3 unbound it
+        // because *"its subject was a sidebar that no longer exists"*;
+        // ADR-0030 built the subject again and the key came back **with its
+        // old meaning unchanged**, which is the only condition on which a
+        // retired reflex may be revived.
+        let from_key = keys::binding_for(
+            &Key::Character("b".into()),
+            Modifiers::COMMAND,
+            keys::Focus::Elsewhere,
+        );
+        assert_eq!(
+            format!("{from_key:?}"),
+            format!("{:?}", Some(Message::ToggleLane))
         );
     }
 
@@ -6020,13 +6383,13 @@ mod tests {
     #[test]
     fn escape_leaves_the_place_before_anything_under_it() {
         // At home the press falls straight through to the wall's own peel.
-        assert!(Place::default().is_home());
+        assert!(Place::default().is_library());
         // Anywhere else it is the place's, and one press is enough: there is no
         // second layer to take off underneath.
         for place in [Place::Album(7), Place::Queue, Place::Settings] {
-            assert!(!place.is_home(), "{place:?} answers the press itself");
+            assert!(!place.is_library(), "{place:?} answers the press itself");
             assert!(
-                place.back().is_home(),
+                place.back().is_library(),
                 "{place:?} left something behind for a second press"
             );
         }
