@@ -91,6 +91,20 @@ reversed; what was lost was always position, provenance and skip.) Replacing a
 slot with a *better statement of the same fact* is the one permitted move — it
 is how the seek row became the needle.
 
+**Sound from the wall is two presses, and that is a price, not a debt.**
+Open the record's page, press `Play album` — deliberately, twice considered:
+ADR-0022 removed the double-click structurally (the first press navigates;
+no tile remains under the pointer for a second), and the Jobs-era critique
+(`docs/design/11-jobs-era-critique.md` P7) surfaced the one candidate no ADR
+had listed — a second press landing on the just-opened page as `Play album`
+— and the owner refused it: a press whose meaning depends on arrival time is
+a micro-mode, in a product that hates cleverness. The friction budget's
+*intent → sound = 1 press* line is hereby **re-priced at the wall**, not
+unmet: one press from the Songs section, from a playlist, from the queue,
+from `Play all`; two from a sleeve, where the second is a fixed 320 × 32
+target with a name. Shift-click remains the one-press *sound-later*.
+(Owner's decision, 2026-08-09.)
+
 **A band's content may not touch the band's edges.** Every bar leads its tallest
 zone by a **named gap** on each side — never a ratio, because a constant
 ink-to-band ratio is not reachable on the 4 px lattice for two bands of
