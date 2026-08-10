@@ -1,6 +1,6 @@
 //! **The run column**: what the engine is holding, and where it is in it.
 //!
-//! # It was a popover, then a rail panel, then a place — and is now dormant
+//! # It was a popover, then a rail panel, and is a place again for unsaved runs
 //!
 //! ADR-0016 moved the queue out of the right-hand rail and into a 360 px card
 //! floating over the wall, anchored to the bar it describes. ADR-0022 removed
@@ -10,11 +10,13 @@
 //!
 //! The queue was then folded into Now playing while the two surfaces were being
 //! reconciled. That made Now playing a second album/playlist page, which was
-//! the wrong destination: it is now deliberately only the current song and a
-//! quiet link to the real source page. `Place::Queue` remains gone and this
-//! renderer is retained, unmounted, while any future dedicated queue surface
-//! is decided. Keeping the tested list/editor machinery here does not reserve
-//! space for it in Now playing.
+//! the wrong destination: it is now deliberately only the current song. The
+//! owner subsequently gave one run a real reason to reopen this surface:
+//! playing `All songs` materializes an **unsaved playlist**, and its source
+//! road needs a location where that list can be inspected, edited and saved.
+//! `Place::Queue` is that location. It has no resident navigation row and
+//! reserves no space in Now playing; the source footer and bottom bar lead here
+//! only while the current run is unsaved.
 //!
 //! **Every fact and gesture survives in this dormant renderer** — the rows,
 //! one list with a cursor, the summary that reads *what is left*, click-to-jump,
@@ -72,11 +74,11 @@ use iced::widget::{
 };
 use iced::{Element, Length, alignment};
 
-use crate::app::Message;
+use crate::app::{Message, Shelf};
 use crate::player::{PlayerState, QueueRow, QueueRowState, RunOrigin};
 use crate::playlists::{Collecting, NameEntry};
 use crate::queue_window::{self, RowShape};
-use crate::views::page;
+use crate::views::{page, place_header_led, place_name, place_pad, playlist_sleeve};
 use crate::{icon, theme};
 
 /// The `Save as playlist` field's id, so the caret can land in it the moment
@@ -107,8 +109,9 @@ pub(crate) fn run_scroll_id() -> scrollable::Id {
 /// a follow that lands a header or a strip's height off the row it was aiming
 /// at.
 ///
-/// An estimate in one respect and deliberately so: the save field, when open,
-/// moves the rows down by less than [`queue_window::MARGIN`] absorbs.
+/// The identity head's editable title has the same declared head height as its
+/// resting title; validation text is the only transient variation, and the
+/// virtual window's [`queue_window::MARGIN`] absorbs that one quiet line.
 #[must_use]
 pub(crate) fn rows_top(pad_top: f32, head_h: f32, head_two_line: bool) -> f32 {
     pad_top
@@ -124,9 +127,7 @@ pub(crate) fn rows_top(pad_top: f32, head_h: f32, head_two_line: bool) -> f32 {
         + theme::GAP_XS
 }
 
-/// Everything the run column needs of the surface drawing it, so that the
-/// merged now-playing place and (for exactly one step) the queue place hand it
-/// the same reading without either growing a tenth positional argument.
+/// Everything the run column needs of the surface drawing it.
 ///
 /// `measure` is the width the rows are set at, `viewport_h` bounds the virtual
 /// window's span, `scroll` is where the one scrollable last said it was
@@ -152,6 +153,212 @@ pub(crate) struct Frame {
     pub(crate) pad: iced::Padding,
 }
 
+/// The unsaved playlist as a full place: its standard header and the retained
+/// run editor beneath it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the call site hands this dedicated place the same independent \
+              editor readings its run column consumes; wrapping them in a \
+              second state type would only duplicate `Frame` and the column's \
+              named arguments"
+)]
+pub(crate) fn view<'a>(
+    shelf: &'a Shelf,
+    player: &'a PlayerState,
+    window: iced::Size,
+    hovered: Option<usize>,
+    saving: Option<&'a NameEntry>,
+    collecting: Collecting,
+    scroll: f32,
+    drag: Option<&'a crate::drag::DragState>,
+    can_undo: bool,
+) -> Element<'a, Message> {
+    let measure =
+        (window.width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).clamp(0.0, theme::LIST_MEASURE);
+    let name = unsaved_name(player.queue_origin());
+    let head = identity_head(shelf, player, &name, saving, window.width);
+    column![
+        place_header_led(place_name(&name), None),
+        run_column(
+            player,
+            Frame {
+                measure,
+                viewport_h: window.height,
+                scroll,
+                pad: place_pad(),
+            },
+            Some(head),
+            hovered,
+            saving,
+            collecting,
+            drag,
+            can_undo,
+        ),
+    ]
+    .into()
+}
+
+/// The title of an unsaved list. An artist's implicit list is deliberately
+/// named like the playlist it is about to become: `All Anne-Marie Puig`, not
+/// the generic action label printed on the artist tile.
+pub(crate) fn unsaved_name(origin: Option<&crate::origin::Origin>) -> String {
+    match origin {
+        Some(crate::origin::Origin::Artist { name, .. }) => format!("All {name}"),
+        Some(crate::origin::Origin::AllSongs) => "All songs".to_owned(),
+        Some(origin) => origin.name().to_owned(),
+        None => "Queue".to_owned(),
+    }
+}
+
+/// The first four distinct records represented by the queue, in queue order.
+///
+/// Queue rows already carry the record title and filed-under artist used by
+/// the shelf, so resolving those pairs is both cheaper and more faithful than
+/// walking every path in every edition on every frame. Four ids are the whole
+/// supply [`playlist_sleeve`] can spend.
+pub(crate) fn unsaved_art(shelf: &Shelf, player: &PlayerState) -> Vec<u64> {
+    let Some(queue) = player.queue() else {
+        return Vec::new();
+    };
+    let mut art = Vec::new();
+    for item in &queue.items {
+        let filed_under = item.album_artist.as_deref().unwrap_or(&queue.artist);
+        let Some(album) = shelf
+            .albums
+            .iter()
+            .find(|album| album.title == item.album && album.artist.label() == filed_under)
+        else {
+            continue;
+        };
+        if !art.contains(&album.id) {
+            art.push(album.id);
+            if art.len() == 4 {
+                break;
+            }
+        }
+    }
+    art
+}
+
+/// Give the unsaved run the same identity vocabulary as a stored playlist:
+/// collage, prominent sans name, kind/byline, then counts. When saving begins,
+/// that prominent name itself becomes the field; editing controls remain in
+/// the run strip immediately below.
+fn identity_head<'a>(
+    shelf: &'a Shelf,
+    player: &'a PlayerState,
+    name: &str,
+    saving: Option<&'a NameEntry>,
+    window_width: f32,
+) -> (Element<'a, Message>, f32) {
+    let art = unsaved_art(shelf, player);
+    let queue = player.queue();
+    let tracks = queue.map_or(0, |queue| queue.items.len());
+    let records = queue.map_or(0, |queue| {
+        let mut groups: Vec<(Option<&str>, &str)> = Vec::new();
+        for item in &queue.items {
+            let group = (
+                item.album.as_deref(),
+                item.album_artist.as_deref().unwrap_or(&queue.artist),
+            );
+            if !groups.contains(&group) {
+                groups.push(group);
+            }
+        }
+        groups.len()
+    });
+    let mut facts = match tracks {
+        1 => "1 track".to_owned(),
+        tracks => format!("{tracks} tracks"),
+    };
+    if let Some(queue) = queue {
+        let time = queue.total_time();
+        if time > std::time::Duration::ZERO {
+            facts.push_str(" · ");
+            facts.push_str(&crate::vm::format_duration(time));
+        }
+    }
+    let byline = match records {
+        1 => "Unsaved playlist · 1 record".to_owned(),
+        records => format!("Unsaved playlist · {records} records"),
+    };
+    let identity = unsaved_identity(name, saving, byline, facts);
+    let sleeve = playlist_sleeve(shelf, &art, name, theme::ALBUM_SLEEVE);
+    if window_width >= theme::ALBUM_BREAKPOINT {
+        (
+            row![sleeve, container(identity).width(Length::Fill)]
+                .spacing(theme::GAP_XL)
+                .align_y(iced::Alignment::Start)
+                .into(),
+            theme::ALBUM_SLEEVE,
+        )
+    } else {
+        (
+            column![sleeve, identity].spacing(theme::GAP_XL).into(),
+            theme::ALBUM_SLEEVE + theme::GAP_XL + 80.0,
+        )
+    }
+}
+
+/// The playlist identity block while it is at rest, and the same block with
+/// its title turned into the save gesture while a name is being chosen.
+fn unsaved_identity<'a>(
+    name: &str,
+    saving: Option<&'a NameEntry>,
+    byline: String,
+    facts: String,
+) -> Element<'a, Message> {
+    let room = theme::active();
+    let title: Element<'a, Message> = match saving {
+        None => text(name.to_owned())
+            .size(theme::SIZE_HERO)
+            .line_height(theme::LEADING_HERO)
+            .font(theme::SEMIBOLD)
+            .color(room.paper)
+            .into(),
+        Some(entry) => {
+            let valid = !entry.text.trim().is_empty();
+            let field = text_input("Playlist name", &entry.text)
+                .id(save_name_id())
+                .on_input(Message::SaveQueueInput)
+                .on_submit(Message::SaveQueueSubmit)
+                .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
+                .size(theme::SIZE_HERO)
+                .line_height(theme::LEADING_HERO)
+                .width(Length::Fill)
+                .style(move |_theme, status| theme::input(room, status));
+            let mut block = column![
+                row![field, page::act("Save", valid, Message::SaveQueueSubmit)]
+                    .spacing(theme::GAP_SM)
+                    .align_y(iced::Alignment::Center)
+            ]
+            .spacing(theme::GAP_XS);
+            if let Some(error) = &entry.error {
+                block = block.push(
+                    text(error.clone())
+                        .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
+                        .color(room.alert),
+                );
+            }
+            block.into()
+        }
+    };
+    column![
+        title,
+        text(byline)
+            .size(theme::SIZE_TITLE)
+            .line_height(theme::LEADING_TITLE)
+            .color(room.paper_dim),
+        text(facts)
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_faint),
+    ]
+    .spacing(theme::GAP_XS)
+    .into()
+}
+
 /// **The run column**: the summary, the acts beside it, and the rows —
 /// **virtualized**, so `Play all`'s five-figure run costs the frame what a
 /// twelve-track record does (doc 09 §7.1's implementation gate;
@@ -159,11 +366,9 @@ pub(crate) struct Frame {
 /// is handed, exactly as the wall's `views/shelf.rs` does for
 /// [`crate::shelf::Grid`]).
 ///
-/// **It is the other half of `Place::NowPlaying`** (doc 12 §3.4): a run is a
-/// list and a cursor, the record column is the cursor, and this is the list.
-/// `head` is what the merged surface puts *above* the summary inside the same
-/// scroll — the record, drawn as the run's head block, when the body is too
-/// narrow to stand the two columns side by side (§5.5a's `SPLIT_FLOOR`).
+/// It is the body of [`crate::place::Place::Queue`]. `head` remains generic
+/// because the renderer once stood beside Now playing's record column; the
+/// dedicated place now passes its playlist identity block and sleeve.
 ///
 /// Every string here is *owned*, straight from [`PlayerState::queue_list`]'s
 /// render-ready reading, which is why the element is `'static`: the contents
@@ -171,7 +376,7 @@ pub(crate) struct Frame {
 /// the library, so nothing on screen can outlive a view-model rebuild mid-scan.
 // The `too_many_lines` expectation this carried is **gone rather than
 // silenced**: the rows loop no longer spells a row's anatomy, so the column is
-// the summary strip, the save field and the windowed loop, and that fits.
+// the summary strip and the windowed loop, and that fits.
 #[expect(
     clippy::too_many_arguments,
     reason = "each argument is one independent reading the column renders — \
@@ -220,8 +425,8 @@ pub(crate) fn run_column<'a>(
                 .collect();
             // Where the rows column begins inside the scrollable content:
             // the place's top pad, the summary strip, the column gaps and
-            // the list's own head block. An estimate — the save field, when
-            // open, moves it by less than the module's margin absorbs.
+            // the list's own head block. Validation can add one quiet line to
+            // the editable identity; the module's margin absorbs it.
             let rows_top = rows_top(pad.top, head_h, list.album.is_some());
             let win = queue_window::window(&shapes, scroll - rows_top, viewport_h);
             // A record's name where the record begins, then its tracks —
@@ -292,7 +497,6 @@ pub(crate) fn run_column<'a>(
                 ]
                 .spacing(theme::GAP_SM)
                 .align_y(iced::Alignment::Center),
-                save_field(saving),
                 column![
                     page::list_head(list.album.as_deref(), &list.artist, true),
                     Column::with_children(rows),
@@ -375,9 +579,8 @@ fn undo_control(offered: bool) -> Element<'static, Message> {
 /// (ADR-0024 §4): a labelled word beside the summary, quiet because it is an
 /// act on a file rather than on playback.
 ///
-/// Offered only while the name field is closed: the field below is the same
-/// control mid-gesture, and drawing both would be one act with two live
-/// buttons.
+/// Offered only while the name field is closed: the page title becomes that
+/// field mid-gesture, and drawing both would be one act with two live buttons.
 ///
 /// # …and only when it can usefully act (ADR-0024 §A5.2)
 ///
@@ -483,37 +686,6 @@ fn save_control(offered: bool, origin: RunOrigin<'_>) -> Element<'static, Messag
     .style(move |_theme, status| theme::word_button(room, room.wall, status))
     .on_press_maybe(offered.then_some(Message::SaveQueueStart))
     .into()
-}
-
-/// The name field `Save as playlist` becomes, with the storage layer's
-/// refusal surfaced plainly under it — or nothing at all while the word is at
-/// rest.
-fn save_field(saving: Option<&NameEntry>) -> Element<'_, Message> {
-    let room = theme::active();
-    let Some(entry) = saving else {
-        return Space::with_height(Length::Fixed(0.0)).into();
-    };
-    let mut block = column![
-        text_input("Name tonight's run…", &entry.text)
-            .id(save_name_id())
-            .on_input(Message::SaveQueueInput)
-            .on_submit(Message::SaveQueueSubmit)
-            .padding(theme::pad(theme::WELL_PAD_V, theme::GAP_MD))
-            .size(theme::SIZE_BODY)
-            .line_height(theme::LEADING_BODY)
-            .width(Length::Fixed(theme::SETTINGS_CONTENT_MIN))
-            .style(move |_theme, status| theme::input(room, status)),
-    ]
-    .spacing(theme::GAP_XS);
-    if let Some(error) = &entry.error {
-        block = block.push(
-            text(error.clone())
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.alert),
-        );
-    }
-    block.into()
 }
 
 /// Nothing queued yet: said plainly, with the gesture that fills it.
@@ -763,6 +935,21 @@ fn next_ring() -> Element<'static, Message> {
 
 #[cfg(test)]
 mod tests {
+    use super::unsaved_name;
+
+    #[test]
+    fn an_artist_run_is_named_as_the_unsaved_playlist_it_can_become() {
+        let origin = crate::origin::Origin::Artist {
+            id: 7,
+            name: "Mahavishnu Orchestra".to_owned(),
+        };
+        assert_eq!(unsaved_name(Some(&origin)), "All Mahavishnu Orchestra");
+        assert_eq!(
+            unsaved_name(Some(&crate::origin::Origin::AllSongs)),
+            "All songs"
+        );
+    }
+
     /// **The place draws the window's slice and nothing else** (doc 09 §7.1's
     /// gate on `Play all`), and **its rows carry the playlist page's whole
     /// edit set** (09 §8.2 — one editor).

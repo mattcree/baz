@@ -1537,6 +1537,16 @@ impl PlayerState {
         self.volume_hover = gesture.latest.is_over().then_some(gesture.latest);
     }
 
+    /// Whether the pointer still owns the volume fader.
+    ///
+    /// The shell uses this only to coalesce persistence: engine confirmations
+    /// keep drawing the drag live, but `config.toml` is written when the hand
+    /// lets go rather than once per pixel crossed.
+    #[must_use]
+    pub fn volume_gesture_active(&self) -> bool {
+        self.volume_gesture.is_some()
+    }
+
     /// Step the volume by `steps` × [`VOLUME_STEP`] positions — the
     /// keyboard's Up and Down. Returns the position to ask for, clamped into
     /// the control's travel, or `None` with no engine to ask.
@@ -1829,6 +1839,12 @@ impl PlayerState {
     #[must_use]
     pub fn queue_provenance(&self) -> Option<&str> {
         self.queue.as_ref()?.provenance()
+    }
+
+    /// The list identity carried by the current run, when it has one.
+    #[must_use]
+    pub fn queue_origin(&self) -> Option<&crate::origin::Origin> {
+        self.queue.as_ref()?.origin.as_ref()
     }
 
     /// **What the run is** — the reading the run column's summary strip is
@@ -2760,6 +2776,7 @@ mod tests {
             album: Some("Geogaddi".to_owned()),
             artist: "Boards of Canada".to_owned(),
             items,
+            origin: None,
             source: vm::RunSource::Fixed,
         }
     }
@@ -5001,6 +5018,7 @@ mod tests {
                 item("Music Is Math", "Geogaddi", "Boards of Canada"),
                 item("Sundown", "Sundown", "Gordon Lightfoot"),
             ],
+            origin: None,
             source: vm::RunSource::Fixed,
         };
         let mut player = PlayerState::new(Availability::Ready);
@@ -5184,6 +5202,7 @@ mod tests {
                     path: PathBuf::from(format!("/m/stack/{index}.flac")),
                 })
                 .collect(),
+            origin: None,
             source: vm::RunSource::Fixed,
         }
     }
@@ -5370,6 +5389,7 @@ mod tests {
             album: None,
             artist: vm::UNKNOWN_ARTIST.to_owned(),
             items: Vec::new(),
+            origin: None,
             source: vm::RunSource::Fixed,
         });
         assert_eq!(player.continuation_note(), None);
@@ -5489,6 +5509,7 @@ mod tests {
                     path: PathBuf::from("/m/stack/1.flac"),
                 },
             ],
+            origin: None,
             source: vm::RunSource::Fixed,
         });
         player.apply(&started("/m/stack/0.flac", 0), &[]);
@@ -5903,6 +5924,7 @@ mod tests {
                 duration: None,
                 path: PathBuf::from("/m/stream.mp3"),
             }],
+            origin: None,
             source: vm::RunSource::Fixed,
         });
         let list = player.queue_list().expect("a queue");

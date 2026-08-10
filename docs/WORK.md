@@ -102,18 +102,7 @@
 
 ## Next
 
-1. **An artist has an `All songs` of their own.** The owner: *"the artist page
-   should have its own 'all songs' playlist I think"*. `implicit::ImplicitList`
-   already gives the library one, with an `Origin` kind and a collage sleeve, so
-   this is that list scoped to one artist rather than new machinery. Undecided:
-   its **order** (their records by year and then track order is the honest
-   default — an artist's songs have a chronology the library's `All songs` does
-   not); whether the tile sits with the artist's records or above them; and what
-   it says, since `All songs` on an artist's page means *their* songs and the
-   word may not need qualifying. It should credit the artist's list rather than
-   the underlying records when played, which is the rule that just landed for
-   playlists.
-2. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+1. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -126,7 +115,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-3. **Ship the public beta.** The last item by construction: it is the one
+2. **Ship the public beta.** The last item by construction: it is the one
    that makes the blockers above reach anybody. `v0.1.0` is prepared up to the
    tag and `docs/RELEASING.md` holds the owner's three commands, but a *beta*
    asks two more things of the release than a private tag does. **Flathub** —
@@ -225,7 +214,7 @@ only.
   question (one band line or two) and the tile-size one below. *Needs: one
   sentence each.*
 - **Borderless window chrome — the bar is built; the field is not flipped.**
-  The app bar shipped (ADR-0040): it is resident in all seven places, it moves
+  The app bar shipped (ADR-0040): it is resident in all eight places, it moves
   and maximises and closes the window, and it holds the display options, the
   gear and the three window buttons. What is not done is `decorations: false`,
   so the platform still draws its title bar *above* baz's own — the whole cost
@@ -297,6 +286,16 @@ only.
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **The volume fader survives a restart.** Its exact protocol position is
+  restored from `config.toml`; only engine-confirmed movement is saved, and a
+  pointer drag is coalesced to the release rather than writing once per pixel.
+  Mute remains an independent, session-only switch.
+- **Every artist has an `All songs` of their own.** One collage tile above
+  `RECORDS`, drawn by the exact component Home uses, plays only that artist.
+  Releases run by year then title, undated last, with every selected edition's
+  disc/track order intact. It materializes as the current unsaved playlist;
+  Now playing and the bottom bar open that editable queue, where it can be
+  saved.
 - **The bottom edge is for one song.** The attempted song/list toggle was
   rejected in use and removed completely: no selector, cumulative list time,
   queue segments or jump targeting remain. The full-width needle is a single
@@ -304,11 +303,10 @@ Newest first. Fuller detail in `CHANGELOG.md`.
 - **Now playing is one current song, not another list page.** The large centred
   cover, track-led placard, needle and figures are the whole composition. A
   quiet, borderless source footer spans the bottom of the place and leads to
-  the originating playlist when it still exists, otherwise to the sounding
-  track's album. The bottom bar's track block follows that same source route,
-  while the lane keeps the dedicated road into the artwork view. The queue is
-  not drawn on this surface; the album and playlist pages remain the places for
-  lists.
+  the originating playlist when it still exists, to the editable queue for an
+  unsaved list, otherwise to the sounding track's album. The bottom bar's track
+  block follows that same source route, while the lane keeps the dedicated road
+  into the artwork view. The queue is not drawn on this surface.
 - **The README is the project's public face, and the word on the front is
   `public beta`.** The owner's *"can we get the README sorted"*, and his
   earlier *"a real public facing view of the app and its features. with an

@@ -26,7 +26,7 @@
 //! window's chrome would have been the removal not done.
 //!
 //! The **gear** went *up*, into [`crate::views::app_bar`] — the same control,
-//! the same message, the same corner, now resident in all seven places rather
+//! the same message, the same corner, now resident in all eight places rather
 //! than only this one. That is what "the application's affair rather than the
 //! frame's" always implied and what a Library-only strip could not deliver.
 //!

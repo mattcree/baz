@@ -2,9 +2,10 @@
 //! sets once and expects to find again.
 //!
 //! The file is `$XDG_CONFIG_HOME/baz/config.toml` (via the `dirs` crate). It
-//! currently carries three things — the music folders baz holds, the
-//! arrangement of the wall, and the ReplayGain setting (ADR-0013) — and it is
-//! written by baz and documented as safe to edit by hand.
+//! carries the music folders baz holds and the standing player/view decisions
+//! a listener expects to find again — including volume, shuffle, arrangement
+//! and ReplayGain. It is written by baz and documented as safe to edit by
+//! hand.
 //!
 //! # `music_dirs`, and the `music_dir` it replaced
 //!
@@ -90,6 +91,7 @@ use std::path::{Path, PathBuf};
 use baz_core::index::GroupKey;
 use baz_core::protocol::ReplayGainMode;
 use baz_core::replaygain::ReplayGainSettings;
+use baz_core::volume::{MAX_POSITION, Volume};
 
 use crate::shelf::Density;
 
@@ -114,6 +116,9 @@ const SIDEBAR_OPEN: &str = "sidebar_open";
 
 /// The key the player's shuffle property is written under.
 const SHUFFLE: &str = "shuffle";
+
+/// The key the volume fader's control position is written under.
+const VOLUME: &str = "volume";
 
 /// Application configuration. See the [module docs](self) for scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,6 +179,19 @@ pub struct Config {
     /// asked for, and a resident index that arrives collapsed would have to be
     /// discovered before it could be used.
     pub sidebar_open: bool,
+    /// The volume fader's position, `0..=`[`MAX_POSITION`].
+    ///
+    /// A standing player decision on the same footing as shuffle: the control
+    /// is resident in every place, and where a listener left it has something
+    /// to say before the first track of the next launch. The integer is the
+    /// protocol's own control unit, not a floating-point gain, so config,
+    /// fader and engine round-trip one exact value.
+    ///
+    /// Mute is deliberately not folded into this field. It is an independent
+    /// switch in the engine and the request here is specifically to remember
+    /// the slider's state; a fresh launch is therefore audible at the saved
+    /// level rather than silently inheriting an old temporary mute.
+    pub volume: Volume,
     /// **Whether shuffle is on** (the owner's decision, 2026-08-10:
     /// *"can you make shuffle a property of the player i.e. toggle on/off"*).
     ///
@@ -211,6 +229,7 @@ impl Default for Config {
             group_key: GroupKey::Artist,
             density: Density::Balanced,
             sidebar_open: true,
+            volume: Volume::UNITY,
             shuffle: false,
         }
     }
@@ -278,6 +297,12 @@ impl Config {
         );
         let _ = writeln!(
             out,
+            "# volume fader position: 0 (silent) to {MAX_POSITION} (unity)\n\
+             {VOLUME} = {}",
+            self.volume.position(),
+        );
+        let _ = writeln!(
+            out,
             "# whether shuffle is on — the crossed arrows on the \
              now-playing bar\n{SHUFFLE} = {}",
             self.shuffle,
@@ -335,6 +360,15 @@ impl Config {
             .get(SIDEBAR_OPEN)
             .and_then(toml::Value::as_bool)
             .unwrap_or(true);
+        // The protocol's integer control unit, accepted only over its stated
+        // travel. An out-of-range hand edit is unreadable rather than a secret
+        // second spelling for unity, and degrades only this key.
+        let volume = table
+            .get(VOLUME)
+            .and_then(toml::Value::as_integer)
+            .and_then(|position| u16::try_from(position).ok())
+            .filter(|position| *position <= MAX_POSITION)
+            .map_or(Volume::UNITY, Volume::new);
         // `sidebar_open`'s degradation, and it defaults the other way: a file
         // that cannot say whether shuffle was on is a file baz plays in order
         // from, because guessing *on* would re-order somebody's evening over a
@@ -349,6 +383,7 @@ impl Config {
             group_key,
             density,
             sidebar_open,
+            volume,
             shuffle,
         }
     }
@@ -523,6 +558,38 @@ mod tests {
         }
     }
 
+    /// The fader and the file use the engine protocol's exact integer unit,
+    /// including both ends of its travel.
+    #[test]
+    fn round_trips_every_shape_of_volume_position() {
+        for position in [0, 1, 618, MAX_POSITION - 1, MAX_POSITION] {
+            let config = Config {
+                volume: Volume::new(position),
+                ..Config::default()
+            };
+            let text = config.to_toml();
+            assert!(
+                text.contains(&format!("volume = {position}")),
+                "{position} was not written in the control's unit:\n{text}"
+            );
+            assert_eq!(Config::from_toml(&text), config);
+        }
+    }
+
+    /// One damaged volume value costs only the volume, never a neighbouring
+    /// standing decision.
+    #[test]
+    fn an_invalid_volume_degrades_to_unity_per_key() {
+        for value in ["-1", "1001", "70000", "\"loud\""] {
+            let config = Config::from_toml(&format!(
+                "volume = {value}\nshuffle = true\ngroup_key = \"year\"\n"
+            ));
+            assert_eq!(config.volume, Volume::UNITY, "{value}");
+            assert!(config.shuffle, "{value} damaged shuffle");
+            assert_eq!(config.group_key, GroupKey::Year, "{value}");
+        }
+    }
+
     /// The persisted setting, every mode and both signs of both pre-amps,
     /// through the document and back unchanged.
     #[test]
@@ -540,6 +607,7 @@ mod tests {
                 group_key: GroupKey::Year,
                 density: Density::Dense,
                 sidebar_open: true,
+                volume: Volume::new(618),
                 shuffle: false,
             };
             let back = Config::from_toml(&config.to_toml());
@@ -868,6 +936,7 @@ mod tests {
             group_key: GroupKey::Genre,
             density: Density::Spacious,
             sidebar_open: true,
+            volume: Volume::new(500),
             shuffle: false,
         };
         let text = config.to_toml();
@@ -887,6 +956,7 @@ mod tests {
             group_key: GroupKey::Played,
             density: Density::Spacious,
             sidebar_open: true,
+            volume: Volume::new(750),
             shuffle: false,
         };
         store(&path, &config).expect("store creates parents and writes");
@@ -1039,6 +1109,7 @@ mod tests {
             group_key: GroupKey::Added,
             density: Density::Dense,
             sidebar_open: true,
+            volume: Volume::new(250),
             shuffle: false,
         };
         let table: toml::Table = config.to_toml().parse().expect("baz writes valid TOML");

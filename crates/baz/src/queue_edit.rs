@@ -136,6 +136,7 @@ mod tests {
             album: Some("Geogaddi".to_owned()),
             artist: "Boards of Canada".to_owned(),
             items: names.iter().copied().map(item).collect(),
+            origin: Some(crate::origin::Origin::playlist("Road Trip")),
             source: crate::vm::RunSource::Playlist("Road Trip".to_owned()),
         }
     }

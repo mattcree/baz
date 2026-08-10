@@ -6,7 +6,7 @@
 //! > **The window holds one place at a time, with the returns lane to its left
 //! > in every place but Settings, and the now-playing bar under all of them.**
 //!
-//! One kind, seven members, one rule. There is no inspector, no popover and no
+//! One kind, eight members, one rule. There is no inspector, no popover and no
 //! rail; a listener has one question to answer about anything on screen —
 //! *which place am I in* — and one key that answers it. (One summoned,
 //! single-tenant panel floats *over* a place without being one — the playlist
@@ -46,13 +46,10 @@
 //!   into "is the place an `Album`, and which one" — one field where there were
 //!   two, and a `hidden` flag that no longer has anything to hide.
 //! - **`Queue`** took over from `overlay.rs`, which held *which popover, if
-//!   any, is floating* — and is **gone again**, into the place that was already
-//!   holding its other half. The owner: *"the queue and the now playing need
-//!   integrated in some way so we can remove the queue option from the bottom
-//!   bar"*. A run is a list and a cursor, [`Place::NowPlaying`] was drawing only
-//!   the cursor, and a place holding one half of a thing is not a place
-//!   (`docs/design/12-now-playing-and-kiosk.md` §3.4). The enum went eight to
-//!   seven, and the door in the bar went with it.
+//!   any, is floating*. It was briefly folded into Now playing, then removed
+//!   when that place became one current song. It returns without a resident
+//!   door for one precise subject: an unsaved list needs somewhere to be
+//!   inspected and saved, and `All songs` now materializes as one.
 //!
 //! # Why an enum and not a stack
 //!
@@ -102,11 +99,15 @@ pub enum Place {
     /// a page. It carries no id for the same reason the bar carries none: the
     /// engine's answer is the only one it may draw.
     ///
-    /// **It absorbed `Queue` whole.** Both halves of the run live here: the
-    /// cursor in the record column, the list in the run column beside it, and
-    /// every gesture the queue place had. Whether the list is on screen is the
-    /// `Run` word's business and not this enum's — a density is not a place.
     NowPlaying,
+    /// **The unsaved playlist**: the run the engine is holding, with its rows,
+    /// edits and `Save as playlist` act.
+    ///
+    /// It has no resident lane destination. It is reached from a run whose
+    /// source is an unsaved list — including either `All songs` — through the
+    /// source road in Now playing and the persistent bar. That gives the
+    /// transient a location without making it permanent navigation furniture.
+    Queue,
     /// **One artist's page**: their name, and their records in the wall's own
     /// tile.
     ///
@@ -270,7 +271,7 @@ impl Place {
     /// Which of the head's three destinations this place *is*, if it is one —
     /// what the lane reads to ink the current row.
     ///
-    /// The four places that are not destinations (`Album`, `Artist`,
+    /// The five places that are not destinations (`Album`, `Artist`, `Queue`,
     /// `Playlist`, `Settings`) light **nothing** in the head rather than
     /// falling back to `Library`. A record's page was reached from the wall,
     /// but it is not the wall, and a head that claimed otherwise would be
@@ -366,6 +367,7 @@ mod tests {
             for from in [
                 Place::Album(7),
                 Place::Artist(5),
+                Place::Queue,
                 Place::Playlist(3),
                 Place::Settings,
             ] {
@@ -374,13 +376,14 @@ mod tests {
         }
     }
 
-    /// The four places that are not destinations light **nothing** in the
+    /// The five places that are not destinations light **nothing** in the
     /// head — a page reached from the wall is not the wall.
     #[test]
     fn only_a_destination_lights_the_head() {
         for place in [
             Place::Album(7),
             Place::Artist(5),
+            Place::Queue,
             Place::Playlist(3),
             Place::Settings,
         ] {
@@ -396,6 +399,7 @@ mod tests {
             Place::Library,
             Place::Home,
             Place::NowPlaying,
+            Place::Queue,
             Place::Album(7),
             Place::Artist(5),
             Place::Playlist(3),
@@ -425,6 +429,7 @@ mod tests {
             Place::Home,
             Place::Album(7),
             Place::Artist(5),
+            Place::Queue,
             Place::Playlist(3),
             Place::Settings,
         ] {

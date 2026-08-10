@@ -44,23 +44,20 @@
 //! it — the alternative is resolving a name against the library at every read,
 //! which is exactly what makes a history unreadable after a rescan.
 //!
-//! # What is not built here
+//! # What the product constructs
 //!
-//! **Only [`Origin::Playlist`] is constructed by the product today.** Every
-//! other kind is built by [`Origin::decode`] and nowhere else, and that is the
-//! honest state of ADR-0034: §2–§5 shipped (the origin on the command, the
-//! marker in the ledger, the launch-time fold), while §1's `QueueVm::origin`
-//! — which is what would make an album's run, a draw's and `All songs`' each
-//! carry their own identity — is still `QueueVm::provenance`, a playlist name
-//! or nothing. The decoder is general because a ledger written by a later baz
-//! must stay readable by this one; the encoder is general because the two must
-//! be one function or they will drift.
+//! Playlist files, the library-wide `All songs`, and each artist's `All songs`
+//! now put their identity on [`crate::vm::QueueVm`]. The live identity lets Now
+//! playing lead back to the right place without keeping a behavioural link to
+//! it. Ledger attribution is narrower: playlist and artist runs are marked;
+//! library-wide `All songs` keeps crediting the records it quotes because the
+//! library itself has no recency row. Album, draw and hand origins remain wire
+//! vocabulary for the model's later steps and for forward-compatible reads.
 //!
-//! **A kind with no lane subject must not be written as a marker until the
-//! lane can credit it** ([`crate::lane::subject_of`]). Marking a run excludes
-//! its plays from the records they quoted, so a marker whose kind the lane
-//! throws away would lose the touch entirely. `no_kind_is_written_that_the_lane_cannot_credit`
-//! is that rule, asserted rather than remembered.
+//! An artist marker intentionally has no returns-lane row today. It preserves
+//! the honest provenance and prevents the artist's records jumping merely
+//! because their shared list was played; [`crate::lane::subject_of`] returning
+//! `None` states that the lane has not grown a third kind of resident row.
 
 /// The wire word for [`Origin::Album`].
 const ALBUM: &str = "album";
@@ -134,10 +131,8 @@ pub(crate) enum Origin {
 impl Origin {
     /// A run reified from the playlist file called `name`.
     ///
-    /// The one constructor the product spends today, and the one gesture that
-    /// has ever recorded provenance: `QueueVm::provenance` is *"the name of the
-    /// playlist file this run was reified from"*, set in exactly one place
-    /// (`playlists.rs`) and `None` everywhere else.
+    /// The constructor shared by every file-backed playlist gesture and by
+    /// restored queues whose older record carries only playlist provenance.
     pub(crate) fn playlist(name: &str) -> Self {
         Self::Playlist {
             id: crate::playlists::playlist_id(name),
@@ -448,44 +443,33 @@ mod tests {
         );
     }
 
-    /// **Nothing is written as a marker that the lane cannot credit.**
+    /// **Live identity does not imply a returns-lane row.**
     ///
-    /// Marking a run excludes its plays from the records they quoted, so a
-    /// marker whose kind [`crate::lane::subject_of`] throws away would *lose*
-    /// the touch rather than move it — a record played through `All songs`
-    /// would vanish from the lane instead of rising in it.
-    ///
-    /// Asserted over this module's own source, because the property is about
-    /// which constructors exist: `Origin::playlist` is the only one, so
-    /// `Playlist` is the only kind that reaches a ledger, and it has a subject.
-    /// A second constructor added without a subject to go with it fails here.
+    /// Playlist and artist origins identify a particular list. Library-wide
+    /// `All songs` does not gain a returns-lane row merely because the live
+    /// queue carries its identity, so the writer deliberately leaves it
+    /// unmarked and its constituent records retain their recency.
     #[test]
-    fn no_kind_is_written_that_the_lane_cannot_credit() {
+    fn live_identity_does_not_imply_a_returns_lane_row() {
         let source = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/origin.rs"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
         )
-        .expect("this module's own source")
+        .expect("the shell source")
         .replace("\r\n", "\n");
-        let start = source.find("impl Origin {").expect("the impl exists");
-        let body = &source[start..source.find("\n#[cfg(test)]").expect("the impl ends")];
-        let constructors: Vec<&str> = body
-            .lines()
-            .filter(|line| line.trim_start().starts_with("pub(crate) fn "))
-            .filter(|line| line.contains("-> Self"))
-            .collect();
+        let start = source.find("fn run_origin(").expect("the writer exists");
+        let rest = &source[start..];
+        let writer = &rest[..rest.find("\n}\n").expect("the writer ends") + 2];
+        assert!(writer.contains("Origin::Playlist { .. } | Origin::Artist { .. }"));
+        assert!(writer.contains("Origin::AllSongs"));
+        assert!(writer.contains("=> None"));
+
         assert_eq!(
-            constructors.len(),
-            1,
-            "a kind gained a constructor: give it a lane subject, or say here \
-             why a run of it must never be marked\n{constructors:#?}"
-        );
-        assert!(
-            constructors[0].contains("fn playlist("),
-            "{constructors:#?}"
-        );
-        assert!(
-            crate::lane::subject_of(&Origin::playlist("Road Trip")).is_some(),
-            "the one kind the product writes has no lane row to credit"
+            crate::lane::subject_of(&Origin::Artist {
+                id: 7,
+                name: "Broadcast".to_owned(),
+            }),
+            None,
+            "an artist list does not silently add a third returns-lane row"
         );
     }
 

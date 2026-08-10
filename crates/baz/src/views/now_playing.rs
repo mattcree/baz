@@ -3,8 +3,9 @@
 //! One large source-bounded cover, the track-led placard, needle and figures.
 //! The run is not another version of an album or playlist page and is not
 //! drawn here. A quiet provenance link is the road to the real source page:
-//! the originating playlist when one still exists, otherwise the sounding
-//! track's album. The persistent bottom bar remains the only transport.
+//! the originating playlist when one still exists, the current unsaved list
+//! when the run is one, otherwise the sounding track's album. The
+//! persistent bottom bar remains the only transport.
 
 use iced::widget::{Space, button, column, container, image as iced_image, row, stack, text};
 use iced::{Element, Length, alignment};
@@ -20,6 +21,8 @@ use crate::views::gradient_block;
 pub(crate) enum Source {
     /// A run reified from a playlist file that still exists.
     Playlist { id: u64, name: String },
+    /// The current run materialized as an unsaved playlist.
+    Queue { name: String },
     /// The record the sounding track resolves into.
     Album { id: u64, name: String },
 }
@@ -29,6 +32,7 @@ impl Source {
     pub(crate) fn open_message(&self) -> Message {
         match self {
             Self::Playlist { id, .. } => Message::OpenPlaylist(*id),
+            Self::Queue { .. } => Message::ShowQueue,
             Self::Album { id, .. } => Message::OpenAlbum(*id),
         }
     }
@@ -651,6 +655,7 @@ fn source_link(source: Source) -> Element<'static, Message> {
     let message = source.open_message();
     let (kind, name) = match source {
         Source::Playlist { name, .. } => ("Playlist", name),
+        Source::Queue { name } => ("Unsaved playlist", name),
         Source::Album { name, .. } => ("Album", name),
     };
     button(
@@ -1225,13 +1230,20 @@ mod tests {
         .expect("the persistent bar source");
         for token in [
             "Source::Playlist",
+            "Source::Queue",
             "Source::Album",
             "Message::OpenPlaylist(*id)",
+            "Message::ShowQueue",
             "Message::OpenAlbum(*id)",
         ] {
             assert!(place.contains(token), "the source road lost `{token}`");
         }
         assert!(app.contains("fn now_playing_source(&self)"));
+        assert!(
+            app.contains("crate::player::RunOrigin::Assembled")
+                && app.contains("views::now_playing::Source::Queue"),
+            "an unsaved run stopped leading to its editable queue"
+        );
         assert!(
             bar.contains("source: Option<Message>") && bar.contains(".on_press(source)"),
             "the persistent track block stopped sharing the source road"

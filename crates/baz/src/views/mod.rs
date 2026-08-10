@@ -44,7 +44,7 @@
 //! ADR-0016 had four kinds — place, inspector, popover, bar. ADR-0022 deleted
 //! two of them: **every surface here except [`bottom_bar`] is a place, or part
 //! of one**. [`top_bar`] and [`shelf`] compose the Library; [`album`],
-//! [`queue`] and [`settings`] are the other three. Places fill the window and
+//! [`queue`] and [`settings`] are three more. Places fill the window and
 //! replace each other ([`crate::place`]), and [`bottom_bar`] is in every one of
 //! them and never moves.
 //!
@@ -84,13 +84,11 @@ pub(crate) mod context_menu;
 pub(crate) mod drag_ghost;
 pub(crate) mod home;
 pub(crate) mod lane;
+pub(crate) mod list_tile;
 pub(crate) mod now_playing;
 pub(crate) mod page;
 pub(crate) mod playlist;
 pub(crate) mod playlist_panel;
-// The queue renderer is retained while its next dedicated surface is decided;
-// Now playing deliberately no longer mounts it.
-#[allow(dead_code)]
 pub(crate) mod queue;
 pub(crate) mod settings;
 pub(crate) mod setup;
@@ -480,7 +478,7 @@ pub(crate) fn section_rule(name: &'static str) -> Element<'static, Message> {
 /// the Library, a section rule on Home and an artist's page — and which
 /// refused the top bar in so many words. ADR-0040 §5 records the reversal and,
 /// more importantly, the **one condition it keeps**: the marks are still
-/// *absent* on the four places that hang no works, rather than present and
+/// *absent* on the five places that hang no works, rather than present and
 /// inert. What is resident is the bar and its reserved slot
 /// ([`theme::APP_BAR_MARKS_W`]), not the control.
 ///

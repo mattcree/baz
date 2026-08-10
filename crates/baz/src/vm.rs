@@ -37,6 +37,8 @@ use baz_core::index::{
 };
 use baz_core::library::{AudioFormat, TrackMeta};
 
+use crate::origin::Origin;
+
 /// What the shelf calls an album whose artist is not known at all.
 pub const UNKNOWN_ARTIST: &str = "Unknown Artist";
 
@@ -839,12 +841,15 @@ pub struct QueueVm {
     /// unit [`Event::TrackStarted`](baz_core::protocol::Event::TrackStarted)
     /// reports in.
     pub items: Vec<QueueItemVm>,
-    /// **Where this run came from** — the three kinds of list, on the record
+    /// Which list this run was reified from, when that list has an identity
+    /// worth carrying back to a source page or into the play ledger.
+    pub(crate) origin: Option<Origin>,
+    /// **How this run may be saved** — the three behaviours, on the record
     /// itself. See [`RunSource`].
     pub source: RunSource,
 }
 
-/// **The three kinds of list a run can be**, which is the distinction the
+/// **The three save behaviours a run can have**, which is the distinction the
 /// summary strip's save word turns on.
 ///
 /// The owner, 2026-08-10: *"underlying we should have playlists which are like
@@ -868,12 +873,13 @@ pub struct QueueVm {
 /// a new origin cannot start advertising a creation act by forgetting to say
 /// it exists elsewhere.
 ///
-/// # It is still origin, never a link
+/// # It is classification, not identity
 ///
-/// ADR-0023 §3 and ADR-0024 §1 are untouched. Nothing here is consulted for
-/// behaviour beyond which word the strip draws, no run ever writes back into
-/// the file it names, and the value travels with the record through every edit
-/// (`crate::queue_edit` clones it) exactly as the name it replaced did.
+/// [`QueueVm::origin`] says which list this queue was reified from;
+/// `RunSource` says only whether it is fixed, saved or assembled. Nothing here
+/// is consulted for behaviour beyond which word the strip draws, no run ever
+/// writes back into the file it names, and both values travel with the record
+/// through every edit (`crate::queue_edit` clones it).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunSource {
     /// **A list that already exists and is not the listener's to name** — a
@@ -1060,6 +1066,7 @@ pub fn album_queue(album: &AlbumVm, chosen: Option<EditionKey>) -> QueueVm {
         album: album.title.clone(),
         artist: album.artist.label().to_owned(),
         items: album_items(album, chosen),
+        origin: None,
         // **A record's track listing is a fixed list**: it exists already, it
         // is not the listener's to name, and there is nothing here to offer to
         // save (the owner: *"I still see save as playlist on the queue when
@@ -1156,6 +1163,10 @@ pub fn restored_queue(
             .and_then(|item| item.album_artist.clone())
             .unwrap_or_default(),
         items,
+        origin: match &source {
+            RunSource::Playlist(name) => Some(Origin::playlist(name)),
+            RunSource::Fixed | RunSource::Assembled => None,
+        },
         source,
     };
     (queue, landed)
@@ -1189,6 +1200,7 @@ pub fn stacked_queue(picks: &[(&AlbumVm, Option<EditionKey>)]) -> QueueVm {
         album: first.and_then(|album| album.title.clone()),
         artist: first.map_or_else(String::new, |album| album.artist.label().to_owned()),
         items,
+        origin: None,
         // A draw is an implicit playlist, but not a *file*: no provenance
         // (09 §6 — playlist files only) — and **fixed**, because `Play all`
         // and `All songs` are lists that already exist. Neither is assembled
@@ -2647,6 +2659,7 @@ mod tests {
             album: None,
             artist: UNKNOWN_ARTIST.to_owned(),
             items: Vec::new(),
+            origin: None,
             source: RunSource::Fixed,
         };
         assert!(empty.is_empty());
@@ -2670,6 +2683,7 @@ mod tests {
             album: Some("Loop".to_owned()),
             artist: "A".to_owned(),
             items: vec![item("once"), item("again")],
+            origin: None,
             source: RunSource::Fixed,
         };
         // The position is exact and its path agrees, so it is the answer.
@@ -2719,6 +2733,7 @@ mod tests {
             album: None,
             artist: UNKNOWN_ARTIST.to_owned(),
             items: Vec::new(),
+            origin: None,
             source: RunSource::Fixed,
         };
         assert!(empty.holds_exactly(&[]));
@@ -2752,6 +2767,7 @@ mod tests {
             album: Some("Loop".to_owned()),
             artist: "A".to_owned(),
             items: vec![item("/m/a/1.flac"), item("/m/a/1.flac")],
+            origin: None,
             source: RunSource::Fixed,
         };
         assert!(queue.holds_exactly(&listed));

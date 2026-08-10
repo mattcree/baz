@@ -293,7 +293,7 @@ pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message
 /// laying a long string over several lines, and a box-set title running to four
 /// lines pushes everything under it down the page. Two lines is a title; more
 /// is a paragraph.
-fn identity_block(identity: Identity<'_>) -> Element<'_, Message> {
+pub(crate) fn identity_block(identity: Identity<'_>) -> Element<'_, Message> {
     let room = theme::active();
     let mut facts = row![
         text(identity.facts)

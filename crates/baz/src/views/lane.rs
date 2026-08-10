@@ -117,7 +117,7 @@ use crate::{icon, theme};
 
 /// **What the well searches, said in the field itself** — ADR-0036 §2.
 ///
-/// The well is resident in all seven places and searches exactly one of them,
+/// The well is resident in all eight places and searches exactly one of them,
 /// so `Search` alone was a promise about the control rather than about its
 /// subject. `Search library` is the noun on the destination row two rows below
 /// it, which is where the query lands.

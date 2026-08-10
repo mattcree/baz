@@ -43,6 +43,7 @@ use baz_core::index::{GroupKey, IndexError, Library};
 use baz_core::protocol::{self as protocol, Command, Event, SignalChain};
 use baz_core::replaygain::ReplayGainSettings;
 use baz_core::traversal::Traversal;
+use baz_core::volume::Volume;
 use iced::keyboard;
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
 use iced::widget::{column, image as iced_image, row, scrollable, text_input};
@@ -392,7 +393,7 @@ pub(crate) enum Message {
     /// page was the only surface that knew what was sounding. `Now playing`
     /// exists now and is that surface, so the dedicated lane row leads there.
     /// The persistent bar's track block instead follows the same provenance
-    /// road as the source footer: playlist when there is one, album otherwise.
+    /// road as the source footer: saved playlist, unsaved queue, or album.
     ///
     /// **`Message::ShowTheRun` folded into this one** when the `Run` word was
     /// removed. That message was this message plus *turn the density on*, and
@@ -403,6 +404,8 @@ pub(crate) enum Message {
     /// destination never closes itself ([`crate::place::Place::go`]) — and
     /// <kbd>Esc</kbd> is the way out.
     ShowNowPlaying,
+    /// Open the current run as its unsaved playlist.
+    ShowQueue,
     /// The subtle provenance link on Now playing: open the album the sounding
     /// track belongs to, without inheriting a wall tile's shift-click queue
     /// gesture.
@@ -697,7 +700,10 @@ pub(crate) enum Message {
     /// The tile states its own scope in its counts line, so what it will play
     /// is on screen beside it.
     PlayEverything,
-    /// The pointer entered (`true`) or left (`false`) Home's `All songs` tile.
+    /// The `All songs` tile on an artist page: play that artist's implicit
+    /// list in release chronology.
+    PlayArtistSongs(u64),
+    /// The pointer entered (`true`) or left (`false`) an `All songs` tile.
     ///
     /// The wall's [`Self::TileEntered`] mechanism for the one tile that is not
     /// a record, and a `bool` rather than an id because there is only ever one
@@ -1120,6 +1126,13 @@ struct App {
     /// `ReplayGainChanged` — the event also arrives at track boundaries, where
     /// the settings have not moved at all and there is nothing to write.
     saved_replay_gain: ReplayGainSettings,
+    /// The volume position as it currently stands on disk.
+    ///
+    /// Like [`Self::saved_replay_gain`], this makes persistence follow the
+    /// engine's confirmation without rereading `config.toml` for every volume
+    /// event. Mute and output-path changes report through the same event but do
+    /// not move this value, so they cost no write.
+    saved_volume: Volume,
     /// The play ledger the engine is appending to (ADR-0018), or `None` when
     /// it could not be opened.
     ///
@@ -1395,6 +1408,18 @@ impl App {
         // crate::mpris).
         let mpris = Mpris::start();
         let stored = config::config_file().map(|path| config::load(&path));
+        let saved_volume = stored
+            .as_ref()
+            .map_or(Volume::UNITY, |config| config.volume);
+        // Restore the fader's standing position as an engine command, never an
+        // optimistic UI write. The confirming `VolumeChanged` is what moves
+        // the player mirror; unity is already the engine default and needs no
+        // round trip.
+        if saved_volume != player.volume() {
+            playback.send(Command::SetVolume {
+                position: saved_volume.position(),
+            });
+        }
         let saved_replay_gain = stored
             .as_ref()
             .map_or_else(ReplayGainSettings::default, |config| config.replay_gain);
@@ -1521,6 +1546,7 @@ impl App {
             pressed_control: None,
             warmth: Tween::settled(0.0).with_curve(motion::Curve::Linear),
             saved_replay_gain,
+            saved_volume,
         };
         // **The run, handed back to the engine — silent.** `SetQueue` and
         // nothing else: it replaces the queue and starts nothing
@@ -1670,6 +1696,7 @@ impl App {
             Message::ShowNowPlaying => {
                 self.go(|place| place.go(crate::lane::Destination::NowPlaying))
             }
+            Message::ShowQueue => self.go(|_| Place::Queue),
             Message::OpenAlbum(id) => self.open_album(id),
             // The Settings place's spine. Session state and deliberately not
             // persisted: which section you were last reading is not a standing
@@ -1723,6 +1750,10 @@ impl App {
             }
             Message::PlayEverything => {
                 self.play_everything();
+                Task::none()
+            }
+            Message::PlayArtistSongs(id) => {
+                self.play_artist_songs(id);
                 Task::none()
             }
             Message::AllSongsHovered(over) => {
@@ -2256,13 +2287,20 @@ impl App {
             .then(|| (crate::playlists::playlist_id(name), name.to_owned()))
     }
 
-    /// The one quiet road out of Now playing: the file-backed playlist the
-    /// run came from while it still exists, otherwise the sounding track's
-    /// resolved album.
+    /// The one quiet road out of Now playing: a saved playlist's page, the
+    /// unsaved playlist represented by the current run, or the sounding
+    /// track's resolved album.
     fn now_playing_source(&self) -> Option<views::now_playing::Source> {
         let now = self.player.now_playing()?;
         if let Some((id, name)) = self.current_playlist() {
             return Some(views::now_playing::Source::Playlist { id, name });
+        }
+        if matches!(
+            self.player.run_origin(),
+            crate::player::RunOrigin::Assembled
+        ) {
+            let name = views::queue::unsaved_name(self.player.queue_origin());
+            return Some(views::now_playing::Source::Queue { name });
         }
         Some(views::now_playing::Source::Album {
             id: now.album_id?,
@@ -2432,7 +2470,10 @@ impl App {
                 }
             }
             Message::SaveQueueStart => {
-                self.playlists.saving_queue = Some(crate::playlists::NameEntry::default());
+                self.playlists.saving_queue = Some(crate::playlists::NameEntry {
+                    text: views::queue::unsaved_name(self.player.queue_origin()),
+                    error: None,
+                });
                 return Some(text_input::focus(views::queue::save_name_id()));
             }
             Message::SaveQueueInput(text) => {
@@ -2673,6 +2714,7 @@ impl App {
             album,
             artist,
             items,
+            origin: None,
             // **Assembled**: this is the listener building a run by hand, one
             // pick at a time, and it is the one kind the save word is for.
             source: vm::RunSource::Assembled,
@@ -2693,6 +2735,7 @@ impl App {
             album: None,
             artist: String::new(),
             items: Vec::new(),
+            origin: None,
             source: vm::RunSource::Assembled,
         });
         let edited = if let Some(held) = self.player.queue() {
@@ -3031,6 +3074,7 @@ impl App {
             Place::Artist(id) => Some(id),
             _ => None,
         };
+        let open_unsaved = self.place == Place::Queue;
         let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
         };
@@ -3041,6 +3085,9 @@ impl App {
                 .map(|album| album.id)
                 .collect();
             ids.extend(theirs);
+        }
+        if open_unsaved {
+            ids.extend(views::queue::unsaved_art(state, &self.player));
         }
         ids.extend(quoted);
         state.request_thumbs_for(&ids)
@@ -3352,6 +3399,7 @@ impl App {
     /// left to peel.)
     fn peel_place_states(&mut self) -> bool {
         match self.place {
+            Place::Queue => self.playlists.saving_queue.take().is_some(),
             Place::Playlist(_) => {
                 let Some(open) = &mut self.playlists.open else {
                     return false;
@@ -3459,6 +3507,7 @@ impl App {
         let lit = self.player.playing_album();
         match message {
             PlayerEvent::Engine(event) => {
+                let volume_confirmed = matches!(&event, Event::VolumeChanged { .. });
                 match &event {
                     Event::TrackStarted { path, position } => {
                         println!(
@@ -3546,6 +3595,9 @@ impl App {
                 // reaches config.toml is what the engine put in force,
                 // including a pre-amp it clamped on the way in.
                 self.persist_replay_gain();
+                if volume_confirmed {
+                    self.persist_volume();
+                }
             }
             PlayerEvent::Closed => {
                 println!("[playback] engine shut down");
@@ -3572,6 +3624,24 @@ impl App {
         }
         self.saved_replay_gain = settings;
         persist(|config| config.replay_gain = settings);
+    }
+
+    /// Write the fader position the engine has just confirmed, if it moved.
+    ///
+    /// `VolumeChanged` also reports mute and output-path changes. Comparing
+    /// only the control position means those independent facts never turn
+    /// into config writes, while drag, keyboard and MPRIS volume gestures all
+    /// share this one confirmation-driven persistence path.
+    fn persist_volume(&mut self) {
+        if self.player.volume_gesture_active() {
+            return;
+        }
+        let volume = self.player.volume();
+        if volume == self.saved_volume {
+            return;
+        }
+        self.saved_volume = volume;
+        persist(|config| config.volume = volume);
     }
 
     /// Hand the desktop integration the state the engine just confirmed.
@@ -3684,7 +3754,14 @@ impl App {
             }
             Message::VolumeHovered(pointer) => self.player.hover_volume(pointer),
             Message::VolumeLeft => self.player.volume_left(),
-            Message::VolumeReleased => self.player.release_volume(),
+            Message::VolumeReleased => {
+                self.player.release_volume();
+                // Confirmed positions heard during the drag were deliberately
+                // not written one pixel at a time. Commit the latest one when
+                // the hand lets go; a final in-flight confirmation will update
+                // it once more when it arrives.
+                self.persist_volume();
+            }
             Message::VolumeStep(steps) => {
                 let target = self.player.step_volume(steps);
                 self.send_volume(target);
@@ -3911,6 +3988,7 @@ impl App {
     /// take the queue, which is the caller's cue to stop rather than to send a
     /// transport command into a run that does not exist.
     fn send_run(&mut self, queue: vm::QueueVm, lead: Option<usize>) -> Option<usize> {
+        let origin = run_origin(&queue);
         // **A fresh pass per run**, and only when the mode is on. The same seed
         // over a re-played record would be the same shuffle twice, which is the
         // one thing about a shuffle a listener notices immediately.
@@ -3926,7 +4004,6 @@ impl App {
         // There is no branch here any more and that is the reduction: what
         // shuffle changes is the walk, which the engine was told about above.
         let paths = queue.paths();
-        let origin = run_origin(&queue);
         if !self.playback.send(Command::SetQueue { paths, origin }) {
             self.player.engine_closed();
             return None;
@@ -4009,6 +4086,25 @@ impl App {
             return;
         }
         println!("[all-songs] play everything — {}", list.counts());
+        self.start(list);
+    }
+
+    /// Play the open artist's implicit `All songs` list.
+    fn play_artist_songs(&mut self, artist: u64) {
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        let Some(list) = state.artist_songs(artist) else {
+            return;
+        };
+        if list.is_empty() {
+            return;
+        }
+        println!(
+            "[artist-songs] play {} — {}",
+            list.origin.name(),
+            list.counts()
+        );
         self.start(list);
     }
 
@@ -4318,7 +4414,7 @@ impl App {
         if from == self.place {
             return Task::none();
         }
-        if from == Place::NowPlaying {
+        if from == Place::Queue {
             self.queue_undo.clear();
         }
         if matches!(from, Place::Playlist(_)) {
@@ -4422,6 +4518,17 @@ impl App {
                     state.view(&self.player, lamp, collecting)
                 }
             }
+            (Screen::Shelf(state), Place::Queue) => views::queue::view(
+                state,
+                &self.player,
+                iced::Size::new(self.body_width(), self.body_height()),
+                self.drag.as_ref().map_or(self.hovered_queue_row, |_| None),
+                self.playlists.saving_queue.as_ref(),
+                collecting,
+                self.queue_scroll,
+                self.drag.as_ref(),
+                self.queue_undo.can_undo(),
+            ),
             (Screen::Shelf(state), Place::Playlist(id)) => match self.playlists.page(id) {
                 Some(open) => views::playlist::view(
                     state,
@@ -4547,11 +4654,11 @@ impl App {
         };
         // **The app bar, over everything** (ADR-0040): the band a platform
         // title bar occupies, drawn by baz, resident and identical in all
-        // seven places.
+        // eight places.
         //
         // It is composed **here**, outside the lane and outside the place,
         // for the reason the lane is composed outside the place: a surface
-        // that is the same everywhere must be assembled once, or it is seven
+        // that is the same everywhere must be assembled once, or it is eight
         // surfaces that happen to agree. And it spans the *window* rather than
         // the body, because the window controls in its right corner belong to
         // the window and may not be inset by a lane whose width changes.
@@ -5667,6 +5774,18 @@ impl Shelf {
         crate::implicit::ImplicitList::everything(&self.albums, |id| {
             self.edition_choice.get(&id).copied()
         })
+    }
+
+    /// One artist's chronological implicit `All songs` list, resolved from
+    /// the same records and edition choices their page draws.
+    pub(crate) fn artist_songs(&self, artist: u64) -> Option<crate::implicit::ImplicitList> {
+        let name = crate::views::artist::label(self, artist)?;
+        Some(crate::implicit::ImplicitList::artist(
+            &self.albums,
+            artist,
+            name,
+            |id| self.edition_choice.get(&id).copied(),
+        ))
     }
 
     /// Put a shelf at the top of the wall — what an index-rail entry does.
@@ -7091,32 +7210,30 @@ fn draw_seed() -> u64 {
 /// the snapshot's `restore_the_run` — say the same thing, and a third could not
 /// quietly say something else.
 ///
-/// It reads `QueueVm::provenance`, which is *"the name of the playlist file
-/// this run was reified from"* and is `None` for every other origin: a record's
-/// own `Play`, `Play all`, a shuffle draw, a track click, a run appended to.
-/// So today exactly one kind is ever written, and that is the whole of the
-/// owner's ask: **a playlist's run stops crediting its albums, and an album's
-/// run keeps crediting the album.** A run with no origin writes a marker that
-/// names no list, and its plays fold onto their records exactly as they always
-/// did.
+/// The queue now carries the list identity separately from [`vm::RunSource`].
+/// Two origins are durable attribution: a playlist file and an artist's
+/// implicit `All songs`. Both exclude the records they quote from record
+/// recency. Library-wide `All songs` deliberately does not: it has no row of
+/// its own and retaining the records' touches is the useful reading of that
+/// collection-wide gesture. The provenance fallback keeps restored and older
+/// playlist queues honest.
 ///
 /// # Why not `RunSource`, which is right here
 ///
-/// [`vm::RunSource`] is the same question answered on the queue's side, and its
-/// `Assembled` is [`Origin::Hand`](crate::origin::Origin::Hand) under another
-/// name. It is deliberately **not** spent here, because writing a marker
-/// *excludes* that run's plays from the records they quoted — and
-/// [`crate::lane::subject_of`] has no row to credit a run made by hand, so a
-/// `hand::` marker would lose the touch rather than move it. The rule is stated
-/// once, in `crate::origin`, and asserted there.
-///
-/// When ADR-0034 §1 lands, `RunSource` and `Origin` become one type, this
-/// becomes `queue.origin.as_ref().map(Origin::encode)`, and the lane grows the
-/// rows that make the other kinds safe to write.
+/// [`vm::RunSource`] answers whether the queue can be saved, not which list it
+/// came from. Its `Fixed` bucket includes records, artist lists, All songs and
+/// draws, whose attribution rules differ; spending it here would conflate
+/// them again.
 fn run_origin(queue: &vm::QueueVm) -> Option<String> {
-    queue
-        .provenance()
-        .map(|name| crate::origin::Origin::playlist(name).encode())
+    use crate::origin::Origin;
+
+    match queue.origin.as_ref() {
+        Some(origin @ (Origin::Playlist { .. } | Origin::Artist { .. })) => Some(origin.encode()),
+        Some(Origin::Album { .. } | Origin::AllSongs | Origin::Draw | Origin::Hand { .. }) => None,
+        None => queue
+            .provenance()
+            .map(|name| Origin::playlist(name).encode()),
+    }
 }
 
 fn read_history() -> Option<History> {
@@ -7767,6 +7884,75 @@ mod tests {
         assert!(
             tail.contains("self.send_run(") && tail.contains("Command::Play"),
             "one press, and the first track sounds"
+        );
+    }
+
+    /// A live source link and a durable history marker are related but not
+    /// identical promises. Artist and file-backed lists own their run;
+    /// library-wide All songs keeps ordinary record recency.
+    #[test]
+    fn only_lists_with_specific_attribution_mark_the_ledger_run() {
+        let queue = |origin, source| vm::QueueVm {
+            album: None,
+            artist: String::new(),
+            items: Vec::new(),
+            origin,
+            source,
+        };
+        let artist = crate::origin::Origin::Artist {
+            id: 17,
+            name: "Broadcast".to_owned(),
+        };
+        assert_eq!(
+            run_origin(&queue(Some(artist.clone()), vm::RunSource::Fixed)),
+            Some(artist.encode())
+        );
+        assert_eq!(
+            run_origin(&queue(
+                Some(crate::origin::Origin::AllSongs),
+                vm::RunSource::Fixed
+            )),
+            None
+        );
+        assert_eq!(
+            run_origin(&queue(
+                None,
+                vm::RunSource::Playlist("Road Trip".to_owned())
+            )),
+            Some(crate::origin::Origin::playlist("Road Trip").encode()),
+            "older restored playlist queues retain their attribution"
+        );
+    }
+
+    /// The fader's standing position crosses both halves of a restart: config
+    /// is sent back to the engine at launch, and only the engine's confirmed
+    /// answer is written for next time.
+    #[test]
+    fn volume_is_restored_and_persisted_from_confirmation() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("the shell source")
+        .replace("\r\n", "\n");
+        let code = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production code");
+        assert!(code.contains("|config| config.volume"));
+        assert!(code.contains("position: saved_volume.position()"));
+        assert!(code.contains("matches!(&event, Event::VolumeChanged { .. })"));
+        assert!(code.contains("self.persist_volume()"));
+
+        let start = code
+            .find("fn persist_volume(&mut self)")
+            .expect("the persistence seam exists");
+        let body = &code[start..];
+        let body = &body[..body.find("\n    }\n").expect("the function ends")];
+        assert!(body.contains("self.player.volume()"));
+        assert!(body.contains("config.volume = volume"));
+        assert!(
+            body.contains("volume_gesture_active()"),
+            "a drag must not write config once per pixel"
         );
     }
 
@@ -8664,6 +8850,7 @@ mod tests {
                 item("Anhydrous 2", "/m/2.flac"),
                 item("Anhydrous 3", "/m/3.flac"),
             ],
+            origin: Some(crate::origin::Origin::playlist("Road Trip")),
             source: vm::RunSource::Playlist("Road Trip".to_owned()),
         }
     }

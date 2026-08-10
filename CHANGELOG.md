@@ -26,6 +26,11 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Fixed
 
+- **The volume fader is remembered between runs.** Its exact integer control
+  position is restored from `config.toml` before the first track plays and is
+  persisted from the engine's confirmation, not an optimistic request. A drag
+  writes once when the hand lets go rather than once per pixel crossed; mute
+  remains an independent, session-only switch.
 - **The bottom-edge needle is a conventional song seek bar.** It measures only
   the current track, with track elapsed/total figures and one continuous seek
   target. The proposed whole-list toggle, cumulative figures, queue segments
@@ -59,6 +64,16 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Added
 
+- **Every artist page has its own `All songs` playlist.** It appears above
+  `RECORDS` in the same wall-sized collage tile used by Home, plays only that
+  artist, and orders releases chronologically (undated releases last) before
+  preserving each selected edition's disc and track order. Playing it
+  materializes the list as an ordinary-looking unsaved playlist named
+  `All <artist>`: its sleeve is generated from the first four records in the
+  run, and the Now playing source road opens that editable list. `Save as
+  playlist` turns the displayed title into a focused, pre-filled name field
+  with an inline Save action. Home's library-wide `All songs` follows the same
+  rule under that name.
 - **Library removal no longer loses arrival history** (ADR-0042).
   `Library::forget_paths` deletes exactly the rows a caller names and keeps
   their arrival dates, the same mechanism folder removal uses. It remains

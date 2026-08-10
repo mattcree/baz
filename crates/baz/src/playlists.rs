@@ -1370,6 +1370,7 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
         album,
         artist: artist.unwrap_or_else(|| playlist.name().to_owned()),
         items,
+        origin: Some(crate::origin::Origin::playlist(playlist.name())),
         // Playing provenance (09 §6): a queue reified from this *file*
         // carries the file's name — origin, never a live link. Set here, in
         // the one place the playable subset becomes a queue record, so
@@ -1866,6 +1867,7 @@ mod tests {
             album: Some("Apollo".to_owned()),
             artist: "Eno".to_owned(),
             items: vec![item("An Ending", "/m/eno/ascent.flac")],
+            origin: Some(crate::origin::Origin::playlist("Road Trip")),
             source: RunSource::Playlist("Road Trip".to_owned()),
         };
         let before = run.clone();
@@ -1987,6 +1989,7 @@ mod tests {
                 duration: Some(Duration::from_secs(260)),
                 path: track("/m/eno/ascent.flac"),
             }],
+            origin: None,
             source: RunSource::Fixed,
         };
         // Whitespace at the ends is trimmed rather than refused (the roots

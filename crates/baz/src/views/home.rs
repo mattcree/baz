@@ -90,9 +90,7 @@
 //! in the mockup the owner approved that is not a rearrangement of something
 //! already shipped, and it is what [`needle`] is.
 
-use iced::widget::{
-    Space, button, column, container, image as iced_image, mouse_area, row, scrollable, stack, text,
-};
+use iced::widget::{Space, button, column, container, image as iced_image, row, scrollable, text};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
@@ -551,120 +549,21 @@ fn all_songs_tile<'a>(
     player: &'a PlayerState,
     hang: Grid,
 ) -> Option<Element<'a, Message>> {
-    let room = theme::active();
     let list = shelf.everything();
-    if list.is_empty() {
-        return None;
-    }
-    // **The wall's own grid** — the one the shell resolved, not a second one
-    // resolved here — so this tile is one column of the lattice
-    // `RECENTLY ADDED` stands on, at the same size the same record is drawn
-    // at on the wall one press away.
-    let edge = hang.art;
-    let work = (edge - 2.0 * theme::SLEEVE_MAT).max(0.0);
-    let hovered = shelf.hovered_all_songs;
-    let art = crate::views::playlist_sleeve(shelf, &list.art, list.name(), work);
-    // **The wall's own hover layer**, built by the wall's own function
-    // (`views::shelf::veil`) rather than by a second one that looks like it.
-    // Two options where a record has four, and the two it does not have are the
-    // two an implicit list cannot answer: `Add to…` is refused by construction
-    // (`Origin::file` is `None`, so there is no file to append to), and `Queue`
-    // would append a whole library to a run — a verb with no reading a listener
-    // would want. `Open` goes to the wall, which is where this list is looked
-    // at (`crate::implicit`'s "where you look at one").
-    let art: Element<'_, Message> = if hovered {
-        let engine = player.engine_ready();
-        stack![
-            art,
-            crate::views::shelf::veil(
-                work,
-                [
-                    engine.then(|| crate::views::shelf::VeilOption::accented(
-                        icon::Glyph::Play,
-                        "Play",
-                        Message::PlayEverything,
-                    )),
-                    Some(crate::views::shelf::VeilOption::new(
-                        icon::Glyph::Open,
-                        "Open",
-                        Message::ShowAllSongs,
-                    )),
-                ]
-                .into_iter()
-                .flatten(),
-            )
-        ]
-        .into()
-    } else {
-        art
-    };
-    let sleeve = container(
-        container(art)
-            .width(Length::Fixed(work))
-            .height(Length::Fixed(work))
-            .style(move |_theme| theme::sleeve(room, 0.0)),
-    )
-    .width(Length::Fixed(edge))
-    .height(Length::Fixed(edge))
-    .padding(theme::SLEEVE_MAT)
-    .style(move |_theme| theme::sleeve_mat(room));
-    // The wall tile's caption block, to the pixel: two one-line lanes in a
-    // reserved box, so this tile and the row below sit on one baseline.
-    let caption_lane = |content: Element<'a, Message>| {
-        container(content)
-            .width(Length::Fixed(edge))
-            .height(Length::Fixed(theme::CAPTION_LINE_H))
-            .align_y(alignment::Vertical::Top)
-            .clip(true)
-    };
-    let hover = if hovered { 1.0 } else { 0.0 };
-    let caption_block = column![
-        caption_lane(
-            text(list.name().to_owned())
-                .size(theme::SIZE_BODY)
-                .line_height(theme::LEADING_BODY)
-                .font(theme::MEDIUM)
-                .color(room.paper)
-                .wrapping(text::Wrapping::None)
-                .into(),
-        ),
-        // **The tile states its own scope.** The collage is arbitrary about
-        // which four records it quotes; this line is not arbitrary about
-        // anything — it is what pressing the tile will play.
-        caption_lane(
-            text(list.counts())
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(theme::caption_ink(room, hover))
-                .wrapping(text::Wrapping::None)
-                .into(),
-        ),
-    ]
-    .width(Length::Fixed(edge))
-    .height(Length::Fixed(theme::CAPTION_H));
-    let tile = column![
-        sleeve,
-        caption_block,
-        crate::views::shelf::state_rule(hover, false, edge)
-    ]
-    .spacing(theme::GAP_XS)
-    .width(Length::Fixed(edge));
-    // The tile's own press plays it, exactly as a record's tile press opens the
-    // record: the primary act, from anywhere on the tile that is not an option.
-    // An option's press is captured before this sees it (iced hands a button's
-    // event to its content first), which is the mechanism the wall relies on.
-    let pressable = button(tile)
-        .padding(0)
-        .style(move |_theme, status| theme::tile(room, status, false))
-        .on_press(Message::PlayEverything);
-    Some(
-        mouse_area(pressable)
-            .on_enter(Message::AllSongsHovered(true))
-            .on_exit(Message::AllSongsHovered(false))
-            .into(),
+    crate::views::list_tile::view(
+        shelf,
+        player,
+        hang,
+        &list,
+        shelf.hovered_all_songs,
+        crate::views::list_tile::Actions {
+            play: Message::PlayEverything,
+            open: Some(Message::ShowAllSongs),
+            enter: Message::AllSongsHovered(true),
+            exit: Message::AllSongsHovered(false),
+        },
     )
 }
-
 /// **`RECENTLY ADDED`** — one row of records by `first_seen_ns`, newest first,
 /// in **the wall's own tile**.
 ///
@@ -1144,6 +1043,11 @@ mod tests {
             .expect("the tile")
             .1;
         let tile = &tile[..tile.find("\n}\n").expect("a function ends")];
+        let anatomy = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/list_tile.rs"),
+        )
+        .expect("the shared list tile")
+        .replace("\r\n", "\n");
 
         // **It plays everything you own**, not whatever the wall is filtered
         // to: Home shows no wall and no query, so a filter set on another page
@@ -1159,7 +1063,7 @@ mod tests {
         // **A list's sleeve, because an implicit list is a list.** The panel's
         // `All songs` row draws this same collage, and one list has one face.
         assert!(
-            tile.contains("crate::views::playlist_sleeve("),
+            anatomy.contains("crate::views::playlist_sleeve("),
             "the tile grew a second face for a list that already has one"
         );
         // **The wall's own tile anatomy**, to the token: the grid's art edge,
@@ -1173,7 +1077,7 @@ mod tests {
             "crate::views::shelf::state_rule(",
         ] {
             assert!(
-                tile.contains(token),
+                anatomy.contains(token),
                 "the tile stopped standing in the wall's anatomy: `{token}`"
             );
         }
@@ -1181,20 +1085,20 @@ mod tests {
         // and two options rather than four, because the two it does not have
         // are the two an implicit list cannot answer.
         assert!(
-            tile.contains("crate::views::shelf::veil(") && tile.contains("stack!["),
+            anatomy.contains("crate::views::shelf::veil(") && anatomy.contains("stack!["),
             "the tile draws a hover layer of its own instead of the wall's"
         );
         assert!(
-            tile.contains("\"Play\"") && tile.contains("\"Open\""),
+            anatomy.contains("\"Play\"") && anatomy.contains("\"Open\""),
             "the tile lost one of its two options"
         );
         assert!(
-            !tile.contains("\"Add to…\""),
+            !anatomy.contains("\"Add to…\""),
             "the veil offers to add to a list with no file behind it"
         );
         // **Absent, not empty** — the rule every band on this page keeps.
         assert!(
-            tile.contains("if list.is_empty() {\n        return None;"),
+            anatomy.contains("if list.is_empty() {\n        return None;"),
             "an empty library still draws a door into nothing"
         );
 

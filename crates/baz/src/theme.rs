@@ -2122,12 +2122,12 @@ pub fn app_bar_pad() -> Padding {
 /// The app bar's reserved slot for the **display options** (logical px) —
 /// four [`STEPPER_HIT`] detent marks, **96**.
 ///
-/// Reserved at every width and in **every place**, including the four that
+/// Reserved at every width and in **every place**, including the five that
 /// hang no works and draw no marks (ADR-0040 §5). That is the whole mechanism
 /// by which one bar can be the same bar everywhere while still obeying
 /// ADR-0028's *absent, not disabled*: the marks are absent where they would be
 /// inert, and the **slot** they leave is not, so the gear and the window
-/// buttons stand on the same two vertical lines in all seven places. A bar
+/// buttons stand on the same two vertical lines in all eight places. A bar
 /// whose right cluster slid 96 px as you navigated would be the frame moving,
 /// which is the one thing the frame may not do.
 pub const APP_BAR_MARKS_W: f32 = 4.0 * STEPPER_HIT;

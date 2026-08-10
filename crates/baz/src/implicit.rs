@@ -20,12 +20,12 @@
 //! a **kind with an origin** rather than as one bespoke thing, so that the
 //! remaining kinds can be named without it being rewritten.
 //!
-//! **Only one origin is built here** ([`Origin::AllSongs`]), because only one
-//! was asked for. [`Origin`]'s own docs say exactly where an album's list and a
-//! draw's list slot in and what each would carry; the full model — including
-//! the harder half, where the play ledger records one line per *track path* and
-//! the engine is never told a run's provenance — is a separate piece of design
-//! work and is not decided here.
+//! Two origins are built here: the library-wide [`Origin::AllSongs`] and an
+//! [`Origin::Artist`] for the `All songs` tile on each artist page. [`Origin`]'s
+//! own docs say exactly where an album's list and a draw's list slot in and what
+//! each would carry. The queue carries this origin as inert identity: it can
+//! label the run, lead back to its source page and be written into the play
+//! ledger without deciding a single track in the order.
 //!
 //! # What an implicit list is, and what it is not
 //!
@@ -167,11 +167,18 @@ impl ImplicitList {
             .map(|(album, _)| album.id)
             .take(QUOTED)
             .collect();
+        let origin = Origin::AllSongs;
+        let mut queue = stacked_queue(&picks);
+        queue.origin = Some(origin.clone());
+        // The gesture materializes this implicit list as tonight's unsaved
+        // playlist. Its rows are fixed now; a durable artefact exists only if
+        // the listener later chooses `Save as playlist`.
+        queue.source = crate::vm::RunSource::Assembled;
         Self {
-            origin: Origin::AllSongs,
+            origin,
             records: picks.len(),
             art,
-            queue: stacked_queue(&picks),
+            queue,
             // The wall is a view of the library, and the query narrows it.
             narrowed_from: Some(albums.len()),
         }
@@ -205,6 +212,60 @@ impl ImplicitList {
         Self::all_songs(albums, &visible, chosen)
     }
 
+    /// **One artist's All songs** — their records in release chronology, then
+    /// each selected edition's own disc/track order.
+    ///
+    /// Chronology is the list's arrangement rather than the wall's: the wall
+    /// can be regrouped by genre, format or recency, but an artist's songs have
+    /// a stable history of their own. Undated records follow dated ones; ties
+    /// are title then id, so two launches over the same library make the same
+    /// run whatever order the wall happened to arrive in.
+    pub(crate) fn artist(
+        albums: &[AlbumVm],
+        artist: u64,
+        name: &str,
+        chosen: impl Fn(u64) -> Option<EditionKey>,
+    ) -> Self {
+        let mut picks: Vec<(&AlbumVm, Option<EditionKey>)> = albums
+            .iter()
+            .filter(|album| crate::vm::artist_id(&album.artist) == artist)
+            .map(|album| (album, chosen(album.id)))
+            .collect();
+        picks.sort_by(|(a, _), (b, _)| {
+            a.year
+                .unwrap_or(u32::MAX)
+                .cmp(&b.year.unwrap_or(u32::MAX))
+                .then_with(|| {
+                    a.title
+                        .as_deref()
+                        .unwrap_or_default()
+                        .to_lowercase()
+                        .cmp(&b.title.as_deref().unwrap_or_default().to_lowercase())
+                })
+                .then_with(|| a.title.cmp(&b.title))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        let art = picks
+            .iter()
+            .map(|(album, _)| album.id)
+            .take(QUOTED)
+            .collect();
+        let origin = Origin::Artist {
+            id: artist,
+            name: name.to_owned(),
+        };
+        let mut queue = stacked_queue(&picks);
+        queue.origin = Some(origin.clone());
+        queue.source = crate::vm::RunSource::Assembled;
+        Self {
+            origin,
+            records: picks.len(),
+            art,
+            queue,
+            narrowed_from: None,
+        }
+    }
+
     /// The list's name — its origin's.
     ///
     /// A borrow rather than a `&'static str`, and not `const`, because
@@ -212,7 +273,10 @@ impl ImplicitList {
     /// §1.4). `All songs` is still one `'static` word; the signature is what
     /// changed, not the string.
     pub(crate) fn name(&self) -> &str {
-        self.origin.name()
+        match &self.origin {
+            Origin::Artist { .. } => "All songs",
+            _ => self.origin.name(),
+        }
     }
 
     /// Whether the list is empty — an empty library, or a query that matched
@@ -329,6 +393,15 @@ mod tests {
         of(albums, &visible)
     }
 
+    fn release(artist: &str, title: &str, year: Option<u32>) -> AlbumVm {
+        let mut album = album(title, Some(100));
+        album.artist = AlbumArtistVm::Named(artist.to_owned());
+        album.title = Some(title.to_owned());
+        album.year = year;
+        album.id = crate::vm::album_id(baz_core::index::AlbumArtist::Named(artist), Some(title));
+        album
+    }
+
     /// **The list is the wall, in the wall's own order** — the property that
     /// makes it the implicit playlist doc 09 §2 already named, rather than a
     /// second collection with opinions of its own.
@@ -348,6 +421,7 @@ mod tests {
         let whole = all(&albums);
         assert_eq!(whole.records, 6);
         assert_eq!(whole.queue.len(), 12);
+        assert_eq!(whole.queue.source, crate::vm::RunSource::Assembled);
         assert_eq!(
             titles(&whole),
             ["a", "a", "b", "b", "c", "c", "d", "d", "e", "e", "f", "f"]
@@ -379,6 +453,46 @@ mod tests {
             of(&albums, &visible).queue.paths(),
             of(&albums, &visible).queue.paths()
         );
+    }
+
+    #[test]
+    fn an_artists_list_is_chronological_whatever_order_the_wall_is_in() {
+        let albums = vec![
+            release("Low", "Later", Some(2005)),
+            release("Other", "Not theirs", Some(1980)),
+            release("LOW", "Early B", Some(1994)),
+            release("Low", "Undated", None),
+            release("Low", "Early A", Some(1994)),
+        ];
+        let artist = crate::vm::artist_id(&AlbumArtistVm::Named("low".to_owned()));
+        let list = ImplicitList::artist(&albums, artist, "Low", |_| None);
+        let records: Vec<&str> = list
+            .queue
+            .items
+            .iter()
+            .step_by(2)
+            .filter_map(|item| item.album.as_deref())
+            .collect();
+
+        assert_eq!(records, ["Early A", "Early B", "Later", "Undated"]);
+        assert_eq!(list.records, 4);
+        assert_eq!(list.queue.len(), 8);
+        assert_eq!(list.queue.source, crate::vm::RunSource::Assembled);
+        assert_eq!(list.name(), "All songs");
+        assert_eq!(list.counts(), "4 records · 8 songs · 13:20");
+        assert!(!list.filtered(), "an artist is a fixed scope");
+        assert_eq!(
+            list.origin,
+            Origin::Artist {
+                id: artist,
+                name: "Low".to_owned(),
+            }
+        );
+        assert_eq!(
+            list.art,
+            [albums[4].id, albums[2].id, albums[0].id, albums[3].id]
+        );
+        assert_eq!(list.origin.file(), None);
     }
 
     /// **The name stays honest under a query.** A list called *All songs* that
@@ -467,15 +581,14 @@ mod tests {
     /// so that adding an album's list or a draw's list to [`Origin`] without
     /// answering this question fails here.
     #[test]
-    #[expect(
-        clippy::single_element_loop,
-        reason = "the loop is the claim: it sweeps every Origin, and there is \
-                  one today. Unrolling it would make adding a variant silently \
-                  skip this assertion, which is the exact failure the sweep \
-                  exists to prevent"
-    )]
     fn no_origin_has_a_file_behind_it() {
-        for origin in [Origin::AllSongs] {
+        for origin in [
+            Origin::AllSongs,
+            Origin::Artist {
+                id: 1,
+                name: "Low".to_owned(),
+            },
+        ] {
             assert_eq!(origin.file(), None, "{origin:?} claimed a file");
             assert!(!origin.name().is_empty(), "{origin:?} has no name");
         }

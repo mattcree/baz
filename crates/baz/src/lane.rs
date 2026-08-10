@@ -158,13 +158,12 @@ pub(crate) fn played_list(provenance: Option<&str>) -> Option<u64> {
 ///   there is nothing to go back to, so there is no row to raise.
 /// - **A run made by hand.** There was no list.
 ///
-/// # The rule this places on the *writer*
-///
-/// Marking a run in the ledger excludes its plays from the records they
-/// quoted, so **a kind this returns `None` for must not be written as a
-/// marker** until the lane can credit it — otherwise the touch is lost rather
-/// than moved. Today the product writes exactly one kind, and
-/// [`crate::origin`]'s own sweep is where that is asserted.
+/// An artist run is the deliberate exception to the old *no row, no marker*
+/// rule: its marker preserves the list attribution and stops every quoted
+/// record jumping in `RECENT`, while this function refuses to invent an artist
+/// row in a lane whose resident subjects remain records and playlist files.
+/// Library-wide `All songs`, draws and hand-built runs are not marked, so their
+/// constituent record touches remain visible.
 pub(crate) fn subject_of(origin: &crate::origin::Origin) -> Option<Subject> {
     use crate::origin::Origin;
     match origin {

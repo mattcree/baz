@@ -1,4 +1,5 @@
-//! **The artist's page** — their name, and their records in the wall's own tile.
+//! **The artist's page** — their `All songs`, then their records in the wall's
+//! own tile.
 //!
 //! The owner, in one line: *"previous and next on albums doesn't make sense on
 //! the album view. we could add an Artist > album breadcrumb though. and have
@@ -140,6 +141,27 @@ pub(crate) fn view<'a>(
     // — the second of three — until the general fix landed.
     let lead = place_name(name);
 
+    // One list above the records it draws from: broadest first, and visually
+    // distinct from the `RECORDS` set rather than pretending to be one more
+    // album. The shared tile keeps this identical to Home's `All songs` in
+    // anatomy while the artist constructor gives it a different scope.
+    let songs = shelf.artist_songs(artist);
+    let songs = songs.as_ref().and_then(|list| {
+        crate::views::list_tile::view(
+            shelf,
+            player,
+            hang,
+            list,
+            shelf.hovered_all_songs,
+            crate::views::list_tile::Actions {
+                play: Message::PlayArtistSongs(artist),
+                open: None,
+                enter: Message::AllSongsHovered(true),
+                exit: Message::AllSongsHovered(false),
+            },
+        )
+    });
+
     let mut rows = column![].spacing(hang.gutter);
     let mut current = row![].spacing(hang.gutter);
     let mut in_row = 0usize;
@@ -158,7 +180,13 @@ pub(crate) fn view<'a>(
         rows = rows.push(current);
     }
 
-    let body = column![crate::views::section_rule("Records"), rows].spacing(theme::GAP_LG);
+    let records_section =
+        column![crate::views::section_rule("Records"), rows].spacing(theme::GAP_LG);
+    let mut body = column![].spacing(theme::HANG);
+    if let Some(songs) = songs {
+        body = body.push(songs);
+    }
+    body = body.push(records_section);
 
     column![
         place_header_led(lead, Some(counts(&records))),
@@ -203,5 +231,25 @@ mod tests {
     #[test]
     fn the_counts_line_honours_its_singulars() {
         assert_eq!(counts(&[]), "0 records · 0 tracks");
+    }
+
+    /// The artist list is the same visual object as Home's list, and it leads
+    /// the records rather than masquerading as one of them.
+    #[test]
+    fn all_songs_is_the_shared_tile_above_records() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/artist.rs"),
+        )
+        .expect("this view's source")
+        .replace("\r\n", "\n");
+        let code = source.split("#[cfg(test)]").next().expect("a source head");
+        let tile = code
+            .find("crate::views::list_tile::view(")
+            .expect("the shared tile is used");
+        let records = code
+            .find("let records_section =")
+            .expect("the records section exists");
+        assert!(tile < records, "All songs leads the records");
+        assert!(code.contains("Message::PlayArtistSongs(artist)"));
     }
 }
