@@ -1,13 +1,13 @@
 # baz — the work queue
 
-> **This file answers one question: what is next?** Read the top of `## Next`
-> and start. If you are an agent picking this project up cold, this is the only
-> file you need to begin; everything else explains *why*.
+> **This file answers one question: what is next?** Read the top of the *Next*
+> list below and start. If you are an agent picking this project up cold, this
+> is the only file you need to begin; everything else explains *why*.
 >
 > **The rule.** Every item here is one of four states, and an item leaves only
-> by being **done** or by the owner saying it should go. "Blocked on a decision"
-> is a *note on the item*, never a reason to delete it — that failure has
-> happened, and this file exists because of it.
+> by being **done** or by the owner saying it should go. "Blocked on a
+> decision" is a *note on the item*, never a reason to delete it — that failure
+> has happened, and this file exists because of it.
 >
 > | state | means |
 > |---|---|
@@ -20,66 +20,42 @@
 > its item to done and adding anything it discovered. A branch that changes the
 > product and not this file is incomplete.
 >
-> Where the other documents fit: `CHANGELOG.md` is what shipped, `BACKLOG.md` is
-> what was deliberately *not* done and why, `NEXT-STEPS.md` is the shape of the
-> project, `REQUESTS.md` is the owner's asks verbatim with their fate. **This is
-> the ordered queue.** If they disagree, this one is wrong — fix it.
+> Where the other documents fit: `CHANGELOG.md` is what shipped, `BACKLOG.md`
+> is what was deliberately *not* done and why, `NEXT-STEPS.md` is the shape of
+> the project, `REQUESTS.md` is the owner's asks verbatim with their fate.
+> **This is the ordered queue.** If they disagree, this one is wrong — fix it.
 
 ## Next
 
-1. **Doc 14's Tier 2 — the serif on the two pages.** Held back tonight only
-   because `views/now_playing.rs` argues in prose *against* the serif and must
-   be amended in the same commit, and that file was another agent's. Do it
-   next, and amend the prose with it or the code argues with the ADR.
-2. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and the
-1. **The lane's scrollbar looks inset on the right.** *"scroll bar is in a
-   strange location… it seems to have padding on the right"*. The lane's gutter
-   was moved onto its contents so the bar could reach the edge; it evidently
-   still does not. Measure it on a rendered frame rather than reasoning from
-   the code — `docs/design/impl/search-in-lane/` has the harness.
-2. **Doc 14's Tier 2 — the serif on the two pages.** Still held back for the
-   reason it always was: `views/now_playing.rs:64-70` argues in prose *against*
-   the serif and must be amended in the same commit, and that file belonged to
-   the artwork-at-size agent while Tier 1 was built. Three things go with it —
-   `the_serif_is_the_work_titles_and_nothing_else` (`theme.rs`) changes from
-   `assert_eq!(users, ["views/home.rs"])` to an enumerated list of two; the
-   album page's hero takes `theme::WORK_TITLE`; and the playlist page's hero
-   deliberately does **not** (that is the axis). Tier 2's other two items are
-   smaller and can ride with it: the byline stating its composition
+1. **Doc 14's Tier 2 — the serif on the two pages.** Unblocked now:
+   `views/now_playing.rs` is free, and it argues in prose *against* the serif,
+   so amend that prose in the same commit or the code contradicts the ADR.
+   Three things go with it: `the_serif_is_the_work_titles_and_nothing_else`
+   (`theme.rs`) changes from `assert_eq!(users, ["views/home.rs"])` to an
+   enumerated list of two; the album page's hero takes `theme::WORK_TITLE`;
+   and the playlist page's hero deliberately does **not** — that is the axis.
+   Two smaller items can ride with it: the byline stating its composition
    (`Playlist` → `Playlist · 4 records`, from the distinct-record list
    `playlists.rs` already computes for the sleeve), and — only if a frame says
    `Run · ` was not enough — the save label naming its subject.
-3. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and the
-   Flatpak build are all done; what is left is a screenshot for the metainfo,
-   the version edit from `0.0.0`, a `workflow_dispatch` dry run, then the tag.
-   **The tag is the owner's to cut** — the workflow produces a draft.
-3. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** Visible in a
+2. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** Visible in a
    committed frame: at 2560 with the run standing, ~700 px of field sits
-   between the sleeve and the run column, because the record column hangs
-   left and the run stays 440 wide. A4 takes it to ~1100 at that size.
+   between the sleeve and the run column, because the record column hangs left
+   and the run stays 440 wide. A4 takes it to ~1100 at that size.
+3. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
+   the Flatpak build are all done; what is left is a screenshot for the
+   metainfo, the version edit from `0.0.0`, a `workflow_dispatch` dry run,
+   then the tag. **The tag is the owner's to cut** — the workflow produces a
+   draft.
 4. **Rewrite the README as the project's public face**, with the icon and real
-   Flatpak build are all done; what is left is a screenshot for the metainfo,
-   the version edit from `0.0.0`, a `workflow_dispatch` dry run, then the tag.
-   **The tag is the owner's to cut** — the workflow produces a draft.
-3. **Rewrite the README as the project's public face**, with the icon and real
-   screenshots of the wall, Home, Now playing and a playlist. Deliberately near
-   last, so it describes what actually ships. Its keyboard table is badly stale
-   today: `Pull` is gone, `Q` never opened the queue, shuffle is a mode, the
+   screenshots of the wall, Home, Now playing and a playlist. Deliberately
+   last, so it describes what actually ships. Its keyboard table is badly
+   stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode, the
    group keys changed, `Ctrl+B` exists.
 
 ## Doing
 
-- **The wall's scrollbar sits 108 px inboard of the window.** Measured on an
-  isolated 1280×860 frame: the bar is at x 1168–1171 and the rail's letters at
-  1233–1239, so the rail's whole lane sits between the bar and the window edge
-  — the owner's *"strange location… padding on the right"*. It is the **wall's**
-  bar, not the lane's; the lane draws none at all with a short list. The open
-  question is whether the bar should take the window edge outboard of the rail,
-  and what that costs the rail's edge-flingable hit bands.
-- **Doc 14 Tier 1** — the kind in the line under a name (`Playlist · 14 ·
-  42:10`), the byline that makes the two identity blocks the same height, and
-  the `Save as playlist` fixes: the run strip gains its noun, and the word
-  becomes the readout `Saved as "Road Trip"` while provenance stands unedited.
+Nothing. The queue above is the next thing.
 
 ## Waiting on the owner
 
