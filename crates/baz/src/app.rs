@@ -4287,6 +4287,15 @@ pub(crate) struct Shelf {
     /// Bumped whenever [`Self::lane_recent`] is rebuilt — the shell's cue to
     /// re-merge, without comparing two vectors of strings.
     pub(crate) lane_stamp: u64,
+    /// **The collection's four figures**, for the Home place's `COLLECTION`
+    /// footer ([`vm::Collection`]).
+    ///
+    /// Cached here for ADR-0030 §4's reason: three of the four are a pass over
+    /// every track, and the contract forbids paying that per frame. It is
+    /// rebuilt exactly where the albums it counts are —
+    /// [`Self::rebuild_shelves`] — so it cannot describe a library that is no
+    /// longer on the shelf.
+    pub(crate) collection: vm::Collection,
 }
 
 /// **The record the pull drew, and when it was last heard.**
@@ -4404,6 +4413,7 @@ impl Shelf {
             lane_played: HashMap::new(),
             lane_recent: Vec::new(),
             lane_stamp: 0,
+            collection: vm::Collection::default(),
         };
         // `rebuild_shelves` folds the ledger onto the records it has just
         // built (ADR-0030 §4): once, here, and never again from the file.
@@ -4959,6 +4969,13 @@ impl Shelf {
                 end: self.albums.len(),
             });
         }
+        // **Home's figures, counted here and nowhere else.** One pass over the
+        // tracks that were just rebuilt, on the same schedule the rebuild runs
+        // on — which is what keeps the `COLLECTION` footer off the per-frame
+        // path (ADR-0030 §4). The arrangement does not change any of the four,
+        // but re-counting is cheaper than reasoning about which caller changed
+        // what.
+        self.collection = vm::Collection::count(&self.albums, self.library.len());
         self.refilter();
         // The album ids survive a re-arrangement (see above), so the fold does
         // too — but a *rescan* can add and remove records, and the lane must

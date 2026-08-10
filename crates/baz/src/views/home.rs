@@ -5,17 +5,22 @@
 //! against. **The owner chose the page**, and the product's preamble
 //! says his decision is sufficient on its own; the ADR carries the amendment.
 //!
-//! # Two sections, and an honest inventory behind them
+//! # Three sections, and an honest inventory behind them
 //!
 //! ADR-0030 §6 inventoried what a home surface could truthfully hold and
 //! found exactly two facts worth the room. That survives the change from band
 //! to place unchanged, because it was an argument about *facts*, not about
-//! geometry:
+//! geometry — and the owner has since added a third:
 //!
 //! - **`CONTINUE`** — the run to carry on with (ADR-0023 §6's snapshot, built
 //!   for this; see [`crate::session`]).
 //! - **`RECENTLY ADDED`** — a row of records by first-seen, in the wall's own
 //!   tile, carrying the wall's own hover options.
+//! - **`COLLECTION`** — four figures about the library, at the **foot** of the
+//!   page. The owner's, verbatim: *"the album and track count below the search
+//!   bar doesn't look good… maybe this should go into the home as some basic
+//!   stats?"*. See [`collection`] for what the four are, why they are four, and
+//!   why they are the last thing on the page rather than the first.
 //!
 //! # The band asks one question, and it is only asked in the silence
 //!
@@ -55,13 +60,18 @@
 //! **playlists**, which are the returns lane's content one column to the left
 //! — one fact drawn twice is doc 07 L8.6's test; **the pull**, which is an act
 //! you press, and an unbidden offer is generation without a request; and every
-//! engagement statistic, which is not close.
+//! **engagement** statistic — what you played, how often, for how long — which
+//! is still not close. `COLLECTION` is not one of those and the line is worth
+//! stating plainly: it describes **what you own**, not what you do with it, and
+//! every figure in it would be identical if the application had never been
+//! opened.
 //!
 //! **A section is absent, not empty.** `CONTINUE` is absent while something is
 //! sounding, with no run to carry on with, and when the library no longer holds
 //! the file the run is on; `RECENTLY ADDED` is absent when the library holds
-//! fewer than a row of records. A page with neither says so in one line rather
-//! than drawing two empty headings.
+//! fewer than a row of records; `COLLECTION` is absent when there is no
+//! collection. A page with none of the three says so in one line rather than
+//! drawing three empty headings.
 //!
 //! # The signature of the whole design
 //!
@@ -143,11 +153,17 @@ pub(crate) fn view<'a>(
 
     let continuing = continue_band(shelf, player, resume, width);
     let added = recently_added(shelf, player, width, collecting);
-    let nothing = continuing.is_none() && added.is_none();
+    let counted = collection(shelf);
+    let nothing = continuing.is_none() && added.is_none() && counted.is_none();
     if let Some(band) = continuing {
         body = body.push(band);
     }
     if let Some(band) = added {
+        body = body.push(band);
+    }
+    // **Last, always.** See [`collection`]: you come to Home to get back into
+    // music, not to read numbers, so the numbers close the page.
+    if let Some(band) = counted {
         body = body.push(band);
     }
     if nothing {
@@ -537,6 +553,146 @@ fn recently_added<'a>(
     )
 }
 
+/// **`COLLECTION`** — four figures about the library, at the foot of the page.
+///
+/// The owner's ask: *"the album and track count below the search bar doesn't
+/// look good… maybe this should go into the home as some basic stats?"*. The
+/// counts came off the search well ([`crate::views::lane`]) and arrived here,
+/// and this is what they became.
+///
+/// # Where it sits, and why that is the foot
+///
+/// **Last.** Home's job is to put you back into music: `CONTINUE` is the one
+/// thing on this page you press, and `RECENTLY ADDED` is a row of records you
+/// can start from. Neither may be pushed down by an inventory. The figures are
+/// something you read *once in a while* — how big has this got, how much of it
+/// have I never got to the end of — and a fact you consult occasionally goes
+/// where the page ends, not where the eye lands. It is also the only section
+/// here that is pure statement: nothing in it is pressable, so putting it above
+/// two sections that are would be leading with the part you cannot use.
+///
+/// # The four, and the ones that were cut
+///
+/// Kept — records, the people who made them, the files, and the time
+/// ([`vm::Collection`]):
+///
+/// ```text
+///   25          9          206         14 hours
+///   ALBUMS      ARTISTS    TRACKS      OF MUSIC
+/// ```
+///
+/// It reads as a sentence about a collection rather than as a table: *25
+/// albums, 9 artists, 206 tracks, 14 hours of music*. Cut, and each for a
+/// reason rather than for room:
+///
+/// - **When the collection was last added to.** `RECENTLY ADDED` is drawn one
+///   section above this one, and it says the same thing with covers. One fact
+///   drawn twice is doc 07 L8.6's test, and the section that already passes it
+///   keeps the fact.
+/// - **How many records have never been played.** A figure about the
+///   *listener*, not about the collection — it is read out of the play ledger
+///   and it would change while you sat looking at it. ADR-0030 §6 refuses
+///   every engagement statistic, and this is the one on the list that is easy
+///   to mistake for an inventory fact.
+/// - **The library's size on disk.** True, cheap and dull: it is a fact about
+///   a filesystem, and nothing you would do differently having read it. The
+///   `Details` block on a record's page is where bytes belong.
+///
+/// # Absent, not empty
+///
+/// No records, no section — the same rule the two bands above it keep. A
+/// `COLLECTION` heading over four zeroes would be the page reporting on a
+/// library that does not exist yet, and the first-run page already has one
+/// line that says the right thing.
+fn collection(shelf: &Shelf) -> Option<Element<'static, Message>> {
+    let counted = shelf.collection;
+    if counted.albums == 0 {
+        return None;
+    }
+    let mut cells = row![].spacing(theme::GAP_XL);
+    for (figure, label) in [
+        (counted.albums.to_string(), "ALBUMS"),
+        (counted.artists.to_string(), "ARTISTS"),
+        (counted.tracks.to_string(), "TRACKS"),
+        (playing_time(counted.playing_ms), "OF MUSIC"),
+    ] {
+        cells = cells.push(stat(figure, label));
+    }
+    Some(
+        column![section_rule("Collection"), cells]
+            .spacing(theme::GAP_LG)
+            .into(),
+    )
+}
+
+/// One cell of the `COLLECTION` footer: the figure over its word.
+///
+/// The figure takes the **emphasis** size — one step above the body, which is
+/// the room's *quiet prominence* and not a headline; the word takes the section
+/// heading's own voice, tracked caps at the smallest size in the scale, in
+/// [`theme::Palette::paper_faint`]. So a cell is the page's own two smallest
+/// voices stacked, and the block reads as a footnote with structure rather
+/// than as a dashboard tile: no card, no rule, no colour, nothing pressable.
+///
+/// [`theme::STAT_W`] is a **pitch**: every cell is that wide whatever is in
+/// it, so the four figures stand on one lattice and the row reads left to
+/// right as a sentence. `font.rs` measures both lines of every cell against
+/// it.
+fn stat(figure: String, label: &'static str) -> Element<'static, Message> {
+    let room = theme::active();
+    container(
+        column![
+            text(figure)
+                .size(theme::SIZE_EMPHASIS)
+                .line_height(theme::LEADING_EMPHASIS)
+                .font(theme::MEDIUM)
+                .color(room.paper)
+                .wrapping(text::Wrapping::None),
+            text(theme::tracked(label))
+                .size(theme::SIZE_HEADING)
+                .line_height(theme::LEADING_HEADING)
+                .font(theme::MEDIUM)
+                .color(room.paper_faint)
+                .wrapping(text::Wrapping::None),
+        ]
+        .spacing(theme::GAP_XXS),
+    )
+    .width(Length::Fixed(theme::STAT_W))
+    .clip(true)
+    .into()
+}
+
+/// How long the collection is, in **one** unit: `14 hours`, `38 days`,
+/// `42 minutes`.
+///
+/// One unit rather than two, because the figure is a sense of scale and not a
+/// duration you are going to act on — `38 days 4 hours` is a stopwatch reading
+/// for a fact whose interesting digit is the first one. The unit is the
+/// largest that gives a whole number, and the singular is spelled rather than
+/// left as `1 days`.
+///
+/// It is **not** [`vm::format_duration`], which sets a position inside a track
+/// as `3:12` — a clock face for a collection would be six-digit nonsense.
+fn playing_time(ms: u64) -> String {
+    let plural = |n: u64, unit: &str| {
+        if n == 1 {
+            format!("{n} {unit}")
+        } else {
+            format!("{n} {unit}s")
+        }
+    };
+    let seconds = ms / 1_000;
+    let days = seconds / 86_400;
+    if days > 0 {
+        return plural(days, "day");
+    }
+    let hours = seconds / 3_600;
+    if hours > 0 {
+        return plural(hours, "hour");
+    }
+    plural(seconds / 60, "minute")
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
@@ -784,6 +940,177 @@ mod tests {
         let (filled, rest) = needle_runs(100_000, 100_000, width);
         assert!((filled - (width - theme::NEEDLE_TICK_W)).abs() < 0.001);
         assert!((rest - 0.0).abs() < 0.001);
+    }
+
+    /// **The collection's counts are the Home place's footer now** — the far
+    /// half of the move the owner asked for, whose near half is
+    /// [`crate::views::lane`]'s well losing its second line.
+    ///
+    /// *"the album and track count below the search bar doesn't look good…
+    /// maybe this should go into the home as some basic stats?"* The retired
+    /// readout pinned two format strings; this pins what replaced the resting
+    /// one — four figures, their four words, and the fact that they are drawn
+    /// **after** the two sections you can act on.
+    #[test]
+    fn the_collection_is_the_pages_footer_and_its_four_figures() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/home.rs"),
+        )
+        .expect("this file")
+        .replace("\r\n", "\n");
+        let shipped = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a source has a head");
+        let band = shipped
+            .split_once("fn collection(shelf: &Shelf)")
+            .expect("the collection band")
+            .1;
+        let band = &band[..band.find("\n}\n").expect("a function ends")];
+        for figure in ["ALBUMS", "ARTISTS", "TRACKS", "OF MUSIC"] {
+            assert!(
+                band.contains(figure),
+                "the collection footer lost its {figure:?} cell"
+            );
+        }
+        assert!(
+            band.contains("counted.albums") && band.contains("counted.tracks"),
+            "the two figures that came off the search well are not the two \
+             the footer states"
+        );
+        assert!(
+            band.contains("if counted.albums == 0 {\n        return None;"),
+            "a library with no records still draws a COLLECTION heading — a \
+             section is absent, not empty"
+        );
+        // **Last on the page.** Home is a door back into music; an inventory
+        // must not push the one thing you press down the page.
+        let view = shipped
+            .split_once("pub(crate) fn view<'a>(")
+            .expect("the page")
+            .1;
+        let drawn = |guard: &str| view.find(guard).unwrap_or_else(|| panic!("{guard}"));
+        assert!(
+            drawn("if let Some(band) = continuing {") < drawn("if let Some(band) = counted {")
+                && drawn("if let Some(band) = added {") < drawn("if let Some(band) = counted {"),
+            "the COLLECTION footer is drawn above CONTINUE or RECENTLY ADDED — \
+             it is the page's last section, not its first"
+        );
+        // …and the page still says one plain line when it has nothing at all,
+        // which the footer must be part of deciding.
+        assert!(
+            view.contains("counted.is_none()"),
+            "an empty library could now draw an empty page rather than its one \
+             line, because the footer is not in the `nothing` predicate"
+        );
+    }
+
+    /// **The playing time is one unit, and the singular is spelled.**
+    ///
+    /// A collection's length is a sense of scale, not a stopwatch reading, so
+    /// the unit is the largest that gives a whole number and there is no
+    /// second term after it. `1 days` would be the sort of thing that makes a
+    /// page feel machine-written.
+    #[test]
+    fn the_playing_time_is_one_unit_and_reads_as_english() {
+        const MINUTE: u64 = 60_000;
+        const HOUR: u64 = 60 * MINUTE;
+        const DAY: u64 = 24 * HOUR;
+        assert_eq!(playing_time(0), "0 minutes");
+        assert_eq!(playing_time(MINUTE), "1 minute");
+        assert_eq!(playing_time(42 * MINUTE), "42 minutes");
+        assert_eq!(playing_time(HOUR), "1 hour");
+        assert_eq!(playing_time(HOUR - 1), "59 minutes", "no rounding up");
+        assert_eq!(playing_time(14 * HOUR), "14 hours");
+        assert_eq!(playing_time(DAY), "1 day");
+        assert_eq!(playing_time(38 * DAY + 7 * HOUR), "38 days", "one unit");
+        // The figure the cell reserves for: nothing here can produce two.
+        assert_eq!(playing_time(9_999 * DAY), "9999 days");
+    }
+
+    /// **The four figures are counted once, off the albums, and they are the
+    /// four the footer states.**
+    ///
+    /// [`vm::Collection`] is what ADR-0030 §4's responsiveness contract makes
+    /// necessary — the count is a walk of every track, so it happens where the
+    /// albums are built and never in a frame. This is the arithmetic on its
+    /// own: named artists only, case-folded, and an album owned in two formats
+    /// counted once as a record and twice as files, because that is what it is.
+    #[test]
+    fn the_collection_counts_records_people_files_and_time() {
+        use std::time::Duration;
+
+        let track = |title: &str, secs: Option<u64>| vm::TrackVm {
+            disc: None,
+            number: None,
+            title: title.to_owned(),
+            artist: None,
+            duration: secs.map(Duration::from_secs),
+            path: std::path::PathBuf::from(format!("/m/{title}.flac")),
+            bytes: None,
+        };
+        let edition = |tracks: Vec<vm::TrackVm>| vm::EditionVm {
+            key: vm::EditionKey(None),
+            detail: None,
+            bitrate: None,
+            bit_depth: None,
+            sample_rate: None,
+            replay_gain: vm::ReplayGainCoverage::default(),
+            tracks,
+        };
+        let album = |artist: vm::AlbumArtistVm, editions: Vec<vm::EditionVm>| vm::AlbumVm {
+            id: 0,
+            title: Some("A record".to_owned()),
+            track_artists_vary: false,
+            artist,
+            year: None,
+            genre: None,
+            first_seen_ns: None,
+            first_track: std::path::PathBuf::from("/m/a.flac"),
+            editions,
+        };
+
+        let albums = vec![
+            // One record, owned twice: one album, two editions, six files.
+            album(
+                vm::AlbumArtistVm::Named("Boards of Canada".to_owned()),
+                vec![
+                    edition(vec![track("a", Some(600)), track("b", Some(300))]),
+                    edition(vec![
+                        track("c", Some(600)),
+                        track("d", Some(300)),
+                        track("e", None),
+                        track("f", Some(0)),
+                    ]),
+                ],
+            ),
+            // The same artist, spelled differently: still one artist.
+            album(
+                vm::AlbumArtistVm::Named("boards of canada".to_owned()),
+                vec![edition(vec![track("g", Some(1_800))])],
+            ),
+            // Neither of these names a person, so neither is counted as one.
+            album(vm::AlbumArtistVm::Various, vec![edition(vec![])]),
+            album(vm::AlbumArtistVm::Unknown, vec![edition(vec![])]),
+        ];
+        // `tracks` comes from the library rather than from this walk, so the
+        // figure on Home and the figure the library reports are one number.
+        let counted = vm::Collection::count(&albums, 7);
+        assert_eq!(counted.albums, 4, "records, not editions and not files");
+        assert_eq!(counted.artists, 1, "named, folded, and never a placeholder");
+        assert_eq!(counted.tracks, 7, "the library's own figure, untouched");
+        assert_eq!(
+            counted.playing_ms, 3_600_000,
+            "an unreadable duration contributes nothing rather than a guess"
+        );
+        assert_eq!(playing_time(counted.playing_ms), "1 hour");
+
+        assert_eq!(
+            vm::Collection::count(&[], 0),
+            vm::Collection::default(),
+            "no collection counts as nothing, which is what makes the footer \
+             absent rather than four zeroes"
+        );
     }
 
     /// **A track with no declared length reads as unstarted**, never as

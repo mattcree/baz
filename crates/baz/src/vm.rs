@@ -476,6 +476,81 @@ pub struct ShelfVm {
     pub albums: Vec<AlbumVm>,
 }
 
+/// **The collection, counted** — what the Home place's `COLLECTION` footer
+/// states, and the whole of it.
+///
+/// Four figures, chosen as *your collection, briefly* rather than as a report:
+/// how many records, how many people made them, how many files that is, and
+/// how long it would take to hear all of it. The set is small on purpose and
+/// the cuts are as deliberate as the keeps — [`crate::views::home`]'s
+/// `collection` argues each one.
+///
+/// # Counted once, never per frame
+///
+/// ADR-0030 §4's responsiveness contract forbids a per-frame walk of the
+/// library, and three of these four figures are a walk. So this is built where
+/// the view model itself is built (`app.rs`'s `Shelf::rebuild_shelves`) and
+/// held on the shelf — one pass over every track per *rebuild*, which is a
+/// scan batch or a change of arrangement, and zero passes per frame. It is a
+/// `Copy` struct of four scalars, so holding it costs nothing either.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Collection {
+    /// Records — [`AlbumVm`]s, so an album owned in two formats is one record,
+    /// exactly as the wall draws it.
+    pub albums: usize,
+    /// **Distinct named album artists**, case-folded.
+    ///
+    /// Named ones only: `Various` and `Unknown` are the two answers
+    /// [`AlbumArtistVm`] gives when there *is* no artist to count, and counting
+    /// them would put "we could not read this" into a figure about people.
+    /// Folded because the wall's own `ARTIST` arrangement folds — a collection
+    /// that files `Boards of Canada` and `boards of canada` on one shelf must
+    /// not be told it has two artists.
+    pub artists: usize,
+    /// Tracks — the library's own count, which is every file it holds. The
+    /// same figure the retired well readout stated, so it is the figure the
+    /// owner already recognises.
+    pub tracks: usize,
+    /// Total playing time of every track the scan read a duration for, in
+    /// milliseconds. Tracks with no readable duration contribute nothing
+    /// rather than an estimate.
+    pub playing_ms: u64,
+}
+
+impl Collection {
+    /// Count `albums`, taking the track total from the library that produced
+    /// them.
+    ///
+    /// `tracks` is passed rather than derived so that the figure on Home and
+    /// the figure the library reports are one number by construction.
+    #[must_use]
+    pub fn count(albums: &[AlbumVm], tracks: usize) -> Self {
+        let mut artists: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut playing_ms = 0_u64;
+        for album in albums {
+            if let AlbumArtistVm::Named(name) = &album.artist {
+                artists.insert(name.to_lowercase());
+            }
+            for edition in &album.editions {
+                for track in &edition.tracks {
+                    playing_ms = playing_ms.saturating_add(
+                        track
+                            .duration
+                            .and_then(|d| u64::try_from(d.as_millis()).ok())
+                            .unwrap_or(0),
+                    );
+                }
+            }
+        }
+        Self {
+            albums: albums.len(),
+            artists: artists.len(),
+            tracks,
+            playing_ms,
+        }
+    }
+}
+
 /// Build the wall from the library, **arranged by `key`** —
 /// [`Library::shelves_with_history`] projected into owned view models
 /// (ADR-0019).

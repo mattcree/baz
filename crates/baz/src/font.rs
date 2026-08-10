@@ -501,38 +501,60 @@ mod tests {
         assert!(keys > 200.0 && keys < 420.0, "the key row is {keys:.1} px");
     }
 
-    /// **The well's two figures fit the lane's measure, and its query fits
-    /// beside them** — the reason the counts came out of the well when the
-    /// well went into the lane.
+    /// **The lane's well holds a query beside its match count** — the
+    /// arithmetic that let the count come back *inside* the field when the
+    /// collection's counts left for Home.
     ///
-    /// In the strip the counts were the placeholder and the match count sat in
-    /// a reserved [`crate::views::top_bar::MATCH_W`] 88 slot *inside* the
-    /// field. At [`theme::SIDEBAR_MEASURE`] 232 that slot would leave the
-    /// query 100 px, so both figures moved onto the readout line under the
-    /// field and both now measure against the whole lane. Longer than the lane
-    /// clips rather than reflows, so this is the bound that keeps the ordinary
-    /// case whole — and the owner-scale line and a library thirty times that
-    /// size are both checked, because the figures tick up during a scan.
+    /// The shipped lane put both figures on a line under the field because the
+    /// strip's [`crate::views::top_bar::MATCH_W`] 88 slot inside a
+    /// [`theme::SIDEBAR_MEASURE`] 232 well left the query 88 px. Only one
+    /// figure is in the field now and it has a slot of its own —
+    /// [`theme::SIDEBAR_MATCH_W`] 72, sized here rather than guessed:
+    ///
+    /// ```text
+    ///   232 − SIDEBAR_HEAD_TEXT_X 44 − GAP_MD 12 − SIDEBAR_MATCH_W 72 = 104
+    /// ```
+    ///
+    /// Two claims, and the second is the one the owner would notice: the slot
+    /// **holds its worst figure**, so a right-aligned count never runs left
+    /// under the query; and what is left is **more room than a reserved
+    /// `MATCH_W` would have left**, which is why this is not the arrangement
+    /// the lane already rejected.
     #[test]
-    fn the_lanes_well_holds_its_readout_at_the_lane_measure() {
+    fn the_lanes_well_holds_a_query_beside_its_match_count() {
         let sans = sans();
-        // The readout hangs between the head's word vertical and the field's
-        // own trailing padding — the query's lane, exactly.
-        let lane = theme::SIDEBAR_MEASURE - theme::SIDEBAR_HEAD_TEXT_X - theme::GAP_MD;
-        for line in [
-            "1284 albums · 9902 tracks",
-            "40000 albums · 512345 tracks",
-            "9902 of 40000 albums",
-        ] {
-            let measured = sans.width(line, theme::SIZE_META);
-            assert!(
-                measured <= lane,
-                "{line:?} measures {measured:.1} px against the lane's {lane:.0}"
-            );
-        }
-        // And the strip's own form, at the one regime it is still drawn in:
-        // the counts as the placeholder, past the magnifier's reserved lane
-        // and the input's own padding.
+        // `9999 / 9999` — a collection ten times the owner's. Above that the
+        // slot clips rather than colliding, because the count is drawn in a
+        // fixed, clipped box.
+        fits(
+            &sans,
+            "9999 / 9999",
+            theme::SIZE_META,
+            theme::SIDEBAR_MATCH_W,
+            "SIDEBAR_MATCH_W",
+        );
+        let query = theme::SIDEBAR_MEASURE
+            - theme::SIDEBAR_HEAD_TEXT_X
+            - theme::GAP_MD
+            - theme::SIDEBAR_MATCH_W;
+        assert!(
+            (query - 104.0).abs() < f32::EPSILON,
+            "the query's room in the lane's well is {query} px, not the 104 \
+             the design records"
+        );
+        assert!(
+            query
+                > theme::SIDEBAR_MEASURE
+                    - theme::SIDEBAR_HEAD_TEXT_X
+                    - theme::GAP_MD
+                    - crate::views::top_bar::MATCH_W,
+            "the lane's slot buys the query no room over the strip's, so the \
+             count belongs back under the field"
+        );
+        // And the strip's own well, at the one regime it is still drawn in:
+        // the collection's counts as the placeholder, past the magnifier's
+        // reserved lane and the input's own padding. Unchanged by the move —
+        // a strip is one control tall and has no second line to give.
         let strip_lane = crate::views::top_bar::WELL_W
             - (theme::GAP_MD + theme::ICON_PX + theme::GAP_SM)
             - theme::GAP_MD;
@@ -542,6 +564,43 @@ mod tests {
             "the owner-scale counts measure {measured:.1} px against the \
              strip well's {strip_lane:.0}"
         );
+    }
+
+    /// **Every cell of Home's `COLLECTION` footer holds both its lines** at
+    /// [`theme::STAT_W`] — the figure and the tracked word under it.
+    ///
+    /// The cell is a *pitch*, so a figure or a word wider than it would not
+    /// push its neighbour along: it would clip, and the row would quietly stop
+    /// being four columns. The figures are swept to a library far larger than
+    /// the owner's, because they tick up during a scan.
+    #[test]
+    fn the_home_collection_cells_hold_their_figures_and_their_words() {
+        // Both lines are set in Medium — the figure for quiet prominence, the
+        // word because every tracked-caps label in the product is.
+        let medium = Face::parse(SANS_MEDIUM);
+        for figure in [
+            "40000",      // albums, and artists cannot exceed them
+            "1234567",    // tracks
+            "9999 days",  // the longest playing time the unit can produce
+            "42 minutes", // …and the longest short one
+        ] {
+            fits(
+                &medium,
+                figure,
+                theme::SIZE_EMPHASIS,
+                theme::STAT_W,
+                "STAT_W (a figure)",
+            );
+        }
+        for label in ["ALBUMS", "ARTISTS", "TRACKS", "OF MUSIC"] {
+            fits(
+                &medium,
+                &theme::tracked(label),
+                theme::SIZE_HEADING,
+                theme::STAT_W,
+                "STAT_W (a word)",
+            );
+        }
     }
 
     /// **The strip's declared reservations hold their measured words** —

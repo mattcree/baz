@@ -1415,12 +1415,17 @@ gives **13**.
 > `2 × GAP_MD + STEPPER_HIT` = 48. With a head of `3 × 40` that gives **7 rows**
 > at 860 and **11** at 1080.
 >
-> **The search well costs one of them.** ADR-0030's second amendment puts it in
-> the head: `GAP_SM` 8 plus `SIDEBAR_WELL_H` 52 — the field at `TRANSPORT_HIT`,
-> `GAP_XS`, and one `LINE_META` readout line that is always drawn. The head
-> becomes 180, and the list holds **6 rows** at 860 and **10** at 1080. Stated
-> here rather than in the commit, because it is the one thing the move takes
-> from §1's subject and the owner should be able to find it.
+> **The search well costs one of them, and then gives it back.** ADR-0030's
+> second amendment puts it in the head: `GAP_SM` 8 plus `SIDEBAR_WELL_H` — a
+> head of 180, and the list holding **6 rows** at 860 and **10** at 1080. That
+> 52 was the field at `TRANSPORT_HIT` over an always-drawn `LINE_META` readout
+> line; the **fourth amendment** takes the line away — the collection's counts
+> are Home's footer and the match count is inside the field — so
+> `SIDEBAR_WELL_H` is 32, the head is 160, and the list is back to **7 rows**
+> at 860. At 1080 it stays **10**: the recovered 20 px is banked toward an
+> eleventh rather than buying one. Stated here rather than in the commit,
+> because it is the one thing the move takes from §1's subject and the owner
+> should be able to find it.
 
 ### 9.3 Content share, both readings
 
