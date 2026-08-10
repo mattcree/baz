@@ -86,6 +86,45 @@ pub(crate) fn save_name_id() -> text_input::Id {
     text_input::Id::new("baz-queue-save")
 }
 
+/// **The run column's own scrollable**, named so the shell can drive it.
+///
+/// The owner, 2026-08-10: *"ideally the currently playing item in the playlist
+/// is where our scroll goes to i.e. it should be visible when we change
+/// track"*. A follow is a `scrollable::scroll_to` and iced 0.13 addresses a
+/// widget by id, so the column has one — the same construction the save field
+/// above already uses for its caret.
+pub(crate) fn run_scroll_id() -> scrollable::Id {
+    scrollable::Id::new("baz-run-column")
+}
+
+/// **Where the rows column begins inside the scrollable's content** — the
+/// place's top pad, the summary strip, the column's own gaps, and the run's
+/// head block where there is one.
+///
+/// Published rather than inlined because **two surfaces have to agree about
+/// it**: this module builds the column from it, and the shell computes a
+/// follow offset from it ([`crate::views::now_playing::follow`]). A private
+/// copy on each side is a pair of numbers that drift, and the symptom would be
+/// a follow that lands a header or a strip's height off the row it was aiming
+/// at.
+///
+/// An estimate in one respect and deliberately so: the save field, when open,
+/// moves the rows down by less than [`queue_window::MARGIN`] absorbs.
+#[must_use]
+pub(crate) fn rows_top(pad_top: f32, head_h: f32, head_two_line: bool) -> f32 {
+    pad_top
+        + head_h
+        + theme::TRANSPORT_HIT
+        + 2.0 * theme::GAP_LG
+        + theme::LINE_BODY
+        + if head_two_line {
+            theme::GAP_XXS + theme::LINE_META
+        } else {
+            0.0
+        }
+        + theme::GAP_XS
+}
+
 /// Everything the run column needs of the surface drawing it, so that the
 /// merged now-playing place and (for exactly one step) the queue place hand it
 /// the same reading without either growing a tenth positional argument.
@@ -187,18 +226,7 @@ pub(crate) fn run_column<'a>(
             // the place's top pad, the summary strip, the column gaps and
             // the list's own head block. An estimate — the save field, when
             // open, moves it by less than the module's margin absorbs.
-            let head_two_line = list.album.is_some();
-            let rows_top = pad.top
-                + head_h
-                + theme::TRANSPORT_HIT
-                + 2.0 * theme::GAP_LG
-                + theme::LINE_BODY
-                + if head_two_line {
-                    theme::GAP_XXS + theme::LINE_META
-                } else {
-                    0.0
-                }
-                + theme::GAP_XS;
+            let rows_top = rows_top(pad.top, head_h, list.album.is_some());
             let win = queue_window::window(&shapes, scroll - rows_top, viewport_h);
             // A record's name where the record begins, then its tracks —
             // **albums listed as albums, never flattened** (ADR-0014). Each
@@ -311,6 +339,7 @@ pub(crate) fn run_column<'a>(
             .padding(pad)
             .align_x(alignment::Horizontal::Center),
     )
+    .id(run_scroll_id())
     .on_scroll(Message::QueueScrolled)
     .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
     .style(move |_theme, status| theme::scrollbar(room, room.wall, status))

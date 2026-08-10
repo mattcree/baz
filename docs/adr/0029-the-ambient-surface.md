@@ -583,6 +583,39 @@ the four states. *"A low bar to edit a playlist"* is an argument about the
 playlist page's reachability, not licence for a queue edit made for tonight to
 rewrite a file somebody owns.
 
+### 8.7 Amendment, 2026-08-10: the field is continuous, and §8.4's terms 2 and 3 go with the boundary
+
+**The owner:** *"the background fade behind the album art seems to abruptly end
+beside the track list which looks bad -- the fade should continue under the
+playlist area too"*.
+
+§8.4 term 2 — *"under the run column the field is clamped to `room.wall`'s
+lightness"* — is **withdrawn**, and so is `field::Reach`, the type that
+expressed it. §5.4's *"the ceiling is lower where type is"* was drawn as **two
+washes in a row**, and that is a worse object than the lightness step it was
+specified as: two gradients do not step at their join, the second restarts the
+ramp, so the boundary was a hard vertical edge that announced the layout.
+
+**The constraint was real and the answer is a measurement.** Term 2's argument
+was that a run row must carry no contrast claim that is not already shipped.
+That is checkable rather than arguable, so it is now checked:
+`every_run_row_is_legible_over_the_brightest_field` sweeps every room × every
+hue × every ink the run column draws against the field's own brightest stop, at
+the floors ADR-0017 §1.6's contrast suite already uses. The field costs every
+ink about an eighth of its ratio and no ink its floor; the binding case is
+`paper_faint` at **4.71 : 1** against 4.5.
+
+**What this owes step A7.** §8.4 term 3 — *"under the run column the field does
+not drift"* — is a claim about **motion under type**, and the measurement above
+is about a static ground. It is therefore **neither kept nor withdrawn here**:
+it is A7's to make, and A7 no longer has a mechanism to make it with, because
+the domain it would have used is gone.
+
+The direction A7 should take if drift under the rows proves distracting is
+recorded now so it is not rediscovered as a boundary: **slow or still the whole
+field**, do not re-introduce a region. The seam is the thing the owner
+rejected, and a moving seam would be worse than the static one he saw.
+
 ## Consequences
 
 - **`Place::Queue` is the first member this product has deleted.** The enum goes

@@ -49,16 +49,46 @@
 //! ambient is drawn on the field, and the sleeve is the one object on the
 //! surface with nothing on top of it.
 //!
-//! # The ceiling is lower where type is
+//! # One object, one value, no domains — and the reason is a measurement
 //!
-//! One object, one ceiling function, **and the ceiling is lower where type
-//! is** (doc 12 §5.4). Under the run column the field is clamped to the
-//! room's own [`wall`](crate::theme::Palette::wall) lightness —
-//! [`Reach::Still`] — which introduces no new contrast number at all, because
-//! `wall` is the ground every other list in this product is read over. Every
-//! pairing on a run row is the pairing that ships today. That is not a second
-//! object interposed between two others, which is what a scrim is; it is the
-//! same object's own value, reduced.
+//! The field shipped with a **lower ceiling where type is**: under the run
+//! column it was clamped flat to the room's own
+//! [`wall`](crate::theme::Palette::wall) lightness, so that no run row carried
+//! a contrast claim that was not already shipped and tested (doc 12 §5.4,
+//! ADR-0029 §8.4 term 2).
+//!
+//! **The owner, 2026-08-10:** *"the background fade behind the album art seems
+//! to abruptly end beside the track list which looks bad -- the fade should
+//! continue under the playlist area too"*. He is right, and the defect is worse
+//! than a taste: two washes drawn side by side do not merely step in lightness,
+//! they **restart the ramp**, so the seam was a hard vertical edge announcing
+//! the layout rather than a room lit by a record.
+//!
+//! It is now **one wash across the whole body**, at full amplitude, with no
+//! domains at all — and that is settled by measurement rather than by nerve.
+//! `every_run_row_is_legible_over_the_brightest_field` sweeps every room ×
+//! every hue × every ink the run column draws, against the floor each ink's
+//! *use* implies — the same instrument and the same floors `theme`'s own
+//! contrast suite uses:
+//!
+//! | ink | over `wall` | over the field, worst hue | floor |
+//! |---|---|---|---|
+//! | `paper` | 15.33 | **13.54** | 4.5 |
+//! | `paper_dim` | 8.20 | **7.24** | 4.5 |
+//! | `paper_faint` | 5.34 | **4.71** | 4.5 |
+//! | `paper_muted` | 3.61 | **3.19** | 3.0 |
+//! | `alert` | 6.30 | **5.57** | 4.5 |
+//!
+//! (Closing Time; Reading Room's figures are within 0.02 of these at the
+//! binding inks and are swept identically.) **The field costs every ink about
+//! an eighth of its ratio and no ink its floor.** The binding case is
+//! `paper_faint` — the durations and the summary — at 4.71 against a 4.5
+//! floor, which is 4.7 % of margin and is the number to watch if [`CEILING_L`]
+//! is ever raised.
+//!
+//! So the constraint that produced the seam was real, and the answer to it was
+//! never a boundary: it was to check that the ceiling the field already has is
+//! low enough. It is.
 //!
 //! # What is deliberately not here yet
 //!
@@ -159,21 +189,6 @@ const ANCHOR: (f32, f32) = (0.10, 0.90);
 pub(crate) struct Field {
     /// Hue angles in degrees, `0.0..360.0`.
     hues: [f32; 3],
-}
-
-/// How far the field is allowed to travel from the room, in the two places it
-/// is drawn (doc 12 §5.4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Reach {
-    /// **The ambient region** — everywhere the run column is not. The field
-    /// climbs the room's ladder to [`CEILING_L`].
-    Ambient,
-    /// **Under the run column**, where type scrolls: the field is clamped flat
-    /// to the room's own `wall` lightness. The hues remain — the room is still
-    /// the record's colour — but nothing in the region is lighter than the
-    /// ground every other list in the product is read over, so the run's rows
-    /// carry no contrast claim that is not already shipped and tested.
-    Still,
 }
 
 impl Field {
@@ -278,28 +293,25 @@ impl Field {
         })
     }
 
-    /// **The three colours the field is drawn in**, at `reach`, in the room
-    /// `room` — brightest first, which is the order they are laid along the
-    /// wash.
+    /// **The three colours the field is drawn in** in the room `room` —
+    /// brightest first, which is the order they are laid along the wash.
     ///
     /// The record supplies the hue and **nothing else**: lightness comes from
     /// the room's own ladder and chroma is [`CHROMA`], pinned. Three colour
     /// conversions, run once per view build, which is the whole per-frame cost
     /// of the field.
+    ///
+    /// **There is no second answer for the region under the run column.** There
+    /// was — a `Reach` with a flat variant — and it is gone with the seam the
+    /// owner reported (module docs): one object, one value, everywhere.
     #[must_use]
-    pub(crate) fn colors(self, room: &theme::Palette, reach: Reach) -> [Color; 3] {
+    pub(crate) fn colors(self, room: &theme::Palette) -> [Color; 3] {
         let ground = lightness(room.wall);
-        let (floor, ceiling) = match reach {
-            // The ladder climbs toward the lamp, which is *lighter* in a dark
-            // room and *darker* in a light one — the same inversion
-            // `Palette::recess` documents for elevation, read off the room's
-            // own `wall → plinth` step rather than off a room's name, so a
-            // third room needs no edit here.
-            Reach::Ambient => (ground, ground + rise(room)),
-            // Flat at the room's ground: nothing under scrolling type is
-            // lighter than the surface every other list is read over.
-            Reach::Still => (ground, ground),
-        };
+        // The ladder climbs toward the lamp, which is *lighter* in a dark room
+        // and *darker* in a light one — the same inversion `Palette::recess`
+        // documents for elevation, read off the room's own `wall → plinth` step
+        // rather than off a room's name, so a third room needs no edit here.
+        let (floor, ceiling) = (ground, ground + rise(room));
         std::array::from_fn(|index| {
             from_oklch(
                 floor + (ceiling - floor) * RUNGS[index],
@@ -314,12 +326,15 @@ impl Field {
     ///
     /// The gradient is the whole of the still field — no layers, no stacked
     /// containers faking a radial, and no per-frame work beyond building this
-    /// value. `Reach::Still` produces three stops at one lightness, which is a
-    /// gradient in hue alone: the room is still the record's colour under the
-    /// run, it is simply no lighter than the room.
+    /// value.
+    ///
+    /// **One wash, over the whole body.** It used to be two side by side, and
+    /// two gradients do not merely step at their join — the second restarts the
+    /// ramp — which is the hard vertical edge beside the run column the owner
+    /// reported. A single value cannot have a seam.
     #[must_use]
-    pub(crate) fn wash(self, room: &theme::Palette, reach: Reach) -> iced::gradient::Linear {
-        let [near, mid, far] = self.colors(room, reach);
+    pub(crate) fn wash(self, room: &theme::Palette) -> iced::gradient::Linear {
+        let [near, mid, far] = self.colors(room);
         iced::gradient::Linear::new(iced::Radians(ANGLE))
             .add_stop(0.0, near)
             .add_stop(0.5, mid)
@@ -570,11 +585,7 @@ mod tests {
         let pale = Field::derive(32, 32, &flat(32, 32, [250, 205, 190])).expect("pale");
         let deep = Field::derive(32, 32, &flat(32, 32, [90, 32, 20])).expect("deep");
         let room = &theme::CLOSING_TIME;
-        for (a, b) in pale
-            .colors(room, Reach::Ambient)
-            .into_iter()
-            .zip(deep.colors(room, Reach::Ambient))
-        {
+        for (a, b) in pale.colors(room).into_iter().zip(deep.colors(room)) {
             let (a_l, _, a_h) = oklch(a);
             let (b_l, _, b_h) = oklch(b);
             assert!(
@@ -612,23 +623,12 @@ mod tests {
                 let field = Field {
                     hues: [hue as f32; 3],
                 };
-                for colour in field.colors(room, Reach::Ambient) {
+                for colour in field.colors(room) {
                     let l = lightness(colour);
                     // Inside the room's own band, at either end inclusive.
                     assert!(
                         l >= ground.min(ceiling) - 0.002 && l <= ground.max(ceiling) + 0.002,
                         "{}: hue {hue} left the band at L {l}",
-                        room.name
-                    );
-                }
-                // **Under the run column nothing is lighter than `wall`.**
-                // Doc 12 §5.4 term 2, as the one-line test it promised to be:
-                // every pairing on a run row is the pairing that ships today.
-                for colour in field.colors(room, Reach::Still) {
-                    let l = lightness(colour);
-                    assert!(
-                        (l - ground).abs() < 0.002,
-                        "{}: the run's ground moved off the wall — L {l} vs {ground}",
                         room.name
                     );
                 }
@@ -694,6 +694,112 @@ mod tests {
             assert!(
                 !(60.0..=300.0).contains(&hue),
                 "a red cover derived hue {hue}"
+            );
+        }
+    }
+
+    /// **Every run row is legible over the brightest field** — the measurement
+    /// that let the field become continuous, and the one to re-run before
+    /// [`CEILING_L`] is ever raised.
+    ///
+    /// The owner, 2026-08-10: *"the background fade behind the album art seems
+    /// to abruptly end beside the track list which looks bad -- the fade should
+    /// continue under the playlist area too"*. The seam existed because the
+    /// field was clamped flat under the run column so that no row carried a
+    /// contrast claim that was not already shipped (doc 12 §5.4 term 2). The
+    /// honest way to remove the clamp is not to argue that it looks fine — it
+    /// is to measure what the rows are actually read against.
+    ///
+    /// So: every room × every hue × every ink the run column draws, against the
+    /// **field's own brightest stop**, at the floor each ink's *use* implies —
+    /// 4.5 : 1 to be read, 3.0 : 1 for a mark. Those are `theme`'s own floors
+    /// and this is `theme`'s own instrument, re-implemented here for the reason
+    /// [`lightness`] is published: one measurement, two callers, no drift.
+    ///
+    /// **The result, and the margin.** The field costs every ink about an
+    /// eighth of its ratio and no ink its floor. The binding case is
+    /// `paper_faint` — the durations, the positions and the summary — at
+    /// **4.71 : 1** against a 4.5 floor, which is 4.7 % of margin. The test
+    /// asserts the floor rather than the figure, because the figure moves with
+    /// the palette and the floor is the promise; the figure is recorded in the
+    /// module docs so a future reader can see how much room there is.
+    #[test]
+    fn every_run_row_is_legible_over_the_brightest_field() {
+        /// WCAG 2.1 relative luminance.
+        fn luminance(color: Color) -> f32 {
+            fn linear(channel: f32) -> f32 {
+                if channel <= 0.04045 {
+                    channel / 12.92
+                } else {
+                    ((channel + 0.055) / 1.055).powf(2.4)
+                }
+            }
+            0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+        }
+        fn contrast(foreground: Color, background: Color) -> f32 {
+            let (a, b) = (luminance(foreground), luminance(background));
+            (a.max(b) + 0.05) / (a.min(b) + 0.05)
+        }
+        /// To be read.
+        const TEXT: f32 = 4.5;
+        /// To be found — `paper_muted` is the album group's artist line and the
+        /// empty state's third line, which `theme`'s own suite already treats
+        /// as a mark rather than a sentence.
+        const MARK: f32 = 3.0;
+
+        for room in [&theme::CLOSING_TIME, &theme::READING_ROOM] {
+            // Every ink `views::queue` puts on a row, a header or the strip.
+            let inks = [
+                ("paper", room.paper, TEXT),
+                ("paper_dim", room.paper_dim, TEXT),
+                ("paper_faint", room.paper_faint, TEXT),
+                ("alert", room.alert, TEXT),
+                ("paper_muted", room.paper_muted, MARK),
+            ];
+            for hue in 0..360 {
+                #[expect(clippy::cast_precision_loss, reason = "0..360 is exact in f32")]
+                let field = Field {
+                    hues: [hue as f32; 3],
+                };
+                for ground in field.colors(room) {
+                    for (name, ink, floor) in inks {
+                        let ratio = contrast(ink, ground);
+                        assert!(
+                            ratio >= floor,
+                            "{}: {name} over the field at hue {hue} is \
+                             {ratio:.2} : 1, below its {floor} : 1 floor — the \
+                             field may not run under the run column at this \
+                             ceiling",
+                            room.name
+                        );
+                    }
+                }
+            }
+        }
+
+        // …and the claim that makes the sweep meaningful: the *brightest* stop
+        // is the worst case, so measuring all three and asserting the floor
+        // cannot miss a darker one that happens to pair worse. In a dark room
+        // the field climbs away from the ink; in a light one it falls toward
+        // it — which is why both rooms are swept rather than one reasoned about.
+        for room in [&theme::CLOSING_TIME, &theme::READING_ROOM] {
+            let field = Field { hues: [175.0; 3] };
+            let stops = field.colors(room);
+            let worst = stops
+                .iter()
+                .map(|&stop| contrast(room.paper_faint, stop))
+                .fold(f32::INFINITY, f32::min);
+            assert!(
+                worst >= TEXT,
+                "{}: the binding ink lost its floor at {worst:.2} : 1",
+                room.name
+            );
+            assert!(
+                worst < contrast(room.paper_faint, room.wall),
+                "{}: the field is supposed to cost the ink something — if it \
+                 costs nothing, the ceiling has collapsed onto the wall and \
+                 there is no field",
+                room.name
             );
         }
     }

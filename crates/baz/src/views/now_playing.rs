@@ -387,7 +387,7 @@ pub(crate) fn view<'a>(
     let (handle, source) = now.map_or((None, f32::INFINITY), |now| work(shelf, now));
     let edge = record_edge(width, height, showing_run, source);
     let stacked = showing_run && run_w <= 0.0;
-    let field = field_layer(field_of(shelf, now), ground(width, showing_run));
+    let field = field_layer(field_of(shelf, now));
     let record = now.map(|now| {
         if stacked {
             head_block(player, handle, now, edge, measure)
@@ -479,6 +479,99 @@ pub(crate) fn view<'a>(
     // may claim it, and it arrives whole or not at all. z1.5, the spectrum in
     // the field's shader, is step A8's and is not reserved for here.
     stack![field, body].into()
+}
+
+/// **Where the sounding row should land**: two rows' worth of list above it.
+///
+/// The owner asked for the row to be *visible*, and the convention — every
+/// player that follows a run does this — is that it lands a little way down
+/// rather than flush at the top edge. Flush reads as a jump and hides what came
+/// before it; two rows of history is enough that the surface still shows you
+/// where you have come from.
+///
+/// It is expressed as **two of the run's own rows** rather than as a pixel
+/// count, so it stays two rows if the row pitch ever moves. A one-line row is
+/// used for the reckoning because it is the shorter of the two — the lead is a
+/// floor on how much history stays visible, and a floor should be computed from
+/// the smaller unit.
+const FOLLOW_LEAD: f32 = 2.0 * crate::queue_window::row_pitch(false);
+
+/// **The offset that brings the sounding row into view, or `None` for leave it
+/// alone** (the owner, 2026-08-10: *"ideally the currently playing item in the
+/// playlist is where our scroll goes to i.e. it should be visible when we
+/// change track"*).
+///
+/// # The three rules that make this bearable rather than annoying
+///
+/// 1. **Only when the row is not already visible.** A view that jumps when it
+///    did not need to is worse than one that never moves, so a row wholly
+///    inside the viewport returns `None` and nothing happens. Most track
+///    changes inside one record are exactly this case, which is why the
+///    ordinary experience of a twelve-track album is no movement at all.
+/// 2. **Only on the engine's own confirmation**, which is the caller's half —
+///    `App` spends this on `Event::TrackStarted` and on arriving at the place,
+///    never on a clock and never per frame. This product reports position from
+///    engine events and never extrapolates, and a scroll caused by playback
+///    obeys the same rule.
+/// 3. **A manual scroll is not fought, it is reconciled.** Nothing here
+///    notices that the listener has scrolled away, and that is deliberate: the
+///    *next track change* is the moment the surface is allowed to move, because
+///    it is the only boundary at which a listener is not mid-gesture. Between
+///    two tracks the column is theirs.
+///
+/// # It computes the offset from the same arithmetic the column is built from
+///
+/// [`queue::rows_top`] for where the rows begin inside the scroll and
+/// [`crate::queue_window::row_box`] for where the row sits inside them — the
+/// two functions `queue::run_column` itself builds from. That is what lets a
+/// follow reach a row **outside the built slice** in one step: the window is
+/// recomputed from the new offset on the next view, so the target is never a
+/// spacer.
+#[must_use]
+pub(crate) fn follow(
+    shelf: &Shelf,
+    player: &PlayerState,
+    width: f32,
+    height: f32,
+    scroll: f32,
+) -> Option<f32> {
+    let list = player.queue_list()?;
+    let row = player.playing_queue_row()?;
+    let shapes: Vec<crate::queue_window::RowShape> = list
+        .rows
+        .iter()
+        .map(|row_state| crate::queue_window::RowShape {
+            head: row_state.head.as_ref().map(|head| head.album.is_some()),
+            two_line: row_state.artist.is_some(),
+        })
+        .collect();
+    let (top, row_h) = crate::queue_window::row_box(&shapes, row)?;
+
+    // The composition, read exactly as `view` reads it — the head block only
+    // exists below `SPLIT_FLOOR`, and it is inside the scroll there, so it is
+    // part of the offset the rows begin at.
+    let now = player.now_playing();
+    let run_w = run_w(width, true);
+    let head_h = if run_w > 0.0 {
+        0.0
+    } else {
+        now.map_or(0.0, |now| {
+            let (_, source) = work(shelf, now);
+            record_edge(width, height, true, source) + HEAD_BELOW + theme::GAP_XL
+        })
+    };
+    let pad_top = theme::HANG;
+    let rows_top = queue::rows_top(pad_top, head_h, list.album.is_some());
+    let top = rows_top + top;
+
+    // Already on screen, whole: do nothing. The bottom edge is the viewport's
+    // own, and the scrollable's viewport is the body's height — the same
+    // number `Frame::viewport_h` hands the virtual window, so "visible" here
+    // and "built" there cannot disagree.
+    if top >= scroll && top + row_h <= scroll + height {
+        return None;
+    }
+    Some((top - FOLLOW_LEAD).max(0.0))
 }
 
 /// [`queue::run_column`], named here so the two call sites above read as one
@@ -638,48 +731,6 @@ fn sleeve(
     }
 }
 
-/// **Which ground the place is standing on** (doc 12 §5.4's z1).
-///
-/// One object with one ceiling function, and the ceiling is lower where type
-/// is — so the three cases are not three grounds, they are three *domains* of
-/// the same one.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Ground {
-    /// The record alone: the ambient field, full bleed.
-    Ambient,
-    /// Two columns. The ambient field under the record, and under the run's
-    /// own column plus the gutter it hangs in — `f32` px, measured from the
-    /// body's right edge — the field clamped flat to the room's `wall`.
-    Split(f32),
-    /// Re-stacked below [`theme::SPLIT_FLOOR`]: the whole body *is* the run's
-    /// list, so the whole field is the run's ground. Nothing on this surface
-    /// is read over anything lighter than `wall` at this width, which is the
-    /// same sentence as the split case with a wider domain.
-    Still,
-}
-
-/// **Which domain of the field the body's width has put the place in.**
-///
-/// The same two conditions [`run_w`] already answers — is the run standing,
-/// and is there room for two columns — read for the ground instead of for a
-/// width. Stated as its own function so the restack is one decision made once:
-/// a surface whose layout re-stacked at 784 and whose ground re-stacked at
-/// some other number would be two compositions wearing one name.
-fn ground(width: f32, showing_run: bool) -> Ground {
-    if !showing_run {
-        return Ground::Ambient;
-    }
-    let beside = run_w(width, true);
-    if beside > 0.0 {
-        // The run's column and the `HANG` gutter it hangs in — the `GAP_XL`
-        // between the two columns stays on the ambient side, so the ceiling
-        // drops exactly at the list's own left edge (doc 12 §5.4 term 2).
-        Ground::Split(beside + theme::HANG)
-    } else {
-        Ground::Still
-    }
-}
-
 /// **The field, laid under everything** — the place's z1, and the reason a
 /// large screen reads as composed rather than empty.
 ///
@@ -692,29 +743,47 @@ fn ground(width: f32, showing_run: bool) -> Ground {
 /// **It is under, never over.** Nothing is drawn on the sleeve; the field is
 /// the room's own colour changed, it dims no artwork, and it is not a scrim —
 /// [`crate::field`] carries the argument.
-fn field_layer(field: Option<field::Field>, ground: Ground) -> Element<'static, Message> {
+///
+/// # One wash, and the three grounds that went
+///
+/// The owner, 2026-08-10: *"the background fade behind the album art seems to
+/// abruptly end beside the track list which looks bad -- the fade should
+/// continue under the playlist area too"*.
+///
+/// This function used to answer a `Ground` — `Ambient` for the record alone,
+/// `Split(under_run)` for the two columns, `Still` for the re-stacked one —
+/// and in the split case it drew **two washes in a `row!`**. That is worse
+/// than the lightness step it was designed as: two gradients side by side do
+/// not step at their join, the second **restarts the ramp**, so the join was a
+/// hard vertical edge that announced the layout. Doc 12 §5.4's *"the ceiling
+/// is lower where type is"* was drawn as *the ceiling is a different object
+/// where type is*.
+///
+/// It is now one wash over the whole body, and the constraint that produced
+/// the domains is answered by measurement instead:
+/// `field::every_run_row_is_legible_over_the_brightest_field` sweeps every
+/// room × every hue × every ink the run column draws against the field's own
+/// brightest stop, and every one clears the floor its use implies — the
+/// binding case being `paper_faint` at 4.71 : 1 against 4.5.
+///
+/// **The seam is also why `run_w` no longer has a second consumer here.** The
+/// field's domain and the layout's split were two functions of one number
+/// that had to be kept in step, and `the_composition_holds_across_the_restack`
+/// existed to prove they were. One of them is gone, so they cannot disagree.
+fn field_layer(field: Option<field::Field>) -> Element<'static, Message> {
     let Some(field) = field else {
         return Space::new(Length::Fill, Length::Fill).into();
     };
     let room = theme::active();
-    let wash = move |reach| {
-        let gradient = field.wash(room, reach);
-        container(Space::new(Length::Fill, Length::Fill))
-            .height(Length::Fill)
-            .style(move |_theme| container::Style {
-                background: Some(iced::Background::Gradient(gradient.into())),
-                ..container::Style::default()
-            })
-    };
-    match ground {
-        Ground::Ambient => wash(field::Reach::Ambient).width(Length::Fill).into(),
-        Ground::Still => wash(field::Reach::Still).width(Length::Fill).into(),
-        Ground::Split(under_run) => row![
-            wash(field::Reach::Ambient).width(Length::Fill),
-            wash(field::Reach::Still).width(Length::Fixed(under_run)),
-        ]
-        .into(),
-    }
+    let gradient = field.wash(room);
+    container(Space::new(Length::Fill, Length::Fill))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Gradient(gradient.into())),
+            ..container::Style::default()
+        })
+        .into()
 }
 
 /// The record column: the work at `edge`, and the placard under it.
@@ -1097,44 +1166,38 @@ mod tests {
         assert!(run_w(theme::SPLIT_FLOOR, true) > 0.0);
     }
 
-    /// **The composition holds across the restack** — the layout, the artwork
-    /// and the ground all turn at [`theme::SPLIT_FLOOR`] and nowhere else.
+    /// **The composition holds across the restack** — the layout and the
+    /// artwork turn at [`theme::SPLIT_FLOOR`] and nowhere else.
     ///
-    /// Step A2 added a third object to a surface that already had two, and the
-    /// failure it could have introduced is a **seam**: a field whose domain
-    /// changed at one width while the columns re-stacked at another would put
-    /// ambient light under a scrolling list, or a wall-clamped column under
-    /// the work, for the band between the two numbers. Swept 400–4000 the way
-    /// everything else on this surface is.
+    /// # The seam this was written for is now unreachable, and that is the news
+    ///
+    /// It swept a third claim until 2026-08-10: that the **field's domain**
+    /// turned at the same width the columns did. A field whose domain changed
+    /// at one width while the columns re-stacked at another would have put
+    /// ambient light under a scrolling list, or a wall-clamped column under the
+    /// work, for the band between the two numbers.
+    ///
+    /// The owner removed the domains — *"the fade should continue under the
+    /// playlist area too"* — so there is one wash over the whole body and
+    /// **two numbers that had to agree have become one number**. The strongest
+    /// version of a test that two things stay in step is the one you delete
+    /// because there is only one thing. What is asserted instead is the
+    /// property that outlived it: the record's column always has room to be a
+    /// record column inside the split.
     #[test]
     fn the_composition_holds_across_the_restack() {
         for width in sides() {
-            // **One floor, three consequences.** The run's column, the record's
-            // composition and the field's domain are the same decision.
-            let split = width >= theme::SPLIT_FLOOR;
+            // **One floor, two consequences** — the run's column and the
+            // record's composition. The field is no longer a third, because it
+            // no longer has a width in it.
+            let beside = run_w(width, true);
             assert_eq!(
-                ground(width, true),
-                if split {
-                    Ground::Split(theme::RUN_MEASURE + theme::HANG)
-                } else {
-                    Ground::Still
-                },
-                "{width}: the ground turned somewhere the layout did not"
+                beside > 0.0,
+                width >= theme::SPLIT_FLOOR,
+                "{width}: the layout turned somewhere the floor did not"
             );
-            // The run stood down is the ambient field at every width, because
-            // there is no type for the ceiling to be lower under.
-            assert_eq!(ground(width, false), Ground::Ambient, "{width}");
-            // **The clamped domain never eats the record's own column.** The
-            // still region is the run plus its gutter, and the work has to fit
-            // beside it — otherwise the sleeve would hang over a ground meant
-            // for a list.
-            if let Ground::Split(under_run) = ground(width, true) {
-                let beside = run_w(width, true);
+            if beside > 0.0 {
                 let record_right = width - theme::HANG - beside - theme::GAP_XL;
-                assert!(
-                    width - under_run >= record_right,
-                    "{width}: the clamped ground reached under the work"
-                );
                 assert!(
                     record_right >= theme::HANG + theme::ART_MIN,
                     "{width}: the record column fell under its own floor inside the split"

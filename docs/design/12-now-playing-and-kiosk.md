@@ -3227,7 +3227,7 @@ receipt. It is also the owner's live ask.
 | **A5** | The feed | Survives, unchanged |
 | **M4** | The run marker: the command field, ledger v1.1, the lane across a quit | New — after A5, per the order below |
 | **A6** | The toggles | Survives, **and must now design its own control** — `Run` is gone, so `Ambient` has no peer to sit beside (ADR-0029 §8.5) |
-| **A7** | The field drifts *(gated)* | Survives, **+ §5.4 term 3** |
+| **A7** | The field drifts *(gated)* | Survives — **but §5.4 term 3 has no mechanism left**: the field's domains went with the seam the owner reported (ADR-0029 §8.7), so A7 must answer *drift under scrolling type* by slowing or stilling the whole field, not by re-introducing a region |
 | **A8** | The tap and the spectrum *(gated)* | Survives, **+ a widened mask and a harder gate** |
 | **A9** | The meter | Survives, unchanged |
 

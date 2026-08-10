@@ -1348,8 +1348,20 @@ impl App {
             Message::FirstFrame => self.log_first_frame(),
             Message::SetupSubmit => self.submit_setup(),
             Message::Playback(event) => {
+                // **The track's own identity, before and after.**
+                // `track_seq` is documented as a count that changes exactly
+                // when the playing track changes — and, because it is bumped
+                // only on a genuinely different path, a *seek* does not move
+                // it. That is precisely the trigger the run's follow wants:
+                // the engine's own confirmation of a new track, never a clock
+                // and never a request.
+                let before = self.player.track_seq();
                 self.apply_player_event(event);
-                Task::none()
+                if self.player.track_seq() == before {
+                    Task::none()
+                } else {
+                    self.follow_the_run()
+                }
             }
             Message::PlayAlbum(id) => {
                 self.play_album(id);
@@ -1808,7 +1820,12 @@ impl App {
                     self.menu = None;
                     let from = self.place;
                     self.place = self.place.playlist(*id);
-                    self.note_place_left(from);
+                    // A playlist door, or the Library after a delete —
+                    // never `Now playing`, so the only task this can answer
+                    // with is `Task::none()`, and the machine this arm lives
+                    // in answers `bool`. Discarded deliberately rather than
+                    // by omission.
+                    let _ = self.note_place_left(from);
                 } else if let Screen::Shelf(state) = &self.screen
                     && self.playlists.open_page(*id, &state.library)
                 {
@@ -1817,7 +1834,12 @@ impl App {
                     self.menu = None;
                     let from = self.place;
                     self.place = self.place.playlist(*id);
-                    self.note_place_left(from);
+                    // A playlist door, or the Library after a delete —
+                    // never `Now playing`, so the only task this can answer
+                    // with is `Task::none()`, and the machine this arm lives
+                    // in answers `bool`. Discarded deliberately rather than
+                    // by omission.
+                    let _ = self.note_place_left(from);
                 }
             }
             Message::PickPlaylist(id) => {
@@ -1892,7 +1914,12 @@ impl App {
                     // hashed, so a rename mints a new one.
                     let from = self.place;
                     self.place = Place::Playlist(renamed);
-                    self.note_place_left(from);
+                    // A playlist door, or the Library after a delete —
+                    // never `Now playing`, so the only task this can answer
+                    // with is `Task::none()`, and the machine this arm lives
+                    // in answers `bool`. Discarded deliberately rather than
+                    // by omission.
+                    let _ = self.note_place_left(from);
                 }
             }
             Message::PlaylistDelete => {
@@ -1905,7 +1932,12 @@ impl App {
                     // honest answer, by the same route Esc takes.
                     let from = self.place;
                     self.place = self.place.back();
-                    self.note_place_left(from);
+                    // A playlist door, or the Library after a delete —
+                    // never `Now playing`, so the only task this can answer
+                    // with is `Task::none()`, and the machine this arm lives
+                    // in answers `bool`. Discarded deliberately rather than
+                    // by omission.
+                    let _ = self.note_place_left(from);
                 }
             }
             Message::SaveQueueStart => {
@@ -2715,7 +2747,7 @@ impl App {
             state.hovered_all_songs = false;
             let from = self.place;
             self.place = door(self.place);
-            self.note_place_left(from);
+            return self.note_place_left(from);
         }
         Task::none()
     }
@@ -2740,8 +2772,10 @@ impl App {
         self.drag = None;
         let from = self.place;
         self.place = self.place.album(id);
-        self.note_place_left(from);
-        Task::none()
+        // A record's page, never `Now playing` — the task is `Task::none()`
+        // by construction, and returning it keeps that true if the door ever
+        // changes where it lands.
+        self.note_place_left(from)
     }
 
     /// **Go home** — every place's `‹ Library`, and the first thing
@@ -2753,8 +2787,10 @@ impl App {
         self.menu = None;
         self.drag = None;
         let from = self.place;
-        self.place = self.place.back();
-        self.note_place_left(from);
+        // `back()` can reach `Now playing` from a record's page opened out of
+        // the run, so this one genuinely has a follow to answer with — it is
+        // batched at the end of the function with the rest of `leave`'s work.
+        let entering = self.note_place_left(from);
         // A place's transient fields do not outlive the place: a rename
         // field left standing behind a navigation would greet the next
         // visit mid-gesture.
@@ -2762,7 +2798,7 @@ impl App {
             open.renaming = None;
         }
         self.playlists.saving_queue = None;
-        Task::none()
+        entering
     }
 
     /// <kbd>Esc</kbd>'s place-level share of the peel: the transient fields
@@ -3774,6 +3810,52 @@ impl App {
         self.publish_mpris(false);
     }
 
+    /// **Bring the sounding row into view in the run column**, or leave the
+    /// column exactly where it is.
+    ///
+    /// The owner, 2026-08-10: *"ideally the currently playing item in the
+    /// playlist is where our scroll goes to i.e. it should be visible when we
+    /// change track"*.
+    ///
+    /// Everything about *whether* to move is
+    /// [`views::now_playing::follow`]'s — it answers `None` for a row that is
+    /// already on screen, which is most track changes inside one record. What
+    /// is here is the two halves the view cannot do: the place check, and the
+    /// widget operation.
+    ///
+    /// **Only while the place is on screen.** A follow computed for a surface
+    /// nobody is looking at would be spent on a scrollable that iced has not
+    /// built, and the offset would be stale by the time it was. Arriving at the
+    /// place computes its own ([`Self::note_place_left`]), which is the same
+    /// call with the same function.
+    ///
+    /// `queue_scroll` is written here as well as driven, so the **virtual
+    /// window** and the widget agree on the same frame: the window is computed
+    /// from this field, and a widget that had scrolled while the field had not
+    /// would draw the slice for the old offset.
+    fn follow_the_run(&mut self) -> Task<Message> {
+        if self.place != Place::NowPlaying {
+            return Task::none();
+        }
+        let Screen::Shelf(state) = &self.screen else {
+            return Task::none();
+        };
+        let Some(target) = views::now_playing::follow(
+            state,
+            &self.player,
+            self.body_width(),
+            self.body_height(),
+            self.queue_scroll,
+        ) else {
+            return Task::none();
+        };
+        self.queue_scroll = target;
+        scrollable::scroll_to(
+            views::queue::run_scroll_id(),
+            AbsoluteOffset { x: 0.0, y: target },
+        )
+    }
+
     /// Bookkeeping for a place change: an edit history belongs to the
     /// surface that shows its `Undo` word, and leaving that surface is one
     /// of the three things that end it (P2: "until the next edit, a
@@ -3781,31 +3863,44 @@ impl App {
     ///
     /// # …and the run's scroll, on the way *in*
     ///
-    /// [`Self::queue_scroll`]'s own note says the offset must be zero when the
-    /// place is entered, because iced 0.13 keys widget state by tree position:
-    /// leaving unmounts the run's scrollable and coming back re-creates it at
-    /// the top, so a remembered offset windows rows the widget is not showing.
+    /// [`Self::queue_scroll`]'s own note says the offset must be re-established
+    /// when the place is entered, because iced 0.13 keys widget state by tree
+    /// position: leaving unmounts the run's scrollable and coming back
+    /// re-creates it at the top, so a remembered offset windows rows the widget
+    /// is not showing.
     ///
     /// **It was written on one route in and not on the others.**
-    /// `Message::ShowTheRun` reset it; the lane's `Now playing` row and the
-    /// bar's now-playing block did not, so those two reached the place with a
-    /// stale offset and the virtual window drew the wrong slice. That message
+    /// `Message::ShowTheRun` reset it to zero; the lane's `Now playing` row and
+    /// the bar's now-playing block did not, so those two reached the place with
+    /// a stale offset and the virtual window drew the wrong slice. That message
     /// has gone with the `Run` word, which is what forced the question — and
     /// the answer is that this belongs to *entering the place*, not to one
     /// press. So it is here, where every route already passes.
-    fn note_place_left(&mut self, from: Place) {
+    ///
+    /// **And it is no longer zero.** The owner asked for the sounding row to be
+    /// where the scroll goes, and *arriving* is the first moment that is true
+    /// of: opening the place on the top of a run you are forty tracks into is
+    /// the same defect as not following a track change, reached by a different
+    /// door. So the entry offset is [`Self::follow_the_run`]'s answer, and zero
+    /// only when there is nothing to follow.
+    fn note_place_left(&mut self, from: Place) -> Task<Message> {
         if from == self.place {
-            return;
+            return Task::none();
         }
         if from == Place::NowPlaying {
             self.queue_undo.clear();
         }
-        if self.place == Place::NowPlaying {
-            self.queue_scroll = 0.0;
-        }
         if matches!(from, Place::Playlist(_)) {
             self.playlists.clear_undo();
         }
+        if self.place != Place::NowPlaying {
+            return Task::none();
+        }
+        // The widget is about to be built fresh at zero, so the follow is
+        // computed against zero rather than against what the *last* visit left
+        // in `queue_scroll` — the field is stale by definition on this path.
+        self.queue_scroll = 0.0;
+        self.follow_the_run()
     }
 
     /// Send a transport command, marking it pending on acceptance and

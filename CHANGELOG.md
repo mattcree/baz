@@ -1512,6 +1512,65 @@ next commit.
   shrink-width block genuinely centred, and the playlist page's sits inside
   `place_pad()` on the same heading lane as the `Tracks` rule above it.
 
+- **The ambient field runs under the run column, continuously.** The owner:
+  *"the background fade behind the album art seems to abruptly end beside the
+  track list which looks bad -- the fade should continue under the playlist
+  area too"*.
+
+  It was two washes drawn side by side — the ambient one, and a second clamped
+  flat to `wall`'s lightness under the rows (doc 12 §5.4 term 2, ADR-0029 §8.4)
+  — and that is worse than the lightness step it was designed as: **two
+  gradients do not step at their join, the second restarts the ramp**, so the
+  seam was a hard vertical edge announcing the layout. `field::Reach` and
+  `now_playing::Ground` are both deleted; there is one wash over the whole
+  body.
+
+  **The clamp existed for a real reason and the answer to it is a
+  measurement**, not nerve. `every_run_row_is_legible_over_the_brightest_field`
+  sweeps every room × every hue × every ink the run column draws against the
+  field's own brightest stop, at the floors each ink's use implies. The field
+  costs every ink about an eighth of its ratio and no ink its floor — in
+  Closing Time, `paper` 15.33 → 13.54, `paper_dim` 8.20 → 7.24, `paper_faint`
+  5.34 → **4.71** against a 4.5 floor, `paper_muted` 3.61 → 3.19 against 3.0,
+  `alert` 6.30 → 5.57; Reading Room within 0.02 at the binding inks. The
+  binding case is `paper_faint` at 4.7 % of margin, and it is the number to
+  re-check before `field::CEILING_L` is ever raised.
+
+  `the_composition_holds_across_the_restack` lost a third of its subject and is
+  better for it: it existed to prove the field's domain and the columns' split
+  turned at the same width, and there is now one number where there were two.
+
+- **The run column follows the music.** The owner: *"ideally the currently
+  playing item in the playlist is where our scroll goes to i.e. it should be
+  visible when we change track"*.
+
+  Three rules make it bearable rather than annoying, and all three are in
+  `views::now_playing::follow`. It moves **only on the engine's own
+  confirmation** — `track_seq` changing, which is a new track and never a seek
+  and never a clock. It moves **only when the sounding row is not already
+  visible**, which is most track changes inside one record, so the ordinary
+  experience of a twelve-track album is no movement at all. And it **does not
+  fight a manual scroll**: nothing notices that the listener has scrolled away,
+  because the next track change is the only boundary at which they are not
+  mid-gesture. The row lands two rows' worth of list down rather than flush at
+  the top, so what you have already heard stays visible behind the cursor.
+
+  **Arriving at the place is the same computation**, which supersedes the
+  merge's `queue_scroll = 0.0`: opening the place on the top of a run you are
+  forty tracks into is the same defect reached by a different door.
+
+  `queue_window::row_box` is the new arithmetic, and it is deliberately the
+  same walk over the same pitches `queue_window::window` makes — otherwise a
+  follow to a row outside the built slice would scroll into a spacer.
+  `a_follow_lands_on_its_row_inside_the_built_slice` sweeps a 4 000-row run at
+  three viewports and asserts the target is both built *and* on screen.
+
+  **The playlist page and the record's page deliberately do not do this.** They
+  mark the sounding row with the same lamp dot, so the argument nearly carries
+  — but they are documents you are reading, where the lamp is an annotation,
+  and the run column is the list you are hearing, where the cursor is the
+  subject. Moving a document under its reader is the defect, not the fix.
+
 - **The run column's scroll offset is reset on every route into the place.**
   `queue_scroll`'s own note says it must be zero when the place is entered,
   because iced 0.13 keys widget state by tree position and a remembered offset
