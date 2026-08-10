@@ -441,9 +441,19 @@ fn run_scroll<'a>(
 ///
 /// **Visible at rest, and pointer-reachable**, which the product's standing
 /// rule requires; the alternative — revealing it on mouse-move, as most kiosks
-/// do — is refused outright. It is a **peer** of the `Ambient` word-door that
-/// arrives with the ambient field, not a row inside it: those toggles govern
-/// how the surface *looks*, and this one governs what it *is* (§3.4.3).
+/// do — is refused outright. It is a **peer** of the `Ambient` word-door, not
+/// a row inside it: those toggles govern how the surface *looks*, and this one
+/// governs what it *is* (§3.4.3).
+///
+/// **`Ambient` is not here yet, and the field arriving did not bring it.** This
+/// doc said it *"arrives with the ambient field"* until step A2 shipped the
+/// field and left it out deliberately. ADR-0029 §5's door carries **four**
+/// toggles — the field, the spectrum, the meter, the feed — and three of the
+/// four govern subsystems that do not exist; T1's own three states are
+/// still / drifting / unavailable, and with no shader there is no drifting. A
+/// door with one working entry and three dead ones is height reserved for
+/// things that are not built, which is the discipline this file already keeps
+/// in [`BELOW`]. It arrives whole, at step A6.
 fn controls(run: bool) -> Element<'static, Message> {
     let room = theme::active();
     container(
