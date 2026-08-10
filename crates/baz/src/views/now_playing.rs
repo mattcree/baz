@@ -61,14 +61,44 @@
 //! field already has the bar, which is in every place. Nothing here forecloses
 //! it.
 //!
-//! # The serif stays on the Home placard
+//! # This surface stays in the sans, and the reason is sharper than it was
 //!
-//! The work's title here is set in the sans, not in `theme::WORK_TITLE`. The
-//! serif italic is the *museum placard's* convention and there is one placard
-//! in the product; a second consumer would be a display face arriving one
-//! surface at a time, which is the thing `assets/fonts/README.md` records as
-//! deleted and staying deleted. `the_serif_is_the_work_titles_and_nothing_else`
-//! holds this to it.
+//! It used to read: *the serif italic is the museum placard's convention and
+//! there is one placard in the product; a second consumer would be a display
+//! face arriving one surface at a time.* **The concern was right and it is
+//! kept. The boundary was wrong.**
+//!
+//! *One placard* is a **quantity**, and a quantity cannot answer whether the
+//! next string may have the face — which is exactly how a display face arrives
+//! one surface at a time. It also could not survive its first real case: doc
+//! 14 found the strongest honest signal baz has for telling a found thing from
+//! a made one is that **a record's title is a work's and a playlist's name is
+//! a label somebody typed**, and that signal is worth nothing until the
+//! record's own page states it. So the record page's hero took the serif
+//! (ADR-0024 §A4.4), and the boundary became a rule instead of a count:
+//!
+//! > **The serif italic sets an album's title, on the surface whose subject
+//! > that album is.**
+//!
+//! Under that rule this place is in the sans **more firmly than before**, and
+//! for a reason about the strings rather than about the tally:
+//!
+//! - the hero here is `NowPlaying::title` — **a track's**
+//!   title, not an album's. baz is album-oriented (`VISION.md`): the album is
+//!   the work, a track is a part of one. The serif has never been offered to
+//!   it and is not now.
+//! - the album line under it (`Ochre`, at body size in `paper_dim`) is
+//!   an album's title standing as **a fact about the track above it** —
+//!   *where this came from* — and the placard convention sets facts in roman.
+//!   Italicising it would leave the smallest line the only italic one on the
+//!   surface, which inverts the convention rather than applying it.
+//!
+//! What that leaves is the original worry, undiluted: nothing may take this
+//! face by accretion. `the_serif_is_the_work_titles_and_nothing_else` is an
+//! **enumeration** of two views and a proof that nothing names the family
+//! directly, so a third consumer fails the build. Whether the rule should
+//! reach the wall's captions and the returns lane's rows is the owner's open
+//! question (`docs/WORK.md`) and is not answered here.
 
 use iced::widget::{Space, button, column, container, image as iced_image, row, stack, text};
 use iced::{Element, Length, alignment};

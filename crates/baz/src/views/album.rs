@@ -11,7 +11,7 @@
 //! | | the column | this page |
 //! |---|---|---|
 //! | shape | one lane, everything stacked | two columns: the object, and what is written about it |
-//! | the title | `SIZE_TITLE` 19, fifth of eight by ink | `SIZE_HERO` 28, second, and first among type |
+//! | the title | `SIZE_TITLE` 19, fifth of eight by ink | `SIZE_HERO` 28 in `theme::WORK_TITLE`, second, and first among type |
 //! | the sleeve | capped at 120 so it could not dominate | `ART_MAX` 320 — it is the *only* image of the record on screen |
 //! | `Details` | below the fold, reached by scrolling past the tracks | beside the sleeve, above the fold at every shipped width |
 //!
@@ -488,6 +488,32 @@ fn details<'a>(album: &'a vm::AlbumVm, edition: Option<&'a vm::EditionVm>) -> El
 ///
 /// The counts describe `edition`, not the album: with two rips on disk, "24
 /// tracks" would be a number nothing on screen adds up to.
+///
+/// # The title is set in [`theme::WORK_TITLE`], and the playlist page's is not
+///
+/// The second consumer of the serif italic, and the last one this change makes
+/// (ADR-0024 §A4.4; design 14 §5.2). The museum placard's convention is that
+/// **the work's title is italic and every fact around it is not** — and this
+/// block is that placard exactly: the title, then who made it, then when and
+/// in what. The artist and the catalogue line below stay in the sans, which is
+/// what makes the italic mean *this string is the name of the thing* rather
+/// than *this string is important*.
+///
+/// The asymmetry with `views::playlist`'s hero — the same size, the same ink,
+/// the same slot, in the sans — **is the design and must not be flattened into
+/// consistency**. A record's title is a work's, published by someone else; a
+/// playlist's name is a label the owner typed, and every other string a person
+/// typed in this product (the query, the rename field, the folder path) is
+/// already sans. Doc 14 §2's last row, in the type itself: the two page heroes
+/// are different *kinds of string* at the same size, for no pixels.
+///
+/// **The line, and why it can be held.** The serif sets an album's title where
+/// the album is the subject being labelled — here, and on Home's `CONTINUE`
+/// placard. Not a track's title, not an artist's, not a playlist's, and not an
+/// album's title where it appears as a *fact about something else*
+/// (`views::now_playing`'s `Ochre` under the sounding track's name). Two call
+/// sites, enumerated by `theme::the_serif_is_the_work_titles_and_nothing_else`,
+/// which fails the build on a third.
 fn album_header<'a>(
     album: &'a vm::AlbumVm,
     edition: Option<&'a vm::EditionVm>,
@@ -527,7 +553,9 @@ fn album_header<'a>(
             text(title)
                 .size(theme::SIZE_HERO)
                 .line_height(theme::LEADING_HERO)
-                .font(theme::SEMIBOLD)
+                // Serif italic: a *work's* title, against the sans name on the
+                // playlist page's hero. See this function's docs.
+                .font(theme::WORK_TITLE)
                 .color(room.paper)
         )
         .max_height(2.0 * theme::LINE_HERO)

@@ -91,8 +91,8 @@ pub const SANS_MEDIUM: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Mediu
 /// IBM Plex Sans `SemiBold` — headings, and the primary action's label.
 pub const SANS_SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-SemiBold.ttf");
 
-/// **The serif italic**, and the one thing it is for: a *work's own title* on
-/// the Home place's `CONTINUE` placard.
+/// **The serif italic**, and the one thing it is for: a *work's own title* —
+/// on the Home place's `CONTINUE` placard, and on the record's own page.
 ///
 /// # Why a second family exists at all, after this module argued against one
 ///
@@ -106,11 +106,17 @@ pub const SANS_SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexSans-Sem
 /// italic** and everything around it — the artist, the date, the medium — is
 /// not. The italic is not decorating the placard, it is the placard's own
 /// convention for saying *this string is the name of the thing, not a fact
-/// about it*. Nothing else in the product is a work's title standing alone
-/// beside its own facts, so nothing else takes it.
+/// about it*. What takes it is a work's title standing beside its own facts,
+/// which is the `CONTINUE` placard and the record page's identity block — and
+/// nothing else: not a track's title, not a playlist's name, which is a label
+/// somebody typed and is set in the sans every other typed string is.
 ///
 /// **The owner saw the risk and approved it** (2026-08-09). It is kept to one
-/// token ([`crate::theme::WORK_TITLE`]) so it is one line to revert.
+/// token ([`crate::theme::WORK_TITLE`]) so it is one line to revert, and its
+/// consumers are **enumerated** by
+/// `theme::the_serif_is_the_work_titles_and_nothing_else` rather than merely
+/// counted — a display face is what a second family becomes when it can arrive
+/// one surface at a time without an argument.
 ///
 /// Same family as the bundled Sans, same licence, same upstream commit,
 /// complete rather than subset — `assets/fonts/README.md` carries the hash and
@@ -202,6 +208,61 @@ mod tests {
             /// Units per em — the denominator every advance is scaled by.
             pub fn units_per_em(&self) -> f32 {
                 self.upem
+            }
+
+            /// A `name` record by ID, decoded — Windows platform (3) records
+            /// are UTF-16BE and are preferred; the Macintosh platform (1)
+            /// record is single-byte and is the fallback.
+            pub fn name(&self, id: u16) -> Option<String> {
+                let name = table(self.data, *b"name");
+                let count = usize::from(be16(self.data, name + 2));
+                let storage = name + usize::from(be16(self.data, name + 4));
+                let mut mac: Option<String> = None;
+                for index in 0..count {
+                    let record = name + 6 + 12 * index;
+                    if be16(self.data, record + 6) != id {
+                        continue;
+                    }
+                    let length = usize::from(be16(self.data, record + 8));
+                    let at = storage + usize::from(be16(self.data, record + 10));
+                    let bytes = &self.data[at..at + length];
+                    match be16(self.data, record) {
+                        3 => {
+                            let utf16: Vec<u16> = bytes
+                                .chunks_exact(2)
+                                .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+                                .collect();
+                            return Some(String::from_utf16_lossy(&utf16));
+                        }
+                        1 => mac = Some(bytes.iter().map(|&b| char::from(b)).collect()),
+                        _ => {}
+                    }
+                }
+                mac
+            }
+
+            /// **The family name a matcher will file this face under**, which
+            /// is the string `Font::with_name` is compared against.
+            ///
+            /// **Record 16 (Typographic Family) first, record 1 second**, and
+            /// the order is not a nicety — record 1 is the *legacy* family,
+            /// and the legacy model can only hold four styles, so every weight
+            /// past Regular and Bold is pushed into a family of its own.
+            /// IBM Plex Sans Medium's record 1 reads **`IBM Plex Sans Medm`**.
+            /// Reading only record 1 would say baz asks for a family none of
+            /// its own weights belong to; reading 16 says what fontdb, and so
+            /// cosmic-text, and so iced, actually match on.
+            pub fn family(&self) -> String {
+                self.name(16)
+                    .or_else(|| self.name(1))
+                    .expect("the face names a family")
+            }
+
+            /// Whether the face declares itself italic — `head.macStyle`
+            /// bit 1, the flag a matcher reads when a style is asked for.
+            pub fn is_italic(&self) -> bool {
+                let head = table(self.data, *b"head");
+                be16(self.data, head + 44) & 0x0002 != 0
             }
 
             /// The glyph id `codepoint` maps to, or 0 (`.notdef`) when the
@@ -393,6 +454,106 @@ mod tests {
             for character in "…—·’“”→".chars() {
                 assert_ne!(face.glyph(character), 0, "no glyph for {character:?}");
             }
+        }
+    }
+
+    /// **The names baz asks for are the names the faces answer to**, and the
+    /// serif face baz asks for *italic* declares itself italic.
+    ///
+    /// This is the silent-fallback guard, and it is the one that matters most
+    /// now that a second family sets real content. `Font::with_name` is a
+    /// **string match** against a face's own `name` table: get the family
+    /// spelling wrong by one character and cosmic-text does not fail, warn or
+    /// draw a box — it resolves the request against whatever the *host*
+    /// happens to have, so `theme::WORK_TITLE` would quietly become "some
+    /// serif this machine owns". That is invisible on the machine that shipped
+    /// it and wrong on a fresh one, which is the exact failure this product
+    /// bundled a typeface to end (see this module's head).
+    ///
+    /// So the two constants are compared against the strings the bundled bytes
+    /// spell for themselves, and the serif is checked to declare the style
+    /// [`theme::WORK_TITLE`] asks it for. Frames are the other half of the
+    /// proof and cannot be this half: a host serif italic looks like a serif
+    /// italic.
+    ///
+    /// **Found writing it**: the family a face spells is `name` record **16**,
+    /// not record 1. Record 1 is the legacy family, which holds four styles at
+    /// most, so Plex Sans Medium's record 1 reads `IBM Plex Sans Medm` — this
+    /// test's first draft failed on the shipped, working bundle. The
+    /// assertion below is on the record a matcher reads, which is the only one
+    /// that can be evidence about matching.
+    #[test]
+    fn the_family_names_baz_asks_for_are_the_names_the_faces_spell() {
+        // The legacy record, named so the paragraph above is checkable rather
+        // than folklore, and so a future face swap that drops record 16 fails
+        // here with the reason attached.
+        assert_eq!(
+            Face::parse(SANS_MEDIUM).name(1).as_deref(),
+            Some("IBM Plex Sans Medm"),
+            "record 1 is the legacy family and this is why record 16 is the \
+             one compared below"
+        );
+        for (label, bytes) in [
+            ("Sans Regular", SANS_REGULAR),
+            ("Sans Medium", SANS_MEDIUM),
+            ("Sans SemiBold", SANS_SEMIBOLD),
+        ] {
+            assert_eq!(
+                Face::parse(bytes).family(),
+                SANS,
+                "{label} spells its family differently from the string \
+                 `Font::with_name` is given, so every weight baz asks for \
+                 would resolve against the host's fonts instead"
+            );
+        }
+        let serif = Face::parse(SERIF_ITALIC);
+        assert_eq!(
+            serif.family(),
+            SERIF,
+            "the serif italic spells its family differently from `SERIF`, so \
+             `theme::WORK_TITLE` would silently become whatever serif this \
+             machine owns — right here, wrong everywhere else"
+        );
+        assert!(
+            serif.is_italic(),
+            "`theme::WORK_TITLE` asks this family for the italic style; the \
+             bundled face does not declare itself italic, so the matcher \
+             would synthesise a slant or reach past it"
+        );
+    }
+
+    /// **The serif italic can actually set an album's title**, which is now
+    /// two surfaces' worth rather than one (`theme::WORK_TITLE`: Home's
+    /// `CONTINUE` placard and the record's page).
+    ///
+    /// The failure mode this closes is the quiet one, and it is quiet in
+    /// exactly the wrong direction: a glyph the bundled face does not carry is
+    /// not a crash and not a blank — cosmic-text falls back to whatever the
+    /// **host** has, so a title with one accented letter would be set half in
+    /// Plex Serif Italic and half in some machine-dependent face, and it would
+    /// look fine on the machine that shipped it. A record's title is not
+    /// baz's own string the way a readout is; it is whatever the tags say, so
+    /// the set below is Latin-1's letters plus the punctuation titles arrive
+    /// carrying.
+    #[test]
+    fn the_serif_face_carries_every_letter_an_album_title_arrives_with() {
+        let serif = Face::parse(SERIF_ITALIC);
+        let mut alphabet: String = ('A'..='Z').chain('a'..='z').chain('0'..='9').collect();
+        // Latin-1's letter block, which is where European release titles live,
+        // then the punctuation a title carries: quotes, dashes, the ellipsis,
+        // the interpunct, the ampersand and the brackets a reissue is labelled
+        // with.
+        alphabet.extend(('\u{c0}'..='\u{ff}').filter(|c| *c != '\u{d7}' && *c != '\u{f7}'));
+        alphabet.push_str(" .,:;!?'\"’‘“”-–—…·&()[]/+#*%$@=_~^`{}|<>\\");
+        for character in alphabet.chars() {
+            assert_ne!(
+                serif.glyph(character),
+                0,
+                "IBM Plex Serif Italic has no glyph for {character:?} — an \
+                 album title containing it would be set half in the bundled \
+                 face and half in whatever the host happens to have, which \
+                 looks correct on this machine and wrong on a fresh one"
+            );
         }
     }
 

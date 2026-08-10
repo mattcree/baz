@@ -1199,20 +1199,45 @@ pub const SIDEBAR_WELL_H: f32 = TRANSPORT_HIT;
 /// first character it sets never move.
 pub const SIDEBAR_MATCH_W: f32 = 72.0;
 
-/// **A work's own title**, and the one place in the product it is set: the
-/// Home place's `CONTINUE` placard.
+/// **A work's own title**, and the two places in the product it is set: the
+/// Home place's `CONTINUE` placard and the record page's hero.
 ///
 /// IBM Plex Serif **Italic** — the museum-placard convention, where the
 /// work's title is italic and every fact around it (the artist, the date, the
 /// medium) is not. baz's identity is a gallery and its icon is a work under a
-/// wall label; this is that label's own typography, used for the one string on
-/// screen that is a work's name standing beside its own facts.
+/// wall label; this is that label's own typography, used for the strings on
+/// screen that are a work's name standing beside its own facts.
+///
+/// # The line, and it is a rule rather than a count of call sites
+///
+/// It began as *the one placard's* type. That boundary was a **quantity**, and
+/// a quantity cannot say whether the next string may have it — which is how a
+/// display face arrives one surface at a time. The boundary is now a rule
+/// (ADR-0024 §A4.4, design 14 §5.2):
+///
+/// > **The serif italic sets an album's title, on the surface whose subject
+/// > that album is.** Not a track's title, not an artist's, not a playlist's
+/// > name — and not an album's title standing as a *fact about something
+/// > else*, which is what `views::now_playing` prints under the sounding
+/// > track.
+///
+/// That is what makes the record page's hero italic and the playlist page's
+/// hero — same size, same ink, same slot — **deliberately sans**: a record's
+/// title is a work someone published, a playlist's name is a label the owner
+/// typed, and every other typed string in this product is already sans. The
+/// asymmetry is the design (doc 14 §2's last row) and costs no pixels.
+///
+/// Whether the rule should also reach the wall's tile captions and the returns
+/// lane's rows is **the owner's question**, open (`docs/WORK.md`): it is sixty
+/// italic serif captions on a wall of covers, and an italic serif at
+/// [`SIZE_BODY`] 13 is answerable only from a frame.
 ///
 /// **The typographic risk, seen and approved by the owner** (2026-08-09). It
 /// is one token so that it is one line to revert: change this to
 /// [`MEDIUM`] and the serif leaves the product, because
 /// `crate::font::SERIF_ITALIC` has no other consumer and
-/// `the_serif_is_the_work_titles_and_nothing_else` says so.
+/// `the_serif_is_the_work_titles_and_nothing_else` says so — an **enumerated**
+/// list of consumers, never a `contains`, so a third arrives only on purpose.
 pub const WORK_TITLE: Font = Font {
     style: font::Style::Italic,
     ..Font::with_name(crate::font::SERIF)
@@ -4242,10 +4267,18 @@ mod tests {
     /// what makes the second family a *placard convention* rather than a
     /// display face returning one weight at a time.
     ///
-    /// Two claims, both over the source. `WORK_TITLE` is named in exactly one
-    /// view, and that view is the Home place's placard; and the serif family
-    /// is reachable only through that token, so nothing can quietly set a
-    /// second string in it by naming the family directly.
+    /// Two claims, both over the source. `WORK_TITLE` is named in exactly the
+    /// two views that set **an album's title on the surface whose subject that
+    /// album is** — Home's `CONTINUE` placard and the record's page; and the
+    /// serif family is reachable only through that token, so nothing can
+    /// quietly set a third string in it by naming the family directly.
+    ///
+    /// **It is an enumeration and it stays one.** Loosening this to a
+    /// `contains` would buy nothing and cost the whole guard: the risk the
+    /// token carries is not that the serif is used, it is that it *spreads* —
+    /// onto a track title, an artist, a playlist's name, sixty tile captions
+    /// on a wall — one surface at a time, with no single change large enough
+    /// to argue about. Adding a name here is that argument, made once.
     ///
     /// It is the reversion clause made mechanical: point `WORK_TITLE` at
     /// [`MEDIUM`] and `crate::font::SERIF_ITALIC` has no consumer left.
@@ -4291,14 +4324,24 @@ mod tests {
                 names_family.push(relative);
             }
         }
+        // `rust_sources` walks the tree in the filesystem's order, so the
+        // enumeration is sorted before it is compared: the list is a set of
+        // names, and a directory read order is not a fact about the design.
+        users.sort();
         assert_eq!(
             users,
-            ["views/home.rs"],
+            ["views/album.rs", "views/home.rs"],
             "the serif italic is the museum placard's convention for a \
-             *work's own title*, and the placard is the Home place's. A \
-             second consumer is a display face arriving by the back door — \
-             which is the thing `assets/fonts/README.md` records as deleted \
-             and staying deleted."
+             *work's own title*, and it is set exactly where an album is the \
+             subject being labelled: Home's `CONTINUE` placard, and the \
+             record's own page. A third consumer arrives here on purpose or \
+             not at all — an unenumerated one is a display face coming by the \
+             back door, which is the thing `assets/fonts/README.md` records \
+             as deleted and staying deleted. In particular it is **not** the \
+             playlist page's hero (a label the owner typed, not a work), not \
+             `views/now_playing.rs` (a track's title, with the album under it \
+             as a fact about it), and not the wall or the lane, which are the \
+             owner's open question."
         );
         assert!(
             names_family.is_empty(),
