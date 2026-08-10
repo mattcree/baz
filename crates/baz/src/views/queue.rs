@@ -52,7 +52,18 @@
 //! edit set — ▲▼ steppers, ✕, and the transfer `+` — so the queue place and
 //! the playlist page are **the same editor** (09 §8.2), differing only in
 //! their header blocks: the artefact's name and acts there, the run's
-//! provenance-led summary and `Save as playlist` here. And since `Play all`
+//! noun-led summary and `Save as playlist` here.
+//!
+//! **That is the whole of the difference, and until 2026-08-10 the surface
+//! never said so.** The owner: *"'save as playlist' really makes no sense on
+//! the playlist page for a CD"* — he was reading this column, and the reading
+//! was fair: the strip said `1 of 24 · 1:56:19 left`, a run reading with no
+//! subject; the word beside it offered to save something; and 57 px below
+//! stood the record's own title. So the strip now leads with a noun in both
+//! branches (`Run · …`, or the list's name) and the word states what it is
+//! saving — see [`save_control`] and ADR-0024 §A5.
+//!
+//! And since `Play all`
 //! (09 §7.1) can reify a whole library into this list, the rows are drawn
 //! through [`crate::queue_window`]'s virtual window — everything off screen
 //! is two spacers, the wall's own discipline at list scale.
@@ -64,7 +75,7 @@ use iced::widget::{
 use iced::{Element, Length, alignment};
 
 use crate::app::Message;
-use crate::player::{PlayerState, QueueRow, QueueRowState};
+use crate::player::{PlayerState, QueueRow, QueueRowState, RunOrigin};
 use crate::playlists::{Collecting, NameEntry};
 use crate::queue_window::{self, RowShape};
 use crate::{icon, theme};
@@ -252,7 +263,12 @@ pub(crate) fn run_column<'a>(
                     // what makes the accelerator legal.
                     undo_control(can_undo),
                     Space::with_width(Length::Fill),
-                    save_control(saving.is_none()),
+                    // …and the save word, which now reads the run rather
+                    // than only its own name field (ADR-0024 §A5.2). The
+                    // reading is the player's — no argument from the place
+                    // above, because the place knows nothing about this that
+                    // `PlayerState` does not already hold.
+                    save_control(saving.is_none(), player.run_origin()),
                 ]
                 .spacing(theme::GAP_SM)
                 .align_y(iced::Alignment::Center),
@@ -298,13 +314,6 @@ pub(crate) fn run_column<'a>(
     .into()
 }
 
-/// **Save as playlist** — the transient frozen into an artefact
-/// (ADR-0024 §4): a labelled word beside the summary, quiet because it is an
-/// act on a file rather than on playback.
-///
-/// Offered only while the name field is closed: the field below is the same
-/// control mid-gesture, and drawing both would be one act with two live
-/// buttons.
 /// **Undo** — the run as it stood before the last edit, restored
 /// (doc 11 §5 P2). Drawn only while there is an edit to take back: a
 /// standing "Undo" over a list nobody has edited would be a control that
@@ -335,11 +344,77 @@ fn undo_control(offered: bool) -> Element<'static, Message> {
     .into()
 }
 
-fn save_control(offered: bool) -> Element<'static, Message> {
+/// **Save as playlist** — the transient frozen into an artefact
+/// (ADR-0024 §4): a labelled word beside the summary, quiet because it is an
+/// act on a file rather than on playback.
+///
+/// Offered only while the name field is closed: the field below is the same
+/// control mid-gesture, and drawing both would be one act with two live
+/// buttons.
+///
+/// # …and only when it can usefully act (ADR-0024 §A5.2)
+///
+/// The owner, 2026-08-10: *"'save as playlist' really makes no sense on the
+/// playlist page for a CD"*. He is reading this word, on the surface the
+/// queue merged into, and he is right twice over: the strip beside it prints
+/// the run's provenance, so the control offered to save a thing whose name
+/// was already two inches to its left; and over a record's run it manufactured
+/// a one-record playlist whose sleeve is that record's own cover, which then
+/// landed in the lane above the record it came from wearing its face
+/// (design 14 §0). It was conditioned on **nothing** but whether its own name
+/// field was open.
+///
+/// So it reads [`PlayerState::run_origin`], and takes the shape that reading
+/// permits:
+///
+/// | the run | the word |
+/// |---|---|
+/// | [`RunOrigin::Unfiled`] — a record's, a shuffle's, `Play all`'s | `Save as playlist`, live |
+/// | [`RunOrigin::Saved`] — reified from a file, unedited | `Saved as “Road Trip”`, a **readout** |
+/// | [`RunOrigin::Diverged`] — reified from a file, since edited | `Save as new playlist`, live |
+///
+/// **The precedent is eleven lines up.** [`undo_control`] is drawn only while
+/// there is an edit to take back, because *"a standing `Undo` over a list
+/// nobody has edited would be a control that cannot act pretending it can"*.
+/// This was that defect and this is that cure — a readout rather than a
+/// disabled button and rather than a removal, which is what the panel's
+/// `Queue` row already is at rest (ADR-0024's 2026-08-09 amendment item 2).
+///
+/// **`Save changes to “Road Trip”` is refused**, and not on taste: that
+/// amendment's item 6 keeps the run tonight's snapshot and holds §1's
+/// decoupling *in both directions*, and ADR-0023 §3 makes provenance an
+/// origin rather than a live link. A run that wrote itself back would be the
+/// two-structure confusion returning. `Diverged` therefore offers a **new**
+/// file, and says so in the word.
+///
+/// The readout is built at this control's own height and inset, so the strip
+/// is the same strip in all three states: nothing above or below it moves
+/// when a run is edited.
+fn save_control(offered: bool, origin: RunOrigin<'_>) -> Element<'static, Message> {
     let room = theme::active();
+    let label = match origin {
+        RunOrigin::Unfiled => "Save as playlist".to_owned(),
+        RunOrigin::Diverged => "Save as new playlist".to_owned(),
+        RunOrigin::Saved(name) => {
+            return container(
+                container(
+                    text(format!("Saved as “{name}”"))
+                        .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
+                        .color(room.paper_faint)
+                        .wrapping(text::Wrapping::None),
+                )
+                .height(Length::Fill)
+                .align_y(alignment::Vertical::Center),
+            )
+            .height(Length::Fixed(theme::TRANSPORT_HIT))
+            .padding(theme::pad(0.0, theme::GAP_SM))
+            .into();
+        }
+    };
     button(
         container(
-            text("Save as playlist")
+            text(label)
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
                 .font(theme::MEDIUM)
@@ -924,6 +999,82 @@ mod tests {
         assert!(
             source.contains("Message::DragOverRow(crate::drag::List::Queue, index, before)"),
             "every row measures a drag in flight against its own bounds"
+        );
+    }
+
+    /// **The save word takes the shape the run permits** (ADR-0024 §A5.2) —
+    /// three states, one slot, one height.
+    ///
+    /// The predicate itself is tested where it lives
+    /// (`player::tests::the_save_word_offers_only_over_a_run_that_is_not_already_a_file`);
+    /// what is pinned here is that this file *spends* it, and that the
+    /// readout is drawn at the button's own box so nothing in the strip moves
+    /// when a run is edited. Over the source, for this module's own reason:
+    /// there is no `PlayerState` to construct without an engine.
+    #[test]
+    fn the_save_word_is_a_readout_over_a_run_that_is_already_a_file() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/queue.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+
+        assert!(
+            source.contains("save_control(saving.is_none(), player.run_origin())"),
+            "the strip's word reads the run, not only its own name field"
+        );
+        for (arm, word) in [
+            ("RunOrigin::Unfiled", "\"Save as playlist\""),
+            ("RunOrigin::Diverged", "\"Save as new playlist\""),
+            ("RunOrigin::Saved(name)", "\"Saved as “{name}”\""),
+        ] {
+            assert!(
+                source.contains(arm) && source.contains(word),
+                "the `{arm}` run wears {word}"
+            );
+        }
+        // The readout is a statement, so it is not a button and it sends
+        // nothing — the panel's `Queue` row's own form at rest. A disabled
+        // button would still be a control claiming an act.
+        let readout = source
+            .split("RunOrigin::Saved(name) => {")
+            .nth(1)
+            .expect("the readout arm");
+        let readout = &readout[..readout.find("\n        }").unwrap_or(readout.len())];
+        assert!(
+            !readout.contains("button(") && !readout.contains("on_press"),
+            "a readout states; it does not offer"
+        );
+        assert!(
+            readout.contains("Length::Fixed(theme::TRANSPORT_HIT)")
+                && readout.contains("theme::pad(0.0, theme::GAP_SM)"),
+            "…at the word's own box and inset, so the strip does not move"
+        );
+        // And a write-back is refused, in the code as well as in the record:
+        // ADR-0024's 2026-08-09 amendment item 6 and ADR-0023 §3. The prose
+        // is stripped first, because naming a refusal in a doc comment is how
+        // the refusal survives the next reader.
+        let code: String = source
+            .lines()
+            .filter(|line| {
+                let line = line.trim_start();
+                !line.starts_with("///") && !line.starts_with("//!") && !line.starts_with("//")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Spelled in two halves so this assertion is not itself the thing it
+        // is looking for.
+        let write_back = concat!("Save changes", " to");
+        assert!(
+            !code.contains(write_back),
+            "provenance is an origin, never a live link — a run that wrote \
+             itself back would be the two-structure confusion returning"
+        );
+        // The creation act survives, which is the guard that makes this a fix
+        // rather than a removal (`every_queue_affordance_survives_the_merge`).
+        assert!(
+            source.contains("Message::SaveQueueStart"),
+            "freezing a transient into a file is still one press away"
         );
     }
 }

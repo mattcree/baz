@@ -120,16 +120,38 @@ pub(crate) struct PanelRow {
 }
 
 impl PanelRow {
-    /// The row's counts line: `12 · 42:10`, or `12` when no time is known.
+    /// The row's line under the name: `Playlist · 12 · 42:10`, or
+    /// `Playlist · 12` when no time is known.
+    ///
+    /// **The line under a name declares its kind in its first token**
+    /// (ADR-0024 §A3.1). A found thing's line is an artist's name; a made
+    /// thing's is this; an implicit one's is a scale statement, which
+    /// [`crate::implicit`]'s `All songs` already gives
+    /// (`1284 records · 9902 songs · 84:12:07`). The rule is spent here
+    /// because this one string is what the returns lane's rows
+    /// (`crate::app::App::sync_lane`) and the panel's rows
+    /// (`crate::views::playlist_panel`) both draw — and any tile a playlist
+    /// ever reaches will draw it too.
+    ///
+    /// Before this the string was a **bare integer**: `14`, at
+    /// [`theme::SIZE_META`](crate::theme::SIZE_META) 12 in `paper_faint`, in
+    /// the exact slot where a record prints `Anne-Marie Puig`. It did not read
+    /// as a count — it read as a name truncated to nothing, which is design
+    /// 14 §3.1's finding.
+    ///
+    /// **No new widget and no geometry change**: the same `SIZE_META` text at
+    /// the same leading, a different string. At the lane's 176 px of measure
+    /// (`SIDEBAR_MEASURE` 232 − `SIDEBAR_SLEEVE` 48 − `GAP_SM` 8) the longest
+    /// form this can take is well inside the measure.
     #[must_use]
     pub(crate) fn counts(&self) -> String {
         match self.seconds {
             Some(seconds) => format!(
-                "{} · {}",
+                "Playlist · {} · {}",
                 self.entries,
                 vm::format_duration(Duration::from_secs(seconds))
             ),
-            None => self.entries.to_string(),
+            None => format!("Playlist · {}", self.entries),
         }
     }
 }
@@ -1356,6 +1378,87 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let folder = Folder::open(dir.path().join("playlists")).expect("open");
         (dir, folder)
+    }
+
+    /// **The line under a name declares its kind in its first token**
+    /// (ADR-0024 §A3.1) — and the property being pinned is not the wording,
+    /// it is that a made thing's line and a found thing's line are **never
+    /// the same shape**.
+    ///
+    /// That is the one thing a screenshot cannot check. Before this, a
+    /// playlist's line was `14` and a record's was `Anne-Marie Puig`: two
+    /// strings in one slot, at one size, in one ink, with nothing but their
+    /// content to tell a reader which kind of object he was looking at — and
+    /// `14` did not read as a count, it read as a name truncated to nothing.
+    /// The record arm is asserted here beside it, from the same source the
+    /// lane builds it from (`app::App::sync_lane`'s record arm takes
+    /// `album.artist.label()`), because *neither string alone* is the
+    /// property.
+    #[test]
+    fn the_line_under_a_name_declares_its_kind_in_its_first_token() {
+        let timed = PanelRow {
+            id: playlist_id("Road Trip"),
+            name: "Road Trip".to_owned(),
+            entries: 14,
+            seconds: Some(2530),
+            touched_unix_s: None,
+            art: Vec::new(),
+        };
+        assert_eq!(timed.counts(), "Playlist · 14 · 42:10");
+
+        // A bare imported path list declares no times, so the row says what it
+        // knows and does not claim `0:00` about music it has not measured —
+        // but it still leads with the noun, because the noun is the point.
+        let untimed = PanelRow {
+            seconds: None,
+            ..timed.clone()
+        };
+        assert_eq!(untimed.counts(), "Playlist · 14");
+
+        // The shapes, against each other. A found thing's line is a person's
+        // name; a made thing's opens with the kind and then counts. No made
+        // line can be mistaken for a found one at a glance, at any count.
+        let found = "Anne-Marie Puig";
+        for made in [timed.counts(), untimed.counts()] {
+            assert!(
+                made.starts_with("Playlist · "),
+                "a made thing names its kind first: {made}"
+            );
+            assert!(
+                !found.starts_with("Playlist · "),
+                "…and a found thing never can, because its line is an artist"
+            );
+            assert_ne!(made, found);
+        }
+
+        // **And it costs no geometry.** The tightest surface the string
+        // reaches is the lane's row: SIDEBAR_MEASURE 232 − SIDEBAR_SLEEVE 48
+        // − GAP_SM 8 = 176 px, set at SIZE_META 12 with `Wrapping::None`
+        // inside a container that clips. At a conservative 0.62 em per
+        // character the ordinary form is inside that measure with room, which
+        // is what the rule was costed at (design 14 §5.3).
+        //
+        // A list of four or five figures would run past 176 and be **clipped**
+        // — never reflowed, never taller, never pushing a row down: the
+        // container's `clip(true)` and the row's fixed SIDEBAR_ROW_H see to
+        // that, and it is the same truncation a long artist name has always
+        // taken in the same slot. So the claim under test is *the ordinary
+        // line fits*, and the guarantee under every line is *the row does not
+        // move*.
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a character count that cannot approach f32's mantissa"
+        )]
+        let sets_in = |line: &str| line.chars().count() as f32 * 0.62 * crate::theme::SIZE_META;
+        let measure =
+            crate::theme::SIDEBAR_MEASURE - crate::theme::SIDEBAR_SLEEVE - crate::theme::GAP_SM;
+        for line in [timed.counts(), untimed.counts()] {
+            assert!(
+                sets_in(&line) < measure,
+                "`{line}` sets in {} px against the lane's {measure}",
+                sets_in(&line)
+            );
+        }
     }
 
     /// An absolute fixture path by the platform's own rule — the same lesson
