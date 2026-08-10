@@ -40,7 +40,7 @@ modifier: the letters belong to the query now.
 |---|---|
 | any printable character | filter the wall by it, from wherever you are — the search well takes the caret with the first keystroke |
 | <kbd>Enter</kbd> | play the best match for what you typed; with no query, play the selected album |
-| <kbd>Esc</kbd> | leave the search field, then peel one layer: the queue, else the settings, else the pull, else the query, else the inspector, else the shuffle's marks |
+| <kbd>Esc</kbd> | leave the search field, then peel one layer: the place you are in, else the settings, else the query, else the shuffle's marks |
 | <kbd>Space</kbd> | play / pause |
 | <kbd>←</kbd> <kbd>→</kbd> | seek 5 s back / forward |
 | <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> | seek 30 s back / forward |
@@ -51,7 +51,7 @@ modifier: the letters belong to the query now.
 | <kbd>Ctrl</kbd>+<kbd>-</kbd> <kbd>Ctrl</kbd>+<kbd>=</kbd>, or <kbd>Ctrl</kbd>+scroll | hang the wall closer or wider — **spacious**, **balanced**, **dense** |
 | <kbd>1</kbd> … <kbd>5</kbd> | arrange the wall by **artist**, **year**, **genre**, **added** or **played** — the same five words in the top bar |
 | <kbd>/</kbd>, or <kbd>Ctrl</kbd>+<kbd>F</kbd> | put the caret in the search field without typing anything |
-| <kbd>Ctrl</kbd>+<kbd>U</kbd> | show / hide what is playing **up next**, over the now-playing bar |
+| <kbd>Ctrl</kbd>+<kbd>U</kbd> | go to **Now playing** with the run beside it — what is playing, and what is **up next**, on one surface |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | go to the settings, or come back |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> | hide the album inspector, or bring it back — the selection is kept |
 | <kbd>Ctrl</kbd>+<kbd>R</kbd> | **the pull**: one record, weighted toward what you have not heard in a long time. Nothing plays — it is offered, and pressing again offers a different one |
@@ -87,11 +87,11 @@ wall, or the two zoom keys, and baz remembers where you left it. Three named
 steps rather than a free zoom, so that every screenshot of baz is one of three
 walls and a layout bug is reproducible.
 
-Every one of those keys goes on working while the queue is open. The popover
-is deliberately not modal — iced 0.13 offers no focus containment and no
-accessibility tree, so imitating a modal would be a claim the toolkit cannot
-back — and <kbd>Esc</kbd>, a second <kbd>Ctrl</kbd>+<kbd>U</kbd>, or a press
-anywhere outside it all put it away.
+Every one of those keys goes on working on the now-playing surface. The run is
+not a layer over anything — it is half of that place, drawn beside the record,
+and the `Run` word in the place's top-right is what stands it down. <kbd>Esc</kbd>
+leaves the place, as it leaves every place; it does not hide the run, because a
+peel that removed half a place would make one key mean three things.
 
 ## Accessibility — read this before you install
 

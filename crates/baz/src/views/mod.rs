@@ -35,8 +35,9 @@
 //! replace each other ([`crate::place`]), and [`bottom_bar`] is in every one of
 //! them and never moves.
 //!
-//! That is why [`place_header`] is shared rather than copied: three places draw
-//! the same strip, in the same geometry as the Library's [`top_bar`], because
+//! That is why [`place_header`] is shared rather than copied: the places that
+//! wear one draw the same strip, in the same geometry as the Library's
+//! [`top_bar`], because
 //! **the frame is the frame in every place** — navigating may not slide the
 //! content area by a pixel.
 //!
