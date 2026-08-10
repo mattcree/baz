@@ -300,6 +300,17 @@ pub(crate) enum Message {
     /// The bar's labelled `Queue` control, or `Q`: go to the queue place, or
     /// come back from it (see [`crate::place`]).
     ToggleQueue,
+    /// **The `Run` word**, in the now-playing place's own top-right corner:
+    /// show the run beside the record, or stand it down
+    /// (`docs/design/12-now-playing-and-kiosk.md` §3.4.3).
+    ///
+    /// The merged surface's two densities, as a **stated control** rather than
+    /// as a consequence of the window manager: `F11` changes nothing about it,
+    /// because iced 0.13 cannot tell baz which display it is filling and a
+    /// full-screen that decided what a place *contained* would strand a
+    /// single-display listener. Remembered across launches
+    /// ([`config::Config::run_column`]).
+    ToggleRun,
     /// **The bar's now-playing block**: go to the page of the record that is
     /// sounding.
     ///
@@ -806,6 +817,14 @@ pub(crate) enum Message {
     FileHoverLeft,
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the shell holds one flag per remembered *view* decision — the \
+              lane's width, the run column's density — beside two facts about \
+              the launch itself. They are independent standing answers with \
+              independent controls and independent config keys; bundling them \
+              into a state enum would name a mode nobody can be in"
+)]
 struct App {
     started: Instant,
     first_frame_logged: bool,
@@ -945,6 +964,10 @@ struct App {
     /// Whether the returns lane opens open, read from the config for
     /// `group_key`'s reason and handed to the shelf the same way.
     lane_open: bool,
+    /// **Whether the now-playing place stands its run beside the record** —
+    /// the `Run` word's state, read from the config on the first frame for
+    /// `lane_open`'s reason exactly ([`config::Config::run_column`]).
+    run_column: bool,
     /// **The lane, merged**: the shelf's recent records and every playlist,
     /// in [`crate::lane::resolve`]'s one order.
     ///
@@ -1091,6 +1114,8 @@ impl App {
             .as_ref()
             .map_or(shelf::Density::Balanced, |config| config.density);
         let lane_open = stored.as_ref().is_none_or(|config| config.sidebar_open);
+        // The merged now-playing place's density, restored on the same terms.
+        let run_column = stored.as_ref().is_none_or(|config| config.run_column);
         // **The shuffle property, restored.** A standing decision
         // (`config::Config::shuffle`), seeded rather than assumed for
         // `seed_volume`'s reason: the control must be lit on the first frame,
@@ -1121,6 +1146,7 @@ impl App {
             settings_section: 0,
             density,
             lane_open,
+            run_column,
             lane: Vec::new(),
             lane_mark: (u64::MAX, u64::MAX),
             art_mark: ((u64::MAX, u64::MAX), Place::Settings),
@@ -1198,6 +1224,11 @@ impl App {
     /// Everything [`Self::update`] does except keep the lane true — the update
     /// loop proper, split out so that the one thing that must happen after
     /// every message can be one line rather than an arm in each of forty.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one arm per message that is not already routed to a \
+                  sub-machine above; the routing table is clearest read whole"
+    )]
     fn route(&mut self, message: Message) -> Task<Message> {
         note_message(&message);
         // The volume is its own small machine and every one of its messages
@@ -1240,6 +1271,7 @@ impl App {
                 self.queue_scroll = 0.0;
                 self.go(Place::queue)
             }
+            Message::ToggleRun => self.toggle_run(),
             // **Shift-click a sleeve queues the record** — the one-press
             // accelerator over the picker's Queue row (ADR-0023 §3's stack;
             // doc 09 §13 step 7). A plain press navigates, exactly as
@@ -2485,6 +2517,35 @@ impl App {
         self.set_lane(!self.lane_open)
     }
 
+    /// **The `Run` word**: put the run on the now-playing surface, or stand it
+    /// down (doc 12 §3.4.3), and remember which.
+    ///
+    /// **Turning it off clears the run's undo history**, and that is the same
+    /// rule leaving the place obeys rather than a new one: `Undo` is a word in
+    /// the run's own summary strip, and an accelerator whose visible twin is
+    /// off screen is not legal (doc 11 §5 P2, doc 12 §6.4.4).
+    fn toggle_run(&mut self) -> Task<Message> {
+        self.set_run(!self.run_column)
+    }
+
+    /// Put the run column in `on` — the `Run` word, and
+    /// <kbd>Ctrl</kbd>+<kbd>U</kbd>, which asks for the surface *and* its list.
+    fn set_run(&mut self, on: bool) -> Task<Message> {
+        if self.run_column == on {
+            return Task::none();
+        }
+        self.run_column = on;
+        if !on {
+            self.queue_undo.clear();
+        }
+        // The column's scrollable is unmounted and re-created with the density,
+        // so the remembered offset would window rows the widget is not showing
+        // (`queue_scroll`'s own note).
+        self.queue_scroll = 0.0;
+        persist_run_column(on);
+        Task::none()
+    }
+
     /// Put the lane in `open` — the marks at its foot,
     /// <kbd>Ctrl</kbd>+<kbd>B</kbd>, and every road to the well
     /// ([`Self::reach_the_well`]) — persisting the state and re-hanging the
@@ -2659,7 +2720,9 @@ impl App {
                 };
                 open.renaming.take().is_some()
             }
-            Place::Queue => self.playlists.saving_queue.take().is_some(),
+            // The run's save field, in either place that draws the run — the
+            // queue place for exactly one more step (doc 12 §12, M2).
+            Place::Queue | Place::NowPlaying => self.playlists.saving_queue.take().is_some(),
             _ => false,
         }
     }
@@ -3611,7 +3674,7 @@ impl App {
     /// visible twin stands.
     fn undo_edit(&mut self) -> Task<Message> {
         match self.place {
-            Place::Queue => self.undo_queue_edit(),
+            Place::Queue | Place::NowPlaying => self.undo_queue_edit(),
             Place::Playlist(_) => {
                 if let Screen::Shelf(state) = &self.screen {
                     self.playlists.undo_open(&state.library);
@@ -3651,7 +3714,7 @@ impl App {
         if from == self.place {
             return;
         }
-        if from == Place::Queue {
+        if matches!(from, Place::Queue | Place::NowPlaying) {
             self.queue_undo.clear();
         }
         if matches!(from, Place::Playlist(_)) {
@@ -3793,9 +3856,22 @@ impl App {
                 self.body_width(),
                 collecting,
             ),
-            (Screen::Shelf(state), Place::NowPlaying) => {
-                views::now_playing::view(state, &self.player, self.body_width(), self.body_height())
-            }
+            (Screen::Shelf(state), Place::NowPlaying) => views::now_playing::view(
+                state,
+                &self.player,
+                self.body_width(),
+                self.body_height(),
+                self.run_column,
+                // The hover slots go quiet while a row is in the hand: the
+                // gesture's own statements — the ghost and the line — are
+                // the surface's voice mid-drag.
+                self.drag.as_ref().map_or(self.hovered_queue_row, |_| None),
+                self.playlists.saving_queue.as_ref(),
+                collecting,
+                self.queue_scroll,
+                self.drag.as_ref(),
+                self.queue_undo.can_undo(),
+            ),
             (Screen::Shelf(state), Place::Settings) => {
                 // Built here rather than inside the view: the folders come from
                 // the shell's own list and their contents from the index, and a
@@ -5779,6 +5855,13 @@ fn persist_shuffle(on: bool) {
 /// density step and the group key, and **no Settings row**).
 fn persist_lane(open: bool) {
     persist(|config| config.sidebar_open = open);
+}
+
+/// Remember whether the now-playing place stands its run beside the record —
+/// `persist_lane`'s argument exactly (doc 12 §3.4.3: one bool in
+/// `config.toml`, the `Run` word as its only control, and **no Settings row**).
+fn persist_run_column(on: bool) {
+    persist(|config| config.run_column = on);
 }
 
 /// **What `session.toml` should say about the run** — or `None` for *leave the

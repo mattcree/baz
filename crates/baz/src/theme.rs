@@ -3257,6 +3257,37 @@ pub fn track_row(
 /// the surface declares (law L5).
 pub const LIST_MEASURE: f32 = 880.0;
 
+/// **The run column's measure on the merged now-playing surface** (logical px)
+/// — half of [`LIST_MEASURE`], **440**.
+///
+/// Derived rather than chosen (`docs/design/12-now-playing-and-kiosk.md`
+/// §5.5a): [`LIST_MEASURE`] is the measure this product gives a list that owns
+/// its surface, and the run owns *half* of one — the record has the other half.
+/// It clears the run row's own anatomy with room to spare —
+/// [`TRACK_NO_W`] 24 + [`GAP_SM`] 8 + title + `GAP_SM` 8 + [`DURATION_W`] 48 +
+/// [`GAP_XS`] 4 + four [`STEPPER_HIT`] 96 + three `GAP_XS` 12 +
+/// [`SCROLLBAR_LANE`] 10 = 210 + title — leaving 230 px of title lane, against
+/// the ~224 px the bar's own left block gets for the same three-line reading.
+/// **A run row is not a cramped row; it is the row the bar has always drawn,
+/// given more room.**
+pub const RUN_MEASURE: f32 = LIST_MEASURE / 2.0;
+
+/// **The body width below which the merged surface stops being two columns**
+/// (logical px) — **784**.
+///
+/// `ART_MIN` 240 + two [`HANG`] 80 + [`RUN_MEASURE`] 440 + [`GAP_XL`] 24: the
+/// narrowest body in which the record can be [`ART_MIN`] *and* the run can be
+/// its own measure. Below it the record cannot be the size it deserves in any
+/// case — 240 px in a 704 px column is a thumbnail, not a subject — so the
+/// columns re-stack into one and the record becomes the run's head block
+/// (`docs/design/12-now-playing-and-kiosk.md` §5.5a). **One composition
+/// degrading, not a second layout**: the same four objects, re-hung.
+///
+/// It bites at a 1064 px window with the returns lane open, or an 880 px window
+/// with it collapsed — both below the 1280 the composition audits are taken at,
+/// so the regime is a real one rather than a theoretical one.
+pub const SPLIT_FLOOR: f32 = ART_MIN + 2.0 * HANG + RUN_MEASURE + GAP_XL;
+
 /// Edge of the sleeve on a record's page (logical px) — **320**.
 ///
 /// `ART_MAX`, which is `art::THUMB_PX`, so the decoded thumbnail is drawn at
@@ -4397,6 +4428,27 @@ mod tests {
         // padding around both. The label itself is measured in the face that
         // draws it by `font.rs`; this is the arithmetic that leaves room.
         const { assert!(UP_NEXT_W > POSITION_W + 3.0 * GAP_SM) }
+        // **The run column's measure holds a run row's whole anatomy**, and
+        // holds it with more title lane than the bar's own left block gets for
+        // the same reading (doc 12 §5.5a). The sum is the row's fixed furniture
+        // — number column, duration, the four reserved edit slots, the
+        // scrollbar's lane and the gaps between them — and what is left is the
+        // title's.
+        const {
+            let anatomy = TRACK_NO_W
+                + GAP_SM
+                + GAP_SM
+                + DURATION_W
+                + GAP_XS
+                + 4.0 * STEPPER_HIT
+                + 3.0 * GAP_XS
+                + SCROLLBAR_LANE;
+            assert!(RUN_MEASURE - anatomy > 200.0);
+        }
+        // …and the split floor is the narrowest body that can hold the run at
+        // that measure *and* the record at its floor, hung from the body's own
+        // two gutters. Below it the columns re-stack (`SPLIT_FLOOR`'s token).
+        const { assert!(SPLIT_FLOOR == ART_MIN + 2.0 * HANG + RUN_MEASURE + GAP_XL) }
     }
 
     /// **The ambient continuation is a reservation, not an addition.**

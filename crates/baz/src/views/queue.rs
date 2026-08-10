@@ -74,18 +74,44 @@ pub(crate) fn save_name_id() -> text_input::Id {
     text_input::Id::new("baz-queue-save")
 }
 
-/// The **Queue** place: the header strip, the summary, and the rows —
-/// **virtualized**, so `Play all`'s five-figure queue costs the frame what a
+/// Everything the run column needs of the surface drawing it, so that the
+/// merged now-playing place and (for exactly one step) the queue place hand it
+/// the same reading without either growing a tenth positional argument.
+///
+/// `measure` is the width the rows are set at, `viewport_h` bounds the virtual
+/// window's span, `scroll` is where the one scrollable last said it was
+/// ([`Message::QueueScrolled`]), and `clearance` is the air reserved above the
+/// summary for the place's own top-right controls — the `Run` word is drawn as
+/// a **layer** over the body (it costs the record no height, doc 12 §5.5a), so
+/// the column that the word governs is what leaves room for it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Frame {
+    /// The measure the rows are set at, scrollbar lane already taken off.
+    pub(crate) measure: f32,
+    /// The viewport the virtual window is computed against.
+    pub(crate) viewport_h: f32,
+    /// Where the scrollable last said it was.
+    pub(crate) scroll: f32,
+    /// Air above the summary for the place's top-right controls.
+    pub(crate) clearance: f32,
+    /// The gutter the column hangs from — [`place_pad`] when the column owns
+    /// the body's whole width, and the right-hand column's own inset when it
+    /// stands beside the record.
+    pub(crate) pad: iced::Padding,
+}
+
+/// **The run column**: the summary, the acts beside it, and the rows —
+/// **virtualized**, so `Play all`'s five-figure run costs the frame what a
 /// twelve-track record does (doc 09 §7.1's implementation gate;
 /// [`crate::queue_window`] owns the arithmetic, this file draws the slice it
 /// is handed, exactly as the wall's `views/shelf.rs` does for
 /// [`crate::shelf::Grid`]).
 ///
-/// `window` decides two things: the width sets the list's measure — it grows
-/// until [`theme::LIST_MEASURE`] and then stops, centring in what is left,
-/// for the reason the record's page does the same — and the height bounds
-/// the virtual window's span. `scroll` is where the place's one scrollable
-/// last said it was ([`Message::QueueScrolled`]).
+/// **It is the other half of `Place::NowPlaying`** (doc 12 §3.4): a run is a
+/// list and a cursor, the record column is the cursor, and this is the list.
+/// `head` is what the merged surface puts *above* the summary inside the same
+/// scroll — the record, drawn as the run's head block, when the body is too
+/// narrow to stand the two columns side by side (§5.5a's `SPLIT_FLOOR`).
 ///
 /// Every string here is *owned*, straight from [`PlayerState::queue_list`]'s
 /// render-ready reading, which is why the element is `'static`: the contents
@@ -93,30 +119,39 @@ pub(crate) fn save_name_id() -> text_input::Id {
 /// the library, so nothing on screen can outlive a view-model rebuild mid-scan.
 #[expect(
     clippy::too_many_lines,
-    reason = "the place is one composition — the summary strip, the save \
+    reason = "the column is one composition — the summary strip, the save \
               field, and the windowed rows loop — and the loop's boxing \
               rules must stay in sight of the spacers they keep honest"
 )]
 #[expect(
     clippy::too_many_arguments,
-    reason = "each argument is one independent reading the place renders — \
+    reason = "each argument is one independent reading the column renders — \
               the drag in flight and the undo affordance arrived from two \
               different studies, and bundling them into a struct would name \
               nothing the call site does not already say"
 )]
-pub(crate) fn view<'a>(
+pub(crate) fn run_column<'a>(
     player: &'a PlayerState,
-    window: iced::Size,
+    frame: Frame,
+    head: Option<(Element<'a, Message>, f32)>,
     hovered: Option<usize>,
     saving: Option<&'a NameEntry>,
     collecting: Collecting,
-    scroll: f32,
     drag: Option<&'a crate::drag::DragState>,
     can_undo: bool,
 ) -> Element<'a, Message> {
     let room = theme::active();
-    let measure =
-        (window.width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).clamp(0.0, theme::LIST_MEASURE);
+    let Frame {
+        measure,
+        viewport_h,
+        scroll,
+        clearance,
+        pad,
+    } = frame;
+    let (head, head_h) = match head {
+        Some((element, height)) => (Some(element), height + theme::GAP_XL),
+        None => (None, 0.0),
+    };
     // A row is only a control when there is an engine to send its command to.
     let live = player.engine_ready();
     let body: Element<'a, Message> = match player.queue_list() {
@@ -140,7 +175,9 @@ pub(crate) fn view<'a>(
             // the list's own head block. An estimate — the save field, when
             // open, moves it by less than the module's margin absorbs.
             let head_two_line = list.album.is_some();
-            let rows_top = theme::HANG
+            let rows_top = pad.top
+                + clearance
+                + head_h
                 + theme::TRANSPORT_HIT
                 + 2.0 * theme::GAP_LG
                 + theme::LINE_BODY
@@ -150,7 +187,7 @@ pub(crate) fn view<'a>(
                     0.0
                 }
                 + theme::GAP_XS;
-            let win = queue_window::window(&shapes, scroll - rows_top, window.height);
+            let win = queue_window::window(&shapes, scroll - rows_top, viewport_h);
             // A record's name where the record begins, then its tracks —
             // **albums listed as albums, never flattened** (ADR-0014). Each
             // element is boxed at exactly the pitch the module declared for
@@ -228,23 +265,76 @@ pub(crate) fn view<'a>(
             .into()
         }
     };
+    // The head — the record, when the body is too narrow to stand it beside
+    // the run (§5.5a) — is *inside* the scroll, and that is deliberate: at
+    // this width the surface has become the editor, and an editor whose
+    // first 300 px are a fixed hero is an editor you scroll past to use.
+    let body: Element<'a, Message> = match head {
+        None => body,
+        Some(head) => column![head, body].spacing(theme::GAP_XL).into(),
+    };
+    let body: Element<'a, Message> = if clearance > 0.0 {
+        column![Space::with_height(Length::Fixed(clearance)), body].into()
+    } else {
+        body
+    };
+    // One scroll for the run, with the bar's lane reserved whether or not
+    // the list overflows — the same reserved-slot rule the durations
+    // depend on, and the reason a thirteenth track arriving shunts none of
+    // them sideways.
+    scrollable(
+        container(container(body).width(Length::Fixed(measure)))
+            .width(Length::Fill)
+            .padding(pad)
+            .align_x(alignment::Horizontal::Center),
+    )
+    .on_scroll(Message::QueueScrolled)
+    .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
+    .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+/// The **Queue** place, for exactly one step longer.
+///
+/// `Place::Queue` is deleted in doc 12 §12's step M2; while it stands, the
+/// place is [`run_column`] under the header strip it has always worn, so that
+/// both doors work for one commit and the merge is reversible.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a pass-through to `run_column`, whose arguments these are"
+)]
+pub(crate) fn view<'a>(
+    player: &'a PlayerState,
+    window: iced::Size,
+    hovered: Option<usize>,
+    saving: Option<&'a NameEntry>,
+    collecting: Collecting,
+    scroll: f32,
+    drag: Option<&'a crate::drag::DragState>,
+    can_undo: bool,
+) -> Element<'a, Message> {
+    let measure =
+        (window.width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).clamp(0.0, theme::LIST_MEASURE);
     column![
         place_header("Queue"),
-        // One scroll for the place, with the bar's lane reserved whether or not
-        // the list overflows — the same reserved-slot rule the durations
-        // depend on, and the reason a thirteenth track arriving shunts none of
-        // them sideways.
-        scrollable(
-            container(container(body).width(Length::Fixed(measure)))
-                .width(Length::Fill)
-                .padding(place_pad())
-                .align_x(alignment::Horizontal::Center)
-        )
-        .on_scroll(Message::QueueScrolled)
-        .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
-        .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
-        .width(Length::Fill)
-        .height(Length::Fill),
+        run_column(
+            player,
+            Frame {
+                measure,
+                viewport_h: window.height,
+                scroll,
+                clearance: 0.0,
+                pad: place_pad(),
+            },
+            None,
+            hovered,
+            saving,
+            collecting,
+            drag,
+            can_undo,
+        ),
     ]
     .into()
 }
@@ -379,7 +469,7 @@ fn album_group(album: Option<&str>, artist: &str, air: f32) -> Element<'static, 
 /// Quiet text rather than an illustration or a call to action — an empty queue
 /// is the ordinary state of a player nobody has pressed play on, not a problem
 /// to solve.
-fn empty_state() -> Element<'static, Message> {
+pub(crate) fn empty_state() -> Element<'static, Message> {
     let room = theme::active();
     container(
         column![
