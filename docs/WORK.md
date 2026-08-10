@@ -32,18 +32,15 @@
    was moved onto its contents so the bar could reach the edge; it evidently
    still does not. Measure it on a rendered frame rather than reasoning from
    the code — `docs/design/impl/search-in-lane/` has the harness.
-2. **`Save as playlist` appears where it makes no sense** — *"on the playlist
-   page for a CD"*. It belongs to the *run*; offering it on a thing already
-   saved is a category error. Design doc 14 is chasing it as a defect; if that
-   study has landed, implement its fix.
-3. **Tell an album from a playlist.** *"the information heirarchy isn't great"*,
-   and the playlist's name is not prominent enough. Design doc 14 owns it —
-   implement whatever it concludes, honouring its tiers.
-4. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and the
+2. **Doc 14's Tier 2 — the serif on the two pages.** Held back tonight only
+   because `views/now_playing.rs` argues in prose *against* the serif and must
+   be amended in the same commit, and that file was another agent's. Do it
+   next, and amend the prose with it or the code argues with the ADR.
+3. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and the
    Flatpak build are all done; what is left is a screenshot for the metainfo,
    the version edit from `0.0.0`, a `workflow_dispatch` dry run, then the tag.
    **The tag is the owner's to cut** — the workflow produces a draft.
-5. **Rewrite the README as the project's public face**, with the icon and real
+4. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately near
    last, so it describes what actually ships. Its keyboard table is badly stale
    today: `Pull` is gone, `Q` never opened the queue, shuffle is a mode, the
@@ -59,7 +56,10 @@
 - **The artwork at full size** (doc 12 step A2) — deletes the 720 px clamp that
   makes full-screen *"look weird"*, adds the 1024 px hero decode and the
   cover-derived field.
-- **Design doc 14** — records versus lists, and the `Save as playlist` defect.
+- **Doc 14 Tier 1** — the kind in the line under a name (`Playlist · 14 ·
+  42:10`), the byline that makes the two identity blocks the same height, and
+  the `Save as playlist` fixes: the run strip gains its noun, and the word
+  becomes the readout `Saved as "Road Trip"` while provenance stands unedited.
 
 ## Waiting on the owner
 
@@ -68,6 +68,12 @@
   no edge-drag resize anywhere in `window::Action`**, so going borderless today
   loses pointer resizing. The route is a ~30-line upstream-shaped iced patch,
   which means a forked dependency. *Needs: yes or no to the fork.*
+- **Doc 14's Tier 3**, three questions rather than tasks: should the serif
+  reach the *wall and lane* as well as the pages (sixty italic captions is an
+  aesthetics call, and aesthetics is the owner's own rule)? Should a playlist
+  of fewer than four records draw the designed rest tile instead of one
+  record's cover full-bleed? And on `Save as playlist` — did he mean **remove
+  it** rather than make it make sense?
 - **Resizing is still slow**, reported twice. Two commands separate the toolkit
   from us and have never been run on the machine that has the bug — Xvfb has no
   GPU and cannot reproduce it:
@@ -90,4 +96,7 @@ Newest first. Fuller detail in `CHANGELOG.md`.
 - The collection's counts moved from the lane to Home as a `COLLECTION` footer.
 - `Pull` removed; shuffle became a player property; `All songs` became an
   implicit list.
+- Design doc 14 — records versus lists; found the two complaints were one
+  defect, and that a one-to-three-record playlist's sleeve is byte-for-byte the
+  widget a record's own row builds.
 - The refusals ledger deleted — it had become law over the owner.
