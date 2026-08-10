@@ -60,6 +60,16 @@ walkdir = "2"       # directory traversal (Unlicense OR MIT)
 # does not trim and what a Vorbis seek costs — is documented, and tested, in
 # baz_core::playback.
 symphonia = { version = "0.5", default-features = false, features = ["wav", "pcm", "flac", "mp3", "isomp4", "aac", "alac", "ogg", "vorbis"] }  # demux/decode (MPL-2.0 — allowlisted in deny.toml)
+# Already in the graph as symphonia's own dependency — **zero net-new crates**,
+# and named here only so that `playback::source` can register the ID3v2 reader
+# on a probe of its own. It builds that probe rather than calling
+# `symphonia::default::get_probe()` because the default registry includes the
+# raw-ADTS demuxer, which baz never wants: `.aac` is not an `AUDIO_EXTENSIONS`
+# member, so in production that reader only ever fires on a file that is not
+# what its name says — and it is where every panic the fuzz sweep found lived
+# (ADR-0040 §2.5). Version must track `symphonia` above; Cargo.lock unifies
+# them.
+symphonia-metadata = { version = "0.5", default-features = false }  # ID3v2 reader for baz's own probe (MPL-2.0)
 tokio = { version = "1", features = ["rt"] }  # async runtime for the iced shell only (MIT)
 # Playlist deletion moves the file to the platform trash instead of unlinking
 # it (doc 11 §5 P2 — forgiveness: reversible-first, the confirm dialog

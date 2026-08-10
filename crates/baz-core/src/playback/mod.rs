@@ -303,6 +303,24 @@ pub enum PlaybackError {
     #[error("decode error: {0}")]
     Decode(#[from] symphonia::core::errors::Error),
 
+    /// A decoder **panicked** on this file rather than returning an error
+    /// (ADR-0040).
+    ///
+    /// Distinct from [`Self::Decode`] on purpose, and the distinction is the
+    /// whole point of the variant: `Decode` is a parser saying *these bytes
+    /// are not a stream I can read*, which is a fact about the file. This one
+    /// is a parser **failing to say anything** — an index, an overflow or an
+    /// assertion inside third-party code, caught at baz's boundary so that a
+    /// corrupt file in a scanned folder cannot take the decode thread with it.
+    /// A file that produces it is a bug report waiting to be written, and the
+    /// panic's own message is on stderr; a file that produces `Decode` is
+    /// simply not music.
+    #[error("the decoder panicked while {doing} this file")]
+    DecoderPanicked {
+        /// What was being attempted — `"opening"`, `"decoding"`, `"seeking"`.
+        doing: &'static str,
+    },
+
     /// The container has no default audio track.
     #[error("no default audio track in container")]
     NoDefaultTrack,

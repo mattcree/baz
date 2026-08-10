@@ -98,29 +98,7 @@
 
 ## Next
 
-1. **A 29-byte malformed FLAC asks baz for 4 GB.** The first run of the fuzz
-   job that has ever happened anywhere — it goes on `schedule` and
-   `workflow_dispatch` only, and neither had fired until v0.1.0's release dry
-   run — found an out-of-memory in `playback_decode` in forty seconds.
-   [Run 31399606796](https://github.com/mattcree/baz/actions/runs/31399606796);
-   the input is `ZkxhQwYn///7/1IA/wBJAQAAABMAAAAAAAAA/z0=`, and reading it by
-   hand says what it is: `fLaC`, then a metadata block header declaring
-   **type 6 (PICTURE), length 0x27FFFF**, then a PICTURE body whose 32-bit
-   **MIME-type length is 0xFF004901 — about 4.28 GB**, inside a block that says
-   it is 2.6 MB long. The allocation is not checked against the block that
-   contains it. **This is the product and not the harness**: `open_bytes` is
-   the same probe path a file on disk takes, so one corrupt FLAC in a scanned
-   folder is an allocation the machine cannot serve.
-   - **It does not block the tag** and it is not a regression — the fuzz job is
-     skipped on `push`, so the release gate never sees it. It is item 1 because
-     the ordering rule is functional-first and this is a file that takes the
-     player down, not a file that will not play.
-   - **Undecided, and it is the whole of the work**: whose bound. If the
-     unchecked read is symphonia's, baz's choices are a guard before the probe,
-     a pin, or a patch upstream — and *"which"* is the design, not the fix.
-     Reproduce with `cargo fuzz run playback_decode` on the artifact the run
-     wrote; nobody has run it locally yet.
-2. **A library from a newer baz reads as no library at all.** The owner, on
+1. **A library from a newer baz reads as no library at all.** The owner, on
    2026-08-10, ran a two-day-old binary out of `target/release/` and reported
    *"it shows me 'where's your music' which has no browse function and it also
    tells me the schema version is version 8 if I pick any directory"*. Both
@@ -151,7 +129,7 @@
      anyone looking for an executable, and he went to the obvious one. Worth a
      line in `docs/DEVELOPMENT.md` at least.
 
-3. **A deleted folder's records never leave the library.** `rm -rf` an album
+2. **A deleted folder's records never leave the library.** `rm -rf` an album
    directory and its eight rows stay on the wall for good. This is
    **deliberate and the reasoning is sound**: from the filesystem's side a
    deleted folder and an unmounted NAS are the same `NotFound` for every path
@@ -162,7 +140,7 @@
    order, and it needs no guessing about mounts because a person is asserting
    the fact. Related: the owner's library is on a NAS by design (ADR-0025), so
    the unmount case is his real case and not a hypothetical.
-4. **Removing a music folder destroys `first_seen_ns`.** Remove a root and
+3. **Removing a music folder destroys `first_seen_ns`.** Remove a root and
    add it back and every album files under ADDED = *today* — a real loss of
    the one fact ADR-0019 built a column and a structural guarantee to protect,
    and it is unrecoverable, which puts it above the two items below it. The
@@ -170,13 +148,13 @@
    forgotten root's paths and restore it if the folder comes back. Called
    *"its own small design"* there, which is a design that has never been
    written rather than a line of code.
-5. **The seek bar says which thing it measures.** The owner: *"I think the seek
+4. **The seek bar says which thing it measures.** The owner: *"I think the seek
    bar at the bottom should have a toggle indicating for song or for whole
    playlist"*. Both are true readouts — the track's position and the run's — and
    he is asking to choose. Undesigned; the questions are where the toggle lives
    (the bar is already dense), whether the choice persists, and what the
    elapsed/remaining figures either side of the bar read in run mode.
-6. **An artist has an `All songs` of their own.** The owner: *"the artist page
+5. **An artist has an `All songs` of their own.** The owner: *"the artist page
    should have its own 'all songs' playlist I think"*. `implicit::ImplicitList`
    already gives the library one, with an `Origin` kind and a collage sleeve, so
    this is that list scoped to one artist rather than new machinery. Undecided:
@@ -187,7 +165,7 @@
    word may not need qualifying. It should credit the artist's list rather than
    the underlying records when played, which is the rule that just landed for
    playlists.
-7. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
+6. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
    2026-08-10: *"at full screen the now playing page looks odd because the
    playlist hugs right and the art hugs left"* — which is this item, reported
    from the frame rather than from the measurement, and worth recording as a
@@ -199,7 +177,7 @@
    too — A4 widening the run closes the gap from one side, and if the sleeve is
    also hanging hard left rather than sitting in its column, that is a second
    fault the widening would hide rather than fix.
-8. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+7. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -212,7 +190,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-9. **Rewrite the README as the project's public face**, with the icon and real
+8. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
    last, so it describes what actually ships. Two of those four now exist and
    are regenerable — `docs/screenshots/capture.sh` writes the wall and Now
@@ -222,7 +200,7 @@
    `Ctrl+B` exists. (The group-key row itself is current again — the six words
    and `1`–`6` were corrected when `A–Z` came back.)
 
-10. **Ship the public beta.** The last item by construction: it is the one
+9. **Ship the public beta.** The last item by construction: it is the one
    that makes the eight above reach anybody. `v0.1.0` is prepared up to the
    tag and `docs/RELEASING.md` holds the owner's three commands, but a *beta*
    asks two more things of the release than a private tag does. **Flathub** —
@@ -332,6 +310,95 @@
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **A 29-byte malformed FLAC asks baz for 4 GB — and the answer is that the
+  bound is symphonia's, while the *panics* were baz's to catch and are caught.**
+  ADR-0040. Reproduced first, as the item asked: `cargo fuzz run
+  playback_decode` on the artifact, frame 18 in `symphonia-metadata`'s
+  `read_picture_block`, `vec![0u8; media_type_len]` from an unchecked `u32`.
+  - **Whose bound, settled with four findings rather than an argument.** It is
+    **unfixed in 0.6.0** as well as 0.5.5, so an upgrade buys nothing.
+    `MetadataOptions::limit_visual_bytes` and `limit_metadata_bytes` — the API
+    *designed* for this bound — exist in `symphonia-core` and are read by **no
+    reader in the released tree**. The same demuxer checks a block length
+    before allocating twenty lines away, and `symphonia-format-riff`'s
+    equivalent site is commented `// TODO: Apply limit.` And it is a **class**:
+    four sites in two containers, three of them found by the fuzzer and one
+    built by hand to test the hypothesis, with Ogg and five MP4 sample-table
+    sites behind them.
+  - **So no guard, and the reason is not effort.** A header walk catches these
+    four inputs and misses the real case, a large honest file with one corrupt
+    inner length; a body walk is symphonia's parser rewritten four times; and
+    the day baz's copy and symphonia's original disagree, baz refuses a file
+    that *plays* — which for a music player is the worse failure. WAV files in
+    the wild declare `0xFFFFFFFF` routinely, so even a blunt size-sanity rule
+    would refuse real records. The residue is in `docs/BACKLOG.md` with all
+    three reproducers in base64 and the upstream report written out, because
+    filing it is a GitHub account and not an agent's to do.
+  - **The severity was measured and it is not what the item said.** *"An
+    allocation the machine cannot serve"* is wrong on the machine baz ships
+    to: the 4.28 GB `calloc` is a lazy zero mapping, `open` returns `decode
+    error: out of bounds`, peak RSS **3.4 MB**. Under `ulimit -v 2G` the same
+    call is `memory allocation of 4278208769 bytes failed` and `SIGABRT`. So
+    the real exposure is a small machine, a container limit, strict overcommit
+    or a 32-bit build — and libFuzzer's `-malloc_limit_mb` is what turned it
+    into a red job.
+  - **The fuzzer found something worse on the way, and that *is* fixed.**
+    **Three panics in symphonia's AAC reader**, reachable from
+    `AudioSource::open` in 27 to 33 bytes — two while opening (`step_by(0)`, a
+    subtraction underflow) and one while decoding (a band index one past the
+    end). No overcommit caveat: a panic kills the decode thread on every
+    platform, and **all six of `AUDIO_EXTENSIONS` reach it** on the same bytes,
+    because a probe identifies a stream by searching its bytes. Answered
+    twice. **baz now probes only for the formats it plays**: the raw-ADTS
+    demuxer is out of the registry, because `.aac` is not a scanned extension
+    so that reader could only ever have fired on a file that is not what its
+    name says — which is exactly where it fired. And baz **contains an unwind**
+    at `open`, `next_block` and `seek`, for the parsers it does keep — a
+    boundary that knows no container, cannot refuse a file that plays, and does
+    not grow when symphonia grows a format. Two findings fell out of the first:
+    MPEG audio's sync word and ADTS's **overlap**, so two readers were
+    competing for the same corrupt `.mp3`; and nothing in the suite covered the
+    ID3v2 metadata reader, whose absence would have stopped MP3 ReplayGain
+    silently — it has a test now, confirmed to fail without the registration.
+  - **Five more defects, every one of them baz's own, all fixed outright.**
+    Seven minutes per target on all six targets, from an empty corpus:
+    - the **play ledger's date arithmetic** multiplied an unbounded year into
+      days (`1120120120176761-02-15T10:44:44Z`, found in under a minute) —
+      a panic under overflow checks and a *wrong instant* without them;
+    - a **mis-encoded ReplayGain tag** panicked `AudioSource::open`, because
+      `parse_gain` cut two *bytes* off the end of text that came out of a file
+      to look for `dB`, and the cut could land inside a character;
+    - and **three ways a playlist edited itself on every save** — a comment
+      losing one carriage return per save, a superseded `#EXTINF` hopping over
+      the comment beside it, and a title ending in a vertical tab being
+      shortened by the writer but not the reader. Each is a break of the
+      module's own round-trip law, which is why each repeated on every save.
+    `protocol_deserialize` and `scanner_inference` came out clean.
+  - **Everything the fuzzer found is now a `push` gate**, in
+    `crates/baz-core/tests/hostile_media.rs`, driven through the real on-disk
+    `open` under every scanned extension — because the fuzz job is skipped on
+    `push`, so a reproducer in a corpus is not a gate at all.
+  - **`playback_decode` is still expected red, and saying so is a correction
+    to this branch's own first draft.** It claimed the job could now go green;
+    a verification run said otherwise inside a minute, with **122 bytes of
+    ISO-MP4** that reach `symphonia-format-isomp4`'s `atoms/mod.rs:449` and
+    `attempt to add with overflow`. baz survives it — that is §2's containment
+    on a parser baz *keeps*, which is the live demonstration the ADR had
+    otherwise lost — but **libfuzzer-sys's panic hook aborts before
+    `catch_unwind` runs**, so no containment can make a panic invisible to the
+    fuzzer, and none should. Backlogged with its reproducer.
+    - Two things did change so the job is still worth reading: the loop now
+      runs **every** target and fails at the end with the list (a `run:` block
+      is `bash -e`, so one red target used to hide the five after it), and
+      `-malloc_limit_mb` goes to 6144 with `-rss_limit_mb` kept at 2048, so
+      the *reservation* class does not also turn it red. The first attempt at
+      that set the flag to `0`, which in libFuzzer means *"use
+      `rss_limit_mb`"* rather than *"off"* and changed nothing — caught by
+      re-running, not by reading.
+  - **Left for the owner's eye, and it is a policy question rather than a
+    defect:** the release gate is still weaker than the dry run. The fuzz job
+    stays `schedule` + `workflow_dispatch`, argued in `docs/RELEASING.md`; what
+    changed is that the class most worth catching no longer waits for it.
 - **The ladder only tightens** — the owner, looking at the running app: *"why
   is balanced smaller than compact... I think the dense should be a bit
   smaller."* Two things in one sentence, and they are kept apart in the commit
@@ -463,13 +530,18 @@ Newest first. Fuller detail in `CHANGELOG.md`.
     and not against the release commit, because `workflow_dispatch` takes a
     branch and an agent may not push one; the owner re-runs it on the pushed
     release commit as step 2 of his list.
-  - **It went red, and the red is item 1 above.** The `version` job and every
+  - **It went red, and the red is the entry above this one** (it was item 1 of
+    *Next* until ADR-0040 answered it). The `version` job and every
     CI job but one came out green; the fuzz job — which had never run anywhere,
     because it goes on `schedule` and `workflow_dispatch` and neither had
     fired — found an OOM in forty seconds. `build` `needs` the gate, so **the
     three platform builds and the checksum step still have not run in CI**.
-    They are the last unexercised thing in the release path, and only a green
-    dry run reaches them.
+    They are the last unexercised thing in the release path. This entry said
+    *"only a green dry run reaches them"*; ADR-0040 established that
+    `playback_decode` stays red on a Symphonia panic no fix inside baz can
+    hide from libFuzzer, so **the tag reaches them and the dry run does not** —
+    the fuzz job is skipped on `push`. `docs/RELEASING.md` now says so where
+    he will be standing.
   - **The tag is not blocked by it**: the fuzz job is skipped on `push`, so the
     gate a tag is held to is the one that went green. `docs/RELEASING.md` says
     this where he will be standing when he needs it, because a red dry run

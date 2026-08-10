@@ -386,6 +386,86 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 ## Known gaps in shipped features
 
+- **A corrupt file can still make Symphonia reserve gigabytes, and that is
+  upstream's bound to take.** *(Decided 2026-08-10, ADR-0040 §1. The **panics**
+  the same sweep found are fixed — baz stopped registering the raw-ADTS
+  demuxer it never needed, §2.5, and contains an unwind out of the parsers it
+  does use, §2. This entry is only the allocation.)* Metadata buffers are
+  allocated from unchecked 32-bit lengths in at least four places across two
+  containers, before a byte is read and without any check against the block
+  that contains them:
+
+  | reproducer (base64) | container | site | asks for |
+  |---|---|---|---|
+  | `ZkxhQwYn///7/1IA/wBJAQAAABMAAAAAAAAA/z0=` | FLAC | `symphonia-metadata/flac.rs:53` picture MIME type | 4,278,208,769 |
+  | `ZkxhQwQAACAAAAAAAQAAAAD///8=` | FLAC | `symphonia-metadata/vorbis.rs:175` comment value | 4,294,967,040 |
+  | `UklGRiAAAIBXQVZFZm10IBAAAAABAAIARKwAABCxAgAEABAATElTVPz//39JTkZPSU5BTfD//38=` | WAV | `symphonia-format-riff/wave/chunks.rs:538` `LIST`/`INFO` value | 2,147,483,632 |
+
+  Each decodes with `base64 -d` and reproduces through `AudioSource::open` on
+  a file with any of `AUDIO_EXTENSIONS`. `flac.rs:66` (the picture
+  *description*) is the fourth and the fuzzer found it too; the comment reader
+  is shared with Ogg Vorbis, and `symphonia-format-isomp4` reserves sample
+  tables from a `u32` entry count in five more places (`stsz`, `stts`, `stsc`,
+  `stco`, `co64`).
+
+  **What it costs, measured rather than assumed.** On a 64-bit machine with
+  ordinary overcommit — the platform baz ships to — the reservation is a lazy
+  zero mapping that is never written: `open` returns `decode error: out of
+  bounds`, peak RSS **3.4 MB**, and nothing is wrong except the arithmetic.
+  Where the reservation cannot be made (`ulimit -v`, `vm.overcommit_memory=2`,
+  a container memory limit, a small machine, a 32-bit build) the same call is
+  `memory allocation of 4278208769 bytes failed` followed by `SIGABRT` — no
+  unwind, so ADR-0040 §2's containment cannot reach it and nothing can, in
+  process.
+
+  **Why baz does not guard it**, in one line each and at length in ADR-0040
+  §1: a header walk misses the real case (a large honest file with one corrupt
+  inner length); a body walk is symphonia's parser rewritten for four
+  containers; the day the two disagree, baz refuses a file that plays; WAV
+  files in the wild routinely declare `0xFFFFFFFF` so a size-sanity rule would
+  refuse real ones; a pin buys nothing because 0.5.5 and **0.6.0 both have
+  it**; and a vendored fork is three thousand lines of MPL-2.0 to re-sync
+  forever, covering one of the two crates involved.
+
+  **What would reverse it**: symphonia honouring its own
+  `MetadataOptions::limit_metadata_bytes` / `limit_visual_bytes`, which exist
+  in `symphonia-core` and which **no reader in the released tree reads** — the
+  bound is already designed, just not wired up. *Needs the owner's hand:* an
+  upstream issue is a GitHub account. The text is above; the three reproducers,
+  the two versions and the unused-knob finding are the whole report.
+
+- **Symphonia still panics on a crafted MP4, and `playback_decode` is
+  therefore expected red on scheduled runs.** *(2026-08-10, ADR-0040 §4.)*
+  122 bytes whose `ftyp` atom declares a length of `u64::MAX` reach
+  `symphonia-format-isomp4-0.5.5/src/atoms/mod.rs:449` and `attempt to add
+  with overflow`:
+
+  ```text
+  frx/AAAAAAAAAWZ0eXD///////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////7//sAAPIAZnR5cPv7Jfc=
+  ```
+
+  (one line, `base64 -d`; it reproduces through `AudioSource::open` under any
+  extension).
+
+  **baz survives it**: ADR-0040 §2's containment turns it into
+  `PlaybackError::DecoderPanicked` in any build with overflow checks, and in a
+  release build the sum wraps and symphonia's own next check refuses the file
+  as *"invalid ftyp data length"* — a wrong number rather than a dead thread.
+  Pinned both ways by `a_contained_panic_is_named_as_one`.
+
+  **What cannot be fixed here**: libfuzzer-sys installs a panic hook that
+  calls `process::abort()`, so the abort happens before `catch_unwind` can
+  regain control — no containment in baz can make a panic invisible to the
+  fuzzer, and it should not, because finding them is what the fuzzer is for.
+  So the target stays red until symphonia fixes the arithmetic. The CI step
+  now runs **every** target and fails at the end with the list, so this one
+  does not hide the other five.
+
+  *Needs the owner's hand:* the same upstream issue as the entry above, or its
+  own — this is `symphonia-format-isomp4`, that one is `symphonia-metadata`
+  and `symphonia-format-riff`.
+
 - **The density cache still decodes one size for three steps.** `02` §2.7
   prices it: at `Dense` the LRU holds 320² thumbnails for ~200 px tiles —
   2.5× the pixels needed. The density-aware decode size stays deliberately

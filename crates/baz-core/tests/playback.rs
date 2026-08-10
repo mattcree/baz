@@ -1101,6 +1101,55 @@ fn mp3_decoded_length_is_exact() {
     );
 }
 
+/// An MP3's ReplayGain tags are read off the **ID3v2** block ahead of the
+/// stream, which is a property of baz's own probe registry and of nothing
+/// else.
+///
+/// `playback::source::probe` builds that registry by hand rather than calling
+/// `symphonia::default::get_probe()`, so that the raw-ADTS demuxer is left out
+/// (ADR-0040 §2.5). Everything the default registry contained and baz still
+/// wants has to be put back explicitly, and `Id3v2Reader` is the one that is
+/// not a format reader and so is easy to forget — forget it and MP3
+/// ReplayGain silently stops working, with every other test in this file
+/// still green.
+///
+/// The tags are written as ID3v2 `TXXX` frames, which is where every scanner
+/// puts them on an MP3 and what a `.flac`'s Vorbis comments are *not*: this
+/// exercises the metadata that arrives **outside** the container, i.e.
+/// `probed.metadata` rather than `format.metadata()`.
+#[test]
+fn an_mp3s_replay_gain_comes_off_its_id3v2_block() {
+    if !have_ffmpeg_encoder("libmp3lame") {
+        eprintln!("SKIP: ffmpeg with libmp3lame not available; ID3v2 fixture not generated");
+        return;
+    }
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("id3v2-replaygain");
+    std::fs::create_dir_all(&dir).expect("create fixture dir");
+    let tagged = dir.join("tagged.mp3");
+    run_encoder(
+        Command::new("ffmpeg")
+            .args(["-hide_banner", "-v", "error", "-y"])
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=1:sample_rate=44100",
+            ])
+            .args(["-ac", "2", "-c:a", "libmp3lame", "-id3v2_version", "3"])
+            .args(["-metadata", "REPLAYGAIN_TRACK_GAIN=-7.75 dB"])
+            .args(["-metadata", "REPLAYGAIN_TRACK_PEAK=0.988525"])
+            .args(["-metadata", "REPLAYGAIN_ALBUM_GAIN=-9.20 dB"])
+            .args(["-metadata", "REPLAYGAIN_ALBUM_PEAK=1.001221"])
+            .arg(&tagged),
+    );
+    let source = AudioSource::open(&tagged).expect("open the tagged mp3");
+    let gain = source.replay_gain();
+    assert_eq!(gain.track_gain_centidb, Some(-775), "{gain:?}");
+    assert_eq!(gain.track_peak_micro, Some(988_525), "{gain:?}");
+    assert_eq!(gain.album_gain_centidb, Some(-920), "{gain:?}");
+    assert_eq!(gain.album_peak_micro, Some(1_001_221), "{gain:?}");
+}
+
 /// Content sanity: the decoded MP3 is the source sine within lossy
 /// tolerance over the steady state (first/last MPEG frame excluded — codec
 /// edges are covered by the boundary test's own bound).

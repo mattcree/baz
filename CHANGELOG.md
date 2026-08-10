@@ -26,6 +26,71 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Fixed
 
+- **A corrupt file in a scanned folder can no longer stop the music.** Three
+  panics in Symphonia's AAC reader were reachable from `AudioSource::open` —
+  `assertion failed: step != 0` and `attempt to subtract with overflow` while
+  *opening*, an out-of-bounds band index while *decoding* — from **29 bytes**,
+  under **any** of baz's six audio extensions, because a probe identifies a
+  stream by searching its bytes and the ADTS sync word is twelve bits.
+  Answered twice: baz now probes for **only the formats it plays**, which
+  leaves the raw-ADTS demuxer out of the registry entirely (ADR-0040 §2.5),
+  and it contains an unwind out of a decoder at all three doors (`open`,
+  `next_block`, `seek`), reporting it as `PlaybackError::DecoderPanicked`, so
+  a hostile file that reaches a parser baz *does* use fails exactly where a
+  merely unreadable one already failed (§2).
+  - **What that costs**: a raw ADTS stream misnamed `.m4a` used to play and
+    now does not. `.aac` has never been a scanned extension, so no such file
+    was ever listed.
+- **A hand-edited play ledger with an implausible year no longer panics.** The
+  date arithmetic multiplied an unbounded year into days without a check, so a
+  sixteen-digit year in a `~/.local/share/baz/history.tsv` line aborted under
+  overflow checks and wrapped to a wrong instant without them. It now yields
+  "not a timestamp", which is what every other malformed line yields.
+- **A mis-encoded ReplayGain tag no longer panics the decode thread.**
+  `parse_gain` looked for a `dB` suffix by slicing the value two *bytes* from
+  the end — on text that comes out of a file's metadata, so the cut could land
+  inside a character. One such tag on one track was `byte index … is not a char
+  boundary` at `AudioSource::open`. A value like that now simply is not a gain.
+- **Saving a playlist no longer edits it three ways.** All three broke the
+  module's own round-trip law, which means each one changed the file again on
+  every save:
+  - a comment ending in carriage returns lost one per save (the reader stripped
+    a single CR as a line terminator and kept the rest; the writer ends lines
+    with a bare `\n`) — a trailing run is terminator noise now, and a CR
+    *inside* a line still travels verbatim;
+  - a superseded duplicate `#EXTINF` hopped over the comment between it and the
+    line that superseded it, once per save;
+  - an `#EXTINF` title ending in a vertical tab or a non-breaking space was
+    shortened by the writer but not by the reader, so the first save silently
+    changed it.
+
+### Changed
+
+- **The scheduled fuzz job measures residency rather than reservation, and one
+  red target no longer hides the rest.** `-rss_limit_mb` stays at 2048;
+  `-malloc_limit_mb` goes to 6144, above the largest buffer a 32-bit length
+  field can name, because Symphonia allocates metadata buffers from unchecked
+  32-bit lengths in at least four places across two containers and that bound
+  is upstream's (ADR-0040 §1, `docs/BACKLOG.md`). The loop now runs **every**
+  target and fails at the end with the list — a `run:` block is `bash -e`, so
+  the first failure used to abort the step, which matters because
+  `playback_decode` stays red on a Symphonia panic that no fix inside baz can
+  hide from libFuzzer (§4). Its **triggers are unchanged**: fuzzing is still
+  `schedule` and `workflow_dispatch` only.
+- **`symphonia-metadata` is now a direct dependency** — **zero net-new
+  crates**, since it was already in the graph as Symphonia's own. baz needs to
+  name it to register the ID3v2 reader on the probe it now builds itself.
+
+### Added
+
+- `crates/baz-core/tests/hostile_media.rs` — every hostile input the fuzzer has
+  found, run on `push` through both `open_bytes` and a real file on disk under
+  every scanned extension. The fuzz job is not a gate a tag passes through, so
+  a reproducer that lives only in a corpus is not a gate at all (ADR-0040 §3).
+- `an_mp3s_replay_gain_comes_off_its_id3v2_block` — the first test to drive an
+  MP3's ID3v2 tags through the decoder, which nothing covered before and which
+  the probe change above made load-bearing.
+
 - **A tighter density step could draw *larger* covers than a looser one.** Each
   step carries its own hang, and the wall's art rises as the hang falls, so
   wherever two steps landed on the same column count the tighter one drew the

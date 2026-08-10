@@ -255,19 +255,57 @@ CI gate failed on its fuzz job**, and `build` has `needs: [version, gate]`, so
 the three platform builds and the checksum self-check never started. They
 remain unexercised in CI, exactly as they were before.
 
-**The failure is a defect in baz, not in the workflow.** `playback_decode`
-found an out-of-memory in 40 seconds on a 29-byte input, which is now item 1 of
-`docs/WORK.md`. **It does not block the tag**: CI's fuzz job is
+**The failure was a defect in baz, not in the workflow** — `playback_decode`
+found an out-of-memory in 40 seconds on a 29-byte input — **and it has since
+been answered** (ADR-0040, `docs/WORK.md`'s *Recently done*). **Expect
+`playback_decode` to stay red anyway**, for a reason that is written down
+rather than mysterious, and expect the other five targets to be visible now
+whatever it does. What changed, in three parts, only one of which is a fix:
+
+1. **Three panics the same sweep turned up are genuinely fixed** — symphonia's
+   AAC reader, reachable from `AudioSource::open` on 27 bytes under any
+   extension. Those were the serious half: baz stopped registering the
+   raw-ADTS demuxer it never had a use for, and contains an unwind out of the
+   parsers it does use. They are now a `cargo test` gate that a **tag** passes
+   through (`crates/baz-core/tests/hostile_media.rs`).
+2. **The oversized allocation is not fixed and will not be**, by baz. The bound
+   belongs to symphonia, which has it unchecked in 0.5.5 and 0.6.0 alike, in
+   four places across two containers. ADR-0040 §1 is the argument;
+   `docs/BACKLOG.md` holds the reproducers and the upstream report.
+3. **So the job's flags and its loop changed**: `-malloc_limit_mb=6144` with
+   `-rss_limit_mb=2048` kept, so the step fails on memory the decode path
+   *touches* and not on a lazy reservation symphonia makes and never writes
+   (if that reads like moving a goalpost, the measurement is in ADR-0040:
+   3.4 MB of peak RSS for a request of 4.28 GB) — and the loop now runs
+   **every** target and fails at the end with the list, where a `run:` block's
+   `bash -e` used to abort at the first one.
+4. **`playback_decode` will still be red, on a panic that is Symphonia's.**
+   122 bytes of ISO-MP4 overflow an addition in `symphonia-format-isomp4`.
+   baz survives it — the containment turns it into an error, and a release
+   build refuses the file on the wrapped length — but **libfuzzer-sys's panic
+   hook aborts the process before `catch_unwind` can run**, so no fix inside
+   baz can make it invisible to the fuzzer, and none should. It is in
+   `docs/BACKLOG.md` with its reproducer. **A dry run whose only red is
+   `CI gate / fuzz`, with `playback_decode` the only failing target named in
+   the step's summary line, is still the expected result and still not a
+   reason to stop.**
+
+**The asymmetry itself has not changed, and is still worth knowing rather than
+discovering.** CI's fuzz job is
 `if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'`,
 a called workflow sees the *caller's* event, and a tag arrives as `push` — so
-the gate a tag is held to is the one that just went green. That asymmetry is
-worth knowing rather than discovering: **the dry run is a stricter gate than
-the tag**, and until the OOM is fixed a red dry run whose only red is
-`CI gate / fuzz` is the expected result and not a reason to stop.
+**the dry run is a stricter gate than the tag**. That is deliberate (half an
+hour of fuzzing on every commit buys less than it costs), and it is why
+ADR-0040 §3 put the reproducers into `cargo test`, which a tag *does* run.
 
 It also does not prove the release commit, which it predates. Re-running it
-after the push is the only way to see the version job resolve `0.1.0` — and,
-once the fuzz defect is fixed, the only way to reach the build matrix at all.
+after the push is the only way to see the version job resolve `0.1.0`. It is
+**not** the way to reach the build matrix, and that has not changed: `build`
+`needs: [version, gate]`, the gate contains the fuzz job on a
+`workflow_dispatch`, and item 4 above says why that job stays red. The three
+platform builds and the checksum step are reached by a **tag**, where the fuzz
+job is skipped — so they are exercised by the real thing rather than by the
+rehearsal, which is worth knowing before step 7 rather than after it.
 
 **Budget an hour for it, and know why.** Six fuzz targets at five minutes each,
 after a `cargo install cargo-fuzz` from source, is half an hour on its own, and

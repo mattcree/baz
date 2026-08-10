@@ -26,6 +26,7 @@ rubato = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 symphonia = { workspace = true }
+symphonia-metadata = { workspace = true }
 thiserror = { workspace = true }
 # The platform trash, for playlist deletion only (doc 11 §5 P2): the file a
 # listener deletes is recoverable by the desktop's own means, which is what
