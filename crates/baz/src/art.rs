@@ -33,6 +33,48 @@
 //! each. That is still ~8× the live widget count at any window size, so the
 //! only thing it costs is a scroll further back through the wall before a
 //! thumbnail has to be decoded again.
+//!
+//! # Two tiers, because two surfaces want different things
+//!
+//! The wall draws up to 120 records at 320 px. **The Now playing place draws
+//! one record at whatever the viewport allows**, and 320 is nowhere near
+//! enough for that — it is why that surface shipped clamped at a flat 720 and
+//! was upscaling a 320 px thumbnail 2.25× to reach it (ADR-0029 §2, doc 12
+//! §0.4 b). So there is a second decode of **one** record, [`load_hero`], at
+//! [`HERO_PX`] 1024, in a [`HERO_CACHE_ENTRIES`]-entry cache:
+//!
+//! | Tier | Edge | Entries | Worst case | For |
+//! |---|---|---|---|---|
+//! | [`load_thumb`] | [`THUMB_PX`] 320 | [`THUMB_CACHE_ENTRIES`] 384 | ~150 MiB | the wall, the lane, every collage |
+//! | [`load_hero`] | [`HERO_PX`] 1024 | [`HERO_CACHE_ENTRIES`] 2 | **8 MiB** | the Now playing place's one work |
+//!
+//! **The hero tier is 5.3 % more art memory** for the surface the owner wants
+//! to leave running, and it is what makes *no artwork is ever drawn larger
+//! than its source* true on that surface for the first time: the edge stops
+//! being a chosen constant and becomes `min(viewport, the source's own
+//! pixels)`, where the second term is what the decode actually returned.
+//!
+//! Both tiers call the **same** resolution order and the same decode, so a
+//! record's hero can never disagree with its thumbnail about which file the
+//! art came from.
+//!
+//! # A defect this found: the decode was enlarging small covers
+//!
+//! This module said *downscale-only* and was not.
+//! [`image::DynamicImage::thumbnail`] scales **to fit** — it forwards to
+//! `resize_dimensions(.., fill: false)`, whose ratio is not clamped at 1
+//! (`image-0.24.9/src/dynimage.rs:716–719`) — so a 120 px cover was decoded to
+//! 320 × 320, and the RGBA in the cache carried 6.8× more pixels than the file
+//! had. Nothing caught it: the tests all used sources **larger** than
+//! [`THUMB_PX`], which is the ordinary case and therefore the only one anybody
+//! wrote.
+//!
+//! It never showed on the wall, because a 320 px handle in a 320 px tile is
+//! 1 : 1 either way — the enlargement happened in the decoder instead of in
+//! the GPU. It shows immediately on a surface that reads the decode's size and
+//! **believes it**, which is what step A2's `art_edge` now does. [`decode`]
+//! guards the call; `the_hero_is_the_same_art_decoded_larger_and_never_upscaled`
+//! pins both tiers at both ends.
 
 use std::path::{Path, PathBuf};
 
@@ -50,6 +92,33 @@ pub const THUMB_PX: u32 = 320;
 /// Thumbnail LRU capacity. Derivation (do not hand-tune without redoing it):
 /// budget 150 MiB ÷ (320 × 320 px × 4 B/px = 400 KiB worst case) = 384.
 pub const THUMB_CACHE_ENTRIES: usize = 384;
+
+/// Max **hero** edge in pixels: **1024** — the Now playing place's own decode
+/// tier (doc 12 §5.2).
+///
+/// Chosen, and the choice is a measurement rather than a preference: it is the
+/// largest edge that is smaller than the shortest dimension of every panel
+/// this surface targets (1080 is the smallest kiosk height), **so the cover is
+/// never the thing limiting the layout — the viewport is**. A ceiling above
+/// that would buy pixels no window could show and would cost them per entry.
+///
+/// It is a **ceiling, not a size**: [`load_hero`] downscales only, so a 500 px
+/// cover comes back 500 px and is drawn at 500. `HERO_PX` is what the decoder
+/// will not exceed; what the *surface* clamps against is what the decode
+/// actually returned.
+pub const HERO_PX: u32 = 1024;
+
+/// Hero LRU capacity: **2**. Derivation, in the shape [`THUMB_CACHE_ENTRIES`]
+/// uses — 1024 × 1024 px × 4 B/px = **4 MiB** per entry, × 2 = **8 MiB**,
+/// against the thumbnail tier's 150 MiB budget (doc 12 §5.2's gate).
+///
+/// Two rather than one so that **the record that was sounding a moment ago is
+/// still decoded**: a `Prev` press, or a jump back up the run, finds its hero
+/// in hand rather than watching the sleeve grow into place. Doc 12 §5.2 asks
+/// for the *successor* instead, and it cannot have it yet — see
+/// [`crate::app::Shelf::request_hero`], which records why and what would give
+/// it one.
+pub const HERO_CACHE_ENTRIES: usize = 2;
 
 /// Where an album's art comes from, per the resolution order above.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,13 +198,54 @@ fn cover_file(dir: &Path) -> Option<PathBuf> {
 /// is no art or it cannot be decoded. Blocking; call off the UI thread.
 #[must_use]
 pub fn load_thumb(first_track: &Path) -> Option<(u32, u32, Vec<u8>)> {
+    decode(first_track, THUMB_PX)
+}
+
+/// Resolve and decode an album's art into an RGBA image no larger than
+/// [`HERO_PX`] per edge — **the Now playing place's tier** (doc 12 §5.2).
+///
+/// [`load_thumb`]'s function with one number changed, deliberately: the same
+/// resolution order, the same downscale-only [`image::DynamicImage::thumbnail`],
+/// the same `(w, h, rgba)` answer, the same blocking contract. What differs is
+/// only what it is *for* — one record drawn as large as a viewport allows,
+/// rather than 120 drawn at a tile's size.
+///
+/// **Downscale-only is the load-bearing property.** A 500 px cover comes back
+/// 500 × 500, and `min(w, h)` of that is the number the surface clamps its
+/// artwork against, so a small source is drawn at its own size, centred, with
+/// the field around it (doc 12 §5.2, story S7). The refusal *no artwork is
+/// ever drawn larger than its source* becomes arithmetic on this return value
+/// rather than a constant that happened to be small enough.
+#[must_use]
+pub fn load_hero(first_track: &Path) -> Option<(u32, u32, Vec<u8>)> {
+    decode(first_track, HERO_PX)
+}
+
+/// The body both tiers share: resolve, decode, downscale to fit `edge`.
+///
+/// One function because the two tiers must never disagree about **which file
+/// the art came from** — a hero resolved by a different order than the
+/// thumbnail would be a record whose sleeve changed when it started playing.
+fn decode(first_track: &Path, edge: u32) -> Option<(u32, u32, Vec<u8>)> {
     let image = match resolve(first_track)? {
         ArtSource::Embedded(bytes) => image::load_from_memory(&bytes).ok()?,
         ArtSource::File(path) => image::open(path).ok()?,
     };
-    let thumb = image.thumbnail(THUMB_PX, THUMB_PX).into_rgba8();
-    let (w, h) = thumb.dimensions();
-    Some((w, h, thumb.into_raw()))
+    // **The guard is what makes this downscale-only**, and it is not
+    // decoration: `DynamicImage::thumbnail` scales *to fit*, in both
+    // directions — it forwards to `resize_dimensions(.., fill: false)`, whose
+    // ratio is not clamped at 1 (`image-0.24.9/src/dynimage.rs:716–719`). So
+    // the call this module has always made was quietly **enlarging** any cover
+    // smaller than its tier, and both this file's own prose and ADR-0029 §5.2
+    // described it as downscale-only. Found by step A2, whose whole subject is
+    // artwork that must never exceed its source; see the module docs.
+    let scaled = if image.width() > edge || image.height() > edge {
+        image.thumbnail(edge, edge).into_rgba8()
+    } else {
+        image.into_rgba8()
+    };
+    let (w, h) = scaled.dimensions();
+    Some((w, h, scaled.into_raw()))
 }
 
 #[cfg(test)]
@@ -269,5 +379,56 @@ mod tests {
         write_wav(&track, Some(png_bytes(400, 400)));
         let (w, h, _) = load_thumb(&track).expect("thumb");
         assert_eq!((w, h), (THUMB_PX, THUMB_PX));
+    }
+
+    /// **The hero tier reads the same file the thumbnail does, and never
+    /// invents a pixel.** Both halves matter: a hero resolved by a different
+    /// order would be a record whose sleeve changed when it started playing,
+    /// and a hero that upscaled would put the Now playing surface back where
+    /// ADR-0029 §2 found it.
+    #[test]
+    fn the_hero_is_the_same_art_decoded_larger_and_never_upscaled() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let track = dir.path().join("01 song.wav");
+        write_wav(&track, None);
+
+        // A source between the two tiers: the thumbnail clamps it, the hero
+        // does not, and neither exceeds the file.
+        std::fs::write(dir.path().join("cover.png"), png_bytes(600, 600)).expect("write");
+        assert_eq!(load_thumb(&track).map(|(w, h, _)| (w, h)), Some((320, 320)));
+        assert_eq!(load_hero(&track).map(|(w, h, _)| (w, h)), Some((600, 600)));
+
+        // A source **smaller than both** stays its own size in both tiers.
+        // This is what makes `art_edge`'s third term honest for a listener
+        // whose older rips carry 120 px covers (story S7).
+        std::fs::write(dir.path().join("cover.png"), png_bytes(120, 120)).expect("write");
+        assert_eq!(load_thumb(&track).map(|(w, h, _)| (w, h)), Some((120, 120)));
+        assert_eq!(load_hero(&track).map(|(w, h, _)| (w, h)), Some((120, 120)));
+
+        // A source **larger than the hero's ceiling** is clamped to it, so the
+        // 8 MiB derivation in [`HERO_CACHE_ENTRIES`] is a worst case rather
+        // than a hope.
+        std::fs::write(dir.path().join("cover.png"), png_bytes(2400, 2400)).expect("write");
+        let (w, h, rgba) = load_hero(&track).expect("hero");
+        assert_eq!((w, h), (HERO_PX, HERO_PX));
+        assert_eq!(rgba.len(), (w * h * 4) as usize);
+        assert_eq!(
+            rgba.len() * HERO_CACHE_ENTRIES,
+            8 * 1024 * 1024,
+            "the hero cache's stated 8 MiB is this number"
+        );
+
+        // The **embedded** picture wins for the hero exactly as it does for
+        // the thumbnail — one resolution order, asserted rather than assumed.
+        write_wav(&track, Some(png_bytes(700, 700)));
+        assert_eq!(load_hero(&track).map(|(w, h, _)| (w, h)), Some((700, 700)));
+
+        // And art that cannot be decoded is no art in both tiers, not an error.
+        std::fs::remove_file(dir.path().join("cover.png")).expect("remove");
+        let bare = dir.path().join("02 song.wav");
+        write_wav(&bare, None);
+        std::fs::write(dir.path().join("cover.png"), b"not an image").expect("write");
+        assert_eq!(load_hero(&bare), None);
+        assert_eq!(load_thumb(&bare), None);
     }
 }

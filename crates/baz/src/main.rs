@@ -38,6 +38,7 @@ mod app;
 mod art;
 mod config;
 mod drag;
+mod field;
 mod font;
 mod groove;
 mod icon;

@@ -767,8 +767,17 @@ pub(crate) enum Message {
     RefreshTick,
     /// An engine event arrived over the bridge subscription.
     Playback(PlayerEvent),
-    /// An off-thread thumbnail decode finished (`None` = no usable art).
-    ThumbLoaded(u64, Option<iced_image::Handle>),
+    /// An off-thread thumbnail decode finished (`None` = no usable art), with
+    /// **the decode's own shortest edge** beside the handle — the number that
+    /// keeps *no artwork is ever drawn larger than its source* true on the Now
+    /// playing place before that record's hero has landed (see
+    /// [`Shelf::thumb_px`]).
+    ThumbLoaded(u64, Option<(f32, iced_image::Handle)>),
+    /// An off-thread **hero** decode finished — the Now playing place's own
+    /// tier ([`art::load_hero`], doc 12 §5.2). `None` = no usable art, which
+    /// is the same answer [`Self::ThumbLoaded`] gives and is recorded in the
+    /// same known-absent set.
+    HeroLoaded(u64, Option<Hero>),
     /// ~10 Hz drain of the scan worker's channel while a scan runs.
     ScanTick,
     /// A frame was presented (subscribed only until first-frame is logged).
@@ -1249,7 +1258,7 @@ impl App {
         // record drawn next to it, so the lane's rows and Home's newest row
         // ask for their own — through the same cache, so a sleeve is one
         // decode however many surfaces draw it.
-        Task::batch([task, self.request_offscreen_art()])
+        Task::batch([task, self.request_offscreen_art(), self.request_hero()])
     }
 
     /// Everything [`Self::update`] does except keep the lane true — the update
@@ -2503,6 +2512,31 @@ impl App {
         }
         ids.extend(quoted);
         state.request_thumbs_for(&ids)
+    }
+
+    /// **The sounding record's hero decode**, asked for after every message
+    /// and answered at most once per record (doc 12 §5.2).
+    ///
+    /// Placed beside [`Self::request_offscreen_art`] in [`Self::update`] rather
+    /// than hung off `TrackStarted`, for a reason that is a bug avoided rather
+    /// than a preference: the engine can confirm a track before the scan has
+    /// resolved its album, and a one-shot request on the event would leave that
+    /// record on its 320 px thumbnail for the whole session. Asked every
+    /// message, the ask **self-heals** — the first message after the library
+    /// knows the record gets it — and the cost of not needing one is an
+    /// `Option` compare and a hash lookup ([`Shelf::request_hero`] is the
+    /// guard).
+    ///
+    /// **Not gated on being in the place.** A hero is 4 MiB and one decode per
+    /// *record*, not per track, and gating it would mean the surface the owner
+    /// wants to leave running grows its artwork into place every time it is
+    /// opened. The budget for that trade is [`art::HERO_CACHE_ENTRIES`]'s.
+    fn request_hero(&mut self) -> Task<Message> {
+        let sounding = self.player.playing_album();
+        let Screen::Shelf(state) = &mut self.screen else {
+            return Task::none();
+        };
+        state.request_hero(sounding)
     }
 
     /// Re-merge [`Self::lane`] if either half has been rebuilt since it was
@@ -4189,6 +4223,49 @@ pub(crate) struct GroupVm {
     pub(crate) end: usize,
 }
 
+/// **One record decoded at the Now playing place's tier** — the artwork, the
+/// number that bounds it, and the field derived from it (doc 12 §5.2, §5.3).
+///
+/// All three come out of **one** decode on **one** worker call, because all
+/// three are readings of the same pixels and a second pass over them would be
+/// a second chance to disagree.
+#[derive(Debug, Clone)]
+pub(crate) struct Hero {
+    /// The cover at up to [`art::HERO_PX`] per edge.
+    pub(crate) handle: iced_image::Handle,
+    /// `min(width, height)` of what the decode actually returned — **the
+    /// source's own pixels**, and the third term of the Now playing place's
+    /// `art_edge`. Not [`art::HERO_PX`], which is only the decoder's ceiling:
+    /// a 500 px cover yields 500 here and is drawn at 500.
+    pub(crate) px: f32,
+    /// The record's ambient field, or `None` when the cover carries no hue
+    /// worth reading — a monochrome sleeve gets the room (story S7).
+    pub(crate) field: Option<crate::field::Field>,
+}
+
+/// `min(w, h)` as the `f32` a layout wants.
+///
+/// Named because both tiers spend it and because what it *means* is the same
+/// sentence in both: **the largest square that may be drawn from this decode
+/// without inventing a pixel.**
+fn shortest_edge(w: u32, h: u32) -> f32 {
+    f32::from(u16::try_from(w.min(h)).unwrap_or(u16::MAX))
+}
+
+/// A finished thumbnail decode, as the message carries it: its shortest edge
+/// and its handle.
+///
+/// One function because three call sites build it — the wall's visible range,
+/// the surfaces beside the wall, and the playlist collages — and three copies
+/// of *decode, measure, wrap* is three places for the measurement to drift
+/// away from the pixels it describes.
+fn decoded((w, h, rgba): (u32, u32, Vec<u8>)) -> (f32, iced_image::Handle) {
+    (
+        shortest_edge(w, h),
+        iced_image::Handle::from_rgba(w, h, rgba),
+    )
+}
+
 /// The shelf screen: library, scan state, and grid/panel view state.
 ///
 /// Fields the view layer reads are `pub(crate)`; the ones the update loop
@@ -4290,6 +4367,27 @@ pub(crate) struct Shelf {
     pub(crate) edition_choice: HashMap<u64, vm::EditionKey>,
     /// Decoded-thumbnail LRU; capacity/budget documented in [`art`].
     pub(crate) thumbs: LruCache<u64, iced_image::Handle>,
+    /// **The shortest edge of each decoded thumbnail**, in pixels.
+    ///
+    /// [`art::load_thumb`] downscales only, so this is `min(w, h)` of a
+    /// picture that is either the source itself (a cover smaller than
+    /// [`art::THUMB_PX`]) or a faithful reduction of it — **in both cases a
+    /// true upper bound on what may be drawn from this handle**. It is what
+    /// keeps *no artwork is ever drawn larger than its source* true on the
+    /// Now playing place for the frames between arriving and the hero landing,
+    /// rather than only afterwards.
+    ///
+    /// A plain map rather than an entry in [`Self::thumbs`]: the six surfaces
+    /// that draw a thumbnail want the handle and nothing else, and widening
+    /// the LRU's value would have touched all six to serve one. Four bytes per
+    /// album the process has ever decoded — the same unbounded-by-design
+    /// shape, and two orders of magnitude smaller than, [`Self::no_art`].
+    thumb_px: HashMap<u64, f32>,
+    /// **Decoded-hero LRU** — the Now playing place's own decode tier
+    /// ([`art::HERO_CACHE_ENTRIES`] entries, 8 MiB worst case).
+    heroes: LruCache<u64, Hero>,
+    /// The record [`Self::request_hero`] has a decode in flight for.
+    hero_pending: Option<u64>,
     /// The album range [`Shelf::request_visible_thumbs`] last asked about, so
     /// the two redundant requests every resize step delivers cost a
     /// comparison instead of a pass over the library. `None` until the first
@@ -4465,6 +4563,11 @@ impl Shelf {
             thumbs: LruCache::new(
                 NonZeroUsize::new(art::THUMB_CACHE_ENTRIES).unwrap_or(NonZeroUsize::MIN),
             ),
+            thumb_px: HashMap::new(),
+            heroes: LruCache::new(
+                NonZeroUsize::new(art::HERO_CACHE_ENTRIES).unwrap_or(NonZeroUsize::MIN),
+            ),
+            hero_pending: None,
             last_requested: None,
             pending: HashSet::new(),
             no_art: HashSet::new(),
@@ -4613,11 +4716,30 @@ impl Shelf {
                 }
                 Task::none()
             }
-            Message::ThumbLoaded(id, handle) => {
+            Message::ThumbLoaded(id, decoded) => {
                 self.pending.remove(&id);
-                match handle {
-                    Some(handle) => {
+                match decoded {
+                    Some((px, handle)) => {
+                        self.thumb_px.insert(id, px);
                         self.thumbs.put(id, handle);
+                    }
+                    None => {
+                        self.no_art.insert(id);
+                    }
+                }
+                Task::none()
+            }
+            // The hero tier's answer, in the thumbnail tier's own shape: a
+            // decode that found nothing is recorded in the **same**
+            // known-absent set, because both tiers ran the same resolution
+            // order and a second ask would be a question already answered.
+            Message::HeroLoaded(id, hero) => {
+                if self.hero_pending == Some(id) {
+                    self.hero_pending = None;
+                }
+                match hero {
+                    Some(hero) => {
+                        self.heroes.put(id, hero);
                     }
                     None => {
                         self.no_art.insert(id);
@@ -5657,6 +5779,86 @@ impl Shelf {
     /// The same decode path, the same cache, the same in-flight and
     /// known-absent sets — so a record's sleeve is one decode however many
     /// surfaces are drawing it, and asking twice costs one set lookup.
+    /// **Decode the sounding record at [`art::HERO_PX`]**, once, and derive its
+    /// field while the pixels are already in hand (doc 12 §5.2, §5.3).
+    ///
+    /// Everything expensive happens on the blocking worker: the decode, and
+    /// [`crate::field::Field::derive`]'s one pass over the sampled pixels. What
+    /// crosses back is a handle, one `f32`, and three hue angles — **the UI
+    /// thread never sees a pixel of a cover**, which is what keeps the field's
+    /// per-frame cost at three colour conversions.
+    ///
+    /// `no_art` is shared with the thumbnail tier deliberately: the two tiers
+    /// run the *same* resolution order and the same decode, so a record with no
+    /// decodable art has none in both and asking twice would be asking a
+    /// question already answered.
+    ///
+    /// # The successor is not prefetched, and cannot be yet
+    ///
+    /// Doc 12 §5.2 budgets the two entries as *"the sounding record and the one
+    /// after it"*. **The one after it cannot be named from here.** The UI's
+    /// record of the run is [`vm::QueueVm`], whose rows carry a title, an
+    /// artist and an album *string* and **no path and no album id** — the
+    /// engine holds the paths. Resolving the next record would mean matching
+    /// two strings against the wall and hoping no listener owns two editions of
+    /// the same record, which is a worse answer than not having one.
+    ///
+    /// So the second entry is spent on **the record that was sounding a moment
+    /// ago**, which the LRU gives for free and which a `Prev` press or a jump
+    /// back up the run collects. Naming the successor is
+    /// [ADR-0034](../../docs/adr/0034-the-run-and-its-list.md)'s `Origin` work
+    /// — step M3, which is what puts identity on a run's rows — and it is one
+    /// line here once that lands.
+    fn request_hero(&mut self, sounding: Option<u64>) -> Task<Message> {
+        let Some(id) = sounding else {
+            return Task::none();
+        };
+        // `get`, not `peek`: asking for the sounding record's hero is what
+        // keeps it the freshest of the two entries, so the one the LRU drops
+        // is always the one that stopped playing.
+        if self.heroes.get(&id).is_some()
+            || self.hero_pending == Some(id)
+            || self.no_art.contains(&id)
+        {
+            return Task::none();
+        }
+        let Some(album) = self.albums.iter().find(|album| album.id == id) else {
+            return Task::none();
+        };
+        self.hero_pending = Some(id);
+        let path = album.first_track.clone();
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    art::load_hero(&path).map(|(w, h, rgba)| Hero {
+                        field: crate::field::Field::derive(w, h, &rgba),
+                        px: shortest_edge(w, h),
+                        handle: iced_image::Handle::from_rgba(w, h, rgba),
+                    })
+                })
+                .await
+                .ok()
+                .flatten()
+            },
+            move |hero| Message::HeroLoaded(id, hero),
+        )
+    }
+
+    /// The sounding record's hero, when one is decoded — the Now playing
+    /// place's artwork and the source of its field.
+    pub(crate) fn hero(&self, id: u64) -> Option<&Hero> {
+        self.heroes.peek(&id)
+    }
+
+    /// The shortest edge of `id`'s decoded **thumbnail**, in pixels.
+    ///
+    /// What the Now playing place clamps its artwork against for the frames
+    /// between arriving and its hero landing. See [`Self::thumb_px`]'s field
+    /// for why this is a true bound rather than a guess.
+    pub(crate) fn thumb_edge(&self, id: u64) -> Option<f32> {
+        self.thumb_px.get(&id).copied()
+    }
+
     fn request_thumbs_for(&mut self, ids: &[u64]) -> Task<Message> {
         let mut tasks = Vec::new();
         for &id in ids {
@@ -5673,13 +5875,10 @@ impl Shelf {
             let path = album.first_track.clone();
             tasks.push(Task::perform(
                 async move {
-                    tokio::task::spawn_blocking(move || {
-                        art::load_thumb(&path)
-                            .map(|(w, h, rgba)| iced_image::Handle::from_rgba(w, h, rgba))
-                    })
-                    .await
-                    .ok()
-                    .flatten()
+                    tokio::task::spawn_blocking(move || art::load_thumb(&path).map(decoded))
+                        .await
+                        .ok()
+                        .flatten()
                 },
                 move |handle| Message::ThumbLoaded(id, handle),
             ));
@@ -5783,13 +5982,10 @@ impl Shelf {
             let path = album.first_track.clone();
             tasks.push(Task::perform(
                 async move {
-                    tokio::task::spawn_blocking(move || {
-                        art::load_thumb(&path)
-                            .map(|(w, h, rgba)| iced_image::Handle::from_rgba(w, h, rgba))
-                    })
-                    .await
-                    .ok()
-                    .flatten()
+                    tokio::task::spawn_blocking(move || art::load_thumb(&path).map(decoded))
+                        .await
+                        .ok()
+                        .flatten()
                 },
                 move |handle| Message::ThumbLoaded(id, handle),
             ));
@@ -5820,13 +6016,10 @@ impl Shelf {
             let path = album.first_track.clone();
             tasks.push(Task::perform(
                 async move {
-                    tokio::task::spawn_blocking(move || {
-                        art::load_thumb(&path)
-                            .map(|(w, h, rgba)| iced_image::Handle::from_rgba(w, h, rgba))
-                    })
-                    .await
-                    .ok()
-                    .flatten()
+                    tokio::task::spawn_blocking(move || art::load_thumb(&path).map(decoded))
+                        .await
+                        .ok()
+                        .flatten()
                 },
                 move |handle| Message::ThumbLoaded(id, handle),
             ));

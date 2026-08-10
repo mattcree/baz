@@ -74,6 +74,7 @@ use iced::widget::{Space, button, column, container, image as iced_image, row, s
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
+use crate::field;
 use crate::player::PlayerState;
 use crate::playlists::{Collecting, NameEntry};
 use crate::theme;
@@ -125,25 +126,31 @@ const BELOW: f32 = theme::LINE_HEADING
 /// size the head gives it, because what is left worth doing at that width is
 /// the list (doc 12 §5.5a).
 ///
+/// `source` is the shortest edge of the decode being drawn, and it bounds the
+/// answer in **both** compositions: a 120 px cover is 120 px in the head block
+/// as surely as it is in the record column, because the refusal is about the
+/// file rather than about the layout.
+///
 /// Stating it in one function is what keeps the surface monotonic across the
 /// floor: the record does not lurch when the two columns become one.
 #[must_use]
-pub(crate) fn record_edge(width: f32, height: f32, run: bool) -> f32 {
+pub(crate) fn record_edge(width: f32, height: f32, run: bool, source: f32) -> f32 {
     if run && width < theme::SPLIT_FLOOR {
-        theme::ART_MIN
+        theme::ART_MIN.min(source)
     } else {
-        art_edge(width, height, run_w(width, run))
+        art_edge(width, height, run_w(width, run), source)
     }
 }
 
-/// **The artwork's edge**, derived from the viewport and clamped.
+/// **The artwork's edge**, derived from the viewport, the column beside it,
+/// and **the source's own pixels**.
 ///
 /// The whole of what makes the kiosk mode this surface at a larger size: the
 /// work takes the room it is given, bounded below so it never stops being the
-/// subject and above so a 4 K panel does not become one cover and nothing
-/// else. The height term is what stops a wide, short window pushing the
-/// placard off the bottom — a now-playing screen that has scrolled away from
-/// what is playing is not one.
+/// subject and above by the one thing that may honestly bound it. The height
+/// term is what stops a wide, short window pushing the placard off the bottom
+/// — a now-playing screen that has scrolled away from what is playing is not
+/// one.
 ///
 /// `run_w` is [`run_w`]'s answer, and it is subtracted from the *width* term
 /// alone: the run's head sits in the run's own column, so it costs the record
@@ -151,8 +158,42 @@ pub(crate) fn record_edge(width: f32, height: f32, run: bool) -> f32 {
 /// record is height-bound**, which is every window above the narrowest one this
 /// product draws — `the_run_costs_the_record_nothing_where_it_is_height_bound`
 /// is that claim swept.
+///
+/// # The third term, and the constant it replaced
+///
+/// `source` is `min(w, h)` of the decode this surface is actually drawing —
+/// [`crate::app::Hero::px`] once the hero has landed, the thumbnail's own edge
+/// before it, and **infinite** for a record with no art at all, because the
+/// deterministic gradient placeholder has no resolution and *larger than its
+/// source* is not a predicate that applies to it.
+///
+/// It replaces `NOW_PLAYING_MAX` **720**, which was deleted with step A2. That
+/// constant was a fixed number standing in for a fact about the decode, and it
+/// was wrong in both directions at once: it let a 320 px thumbnail be drawn at
+/// 2.25× on any panel 1080 px tall or better — *no artwork is ever drawn
+/// larger than its source*, false in the one place nobody had a test for
+/// (ADR-0029 §Context 2) — while capping a 4K panel's work at 720 px in a
+/// 3744 px body, which is doc 12 §5.5's *"postage stamp in a void"* and is the
+/// thing the owner saw. **A fact about the file cannot be spelled as a
+/// constant in a view**, and this is the general form of that.
+///
+/// # Where the clamps sit, and why that order
+///
+/// ```text
+/// min(by_width, by_height).max(ART_MIN).min(source)
+/// ```
+///
+/// The floor is applied **before** the source ceiling, and the ceiling wins.
+/// Doc 12 §5.2 prints `min(…, hero_px).max(ART_MIN)`, which disagrees with the
+/// test printed six lines under it — at `hero_px` 120 that expression is 240,
+/// and `art_edge(side, side, 120) <= 120` fails. The test is right and the
+/// formula is not: [`theme::ART_MIN`] is a **design** floor, saying a work
+/// this small has stopped being a subject, and `source` is a **fact**, saying
+/// there are no more pixels. A fact outranks a floor, story S7 asks for the
+/// small cover *"drawn at its own pixel size, centred, never scaled up"*, and
+/// the field is what makes that composed rather than broken.
 #[must_use]
-pub(crate) fn art_edge(width: f32, height: f32, run_w: f32) -> f32 {
+pub(crate) fn art_edge(width: f32, height: f32, run_w: f32, source: f32) -> f32 {
     let beside = if run_w > 0.0 {
         run_w + theme::GAP_XL
     } else {
@@ -162,17 +203,10 @@ pub(crate) fn art_edge(width: f32, height: f32, run_w: f32) -> f32 {
     let by_height = height - 2.0 * theme::HANG - BELOW;
     by_width
         .min(by_height)
-        .clamp(theme::ART_MIN, NOW_PLAYING_MAX)
+        .max(theme::ART_MIN)
+        .min(source)
+        .max(0.0)
 }
-
-/// The largest the artwork is ever drawn: **720**.
-///
-/// Past this a cover stops gaining anything — the decoded thumbnail is not
-/// that large, and a bigger square would be upscaling — and the placard under
-/// it would be pushed to the bottom of a very tall column. It is the one
-/// number in this file that is chosen rather than derived, and it is chosen
-/// against the decode's own ceiling.
-pub(crate) const NOW_PLAYING_MAX: f32 = 720.0;
 
 /// The air the run column leaves above its summary for the place's own
 /// top-right controls, which are drawn as a **layer** and therefore cost the
@@ -242,15 +276,20 @@ pub(crate) fn view<'a>(
         .into();
     }
     let run_w = run_w(width, showing_run);
-    let edge = record_edge(width, height, showing_run);
+    // **The source's own pixels**, which is what bounds the work now that
+    // `NOW_PLAYING_MAX` is gone. Resolved once, here, so the number the layout
+    // clamps against and the picture the layout draws are the same decode.
+    let (handle, source) = now.map_or((None, f32::INFINITY), |now| work(shelf, now));
+    let edge = record_edge(width, height, showing_run, source);
     let stacked = showing_run && run_w <= 0.0;
     let measure =
         (width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).clamp(0.0, theme::LIST_MEASURE);
+    let field = field_layer(field_of(shelf, now), ground(width, showing_run));
     let record = now.map(|now| {
         if stacked {
-            head_block(shelf, player, now, edge, measure)
+            head_block(player, handle, now, edge, measure)
         } else {
-            record_column(shelf, player, now, edge)
+            record_column(player, handle, now, edge)
         }
     });
     let body: Element<'a, Message> = match (record, showing_run) {
@@ -324,7 +363,10 @@ pub(crate) fn view<'a>(
             )
         }
     };
-    stack![body, controls(run)].into()
+    // **z1 · z3**, in doc 12 §5.4's own order: the field under everything, the
+    // place over it, the place's own controls over that. z1.5 — the spectrum,
+    // in the field's shader — is step A8's and is not reserved for here.
+    stack![field, body, controls(run)].into()
 }
 
 /// [`queue::run_column`], named here so the two call sites above read as one
@@ -400,8 +442,8 @@ fn controls(run: bool) -> Element<'static, Message> {
 /// editor whose first 300 px are a fixed hero is an editor you scroll past to
 /// use.
 fn head_block<'a>(
-    shelf: &'a Shelf,
     player: &'a PlayerState,
+    handle: Option<iced_image::Handle>,
     now: &'a crate::player::NowPlaying,
     edge: f32,
     measure: f32,
@@ -442,7 +484,7 @@ fn head_block<'a>(
     }
     column![
         row![
-            sleeve(shelf, now, edge),
+            sleeve(handle, now, edge),
             container(identity)
                 .width(Length::Fill)
                 .height(Length::Fixed(edge))
@@ -456,15 +498,64 @@ fn head_block<'a>(
     .into()
 }
 
+/// **What this surface has to draw of a record, and the number that bounds
+/// it** — the two answers that must be taken together, so they are taken in
+/// one place.
+///
+/// Three cases, in preference order:
+///
+/// 1. **The hero** ([`art::load_hero`](crate::art::load_hero), up to 1024 px),
+///    bounded by its own decoded size. This is the ordinary case and the one
+///    the composition is designed around.
+/// 2. **The thumbnail** (up to [`crate::art::THUMB_PX`] 320), bounded by *its*
+///    own decoded size, for the frames between arriving at the place and the
+///    hero landing. `load_thumb` downscales only, so that bound is a true one
+///    — a 120 px cover measures 120 here — and the refusal therefore holds on
+///    every frame rather than only on the settled ones.
+/// 3. **No art**: the wall's own deterministic gradient, and no bound at all.
+///    A gradient has no resolution, so it fills whatever the viewport allows
+///    and the placard under it does not move (story S7's third criterion).
+///
+/// The visible consequence of (2) is that a record whose hero is still
+/// decoding shows a small sleeve that grows once. That is the honest reading
+/// and it is bounded to a frame or two by
+/// [`Shelf::request_hero`](crate::app::Shelf::request_hero), which asks for
+/// the hero the moment the engine names a record rather than when this place
+/// is opened.
+fn work(shelf: &Shelf, now: &crate::player::NowPlaying) -> (Option<iced_image::Handle>, f32) {
+    let Some(id) = now.album_id else {
+        return (None, f32::INFINITY);
+    };
+    if let Some(hero) = shelf.hero(id) {
+        return (Some(hero.handle.clone()), hero.px);
+    }
+    match (shelf.thumbs.peek(&id), shelf.thumb_edge(id)) {
+        (Some(handle), Some(px)) => (Some(handle.clone()), px),
+        _ => (None, f32::INFINITY),
+    }
+}
+
+/// The record's ambient field, when it has one — `None` for a record with no
+/// art, a record whose hero has not landed, and a **monochrome** record, all
+/// three of which get the room (story S7, [`crate::field`]).
+///
+/// Read from the hero alone rather than from the thumbnail: 320 px is enough
+/// pixels for a palette, but a field that changed colour when the hero
+/// replaced the thumbnail would be the room flickering on every record change.
+/// One decode, one field, arriving together.
+fn field_of(shelf: &Shelf, now: Option<&crate::player::NowPlaying>) -> Option<field::Field> {
+    shelf.hero(now?.album_id?)?.field
+}
+
 /// The work itself at `edge` — the decoded cover, or the wall's own
 /// deterministic gradient where a record has none.
-fn sleeve<'a>(
-    shelf: &'a Shelf,
-    now: &'a crate::player::NowPlaying,
+fn sleeve(
+    handle: Option<iced_image::Handle>,
+    now: &crate::player::NowPlaying,
     edge: f32,
-) -> Element<'a, Message> {
-    match now.album_id.and_then(|id| shelf.thumbs.peek(&id)) {
-        Some(handle) => iced_image(handle.clone())
+) -> Element<'static, Message> {
+    match handle {
+        Some(handle) => iced_image(handle)
             .width(Length::Fixed(edge))
             .height(Length::Fixed(edge))
             .into(),
@@ -475,15 +566,94 @@ fn sleeve<'a>(
     }
 }
 
+/// **Which ground the place is standing on** (doc 12 §5.4's z1).
+///
+/// One object with one ceiling function, and the ceiling is lower where type
+/// is — so the three cases are not three grounds, they are three *domains* of
+/// the same one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Ground {
+    /// The record alone: the ambient field, full bleed.
+    Ambient,
+    /// Two columns. The ambient field under the record, and under the run's
+    /// own column plus the gutter it hangs in — `f32` px, measured from the
+    /// body's right edge — the field clamped flat to the room's `wall`.
+    Split(f32),
+    /// Re-stacked below [`theme::SPLIT_FLOOR`]: the whole body *is* the run's
+    /// list, so the whole field is the run's ground. Nothing on this surface
+    /// is read over anything lighter than `wall` at this width, which is the
+    /// same sentence as the split case with a wider domain.
+    Still,
+}
+
+/// **Which domain of the field the body's width has put the place in.**
+///
+/// The same two conditions [`run_w`] already answers — is the run standing,
+/// and is there room for two columns — read for the ground instead of for a
+/// width. Stated as its own function so the restack is one decision made once:
+/// a surface whose layout re-stacked at 784 and whose ground re-stacked at
+/// some other number would be two compositions wearing one name.
+fn ground(width: f32, showing_run: bool) -> Ground {
+    if !showing_run {
+        return Ground::Ambient;
+    }
+    let beside = run_w(width, true);
+    if beside > 0.0 {
+        // The run's column and the `HANG` gutter it hangs in — the `GAP_XL`
+        // between the two columns stays on the ambient side, so the ceiling
+        // drops exactly at the list's own left edge (doc 12 §5.4 term 2).
+        Ground::Split(beside + theme::HANG)
+    } else {
+        Ground::Still
+    }
+}
+
+/// **The field, laid under everything** — the place's z1, and the reason a
+/// large screen reads as composed rather than empty.
+///
+/// A `Space` when the record has no field, which is the room showing through:
+/// no art, no hue in the art, or a hero still in flight. Story S7's *"the
+/// field falls back to the room, because there is no palette to read"*, and
+/// the honest answer rather than a grey wash pretending to be derived from
+/// something.
+///
+/// **It is under, never over.** Nothing is drawn on the sleeve; the field is
+/// the room's own colour changed, it dims no artwork, and it is not a scrim —
+/// [`crate::field`] carries the argument.
+fn field_layer(field: Option<field::Field>, ground: Ground) -> Element<'static, Message> {
+    let Some(field) = field else {
+        return Space::new(Length::Fill, Length::Fill).into();
+    };
+    let room = theme::active();
+    let wash = move |reach| {
+        let gradient = field.wash(room, reach);
+        container(Space::new(Length::Fill, Length::Fill))
+            .height(Length::Fill)
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Gradient(gradient.into())),
+                ..container::Style::default()
+            })
+    };
+    match ground {
+        Ground::Ambient => wash(field::Reach::Ambient).width(Length::Fill).into(),
+        Ground::Still => wash(field::Reach::Still).width(Length::Fill).into(),
+        Ground::Split(under_run) => row![
+            wash(field::Reach::Ambient).width(Length::Fill),
+            wash(field::Reach::Still).width(Length::Fixed(under_run)),
+        ]
+        .into(),
+    }
+}
+
 /// The record column: the work at `edge`, and the placard under it.
 fn record_column<'a>(
-    shelf: &'a Shelf,
     player: &'a PlayerState,
+    handle: Option<iced_image::Handle>,
     now: &'a crate::player::NowPlaying,
     edge: f32,
 ) -> Element<'a, Message> {
     let room = theme::active();
-    let work = sleeve(shelf, now, edge);
+    let work = sleeve(handle, now, edge);
 
     // Owned: the two figures are `String`s the reading builds, and a borrow
     // of them cannot outlive this function.
@@ -595,31 +765,93 @@ mod tests {
             .map(|side| f32::from(u16::try_from(side).expect("a window side fits u16")))
     }
 
+    /// The decoded sizes the sweeps walk: two below [`theme::ART_MIN`], one
+    /// between the tiers, the thumbnail's own ceiling, the hero's own ceiling,
+    /// and a source large enough that the viewport is always the binding term
+    /// (doc 12 §5.2's list, plus 240 and 3000 for the two ends it omits).
+    const SOURCES: [f32; 6] = [120.0, 240.0, 320.0, 500.0, 1024.0, 3000.0];
+
     /// **The kiosk is this surface at a larger size**, and it is a property of
     /// the arithmetic rather than a plan: the work's edge grows with the
-    /// viewport, monotonically, and is bounded at both ends — **with the run
-    /// standing beside it and without**.
+    /// viewport, monotonically, and stops **where the source stops** — which
+    /// since step A2 is the only ceiling there is.
     #[test]
-    fn the_work_grows_with_the_window_and_stops_at_both_ends() {
-        for run in [false, true] {
-            let mut previous = 0.0_f32;
-            for side in sides() {
-                let edge = record_edge(side, side, run);
-                assert!(edge >= theme::ART_MIN, "{side}: {edge}");
-                assert!(edge <= NOW_PLAYING_MAX, "{side}: {edge}");
-                assert!(
-                    edge >= previous,
-                    "{side}: the work shrank as the window grew (run {run})"
-                );
-                previous = edge;
+    fn the_work_grows_with_the_window_and_stops_at_its_source() {
+        for source in SOURCES {
+            for run in [false, true] {
+                let mut previous = 0.0_f32;
+                for side in sides() {
+                    let edge = record_edge(side, side, run, source);
+                    assert!(edge >= theme::ART_MIN.min(source), "{side}: {edge}");
+                    assert!(edge <= source, "{side}: {edge} px drawn from {source} px");
+                    assert!(
+                        edge >= previous,
+                        "{side}: the work shrank as the window grew (run {run})"
+                    );
+                    previous = edge;
+                }
             }
         }
-        // A 4 K panel is the surface at its ceiling, not one cover and
-        // nothing else — and the run does not take it off the ceiling.
+        // **A 4 K panel is bound by the file and nothing else.** This is the
+        // whole of step A2 in one assertion, and the `NOW_PLAYING_MAX` 720 it
+        // replaced is what made it false: a well-kept collection now fills the
+        // panel, and a modest one is drawn honestly small on a field rather
+        // than upscaled to look large.
         for run in [false, true] {
-            let edge = record_edge(3840.0, 2160.0, run);
-            assert!((edge - NOW_PLAYING_MAX).abs() < f32::EPSILON, "run {run}");
+            for source in SOURCES {
+                let edge = record_edge(3840.0, 2160.0, run, source);
+                assert!(
+                    (edge - source.min(2160.0 - 80.0 - BELOW)).abs() < f32::EPSILON,
+                    "run {run}, source {source}: {edge}"
+                );
+            }
+            // The two rows of doc 12 §5.5's table that A2 exists for. Both are
+            // `NOW_PLAYING_MAX` 720 in the build before this one.
+            assert!((record_edge(3840.0, 2160.0, run, 1024.0) - 1024.0).abs() < f32::EPSILON);
+            assert!((record_edge(2560.0, 1440.0, run, 1024.0) - 1024.0).abs() < f32::EPSILON);
         }
+    }
+
+    /// **The surface never draws art larger than its source** — doc 12 §5.2's
+    /// test, verbatim, and the refusal this product has always stated and has
+    /// never been able to make true here (ADR-0029 §Context 2).
+    ///
+    /// Swept the way the wall's own
+    /// `the_wall_never_draws_art_larger_than_its_source` is swept
+    /// (`shelf.rs:1509–1530`), because it is the same claim about the other
+    /// surface that draws artwork.
+    ///
+    /// **`theme::ART_MIN` does not exempt a small cover**, and that is the one
+    /// place this test disagrees with the formula doc 12 §5.2 prints beside
+    /// it: `min(…, hero_px).max(ART_MIN)` draws a 120 px cover at 240 and
+    /// fails this. The floor is a design statement about when a work stops
+    /// being a subject; the source is a fact about how many pixels exist. The
+    /// fact wins, story S7 asks for exactly that, and the field is what makes
+    /// the result composed rather than broken.
+    #[test]
+    fn the_now_playing_surface_never_draws_art_larger_than_its_source() {
+        for source in SOURCES {
+            for side in sides() {
+                for run in [false, true] {
+                    let beside = run_w(side, run);
+                    assert!(
+                        art_edge(side, side, beside, source) <= source,
+                        "{side}² with {beside} beside: {} px drawn from {source} px",
+                        art_edge(side, side, beside, source)
+                    );
+                    // …and the re-stacked head block below `SPLIT_FLOOR` is
+                    // bound by the same fact, which is why the clamp lives in
+                    // `record_edge` rather than only in `art_edge`.
+                    assert!(record_edge(side, side, run, source) <= source, "{side}");
+                }
+            }
+        }
+        // **A record with no art at all has no source**, so the deterministic
+        // gradient takes whatever the viewport allows — a gradient has no
+        // resolution and *larger than its source* is not a predicate that
+        // applies to it (story S7, `crate::field`'s second property).
+        let unbounded = art_edge(1920.0, 1080.0, 0.0, f32::INFINITY);
+        assert!(unbounded.is_finite() && (unbounded - (1080.0 - 80.0 - BELOW)).abs() < 0.001);
     }
 
     /// **A wide, short window is bounded by its height** — a now-playing
@@ -627,13 +859,14 @@ mod tests {
     #[test]
     fn a_short_window_is_bounded_by_its_height() {
         assert!(
-            art_edge(2560.0, 600.0, 0.0) < art_edge(2560.0, 1400.0, 0.0),
+            art_edge(2560.0, 600.0, 0.0, f32::INFINITY)
+                < art_edge(2560.0, 1400.0, 0.0, f32::INFINITY),
             "the height has to be in the arithmetic"
         );
         // …and it never collapses below the floor, whatever the window does.
         for height in [0.0, 1.0, 120.0, 300.0] {
             for run in [false, true] {
-                let edge = art_edge(1280.0, height, run_w(1280.0, run));
+                let edge = art_edge(1280.0, height, run_w(1280.0, run), f32::INFINITY);
                 assert!((edge - theme::ART_MIN).abs() < f32::EPSILON, "run {run}");
             }
         }
@@ -653,8 +886,9 @@ mod tests {
         // 1280 × 860 with the returns lane collapsed: 1184 × 779 of body,
         // height-bound, and the sleeve is the height less the gutter and the
         // placard — with no transport in the subtraction.
-        assert!((art_edge(1184.0, 779.0, 0.0) - (779.0 - 80.0 - BELOW)).abs() < f32::EPSILON);
-        assert!((art_edge(1184.0, 779.0, 0.0) - 569.0).abs() < f32::EPSILON);
+        let bare = |w: f32, h: f32| art_edge(w, h, 0.0, f32::INFINITY);
+        assert!((bare(1184.0, 779.0) - (779.0 - 80.0 - BELOW)).abs() < f32::EPSILON);
+        assert!((bare(1184.0, 779.0) - 569.0).abs() < f32::EPSILON);
     }
 
     /// **The run costs the record nothing wherever the record is
@@ -671,8 +905,8 @@ mod tests {
     fn the_run_costs_the_record_nothing_where_it_is_height_bound() {
         for width in sides() {
             for height in sides() {
-                let with = art_edge(width, height, run_w(width, true));
-                let without = art_edge(width, height, 0.0);
+                let with = art_edge(width, height, run_w(width, true), f32::INFINITY);
+                let without = art_edge(width, height, 0.0, f32::INFINITY);
                 let beside = run_w(width, true);
                 if beside <= 0.0 {
                     assert!((with - without).abs() < f32::EPSILON, "{width}×{height}");
@@ -696,13 +930,11 @@ mod tests {
         // the record comes back — which is why this is a cost paid rather than
         // a cost hidden.
         let (body_w, body_h) = (1000.0, 779.0);
-        assert!(art_edge(body_w, body_h, run_w(body_w, true)) < art_edge(body_w, body_h, 0.0));
+        let bare = |w: f32, beside: f32| art_edge(w, body_h, beside, f32::INFINITY);
+        assert!(bare(body_w, run_w(body_w, true)) < bare(body_w, 0.0));
         // …and with the lane collapsed at the same window, it is free again.
         let body_w = 1184.0;
-        assert!(
-            (art_edge(body_w, body_h, run_w(body_w, true)) - art_edge(body_w, body_h, 0.0)).abs()
-                < f32::EPSILON
-        );
+        assert!((bare(body_w, run_w(body_w, true)) - bare(body_w, 0.0)).abs() < f32::EPSILON);
     }
 
     /// **The two columns re-stack below the split floor**, swept 400–4000 the
@@ -739,6 +971,67 @@ mod tests {
         // audits are taken at, so the regime is real rather than theoretical.
         assert!((run_w(theme::SPLIT_FLOOR - 1.0, true)).abs() < f32::EPSILON);
         assert!(run_w(theme::SPLIT_FLOOR, true) > 0.0);
+    }
+
+    /// **The composition holds across the restack** — the layout, the artwork
+    /// and the ground all turn at [`theme::SPLIT_FLOOR`] and nowhere else.
+    ///
+    /// Step A2 added a third object to a surface that already had two, and the
+    /// failure it could have introduced is a **seam**: a field whose domain
+    /// changed at one width while the columns re-stacked at another would put
+    /// ambient light under a scrolling list, or a wall-clamped column under
+    /// the work, for the band between the two numbers. Swept 400–4000 the way
+    /// everything else on this surface is.
+    #[test]
+    fn the_composition_holds_across_the_restack() {
+        for width in sides() {
+            // **One floor, three consequences.** The run's column, the record's
+            // composition and the field's domain are the same decision.
+            let split = width >= theme::SPLIT_FLOOR;
+            assert_eq!(
+                ground(width, true),
+                if split {
+                    Ground::Split(theme::RUN_MEASURE + theme::HANG)
+                } else {
+                    Ground::Still
+                },
+                "{width}: the ground turned somewhere the layout did not"
+            );
+            // The run stood down is the ambient field at every width, because
+            // there is no type for the ceiling to be lower under.
+            assert_eq!(ground(width, false), Ground::Ambient, "{width}");
+            // **The clamped domain never eats the record's own column.** The
+            // still region is the run plus its gutter, and the work has to fit
+            // beside it — otherwise the sleeve would hang over a ground meant
+            // for a list.
+            if let Ground::Split(under_run) = ground(width, true) {
+                let beside = run_w(width, true);
+                let record_right = width - theme::HANG - beside - theme::GAP_XL;
+                assert!(
+                    width - under_run >= record_right,
+                    "{width}: the clamped ground reached under the work"
+                );
+                assert!(
+                    record_right >= theme::HANG + theme::ART_MIN,
+                    "{width}: the record column fell under its own floor inside the split"
+                );
+            }
+        }
+
+        // **The record does not lurch at the floor.** At the widest window
+        // below it the head block is `ART_MIN`; at the narrowest above it the
+        // record column is at least that, so the work grows across the seam
+        // rather than jumping either way — with a source bound in play and
+        // without one.
+        for source in SOURCES {
+            let below = record_edge(theme::SPLIT_FLOOR - 1.0, 1080.0, true, source);
+            let above = record_edge(theme::SPLIT_FLOOR, 1080.0, true, source);
+            assert!(
+                above >= below,
+                "source {source}: {below} → {above} across the floor"
+            );
+            assert!(below <= source && above <= source, "source {source}");
+        }
     }
 
     /// **Every queue affordance survives the merge** — doc 12 §6.4.4's table
