@@ -8,7 +8,7 @@
 > 2. *"'save as playlist' really makes no sense on the playlist page for a
 >    CD"*
 >
-> Logged in `docs/REQUESTS.md` as **designing** — *"the family was made
+> Logged in `docs/BACKLOG.md`, *What the owner asked for*, as **designing** — *"the family was made
 > deliberately; the cost is now visible"*.
 
 **Status**: design study · **tier 1 shipped 2026-08-10** (§9) · **tier 2
@@ -326,7 +326,7 @@ So Home is not confused **today**. It is about to be. Two things are in
 flight:
 
 - the owner's ask *"I wanted the Play all to be more like a tile on the home
-  screen, a special 'playlist'"* (`REQUESTS.md`, **building**) — an
+  screen, a special 'playlist'"* (`BACKLOG.md`, **building**) — an
   **implicit** list rendered as a tile, in a section of records;
 - `RECENTLY ADDED` already draws **the wall's own tile function verbatim**
   (`views/home.rs:541-543` → `views/shelf.rs:890-1042`), so anything that

@@ -20,9 +20,10 @@
 > its item to done and adding anything it discovered. A branch that changes the
 > product and not this file is incomplete.
 >
-> Where the other documents fit: `CHANGELOG.md` is what shipped, `BACKLOG.md`
-> is what was deliberately *not* done and why, `NEXT-STEPS.md` is the shape of
-> the project, `REQUESTS.md` is the owner's asks verbatim with their fate.
+> Where the other documents fit: `CHANGELOG.md` is what shipped, and
+> `BACKLOG.md` is everything not done yet — deliberate deferrals, known gaps,
+> and, in *What the owner asked for*, his asks verbatim with their fate.
+> `NEXT-STEPS.md` is the shape of the project.
 > **This is the ordered queue.** If they disagree, this one is wrong — fix it.
 >
 > ## How this list is ordered

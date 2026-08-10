@@ -3,7 +3,8 @@
 > Concrete, ordered, with acceptance criteria. Standards in `ENGINEERING.md`;
 > vision in `VISION.md`; deliberate deferrals in `BACKLOG.md`; what actually
 > landed in `CHANGELOG.md`; what the owner asked for and where it got to is
-> `REQUESTS.md`. **What to do next is [`WORK.md`](WORK.md)** — start there.
+> `BACKLOG.md`'s *What the owner asked for*. **What to do next is
+> [`WORK.md`](WORK.md)** — start there.
 > Updated 2026-08-10.
 >
 > **Status**: Phases 0–3 ✅. baz scans several folders, shows the collection,
@@ -140,7 +141,10 @@ measurements have never been taken because the feature does not exist yet.
   incomplete. "Blocked on a decision" is a note on an item, never a reason to
   drop it.
 
-- **Every ask from the owner goes into `REQUESTS.md` when it is made**, and
+- **Every ask from the owner goes into `BACKLOG.md` when it is made** — its
+  *What the owner asked for* section, which was a file of its own until the
+  owner folded it in with *"requests need to be in backlog, no need for
+  different concepts"* — and
   leaves only as shipped or as declined with his agreement. It exists because
   three instructions were reported back to him as "decisions waiting" instead
   of being built.

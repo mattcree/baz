@@ -307,7 +307,8 @@
 >
 > The owner: *"again I wanted the Play all, to be more like a tile on the home
 > screen, a special 'playlist'"* — and the *again* is recorded, because it had
-> been asked for before and not built (`docs/REQUESTS.md` exists for exactly
+> been asked for before and not built (`docs/BACKLOG.md`'s *What the owner
+> asked for* exists for exactly
 > that failure).
 >
 > **§6's inventory gains a third item, and the addition is tested against §6's

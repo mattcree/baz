@@ -5,7 +5,7 @@
 > *"ideally the by artist page could have more info, maybe just the wikipedia
 > for the band or something?"*
 >
-> Logged in `docs/REQUESTS.md` as **designing**.
+> Logged in `docs/BACKLOG.md`, *What the owner asked for*, as **designing**.
 
 **Status**: design study · proposes an amendment to
 [ADR-0030](../adr/0030-the-returns-lane-and-the-home-band.md) §6 (which is
