@@ -25,6 +25,35 @@
 //! reason: a record behaves the same wherever it is drawn, which is what makes
 //! a third surface showing records affordable at all.
 //!
+//! # The grid is *handed* to this page, and that is the fix for a real defect
+//!
+//! This page used to resolve its own: `Grid::new(width − 2 × HANG, Balanced)`,
+//! a hand-written guess at [`crate::views::place_pad`]'s horizontals — and
+//! wrong twice over. It missed the pad's [`theme::SCROLLBAR_LANE`], so the
+//! block was resolved for 10 px the page does not have; and it named
+//! `Balanced` outright, so the page ignored the density step entirely and
+//! <kbd>Ctrl</kbd>+<kbd>=</kbd> did nothing here.
+//!
+//! What it produced, measured at the owner's own window: **at 1920 px with the
+//! returns lane collapsed the page drew six columns of 244 px art where the
+//! wall drew five of 294 px** — the same record, 50 px smaller, one press
+//! apart. The two widths straddled a column boundary that 22 px of arithmetic
+//! decided, which is exactly how fragile a second answer to *how wide is the
+//! grid* is.
+//!
+//! So there is one answer now and this page is given it: [`crate::app::Shelf::grid`],
+//! the grid the wall itself hangs on. Every page that hangs works reads that
+//! one grid, so **a record is the same size in all three by construction** —
+//! `every_place_that_hangs_works_hangs_them_on_one_grid` is the assertion, and
+//! there is no arithmetic left here for it to disagree with.
+//!
+//! It costs this page 22 px: the wall's width reserves the index rail's lane
+//! and the wall's 4 px bar (112 px in all) where this page's own gutters take
+//! 90, so the block of records stops 22 px short of where it could. That is
+//! under a tenth of a gutter, it is spent at the trailing edge where nothing
+//! hangs from, and the alternative — the same cover 50 px bigger on one page
+//! than the next — is the thing being fixed.
+//!
 //! **Deliberately not here yet**, and each for a reason rather than for want of
 //! room: a biography or any critic metadata (it would come off the network, and
 //! nothing in baz goes to the network); an artist image (same); play counts and
@@ -48,7 +77,7 @@ use iced::{Element, Length};
 use crate::app::{Message, Shelf};
 use crate::player::PlayerState;
 use crate::shelf::Grid;
-use crate::views::{place_header_led, place_name, place_pad, section_rule};
+use crate::views::{place_header_led, place_name, place_pad};
 use crate::{theme, vm};
 
 /// Every record filed under `artist`, in the wall's own order.
@@ -93,7 +122,7 @@ pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     player: &'a PlayerState,
     artist: u64,
-    width: f32,
+    hang: Grid,
     collecting: crate::playlists::Collecting,
 ) -> Element<'a, Message> {
     let room = theme::active();
@@ -111,10 +140,6 @@ pub(crate) fn view<'a>(
         .align_y(iced::alignment::Vertical::Center)
         .into();
 
-    let hang = Grid::new(
-        (width - 2.0 * theme::HANG).max(0.0),
-        crate::shelf::Density::Balanced,
-    );
     let mut rows = column![].spacing(hang.gutter);
     let mut current = row![].spacing(hang.gutter);
     let mut in_row = 0usize;
@@ -133,7 +158,11 @@ pub(crate) fn view<'a>(
         rows = rows.push(current);
     }
 
-    let body = column![section_rule("Records"), rows].spacing(theme::GAP_LG);
+    let body = column![
+        crate::views::section_rule_hung("Records", hang.density),
+        rows
+    ]
+    .spacing(theme::GAP_LG);
 
     column![
         place_header_led(lead, Some(counts(&records))),

@@ -101,20 +101,6 @@ use crate::shelf::Grid;
 use crate::views::{gradient_block, section_rule};
 use crate::{icon, theme, vm};
 
-/// How many records `RECENTLY ADDED` shows: **one row of the wall's own
-/// tiles**, at whatever the density's column count is.
-///
-/// A row rather than a number, because the wall's arithmetic already decides
-/// how many works fit across a width and a second answer to that question
-/// would be a second grid.
-fn recent_columns(width: f32) -> usize {
-    Grid::new(
-        (width - 2.0 * theme::HANG).max(0.0),
-        crate::shelf::Density::Balanced,
-    )
-    .columns
-}
-
 /// **The needle's arithmetic**, alone: how much of the line is amber and how
 /// much is muted, given a position, a length and the sleeve's width.
 ///
@@ -156,14 +142,15 @@ pub(crate) fn view<'a>(
     player: &'a PlayerState,
     resume: &'a crate::session::Snapshot,
     width: f32,
+    hang: Grid,
     collecting: crate::playlists::Collecting,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let mut body = column![].spacing(theme::HANG);
 
     let continuing = continue_band(shelf, player, resume, width);
-    let everything = all_songs_tile(shelf, player, width);
-    let added = recently_added(shelf, player, width, collecting);
+    let everything = all_songs_tile(shelf, player, hang);
+    let added = recently_added(shelf, player, hang, collecting);
     let counted = collection(shelf);
     let nothing =
         continuing.is_none() && everything.is_none() && added.is_none() && counted.is_none();
@@ -562,20 +549,17 @@ fn resume_line<'a>(
 fn all_songs_tile<'a>(
     shelf: &'a Shelf,
     player: &'a PlayerState,
-    width: f32,
+    hang: Grid,
 ) -> Option<Element<'a, Message>> {
     let room = theme::active();
     let list = shelf.everything();
     if list.is_empty() {
         return None;
     }
-    // The wall's own grid, at the same density the row below uses, so the tile
-    // is one column of the lattice `RECENTLY ADDED` stands on rather than a
-    // second measure.
-    let hang = Grid::new(
-        (width - 2.0 * theme::HANG).max(0.0),
-        crate::shelf::Density::Balanced,
-    );
+    // **The wall's own grid** — the one the shell resolved, not a second one
+    // resolved here — so this tile is one column of the lattice
+    // `RECENTLY ADDED` stands on, at the same size the same record is drawn
+    // at on the wall one press away.
     let edge = hang.art;
     let work = (edge - 2.0 * theme::SLEEVE_MAT).max(0.0);
     let hovered = shelf.hovered_all_songs;
@@ -704,8 +688,8 @@ fn all_songs_tile<'a>(
 ///
 /// The tie-break is the returns lane's own total-order rule, for the reason it
 /// has there: two launches over the same library must draw the same row.
-pub(crate) fn newest(shelf: &Shelf, width: f32) -> Vec<&vm::AlbumVm> {
-    let columns = recent_columns(width);
+pub(crate) fn newest(shelf: &Shelf, hang: Grid) -> Vec<&vm::AlbumVm> {
+    let columns = hang.columns;
     let mut newest: Vec<&vm::AlbumVm> = shelf
         .albums
         .iter()
@@ -726,17 +710,13 @@ pub(crate) fn newest(shelf: &Shelf, width: f32) -> Vec<&vm::AlbumVm> {
 fn recently_added<'a>(
     shelf: &'a Shelf,
     player: &'a PlayerState,
-    width: f32,
+    hang: Grid,
     collecting: crate::playlists::Collecting,
 ) -> Option<Element<'a, Message>> {
-    let newest = newest(shelf, width);
+    let newest = newest(shelf, hang);
     if newest.is_empty() {
         return None;
     }
-    let hang = Grid::new(
-        (width - 2.0 * theme::HANG).max(0.0),
-        crate::shelf::Density::Balanced,
-    );
     let mut tiles = row![].spacing(hang.gutter);
     for album in newest {
         tiles = tiles.push(crate::views::shelf::tile(
@@ -744,9 +724,12 @@ fn recently_added<'a>(
         ));
     }
     Some(
-        column![section_rule("Recently added"), tiles]
-            .spacing(theme::GAP_LG)
-            .into(),
+        column![
+            crate::views::section_rule_hung("Recently added", hang.density),
+            tiles
+        ]
+        .spacing(theme::GAP_LG)
+        .into(),
     )
 }
 

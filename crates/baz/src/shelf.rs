@@ -84,7 +84,7 @@
 //! is then the same arithmetic. That is the whole of why the properties
 //! survive the step — `gutter == margin == hang` wherever the art is uncapped
 //! is an algebraic consequence of the formula, and the formula did not change,
-//! so it is true at three steps for the same reason it was true at one.
+//! so it is true at every step for the same reason it was true at one.
 
 use crate::theme::{GAP_LG, HANG, LABEL_H};
 
@@ -112,11 +112,11 @@ fn round_half_up(value: f32) -> f32 {
     (value + 0.5).floor()
 }
 
-/// **How closely the wall hangs its works** — three named steps, and the
+/// **How closely the wall hangs its works** — four named steps, and the
 /// four numbers each one gives [`Grid`] (`.interface-design/system.md` §7.1,
-/// ADR-0017 step 6).
+/// ADR-0017 step 6, ADR-0028 and its fourth-step amendment).
 ///
-/// # Three steps, not a slider
+/// # Four steps, not a slider
 ///
 /// `03-interface-prior-art.md` R7: density control is universal outside music
 /// — Lightroom, Calibre, Steam, Plex, Google Photos all ship one — and **two
@@ -124,11 +124,14 @@ fn round_half_up(value: f32) -> f32 {
 /// deliberately shows fewer, larger covers this matters more rather than less:
 /// 300 albums and 40 000 albums do not want the same wall.
 ///
-/// It is three *named* steps and not a free zoom because a slider makes every
-/// screenshot of baz different and every layout bug unreproducible. Three is
-/// also the number that can be spent from a keyboard without a readout: a step
-/// either side of the default, and you are never more than two presses from
-/// any of them.
+/// They are *named* steps and not a free zoom because a slider makes every
+/// screenshot of baz different and every layout bug unreproducible. It shipped
+/// as three and the owner asked for four (2026-08-10: *"4 levels makes sense
+/// to me"*); the fourth is [`Self::Compact`], and it goes **inside** the
+/// ladder rather than past either end, because that is where the measurement
+/// put the gap — see its own note below. Four is still a count you can spend
+/// from a keyboard without a readout: the marks say where you are, and the
+/// ladder's ends are three presses apart rather than two.
 ///
 /// # A control in the place's body, not a setting
 ///
@@ -139,10 +142,13 @@ fn round_half_up(value: f32) -> f32 {
 /// preference somebody goes somewhere to set, and there is still no density
 /// row and no zoom readout.
 ///
-/// The visible control is **three detent marks at the foot of the index
-/// rail's lane** (ADR-0028, doc 11 §5 P8 — the owner's choice): density
-/// reads the viewport, so its home is the place's body (doc 07 L8.1), and
-/// the lane is the body's one resident view-subject strip.
+/// The visible control is **the detent marks, one per step, standing at the
+/// trailing edge of the block of works they hang** (ADR-0028 as amended):
+/// on the Library that block is the whole place and the marks close the index
+/// rail's lane; on Home and an artist's page the block is a named section and
+/// the marks stand on its rule. Density reads the viewport, so its home is
+/// the place's body (doc 07 L8.1) — never the frame, which is why the marks
+/// are not in the returns lane and not in the strip.
 /// <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd> and
 /// <kbd>Ctrl</kbd>+scroll remain as the marks' accelerators, sending the
 /// same [`crate::app::Message::DensityStep`] a mark's press sends
@@ -151,14 +157,22 @@ fn round_half_up(value: f32) -> f32 {
 /// # Why these four numbers per step
 ///
 /// [`Density::Balanced`] **is** the shipped hang, token for token — asserted
-/// below — so the default wall is the wall that was measured, and the two
-/// other steps are the same wall zoomed rather than three walls that happen to
-/// share a formula.
+/// below — so the default wall is the wall that was measured, and the other
+/// steps are the same wall zoomed rather than four walls that happen to share
+/// a formula.
 ///
 /// - **Spacious** raises `ART_MIN` to 288 and pins `ART_TARGET` at `ART_MAX`,
 ///   so above about 1100 px of grid the art is capped and the *margins* take
 ///   the slack. That is the one case in which `gutter > hang`, and it is the
-///   case in which the alternative would be upscaling a thumbnail.
+///   case in which the alternative would be upscaling a thumbnail. It is also
+///   why **there is no step looser than this one**: `ART_MAX` is already
+///   [`crate::art::THUMB_PX`], so a looser step could not draw a larger work,
+///   only more air around the same one.
+/// - **Compact** is the interval between `Balanced` and `Dense`, halved:
+///   208 = (240 + 176)/2, 236 = (272 + 200)/2, 280 = (320 + 240)/2, and the
+///   hang's own midpoint 34 taken down to 32, the nearest value on the 4 px
+///   lattice `theme.rs` holds every measure to. Nothing about it is tuned,
+///   which is the point — it is the ladder's widest rung split in two.
 /// - **Dense** is today's shelf: at the shipped 1280 px window the wall is
 ///   1172 px wide once the rail's lane is off it, and Dense hangs
 ///   **5 × 200.8** there against the 5 × 208 baz drew before the hang landed.
@@ -166,7 +180,7 @@ fn round_half_up(value: f32) -> f32 {
 ///
 /// `ART_MAX` never exceeds [`crate::art::THUMB_PX`] at any step, so *nothing
 /// upscales* is a property of the system rather than of the default —
-/// `the_wall_never_draws_art_larger_than_its_source` sweeps all three.
+/// `the_wall_never_draws_art_larger_than_its_source` sweeps every step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Density {
     /// The largest works and the widest hang: `HANG` 48, art 288 … 320.
@@ -175,6 +189,21 @@ pub enum Density {
     /// 240 … 320.
     #[default]
     Balanced,
+    /// **The fourth step** (2026-08-10, the owner's *"4 levels makes sense to
+    /// me"*): `HANG` 32, art 208 … 280 — the `Balanced`-to-`Dense` interval
+    /// halved.
+    ///
+    /// It goes here rather than past either end of the ladder because that is
+    /// where the gap was, measured at the wall's real width for seven window
+    /// widths in both lane states (`docs/design/impl/density-on-every-page/`):
+    /// `Balanced` → `Dense` jumps two to four columns at every window from
+    /// 1280 up, where `Spacious` → `Balanced` jumps nought to one. The two
+    /// alternatives were refused on measurement rather than on taste — looser
+    /// than `Spacious` cannot enlarge a work at all (see the type's docs), and
+    /// tighter than `Dense` would leave the widest rung exactly where it is,
+    /// which is the rung a listener actually crosses because `Balanced` is the
+    /// default and `Dense` is its neighbour.
+    Compact,
     /// The most works on screen: `HANG` 28, art 176 … 240 — the shelf baz
     /// shipped before density existed.
     Dense,
@@ -185,8 +214,10 @@ impl Density {
     /// `ALL[0]` is what <kbd>Ctrl</kbd>+<kbd>=</kbd> walks towards.
     ///
     /// Written once and read by [`Self::step`], [`Self::from_code`] and every
-    /// sweep in the tests, so a fourth step is one variant and one row here.
-    pub const ALL: [Self; 3] = [Self::Spacious, Self::Balanced, Self::Dense];
+    /// sweep in the tests, so a step is one variant and one row here — a
+    /// promise this array made while it held three, and which held: the
+    /// fourth step cost exactly that in this file, plus its four numbers.
+    pub const ALL: [Self; 4] = [Self::Spacious, Self::Balanced, Self::Compact, Self::Dense];
 
     /// The word this step is written as in `config.toml`.
     ///
@@ -198,6 +229,7 @@ impl Density {
         match self {
             Self::Spacious => "spacious",
             Self::Balanced => "balanced",
+            Self::Compact => "compact",
             Self::Dense => "dense",
         }
     }
@@ -219,6 +251,7 @@ impl Density {
         match self {
             Self::Spacious => "Spacious",
             Self::Balanced => "Balanced",
+            Self::Compact => "Compact",
             Self::Dense => "Dense",
         }
     }
@@ -229,6 +262,7 @@ impl Density {
         match self {
             Self::Spacious => 48.0,
             Self::Balanced => HANG,
+            Self::Compact => 32.0,
             Self::Dense => 28.0,
         }
     }
@@ -239,6 +273,7 @@ impl Density {
         match self {
             Self::Spacious => 288.0,
             Self::Balanced => crate::theme::ART_MIN,
+            Self::Compact => 208.0,
             Self::Dense => 176.0,
         }
     }
@@ -249,6 +284,7 @@ impl Density {
         match self {
             Self::Spacious => 320.0,
             Self::Balanced => crate::theme::ART_TARGET,
+            Self::Compact => 236.0,
             Self::Dense => 200.0,
         }
     }
@@ -260,6 +296,7 @@ impl Density {
         match self {
             Self::Spacious => 320.0,
             Self::Balanced => crate::theme::ART_MAX,
+            Self::Compact => 280.0,
             Self::Dense => 240.0,
         }
     }
@@ -527,7 +564,7 @@ impl Run {
 /// unit rather than sitting beside it. At the default the gap a reader sees
 /// above a header is the previous row's trailing hang (40) and the gap below
 /// it is `HANG − HEADING_LINE_H` (28) — a header nearer the shelf it names
-/// than the one it follows, and that ratio is the same at all three steps.
+/// than the one it follows, and that ratio is the same at every step.
 ///
 /// # Why the sticky header is exact rather than approximate
 ///
@@ -860,9 +897,14 @@ mod tests {
         }
     }
 
-    /// **The three steps, at the widths the shipped windows actually give the
+    /// **The steps, at the widths the shipped windows actually give the
     /// wall** — `.interface-design/system.md` §7.1's table, recomputed from
     /// the specification's own formula and its four numbers per step.
+    ///
+    /// The fourth step's two rows were computed the same way and added when
+    /// it landed (2026-08-10): §7.1's table is three rows wide and is
+    /// corrected by this test rather than reproduced by it, exactly as the
+    /// note below already records for the rail's lane.
     ///
     /// The widths are the *grid's*, not the window's: a 1280 px window with no
     /// inspector leaves 1172 px once the index rail's
@@ -892,6 +934,8 @@ mod tests {
             (Density::Spacious, 1812.0, 5, 304.8, 48.0, 48.0),
             (Density::Balanced, 1172.0, 4, 243.0, 40.0, 40.0),
             (Density::Balanced, 1812.0, 6, 255.33, 40.0, 40.0),
+            (Density::Compact, 1172.0, 4, 253.0, 32.0, 32.0),
+            (Density::Compact, 1812.0, 7, 222.29, 32.0, 32.0),
             (Density::Dense, 1172.0, 5, 200.8, 28.0, 28.0),
             (Density::Dense, 1812.0, 8, 195.0, 28.0, 28.0),
         ];
@@ -929,9 +973,14 @@ mod tests {
     }
 
     /// **A denser step never hangs fewer works, at any width.** The one
-    /// ordering claim the three steps make to a listener: pressing towards
-    /// Dense puts *more* records on screen, always, and pressing back puts
-    /// fewer.
+    /// ordering claim the ladder makes to a listener: pressing towards Dense
+    /// puts *more* records on screen — or the same number — and never fewer.
+    ///
+    /// *Or the same* is not a weakening, and the fourth step is why it had to
+    /// be said out loud: at a narrow window the counts the three steps hang
+    /// are already consecutive integers, so a fourth rung has nowhere to
+    /// stand between them and must repeat a neighbour there. What may never
+    /// happen is an **inversion**, and that is what this asserts.
     ///
     /// The art is deliberately **not** asserted to be monotone with it, and
     /// that is not an omission: at 1120 px Spacious hangs 3 × 309.3 while
@@ -947,7 +996,76 @@ mod tests {
                 .collect();
             assert!(
                 counts.windows(2).all(|pair| pair[0] <= pair[1]),
-                "{width} px: Spacious/Balanced/Dense hang {counts:?} columns"
+                "{width} px: the ladder hangs {counts:?} columns"
+            );
+        }
+    }
+
+    /// **The ladder only ever tightens, and the fourth step is the widest
+    /// rung halved** — the two properties that make `Compact` a *step of this
+    /// ladder* rather than a fourth set of numbers beside it.
+    ///
+    /// Monotonicity first, because it is what `Density::step`'s sign means: a
+    /// press of <kbd>Ctrl</kbd>+<kbd>-</kbd> must make every one of the four
+    /// numbers smaller or leave it alone, at every rung. A step inserted at
+    /// the wrong index — the easy way to get a fourth step wrong — fails
+    /// here rather than on somebody's wall.
+    ///
+    /// Then the arithmetic of the fourth rung itself: each of its three art
+    /// numbers is the exact mean of its neighbours', and its hang is their
+    /// mean 34 taken down to the nearest value on `theme.rs`'s 4 px lattice.
+    /// Nothing is tuned, so nothing can be quietly re-tuned.
+    #[test]
+    fn the_ladder_only_tightens_and_the_fourth_step_halves_its_widest_rung() {
+        for pair in Density::ALL.windows(2) {
+            let (looser, tighter) = (pair[0], pair[1]);
+            let subject = format!("{} → {}", looser.label(), tighter.label());
+            assert!(looser.hang() > tighter.hang(), "{subject}: hang");
+            assert!(looser.art_min() > tighter.art_min(), "{subject}: art_min");
+            assert!(
+                looser.art_target() > tighter.art_target(),
+                "{subject}: art_target"
+            );
+            assert!(looser.art_max() >= tighter.art_max(), "{subject}: art_max");
+        }
+        // Nothing upscales, at any step: the cap is the thumbnail the cache
+        // holds. This is also why there is no step *looser* than Spacious —
+        // it already stands on the cap, so a looser one could only add air.
+        // The thumbnail edge, as a pixel count the steps can be compared
+        // against: `THUMB_PX` is a `u32` and every step's cap is a whole
+        // number of logical pixels well inside f32's exact-integer range.
+        let cap = f32::from(u16::try_from(crate::art::THUMB_PX).expect("a sane thumbnail edge"));
+        for density in Density::ALL {
+            assert!(
+                density.art_max() <= cap,
+                "{} draws above the cached thumbnail",
+                density.label()
+            );
+        }
+        assert!(
+            (Density::Spacious.art_max() - cap).abs() < f32::EPSILON,
+            "the loosest step stands on the cap, which is what closes that end"
+        );
+
+        // The interval halved (the type's own note, and the measurement in
+        // `docs/design/impl/density-on-every-page/`).
+        let mean = f32::midpoint;
+        let (loose, tight) = (Density::Balanced, Density::Dense);
+        let mid = Density::Compact;
+        assert!((mid.art_min() - mean(loose.art_min(), tight.art_min())).abs() < f32::EPSILON);
+        assert!(
+            (mid.art_target() - mean(loose.art_target(), tight.art_target())).abs() < f32::EPSILON
+        );
+        assert!((mid.art_max() - mean(loose.art_max(), tight.art_max())).abs() < f32::EPSILON);
+        // The hang is the mean taken down to the 4 px lattice: 34 → 32.
+        let hang_mean = mean(loose.hang(), tight.hang());
+        assert!((hang_mean - 34.0).abs() < f32::EPSILON);
+        assert!((mid.hang() - 32.0).abs() < f32::EPSILON);
+        for density in Density::ALL {
+            assert!(
+                density.hang() % 4.0 == 0.0,
+                "{} hangs off the 4 px lattice",
+                density.label()
             );
         }
     }
@@ -976,10 +1094,16 @@ mod tests {
     /// word each step is written as in the config document.
     #[test]
     fn the_zoom_steps_one_stop_at_a_time_and_stops_at_the_ends() {
-        use Density::{Balanced, Dense, Spacious};
+        use Density::{Balanced, Compact, Dense, Spacious};
 
         assert_eq!(Balanced.step(1), Spacious, "Ctrl+= loosens the hang");
-        assert_eq!(Balanced.step(-1), Dense, "Ctrl+- tightens it");
+        assert_eq!(Balanced.step(-1), Compact, "Ctrl+- tightens it");
+        // The fourth step is a rung of the same ladder, walked the same way —
+        // and the ladder's ends are now three presses apart, not two.
+        assert_eq!(Compact.step(-1), Dense);
+        assert_eq!(Compact.step(1), Balanced);
+        assert_eq!(Spacious.step(-3), Dense);
+        assert_eq!(Dense.step(3), Spacious);
         // Saturating, never wrapping: a zoom that has run out does nothing.
         assert_eq!(Spacious.step(1), Spacious);
         assert_eq!(Dense.step(-1), Dense);
@@ -1007,7 +1131,17 @@ mod tests {
         }
         // The ladder is loosest-first, which is what makes `step`'s sign the
         // direction a listener presses in.
-        assert_eq!(Density::ALL, [Spacious, Balanced, Dense]);
+        assert_eq!(Density::ALL, [Spacious, Balanced, Compact, Dense]);
+        // **The three shipped words keep their exact spellings.** A step
+        // added to the ladder may not re-hang a wall somebody already has,
+        // which is `code`'s own rule and the lesson ADR-0035 learned when
+        // `"artist"` was repurposed.
+        assert_eq!(Spacious.code(), "spacious");
+        assert_eq!(Balanced.code(), "balanced");
+        assert_eq!(Dense.code(), "dense");
+        assert_eq!(Compact.code(), "compact");
+        // …and the default is still the wall that was measured.
+        assert_eq!(Density::default(), Balanced);
     }
 
     /// **A mark's delta is the gesture's own notches** (ADR-0028): for every

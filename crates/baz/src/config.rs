@@ -150,8 +150,9 @@ pub struct Config {
     /// **View state, persisted, and deliberately not a setting.** ADR-0017
     /// §1.3 takes the critique's better half — *Settings must never be the
     /// answer to a view question* — and supersedes `02` §2.7's Settings →
-    /// Appearance row: the control is the three detent marks at the foot of
-    /// the index rail's lane (ADR-0028), with <kbd>Ctrl</kbd>+<kbd>-</kbd> /
+    /// Appearance row: the control is the four detent marks, standing at the
+    /// trailing edge of whatever block of works they hang (ADR-0028 and its
+    /// fourth-step amendment), with <kbd>Ctrl</kbd>+<kbd>-</kbd> /
     /// <kbd>Ctrl</kbd>+<kbd>=</kbd> and <kbd>Ctrl</kbd>+scroll as its
     /// accelerators, and this key is where the press's *result* is
     /// remembered, exactly as `group_key` remembers the press on a word in
@@ -683,14 +684,11 @@ mod tests {
     /// one value that would otherwise re-hang a whole wall.
     #[test]
     fn an_unreadable_density_degrades_to_balanced_alone() {
-        for spelling in [
-            "\"compact\"",
-            "\"DENSE\"",
-            "3",
-            "true",
-            "\"\"",
-            "\"dense \"",
-        ] {
+        // `"compact"` stood here as a word baz did not know, until the
+        // owner's fourth step made it one (2026-08-10). Its replacement is
+        // chosen the same way: a plausible density word this build has no
+        // step for, so the test still asks what it means to ask.
+        for spelling in ["\"cosy\"", "\"DENSE\"", "3", "true", "\"\"", "\"dense \""] {
             let text = format!(
                 "music_dir = \"/m\"\ngroup_key = \"year\"\ndensity = {spelling}\n\
                  [replaygain]\nmode = \"album\"\n"

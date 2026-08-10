@@ -172,6 +172,9 @@ gesture accelerates them".
   mark confirms.
 - **No fourth step, no slider** — the three-step design is what makes the
   reserved-slot arguments unconditional, and this ADR leans on that.
+  *(**Half overturned 2026-08-10** — see the amendment. There is a fourth
+  step; there is still no slider. The clause's real argument was about
+  reproducibility, and four named detents keep it whole.)*
 - **No whole-lane-wide hit targets for the marks.** The spine's
   nearest-slot press owns the lane's band; giving the marks the full 108 px
   would put two press grammars on one x-range with nothing visible dividing
@@ -190,3 +193,189 @@ gesture accelerates them".
   names the marks instead of declaring the gesture its own control.
 - Captures under `docs/design/impl/density-control/` — all three detents,
   the active mark moving, taken by the real press on the real binary.
+
+
+---
+
+## Amendment (2026-08-10) — a fourth step, and the marks stand where the works do
+
+**Status**: accepted · the owner, in two messages: *"we should ensure the
+density options are available on all pages..."* and *"4 levels makes sense to
+me"* · **overturns one bullet of this entry's own "Deliberately not done"**
+(the fourth step) and **generalises §1** (the home) · adds no message, no
+token, no dependency and no state.
+
+Evidence, measurements and every frame quoted below:
+`docs/design/impl/density-on-every-page/`.
+
+### 1 · The fourth step is `Compact`, and it goes *inside* the ladder
+
+This entry refused a fourth step on one argument — *the three-step design is
+what makes the reserved-slot arguments unconditional* — and that argument was
+about **reproducibility**, which is the same argument that refused the slider:
+every screenshot of baz must be one of a small, named set of walls per width.
+Four named detents keep that whole. What it was never an argument for is the
+number three.
+
+**Where it goes was measured, not chosen.** `Density::ALL` was swept at the
+width the wall really gets (`App::grid_width`), for seven windows in both lane
+states — fourteen walls, the full table in the impl README:
+
+- **`Balanced` → `Dense` is the ladder's widest rung**, jumping two to four
+  columns at every window from 1280 up — 5 → 8 at 1920 with the lane collapsed.
+  `Spacious` → `Balanced` jumps nought or one, and at 1280 collapsed it jumps
+  *nothing at all* (three columns each, 11 px of art between them).
+- **Looser than `Spacious` is refused by the system.** `Spacious.art_max()` is
+  already `art::THUMB_PX` 320, and the sweep shows it standing on that cap at
+  half the widths, spending the slack on margins. A looser step cannot draw a
+  larger work; it can only add air, and air is not a density step. This is the
+  same invariant `the_wall_never_draws_art_larger_than_its_source` has always
+  asserted — it now also closes one end of the ladder as a matter of design.
+- **Tighter than `Dense`** would add an eleventh column to a 1920 wall and
+  leave the widest rung exactly where it is — and that rung is the one a
+  listener actually crosses, `Balanced` being the default and `Dense` its
+  neighbour.
+
+So the fourth step is the widest rung **halved**, and every number is arithmetic
+rather than taste: `art_min` 208 = (240 + 176)/2, `art_target` 236 =
+(272 + 200)/2, `art_max` 280 = (320 + 240)/2, and the hang's own midpoint 34
+taken down to **32**, the nearest value on the 4 px lattice `theme.rs` holds
+every measure to.
+`the_ladder_only_tightens_and_the_fourth_step_halves_its_widest_rung` asserts
+each of those and the ladder's monotonicity, so a later hand cannot re-tune the
+row quietly or insert a step at the wrong index.
+
+**Recorded against itself:** at narrow windows the ladder has no room for a
+fourth rung. Below about 1400 px of grid the three original steps already hang
+consecutive integers, so `Compact` repeats a neighbour's column count there and
+differs only in art. That is a property of the arithmetic and it is why
+`a_tighter_step_never_hangs_fewer_works` asserts *never fewer* rather than
+*strictly more*.
+
+**The three shipped words keep their exact spellings.** `spacious`,
+`balanced`, `dense` are untouched and `Balanced` is still the default, so no
+config document in the world re-hangs a wall because of this — `code`'s own
+rule, and the lesson ADR-0035 learned the hard way when `"artist"` was
+repurposed. The new word is `compact`, and it is asserted by name.
+
+**The marks re-key rather than grow.** The detent glyphs are the wall at their
+own hang — one work, four, nine — and there is no whole number of columns
+between two and three. So `Compact` wears the 3 × 3 field `Dense` used to, and
+`Dense` gains a 4 × 4. The set stays *self-depicting*, which is the one thing
+it may not stop being; the cost is that `Dense`'s cells minify to 2.25 px on a
+1× display, which is at the limit of 16 px and is flagged for the owner's eye
+in the impl README.
+
+### 2 · Density does not apply to a page of rows, and the marks are absent there
+
+The ask's real question. The wall, Home and an artist's page hang tiles, so
+density is a **column count**. A record's page, a playlist's page, `Now
+playing` and `Settings` are **rows**, and a column of rows has no column count.
+
+Both answers were available and this one is taken on a measurement: **a track
+row's height is `theme::TRANSPORT_HIT` 32**, and that number is the
+pointer-target floor — the mitigation ADR-0017 §4 owes a toolkit with no
+accessibility tree — rather than a spacing choice. A tighter step could not
+shrink a row without breaking the floor that *this entry's own argument* exists
+to serve; a looser step could only pad text, which changes no fact on screen.
+Density's declared subject is the viewport (doc 07 L8.1); its declared unit is
+the column.
+
+So the marks are drawn on three places and absent from four. **Absent, not
+disabled**: a control that is present and inert is the lie this entry's §2
+already refuses in the active mark, and the owner's ask rules it out in so many
+words. `docs/design/impl/density-on-every-page/04-record-page-*.png` is the
+absence, photographed, so a reader can check that it is clean rather than a
+control that failed to draw.
+
+### 3 · §1's home, generalised: the trailing edge of the block of works
+
+§1 chose *the foot of the index rail's lane* and argued it on three grounds —
+the lane is the body's resident view-subject strip, the wall's leading band
+fails three ways, and the wall's algebra is untouched. All three still hold and
+**the Library's control has not moved by a pixel**. What §1 could not say,
+because the wall was then the only place that hung works, is what the rule
+*behind* that choice was.
+
+It is this: **the marks stand at the trailing edge of the block of works they
+hang.** On the Library the block is the whole place, so its trailing edge is
+the rail's lane. On Home and an artist's page the block is a *named section*,
+so its trailing edge is that section's rule — `RECENTLY ADDED` and `RECORDS`,
+via `views::section_rule_hung`, in the anatomy `section_rule_noted` already
+established for a fact at a rule's right edge.
+
+Two placements were considered and refused:
+
+- **The top bar.** Refused without needing the owner's standing complaint
+  (*"just adding stuff into that top bar isn't good"*), because doc 07 L8.1
+  already settles it: density's subject is the viewport, so its home is the
+  place's body or nowhere, and the strip is the frame.
+- **The returns lane.** Resident on all seven places, which is superficially
+  what *"available on all pages"* asks for — and refused for §2's reason: on
+  the four places that hang no works it would be present and inert.
+
+`density_marks` is **one function in two axes** (`DetentAxis::Column` down the
+lane, `DetentAxis::Row` along a rule), so the three places cannot drift into
+three controls that look alike. The press, the inert active mark, the tooltip
+name, the hover wash and the `steps_to` delta are all §2 and §3 of this entry,
+unchanged.
+
+### 4 · One grid for every place that hangs works
+
+Not asked for, and the thing the ask walked into. `views/home.rs` and
+`views/artist.rs` each resolved a grid of their own —
+`Grid::new(width − 2 × HANG, Density::Balanced)` — which named a step outright
+(so neither page answered the control *or* the keys, which were never gated by
+place) and guessed at `place_pad`'s horizontals, missing the scrollbar lane.
+
+Measured at 1920 with the lane collapsed, same records, one press apart: **the
+artist page drew six columns of 244 px art where the wall drew five of 294.**
+The two widths straddled a boundary that 22 px of arithmetic decided.
+
+So the shell resolves `Shelf::grid` once and hands it down, and a view file may
+not resolve a grid at all —
+`every_place_that_hangs_works_hangs_them_on_one_grid` reads the sources and
+fails if `home.rs`, `artist.rs`, `views/shelf.rs` or `views/page.rs` grows a
+`Grid::new`, or if `app.rs` stops passing `state.grid()`. A record is now the
+same size wherever it is drawn **by construction**, which is what
+`views/artist.rs`'s own docs claimed before this and could not deliver.
+
+It costs Home and an artist's page 22 px of block width, at the trailing edge,
+where nothing hangs from.
+
+### Deliberately not done, still
+
+- **No slider, no readout row, no Settings → Appearance row.** ADR-0017 §1.3
+  stands whole and so does this entry's §4.
+- **No fifth step, and no room for one at either end** — §1 above closes the
+  loose end on the thumbnail cap and the tight end on the caption block.
+- **No density control on `Now playing`, a record's page, a playlist's page or
+  Settings** — §2.
+- **No change to the keyboard.** <kbd>Ctrl</kbd>+<kbd>±</kbd> and
+  <kbd>Ctrl</kbd>+scroll were never gated by place; they stepped the state
+  everywhere and only the wall redrew. Making the pages read the density is
+  what fixes them, and not one line of `keys.rs`'s table moved.
+
+### Consequences
+
+- `crates/baz/src/shelf.rs`: `Density::Compact`, its four numbers, and
+  `the_ladder_only_tightens_and_the_fourth_step_halves_its_widest_rung`.
+  `ALL` is `[Self; 4]`; nothing else in the type changed.
+- `crates/baz/src/icon.rs`: `Glyph::DensityCompact`; the 3 × 3 field renamed to
+  `DENSITY_COMPACT` and a 4 × 4 `DENSITY_DENSE` written. The family sweep now
+  asserts its own length against `Density::ALL`.
+- `crates/baz/src/views/mod.rs`: `density_marks`, `DetentAxis`, `MARK_INSET`
+  and `density_mark` move here from `views/shelf.rs`; `section_rule_hung`
+  joins `section_rule` and `section_rule_noted`.
+- `crates/baz/src/views/shelf.rs`: `density_control` is now the lane's
+  *placement* and nothing else. Both ADR-0028 tests survive, re-pointed.
+- `crates/baz/src/views/home.rs`, `views/artist.rs`: no `Grid::new`; both take
+  the shell's grid; both hang the marks on their block's rule.
+- `crates/baz/src/app.rs`: `state.grid()` handed to both; `offscreen_art` loses
+  its width parameter; the keyboard-mirror table's `DensityStep` row names the
+  three homes.
+- `.interface-design/system.md` §7.1: the fourth row, the fourth wall, and the
+  placement rule.
+- Captures under `docs/design/impl/density-on-every-page/` — every step on
+  three pages at two windows, the absence on a page of rows, the marks pressed
+  on each page, and the artist-versus-wall defect before and after.

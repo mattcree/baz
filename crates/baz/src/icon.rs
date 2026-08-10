@@ -125,11 +125,21 @@ pub enum Glyph {
     /// Reorder, down: [`Self::ArrowUp`] mirrored.
     ArrowDown,
     /// The wall at its loosest hang — one work filling the field. The first
-    /// of the three density detents (ADR-0028); see [`DENSITY_SPACIOUS`].
+    /// of the four density detents (ADR-0028); see [`DENSITY_SPACIOUS`].
     DensitySpacious,
-    /// The wall at the default hang — four works. The middle detent.
+    /// The wall at the default hang — four works. The second detent.
     DensityBalanced,
-    /// The wall at its tightest hang — nine works. The third detent.
+    /// The wall one step tighter than the default — nine works. The third
+    /// detent, and the one the owner's fourth step added (2026-08-10).
+    ///
+    /// **It is drawn with the outline `DensityDense` carried while there were
+    /// three steps**, and `DensityDense` moved on to sixteen. The set depicts
+    /// *the wall at that hang* and nothing else, so its subdivisions are
+    /// 1, 2, 3, 4 across — there is no whole number between two and three,
+    /// and a mark that stopped being the wall to keep its old pixels would
+    /// have been a mark that lies. See [`DENSITY_COMPACT`].
+    DensityCompact,
+    /// The wall at its tightest hang — sixteen works. The fourth detent.
     DensityDense,
     /// Queue: three stacked bars, the last one short — a list with more to
     /// come. The wall's hover option (doc 13 §11 as the owner overruled it).
@@ -145,7 +155,7 @@ pub enum Glyph {
     Home,
     /// Library: four spines standing on a shelf. The collection, depicted as
     /// the thing a collection physically is — and deliberately not a grid of
-    /// squares, which is what the three density detents already are.
+    /// squares, which is what the density detents already are.
     Library,
     /// Now playing: the record, with its label. The lane's third destination.
     ///
@@ -733,12 +743,19 @@ const ARROW_DOWN: &[Outline] = &[
     ],
 ];
 
-/// The three density detents (ADR-0028) share one field — 0.125 … 0.875, a
-/// 12 px square at [`theme::ICON_PX`] — subdivided one, two and three ways:
-/// **the wall itself at its three hangs**, one work, four works, nine works.
-/// The field is constant across the set so the three read as one thing at
-/// three settings rather than as three marks, exactly as the walls they
-/// depict are one wall at three steps.
+/// The four density detents (ADR-0028 as amended) share one field —
+/// 0.125 … 0.875, a 12 px square at [`theme::ICON_PX`] — subdivided one, two,
+/// three and four ways: **the wall itself at its four hangs**, one work, four
+/// works, nine works, sixteen works. The field is constant across the set so
+/// the four read as one thing at four settings rather than as four marks,
+/// exactly as the walls they depict are one wall at four steps.
+///
+/// **The fourth step re-keyed the set rather than joining it.** `Compact`
+/// hangs between `Balanced` and `Dense`, and there is no whole number of
+/// columns between two and three — so the subdivision each step wears moved
+/// up by one from `Compact` on, and `Dense` gained the 4 × 4 field. The
+/// alternative was a mark that no longer depicted its own wall, which is the
+/// one thing this set may not do.
 const DENSITY_FIELD: (f32, f32) = (0.125, 0.875);
 
 /// One work filling the field: the loosest hang.
@@ -778,9 +795,9 @@ const DENSITY_BALANCED: &[Outline] = &[
     ],
 ];
 
-/// Nine works: the tightest hang. Cell 0.1875 (3 px), gap 0.09375 (1.5 px)
-/// — `3 × 0.1875 + 2 × 0.09375` spans the field exactly.
-const DENSITY_DENSE: &[Outline] = &[
+/// Nine works: one step tighter than the default. Cell 0.1875 (3 px), gap
+/// 0.09375 (1.5 px) — `3 × 0.1875 + 2 × 0.09375` spans the field exactly.
+const DENSITY_COMPACT: &[Outline] = &[
     &[
         (0.125, 0.125),
         (0.3125, 0.125),
@@ -837,6 +854,113 @@ const DENSITY_DENSE: &[Outline] = &[
     ],
 ];
 
+/// Sixteen works: the tightest hang. Cell 0.140625 (2.25 px), gap 0.0625
+/// (1 px) — `4 × 0.140625 + 3 × 0.0625` spans the field exactly, the same
+/// discipline the three coarser detents keep.
+///
+/// It is the finest mark in the sheet and it is at the limit of what 16 px
+/// can say: the cells minify to 2.25 px on a 1× display. That is legible as
+/// *many small works*, which is the whole of what this detent has to mean,
+/// and the mark's accessible name carries the rest.
+const DENSITY_DENSE: &[Outline] = &[
+    &[
+        (0.125, 0.125),
+        (0.265_625, 0.125),
+        (0.265_625, 0.265_625),
+        (0.125, 0.265_625),
+    ],
+    &[
+        (0.328_125, 0.125),
+        (0.468_75, 0.125),
+        (0.468_75, 0.265_625),
+        (0.328_125, 0.265_625),
+    ],
+    &[
+        (0.531_25, 0.125),
+        (0.671_875, 0.125),
+        (0.671_875, 0.265_625),
+        (0.531_25, 0.265_625),
+    ],
+    &[
+        (0.734_375, 0.125),
+        (0.875, 0.125),
+        (0.875, 0.265_625),
+        (0.734_375, 0.265_625),
+    ],
+    &[
+        (0.125, 0.328_125),
+        (0.265_625, 0.328_125),
+        (0.265_625, 0.468_75),
+        (0.125, 0.468_75),
+    ],
+    &[
+        (0.328_125, 0.328_125),
+        (0.468_75, 0.328_125),
+        (0.468_75, 0.468_75),
+        (0.328_125, 0.468_75),
+    ],
+    &[
+        (0.531_25, 0.328_125),
+        (0.671_875, 0.328_125),
+        (0.671_875, 0.468_75),
+        (0.531_25, 0.468_75),
+    ],
+    &[
+        (0.734_375, 0.328_125),
+        (0.875, 0.328_125),
+        (0.875, 0.468_75),
+        (0.734_375, 0.468_75),
+    ],
+    &[
+        (0.125, 0.531_25),
+        (0.265_625, 0.531_25),
+        (0.265_625, 0.671_875),
+        (0.125, 0.671_875),
+    ],
+    &[
+        (0.328_125, 0.531_25),
+        (0.468_75, 0.531_25),
+        (0.468_75, 0.671_875),
+        (0.328_125, 0.671_875),
+    ],
+    &[
+        (0.531_25, 0.531_25),
+        (0.671_875, 0.531_25),
+        (0.671_875, 0.671_875),
+        (0.531_25, 0.671_875),
+    ],
+    &[
+        (0.734_375, 0.531_25),
+        (0.875, 0.531_25),
+        (0.875, 0.671_875),
+        (0.734_375, 0.671_875),
+    ],
+    &[
+        (0.125, 0.734_375),
+        (0.265_625, 0.734_375),
+        (0.265_625, 0.875),
+        (0.125, 0.875),
+    ],
+    &[
+        (0.328_125, 0.734_375),
+        (0.468_75, 0.734_375),
+        (0.468_75, 0.875),
+        (0.328_125, 0.875),
+    ],
+    &[
+        (0.531_25, 0.734_375),
+        (0.671_875, 0.734_375),
+        (0.671_875, 0.875),
+        (0.531_25, 0.875),
+    ],
+    &[
+        (0.734_375, 0.734_375),
+        (0.875, 0.734_375),
+        (0.875, 0.875),
+        (0.734_375, 0.875),
+    ],
+];
+
 /// Shuffle — two shafts crossing, each ending in an arrowhead on the right.
 ///
 /// Symmetric about the box's horizontal centre line (`y → 1 − y`): the
@@ -877,6 +1001,7 @@ impl Glyph {
         Self::ArrowDown,
         Self::DensitySpacious,
         Self::DensityBalanced,
+        Self::DensityCompact,
         Self::DensityDense,
         Self::Queue,
         Self::Open,
@@ -889,7 +1014,7 @@ impl Glyph {
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 24;
+    const COUNT: usize = 25;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -910,6 +1035,7 @@ impl Glyph {
             Self::ArrowDown => ARROW_DOWN,
             Self::DensitySpacious => DENSITY_SPACIOUS,
             Self::DensityBalanced => DENSITY_BALANCED,
+            Self::DensityCompact => DENSITY_COMPACT,
             Self::DensityDense => DENSITY_DENSE,
             Self::Queue => QUEUE,
             Self::Open => OPEN,
@@ -940,15 +1066,16 @@ impl Glyph {
             Self::ArrowDown => 12,
             Self::DensitySpacious => 13,
             Self::DensityBalanced => 14,
-            Self::DensityDense => 15,
-            Self::Queue => 16,
-            Self::Open => 17,
-            Self::Home => 18,
-            Self::Library => 19,
-            Self::NowPlaying => 20,
-            Self::LaneExpanded => 21,
-            Self::LaneCollapsed => 22,
-            Self::Shuffle => 23,
+            Self::DensityCompact => 15,
+            Self::DensityDense => 16,
+            Self::Queue => 17,
+            Self::Open => 18,
+            Self::Home => 19,
+            Self::Library => 20,
+            Self::NowPlaying => 21,
+            Self::LaneExpanded => 22,
+            Self::LaneCollapsed => 23,
+            Self::Shuffle => 24,
         }
     }
 
@@ -1614,17 +1741,27 @@ mod tests {
         );
     }
 
-    /// **The density detents depict the wall at its three hangs** — one,
-    /// four and nine works subdividing one shared field (ADR-0028), so the
-    /// three read as one wall at three settings rather than as three
-    /// unrelated marks.
+    /// **The density detents depict the wall at its four hangs** — one, four,
+    /// nine and sixteen works subdividing one shared field (ADR-0028 as
+    /// amended), so the four read as one wall at four settings rather than as
+    /// four unrelated marks.
+    ///
+    /// The list is written in [`crate::shelf::Density::ALL`]'s own order and
+    /// its length is asserted against it, so a step added without a mark —
+    /// or a mark added without a step — fails here rather than on screen.
     #[test]
     fn the_density_detents_subdivide_one_shared_field() {
         let detents = [
             (Glyph::DensitySpacious, 1),
             (Glyph::DensityBalanced, 2),
-            (Glyph::DensityDense, 3),
+            (Glyph::DensityCompact, 3),
+            (Glyph::DensityDense, 4),
         ];
+        assert_eq!(
+            detents.len(),
+            crate::shelf::Density::ALL.len(),
+            "every density step wears exactly one detent mark"
+        );
         for (glyph, columns) in detents {
             // Through the top row of cells: as many solid runs as columns.
             let runs = runs_along(glyph, 0.25);
@@ -1642,11 +1779,12 @@ mod tests {
                 "{glyph:?} does not close on the shared field's edge"
             );
         }
-        // The subdivisions are real: mid-height crosses Balanced's gap
-        // (nothing), Dense's middle row (three cells) and Spacious's one
-        // work (still solid).
+        // The subdivisions are real: mid-height crosses Balanced's gap and
+        // Dense's gap (nothing — both have an even number of rows), Compact's
+        // middle row (three cells) and Spacious's one work (still solid).
         assert!(runs_along(Glyph::DensityBalanced, 0.5).is_empty());
-        assert_eq!(runs_along(Glyph::DensityDense, 0.5).len(), 3);
+        assert!(runs_along(Glyph::DensityDense, 0.5).is_empty());
+        assert_eq!(runs_along(Glyph::DensityCompact, 0.5).len(), 3);
         assert_eq!(runs_along(Glyph::DensitySpacious, 0.5).len(), 1);
     }
 

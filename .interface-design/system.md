@@ -314,6 +314,7 @@ density step** (§7.1). The values below are `Balanced`, the default.
 |---|---|---|---|---|
 | Spacious | 48 | 288 | 320 | 320 |
 | **Balanced** | **40** | **240** | **272** | **320** |
+| Compact | 32 | 208 | 236 | 280 |
 | Dense | 28 | 176 | 200 | 240 |
 
 | Shelf width | Columns | Art | Gutter | Margin | Row pitch | Today | Today's dead gutter |
@@ -370,10 +371,21 @@ one took durable damage**. Under a direction that deliberately shows *fewer,
 larger* covers this matters more, not less: 300 albums and 40 000 albums do not
 want the same wall.
 
-**Three named steps. Not a free zoom** — a slider makes every screenshot of baz
+**Four named steps. Not a free zoom** — a slider makes every screenshot of baz
 different and every layout bug unreproducible. Steps parameterise the hang
 rather than overriding it, so §7's properties (`gutter == HANG` when uncapped,
 `art ∈ [ART_MIN, ART_MAX]`) hold at every step.
+
+It shipped as three and the owner asked for four on 2026-08-10 (*"4 levels
+makes sense to me"*). The fourth, **Compact**, goes *inside* the ladder rather
+than past either end, and that was measured rather than chosen: `Balanced` →
+`Dense` jumps two to four columns at every window from 1280 up, where
+`Spacious` → `Balanced` jumps nought to one. The other two directions are
+closed — looser than `Spacious` cannot draw a larger work, because `ART_MAX`
+is already `THUMB_PX`; tighter than `Dense` would leave the ladder's widest
+rung exactly where it is, and that is the rung a listener actually crosses.
+`Compact`'s numbers are that rung halved, with the hang taken to the 4 px
+lattice. Full measurement: `docs/design/impl/density-on-every-page/`.
 
 **A control in the place's body, not a Settings row.** ADR-0017 §1.3
 supersedes this section's original placement in *Settings → Appearance*, on
@@ -382,25 +394,46 @@ the critique's better argument: *Settings must never be the answer to a
 the way the group key does, not as a preference somebody goes somewhere to
 set, and there is still no density row and no zoom readout.
 
-The visible control is **three detent marks at the foot of the index rail's
-lane** (ADR-0028, closing doc 11 §5 P8's law-contradiction — a gesture-only
-action broke the visible-control rule): each mark is the wall at its step
-(one, four, nine works in one shared glyph field), the current step reads at
-full glyph ink and is inert, and a mark's press sends the gesture's exact
-`DensityStep` delta, so `Ctrl+-` / `Ctrl+=` and `Ctrl+scroll` are the marks'
-accelerators. No menu, no slider, no readout row — the wall itself is the
-readout.
+The visible control is **one detent mark per step, standing at the trailing
+edge of the block of works it hangs** (ADR-0028, closing doc 11 §5 P8's
+law-contradiction — a gesture-only action broke the visible-control rule; the
+fourth-step amendment §3 generalised the placement). On the Library that block
+is the whole place, so the marks close the index rail's lane; on Home and an
+artist's page it is a named section, so they stand on that section's rule.
+Each mark is the wall at its step (one, four, nine, sixteen works in one
+shared glyph field), the current step reads at full glyph ink and is inert,
+and a mark's press sends the gesture's exact `DensityStep` delta, so `Ctrl+-`
+/ `Ctrl+=` and `Ctrl+scroll` are the marks' accelerators. No menu, no slider,
+no readout row — the wall itself is the readout.
 
-**Built** (ADR-0017 step 6; the marks by ADR-0028). `crates/baz/src/shelf.rs`'s
+**The marks are absent from the four places that hang no works** (a record's
+page, a playlist's, Now playing, Settings), and that is the decision rather
+than an omission. Those pages are rows, a row's height is `TRANSPORT_HIT` 32
+— the pointer-target floor, not a spacing choice — so a tighter step could not
+shrink one without breaking the very rule the visible-control mitigation
+exists to serve, and a looser step could only pad text. Density's subject is
+the viewport's *column count* (doc 07 L8.1), and a column of rows has none. A
+control that is present and inert is worse than one that is absent.
+
+**Built** (ADR-0017 step 6; the marks by ADR-0028, the fourth step and the
+shared placement by its 2026-08-10 amendment). `crates/baz/src/shelf.rs`'s
 `Density` supplies the grid's four numbers and `Grid::new(width, density)` is
-the same arithmetic around them; `views/shelf.rs`'s `density_control` is the
-marks.
+the same arithmetic around them; `views/mod.rs`'s `density_marks` is the
+control, in either axis, and every place that hangs works reads **one** grid —
+`App::Shelf::grid` — so a record is the same size wherever it is drawn.
 
 | Step | `HANG` | `ART_MIN` | `ART_TARGET` | `ART_MAX` |
 |---|---|---|---|---|
 | Spacious | 48 | 288 | 320 | 320 |
 | **Balanced** | **40** | **240** | **272** | **320** |
+| Compact | 32 | 208 | 236 | 280 |
 | Dense | 28 | 176 | 200 | 240 |
+
+`Compact` is `Balanced`'s row and `Dense`'s row averaged — 208 = (240+176)/2,
+236 = (272+200)/2, 280 = (320+240)/2 — with the hang's own average 34 taken
+down to 32, the nearest value on the 4 px lattice §2 holds every measure to.
+`the_ladder_only_tightens_and_the_fourth_step_halves_its_widest_rung` asserts
+exactly that, so the row cannot be quietly re-tuned.
 
 The walls those produce, **measured at the width the window actually gives the
 grid** — the window less `INDEX_LANE_W` 108, so 1172 at the shipped 1280 and
@@ -412,7 +445,16 @@ rail's lane existed and is corrected here rather than reproduced;
 |---|---|---|---|
 | **Spacious** | 3 × 320, gutter 58 | 5 × 304.8, gutter 48 | art pinned at `ART_MAX` over most of the band; the margins take the slack |
 | **Balanced** | 4 × 243 | 6 × 255.3 | the default, and `theme.rs`'s tokens exactly |
+| **Compact** | 4 × 253 | 7 × 222.3 | gutter and margin are both 32 at each — the hang, uncapped, as §7's algebra requires |
 | **Dense** | 5 × 200.8 | 8 × 195 | **today's shelf**: baz drew 5 × 208 here before the hang landed |
+
+At 1172 the ladder hangs 3, 4, 4, 5 columns: the three original steps were
+already consecutive integers there, so `Compact` has nowhere to stand between
+`Balanced` and `Dense` at the shipped window and repeats a neighbour's count
+with different art. That is a fact of the arithmetic at narrow widths rather
+than a flaw in the row, and it is why
+`a_tighter_step_never_hangs_fewer_works` asserts *never fewer* rather than
+*strictly more*. From about 1400 px of grid up, every rung is distinct.
 
 Named plainly rather than in the room's vocabulary, deliberately: the steps are
 the one place baz uses plain UI language about itself.
@@ -421,7 +463,7 @@ the one place baz uses plain UI language about itself.
 (§7's `SHELF_HEADER_H`) and the wall's top edge are the step's hang, not a
 fixed 40 — otherwise the pinned header's hand-over, which is exact only because
 the band and a row's trailing gap are the same number, would be a few pixels
-out at two of the three steps. What does **not** zoom is the window gutter: the
+out at every step but the default. What does **not** zoom is the window gutter: the
 top bar, the bottom bar, the Settings place and the index rail's right-hand
 lane all keep `HANG` 40 at every step, because law L1 gives every window-edge
 surface one gutter and the zoom is of the works rather than of the room.

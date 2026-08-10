@@ -128,11 +128,7 @@
 
 ## Doing
 
-- **Density: a fourth step, and the control on every page** — the owner's *"we
-  should ensure the density options are available on all pages..."* and *"4
-  levels makes sense to me"*. Carries the `views/artist.rs` tile-width defect
-  with it (six columns where the wall draws five at 1920, lane collapsed),
-  since it is the same family: a page laying tiles by its own arithmetic.
+*Nothing in flight.*
 
 ## Waiting on the owner
 
@@ -160,15 +156,6 @@
   returns lane already does without performing. The other two are a frame
   question (one band line or two) and the tile-size one below. *Needs: one
   sentence each.*
-- **Should the artist page's covers be the wall's size to the pixel?**
-  Found while measuring doc 15: `views/artist.rs:19-26` says the tiles are
-  *"the wall's to the pixel"* and they are not. The wall feeds `Grid::new`
-  `window − sidebar − INDEX_LANE_W 108 − 4` (`app.rs:5095-5101`); the artist
-  page and Home feed it `body_width − 2 × HANG 40`. Covers are 4–11 px wider
-  on this page at every size, and **at 1920 with the lane collapsed it draws
-  six columns where the wall draws five**. The prose gets fixed either way;
-  the geometry is a one-line change with one visible consequence. *Needs:
-  his eye on a frame, not an argument.*
 - **Borderless window chrome.** Wayland already draws that title bar inside
   baz's own process, so turning it off is one field — but **iced 0.13 exposes
   no edge-drag resize anywhere in `window::Action`**, so going borderless today
@@ -217,6 +204,55 @@
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **Density: a fourth step, and the control wherever the works are** — the
+  owner's *"we should ensure the density options are available on all
+  pages..."* and *"4 levels makes sense to me"*. ADR-0028's fourth-step
+  amendment; measurements, every step on three pages at two windows, and the
+  before/after of the defect below at
+  `docs/design/impl/density-on-every-page/`.
+  - **`Compact` goes *inside* the ladder, and that was measured rather than
+    chosen.** Swept at the width the wall really gets, for seven windows in
+    both lane states: `Balanced` → `Dense` jumps two to four columns at every
+    window from 1280 up, where `Spacious` → `Balanced` jumps nought or one.
+    Both other directions are closed — **looser than `Spacious` cannot draw a
+    larger work at all**, because its `ART_MAX` is already `art::THUMB_PX`, and
+    tighter than `Dense` would leave the widest rung exactly where it is. The
+    numbers are that rung halved (208 / 236 / 280) with the hang's midpoint 34
+    taken to the 4 px lattice's 32; nothing is tuned, and a test says so.
+  - **The three shipped words keep their spellings** and `Balanced` is still
+    the default, so nobody's wall re-hangs. The new word is `compact`.
+  - **Density does not apply to a page of rows, and the marks are absent
+    there** — decided, with the reason written down. A track row's height is
+    `TRANSPORT_HIT` 32, which is the **pointer-target floor** rather than a
+    spacing choice, so a tighter step would break the very rule ADR-0028
+    exists to serve and a looser one could only pad text. The alternative
+    placement that would have put marks on all seven places — the returns lane
+    — is refused for the same reason: on four of them they would be *present
+    and inert*.
+  - **The marks stand at the trailing edge of the block of works they hang.**
+    On the Library that is the index rail's lane, unmoved and unchanged; on
+    Home and an artist's page it is the block's own section rule. Not the top
+    bar — and that needed no appeal to his standing complaint about it, since
+    doc 07 L8.1 already makes density's subject the viewport.
+  - **The keyboard was half the defect and is fixed by the same change.**
+    `Ctrl`+`=` / `Ctrl`+`-` were never gated by place — they stepped the state
+    from anywhere, and Home and the artist page named `Density::Balanced` in
+    their own source, so off the wall the keys moved nothing on screen. Not a
+    line of `keys.rs` changed.
+  - **This answers *"should the artist page's covers be the wall's size to the
+    pixel?"***, which stood in *Waiting on the owner* asking for a frame rather
+    than an argument. It has one: at 1920 with the lane collapsed the page drew
+    **six columns of 244 px art where the wall drew five of 294** — the same
+    record, one press apart, 50 px different. Both pages resolved a grid of
+    their own; now the shell resolves one and hands it down, and
+    `every_place_that_hangs_works_hangs_them_on_one_grid` fails if a view file
+    grows a `Grid::new` again. It costs those pages 22 px at the trailing edge.
+  - **Needs his eye on one frame** (`07-rail-foot-*`): the `Dense` mark is
+    sixteen squares now. The detents depict the wall at their own hang and
+    there is no whole number of columns between two and three, so the family
+    re-keyed — `Compact` wears the old 3 × 3, `Dense` a new 4 × 4 whose cells
+    minify to 2.25 px at 1×. If it reads as mush rather than as a grid, a
+    larger sprite for that one mark is a small change.
 - **One page, two subjects** — the owner's *"can we reuse the basic layout and
   view of the playlist for the album view and the playlist view accessed via
   clicking into info — right now they are different but for no good reason."*

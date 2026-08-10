@@ -285,10 +285,13 @@ pub(crate) enum Message {
     /// ranks `Library::search` by fit, then field, then library order —
     /// which is why step 12 had to land before step 11 could.
     PlayFirstMatch,
-    /// Step the density: a press on one of the three detent marks at the
-    /// foot of the index rail's lane (ADR-0028), or its accelerators —
-    /// <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd> and
-    /// <kbd>Ctrl</kbd>+scroll on the wall. `+1` loosens the hang and `-1`
+    /// Step the density: a press on one of the four detent marks (ADR-0028
+    /// as amended) — at the foot of the index rail's lane on the Library, on
+    /// the block's own section rule on Home and an artist's page — or its
+    /// accelerators, <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd>
+    /// and <kbd>Ctrl</kbd>+scroll. Those work in every place, and since the
+    /// three places that hang works all read one grid, they are visible
+    /// wherever they are legal. `+1` loosens the hang and `-1`
     /// tightens it; both saturate, and a mark sends the exact signed notch
     /// count between here and its step (see [`shelf::Density::step`],
     /// [`shelf::Density::steps_to`]).
@@ -2541,7 +2544,6 @@ impl App {
             return Task::none();
         }
         self.art_mark = mark;
-        let width = self.body_width();
         let quoted: Vec<u64> = self
             .playlists
             .rows
@@ -2558,7 +2560,7 @@ impl App {
         let Screen::Shelf(state) = &mut self.screen else {
             return Task::none();
         };
-        let mut ids = state.offscreen_art(width);
+        let mut ids = state.offscreen_art();
         if let Some(id) = open_artist {
             let theirs: Vec<u64> = crate::views::artist::records(state, id)
                 .iter()
@@ -4057,7 +4059,7 @@ impl App {
                 // the honest answer, drawn rather than navigated to, exactly
                 // as a vanished record's page is.
                 if views::artist::label(state, id).is_some() {
-                    views::artist::view(state, &self.player, id, self.body_width(), collecting)
+                    views::artist::view(state, &self.player, id, state.grid(), collecting)
                 } else {
                     state.view(&self.player, lamp, collecting, ink)
                 }
@@ -4090,6 +4092,12 @@ impl App {
                 &self.player,
                 &self.resume,
                 self.body_width(),
+                // **The wall's own grid**, not a second one resolved for this
+                // page's width: a record is drawn at the same size wherever
+                // it is drawn, and the density step reaches every place that
+                // hangs works rather than only the Library (ADR-0028's
+                // fourth-step amendment §2).
+                state.grid(),
                 collecting,
             ),
             (Screen::Shelf(state), Place::NowPlaying) => views::now_playing::view(
@@ -5973,7 +5981,7 @@ impl Shelf {
     /// one of them happened to scroll past on the wall — real artwork *by
     /// luck*, which is verbatim the defect the playlist collages had before
     /// their quotations were named here.
-    fn offscreen_art(&self, width: f32) -> Vec<u64> {
+    fn offscreen_art(&self) -> Vec<u64> {
         let mut ids: Vec<u64> = self
             .lane_recent
             .iter()
@@ -5983,7 +5991,7 @@ impl Shelf {
             })
             .collect();
         ids.extend(
-            crate::views::home::newest(self, width)
+            crate::views::home::newest(self, self.grid())
                 .iter()
                 .map(|album| album.id),
         );
@@ -6813,11 +6821,12 @@ mod tests {
             ),
             (
                 "DensityStep",
-                "the three density marks at the foot of the index rail's \
-                 lane (ADR-0028) — each sends this message with the exact \
-                 delta the gesture would spend, so Ctrl+scroll and Ctrl+-/= \
-                 are accelerators of a visible control now, not the control \
-                 itself",
+                "the density marks — at the foot of the index rail's lane on \
+                 the Library, and on the block's own section rule on Home and \
+                 an artist's page (ADR-0028 and its fourth-step amendment). \
+                 Each sends this message with the exact delta the gesture \
+                 would spend, so Ctrl+scroll and Ctrl+-/= are accelerators of \
+                 a visible control now, not the control itself",
             ),
             (
                 "GroupKeySelected",
@@ -7673,26 +7682,33 @@ mod tests {
         assert_eq!(format!("{:?}", search_id()), format!("{:?}", search_id()));
     }
 
-    /// **The zoom is three steps of state and nothing else** — the shell's
-    /// half of ADR-0017 step 6, exercised as the update loop actually spends
-    /// it.
+    /// **The zoom is a ladder of state and nothing else** — the shell's half
+    /// of ADR-0017 step 6, exercised as the update loop actually spends it.
     ///
     /// The shelf's half (the hang's arithmetic) is `shelf::Density`'s and is
     /// tested there; what is pinned here is that the message steps the step,
     /// saturates rather than wrapping, and is produced by both halves of the
     /// gesture.
+    ///
+    /// The ladder is walked by `Density::ALL`'s length rather than by a
+    /// written-out count, so the owner's fourth step (2026-08-10) cost this
+    /// test no number — which is the property `ALL`'s doc promises.
     #[test]
     fn the_zoom_steps_the_wall_and_stops_at_both_ends() {
         use iced::keyboard::{Key, Modifiers};
 
         let step = |density: shelf::Density, delta: i32| density.step(delta);
+        let rungs = i32::try_from(shelf::Density::ALL.len()).expect("a small ladder");
         let mut density = shelf::Density::Balanced;
-        density = step(density, -1);
+        for _ in 0..rungs {
+            density = step(density, -1);
+        }
         assert_eq!(density, shelf::Density::Dense);
         density = step(density, -1);
         assert_eq!(density, shelf::Density::Dense, "the ladder has an end");
-        density = step(density, 1);
-        density = step(density, 1);
+        for _ in 0..rungs {
+            density = step(density, 1);
+        }
         assert_eq!(density, shelf::Density::Spacious);
         density = step(density, 1);
         assert_eq!(density, shelf::Density::Spacious);

@@ -857,7 +857,7 @@ fn lane_row<'a>(
 /// It shipped briefly as *two* marks in the density detents' anatomy — one
 /// per state, the current one inert — and the owner read the built thing and
 /// said it was not the design. He is right, and the two cases are not alike:
-/// density has **three** named steps, so marks that name each one are the
+/// density has **four** named steps, so marks that name each one are the
 /// only way to say which you are on. The lane has two states, and the one you
 /// are not in is fully described by the word for getting there. A pair of
 /// marks for a binary is a radio group where a switch belongs — and it made
