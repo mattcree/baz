@@ -515,6 +515,42 @@ next commit.
   ADR-0029's first step removed the transport this place was drawing a second
   time, and the 32 px it had reserved stayed in `art_edge`'s arithmetic. It is
   gone with it.
+- **The artwork stops at the file, and the room takes the record's colour.**
+  The owner, at full screen: *"also fullscreen the now playing looks weird"*.
+  He was right, and about two things at once (ADR-0029 §2, doc 12 §5.2–§5.4;
+  frames, the sampled field and the measured edges at
+  `docs/design/impl/artwork-at-size/`).
+  - **`NOW_PLAYING_MAX` 720 is deleted.** It was a constant standing in for a
+    fact about the decode, and it was wrong in both directions at once: it let
+    a **320 px thumbnail be drawn at 2.25×** on any panel 1080 px tall or
+    better — *no artwork is ever drawn larger than its source*, false in the
+    one place nobody had a test for — while capping a 2560 px panel's work at
+    720 in a 2280 px body. Measured off the frames, the sleeve goes
+    **720 → 1024 at 2560 × 1440** and **720 → 773 at 1920 × 1080**; a
+    collection ripped with 300 px covers now draws them at **300**, honestly
+    small, rather than at 720.
+  - **A second decode tier, of one record**: `art::load_hero` at `HERO_PX`
+    **1024**, two entries, **8 MiB** against the thumbnail cache's 150. Same
+    resolution order, same downscale-only decode, so a record's hero can never
+    disagree with its thumbnail about which file the art came from. `art_edge`
+    gains a third term and it is **the source's own pixels**.
+  - **The ambient field.** Three hue angles read off the decoded cover, hung on
+    the room's own lightness ladder at a ceiling of **oklch L 0.22** with
+    chroma pinned at **0.024**, drawn as a three-stop wash under the whole
+    place. It is `Palette::lamp`'s own rule — *hue read from the record,
+    lightness and chroma pinned* — with three colours instead of one and a
+    large area instead of a small one. **Not the artwork**: three angles cannot
+    reconstruct an image, and a gradient has no resolution, which is why it can
+    fill a 4K panel where a 1000 px cover cannot. **Not a scrim**: it is under
+    everything, laid over nothing, and it dims no artwork.
+  - **Under the run column the ceiling is lower**, clamped flat to the room's
+    own `wall` — measured at L 0.155–0.160 against 0.158 — so a scrolling list
+    is read over the same ground every other list in the product is read over
+    and no new contrast number enters the design. Below `SPLIT_FLOOR` the whole
+    body is the list, so the whole field is that ground.
+  - **A record with no hue gets the room**, not a grey wash. A monochrome
+    sleeve — under 2 % of its pixels carrying chroma — has nothing to derive
+    from, and the honest answer is `#0C0D0E`, measured exactly.
 - **A work's own title is set in IBM Plex Serif Italic** — the museum-placard
   convention, on the one string in the product that is a work's name standing
   beside its own facts (the Home placard). The owner saw the typographic risk
@@ -1186,6 +1222,25 @@ next commit.
 
 ### Fixed
 
+- **The decode was enlarging covers smaller than its own tier.**
+  `image::DynamicImage::thumbnail` scales **to fit**, in both directions, and
+  `art.rs` has called it *downscale-only* since v0.1: a 120 px cover was decoded
+  to 320 × 320 and cached with 6.8× more pixels than the file had. It never
+  showed on the wall, where a 320 px handle in a 320 px tile is 1 : 1 either
+  way, and it shows immediately on a surface that reads the decode's size and
+  **believes it** — which is what step A2's `art_edge` now does. Both tiers are
+  guarded.
+- **The now-playing placard reserved 16 px less than it draws**, so the two
+  timestamps under the needle were dropped off the bottom at every
+  height-bound size with the run standing. The old expression rolled the
+  placard's five `GAP_XS` and the needle's own tick into `4 · GAP_LG`;
+  `NOW_PLAYING_MAX` 720 hid the shortfall by leaving slack, and deleting the
+  clamp spent it. The reservation is now spelled term by term as the layout it
+  describes.
+- **The re-stacked head block reserved the record column's height**, 108 px
+  more than its own — and that number is the offset the run's virtual window
+  measures its slice from, so a scrolled restacked surface could draw the wrong
+  rows. It reserves its own.
 - **A record's hover options no longer open on another place.** The hovered
   tile is remembered by the shelf and cleared by the pointer *leaving* it — so
   navigating out from under the pointer (a tile's own press, or a keyboard

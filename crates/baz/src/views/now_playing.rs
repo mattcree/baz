@@ -97,24 +97,63 @@ pub(crate) fn run_w(width: f32, run: bool) -> f32 {
     }
 }
 
-/// What the placard under the work needs: three lines, the needle, and the
-/// gaps between them — **130**.
+/// What the placard under the work needs: the gap off the sleeve, three lines,
+/// the needle, the two figures, and every gap between them — **146**.
 ///
 /// It summed [`theme::TRANSPORT_HIT`] as well until the merge, which was the
 /// unspent half of ADR-0029's first step: the duplicated transport widget came
 /// off this surface (the bar carries it, in this place as in every other) and
 /// the 32 px it had reserved stayed in the arithmetic, so the sleeve was 32 px
-/// short at every height-bound size. Removing it is the whole of the fix.
+/// short at every height-bound size. Removing it was the whole of that fix.
 ///
-/// It grows again when the surface does: doc 12 §5.5's figure of 190 is this
-/// number plus the momentary meter's 24, the feed's 20 and one
+/// # It was 130, and 130 was not what the column laid out
+///
+/// **Found by step A2, and it is the reason it had to be found then.** The old
+/// expression rolled the placard's internal gaps into `4 · GAP_LG` and came to
+/// 130; the column [`record_column`] actually builds comes to **146**, because
+/// `.spacing(GAP_XS)` applies between *every* pair of its six children and not
+/// only between the artist and the title, and because the needle draws
+/// `NEEDLE_H + GAP_XS` tall so its tick reads as a mark on the line rather
+/// than a longer run of it (`views::home::needle`).
+///
+/// Sixteen pixels of under-reservation, and `NOW_PLAYING_MAX` 720 was hiding
+/// it: at 1920 the clamp left 69 px of slack, so nothing overflowed. Delete
+/// the clamp and the work grows into that slack, the column overflows its
+/// container, and **iced drops the last child — the two timestamps**. It bit
+/// only where the record is height-bound *and* the run is standing, because
+/// the run's branch is the one that spends a `HANG` of padding at each end.
+///
+/// So it is spelled as the layout, term by term, rather than as a total that
+/// has to be re-derived by hand every time a line moves.
+///
+/// It grows again when the surface does: doc 12 §5.5's figure of 190 is a
+/// number of this kind plus the momentary meter's 24, the feed's 20 and one
 /// [`theme::GAP_LG`] — none of which are built yet (they are steps A5 and A9),
 /// and none of which may reserve height before they exist.
-const BELOW: f32 = theme::LINE_HEADING
-    + theme::LINE_HERO
-    + theme::LINE_BODY
-    + theme::NEEDLE_H
-    + 4.0 * theme::GAP_LG;
+const BELOW: f32 = theme::GAP_XL                                  // work → placard
+    + theme::LINE_HEADING + theme::GAP_XS                         // artist
+    + theme::LINE_HERO + theme::GAP_XS                            // title
+    + theme::LINE_BODY + theme::GAP_XS                            // album
+    + theme::GAP_LG + theme::GAP_XS                               // the air over the needle
+    + theme::NEEDLE_H + theme::GAP_XS + theme::GAP_XS             // the needle, tick included
+    + theme::LINE_META; // the two figures
+
+/// What the **head block** needs under the sleeve, below [`theme::SPLIT_FLOOR`]
+/// — **38**.
+///
+/// [`head_block`] is a different column from [`record_column`]: the identity
+/// stands *beside* the cover rather than under it, and the block has no
+/// `.spacing()` of its own. So it is `GAP_LG` of air, the needle with its tick,
+/// and the two figures — and it is **not** [`BELOW`], which is what the code
+/// passed before this step and which over-reserved by 108 px.
+///
+/// The number is the run column's `rows_top` (`views::queue`), which is the
+/// offset [`crate::queue_window`] measures the virtual slice from. An
+/// over-reservation there is not blank space — the block draws at its natural
+/// height either way — it is **the wrong rows**, appearing once the restacked
+/// surface is scrolled. Pre-existing, from M1, and named here because A2 is
+/// the step that had to read this arithmetic closely enough to see it.
+const HEAD_BELOW: f32 = theme::GAP_LG + theme::NEEDLE_H + theme::GAP_XS + theme::LINE_META;
 
 /// **The edge the record is actually drawn at**, whichever composition the
 /// body's width has put it in.
@@ -344,7 +383,7 @@ pub(crate) fn view<'a>(
         // width in any case, and what is left worth doing is the list — so the
         // same four objects are re-hung rather than a second layout drawn.
         (record, _) => {
-            let head = record.map(|record| (record, edge + theme::GAP_LG + BELOW));
+            let head = record.map(|record| (record, edge + HEAD_BELOW));
             run_scroll(
                 player,
                 queue::Frame {
@@ -872,23 +911,75 @@ mod tests {
         }
     }
 
-    /// **ADR-0029's first step, finished**: the duplicated transport widget
-    /// came off this surface and the 32 px it had reserved stayed in the
-    /// arithmetic, so the sleeve was 32 px short at every height-bound size.
+    /// **The placard reserves what it draws** — no transport it does not draw,
+    /// and every gap it does.
     ///
-    /// The number is asserted rather than the delta, because the delta is what
-    /// a future step's own additions will change and the *terms* are what must
-    /// not silently grow a transport again.
+    /// Two corrections live in this one number, and they pull opposite ways:
+    ///
+    /// - ADR-0029's first step took `TRANSPORT_HIT` **32** out, because the
+    ///   duplicated transport widget came off this surface and the height it
+    ///   had reserved stayed in the arithmetic.
+    /// - Step A2 put **16** back, because the expression that replaced it
+    ///   rolled six children's five `GAP_XS` gaps and the needle's own tick
+    ///   into `4 · GAP_LG` and came out 16 short of what the column lays out.
+    ///   `NOW_PLAYING_MAX` 720 hid that; deleting it dropped the two
+    ///   timestamps off the bottom at 1920 with the run standing.
+    ///
+    /// **The terms are asserted, not the total**, because the total is what a
+    /// future step's own additions will change and the terms are what must not
+    /// silently grow a transport — or lose a figure — again.
     #[test]
-    fn the_placard_reserves_no_transport_it_does_not_draw() {
-        const { assert!(BELOW == 130.0) }
-        const { assert!(BELOW + theme::TRANSPORT_HIT == 162.0) }
+    fn the_placard_reserves_exactly_what_it_draws() {
+        // **The column, summed the way iced lays it out**: six children, five
+        // `GAP_XS` between them, the needle drawn a tick taller than the line,
+        // and one `GAP_XL` off the sleeve. If any of those move, this is what
+        // catches the reservation not moving with them.
+        const CHILDREN: f32 = theme::LINE_HEADING
+            + theme::LINE_HERO
+            + theme::LINE_BODY
+            + theme::GAP_LG
+            + (theme::NEEDLE_H + theme::GAP_XS)
+            + theme::LINE_META;
+        const { assert!(BELOW == 146.0) }
+        const { assert!(BELOW + theme::TRANSPORT_HIT == 178.0) }
+        const { assert!(BELOW == theme::GAP_XL + CHILDREN + 5.0 * theme::GAP_XS) }
+        // The head block below `SPLIT_FLOOR` is a *different* column — the
+        // identity beside the cover, no spacing of its own — and reserves its
+        // own height rather than borrowing this one.
+        const { assert!(HEAD_BELOW == 38.0) }
+        const { assert!(HEAD_BELOW < BELOW) }
         // 1280 × 860 with the returns lane collapsed: 1184 × 779 of body,
         // height-bound, and the sleeve is the height less the gutter and the
-        // placard — with no transport in the subtraction.
+        // placard.
         let bare = |w: f32, h: f32| art_edge(w, h, 0.0, f32::INFINITY);
         assert!((bare(1184.0, 779.0) - (779.0 - 80.0 - BELOW)).abs() < f32::EPSILON);
-        assert!((bare(1184.0, 779.0) - 569.0).abs() < f32::EPSILON);
+        assert!((bare(1184.0, 779.0) - 553.0).abs() < f32::EPSILON);
+    }
+
+    /// **The record column fits the space it was given**, at every window this
+    /// product draws and in the tighter of the two branches.
+    ///
+    /// The one that overflowed is the split: `container(record)` there spends
+    /// a [`theme::HANG`] of padding at *each* end, so the column has
+    /// `body_h − 2·HANG` to live in, and a reservation 16 px short of what it
+    /// lays out silently costs the last child. This is that claim as
+    /// arithmetic rather than as a frame — the frame is in
+    /// `docs/design/impl/artwork-at-size/`, and it is what found it.
+    #[test]
+    fn the_placard_never_overflows_the_column_it_is_drawn_in() {
+        for width in sides() {
+            for height in sides() {
+                for source in SOURCES {
+                    let edge = art_edge(width, height, run_w(width, true), source);
+                    // The split branch's own budget, which is the tight one.
+                    let budget = height - 2.0 * theme::HANG;
+                    assert!(
+                        edge + BELOW <= budget.max(theme::ART_MIN + BELOW),
+                        "{width}×{height} source {source}: the work {edge} plus the                          placard {BELOW} overflows {budget}"
+                    );
+                }
+            }
+        }
     }
 
     /// **The run costs the record nothing wherever the record is

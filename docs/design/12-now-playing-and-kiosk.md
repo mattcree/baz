@@ -1178,10 +1178,20 @@ matters:
 
 ```
 edge = min(width  − 2·HANG,
-           height − 2·HANG − below,
-           hero_px)                    ← the source's own pixels
+           height − 2·HANG − below)
        .max(ART_MIN)
+       .min(hero_px)                   ← the source's own pixels, and it wins
 ```
+
+> **Corrected 2026-08-10, when A2 shipped.** This block ended `.max(ART_MIN)`
+> until then, and at `hero_px` 120 that expression is **240** — which fails the
+> test printed four paragraphs below it, and draws a 120 px cover at 2×. The
+> order above is the shipped one and the reasoning is one sentence:
+> `ART_MIN` is a **design floor** saying a work this small has stopped being a
+> subject, and `hero_px` is a **fact** saying there are no more pixels. *A fact
+> outranks a floor.* Story S7 asks for the small cover *"drawn at its own pixel
+> size, centred, never scaled up"*, and the field is what makes that composed
+> rather than broken.
 
 `hero_px` is `min(decoded_w, decoded_h)` of what `load_hero` actually returned —
 **not** `HERO_PX`, which is only the decoder's ceiling. A 500 px cover yields
@@ -1337,6 +1347,13 @@ album    LINE_BODY     20      meter    METER_H      24
 `below` was **162** with the transport in it and is **190** with the meter and
 the feed; dropping `TRANSPORT_HIT` 32 pays for most of what arrives.
 
+> **Measured 2026-08-10 (A2).** The shipped figure is **146** — this table's
+> six objects, every gap the column actually lays out between them, and the
+> needle's own tick — and 190 is that plus the meter's 24 and the feed's 20,
+> neither of which is built. The sum above reaches the same 190 by a different
+> route and was 16 px optimistic about the base; §5.5a's note carries the
+> arithmetic.
+
 | Window | Lane | Body | `edge` (1000 px source) | Work as % of body width |
 |---|---|---|---|---|
 | 1280 × 800 | open 280 | 1000 × 719 | **449** (height-bound) | 45 % |
@@ -1468,6 +1485,15 @@ instead, stated here so nobody later "fixes" it.
 >    figure as those land. The 1280-lane-open row is unaffected because it is
 >    **width**-bound: `edge` is 456 there at either value, and the frame reads
 >    456 to the pixel.
+>
+>    **Re-corrected 2026-08-10, when A2 shipped: it is 146, not 130.** The 130
+>    was 16 px short of what the placard column lays out — `.spacing(GAP_XS)`
+>    applies between all six of its children, and the needle draws
+>    `NEEDLE_H + GAP_XS` tall. `NOW_PLAYING_MAX` 720 was hiding the shortfall by
+>    leaving slack; A2 spends that slack and the two timestamps go off the
+>    bottom. So every `by_height` here is **44** px larger than printed today,
+>    not 60, and §5.5's future figure is **146 + 24 + 20 = 190** — the same
+>    number, from a base that is now correct rather than by coincidence.
 > 2. **`run_w` is `RUN_MEASURE` flat**, not `RUN_MEASURE · kiosk_scale`, until
 >    A4 builds `kiosk_scale`. The 3840 row's 1100 is that step's, not this one's.
 >
@@ -3178,9 +3204,9 @@ receipt. It is also the owner's live ask.
 | **M1** | The merged surface: the run column, `Run`, `SPLIT_FLOOR` | **✅ Shipped** 2026-08-10 |
 | **M2** | The door comes off; `Place::Queue` is deleted | **✅ Shipped** 2026-08-10 |
 | **A1** | *Delete the duplicate transport* | **✅ Shipped** — its surviving half rode in M1 |
-| **A2** | The hero decode; `NOW_PLAYING_MAX` deleted | Survives, unchanged, **more urgent** |
+| **A2** | The hero decode; `NOW_PLAYING_MAX` deleted | **✅ Shipped** 2026-08-10 — **and it took A3 with it**, see below |
 | **M3** | `Origin`, and the head gains its subject | New — after A2, per the order below |
-| **A3** | The field, static | Survives, **+ one clause** (§5.4 term 2) |
+| **A3** | The field, static | **✅ Shipped** 2026-08-10, in A2 — the two are one visual answer |
 | **A4** | The kiosk type scale | Survives, **+ the run** |
 | **A5** | The feed | Survives, unchanged |
 | **M4** | The run marker: the command field, ledger v1.1, the lane across a quit | New — after A5, per the order below |
@@ -3341,7 +3367,7 @@ the new `below`.
 
 ---
 
-**Step 2 — The hero decode, and the refusal made true.** *(§5.2)*
+**Step A2 — The hero decode, and the refusal made true.** *(§5.2)* — **✅ shipped 2026-08-10, with A3**
 
 `art::load_hero(first_track, HERO_PX = 1024)` beside `load_thumb`, same
 resolution order, `image.thumbnail` (downscale-only). A 2-entry LRU on `Shelf`
@@ -3356,9 +3382,84 @@ over `hero_px ∈ {120, 320, 500, 1024}` × sides 400–4000, mirroring
 `shelf.rs:1509–1530`.
 *Gate*: memory — the 2-entry hero cache must not exceed 8 MiB.
 
+> ### What A2 got wrong when it met the code
+>
+> **Measured, 2026-08-10** ([`impl/artwork-at-size/`](impl/artwork-at-size/README.md)),
+> against two release binaries at 1280 × 860, 1920 × 1080 and 2560 × 1440, in
+> both densities. Five corrections, and the first is a change to the plan
+> rather than to a number.
+>
+> **1 · A2 alone does not answer the owner, so A3 rode with it.** The ask was
+> *"fullscreen the now playing looks weird"*, and the arithmetic says the
+> clamp is only half of why. At 1920 the record is **height**-bound, so
+> deleting `NOW_PLAYING_MAX` buys **53 px** — 720 → 773 — and leaves the same
+> 1000-odd px of empty room the complaint was about. At 2560 it buys 304, and
+> still leaves 1250. **The clamp was making the square small; the missing
+> field was making the room empty**, and shipping the first without the second
+> would have been a release that measured better and looked the same. A3 is
+> one gradient behind one place and it was cheaper to draw than to defer.
+>
+> **2 · §5.2's formula contradicts §5.2's test.** The printed expression ends
+> `.max(ART_MIN)`, and the test six lines under it asserts
+> `art_edge(side, side, 120) <= 120`. At a 120 px cover the expression is
+> **240** and the test fails. The test is right: `ART_MIN` is a *design* floor
+> saying a work this small has stopped being a subject, and `hero_px` is a
+> *fact* saying there are no more pixels. **The fact outranks the floor**, S7
+> asks for the small cover *"drawn at its own pixel size, centred, never
+> scaled up"*, and the shipped clamp is `.max(ART_MIN).min(source)`.
+>
+> **3 · The successor cannot be prefetched, and will not be until M3.** The
+> two entries were budgeted as *"the sounding record and the one after it"*.
+> The one after it **cannot be named from the front end**: `vm::QueueVm`'s rows
+> carry a title, an artist and an album *string*, and no path and no album id —
+> the engine holds the paths. Matching two strings against the wall would pick
+> the wrong edition for any listener who owns two of a record. So the second
+> entry holds **the record that just stopped**, which the LRU gives for free
+> and which a `Prev` press collects. Naming the successor is
+> [ADR-0034](../adr/0034-the-run-and-its-list.md)'s `Origin` — step M3 — and it
+> is one line here once that lands.
+>
+> **4 · The decode was never downscale-only, in either tier.** §5.2 says
+> `image.thumbnail` is *"downscale-only, exactly as `load_thumb` does"*, and
+> `art.rs` has said the same since v0.1. It is not:
+> `DynamicImage::thumbnail` forwards to `resize_dimensions(.., fill: false)`,
+> whose ratio is not clamped at 1 (`image-0.24.9/src/dynimage.rs:716–719`), so
+> a 120 px cover was decoded to 320 × 320. It never showed on the wall, where a
+> 320 px handle in a 320 px tile is 1 : 1 either way; it shows the instant a
+> surface reads the decode's size and believes it, which is exactly what this
+> step's third term does. Both tiers are guarded now.
+>
+> **5 · `below` was 130 and the column lays out 146.** Not a number this
+> document printed — §12.0's note recorded 130 as M1's honest figure — but a
+> number this step had to spend, and it was 16 px short: `.spacing(GAP_XS)`
+> applies between *all six* of the placard's children rather than only the
+> artist and the title, and the needle draws `NEEDLE_H + GAP_XS` tall so its
+> tick reads as a mark on the line. `NOW_PLAYING_MAX` 720 was hiding the
+> shortfall by leaving 69 px of slack at 1920; A2 spends that slack and the
+> two timestamps go off the bottom. **§5.5's future 190 is therefore 146 plus
+> the meter's 24, the feed's 20** — the same arithmetic, from a correct base.
+> A sibling defect fell out of the same reading: the re-stacked head block was
+> reserving `BELOW` where its own column comes to **38**, and that figure is
+> `views::queue`'s `rows_top`, so the over-reservation was not blank space —
+> it was the virtual window measuring its slice from the wrong offset.
+>
+> **What the frames confirm.** 720 → **1024** at 2560 (source-bound), 720 →
+> **773** at 1920 (height-bound), **456 → 456** at 1280 with the run standing
+> (width-bound, untouched), and a 300 px collection drawn at **300** where it
+> was drawn at 720. The field: no ambient patch over **L 0.220** at any size,
+> none under the room's own 0.158, **0.155–0.160 under the run column** against
+> `wall` 0.158, chroma **0.022–0.025** against the pinned 0.024, and a
+> monochrome collection reading `#0C0D0E` **exactly**.
+>
+> **One thing A2 does not fix, and A4 does.** At 2560 with the run standing
+> the record column is 1800 px and the work is 1024 of it, left-hung, so ~700
+> px of field sits between the sleeve and the run. That is §5.5a's left-hang
+> working as written; **A4** scales `RUN_MEASURE` by `kiosk_scale` — 440 → ~1100
+> at this size — which is most of that gap.
+
 ---
 
-**Step 3 — The field, static.** *(§5.3, no motion yet)*
+**Step A3 — The field, static.** *(§5.3, §5.4 term 2)* — **✅ shipped 2026-08-10, in A2**
 
 Palette extraction from the decoded hero (three clamped colours), composited as
 an ordinary gradient behind the place's body. **No shader, no clock, no
@@ -3369,6 +3470,35 @@ toggle yet** — this is the still state, which every backend draws and which
 cost, on every renderer.
 *Test*: extraction is deterministic for a given cover; the composite never
 exceeds L 0.22; a cover with no chroma yields the room rather than a grey wash.
+
+> **Shipped in A2**, and the reason is A2's own first correction above: the
+> clamp made the square small and the absent field made the room empty, and the
+> owner's sentence was about the room. Three things this step's text did not
+> anticipate:
+>
+> - **Only *hue* is read from the record.** *"Lightness and chroma clamped into
+>   the room's own range"* is what §5.3 says, and a clamp is not enough — most
+>   covers sit far above L 0.22, so clamping collapses all three colours onto
+>   the ceiling and the field is flat. What ships is the sentence §5.3 quotes
+>   from the ledger instead: **hue read from the record, lightness and chroma
+>   pinned**. Three hue angles, hung on the room's own ladder. That also makes
+>   §5.3's first property literally true — three angles cannot reconstruct an
+>   image — and `crate::field::Field` is three `f32`s for exactly that reason.
+> - **The chroma is 0.024, and it is a gamut measurement.** A binary search over
+>   both rooms' ladders at one-degree steps puts the largest chroma that leaves
+>   sRGB **nowhere** at 0.0269; above it, cyans clip at Closing Time's floor and
+>   oranges at Reading Room's wall. A clipped channel is a hue that is no longer
+>   the record's, so the constant is measured and the clamp is never reached.
+> - **iced 0.13 has no radial gradient.** §5.3 asks for *"a slow
+>   radial-plus-linear wash"*; `iced::Gradient` has one variant, `Linear`
+>   (`iced_core-0.13.2/src/gradient.rs:9–12`). The linear half ships honestly
+>   rather than being faked with stacked containers, and the radial half is A7's
+>   shader or nothing.
+>
+> And one thing it did anticipate, now measured: §5.3 requires the wash to be
+> **continuous**, *"which at these lightnesses means dithering"*. iced already
+> dithers its gradients — **7/255 within a channel**, about 0.012 oklch L —
+> which is why the frames' figures are 9 × 9 patch means.
 
 ---
 
@@ -3493,6 +3623,13 @@ visible wins rather than in front of them.
 **The whole order, after §12.0's re-ordering:**
 
 > **M1 · M2 · A2 · M3 · A3 · A4 · A5 · M4 · A6 · A7 · A8 · A9**
+
+**A2 and A3 shipped together, 2026-08-10**, so what remains of that order is
+**M3 · A4 · A5 · M4 · A6 · A7 · A8 · A9**. The pairing was not opportunism: the
+clamp is what made the artwork small and the *absent field* is what made the
+room empty, and the owner's sentence — *"fullscreen the now playing looks
+weird"* — was about the room. A2 alone buys 53 px at 1920 and leaves the void
+exactly where it was.
 
 **If the owner wants the bars sooner than this order delivers them**, the
 shortest honest path is **M1 → M2 → A2 → A6 → A8**: the merge, the door off,
