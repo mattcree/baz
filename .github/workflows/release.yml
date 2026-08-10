@@ -276,9 +276,12 @@ jobs:
         run: |
           set -euo pipefail
           cat > notes.md <<EOF
-          **baz $VERSION** — pre-alpha. Linux is the platform baz is developed and
-          used on; the Windows and macOS binaries are built and tested by CI but
-          have not been exercised by a human. See
+          **baz $VERSION** — a public beta. Linux is the platform baz is developed
+          and used on; the Windows and macOS binaries are built and tested by CI
+          but have not been exercised by a human. The limitations we know about
+          are on the
+          [project page](https://github.com/mattcree/baz/blob/v$VERSION/README.md#known-limitations).
+          See
           [\`docs/INSTALL.md\`](https://github.com/mattcree/baz/blob/v$VERSION/docs/INSTALL.md)
           for installation, and
           [\`CHANGELOG.md\`](https://github.com/mattcree/baz/blob/v$VERSION/CHANGELOG.md)

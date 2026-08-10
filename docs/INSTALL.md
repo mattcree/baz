@@ -1,9 +1,12 @@
 # Installing baz
 
-> **Read this first.** baz is **pre-alpha**. It scans a music folder, shows
-> your albums and plays them; it is not a finished player. It reads your files
-> and never writes to them, but expect rough edges, and expect the library
-> database to be rebuilt by a future version.
+> **Read this first.** baz is a **public beta**. The core loop is finished —
+> you can find your music, play it, make lists of it, and nothing baz does
+> loses or corrupts anything — but it is pre-1.0, it has rough edges, and the
+> ones we know about are in [`../README.md`](../README.md)'s *Known
+> limitations* rather than left to be discovered. It reads your files and never
+> writes to them. Expect the library database to be rebuilt by a future
+> version; that costs a rescan and nothing else.
 >
 > **Linux is the platform baz is developed and used on.** The Windows and macOS
 > binaries are built and tested by CI on every change — the same test suite, on
@@ -11,9 +14,10 @@
 > or macOS. They are honest builds, not a supported experience. Reports
 > welcome; surprises likely.
 >
-> **v0.1.0 is the first release.** Its downloads are on the
-> [releases page](https://github.com/mattcree/baz/releases); building from
-> source works on every platform and is described below.
+> **v0.1.0 is the first release, and it has not been tagged yet.** Until it is,
+> the [releases page](https://github.com/mattcree/baz/releases) is empty and
+> **building from source is the only way in** — it works on every platform and
+> it is described below.
 
 ## Flatpak (Linux, the intended way)
 

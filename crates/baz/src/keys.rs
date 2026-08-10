@@ -30,9 +30,13 @@
 //! *every* key press while focused except Tab and the vertical arrows, so
 //! while the search well has focus no transport binding is live at all. The
 //! way out is the way in — Escape, which the field consumes to blur itself,
-//! after which the transport keys work. (The search field takes focus at
-//! startup, so this is the first thing a keyboard user meets; it is
-//! documented in the README's key table.)
+//! after which the transport keys work. (**Nothing has focus at startup**, so
+//! this is something a listener walks into rather than the first thing they
+//! meet: <kbd>Space</kbd> means play/pause on the first frame. This
+//! parenthetical said the opposite until 2026-08-10 — the well *did* take
+//! focus at startup, and `Shelf::open` stopped focusing it when type-anywhere
+//! landed, which is the section immediately below. The README's key table says
+//! the same thing.)
 //!
 //! # Type anywhere — and the focus rule is untouched
 //!

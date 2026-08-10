@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
-# The pictures on baz's store page, taken from the real binary.
+# The pictures on baz's store page and in its README, taken from the real
+# binary.
 #
-# `packaging/flatpak/io.github.mattcree.baz.metainfo.xml` points Flathub at the
-# two PNGs this writes beside it. They are the first thing anyone sees, and a
-# store page showing a baz nobody can install is worse than no page — so this
-# is a script and not a one-off, and it is re-run when the interface changes.
+# `packaging/flatpak/io.github.mattcree.baz.metainfo.xml` points Flathub at two
+# of the four PNGs this writes beside it, and `README.md` shows all four. They
+# are the first thing anyone sees, and a store page showing a baz nobody can
+# install is worse than no page — so this is a script and not a one-off, and it
+# is re-run when the interface changes.
+#
+# **It has been re-run because the interface changed.** The app bar (ADR-0040)
+# put a 41 px band above everything, and the two frames committed before it
+# were taken by a script whose click coordinates predated it — the `Play` press
+# landed on the tile instead of the overlay and photographed a wall captioned
+# `Nothing playing`. Every coordinate below was re-derived from a frame rather
+# than from arithmetic, which is the only way this file has ever been correct.
 #
 #   toolbox run -c baz-dev env CARGO_TARGET_DIR=target/tb \
 #     cargo build --release -p baz --features device-output
@@ -49,10 +58,22 @@
 #
 # Every state below is reached by clicking what a listener would click: a
 # record's own `Play`, raised by resting on its tile, and then the lane's own
-# `Now playing` row. No state is arranged from the outside — nothing is
-# deep-linked and nothing is set in the config that a press could not reach. A
-# capture that arrives at its frame by a route nobody takes has produced a
-# false picture on this project four times.
+# rows. **The playlist is built by hand in the running app** — four records
+# added through each tile's own `Add to…`, into a list named in the panel's own
+# field — because a playlist dropped into the folder before launch would be a
+# picture of a file rather than of the feature. No state is arranged from the
+# outside: nothing is deep-linked and nothing is set in the config that a press
+# could not reach. A capture that arrives at its frame by a route nobody takes
+# has produced a false picture on this project four times.
+#
+# # The order is playlist first, then play
+#
+# Deliberate, and it is about the clock: the fixture's records run about 50
+# minutes, and every frame after the music starts has to be taken before it
+# ends or the bottom bar reads `Nothing playing` in a picture whose whole point
+# is that something is. Building the list costs a dozen presses and needs no
+# playback, so it happens first and the four photographed states then follow
+# one press apart.
 set -uo pipefail
 
 REPO=${REPO:-$(git rev-parse --show-toplevel)}
@@ -143,8 +164,18 @@ mkdir -p "$S/config/baz"
 # about one thing: the picture has to contain a *collection*, because that is
 # what baz is for.
 #
-# `dense` rather than the default `balanced`, because a 1600-wide balanced wall
-# is two columns of very large sleeves — a page with four records on it.
+# `compact` rather than the default `balanced`, because a 1600-wide balanced
+# wall is two columns of very large sleeves — a page with four records on it.
+#
+# **It was `dense` until ADR-0028's second amendment**, which retuned that step
+# from 176 … 240 down to 160 … 200 on the owner's own *"the dense should be a
+# bit smaller"*. At 1600 px that takes the tile to 165 px, and 165 px is
+# narrower than `Marguerite Vance-Lindqvist · 1984` — so the fixture's longest
+# caption photographed as `Marguerite Vance-Lindqvist ·`, an artist's name cut
+# mid-line with a separator dangling off the end of it. `compact` is one step
+# looser, hangs the same three shelves with a fourth beginning, and every
+# caption on the wall is whole. Nothing about the ladder is wrong here; the
+# store frame simply moved down a rung when the rung moved under it.
 #
 # `year` rather than the default `artist`, because the wall breaks a row at
 # every group boundary and this fixture has two or three records per band: by
@@ -159,7 +190,7 @@ music_dirs = [
     "$FIX",
 ]
 group_key = "year"
-density = "dense"
+density = "compact"
 sidebar_open = true
 EOF
 
@@ -206,32 +237,78 @@ sleep 20
 shot()  { sleep 1.0; magick import -window root -crop "${W}x${H}+0+0" +repage \
             "$OUT/$1.png"; echo "  shot $1"; }
 click() { xdotool mousemove "$1" "$2"; sleep 0.4; xdotool click 1; sleep 1.6; }
+rest()  { xdotool mousemove "$1" "$2"; sleep 1.5; }
 # Dead ground in the lane, below its rows: the wall's tiles and the run's rows
 # both reveal controls under the pointer, and a picture of the composition must
 # not be a picture of the pointer.
-park()  { xdotool mousemove 140 520; sleep 0.8; }
+park()  { xdotool mousemove 140 620; sleep 0.8; }
 
+# ------------------------------------------------------------- the geometry
+# Every number below was read off a frame of *this* build at 1600 × 900 with
+# `compact` and the app bar. They are constants of a photograph, not of the
+# layout — the app bar's 41 px moved all of them once already.
+#
+#   app bar          y 0…41
+#   lane rows        Home 125 · Library 165 · Now playing 205 · a playlist 293
+#   wall shelf 1     tiles y 156…355, `Seagrass` x 313…513, `Werkbund` x 548…748
+#   wall shelf 2     tiles y 479…678, `Violet Ledger` x 313…513,
+#                    `Meadowgrass` x 783…983
+#   tile overlay     `Play` +24, `Queue` +74, `Add to…` +124, `Open` +174 from
+#                    the tile's top, inked ~48 px in from its left
+#   playlists panel  `New playlist` y 244 with `Save` at x 1546; in pick mode a
+#                    named list sits at y 296 with its `Add` at x 1556
+ADD_TO_1=280; ADD_TO_2=603; PLAY_1=180
+
+# ------------------------------------------------------------ the playlist
+# Four records into one list, each through its own tile's `Add to…`. The first
+# press opens the panel with nowhere to put anything, which is the honest empty
+# state and also the door: `New playlist` takes a name and the list exists.
+rest 413 255;   click 361 $ADD_TO_1     # Seagrass
+click 1400 244                          # New playlist
+xdotool type --clearmodifiers --delay 60 "Sunday Morning"
+sleep 1.0
+click 1546 244                          # Save — the list is a .m3u8 from here on
+
+for tile in "648 255 596 $ADD_TO_1" "883 578 831 $ADD_TO_2" "413 578 361 $ADD_TO_2"; do
+  set -- $tile
+  rest "$1" "$2"; click "$3" "$4"       # Werkbund, Meadowgrass, Violet Ledger
+  click 1556 296                        # `Add`, on the row the list now has
+done
+xdotool key --clearmodifiers Escape     # the panel closes; the lane keeps the list
+sleep 1.2
+
+# --------------------------------------------------------------- the frames
 # Put a record on. Resting on a tile raises its own four choices — `Play`,
 # `Queue`, `Add to…`, `Open` — and `Play` is the first of them, at the top of
 # the overlay: point at the record, press play. That is the sentence the store
 # page makes ("click one and it plays front to back"), performed rather than
-# asserted, and it is why both frames below are of a player that is playing.
-#
-# `Werkbund` is the second tile of the `1970s` shelf, at x 545…751, y 107…311.
-# The overlay's `Play` row sits at its top, ~25 px in.
-xdotool mousemove 648 209
-sleep 1.5
-click 600 132
+# asserted, and it is why all four frames below are of a player that is playing.
+rest 648 255
+click 596 $PLAY_1
 
 # 1 · the wall, with that record playing: its tile lit, the band in the lane's
 #     `RECENT`, and the bottom bar a live readout rather than `Nothing playing`.
 park
 shot library
 
-# 2 · Now playing, by the lane's own row (the third destination, at y 164).
-click 105 164
+# 2 · Now playing, by the lane's own row — the record and the rest of the run,
+#     side by side, which is the whole of that place.
+click 105 205
 park
 shot now-playing
+
+# 3 · Home: `All songs` with its collage sleeve, what arrived recently, and the
+#     size of the collection. The one place that is about the library rather
+#     than about a record.
+click 105 125
+park
+shot home
+
+# 4 · the playlist, opened from the lane row it earned by existing: a list that
+#     is thirty-five songs off four records and one `.m3u8` file on disk.
+click 140 293
+park
+shot playlist
 
 echo "== isolation receipt"
 grep -m2 '^\[mpris\]' "$S/app.log" || echo "  NO MPRIS LINE — check $S/app.log"

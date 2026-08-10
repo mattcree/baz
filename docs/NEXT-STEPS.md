@@ -40,9 +40,12 @@ chapter's reasoning lives:
 ### 1. Cut v0.1 — the first tag
 
 **The largest gap in the project is that none of this is installable.** The
-README says pre-alpha and the releases page is empty; `RELEASING.md` and
-`INSTALL.md` both describe a process nobody has run. Everything below is
-smaller than this.
+README says public beta and the releases page is empty; `RELEASING.md` and
+`INSTALL.md` both describe a process nobody has run end to end. Everything
+below is smaller than this. (The README was rewritten for that audience on
+2026-08-10 and now says the tag is not cut where a reader will see it, so the
+contradiction is stated rather than lying in wait — but it closes only when the
+tag exists.)
 
 1. ~~**An application icon.**~~ **Done.** `packaging/icons/` — an SVG master, a
    second source for the three smallest sizes, and the hicolor PNG ladder;

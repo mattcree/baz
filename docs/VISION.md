@@ -1,12 +1,12 @@
 # baz — Vision & Groundwork Synthesis
 
-> foo, bar… baz. An open-source, cross-platform music player for people who own their music — in the spirit of foobar2000, without its 2003.
+> foo, bar… baz. An open-source, cross-platform music player for people who own their music — inspired by foobar2000, and deliberately not an attempt to be it.
 >
 > Synthesized 2026-08-07 from the research in `docs/research/`. This is a living document; nothing here is committed until code exists.
 
 ## The one-paragraph pitch
 
-baz is a fast, beautiful, open-source (GPL-3 candidate) music player for Windows/Linux/macOS whose home screen is your album collection — point it at a directory and within a minute you're playing an album, gapless, with no playlist ceremony. It inherits foobar2000's values (instant, correct, no commercial agenda, power under the surface) while fixing its three great weaknesses: closed source, Windows-only heritage, and a hostile default UI. Later, the same core can speak to a NAS or a Navidrome server, and steer whole-library shuffle by mood using local audio analysis — no cloud, no account, ever.
+baz is a fast, beautiful, open-source (GPL-3 candidate) music player for Windows/Linux/macOS whose home screen is your album collection — point it at a directory and within a minute you're playing an album, gapless, with no playlist ceremony. It is **inspired by** foobar2000 — instant, correct, no commercial agenda, power under the surface — and makes its own choices from there rather than claiming its inheritance: open source, Linux-first, and a default interface that is the collection instead of a configuration surface. baz is not a replacement for foobar2000 and is not trying to be one; the two are different products for a shared kind of listener. Later, the same core can speak to a NAS or a Navidrome server, and steer whole-library shuffle by mood using local audio analysis — no cloud, no account, ever.
 
 ## Why it deserves to exist (the gap)
 
@@ -71,7 +71,7 @@ Full analysis in `research/04`. Headline:
 
 ## The research shelf
 
-- `research/01-foobar2000.md` — what we're succeeding, its community's values, the betrayal list
+- `research/01-foobar2000.md` — what baz took from it, its community's values, the betrayal list
 - `research/02-competitors.md` — the landscape, the gap, OpenSubsonic implications
 - `research/03-modern-features.md` — local ML, enrichment sources, presentation tech, feasibility flags
 - `research/04-tech-stack.md` — language/audio/GUI/index/architecture analysis and recommendation

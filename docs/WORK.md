@@ -159,17 +159,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-5. **Rewrite the README as the project's public face**, with the icon and real
-   screenshots of the wall, Home, Now playing and a playlist. Deliberately
-   last, so it describes what actually ships. Two of those four now exist and
-   are regenerable — `docs/screenshots/capture.sh` writes the wall and Now
-   playing for the store listing, and Home and a playlist are two more calls
-   in the same script. Its keyboard table is still
-   stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode,
-   `Ctrl+B` exists. (The group-key row itself is current again — the six words
-   and `1`–`6` were corrected when `A–Z` came back.)
-
-6. **Ship the public beta.** The last item by construction: it is the one
+5. **Ship the public beta.** The last item by construction: it is the one
    that makes the six above reach anybody. `v0.1.0` is prepared up to the
    tag and `docs/RELEASING.md` holds the owner's three commands, but a *beta*
    asks two more things of the release than a private tag does. **Flathub** —
@@ -341,6 +331,76 @@ call.
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **The README is the project's public face, and the word on the front is
+  `public beta`.** The owner's *"can we get the README sorted"*, and his
+  earlier *"a real public facing view of the app and its features. with an
+  icon and stuff."* Deliberately the last item before the tag, so it describes
+  what actually ships.
+  - **Four screenshots, all four re-shot, and the two committed ones were
+    already false.** The app bar put a 41 px band above everything and
+    `capture.sh`'s coordinates predated it, so its `Play` press landed on the
+    tile instead of the overlay: the committed `library.png` is a wall
+    captioned **`Nothing playing`** on a store page whose whole sentence is
+    *click one and it plays*. Caught by looking at the frame rather than at the
+    exit code, which is the eleventh time on this project that was the
+    difference. Every coordinate in the script is now re-derived from a frame
+    and written down beside the state it reaches.
+  - **`Home` and a playlist join the wall and Now playing**, and the playlist
+    is **built by hand in the running app** — four records through each tile's
+    own `Add to…`, into a list named in the panel's own field. A `.m3u8`
+    dropped into the folder before launch would have been a picture of a file
+    rather than of the feature.
+  - **The store frame moved down a rung of the ladder**, and that is a finding
+    rather than taste: ADR-0028's second amendment retuned `Dense` to
+    160 … 200 the same morning, which at 1600 px is 165 px of tile — narrower
+    than `Marguerite Vance-Lindqvist · 1984`. The fixture's longest caption was
+    photographing as an artist's name cut mid-line with the separator dangling.
+    `compact` hangs the same three shelves and every caption is whole.
+  - **The keyboard table was derived from `crates/baz/src/keys.rs`, not
+    edited.** That was the right call and the old table proves it: besides the
+    four errors this item already knew about, it was missing
+    <kbd>Ctrl</kbd>+<kbd>P</kbd> and <kbd>Ctrl</kbd>+<kbd>Z</kbd> entirely,
+    described <kbd>Ctrl</kbd>+<kbd>B</kbd>'s subject as an album inspector that
+    has not existed since ADR-0022, named three densities where there are four,
+    and gave <kbd>Esc</kbd> a peel order that ended at *the shuffle's marks* —
+    a layer removed when shuffle became a mode. A wrong keyboard table is worse
+    than none.
+  - **`keys.rs`'s own module doc contradicted itself** and lost: its opening
+    section says the search field takes focus at startup and the very next
+    section describes the mechanism (type-anywhere, step 11) that made that
+    false. `app.rs`'s `Shelf::open` is the truth — nothing is focused, so
+    <kbd>Space</kbd> means play/pause on the first frame. The stale
+    parenthetical is fixed.
+  - **The maturity word was `pre-alpha` in six places and is `public beta` in
+    all of them**, because it is one claim made to one stranger: `README.md`,
+    `docs/INSTALL.md`, `CHANGELOG.md`'s `[0.1.0]`, the Flathub metainfo's
+    description *and* its release note, and the GitHub release body that
+    `release.yml` writes. The metainfo now carries the rule in a comment so the
+    next edit does not split them again. **The honest half is stated where a
+    reader stands**: the tag is not cut, the releases page is empty, and
+    building from source is the way in today.
+  - **The Flathub description and the README now say the same thing**, which
+    they did not: the metainfo listed six capabilities and omitted playlists,
+    ReplayGain, multichannel and multiple folders. Two more screenshots were
+    added to the store listing with them.
+  - **The owner's correction to the first sentence anyone reads**: *"make sure
+    we say inspired by foobar but not a spiritual successor as they are
+    different."* Fixed in `README.md`, `docs/VISION.md` (three places) and
+    ADR-0002, which is where the claim originated — as an amendment rather than
+    a rewrite, since the ADR is a record. The metainfo and the desktop entry
+    never made the claim and still do not.
+  - **Checked against the code rather than against memory, and memory lost
+    twice.** The brief's *"scans folders you name"* is an ordered list with no
+    names; its *"searches by song and by record"*, the `.m3u8` ownership, the
+    trash, undo's depth, the downmix, MPRIS and the incremental rescan all held
+    exactly. `1255 tests` held exactly too — it is what `cargo test
+    --workspace` counts on Linux at default features, against
+    `NEXT-STEPS.md`'s stale 1047.
+  - **Found on the way, and left for the owner's eye:** an agent reading the
+    code reported that *FLAC-in-MP4 is labelled ALAC* is not a real gap. It is
+    — `library.rs:921` says so in its own words — and it is in the README's
+    limitations. The lesson is the one this file keeps relearning: a claim is
+    checked by reading the line, not by asking whether it sounds right.
 - **`Now playing` makes sense at width, and the run column stopped being the
   third copy of the track list.** Two of the owner's asks on 2026-08-10, on one
   surface. Frames, both builds, at 1280 / 1920 / 2560:

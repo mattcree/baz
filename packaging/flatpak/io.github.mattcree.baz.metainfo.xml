@@ -41,14 +41,20 @@
     <ul>
       <li>FLAC, WAV, MP3, M4A/MP4 (AAC and ALAC) and Ogg Vorbis</li>
       <li>Gapless album playback, with the per-format trim measured and tested</li>
+      <li>Multichannel files folded to stereo by the ITU-R BS.775 matrix</li>
       <li>Albums grouped by album artist, with lossless and lossy copies kept as separate editions of one album</li>
-      <li>Incremental library scanning that re-reads only what changed on disk</li>
-      <li>Search across the whole library as you type</li>
+      <li>Incremental library scanning that re-reads only what changed on disk, across as many folders as you name</li>
+      <li>Search across the whole library as you type, by song and by record</li>
+      <li>Playlists kept as ordinary .m3u8 files you can edit anywhere else</li>
+      <li>ReplayGain, both the tags other scanners wrote and a full EBU R128 pass of your own library</li>
       <li>MPRIS2, so desktop media controls, the lock screen, playerctl and hardware media keys all drive it</li>
     </ul>
     <p>
-      baz is pre-alpha software under active development. It reads your files
-      and never writes to them, but it is not yet a finished player.
+      This is a public beta. The core loop is finished and nothing baz does
+      loses or corrupts anything — it reads your files and never writes to
+      them — but it is pre-1.0 and it has rough edges. The ones we know about,
+      including the formats it cannot play, are listed on the project page
+      rather than left to be discovered.
     </p>
   </description>
 
@@ -107,6 +113,14 @@
       <image type="source">https://raw.githubusercontent.com/mattcree/baz/main/docs/screenshots/now-playing.png</image>
       <caption>Now playing, with the rest of the record beside it</caption>
     </screenshot>
+    <screenshot>
+      <image type="source">https://raw.githubusercontent.com/mattcree/baz/main/docs/screenshots/playlist.png</image>
+      <caption>A playlist, kept as an ordinary .m3u8 file you own</caption>
+    </screenshot>
+    <screenshot>
+      <image type="source">https://raw.githubusercontent.com/mattcree/baz/main/docs/screenshots/home.png</image>
+      <caption>Home: what you have, and what arrived recently</caption>
+    </screenshot>
   </screenshots>
 
   <content_rating type="oars-1.1"/>
@@ -120,8 +134,15 @@
     `type` is the release *channel*, not a maturity claim: this is the build a
     listener installs, so it is `stable`, and a `development` entry is one
     AppStream clients are entitled to hide — which for a project with exactly
-    one release would mean a store page with no release at all. That baz is
-    pre-alpha is said in the description above, where a reader will see it.
+    one release would mean a store page with no release at all. That baz is a
+    beta is said in the description above, where a reader will see it.
+
+    The maturity word lives in exactly two places — the description and the
+    release note below — and it must agree with README.md's status block,
+    which is the same claim to the same stranger. It said "pre-alpha" until
+    2026-08-10 and says "public beta" from the README rewrite onwards, on
+    docs/WORK.md's beta scope: the core loop is finished, and the things baz
+    cannot do are stated on the front page rather than discovered.
   -->
   <releases>
     <release version="0.1.0" date="2026-08-10" type="stable">
@@ -133,7 +154,7 @@
           you type; playlists; and MPRIS2 for the desktop's own media keys.
         </p>
         <p>
-          Pre-alpha. It reads your files and never writes to them.
+          A public beta. It reads your files and never writes to them.
         </p>
       </description>
     </release>

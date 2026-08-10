@@ -118,6 +118,42 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Changed
 
+- **The README is a public-facing page now, with the icon, four real
+  screenshots and a keyboard table that is true.** The owner: *"can we get the
+  README sorted"*, and earlier, *"a real public facing view of the app and its
+  features. with an icon and stuff."* Every claim on it was checked against the
+  code rather than against the previous draft.
+  - **The screenshots are re-shot, and the two that were committed were
+    already wrong.** The app bar added a 41 px band and
+    `docs/screenshots/capture.sh` still clicked at the old coordinates, so its
+    `Play` press missed the tile overlay: the picture on the store page was a
+    wall reading `Nothing playing`. `home.png` and `playlist.png` join them,
+    the playlist built by hand in the running app through each tile's own
+    `Add to…`, and the wall moved from `dense` to `compact` because ADR-0028's
+    second amendment made `dense` narrower than the fixture's longest caption.
+  - **The keyboard table was derived from `crates/baz/src/keys.rs` rather than
+    edited.** The old one had gone wrong in nine ways, including two chords it
+    never listed (<kbd>Ctrl</kbd>+<kbd>P</kbd>, <kbd>Ctrl</kbd>+<kbd>Z</kbd>),
+    a fourth density step it did not know about, and an <kbd>Esc</kbd> peel
+    order ending at a layer that no longer exists.
+  - **`baz is inspired by foobar2000`, and is not its successor** — the owner's
+    own correction, *"make sure we say inspired by foobar but not a spiritual
+    successor as they are different."* Fixed everywhere the claim was made:
+    `README.md`, `docs/VISION.md` and ADR-0002, which is amended rather than
+    rewritten.
+  - **`pre-alpha` became `public beta` in all six places at once** — the
+    README, `docs/INSTALL.md`, `CHANGELOG.md`'s `[0.1.0]`, the Flathub
+    metainfo's description and its release note, and the GitHub release body
+    `release.yml` writes. It is one claim to one stranger and it was split
+    across six files; the metainfo carries the rule in a comment now. The tag
+    still does not exist, and the README says so where a reader will see it.
+  - **The Flathub description and the README agree**, which they did not: the
+    metainfo had omitted playlists, ReplayGain, multichannel and multiple
+    music folders, and now lists them alongside two more screenshots.
+  - **Fixed on the way**: `keys.rs`'s module doc said the search well takes
+    focus at startup, and the section directly beneath it describes the change
+    that made that false. Nothing has focus at startup, so <kbd>Space</kbd>
+    plays on the first frame.
 - **`Now playing` composes itself at width, instead of hanging from both
   edges.** The owner: *"also please make sure the layout of the now playing
   makes sense on wider screens"*, and, the first time he reported it, *"at full
@@ -324,9 +360,10 @@ Every release is built from a tag by CI, gated on the full test suite — see
 The first release. Everything below is everything baz does; there is no
 earlier version to have changed from.
 
-**Status: pre-alpha.** It scans a music folder, shows the albums and plays
-them. It is not a finished player, and nothing here is a promise about the
-next commit.
+**Status: public beta.** It scans the folders you name, shows the albums and
+plays them front to back, and nothing it does loses or corrupts anything. It is
+pre-1.0, the things it cannot do are listed in `README.md`, and nothing here is
+a promise about the next commit.
 
 ### Added
 
