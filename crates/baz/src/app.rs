@@ -554,13 +554,6 @@ pub(crate) enum Message {
     /// It also puts the wall back on the **records** (ADR-0035): the five keys
     /// are how records are arranged, so pressing one is asking for records.
     GroupKeySelected(baz_core::index::GroupKey),
-    /// The strip's sixth word, or `6`: show the wall's other subject
-    /// (ADR-0035). Persisted, on [`Self::GroupKeySelected`]'s terms.
-    ///
-    /// It carries the subject rather than toggling, so the word and the digit
-    /// are *selections* like the five beside them and pressing `ARTISTS` twice
-    /// is not a way to end up somewhere else.
-    WallSubjectSelected(crate::vm::WallSubject),
     /// An entry in the index rail was clicked: put that shelf at the top of
     /// the wall. Carries the run's index, not a pixel — the rail knows which
     /// shelf it points at and nothing about where the shelf is.
@@ -978,9 +971,6 @@ struct App {
     /// a shelf to hold it — so the first-run path can hand it to the shelf the
     /// setup screen eventually opens.
     group_key: GroupKey,
-    /// The subject the wall opens on (ADR-0035), held here for `group_key`'s
-    /// reason and handed to the shelf the same way.
-    subject: vm::WallSubject,
     /// Whether the returns lane opens open, read from the config for
     /// `group_key`'s reason and handed to the shelf the same way.
     lane_open: bool,
@@ -1065,14 +1055,6 @@ pub(crate) struct Setup {
 }
 
 impl App {
-    #[expect(
-        clippy::too_many_lines,
-        reason = "a launch is one composition of independent restores — the \
-                  engine, the library, the config's standing decisions, the \
-                  run's snapshot — and each is three lines that only mean \
-                  anything beside the others. Splitting it would name four \
-                  functions after the order they happen to run in"
-    )]
     fn new(started: Instant, cli_dir: Option<PathBuf>) -> (Self, Task<Message>) {
         // Engine first: open failure must not kill the app — it becomes
         // Availability::NoDevice state that the bottom bar reports.
@@ -1138,9 +1120,6 @@ impl App {
         let group_key = stored
             .as_ref()
             .map_or(GroupKey::Artist, |config| config.group_key);
-        let subject = stored
-            .as_ref()
-            .map_or(vm::WallSubject::default(), |config| config.wall_subject);
         let density = stored
             .as_ref()
             .map_or(shelf::Density::Balanced, |config| config.density);
@@ -1166,7 +1145,7 @@ impl App {
         let (screen, task) = if dirs.is_empty() {
             (Screen::Setup(Setup::fresh(None)), Task::none())
         } else {
-            match Shelf::open(dirs, group_key, subject, density, lane_open) {
+            match Shelf::open(dirs, group_key, density, lane_open) {
                 Ok((shelf, task)) => (Screen::Shelf(Box::new(shelf)), task),
                 Err(error) => (Screen::Setup(Setup::fresh(Some(error))), Task::none()),
             }
@@ -1174,7 +1153,6 @@ impl App {
         let mut app = Self {
             _history_ledger: history_ledger,
             group_key,
-            subject,
             settings_section: 0,
             density,
             lane_open,
@@ -1464,13 +1442,7 @@ impl App {
         let Screen::Setup(setup) = &mut self.screen else {
             return Task::none();
         };
-        match Shelf::open(
-            vec![dir],
-            self.group_key,
-            self.subject,
-            self.density,
-            self.lane_open,
-        ) {
+        match Shelf::open(vec![dir], self.group_key, self.density, self.lane_open) {
             Ok((state, task)) => {
                 self.screen = Screen::Shelf(Box::new(state));
                 task
@@ -4199,14 +4171,6 @@ pub(crate) struct Shelf {
     /// How the wall is arranged (ADR-0019). Persisted in `config.toml`; the
     /// top bar's row of words and `1`–`5` are the two ways to change it.
     pub(crate) group_key: GroupKey,
-    /// **What the wall is a wall of** — records, or artists (ADR-0035).
-    ///
-    /// It sits *beside* `group_key` rather than inside it, so the arrangement
-    /// survives a trip through the artists and back; see
-    /// [`vm::WallSubject`] for why it is not a sixth key. Persisted on
-    /// `group_key`'s own terms; the strip's sixth word and `6` are the two
-    /// ways to change it.
-    pub(crate) subject: vm::WallSubject,
     /// How closely the wall hangs (ADR-0017 step 6). Persisted in
     /// `config.toml`; <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd>
     /// and <kbd>Ctrl</kbd>+scroll are the two ways to change it, and there is
@@ -4237,22 +4201,6 @@ pub(crate) struct Shelf {
     /// How many of each shelf's albums survived it, in `groups` order — what
     /// [`shelf::Shelves`] lays the wall out from.
     visible_counts: Vec<usize>,
-    /// **The artists wall, flattened**, exactly as `albums` is: every artist
-    /// the collection is filed under, in the artists wall's own shelf order
-    /// (ADR-0035). Rebuilt with the records, from the records.
-    pub(crate) artists: Vec<vm::ArtistVm>,
-    /// One entry per artists shelf: its `Initial` header and the slice of
-    /// `artists` under it. `groups`' twin, for the other subject.
-    artist_groups: Vec<GroupVm>,
-    /// Indices into `artists` that survive the current query.
-    ///
-    /// **One query projected twice**: this is `visible`'s own answer put
-    /// through [`vm::visible_artists`], never a second search. An artist
-    /// survives exactly when one of their records does.
-    pub(crate) artist_visible: Vec<usize>,
-    /// How many of each artists shelf's artists survived, in `artist_groups`
-    /// order — `visible_counts`' twin.
-    artist_visible_counts: Vec<usize>,
     /// The live search text.
     pub(crate) query: String,
     /// The **Songs** answers for the live query (doc 09 §5): the top
@@ -4409,7 +4357,6 @@ impl Shelf {
     fn open(
         roots: Vec<PathBuf>,
         group_key: GroupKey,
-        subject: vm::WallSubject,
         density: shelf::Density,
         lane_open: bool,
     ) -> Result<(Self, Task<Message>), String> {
@@ -4445,17 +4392,12 @@ impl Shelf {
         let mut shelf = Self {
             library,
             group_key,
-            subject,
             density,
             history,
             albums: Vec::new(),
             groups: Vec::new(),
             visible: Vec::new(),
             visible_counts: Vec::new(),
-            artists: Vec::new(),
-            artist_groups: Vec::new(),
-            artist_visible: Vec::new(),
-            artist_visible_counts: Vec::new(),
             query: String::new(),
             songs: Vec::new(),
             hovered_song: None,
@@ -4544,7 +4486,6 @@ impl Shelf {
             // shell's state, and the owner's move put the field in the lane.
             Message::EscapePressed => self.peel(),
             Message::GroupKeySelected(key) => self.arrange_by(key),
-            Message::WallSubjectSelected(subject) => self.show_subject(subject),
             Message::RailJumped(run) => self.jump_to_shelf(run),
             Message::Scrolled(viewport) => {
                 self.scroll_offset = viewport.absolute_offset().y;
@@ -4823,19 +4764,10 @@ impl Shelf {
     /// entirely, so holding the scroll offset would drop you into an unrelated
     /// part of the collection while claiming nothing had moved.
     fn arrange_by(&mut self, key: GroupKey) -> Task<Message> {
-        // **Pressing a key asks for records.** The five words are how *records*
-        // are arranged, so one of them is a statement about records even when
-        // the artists are what is on the wall — and a `YEAR` that left the
-        // artists standing would be a word that did nothing (ADR-0035).
-        let subject_moved = self.subject != vm::WallSubject::Records;
-        if self.group_key == key && !subject_moved {
+        if self.group_key == key {
             return Task::none();
         }
         self.group_key = key;
-        if subject_moved {
-            self.subject = vm::WallSubject::Records;
-            persist_wall_subject(self.subject);
-        }
         self.rebuild_shelves();
         self.scroll_offset = 0.0;
         persist_group_key(key);
@@ -4843,94 +4775,6 @@ impl Shelf {
             scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
             self.request_visible_thumbs(),
         ])
-    }
-
-    /// **Show the wall's other subject** — the strip's sixth word and `6` both
-    /// land here (ADR-0035).
-    ///
-    /// [`Self::arrange_by`]'s twin, and deliberately its twin: the wall goes
-    /// back to the top for the same reason (what you were looking at is not
-    /// where it was), the query is untouched for the same reason (the subject
-    /// is a projection of the same match set, never a filter), and the press is
-    /// remembered for the same reason.
-    ///
-    /// **The arrangement is not touched at all.** `group_key` is records' state
-    /// and it stays exactly where the listener left it, so a trip through the
-    /// artists and back is a round trip rather than a reset — which is the
-    /// whole argument for holding the subject beside the key instead of inside
-    /// it.
-    fn show_subject(&mut self, subject: vm::WallSubject) -> Task<Message> {
-        if self.subject == subject {
-            return Task::none();
-        }
-        self.subject = subject;
-        // Nothing is re-derived from the library: both walls were built by the
-        // last `rebuild_shelves` and both filters by the last `refilter`. What
-        // changes is which of them is drawn — and the *range guard*, whose
-        // positions now name a different set of tiles.
-        self.forget_requested();
-        self.scroll_offset = 0.0;
-        persist_wall_subject(subject);
-        Task::batch([
-            scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
-            self.request_visible_thumbs(),
-        ])
-    }
-
-    /// **The headers of the wall that is actually drawn** — the records' or the
-    /// artists', by the active subject (ADR-0035).
-    ///
-    /// The three accessors here are what let one virtualizer, one sticky
-    /// header, one index rail and one set of grid arithmetic serve both
-    /// subjects: the view asks *the wall* for its headers, its survivors and
-    /// its per-shelf counts, and never reaches for a named field. A second
-    /// copy of the wall's layout is the one thing this feature could not
-    /// afford.
-    pub(crate) fn wall_groups(&self) -> &[GroupVm] {
-        match self.subject {
-            vm::WallSubject::Records => &self.groups,
-            vm::WallSubject::Artists => &self.artist_groups,
-        }
-    }
-
-    /// The indices the query left standing, into whichever list the active
-    /// subject draws tiles from ([`Self::wall_groups`]).
-    pub(crate) fn wall_visible(&self) -> &[usize] {
-        match self.subject {
-            vm::WallSubject::Records => &self.visible,
-            vm::WallSubject::Artists => &self.artist_visible,
-        }
-    }
-
-    /// How many tiles survived on each shelf of the drawn wall, in
-    /// [`Self::wall_groups`] order — what [`shelf::Shelves`] lays out from.
-    fn wall_visible_counts(&self) -> &[usize] {
-        match self.subject {
-            vm::WallSubject::Records => &self.visible_counts,
-            vm::WallSubject::Artists => &self.artist_visible_counts,
-        }
-    }
-
-    /// **The figures the wall's readouts state**, following the subject
-    /// (ADR-0035): how many tiles the query left, and how many there are.
-    ///
-    /// The wells say `7 / 1284`, and under an artists wall a figure counting
-    /// *albums* beside tiles that are people would be visibly wrong — the
-    /// readout's subject has to be the wall's. Resolved here rather than at
-    /// each well, so the strip's form and the lane's form cannot disagree.
-    pub(crate) fn wall_counts(&self) -> (usize, usize) {
-        match self.subject {
-            vm::WallSubject::Records => (self.visible.len(), self.albums.len()),
-            vm::WallSubject::Artists => (self.artist_visible.len(), self.artists.len()),
-        }
-    }
-
-    /// The noun those figures are figures **of** — `albums` or `artists`.
-    pub(crate) fn wall_noun(&self) -> &'static str {
-        match self.subject {
-            vm::WallSubject::Records => "albums",
-            vm::WallSubject::Artists => "artists",
-        }
     }
 
     /// **The All songs list, resolved from this wall** (`crate::implicit`).
@@ -5067,7 +4911,7 @@ impl Shelf {
     /// inspector and the double-click hold), and a cache of it would be a
     /// fourth thing that could disagree with the other three.
     pub(crate) fn shelves(&self) -> shelf::Shelves {
-        shelf::Shelves::new(self.grid(), self.wall_visible_counts())
+        shelf::Shelves::new(self.grid(), &self.visible_counts)
     }
 
     /// Re-ask the library for the wall under the active key, and re-derive
@@ -5096,20 +4940,6 @@ impl Shelf {
         // but re-counting is cheaper than reasoning about which caller changed
         // what.
         self.collection = vm::Collection::count(&self.albums, self.library.len());
-        // **The artists wall is built from the records wall, not beside it**
-        // (ADR-0035): an artist exists exactly when a record filed under them
-        // reached `albums`, so the two cannot describe different collections.
-        // Shelved by `Initial` whatever the active key is — the initial is the
-        // one break that is a property of the artist rather than of the record.
-        self.artists.clear();
-        self.artist_groups.clear();
-        for shelf in vm::build_artists(&self.albums) {
-            self.artists.extend(shelf.artists);
-            self.artist_groups.push(GroupVm {
-                header: shelf.header,
-                end: self.artists.len(),
-            });
-        }
         self.refilter();
         // The album ids survive a re-arrangement (see above), so the fold does
         // too — but a *rescan* can add and remove records, and the lane must
@@ -5204,17 +5034,6 @@ impl Shelf {
     /// and its contents cannot disagree about which albums survived.
     fn refilter(&mut self) {
         self.visible = vm::visible_indices(&self.albums, &self.library, &self.query);
-        // **One query, projected twice** (ADR-0035). The search has been spent
-        // once, above; the artists wall is that same answer put through
-        // `vm::visible_artists`, so an artist survives exactly when one of
-        // their records does and a keystroke costs one search rather than two.
-        let surviving: HashSet<u64> = self
-            .visible
-            .iter()
-            .filter_map(|&index| self.albums.get(index))
-            .map(|album| album.id)
-            .collect();
-        self.artist_visible = vm::visible_artists(&self.artists, &surviving);
         // The range guard names *positions*, and every album behind them has
         // just moved. Rows 0..24 of a filtered wall are not the rows 0..24 of
         // the wall before it.
@@ -5231,7 +5050,6 @@ impl Shelf {
         // two lists together rather than a second filter that could disagree
         // with the first.
         self.visible_counts = surviving_per_shelf(&self.visible, &self.groups);
-        self.artist_visible_counts = surviving_per_shelf(&self.artist_visible, &self.artist_groups);
     }
 
     /// Answer a message that only the folders baz holds care about, reporting
@@ -5723,7 +5541,7 @@ impl Shelf {
         let (start, end) = self
             .shelves()
             .visible_albums(self.scroll_offset, self.grid_size.height);
-        let tiles = self.wall_visible().len();
+        let tiles = self.visible.len();
         let (start, end) = (start.min(tiles), end.min(tiles));
         // **Nothing new is on screen, so there is nothing to ask for.**
         //
@@ -5743,29 +5561,6 @@ impl Shelf {
             return Task::none();
         }
         self.last_requested = Some((start, end));
-        // **The artists wall has its own quotations, and this is where they
-        // are asked for** (ADR-0035). An artist's tile is a collage of records
-        // that are *not* on the wall, and the wall's visible range is the
-        // whole of the thumbnail guard — so without this an artist's collage
-        // drew the deterministic gradient until one of the records it quotes
-        // happened to scroll past on the *records* wall. That is real artwork
-        // by luck, and it is verbatim the defect the playlist collages had and
-        // then the artist page had; this is the third time the same guard has
-        // needed extending and the last surface that needed it.
-        //
-        // It is asked for **here** rather than in `App::request_offscreen_art`
-        // — which is where the artist *page*'s records are named — because
-        // this is the only guard that re-fires on a scroll. That one is keyed
-        // on the lane's stamps and the place, neither of which moves when the
-        // wall slides under the pointer.
-        if self.subject == vm::WallSubject::Artists {
-            let quoted: Vec<u64> = self.artist_visible[start..end]
-                .iter()
-                .filter_map(|&index| self.artists.get(index))
-                .flat_map(|artist| artist.records.iter().take(views::SLEEVE_CELLS).copied())
-                .collect();
-            return self.request_thumbs(&quoted);
-        }
         let mut tasks = Vec::new();
         for &album_index in &self.visible[start..end] {
             let Some(album) = self.albums.get(album_index) else {
@@ -6032,10 +5827,7 @@ fn persist_group_key(key: GroupKey) {
 ///
 /// The shelves are contiguous slices of the flat list and `surviving` is in
 /// the same order, so this is one walk of the two lists together rather than
-/// a second filter that could disagree with the first. One function for both
-/// subjects, because the shape is the same shape and two copies of it would
-/// be two chances for the artists wall to lay out differently from the
-/// records wall.
+/// a second filter that could disagree with the first.
 fn surviving_per_shelf(surviving: &[usize], groups: &[GroupVm]) -> Vec<usize> {
     let mut seen = surviving.iter().peekable();
     groups
@@ -6048,12 +5840,6 @@ fn surviving_per_shelf(surviving: &[usize], groups: &[GroupVm]) -> Vec<usize> {
             count
         })
         .collect()
-}
-
-/// Remember what the wall is a wall of — `persist_group_key`'s exact terms
-/// (ADR-0035, ADR-0017 §1.3).
-fn persist_wall_subject(subject: vm::WallSubject) {
-    persist(|config| config.wall_subject = subject);
 }
 
 /// Remember how closely it hangs — the same terms exactly (ADR-0017 §1.3).
@@ -6401,74 +6187,6 @@ mod tests {
         }
     }
 
-    /// **The wall's subject and the wall's arrangement are independent state,
-    /// and a trip through the artists is a round trip** (ADR-0035).
-    ///
-    /// This is the whole argument for holding the subject beside `group_key`
-    /// rather than as a sixth key, and it is a claim about what a function
-    /// does *not* touch — so it is asserted where the fact lives, over the
-    /// source of the two functions that answer it, exactly as
-    /// [`Self::a_place_costs_the_wall_no_width_at_all`] is.
-    ///
-    /// - `show_subject` never reads or writes `group_key`. Press `ARTISTS`
-    ///   from a `YEAR` wall, press `YEAR` again, and the decades are where
-    ///   they were left — because nothing on the way out could have moved
-    ///   them.
-    /// - `arrange_by` *does* set the subject, and only in one direction: the
-    ///   five words are how records are arranged, so pressing one is asking
-    ///   for records. A `YEAR` that left the artists standing would be a word
-    ///   that did nothing.
-    /// - Neither goes back to the library. Both walls were built by the last
-    ///   `rebuild_shelves` and both filters by the last `refilter`, so the
-    ///   press costs a redraw rather than a rebuild.
-    #[test]
-    fn the_walls_subject_and_its_arrangement_are_independent_state() {
-        let source = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
-        )
-        .expect("this module's own source");
-        let body = |signature: &str| {
-            let rest = source
-                .split_once(signature)
-                .unwrap_or_else(|| panic!("`{signature}` exists"))
-                .1;
-            rest[..rest.find("\n    }\n").expect("a function ends")].to_owned()
-        };
-
-        let show = body("fn show_subject(&mut self, subject: vm::WallSubject) -> Task<Message> {");
-        assert!(
-            !show.contains("group_key"),
-            "showing the other subject touches the arrangement, so a trip \
-             through the artists is not a round trip"
-        );
-        assert!(
-            !show.contains("self.rebuild_shelves()") && !show.contains("self.refilter()"),
-            "showing the other subject goes back to the library for a wall \
-             that was already built"
-        );
-        assert!(
-            show.contains("self.forget_requested()"),
-            "the range guard survives a change of subject, so the artists' \
-             collages ask for no artwork until something else clears it"
-        );
-        assert!(
-            show.contains("persist_wall_subject(subject)"),
-            "the subject is not remembered"
-        );
-
-        let arrange = body("fn arrange_by(&mut self, key: GroupKey) -> Task<Message> {");
-        assert!(
-            arrange.contains("vm::WallSubject::Records"),
-            "pressing a group key leaves the artists on the wall, so five of \
-             the row's six words do nothing while the sixth is current"
-        );
-        assert!(
-            !arrange.contains("WallSubject::Artists"),
-            "an arrangement can send the wall *to* the artists, which is a \
-             word meaning something it does not say"
-        );
-    }
-
     /// **Navigating between places costs the Library nothing.**
     ///
     /// Four members, one on screen, and the transitions between them are pure:
@@ -6533,7 +6251,7 @@ mod tests {
 
         /// Message tag → the on-screen control that sends the same message,
         /// or the reason there is none.
-        const CONTROLS: [(&str, &str); 22] = [
+        const CONTROLS: [(&str, &str); 21] = [
             (
                 "ToggleLane",
                 "the `Collapse` control at the returns lane's foot (ADR-0030 §3) — \
@@ -6600,14 +6318,9 @@ mod tests {
             ),
             (
                 "GroupKeySelected",
-                "the top bar's row of words — the first five of the six \
-                 (ADR-0019)",
-            ),
-            (
-                "WallSubjectSelected",
-                "the sixth word in that same row, `ARTISTS` (ADR-0035) — one \
-                 of a closed set of six states, drawn in the same voice and \
-                 the same box as the five keys beside it",
+                "the top bar's row of five words (ADR-0019); the first of \
+                 them, ARTIST, shelves the wall one artist at a time \
+                 (ADR-0035)",
             ),
             (
                 "SetVolume",

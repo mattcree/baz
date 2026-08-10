@@ -932,7 +932,7 @@ mod tests {
     #[test]
     fn the_rail_never_outgrows_the_lane_it_is_given() {
         use baz_core::history::Recency;
-        use baz_core::index::{GroupKey, Initial};
+        use baz_core::index::GroupKey;
 
         use crate::vm::GroupHeaderVm;
 
@@ -947,7 +947,9 @@ mod tests {
             .collect();
         let artists: Vec<GroupHeaderVm> = ('A'..='Z')
             .chain('\u{4e00}'..='\u{4e2f}')
-            .map(|letter| GroupHeaderVm::Initial(Initial::Letter(letter)))
+            .map(|letter| {
+                GroupHeaderVm::Artist(crate::vm::AlbumArtistVm::Named(letter.to_string()))
+            })
             .collect();
         let played: Vec<GroupHeaderVm> = [Recency::ThisEvening, Recency::YearsAgo(40)]
             .into_iter()

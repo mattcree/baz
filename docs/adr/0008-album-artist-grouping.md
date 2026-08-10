@@ -9,7 +9,9 @@
 > the shelf order that keeps both anonymous buckets at the ends. What changed
 > is that this grouping is no longer the *only* grouping. `Library::shelves`
 > arranges the same albums under one of five group keys — ARTIST, YEAR, GENRE,
-> ADDED, PLAYED — and ARTIST is this ADR's shelf with its A–Z breaks named.
+> ADDED, PLAYED — and ARTIST is this ADR's shelf with its breaks named: one
+> per artist since [ADR-0035](0035-the-wall-has-a-subject.md), one per initial
+> before it. Either way the albums and their order are exactly this ADR's, and
 > `Library::albums()` keeps its signature and is the ARTIST projection
 > flattened, asserted rather than claimed. See
 > `docs/adr/0019-group-keys.md`; §5's schema is now v7 of 7.

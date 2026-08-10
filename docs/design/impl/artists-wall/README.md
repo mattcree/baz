@@ -1,5 +1,16 @@
 # `A–Z`, `ARTISTS`, and the wall's second subject
 
+> **Superseded the same day, and kept because it was shipped.** The owner saw
+> this and said *"artists should be grouping stuff by artist not just
+> alphabetically"* — a wall of records **grouped under their artist**, which
+> satisfies ADR-0019 §1 exactly and is therefore an ordinary group key. So the
+> sixth word, the subject, `A–Z` and the artist tiles below are all gone; what
+> replaced them is at
+> [`../artists-grouped/`](../artists-grouped/README.md), and
+> [ADR-0035](../../../adr/0035-the-wall-has-a-subject.md) is the one decision
+> both of these are forms of. These frames are the record of what `main`
+> carried for an hour, not of what baz does.
+
 Frames from the real binary, rendered headless on a private Xvfb with all six
 XDG redirections from [`docs/DEVELOPMENT.md`](../../../DEVELOPMENT.md). Nothing
 touched the owner's session; `capture.sh` prints the run's own

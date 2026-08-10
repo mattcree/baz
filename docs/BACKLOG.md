@@ -99,35 +99,50 @@
   The proposal below is struck rather than deleted, because it was measured and
   the measurements are the interesting part of what happened next.
 
-  **What shipped**, and it is the proposal with one correction: the key's label
-  is `A–Z` and its code is still `"artist"`; `ARTISTS` is a sixth word in the
-  same row holding a `vm::WallSubject` beside `group_key`, with `6` as its
-  accelerator; the artists wall is one tile per person, shelved by `Initial`,
-  indexed by `rail::artist` verbatim, wearing `views::playlist_sleeve`'s
-  collage; the search is spent once and projected onto the people; both wells'
-  figures follow the subject; and the artist tiles' quotations are asked for by
-  the wall's own range guard, which is the only guard that re-fires on a
-  scroll. Home's `COLLECTION` was deliberately left alone — it is an
-  unnarrowed statistic about the whole collection on a different place, and it
-  already names records and artists side by side.
+  **What shipped**, after the owner looked at the first form: `GroupKey::Artist`
+  **groups by the artist** — one shelf per person, headed by their name, in
+  `ArtistKey`'s own order with each artist's records alphabetical under them —
+  and the shelf header is the door to `Place::Artist`. The index rail is still
+  the alphabet, a letter landing on the first artist filed under it
+  (`rail::genre`'s shape, arrived at from the other direction). The key's code
+  is still `"artist"`, so nothing on disk needed migrating.
 
-  **The measurements, re-derived rather than trusted.** `KEYS_W` 314 → **368**,
+  **The proposal's central claim was true and about the wrong wall.** It argued
+  — correctly — that a wall of *artist tiles* cannot be a `GroupKey`, because
+  ADR-0019 §1's sweep asserts every album appears exactly once under every key
+  and a wall of tiles showing no albums falsifies it. So it built the subject
+  beside the key: `A–Z` as the first word, `ARTISTS` as a sixth, a parallel
+  projection, a second search projection, and readouts that follow the subject.
+  It shipped and the owner said *"artists should be grouping stuff by artist
+  not just alphabetically"* — which is a wall of **records grouped under their
+  artist**, and that satisfies §1 exactly. So it is an ordinary key, the sixth
+  word is not needed, and `A–Z` is the same traversal under coarser headers.
+  All of it came out: `vm::WallSubject`, the parallel projection, the second
+  search projection, the `wall_counts` / `wall_noun` split, the artist tile, the
+  `6` accelerator and the `wall_subject` config key. Net −700 lines across
+  `crates/` against the first form, tests included.
+
+  **The measurements, twice.** `KEYS_W` 314 → **368** for the six-word row,
   which the costing below got exactly right; every figure downstream of it did
   **not** match, because `Pull` was removed and `Shuffle` moved to the
-  now-playing bar in between, taking `ACTS_W` from 182 to 88:
+  now-playing bar in between, taking `ACTS_W` from 182 to 88. Then the sixth
+  word went and all 54 px came back:
 
-  | | costed below | shipped |
-  |---|---:|---:|
-  | `LIBRARY_LINE` | 654 | **560** |
-  | the window's own minimum | 750 | **696** (unmoved) |
-  | `TOP_BAR_SPLIT` | 926 | **832** |
-  | `SINGLE_LINE_NO_WELL` vs `WIDEST_LANE_STRIP` 720 | 702 (18 spare) | **608** (112 spare) |
-  | the single-line-with-well band | *deleted* | **832…904, alive** |
+  | | costed below | six words | now |
+  |---|---:|---:|---:|
+  | `KEYS_W` | 368 | **368** | **314** |
+  | `LIBRARY_LINE` | 654 | **560** | **506** |
+  | the window's own minimum | 750 | **696** (unmoved) | **696** (unmoved) |
+  | `TOP_BAR_SPLIT` | 926 | **832** | **778** |
+  | `SINGLE_LINE_NO_WELL` vs `WIDEST_LANE_STRIP` 720 | 702 (18 spare) | **608** (112 spare) | **554** (166 spare) |
+  | the single-line-with-well band | *deleted* | **832…904** | **778…904** |
 
   The costing's most valuable line — *"a consequence nobody would predict"* —
   turned out not to happen, and that is the reason it was worth keeping: the
-  band is now **asserted** in `theme.rs`, because it was predicted not to
-  exist. Frames: [`docs/design/impl/artists-wall/`](design/impl/artists-wall/).
+  band is **asserted** in `theme.rs`, because it was predicted not to exist,
+  and the assertion has now survived the row growing *and* shrinking. Frames:
+  [`docs/design/impl/artists-grouped/`](design/impl/artists-grouped/), with the
+  first form's at [`artists-wall/`](design/impl/artists-wall/).
 
   <details>
   <summary>The costed proposal as it stood, 2026-08-09</summary>
@@ -162,8 +177,9 @@
   </details>
 
 - **An artist is not admitted to the returns lane, and the rule says why.**
-  Still true after ADR-0035 gave artists a wall of their own — a wall is a
-  place you look, and the lane is a record of things you touched. The
+  Still true after ADR-0035 made artists the wall's own shelves and their names
+  its doors — opening is a thing you look at, and the lane is a record of things
+  you touched. The
   lane holds records you have *played* and lists you have *made or edited* —
   both backed by an external store with a timestamp (the play ledger, `.m3u8`
   mtimes), which is what makes `(last touched, name)` a total order. An artist
@@ -177,16 +193,23 @@
   moment.
 
 - ~~**An artists wall would cost the rail, density and the sticky headers
-  nothing**~~ — **confirmed and shipped** (ADR-0035). The estimate held in
-  every part: `rail::entries` needed no branch, the density steps and the
-  sticky headers needed no change, and the two things it named as real costs
-  were the two things that were built — one query projected twice
-  (`vm::visible_artists` over the answer `refilter` already had) and the
-  readouts following the subject (`Shelf::wall_counts` / `wall_noun`, in both
-  wells). Its last sentence stands unchanged: **artist search is not built**,
-  and ADR-0021's ranking is still thrown away at the album fold. What the wall
-  narrows by is *whose records matched*, which is a projection of the record
-  search rather than a search of its own.
+  nothing**~~ — **confirmed twice, and the second time it cost even less**
+  (ADR-0035). The estimate held in every part: the density steps and the sticky
+  headers needed no change, and `rail::entries` needed no branch — though not
+  for the reason given. It predicted a wall *headed by `Initial`* reusing
+  `rail::artist()` verbatim, which is what the first form built; what shipped is
+  headed by the **artists**, so the rail maps each header through `Initial::of`
+  and takes the first shelf of each letter's run. Still no branch in `entries`,
+  still no new vocabulary, still no state — the pure-function-of-the-headers
+  design absorbed a change of headers, which is a better result than the one
+  estimated.
+
+  The two costs it named as real were both built and then both deleted: one
+  query projected twice (`vm::visible_artists`) and the readouts following the
+  subject (`wall_counts` / `wall_noun`). Neither exists, because there is one
+  wall. Its last sentence stands unchanged: **artist search is not built**, and
+  ADR-0021's ranking is still thrown away at the album fold. What narrows is
+  records, and an artist's shelf survives when one of their records does.
 
   <details>
   <summary>The estimate as it stood, 2026-08-09</summary>

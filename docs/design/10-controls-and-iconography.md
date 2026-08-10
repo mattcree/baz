@@ -518,21 +518,27 @@ shipped glyphs have (`icon.rs:407–698`).
 > Frames and the full re-derivation:
 > [`docs/design/impl/search-in-lane/`](impl/search-in-lane/README.md).
 
-> **Superseded again, 2026-08-10 — the row of words is six**
-> ([ADR-0035](../adr/0035-the-wall-has-a-subject.md)). The first key's word
-> became `A–Z` and `ARTISTS` joined the row as the wall's *subject*, so
-> `KEYS_W` is **368**, not 314, and every figure below it moves with it:
-> `LIBRARY_LINE` **560**, `TOP_BAR_SPLIT` **832**, and the well-less single
-> line **608** against the same narrowest strip of 720. `TOP_BAR_FLOOR` 600 and
-> the window's own minimum 696 do **not** move — the floor is also the
-> window's sensible minimum, and it does not chase a strip's population in
-> either direction.
+> **The row of words grew to six and came back to five, 2026-08-10**
+> ([ADR-0035](../adr/0035-the-wall-has-a-subject.md)). For one release the
+> first key's word was `A–Z` and `ARTISTS` stood beside it as the wall's
+> *subject*, which put `KEYS_W` at 368 and moved every figure below it —
+> `LIBRARY_LINE` 560, `TOP_BAR_SPLIT` 832, the well-less single line 608. The
+> sixth word then became the first key's own grouping and all 54 px came back,
+> so the shipped figures are `KEYS_W` **314**, `LIBRARY_LINE` **506**,
+> `TOP_BAR_SPLIT` **778**, the well-less single line **554** against the same
+> narrowest strip of 720. `TOP_BAR_FLOOR` 600 and the window's own minimum 696
+> did **not** move in either direction — the floor is also the window's
+> sensible minimum, and it does not chase a strip's population.
 >
-> The consequence worth reading twice: 832 is still **below** the widest strip
-> that can hold the well (904), so the single-line-with-well band survives the
-> sixth word. The costing that proposed the word predicted it would not, having
-> measured against an acts cluster that `Pull` and `Shuffle` then emptied.
-> Frames: [`docs/design/impl/artists-wall/`](impl/artists-wall/README.md).
+> The consequence worth reading twice: the seam followed the tenants **up and
+> then down**, which is the property that makes it arithmetic rather than a
+> judgement, and at both ends it stayed below the widest strip that can hold
+> the well (904) — so the single-line-with-well band survived the sixth word at
+> 832…904 and is now 778…904, wider than it has ever been. The costing that
+> proposed the word predicted the band would cease to exist, having measured
+> against an acts cluster that `Pull` and `Shuffle` then emptied.
+> Frames: [`docs/design/impl/artists-grouped/`](impl/artists-grouped/README.md),
+> and the six-word form's at [`artists-wall/`](impl/artists-wall/README.md).
 
 All numbers logical px on the 4-lattice; gutters are `HANG` 40 (law L1);
 control height `TRANSPORT_HIT` 32 throughout (L7). Reserved widths:
