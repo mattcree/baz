@@ -111,6 +111,11 @@
 
 - **One composition for a record's page and a list's page** — the owner's *"can
   we reuse the basic layout and view of the playlist for the album view"*.
+- **Density: a fourth step, and the control on every page** — the owner's *"we
+  should ensure the density options are available on all pages..."* and *"4
+  levels makes sense to me"*. Carries the `views/artist.rs` tile-width defect
+  with it (six columns where the wall draws five at 1920, lane collapsed),
+  since it is the same family: a page laying tiles by its own arithmetic.
 - **Playlists get their own section in the lane** — the owner's *"I guess we
   need to add playlists into their own section under library"*. A split of
   `RECENT`, which mixes every list with the last records today.
