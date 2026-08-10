@@ -271,6 +271,37 @@
 >
 > Frames and the measured row count:
 > [`docs/design/impl/home-stats/`](../design/impl/home-stats/README.md).
+>
+> ## Fifth amendment (2026-08-10) — §2's reason for marking nothing was false
+>
+> The owner: *"the information heirarchy isn't great to be able to tell the
+> difference between an album and a playlist"*. From
+> [`docs/design/14-records-and-lists.md`](../design/14-records-and-lists.md)
+> §4.1, and adopted as [ADR-0024](0024-playlists.md) §A3.
+>
+> **§2's *conclusion* stands and its *premise* does not.** The conclusion —
+> *one anatomy for both kinds of row, and nothing drawn on a row to mark its
+> kind* — is untouched: no badge, no glyph, no corner, no second sleeve shape,
+> and `RECENT` still mixes the two kinds in one touch-ordered list rather than
+> segregating them (which is what §8.3 of doc 14 records baz as having declined
+> on purpose). The premise was *"the sleeve already does"*, and it is **false
+> for every playlist of one to three distinct records**: below four,
+> `views::playlist_sleeve` draws the first record's cover full-bleed through
+> byte-for-byte the widget a record's own row builds, from the same cache at
+> the same edge (ADR-0024 §A1 rule 2). That is every playlist
+> `Save as playlist` makes from a CD — one record, by construction — and every
+> list on its way to four.
+>
+> **What carries the distinction instead is the line already under the name.**
+> A record's row prints its album artist there; a playlist's printed a bare
+> integer, `14`, at `SIZE_META` 12 in `paper_faint` — the weakest string in the
+> product, sitting in the exact slot where the disambiguation should happen.
+> It now prints `Playlist · 14 · 42:10` (ADR-0024 §A3.1). Same widget, same
+> size, same ink, same 64 px row: **no geometry changes here at all**, which is
+> why this is an amendment to a *reason* rather than to a layout.
+>
+> Frames — the lane with both kinds in it:
+> [`docs/design/impl/records-and-lists/`](../design/impl/records-and-lists/README.md).
 
 **Status**: accepted and shipped, as amended above (2026-08-09, 2026-08-10) · extracts the decisions of
 [`docs/design/13-everyday-flow.md`](../design/13-everyday-flow.md) §2, §3,

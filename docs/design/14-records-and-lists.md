@@ -11,7 +11,9 @@
 > Logged in `docs/REQUESTS.md` as **designing** — *"the family was made
 > deliberately; the cost is now visible"*.
 
-**Status**: design study. Proposes an amendment to
+**Status**: design study · **tier 1 shipped 2026-08-10** (§9) · tier 2 queued
+(`docs/WORK.md`) · tier 3 is three questions waiting on the owner. Proposes an
+amendment to
 [ADR-0024](../adr/0024-playlists.md) §A1–§A2, which is where the sleeve and
 the shared page arrangement were decided, and touches
 [ADR-0030](../adr/0030-the-returns-lane-and-the-home-band.md) §2, which is
@@ -932,7 +934,32 @@ which is §5.3.
 
 ## 9. Proposals, ordered by relief
 
-### Tier 1 — adopt
+### Tier 1 — adopt · **shipped 2026-08-10**
+
+All five, on `main`. Frames, the harness and the measured strip at
+[`docs/design/impl/records-and-lists/`](impl/records-and-lists/README.md);
+recorded in [ADR-0024](../adr/0024-playlists.md) §A3–§A5 and
+[ADR-0030](../adr/0030-the-returns-lane-and-the-home-band.md)'s fifth
+amendment.
+
+**Two things this study got wrong, found in the building:**
+
+1. **#1's *"zero geometry change"* claim is true, and #4's *"no new state"*
+   claim is not.** §1.4 costed the save fix as answerable from
+   `queue_provenance()` *"plus the undo history the strip already consults for
+   `can_undo`"*. It is not: `App::queue_undo` is cleared when the place is
+   left (`App::note_place_left`), when the run column stands down
+   (`App::set_run`) and when the run ends (`Event::QueueEnded`) — all three
+   are doc 11 §5 P2's ends for an *edit history*, and none of them un-edits a
+   run. Reading saved-ness off it would have made an edited run claim to be
+   its source file again after one navigation, which is the exact lie §A5 is
+   removing. Divergence is a fact about the queue record, so it is kept there:
+   one bool on `PlayerState`, written by the two calls (`note_queue_sent`,
+   `note_queue_edited`) that already draw ADR-0014's line between a new run
+   and an edit to the one sounding, and read by one method, `run_origin()`.
+2. **#3's noun goes on the whole no-provenance branch**, not only on the
+   cursor reading: before a run starts the strip says `Run · 24 tracks ·
+   1:58:00` as well. The branch is the branch.
 
 | # | change | where | relief |
 |---|---|---|---|

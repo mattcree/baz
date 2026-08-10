@@ -78,7 +78,15 @@ yet built;
 able to tell the difference between an album and a playlist"* and
 *"'save as playlist' really makes no sense on the playlist page for a CD"*:
 the kind stated in words, the page's hierarchy restated per kind, the
-byline line restored, and the run's own control made to say what it saves ·
+byline line restored, and the run's own control made to say what it saves.
+**§A3.1, §A3.2, §A4.2, §A4.3 and §A5.1–§A5.3 are shipped** (2026-08-10, doc
+14 tier 1; captures at
+[`docs/design/impl/records-and-lists/`](../design/impl/records-and-lists/README.md)).
+§A4.4 — the serif on the record page's hero — is **queued** rather than
+shipped, held only because `views/now_playing.rs` argues in prose against it
+and must be amended in the same change (`docs/WORK.md`). §A3's closing
+paragraph and §A4.4's last sentence are the two questions **left to the
+owner** ·
 extracts the decisions of
 [`docs/design/08-playback-and-playlists.md`](../design/08-playback-and-playlists.md)
 §4–§6 · changes no engine command — playing a playlist is `SetQueue` ·

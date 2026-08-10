@@ -550,10 +550,27 @@ fn heading(open: bool) -> Element<'static, Message> {
 /// One row of the lane: a sleeve, and — expanded — the name over one quiet
 /// line.
 ///
-/// **Nothing marks which kind a row is**, because the sleeve already does: a
-/// record wears its cover, a playlist wears the 2 × 2 collage of the records
-/// it quotes (ADR-0024 §A1). That is what makes a mixed list read as one list
-/// rather than as two lists sharing a column.
+/// **Nothing is drawn *on* a row to mark its kind** — no badge, no glyph, no
+/// corner — because a mark you must learn is not a hierarchy, and because
+/// nothing is ever drawn on top of a sleeve (ADR-0024 §A3.3). What marks it
+/// is **the line under the name**: an artist's name for a found thing, and
+/// `Playlist · 14 · 42:10` for a made one
+/// ([`PanelRow::counts`](crate::playlists::PanelRow::counts), ADR-0024
+/// §A3.1). Same widget, same size, same ink — a different string, which is
+/// what lets a mixed list stay one list rather than becoming two lists
+/// sharing a column.
+///
+/// **This corrects what stood here.** The comment used to say that nothing
+/// marks the kind *because the sleeve already does*: a record wears its
+/// cover, a playlist wears the 2 × 2 collage of the records it quotes
+/// (ADR-0024 §A1, ADR-0030 §2). That premise is **false for every playlist of
+/// one to three distinct records** — below four, `views::playlist_sleeve`
+/// draws the first record's cover full-bleed through the same `sleeve_cell`
+/// this row builds for a record, from the same cache at the same edge. It is
+/// therefore false for every playlist `Save as playlist` makes from a CD (one
+/// record, by construction) and for every list on its way to four. The
+/// collage stays exactly as §A1 designed it and stays *a* signal; it is no
+/// longer *the* signal (§A3.2).
 fn lane_row<'a>(
     shelf: &'a Shelf,
     playlists: &'a Playlists,

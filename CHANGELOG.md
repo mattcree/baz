@@ -328,6 +328,59 @@ next commit.
   own two-column arrangement: the work over `Play` in the aside, the name
   over the rows in the main column. Whether playlists also join the wall is
   deliberately deferred to the implicit-playlists design study (doc 09).
+- **A record is a work you found; a playlist is a label you made**
+  ([ADR-0024](docs/adr/0024-playlists.md) §A3–§A5, design doc 14, tier 1). The
+  owner reported two things in one breath — *"we do not have the playlist name
+  really prominent… the information heirarchy isn't great to be able to tell
+  the difference between an album and a playlist"* and *"'save as playlist'
+  really makes no sense on the playlist page for a CD"* — and they were one
+  defect: `Save as playlist` over a CD wrote a one-record playlist, whose
+  sleeve is byte-for-byte the widget a record's own row builds, which then
+  landed in `RECENT` above the record it came from wearing its face. The
+  control manufactured the confusion.
+  - **The line under a name declares its kind in its first token.** A
+    playlist's `14` becomes `Playlist · 14 · 42:10`, in the exact slot where a
+    record prints its album artist. One string, and it reaches the returns
+    lane's rows, the playlist panel's rows and any tile a playlist ever gets:
+    the same `SIZE_META` text at the same leading, so **no geometry changes
+    anywhere**. A bare integer in that slot did not read as a count — it read
+    as a name truncated to nothing.
+  - **The playlist page gets back the byline the record page always had.** The
+    name was never small: it is the album title's own `SIZE_HERO` 28 /
+    `SEMIBOLD` and always was. What was missing was the 19 px line of support
+    under it, so the block stopped after 52 px against a record's 80. The
+    playlist page was the album page *with the byline deleted*. The slot now
+    holds the word `Playlist`, the two identity blocks are one 80 px shape, and
+    the difference lives in what the middle line **says** — an artist for a
+    found thing, its kind for a made one. Not *"Made by you"*: a `.m3u8`
+    dropped into the folder was not made here and records no author.
+  - **The run column's strip names its subject.** With no provenance it read
+    `1 of 24 · 1:56:19 left` — a reading with no noun — beside a word offering
+    to save it and 57 px above the record's own title. Both branches now open
+    with a subject: `Run · 1 of 24 · 1:56:19 left`, or the list's name when the
+    run came from one.
+  - **`Save as playlist` says what it is saving, and offers only when it can
+    act.** Over a run reified from a file and unedited since, the word is the
+    readout `Saved as "Road Trip"` — the run *is* that file, whose name the
+    same strip is already printing. One edit and the live word returns as
+    **`Save as new playlist`**. `Save changes to "…"` is refused: provenance is
+    an origin, never a live link, and a run that wrote itself back would be the
+    two-structure confusion returning. Nothing is removed — freezing a
+    transient into a file is still one press, which is what a shuffle, a
+    `Play all` and an edited run genuinely want. The precedent is eleven lines
+    up in the same file: `Undo` is drawn only while there is an edit to take
+    back.
+  - **The collage is demoted from *the* signal to *a* signal**, and the two
+    prose sites that said otherwise are corrected (`views/lane.rs`,
+    [ADR-0030](docs/adr/0030-the-returns-lane-and-the-home-band.md)'s fifth
+    amendment). ADR-0024 §A1 is unchanged in every rule; what was false was the
+    load on it — below four distinct records a playlist's sleeve *is* a
+    record's cover, from the same cache at the same edge, which is every list
+    `Save as playlist` makes from a CD and every list on its way to four.
+  - No badge, no glyph, no rounded corner: a mark over a sleeve breaches
+    *"nothing is ever drawn on top of a sleeve"*, and a rounded one means
+    *different* rather than *made*. Frames at
+    `docs/design/impl/records-and-lists/`.
 
 **Interface**
 

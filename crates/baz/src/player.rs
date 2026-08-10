@@ -754,8 +754,10 @@ pub struct QueueList {
     pub album: Option<String>,
     /// Who that album is filed under.
     pub artist: String,
-    /// The one-line reading: `3 of 12 · 38:12 left` while something is playing,
-    /// `12 tracks · 51:20` otherwise, with the time dropped when the scan read
+    /// The one-line reading, led by the noun of its subject —
+    /// `Run · 3 of 12 · 38:12 left` while something is playing,
+    /// `Run · 12 tracks · 51:20` otherwise, with the run's provenance in the
+    /// noun's place when it has one, and the time dropped when the scan read
     /// no durations to add up (see [`queue_summary`]).
     pub summary: String,
     /// The rows, in play order.
@@ -935,6 +937,49 @@ pub struct PlayerState {
     /// and not an object, which is what keeps ADR-0023 §1's refusal of a live
     /// context intact.
     source_order: Option<crate::shuffle::SourceOrder>,
+    /// **Whether the run has been edited since it was handed to the engine.**
+    ///
+    /// Set by [`Self::note_queue_edited`] and cleared by
+    /// [`Self::note_queue_sent`] — the two calls that already draw ADR-0014's
+    /// line between *a new run* and *an edit to the one sounding*. Its one
+    /// reader is [`Self::run_origin`], which is what decides whether the run
+    /// column's `Save as playlist` is an offer or a readout (ADR-0024 §A5.2).
+    ///
+    /// **Why this is not read off the undo history.** Design 14 §1.4 costed
+    /// the fix as *"no new state"*, on the reasoning that `can_undo` already
+    /// answers *"has this run been edited?"*. It does not, durably:
+    /// `App::queue_undo` is cleared when the place is left
+    /// (`App::note_place_left`), when the run column stands down
+    /// (`App::set_run`) and when the run ends (`Event::QueueEnded`) — all
+    /// three are P2's ends for an *edit history*, and none of them un-edits
+    /// the run. Reading it here would make an edited run claim to be its
+    /// source file again the moment you navigated away and back, which is the
+    /// exact lie §A5 is removing. Divergence is a fact about the queue
+    /// record, so it is kept beside the queue record.
+    queue_edited: bool,
+}
+
+/// **What the run standing is, with respect to a playlist file** — the three
+/// states the summary strip's save word has to tell apart (ADR-0024 §A5.2).
+///
+/// Derived, never stored: provenance is the queue record's own
+/// ([`PlayerState::queue_provenance`]) and divergence is
+/// [`PlayerState::note_queue_edited`]'s. Nothing here is a *link* — ADR-0023
+/// §3 makes provenance an origin, and [`Self::Diverged`] exists precisely so
+/// that a diverged run offers a **new** file rather than a write-back, which
+/// ADR-0024's 2026-08-09 amendment item 6 refuses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunOrigin<'a> {
+    /// No file behind it: a record's run, a shuffle, a `Play all`, a
+    /// needle-drop. Freezing it into a playlist is a genuine creation act
+    /// (ADR-0024 §4) and the word is live.
+    Unfiled,
+    /// Reified from the named playlist file and unedited since — the run
+    /// **is** that file, so the word is a readout rather than an offer.
+    Saved(&'a str),
+    /// Reified from a file and edited since: the run has diverged from it, so
+    /// the honest offer is a new playlist.
+    Diverged,
 }
 
 impl PlayerState {
@@ -979,6 +1024,8 @@ impl PlayerState {
             // `seed_volume`'s reason.
             shuffle: false,
             source_order: None,
+            // No run at all, so nothing has been edited.
+            queue_edited: false,
         }
     }
 
@@ -1178,6 +1225,10 @@ impl PlayerState {
         // Every gesture that *did* arrange one says so through
         // [`Self::note_shuffled_run`] instead.
         self.source_order = None;
+        // …and it is the list it was handed as, not a divergence from
+        // anything. A run reified from a playlist file arrives here *as* that
+        // file (see [`Self::run_origin`]).
+        self.queue_edited = false;
     }
 
     /// Record a queue the shuffle property arranged, with the order it would
@@ -1228,6 +1279,11 @@ impl PlayerState {
     /// run, and the files that failed in this one still failed.
     pub fn note_queue_edited(&mut self, queue: QueueVm) {
         self.queue = Some(queue);
+        // The run has diverged from whatever it was reified from, and that is
+        // permanent for this run: provenance is origin, never a live link
+        // (ADR-0023 §3), so nothing here ever writes back and nothing ever
+        // decides the run has become its file again.
+        self.queue_edited = true;
     }
 
     /// Record that a transport command (Play/Pause/Next) was accepted by
@@ -1801,6 +1857,30 @@ impl PlayerState {
         self.queue.as_ref()?.provenance.as_deref()
     }
 
+    /// **What the run is with respect to a playlist file** — the reading the
+    /// run column's save word is drawn from (ADR-0024 §A5.2).
+    ///
+    /// [`Self::queue_provenance`] and the edit flag, put together in one
+    /// place so that no view has to re-derive the rule: provenance standing
+    /// and no edit since ⇒ [`RunOrigin::Saved`], the run *is* that file and
+    /// the word states it; an edit since ⇒ [`RunOrigin::Diverged`], and the
+    /// only honest offer is a new file; no provenance at all ⇒
+    /// [`RunOrigin::Unfiled`], which is a record's run, a shuffle or a
+    /// `Play all` and where the creation act genuinely belongs.
+    ///
+    /// This is the predicate the defect was missing: `save_control` was
+    /// conditioned on **nothing** but whether its own name field was already
+    /// open, so a run reified from `Road Trip` offered to save a thing whose
+    /// name the same strip was printing two inches to the left.
+    #[must_use]
+    pub fn run_origin(&self) -> RunOrigin<'_> {
+        match self.queue_provenance() {
+            None => RunOrigin::Unfiled,
+            Some(_) if self.queue_edited => RunOrigin::Diverged,
+            Some(name) => RunOrigin::Saved(name),
+        }
+    }
+
     /// The sounding row's queue position, for the surfaces whose *subject*
     /// is the sounding track rather than a listed row — today the bar's
     /// context menu (doc 09 §5.2), whose transfer items spend the queue
@@ -2216,10 +2296,10 @@ impl PlayerState {
     }
 }
 
-/// The **Queue** popover's one-line reading.
+/// The run column's one-line reading, **led by the noun of its subject**.
 ///
 /// While something is playing it counts and then says **what is left**:
-/// `3 of 12 · 38:12 left`. Otherwise it states the size and the whole running
+/// `Run · 3 of 12 · 38:12 left`. Otherwise it states the size and the whole running
 /// time, because "0 of 12" would be a position that does not exist and
 /// "remaining" is the same number as "total" before anything has started.
 ///
@@ -2242,6 +2322,15 @@ impl PlayerState {
 /// (`docs/design/09-implicit-playlists.md` §6, §10). Origin, never a live
 /// link: the name keeps leading through every edit, and goes only when a
 /// different play gesture replaces the run.
+///
+/// **And when it has none, it leads with `Run`** (ADR-0024 §A5.1). The strip
+/// was the one thing on that surface that could say what the column is, and
+/// with no provenance it said `1 of 24 · 1:56:19 left` — a reading with no
+/// subject, beside a word offering to save it and above the record's own
+/// title. Both branches now open with a noun, so the strip's first token is
+/// always *what this list is*, exactly as
+/// [`PanelRow::counts`](crate::playlists::PanelRow::counts) makes the lane's
+/// second line always open with what a row is.
 fn queue_summary(queue: &QueueVm, playing: Option<usize>, elapsed_ms: u64) -> String {
     let reading = match playing {
         None => {
@@ -2266,7 +2355,15 @@ fn queue_summary(queue: &QueueVm, playing: Option<usize>, elapsed_ms: u64) -> St
     };
     match &queue.provenance {
         Some(name) => format!("{name} · {reading}"),
-        None => reading,
+        // **The strip names its subject** (ADR-0024 §A5.1). Without the noun
+        // the left end read `1 of 24 · 1:56:19 left` — a reading with no
+        // subject — while 340 px to its right stood the word
+        // `Save as playlist`, and 57 px below stood the record's own title.
+        // The word was optically a control *of the column*, and the column
+        // was showing a CD. One word, in the string this branch already
+        // builds: it costs no widget and no height, and it is what makes the
+        // word beside it unambiguous.
+        None => format!("Run · {reading}"),
     }
 }
 
@@ -5148,7 +5245,7 @@ mod tests {
 
         assert_eq!(list.album.as_deref(), Some("Geogaddi"));
         assert_eq!(list.artist, "Boards of Canada");
-        assert_eq!(list.summary, "2 tracks · 6:40");
+        assert_eq!(list.summary, "Run · 2 tracks · 6:40");
         assert_eq!(
             list.rows.iter().map(|row| row.position).collect::<Vec<_>>(),
             vec![1, 2],
@@ -5211,8 +5308,101 @@ mod tests {
         assert_eq!(player.queue_provenance(), None);
         assert_eq!(
             player.queue_list().expect("a queue").summary,
-            "2 tracks · 6:40"
+            "Run · 2 tracks · 6:40"
         );
+    }
+
+    /// **Both branches of the strip open with a noun** (ADR-0024 §A5.1).
+    ///
+    /// With no provenance the strip used to read `1 of 24 · 1:56:19 left` — a
+    /// reading with no subject — while `Save as playlist` stood 340 px to its
+    /// right and the record's own title 57 px below it. Nothing on the surface
+    /// said the column was a **run** rather than the record it was showing, so
+    /// the word read as a control of the record. `Run · ` is that missing
+    /// noun, in the string this function already built.
+    #[test]
+    fn the_summary_names_its_subject_when_no_file_named_it() {
+        let albums = albums();
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(geogaddi_queue());
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "Run · 2 tracks · 6:40",
+            "before a run starts, the size and the whole time — with the noun"
+        );
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "Run · 1 of 2 · 6:40 left",
+            "and the cursor reading takes the same noun"
+        );
+
+        // The noun is the *subject*, so a run that has one of its own keeps
+        // it: a list's name is a better answer to "what is this?" than the
+        // word `Run`, and printing both would be the strip saying it twice.
+        let mut from_file = geogaddi_queue();
+        from_file.provenance = Some("Road Trip".to_owned());
+        player.note_queue_sent(from_file);
+        let summary = player.queue_list().expect("a queue").summary;
+        assert!(summary.starts_with("Road Trip · "), "{summary}");
+        assert!(!summary.contains("Run · "), "{summary}");
+    }
+
+    /// **`Save as playlist` does not offer over a run that is already a saved
+    /// file** — the defect the owner reported, as a test over the predicate
+    /// rather than over the widget (ADR-0024 §A5.2).
+    ///
+    /// Three states, and the third is the one that makes this a fix rather
+    /// than a prohibition: a run reified from `Road Trip` and then **edited**
+    /// has diverged from that file, so the live word comes back — as
+    /// `Save as new playlist`, never as a write-back, which ADR-0024's
+    /// 2026-08-09 amendment item 6 and ADR-0023 §3 both refuse.
+    #[test]
+    fn the_save_word_offers_only_over_a_run_that_is_not_already_a_file() {
+        let mut player = PlayerState::new(Availability::Ready);
+        assert_eq!(
+            player.run_origin(),
+            RunOrigin::Unfiled,
+            "no run at all is nobody's file"
+        );
+
+        // A · a record's run. No file behind it, so freezing it is a genuine
+        // creation act and the word is live — correctly, and this is the case
+        // the owner was looking at. What changed for it is the strip's noun,
+        // not the control.
+        player.note_queue_sent(geogaddi_queue());
+        assert_eq!(player.run_origin(), RunOrigin::Unfiled);
+
+        // B · reified from a file, untouched. The run *is* that file, and its
+        // name is already printed at the head of the very strip the word sits
+        // in — so the word states it instead of offering it.
+        let mut from_file = geogaddi_queue();
+        from_file.provenance = Some("Road Trip".to_owned());
+        player.note_queue_sent(from_file);
+        assert_eq!(player.run_origin(), RunOrigin::Saved("Road Trip"));
+
+        // C · the same run, after one edit. Live again, and a *new* file is
+        // the only thing it may offer.
+        let mut edited = geogaddi_queue();
+        edited.provenance = Some("Road Trip".to_owned());
+        player.note_queue_edited(edited);
+        assert_eq!(player.run_origin(), RunOrigin::Diverged);
+        assert_eq!(
+            player.queue_provenance(),
+            Some("Road Trip"),
+            "the origin still leads the strip: an edit diverges the run, it \
+             does not erase where the run came from"
+        );
+
+        // …and divergence is a fact about the run, not about the surface
+        // showing it. `App::queue_undo` is cleared by leaving the place, by
+        // standing the run column down and by the run ending — none of which
+        // un-edits anything — which is why this is not read off `can_undo`.
+        assert_eq!(player.run_origin(), RunOrigin::Diverged);
+
+        // A new run is a new answer, in both directions.
+        player.note_queue_sent(geogaddi_queue());
+        assert_eq!(player.run_origin(), RunOrigin::Unfiled);
     }
 
     /// **A queue holding several records lists them as records** — one name
@@ -5288,7 +5478,7 @@ mod tests {
             vec![QueueRowState::Playing, QueueRowState::Upcoming]
         );
         // Nothing has elapsed yet, so what is left is the whole queue.
-        assert_eq!(list.summary, "1 of 2 · 6:40 left");
+        assert_eq!(list.summary, "Run · 1 of 2 · 6:40 left");
 
         player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
         let list = player.queue_list().expect("a queue");
@@ -5297,7 +5487,7 @@ mod tests {
             vec![QueueRowState::Played, QueueRowState::Playing]
         );
         assert_eq!(
-            list.summary, "2 of 2 · 3:20 left",
+            list.summary, "Run · 2 of 2 · 3:20 left",
             "the first track is behind us and must not count towards what is left"
         );
     }
@@ -5320,18 +5510,18 @@ mod tests {
         // are the same number, and the plainer of the two words is right.
         assert_eq!(
             player.queue_list().expect("a queue").summary,
-            "2 tracks · 6:40"
+            "Run · 2 tracks · 6:40"
         );
 
         player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
         assert_eq!(
             player.queue_list().expect("a queue").summary,
-            "1 of 2 · 6:40 left"
+            "Run · 1 of 2 · 6:40 left"
         );
         player.apply(&progress(60_000, Some(200_000)), &albums);
         assert_eq!(
             player.queue_list().expect("a queue").summary,
-            "1 of 2 · 5:40 left",
+            "Run · 1 of 2 · 5:40 left",
             "a minute into the first track, a minute has come off the reading"
         );
 
@@ -5341,7 +5531,7 @@ mod tests {
         player.apply(&progress(999_000, Some(200_000)), &albums);
         assert_eq!(
             player.queue_list().expect("a queue").summary,
-            "1 of 2 · 3:20 left"
+            "Run · 1 of 2 · 3:20 left"
         );
     }
 
@@ -5382,7 +5572,7 @@ mod tests {
         // …and it is the same reading the list makes, or the bar and the
         // popover would be able to disagree about where the music is.
         let list = player.queue_list().expect("a queue");
-        assert_eq!(list.summary, "2 of 2 · 3:20 left");
+        assert_eq!(list.summary, "Run · 2 of 2 · 3:20 left");
 
         player.apply(&Event::QueueEnded, &albums);
         assert_eq!(
@@ -5590,7 +5780,7 @@ mod tests {
         // "what comes after this" are different questions.
         assert_eq!(
             player.queue_list().expect("a queue").summary,
-            "2 of 2 · 3:20 left"
+            "Run · 2 of 2 · 3:20 left"
         );
     }
 
@@ -5726,7 +5916,10 @@ mod tests {
         });
         player.apply(&started("/m/stack/0.flac", 0), &[]);
         assert_eq!(player.continuation_note().as_deref(), Some("then Kid A"));
-        assert_eq!(player.queue_list().expect("a queue").summary, "1 of 2");
+        assert_eq!(
+            player.queue_list().expect("a queue").summary,
+            "Run · 1 of 2"
+        );
     }
 
     /// A record queued twice with something between the two goes back to being
@@ -5961,7 +6154,7 @@ mod tests {
             vec![QueueRowState::Upcoming, QueueRowState::Upcoming],
             "an unknown track must not mark the row its position points at"
         );
-        assert_eq!(list.summary, "2 tracks · 6:40");
+        assert_eq!(list.summary, "Run · 2 tracks · 6:40");
     }
 
     /// Position and path disagreeing — an event from the queue before last —
@@ -5999,7 +6192,7 @@ mod tests {
                 vec![QueueRowState::Upcoming, QueueRowState::Upcoming],
                 "{ending:?} left a row marked"
             );
-            assert_eq!(list.summary, "2 tracks · 6:40");
+            assert_eq!(list.summary, "Run · 2 tracks · 6:40");
             assert_eq!(player.queued(), 2);
         }
     }
@@ -6019,7 +6212,7 @@ mod tests {
         assert_eq!(list.rows.len(), 1);
         assert_eq!(states(&list), vec![QueueRowState::Upcoming]);
         assert_eq!(
-            list.summary, "1 track · 3:20",
+            list.summary, "Run · 1 track · 3:20",
             "one track is a track, not tracks"
         );
     }
@@ -6061,7 +6254,7 @@ mod tests {
             provenance: None,
         });
         let list = player.queue_list().expect("a queue");
-        assert_eq!(list.summary, "1 track");
+        assert_eq!(list.summary, "Run · 1 track");
         assert_eq!(list.album, None);
         assert_eq!(list.rows[0].duration, "", "no duration, not 0:00");
     }
