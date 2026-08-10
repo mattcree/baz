@@ -115,9 +115,6 @@ const SIDEBAR_OPEN: &str = "sidebar_open";
 /// The key the player's shuffle property is written under.
 const SHUFFLE: &str = "shuffle";
 
-/// The key the now-playing place's run column is written under.
-const RUN_COLUMN: &str = "run_column";
-
 /// Application configuration. See the [module docs](self) for scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -200,27 +197,6 @@ pub struct Config {
     /// launches with shuffle on should be two different shuffles; remembering
     /// one would make every morning's first record play in last night's order.
     pub shuffle: bool,
-    /// **Whether the now-playing place shows the run beside the record**
-    /// (`docs/design/12-now-playing-and-kiosk.md` §3.4.3).
-    ///
-    /// The merged surface has two densities — the record and its list, or the
-    /// record alone — and this is which one the listener chose. **View state,
-    /// persisted, and deliberately not a setting**, on `sidebar_open`'s exact
-    /// footing (ADR-0017 §1.3): the control is the `Run` word in the place's
-    /// own top-right corner, and this key is where the press's *result* is
-    /// remembered.
-    ///
-    /// **It is not bound to full-screen**, and that is the decision rather than
-    /// an omission: iced 0.13 publishes no monitor enumeration, so baz cannot
-    /// tell a second-display full-screen from an only-display one, and a
-    /// single-display listener pressing `F11` would lose the run editor with no
-    /// way back. So the density is a word you press, and `F11` stays a *window*
-    /// act that works in every place.
-    ///
-    /// A fresh baz opens with it **on**. The surface's own argument is that a
-    /// run is a list and a cursor; the half that has to be discovered should be
-    /// the one you turned off.
-    pub run_column: bool,
 }
 
 impl Default for Config {
@@ -235,7 +211,6 @@ impl Default for Config {
             density: Density::Balanced,
             sidebar_open: true,
             shuffle: false,
-            run_column: true,
         }
     }
 }
@@ -306,13 +281,6 @@ impl Config {
              now-playing bar\n{SHUFFLE} = {}",
             self.shuffle,
         );
-        let _ = writeln!(
-            out,
-            "# whether the now-playing place shows the run beside the record \
-             (the `Run` word,\n# in that place's own top-right corner)\n\
-             {RUN_COLUMN} = {}",
-            self.run_column,
-        );
         let _ = write!(
             out,
             "\n[{REPLAY_GAIN_TABLE}]\n\
@@ -374,14 +342,6 @@ impl Config {
             .get(SHUFFLE)
             .and_then(toml::Value::as_bool)
             .unwrap_or(false);
-        // `sidebar_open`'s degradation exactly, and it defaults the same way:
-        // the merged surface's own argument is that a run is a list and a
-        // cursor, so a file that cannot say which density was chosen opens on
-        // the one that shows both halves.
-        let run_column = table
-            .get(RUN_COLUMN)
-            .and_then(toml::Value::as_bool)
-            .unwrap_or(true);
         Self {
             music_dirs,
             replay_gain,
@@ -389,7 +349,6 @@ impl Config {
             density,
             sidebar_open,
             shuffle,
-            run_column,
         }
     }
 }
@@ -581,7 +540,6 @@ mod tests {
                 density: Density::Dense,
                 sidebar_open: true,
                 shuffle: false,
-                run_column: false,
             };
             let back = Config::from_toml(&config.to_toml());
             assert_eq!(back, config, "round-trip failed for {replay_gain:?}");
@@ -913,7 +871,6 @@ mod tests {
             density: Density::Spacious,
             sidebar_open: true,
             shuffle: false,
-            run_column: true,
         };
         let text = config.to_toml();
         assert!(!text.contains(MUSIC_DIRS), "{text}");
@@ -933,7 +890,6 @@ mod tests {
             density: Density::Spacious,
             sidebar_open: true,
             shuffle: false,
-            run_column: true,
         };
         store(&path, &config).expect("store creates parents and writes");
         assert_eq!(load(&path), config);
@@ -1086,41 +1042,46 @@ mod tests {
             density: Density::Dense,
             sidebar_open: true,
             shuffle: false,
-            run_column: true,
         };
         let table: toml::Table = config.to_toml().parse().expect("baz writes valid TOML");
         assert!(table.contains_key(MUSIC_DIRS));
         assert!(table.contains_key(REPLAY_GAIN_TABLE));
         assert!(table.contains_key(GROUP_KEY));
         assert!(table.contains_key(DENSITY));
-        assert!(table.contains_key(RUN_COLUMN));
     }
 
-    /// **The merged now-playing surface's density is remembered** (doc 12
-    /// §3.4.3, S11: *given `Run` was turned off, when baz is relaunched, then
-    /// it is still off*).
+    /// **The now-playing density is gone, and an old file carrying it is read
+    /// without harm.**
     ///
-    /// A fresh baz opens with the run **on**, an unreadable value degrades to
-    /// on rather than costing the surface half of itself, and a file that says
-    /// `false` is honoured — the three states `sidebar_open` has, on
-    /// `sidebar_open`'s own terms.
+    /// The owner removed the `Run` word on 2026-08-10, so `run_column` is not a
+    /// setting any more. Two things have to be true of a `config.toml` written
+    /// by the build before this one, and the second is the one that matters:
+    ///
+    /// - the key is **not written back** — a document that still advertised a
+    ///   control nobody can press would invite somebody to edit it and watch
+    ///   nothing happen;
+    /// - `run_column = false` **costs its neighbours nothing**. This reader is
+    ///   per key by construction (module docs), so an unknown key is skipped
+    ///   rather than failing the document — and the run column now stands
+    ///   because there is a run, which no file can turn off.
+    ///
+    /// The listener this protects is the one who had the density off: he
+    /// upgrades into the surface with *more* on it, never into a blank half.
     #[test]
-    fn the_run_column_is_remembered_and_defaults_to_standing() {
-        assert!(Config::default().run_column);
-        // A document that has never heard of the key: a baz that predates the
-        // merge, and a hand-written file.
-        assert!(Config::from_toml("group_key = \"year\"").run_column);
-        // A value that is not a bool at all costs this one key and nothing
-        // around it.
-        let damaged = Config::from_toml("run_column = \"maybe\"\nsidebar_open = false\n");
-        assert!(damaged.run_column);
-        assert!(!damaged.sidebar_open);
-        // …and the press is honoured, through the document baz writes.
-        let off = Config {
-            run_column: false,
-            ..Config::default()
-        };
-        assert!(!Config::from_toml(&off.to_toml()).run_column);
-        assert!(Config::from_toml(&Config::default().to_toml()).run_column);
+    fn the_retired_density_key_is_neither_written_nor_honoured() {
+        assert!(
+            !Config::default().to_toml().contains("run_column"),
+            "the retired key came back to the document baz writes"
+        );
+        // A file from the build that had the word, with the density turned off.
+        let stale = Config::from_toml(
+            "run_column = false\nsidebar_open = false\nshuffle = true\ngroup_key = \"year\"\n",
+        );
+        assert!(!stale.sidebar_open, "an unknown key cost its neighbour");
+        assert!(stale.shuffle);
+        assert_eq!(stale.group_key, GroupKey::Year);
+        // …and it does not survive a rewrite, so the key leaves a listener's
+        // file the first time baz saves anything.
+        assert!(!stale.to_toml().contains("run_column"));
     }
 }

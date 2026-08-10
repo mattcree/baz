@@ -27,11 +27,37 @@
 
 ## Next
 
-1. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** Visible in a
+1. **A crossfade on the artwork when the record changes.** The owner,
+   2026-08-10: *"when changing track there isn't any kind of nice visual
+   transition for album art in now playing. we should have something a bit
+   nicer, like a quick fade"*. **Deliberately deferred out of that afternoon's
+   batch** — six changes to that one surface landed together and a seventh done
+   hastily is worse than a seventh done next. Everything needed to build it is
+   written down here so nothing has to be rediscovered:
+   - a **bounded** crossfade of the hero, which is a *transition* and not
+     ambient motion — ADR-0020 permits exactly this class, and `crate::motion`
+     already owns the product's durations and easing. Do not invent a number.
+   - **fade only when the artwork actually changes.** Consecutive tracks on one
+     record share a cover, and fading a picture into an identical picture is a
+     flicker nobody can find a reason for. Compare the handle being drawn, not
+     the track.
+   - **start when the new art is ready, not when the track starts.**
+     `art::load_hero` decodes off-thread at 1024 px; beginning before the decode
+     lands fades to nothing and then pops, which is worse than today's cut.
+   - the **two-entry hero LRU** is what makes this possible with no new caching
+     — its second slot holds the record that just stopped, so both images are
+     alive at once. Written for prefetch; check it holds before relying on it.
+   - **the field must travel with the art.** It is one continuous wash since
+     this batch; if the cover crossfades while the room's colour cuts, the seam
+     the owner just had removed comes back in time instead of space.
+   - **idle must return to zero** — the tween ends, its subscription ends, the
+     surface is static. `the_ambient_clock_is_absent_outside_its_place` is the
+     shape of the test that keeps that honest.
+2. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** Visible in a
    committed frame: at 2560 with the run standing, ~700 px of field sits
    between the sleeve and the run column, because the record column hangs left
    and the run stays 440 wide. A4 takes it to ~1100 at that size.
-2. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
+3. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
    the Flatpak build are all done; what is left is a screenshot for the
    metainfo, the version edit from `0.0.0`, a `workflow_dispatch` dry run,
    then the tag. **The tag is the owner's to cut** — the workflow produces a
@@ -143,6 +169,34 @@ Nothing. The queue above is the next thing.
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **The owner's `Now playing` batch, 2026-08-10** — six asks on one surface in
+  one afternoon, with frames for each at
+  `docs/design/impl/now-playing-shows-the-run/`.
+  - the **`Run` word and the two densities** removed. The run column is not
+    what went — it stands whenever there is a run, and all fifteen of its
+    affordances are untouched. `Ctrl+U` folded into `Message::ShowNowPlaying`.
+  - the place **shows whatever the bar names**, sounding or not. The record's
+    column is drawn even when there is no record, so a loaded run becoming a
+    sounding one moves nothing — and the field had believed that all along
+    (`Ground::Split`), which is how the disagreement was found.
+  - the **`Nothing queued` state** inset like the rows it replaces. The wall's
+    and the playlist page's were checked and are correct.
+  - **three kinds of list** (`RunSource::Fixed · Playlist · Assembled`), so the
+    save word appears only for a run assembled from nothing. *Has a file* was
+    never the predicate; *did the listener assemble this* is.
+  - the **field runs continuously under the run column**. The clamp that made
+    the seam was protecting the rows' contrast, so it is replaced by a
+    measurement: binding case `paper_faint` at 4.71 : 1 against a 4.5 floor.
+  - the **run column follows the music** — on the engine's confirmation only,
+    only when the row is off screen, landing it two rows down.
+  - **Deferred out of the batch, deliberately:** the artwork crossfade, now
+    item 1 of *Next* with everything it needs written down.
+  - **Left as it is, with evidence:** *"that needs a scrollbar as well"* — the
+    run column already draws one, at the list's 10 px form, at the column's own
+    right edge (frames `30`/`31`). `theme.rs`'s rule is that a list's bar is
+    its only readout of how much list there is, which is why the wall's is the
+    narrow one and this is not. **Needs the owner's eye on the frame**: if he
+    still cannot find it, the change is one line.
 - **`A–Z` is a group key again, first in the row** — the owner's *"that feels
   like it should go back and honestly it's the first option, followed by
   artist"*. The strip is `A–Z · ARTIST · YEAR · GENRE · ADDED · PLAYED` and the

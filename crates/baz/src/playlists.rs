@@ -48,7 +48,7 @@ use std::time::Duration;
 use baz_core::index::{AlbumArtist, Library};
 use baz_core::playlist::{Entry, ExtInf, Folder, Item, Playlist, PlaylistError};
 
-use crate::vm::{self, QueueItemVm, QueueVm, TrackVm};
+use crate::vm::{self, QueueItemVm, QueueVm, RunSource, TrackVm};
 
 /// What the record page's transfer affordances need to know, bundled so the
 /// view signatures stay readable: whether playlists can exist at all, and
@@ -1371,8 +1371,14 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
         // carries the file's name — origin, never a live link. Set here, in
         // the one place the playable subset becomes a queue record, so
         // `Play` and a row click cannot disagree about where the run is
-        // from. Every other queue construction leaves it `None`.
-        provenance: Some(playlist.name().to_owned()),
+        // from.
+        //
+        // **It is a `named` list**, and named lists offer no save word: the
+        // owner, 2026-08-10, *"adding more stuff to an existing playlist is
+        // fine, that does not need a save -- it's a low bar to edit a
+        // playlist"*. Editing this run still never touches the file
+        // (ADR-0024 §1); the page is the route to that.
+        source: RunSource::Playlist(playlist.name().to_owned()),
     };
     OpenPlaylist {
         id,
@@ -1857,14 +1863,13 @@ mod tests {
             album: Some("Apollo".to_owned()),
             artist: "Eno".to_owned(),
             items: vec![item("An Ending", "/m/eno/ascent.flac")],
-            provenance: Some("Road Trip".to_owned()),
+            source: RunSource::Playlist("Road Trip".to_owned()),
         };
         let before = run.clone();
         // The menu's facts, derived exactly as `App::menu_facts` derives
         // them: provenance, filtered through the folder's own listing.
         let current = run
-            .provenance
-            .as_deref()
+            .provenance()
             .filter(|name| playlists.holds(name))
             .map(|name| (playlist_id(name), name.to_owned()));
         assert!(current.is_some(), "the file stands, so the verb does");
@@ -1979,7 +1984,7 @@ mod tests {
                 duration: Some(Duration::from_secs(260)),
                 path: track("/m/eno/ascent.flac"),
             }],
-            provenance: None,
+            source: RunSource::Fixed,
         };
         // Whitespace at the ends is trimmed rather than refused (the roots
         // field's own manner); what the storage layer's rule genuinely
@@ -2193,12 +2198,7 @@ mod tests {
         playlists.refresh(Some(&library));
         assert!(playlists.open_page(id, &library));
         assert_eq!(
-            playlists
-                .page(id)
-                .expect("open")
-                .queue
-                .provenance
-                .as_deref(),
+            playlists.page(id).expect("open").queue.provenance(),
             Some("Road Trip")
         );
     }

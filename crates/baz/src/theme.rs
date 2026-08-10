@@ -2709,10 +2709,11 @@ pub fn lamp_dot(p: &Palette) -> container::Style {
 /// floor asserted in `a_transport_button_is_a_square_target_around_its_glyph`,
 /// and it is a property of the *button*, not of its paint: what has gone is
 /// the chrome, not the square. The border is 1 px in every state and merely
-/// transparent in three, for the reason [`now_playing`] gives — iced draws a
-/// border inside the widget's bounds, so a border that appeared on hover would
-/// move the glyph under the pointer by a pixel, in the bar, where nothing may
-/// move.
+/// transparent in three, and the reason is the toolkit's: iced draws a border
+/// inside the widget's bounds, so a border that appeared on hover would move
+/// the glyph under the pointer by a pixel, in the bar, where nothing may move.
+/// [`now_playing_text`] keeps the same rule by the opposite construction — no
+/// edge at all rather than a transparent one — and says why there.
 #[must_use]
 pub fn transport(p: &Palette, on: Color, status: button::Status) -> button::Style {
     let (background, text_color) = match status {
@@ -3567,50 +3568,6 @@ pub fn now_playing_text(p: &Palette, status: button::Status) -> button::Style {
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
-            radius: RADIUS_CTRL.into(),
-        },
-        shadow: Shadow::default(),
-    }
-}
-
-/// The bar's labelled **Queue** control — the door to the queue place.
-///
-/// Invisible at rest — the bar's left zone must go on reading as the track
-/// name, not as a row of buttons — a quiet card under the pointer, and the
-/// raised card with a hairline edge while the place it opens **is** the place
-/// on screen. That last state is not decoration: it is the only thing that
-/// tells a listener standing in the queue which of the bar's two doors they
-/// came through.
-///
-/// **The border width is 1 px in every state, including the invisible one.**
-/// iced draws a border inside the widget's bounds, so a border that appeared on
-/// hover would shrink the text under the pointer by a pixel — and this is the
-/// bar, where nothing may move. Only colours vary here; the geometry is one
-/// number in all four states, and `bottom_bar.rs` pins that.
-///
-/// No accent: opening a popover is a *view* choice, not a claim about what is
-/// playing (the same argument [`segment`] makes).
-#[must_use]
-pub fn now_playing(p: &Palette, status: button::Status, open: bool) -> button::Style {
-    let background = if open {
-        p.plinth_lit
-    } else {
-        match status {
-            button::Status::Hovered => p.plinth,
-            button::Status::Pressed => p.recess,
-            button::Status::Active | button::Status::Disabled => Color::TRANSPARENT,
-        }
-    };
-    button::Style {
-        background: Some(Background::Color(background)),
-        text_color: p.paper,
-        border: Border {
-            color: if open {
-                p.hairline_strong(p.plinth_lit)
-            } else {
-                Color::TRANSPARENT
-            },
-            width: 1.0,
             radius: RADIUS_CTRL.into(),
         },
         shadow: Shadow::default(),
@@ -4662,55 +4619,6 @@ mod tests {
         // The place's spine is narrower than its content, or it would read as a
         // second column of content rather than as navigation.
         const { assert!(SETTINGS_NAV_W < SETTINGS_CONTENT_W) }
-    }
-
-    /// The bar's now-playing affordance changes colour and **nothing else**.
-    ///
-    /// This is the pixel-stability claim in its smallest form: the left zone
-    /// became a control, and a control that grew a border on hover would shift
-    /// the track title by a pixel every time the pointer crossed it. The border
-    /// is therefore present in all four states and merely transparent in three.
-    #[test]
-    fn the_now_playing_affordance_moves_nothing_when_it_lights_up() {
-        let mut geometry: Vec<(f32, f32)> = Vec::new();
-        for room in Room::ALL {
-            let p = room.palette();
-            for status in [
-                button::Status::Active,
-                button::Status::Hovered,
-                button::Status::Pressed,
-                button::Status::Disabled,
-            ] {
-                for open in [false, true] {
-                    let style = now_playing(p, status, open);
-                    geometry.push((style.border.width, style.border.radius.top_left));
-                    assert_eq!(
-                        style.shadow,
-                        Shadow::default(),
-                        "the bar casts no shadow; only artwork and the popover do"
-                    );
-                }
-            }
-            // And "open" is visibly different from "hovered", or the anchor the
-            // popover has instead of a notch says nothing. True in every room:
-            // a room whose two raised planes collapsed would lose the only
-            // thing standing in for a notch.
-            let open = now_playing(p, button::Status::Active, true);
-            let hovered = now_playing(p, button::Status::Hovered, false);
-            assert_ne!(
-                from_background(open.background),
-                from_background(hovered.background),
-                "{}: open and hovered are the same surface",
-                p.name
-            );
-        }
-        assert!(
-            geometry
-                .windows(2)
-                .all(|pair| (pair[0].0 - pair[1].0).abs() < f32::EPSILON
-                    && (pair[0].1 - pair[1].1).abs() < f32::EPSILON),
-            "the affordance's border geometry varies with state: {geometry:?}"
-        );
     }
 
     /// The advance width of one **figure** in the bundled face, as a fraction
@@ -6027,9 +5935,6 @@ mod tests {
             ));
             painted.push(("primary", button_colors(&primary(p, status))));
             painted.push(("veil_row", button_colors(&veil_row(p, status))));
-            for open in [false, true] {
-                painted.push(("now_playing", button_colors(&now_playing(p, status, open))));
-            }
         }
         for status in slider_states {
             painted.push(("needle", slider_colors(&needle(p, status))));

@@ -86,16 +86,58 @@ pub(crate) fn save_name_id() -> text_input::Id {
     text_input::Id::new("baz-queue-save")
 }
 
+/// **The run column's own scrollable**, named so the shell can drive it.
+///
+/// The owner, 2026-08-10: *"ideally the currently playing item in the playlist
+/// is where our scroll goes to i.e. it should be visible when we change
+/// track"*. A follow is a `scrollable::scroll_to` and iced 0.13 addresses a
+/// widget by id, so the column has one — the same construction the save field
+/// above already uses for its caret.
+pub(crate) fn run_scroll_id() -> scrollable::Id {
+    scrollable::Id::new("baz-run-column")
+}
+
+/// **Where the rows column begins inside the scrollable's content** — the
+/// place's top pad, the summary strip, the column's own gaps, and the run's
+/// head block where there is one.
+///
+/// Published rather than inlined because **two surfaces have to agree about
+/// it**: this module builds the column from it, and the shell computes a
+/// follow offset from it ([`crate::views::now_playing::follow`]). A private
+/// copy on each side is a pair of numbers that drift, and the symptom would be
+/// a follow that lands a header or a strip's height off the row it was aiming
+/// at.
+///
+/// An estimate in one respect and deliberately so: the save field, when open,
+/// moves the rows down by less than [`queue_window::MARGIN`] absorbs.
+#[must_use]
+pub(crate) fn rows_top(pad_top: f32, head_h: f32, head_two_line: bool) -> f32 {
+    pad_top
+        + head_h
+        + theme::TRANSPORT_HIT
+        + 2.0 * theme::GAP_LG
+        + theme::LINE_BODY
+        + if head_two_line {
+            theme::GAP_XXS + theme::LINE_META
+        } else {
+            0.0
+        }
+        + theme::GAP_XS
+}
+
 /// Everything the run column needs of the surface drawing it, so that the
 /// merged now-playing place and (for exactly one step) the queue place hand it
 /// the same reading without either growing a tenth positional argument.
 ///
 /// `measure` is the width the rows are set at, `viewport_h` bounds the virtual
 /// window's span, `scroll` is where the one scrollable last said it was
-/// ([`Message::QueueScrolled`]), and `clearance` is the air reserved above the
-/// summary for the place's own top-right controls — the `Run` word is drawn as
-/// a **layer** over the body (it costs the record no height, doc 12 §5.5a), so
-/// the column that the word governs is what leaves room for it.
+/// ([`Message::QueueScrolled`]), and `pad` is the gutter the column hangs from.
+///
+/// **There was a fifth, `clearance`** — air reserved above the summary for the
+/// place's top-right layer. That layer was the `Run` word and the owner removed
+/// it, so the field went with it: height held for a control that does not exist
+/// is the thing the place's own arithmetic refuses everywhere else. Step A6's
+/// `Ambient` door brings its own back if it claims that corner.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Frame {
     /// The measure the rows are set at, scrollbar lane already taken off.
@@ -104,8 +146,6 @@ pub(crate) struct Frame {
     pub(crate) viewport_h: f32,
     /// Where the scrollable last said it was.
     pub(crate) scroll: f32,
-    /// Air above the summary for the place's top-right controls.
-    pub(crate) clearance: f32,
     /// The gutter the column hangs from — [`crate::views::place_pad`] when the
     /// column owns
     /// the body's whole width, and the right-hand column's own inset when it
@@ -158,7 +198,6 @@ pub(crate) fn run_column<'a>(
         measure,
         viewport_h,
         scroll,
-        clearance,
         pad,
     } = frame;
     let (head, head_h) = match head {
@@ -187,19 +226,7 @@ pub(crate) fn run_column<'a>(
             // the place's top pad, the summary strip, the column gaps and
             // the list's own head block. An estimate — the save field, when
             // open, moves it by less than the module's margin absorbs.
-            let head_two_line = list.album.is_some();
-            let rows_top = pad.top
-                + clearance
-                + head_h
-                + theme::TRANSPORT_HIT
-                + 2.0 * theme::GAP_LG
-                + theme::LINE_BODY
-                + if head_two_line {
-                    theme::GAP_XXS + theme::LINE_META
-                } else {
-                    0.0
-                }
-                + theme::GAP_XS;
+            let rows_top = rows_top(pad.top, head_h, list.album.is_some());
             let win = queue_window::window(&shapes, scroll - rows_top, viewport_h);
             // A record's name where the record begins, then its tracks —
             // **albums listed as albums, never flattened** (ADR-0014). Each
@@ -291,11 +318,17 @@ pub(crate) fn run_column<'a>(
         None => body,
         Some(head) => column![head, body].spacing(theme::GAP_XL).into(),
     };
-    let body: Element<'a, Message> = if clearance > 0.0 {
-        column![Space::with_height(Length::Fixed(clearance)), body].into()
-    } else {
-        body
-    };
+    // **No clearance strip.** The column used to open with
+    // `TRANSPORT_HIT + GAP_LG` of air, reserved for the place's top-right
+    // layer; that layer was the `Run` word and the owner has removed it
+    // (`views::now_playing`'s module docs). Air held for a control that does
+    // not exist is the defect `now_playing`'s own `BELOW` already refuses on
+    // the other column, so it goes with the word, and the summary starts at
+    // the place's own gutter.
+    //
+    // Step A6's `Ambient` door, if it claims that corner, brings its own
+    // clearance back with it — whole, and measured against what it draws.
+
     // One scroll for the run, with the bar's lane reserved whether or not
     // the list overflows — the same reserved-slot rule the durations
     // depend on, and the reason a thirteenth track arriving shunts none of
@@ -306,6 +339,7 @@ pub(crate) fn run_column<'a>(
             .padding(pad)
             .align_x(alignment::Horizontal::Center),
     )
+    .id(run_scroll_id())
     .on_scroll(Message::QueueScrolled)
     .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
     .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
@@ -364,53 +398,81 @@ fn undo_control(offered: bool) -> Element<'static, Message> {
 /// (design 14 §0). It was conditioned on **nothing** but whether its own name
 /// field was open.
 ///
-/// So it reads [`PlayerState::run_origin`], and takes the shape that reading
-/// permits:
+/// # …and only for a run the listener assembled (the owner, 2026-08-10)
 ///
-/// | the run | the word |
+/// *"I still see save as playlist on the queue when playing a CD... we should
+/// only be showing that in a situation where there isn't an existing
+/// playlist"*, and, narrowing it the same afternoon, *"nah I think adding more
+/// stuff to an existing playlist is fine, that does not need a save -- it's a
+/// low bar to edit a playlist"*.
+///
+/// So it reads [`PlayerState::run_origin`], which now knows the **three kinds
+/// of list** ([`crate::vm::RunSource`]) rather than only whether a file was
+/// named, and takes the shape that reading permits:
+///
+/// | the run | the strip |
 /// |---|---|
-/// | [`RunOrigin::Unfiled`] — a record's, a shuffle's, `Play all`'s | `Save as playlist`, live |
+/// | [`RunOrigin::Fixed`] — a record's, `All songs`, `Play all` | **nothing**, in a reserved slot |
 /// | [`RunOrigin::Saved`] — reified from a file, unedited | `Saved as “Road Trip”`, a **readout** |
-/// | [`RunOrigin::Diverged`] — reified from a file, since edited | `Save as new playlist`, live |
+/// | [`RunOrigin::Diverged`] — reified from a file, since edited | `From “Road Trip”`, a **readout** |
+/// | [`RunOrigin::Assembled`] — built by hand, or a fixed run since edited | `Save as playlist`, live |
 ///
 /// **The precedent is eleven lines up.** [`undo_control`] is drawn only while
 /// there is an edit to take back, because *"a standing `Undo` over a list
 /// nobody has edited would be a control that cannot act pretending it can"*.
-/// This was that defect and this is that cure — a readout rather than a
-/// disabled button and rather than a removal, which is what the panel's
-/// `Queue` row already is at rest (ADR-0024's 2026-08-09 amendment item 2).
+/// This was that defect and this is that cure.
 ///
-/// **`Save changes to “Road Trip”` is refused**, and not on taste: that
-/// amendment's item 6 keeps the run tonight's snapshot and holds §1's
-/// decoupling *in both directions*, and ADR-0023 §3 makes provenance an
-/// origin rather than a live link. A run that wrote itself back would be the
-/// two-structure confusion returning. `Diverged` therefore offers a **new**
-/// file, and says so in the word.
+/// **`Diverged` says `From`, not `Saved as`, and not `Save as new playlist`.**
+/// Two refusals in one word, and they pull opposite ways so both have to be
+/// stated:
 ///
-/// The readout is built at this control's own height and inset, so the strip
-/// is the same strip in all three states: nothing above or below it moves
-/// when a run is edited.
+/// - it may not read `Saved as “Road Trip”`, because after an edit the run is
+///   **not** that file — that is exactly the lie ADR-0024 §A5.2 removed, and
+///   it must not come back through this door;
+/// - it may not offer a new file either, because the owner's second quote
+///   says a run that came from a playlist has a cheap route to changing one
+///   and does not need a second.
+///
+/// So it names its origin and asserts nothing about its identity.
+///
+/// **Nothing here writes back**, and the narrowing did not change that.
+/// *"A low bar to edit a playlist"* is an argument about how easy the
+/// playlist's own page is to reach, not an instruction to make the run an
+/// editor of files: ADR-0024 §1 decouples the two in **both** directions and
+/// ADR-0023 §3 makes provenance an origin rather than a live link, so a queue
+/// edit made for tonight still cannot touch a file somebody owns.
+///
+/// Every state is built at this control's own height and inset — including the
+/// empty one, which is a `Space` of exactly [`theme::TRANSPORT_HIT`] rather
+/// than an absence. The strip is the same strip in all four states, so nothing
+/// above or below it moves when a run is edited, and the run column's
+/// `rows_top` arithmetic stays true whichever word is in it.
 fn save_control(offered: bool, origin: RunOrigin<'_>) -> Element<'static, Message> {
     let room = theme::active();
-    let label = match origin {
-        RunOrigin::Unfiled => "Save as playlist".to_owned(),
-        RunOrigin::Diverged => "Save as new playlist".to_owned(),
-        RunOrigin::Saved(name) => {
-            return container(
-                container(
-                    text(format!("Saved as “{name}”"))
-                        .size(theme::SIZE_META)
-                        .line_height(theme::LEADING_META)
-                        .color(room.paper_faint)
-                        .wrapping(text::Wrapping::None),
-                )
-                .height(Length::Fill)
-                .align_y(alignment::Vertical::Center),
+    let readout = |line: String| -> Element<'static, Message> {
+        container(
+            container(
+                text(line)
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper_faint)
+                    .wrapping(text::Wrapping::None),
             )
-            .height(Length::Fixed(theme::TRANSPORT_HIT))
-            .padding(theme::pad(0.0, theme::GAP_SM))
-            .into();
+            .height(Length::Fill)
+            .align_y(alignment::Vertical::Center),
+        )
+        .height(Length::Fixed(theme::TRANSPORT_HIT))
+        .padding(theme::pad(0.0, theme::GAP_SM))
+        .into()
+    };
+    let label = match origin {
+        RunOrigin::Assembled => "Save as playlist".to_owned(),
+        // A list that already exists says nothing, and holds its height.
+        RunOrigin::Fixed => {
+            return Space::with_height(Length::Fixed(theme::TRANSPORT_HIT)).into();
         }
+        RunOrigin::Saved(name) => return readout(format!("Saved as “{name}”")),
+        RunOrigin::Diverged(name) => return readout(format!("From “{name}”")),
     };
     button(
         container(
@@ -1002,15 +1064,18 @@ mod tests {
         );
     }
 
-    /// **The save word takes the shape the run permits** (ADR-0024 §A5.2) —
-    /// three states, one slot, one height.
+    /// **The save word takes the shape the run permits** (ADR-0024 §A5.2, and
+    /// the owner's narrowing of 2026-08-10) — **four** states, one slot, one
+    /// height.
     ///
     /// The predicate itself is tested where it lives
-    /// (`player::tests::the_save_word_offers_only_over_a_run_that_is_not_already_a_file`);
-    /// what is pinned here is that this file *spends* it, and that the
-    /// readout is drawn at the button's own box so nothing in the strip moves
-    /// when a run is edited. Over the source, for this module's own reason:
-    /// there is no `PlayerState` to construct without an engine.
+    /// (`player::tests::the_save_word_offers_only_over_a_run_the_listener_assembled`);
+    /// what is pinned here is that this file *spends* it, that every state is
+    /// drawn at the button's own box so nothing in the strip moves when a run
+    /// is edited — the empty one included, which is a reserved `Space` rather
+    /// than an absence — and that no state offers a write-back. Over the
+    /// source, for this module's own reason: there is no `PlayerState` to
+    /// construct without an engine.
     #[test]
     fn the_save_word_is_a_readout_over_a_run_that_is_already_a_file() {
         let source = std::fs::read_to_string(
@@ -1024,23 +1089,40 @@ mod tests {
             "the strip's word reads the run, not only its own name field"
         );
         for (arm, word) in [
-            ("RunOrigin::Unfiled", "\"Save as playlist\""),
-            ("RunOrigin::Diverged", "\"Save as new playlist\""),
-            ("RunOrigin::Saved(name)", "\"Saved as “{name}”\""),
+            ("RunOrigin::Assembled =>", "\"Save as playlist\""),
+            ("RunOrigin::Saved(name) =>", "\"Saved as “{name}”\""),
+            ("RunOrigin::Diverged(name) =>", "\"From “{name}”\""),
         ] {
             assert!(
                 source.contains(arm) && source.contains(word),
-                "the `{arm}` run wears {word}"
+                "the `{arm}` run no longer wears {word}"
             );
         }
+        // **A fixed run says nothing, and holds its height.** The slot is the
+        // strip's own `TRANSPORT_HIT`, because the run column's `rows_top`
+        // sums that box whichever of the four states is in it — a strip that
+        // shrank when a CD started playing would window the wrong rows.
+        let fixed = source
+            .split("RunOrigin::Fixed => {")
+            .nth(1)
+            .expect("the fixed arm");
+        let fixed = &fixed[..fixed.find("\n        }").unwrap_or(fixed.len())];
+        assert!(
+            fixed.contains("Space::with_height(Length::Fixed(theme::TRANSPORT_HIT))"),
+            "a fixed run's slot stopped reserving the strip's height"
+        );
+        assert!(
+            !fixed.contains("text(") && !fixed.contains("button("),
+            "a list that already exists is being offered something"
+        );
         // The readout is a statement, so it is not a button and it sends
         // nothing — the panel's `Queue` row's own form at rest. A disabled
         // button would still be a control claiming an act.
         let readout = source
-            .split("RunOrigin::Saved(name) => {")
+            .split("let readout = |line: String|")
             .nth(1)
-            .expect("the readout arm");
-        let readout = &readout[..readout.find("\n        }").unwrap_or(readout.len())];
+            .expect("the readout builder");
+        let readout = &readout[..readout.find("\n    };").unwrap_or(readout.len())];
         assert!(
             !readout.contains("button(") && !readout.contains("on_press"),
             "a readout states; it does not offer"

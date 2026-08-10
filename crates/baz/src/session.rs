@@ -54,6 +54,25 @@ pub struct Snapshot {
     /// Playing provenance (ADR-0023's amendment): the name of the playlist
     /// file this run was reified from, when one was. Origin, never a link.
     pub provenance: Option<String>,
+    /// **Whether the listener assembled this run out of nothing**
+    /// ([`crate::vm::RunSource::Assembled`]).
+    ///
+    /// Written because the run's *kind* decides whether the summary strip
+    /// offers to save it, and a kind that did not survive a quit would change
+    /// that offer under a listener who only relaunched baz: a queue built by
+    /// hand last night would come back looking like a record's track listing
+    /// and lose the one word that can keep it.
+    ///
+    /// It is a second key rather than a spelling of the kind, because
+    /// [`Self::provenance`] already carries the third one — a file's name is
+    /// present exactly when the run came from a file — and two keys that can
+    /// contradict each other are read in one fixed order on the way back in
+    /// (`vm::RunSource::Playlist` wins; see `App::restore_the_run`).
+    ///
+    /// Absent means `false`, which is [`crate::vm::RunSource::Fixed`] — a
+    /// snapshot from a baz that predates this key describes a run nobody can
+    /// prove was assembled, and *offer nothing* is the safe reading.
+    pub assembled: bool,
 }
 
 impl Snapshot {
@@ -90,6 +109,9 @@ impl Snapshot {
         let _ = writeln!(out, "position_ms = {}", self.position_ms);
         if let Some(provenance) = &self.provenance {
             let _ = writeln!(out, "provenance = {}", toml_string(provenance));
+        }
+        if self.assembled {
+            let _ = writeln!(out, "assembled = true");
         }
         let _ = writeln!(out, "paths = [");
         for path in self.paths.iter().filter_map(|path| path.to_str()) {
@@ -133,6 +155,10 @@ impl Snapshot {
                 .get("provenance")
                 .and_then(toml::Value::as_str)
                 .map(str::to_owned),
+            assembled: table
+                .get("assembled")
+                .and_then(toml::Value::as_bool)
+                .unwrap_or(false),
             paths,
         }
     }
@@ -209,6 +235,7 @@ mod tests {
             cursor: 1,
             position_ms: 192_000,
             provenance: Some("Road Trip".to_owned()),
+            assembled: false,
         }
     }
 
@@ -277,6 +304,7 @@ mod tests {
             cursor: 0,
             position_ms: 1,
             provenance: Some(r#"a "list""#.to_owned()),
+            assembled: true,
         };
         assert_eq!(Snapshot::from_toml(&snapshot.to_toml()), snapshot);
     }

@@ -33,17 +33,48 @@
 //! with every one of the fifteen gestures the queue place had
 //! (`every_queue_affordance_survives_the_merge`).
 //!
-//! # Two densities, and `F11` is not one of them
+//! # One density, because the list is not a preference
 //!
-//! The `Run` word in the top-right decides whether the list is on this screen,
-//! and it is **remembered** ([`crate::config::Config::run_column`]) rather than
-//! bound to full-screen. That is a toolkit fact rather than a preference: iced
-//! 0.13 publishes no monitor enumeration at all, so baz cannot tell
-//! *full-screen on the second monitor* from *full-screen on the only monitor*,
-//! and a single-display listener pressing `F11` would lose the run editor with
-//! no way back that is not un-full-screening. `F11` stays a **window** act that
-//! works in every place; what genuinely changes with size is arithmetic —
-//! which axis the two columns sit on ([`theme::SPLIT_FLOOR`]) — and not mode.
+//! The owner, 2026-08-10: *"remove the run button from the now playing"*. The
+//! `Run` word that stood in this place's top-right is gone, and so is what it
+//! chose between — the toggle message it sent, the shell's remembered bool, the
+//! config key under it, and the whole idea that this surface has two densities.
+//!
+//! **The run column stands whenever there is a run to show, and nothing else
+//! decides it.** That is a reduction rather than a default: a surface whose own
+//! argument is *a run is a list and a cursor* was offering a control that hid
+//! the list, which is the surface disagreeing with itself. Doc 12 §12's M1 made
+//! the density *"a stated control"*; the owner has reversed that half of M1 and
+//! this file records the reversal rather than arguing with it.
+//!
+//! What the word was defending against needed no word. It was never bound to
+//! full-screen — iced 0.13 publishes no monitor enumeration at all, so baz
+//! cannot tell *full-screen on the second monitor* from *full-screen on the only
+//! monitor*, and a single-display listener pressing `F11` must not lose the run
+//! editor to a window act. `F11` stays a **window** act that works in every
+//! place; what genuinely changes with size is arithmetic — which axis the two
+//! columns sit on ([`theme::SPLIT_FLOOR`]) — and not mode. **That is now true
+//! because there is no mode left to bind.**
+//!
+//! # What the surface shows is what the bar names
+//!
+//! The owner, in the same breath: *"it should probably just show whatever the
+//! now playing is indicating, just not playing"*. The two halves are read from
+//! the two questions the bar under this place already answers, and from nothing
+//! else:
+//!
+//! - the **record column** draws exactly when
+//!   [`PlayerState::now_playing`] answers — which is the bar's own condition
+//!   for naming a track (`bottom_bar::now_playing_line`), so a paused run draws
+//!   here as surely as a sounding one;
+//! - the **run column** draws exactly when [`PlayerState::queue_list`] answers,
+//!   whatever the phase — so a run restored from `session.toml` at launch, or a
+//!   run that has played to its end, is on this screen rather than denied by it.
+//!
+//! The empty state is therefore reachable in **one** case: no record and no
+//! run. Before the density went there was a second, and it was a plain lie —
+//! with the `Run` word off and a stopped run loaded, this place printed
+//! *"Nothing queued"* over a queue it was holding.
 //!
 //! # A first version, and what it is designed to become
 //!
@@ -100,7 +131,7 @@
 //! reach the wall's captions and the returns lane's rows is the owner's open
 //! question (`docs/WORK.md`) and is not answered here.
 
-use iced::widget::{Space, button, column, container, image as iced_image, row, stack, text};
+use iced::widget::{Space, column, container, image as iced_image, row, stack, text};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
@@ -113,9 +144,8 @@ use crate::views::{gradient_block, queue};
 /// **The run column's width in a body `width` px wide**, or `0` when the run is
 /// not standing beside the record.
 ///
-/// Two conditions, both of them arithmetic rather than mode (doc 12 §3.4.2 —
-/// the density is a *stated control*, and full-screen changes nothing about
-/// it): the listener has turned the run off, or the body is below
+/// Two conditions, and since the `Run` word went **both** are facts rather than
+/// preferences: there is no run at all, or the body is below
 /// [`theme::SPLIT_FLOOR`] and the two columns have re-stacked into one, where
 /// the run takes the whole measure and the record becomes its head.
 #[must_use]
@@ -277,21 +307,14 @@ pub(crate) fn art_edge(width: f32, height: f32, run_w: f32, source: f32) -> f32 
         .max(0.0)
 }
 
-/// The air the run column leaves above its summary for the place's own
-/// top-right controls, which are drawn as a **layer** and therefore cost the
-/// record no height (doc 12 §5.5a).
-const CONTROLS_CLEARANCE: f32 = theme::TRANSPORT_HIT + theme::GAP_LG;
-
 /// **The merged Now playing place**: the record, and the run it is a position
 /// in (doc 12 §3.4, `Place::Queue`'s whole inheritance).
 ///
-/// `run` is the listener's standing answer to *is the list on this screen* —
-/// the `Run` word in the top-right, remembered across launches, and
-/// **deliberately not bound to full-screen**: iced 0.13 publishes no monitor
-/// enumeration, so baz cannot tell a second-display full-screen from an
-/// only-display one, and a single-display listener pressing `F11` would lose
-/// the editor with no way back (§3.4.2). Everything else on this surface is
-/// arithmetic — which axis the two columns sit on, and nothing more.
+/// **Neither half is a preference.** The record column draws when the engine
+/// has a track to name and the run column draws when there is a run — the two
+/// readings the bar under this place is drawn from, so this surface cannot
+/// contradict the one beneath it. See the module docs for the `Run` word that
+/// used to sit over this and for the one lie its removal took with it.
 #[expect(
     clippy::too_many_arguments,
     reason = "the surface is two halves and each half's readings arrive \
@@ -303,7 +326,6 @@ pub(crate) fn view<'a>(
     player: &'a PlayerState,
     width: f32,
     height: f32,
-    run: bool,
     hovered: Option<usize>,
     saving: Option<&'a NameEntry>,
     collecting: Collecting,
@@ -312,10 +334,12 @@ pub(crate) fn view<'a>(
     can_undo: bool,
 ) -> Element<'a, Message> {
     let now = player.now_playing();
-    // The run is on this screen when the listener has left it on *and* there
-    // is a run to draw. A `Run` word standing over an empty column would be a
-    // density with nothing in it.
-    let showing_run = run && player.queue_list().is_some();
+    // **There is a run, so the run is on this screen.** The whole of the
+    // condition since the `Run` word went: no listener state, no config, no
+    // phase — a stopped run and a sounding one are the same list.
+    let showing_run = player.queue_list().is_some();
+    let measure =
+        (width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).clamp(0.0, theme::LIST_MEASURE);
     if now.is_none() && !showing_run {
         // **A start in flight is not silence.** `Resume` on the Home place
         // navigates here in the same press that asks the engine to begin
@@ -338,11 +362,23 @@ pub(crate) fn view<'a>(
         // it names the gestures that fill the list, and it carries the
         // silence-is-a-feature sentence the product wants said at exactly this
         // moment.
-        return stack![
-            container(queue::empty_state()).center(Length::Fill),
-            controls(run),
-        ]
-        .into();
+        //
+        // **It is drawn in the run column's own frame** — the place's gutter,
+        // and the same `measure` the rows would have taken — rather than
+        // dropped straight into the body. The owner, 2026-08-10: *"the nothing
+        // queued thing is hugging the left with no padding"*. `empty_state` is
+        // `width(Fill)` on purpose, so that inside the column it shares the
+        // rows' left edge; a `Fill` block handed to a centring container is
+        // flush against the window instead, which is exactly what he was
+        // looking at. So the frame is stated here, and the sentence lands where
+        // the list it replaces would have.
+        return container(container(queue::empty_state()).width(Length::Fixed(measure)))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(crate::views::place_pad())
+            .align_x(alignment::Horizontal::Center)
+            .align_y(alignment::Vertical::Center)
+            .into();
     }
     let run_w = run_w(width, showing_run);
     // **The source's own pixels**, which is what bounds the work now that
@@ -351,9 +387,7 @@ pub(crate) fn view<'a>(
     let (handle, source) = now.map_or((None, f32::INFINITY), |now| work(shelf, now));
     let edge = record_edge(width, height, showing_run, source);
     let stacked = showing_run && run_w <= 0.0;
-    let measure =
-        (width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).clamp(0.0, theme::LIST_MEASURE);
-    let field = field_layer(field_of(shelf, now), ground(width, showing_run));
+    let field = field_layer(field_of(shelf, now));
     let record = now.map(|now| {
         if stacked {
             head_block(player, handle, now, edge, measure)
@@ -361,17 +395,26 @@ pub(crate) fn view<'a>(
             record_column(player, handle, now, edge)
         }
     });
-    let body: Element<'a, Message> = match (record, showing_run) {
+    let body: Element<'a, Message> = match record {
         // **The record alone**, centred in the body: the composition exactly as
-        // it stood before the merge, at the size this window gives it.
-        (Some(record), false) => container(record).center(Length::Fill).into(),
+        // it stood before the merge, at the size this window gives it. Reached
+        // only when the engine is naming a track that came from no run of ours.
+        Some(record) if !showing_run => container(record).center(Length::Fill).into(),
         // **Two columns.** The record column is *left-hung*, not centred: with
         // the run taking the right edge, centring the work in what remains
         // would leave the placard's left alignment pointing at nothing. The
         // work and its placard share a left edge with each other and hang from
         // the body's own `HANG`.
-        (Some(record), true) if run_w > 0.0 => row![
-            container(record)
+        //
+        // **The record's column is drawn even when there is no record**, which
+        // is the composition holding rather than an empty box: a run loaded and
+        // stopped becomes a run sounding without one pixel of the list moving,
+        // and the field already believed this — [`ground`] answers
+        // `Ground::Split` on the run alone, so a body that re-stacked here
+        // would put a scrolling list under ambient light. The layout was the
+        // half that disagreed.
+        record if run_w > 0.0 => row![
+            container(record.unwrap_or_else(|| Space::new(Length::Fill, Length::Fill).into()))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .padding(iced::Padding {
@@ -388,7 +431,6 @@ pub(crate) fn view<'a>(
                     measure: run_w - theme::SCROLLBAR_LANE,
                     viewport_h: height,
                     scroll,
-                    clearance: CONTROLS_CLEARANCE,
                     pad: iced::Padding {
                         top: theme::HANG,
                         right: theme::SCROLLBAR_LANE,
@@ -412,7 +454,7 @@ pub(crate) fn view<'a>(
         // becomes its head. The record cannot be the size it deserves at this
         // width in any case, and what is left worth doing is the list — so the
         // same four objects are re-hung rather than a second layout drawn.
-        (record, _) => {
+        record => {
             let head = record.map(|record| (record, edge + HEAD_BELOW));
             run_scroll(
                 player,
@@ -420,7 +462,6 @@ pub(crate) fn view<'a>(
                     measure,
                     viewport_h: height,
                     scroll,
-                    clearance: CONTROLS_CLEARANCE,
                     pad: crate::views::place_pad(),
                 },
                 head,
@@ -432,10 +473,105 @@ pub(crate) fn view<'a>(
             )
         }
     };
-    // **z1 · z3**, in doc 12 §5.4's own order: the field under everything, the
-    // place over it, the place's own controls over that. z1.5 — the spectrum,
-    // in the field's shader — is step A8's and is not reserved for here.
-    stack![field, body, controls(run)].into()
+    // **z1 · z2**, in doc 12 §5.4's own order: the field under everything and
+    // the place over it. z3 — the place's own top-right controls — was the
+    // `Run` word and is now empty; `Ambient` (step A6) is the next thing that
+    // may claim it, and it arrives whole or not at all. z1.5, the spectrum in
+    // the field's shader, is step A8's and is not reserved for here.
+    stack![field, body].into()
+}
+
+/// **Where the sounding row should land**: two rows' worth of list above it.
+///
+/// The owner asked for the row to be *visible*, and the convention — every
+/// player that follows a run does this — is that it lands a little way down
+/// rather than flush at the top edge. Flush reads as a jump and hides what came
+/// before it; two rows of history is enough that the surface still shows you
+/// where you have come from.
+///
+/// It is expressed as **two of the run's own rows** rather than as a pixel
+/// count, so it stays two rows if the row pitch ever moves. A one-line row is
+/// used for the reckoning because it is the shorter of the two — the lead is a
+/// floor on how much history stays visible, and a floor should be computed from
+/// the smaller unit.
+const FOLLOW_LEAD: f32 = 2.0 * crate::queue_window::row_pitch(false);
+
+/// **The offset that brings the sounding row into view, or `None` for leave it
+/// alone** (the owner, 2026-08-10: *"ideally the currently playing item in the
+/// playlist is where our scroll goes to i.e. it should be visible when we
+/// change track"*).
+///
+/// # The three rules that make this bearable rather than annoying
+///
+/// 1. **Only when the row is not already visible.** A view that jumps when it
+///    did not need to is worse than one that never moves, so a row wholly
+///    inside the viewport returns `None` and nothing happens. Most track
+///    changes inside one record are exactly this case, which is why the
+///    ordinary experience of a twelve-track album is no movement at all.
+/// 2. **Only on the engine's own confirmation**, which is the caller's half —
+///    `App` spends this on `Event::TrackStarted` and on arriving at the place,
+///    never on a clock and never per frame. This product reports position from
+///    engine events and never extrapolates, and a scroll caused by playback
+///    obeys the same rule.
+/// 3. **A manual scroll is not fought, it is reconciled.** Nothing here
+///    notices that the listener has scrolled away, and that is deliberate: the
+///    *next track change* is the moment the surface is allowed to move, because
+///    it is the only boundary at which a listener is not mid-gesture. Between
+///    two tracks the column is theirs.
+///
+/// # It computes the offset from the same arithmetic the column is built from
+///
+/// [`queue::rows_top`] for where the rows begin inside the scroll and
+/// [`crate::queue_window::row_box`] for where the row sits inside them — the
+/// two functions `queue::run_column` itself builds from. That is what lets a
+/// follow reach a row **outside the built slice** in one step: the window is
+/// recomputed from the new offset on the next view, so the target is never a
+/// spacer.
+#[must_use]
+pub(crate) fn follow(
+    shelf: &Shelf,
+    player: &PlayerState,
+    width: f32,
+    height: f32,
+    scroll: f32,
+) -> Option<f32> {
+    let list = player.queue_list()?;
+    let row = player.playing_queue_row()?;
+    let shapes: Vec<crate::queue_window::RowShape> = list
+        .rows
+        .iter()
+        .map(|row_state| crate::queue_window::RowShape {
+            head: row_state.head.as_ref().map(|head| head.album.is_some()),
+            two_line: row_state.artist.is_some(),
+        })
+        .collect();
+    let (top, row_h) = crate::queue_window::row_box(&shapes, row)?;
+
+    // The composition, read exactly as `view` reads it — the head block only
+    // exists below `SPLIT_FLOOR`, and it is inside the scroll there, so it is
+    // part of the offset the rows begin at.
+    let now = player.now_playing();
+    let run_w = run_w(width, true);
+    let head_h = if run_w > 0.0 {
+        0.0
+    } else {
+        now.map_or(0.0, |now| {
+            let (_, source) = work(shelf, now);
+            record_edge(width, height, true, source) + HEAD_BELOW + theme::GAP_XL
+        })
+    };
+    let pad_top = theme::HANG;
+    let rows_top = queue::rows_top(pad_top, head_h, list.album.is_some());
+    let top = rows_top + top;
+
+    // Already on screen, whole: do nothing. The bottom edge is the viewport's
+    // own, and the scrollable's viewport is the body's height — the same
+    // number `Frame::viewport_h` hands the virtual window, so "visible" here
+    // and "built" there cannot disagree.
+    if top >= scroll && top + row_h <= scroll + height {
+        return None;
+    }
+    Some((top - FOLLOW_LEAD).max(0.0))
 }
 
 /// [`queue::run_column`], named here so the two call sites above read as one
@@ -459,56 +595,6 @@ fn run_scroll<'a>(
     queue::run_column(
         player, frame, head, hovered, saving, collecting, drag, can_undo,
     )
-}
-
-/// **The place's top-right controls** — today the `Run` word alone.
-///
-/// A *layer* over the body rather than a strip in it, which is what keeps the
-/// record's arithmetic untouched by the word that governs the column beside it
-/// (doc 12 §5.5a: *the run's head is in the run's column, so it costs the
-/// record no height*). The run column leaves [`CONTROLS_CLEARANCE`] of air
-/// above its summary so the two never overlap.
-///
-/// **Visible at rest, and pointer-reachable**, which the product's standing
-/// rule requires; the alternative — revealing it on mouse-move, as most kiosks
-/// do — is refused outright. It is a **peer** of the `Ambient` word-door, not
-/// a row inside it: those toggles govern how the surface *looks*, and this one
-/// governs what it *is* (§3.4.3).
-///
-/// **`Ambient` is not here yet, and the field arriving did not bring it.** This
-/// doc said it *"arrives with the ambient field"* until step A2 shipped the
-/// field and left it out deliberately. ADR-0029 §5's door carries **four**
-/// toggles — the field, the spectrum, the meter, the feed — and three of the
-/// four govern subsystems that do not exist; T1's own three states are
-/// still / drifting / unavailable, and with no shader there is no drifting. A
-/// door with one working entry and three dead ones is height reserved for
-/// things that are not built, which is the discipline this file already keeps
-/// in [`BELOW`]. It arrives whole, at step A6.
-fn controls(run: bool) -> Element<'static, Message> {
-    let room = theme::active();
-    container(
-        button(
-            container(
-                text("Run")
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .font(theme::MEDIUM)
-                    .wrapping(text::Wrapping::None),
-            )
-            .height(Length::Fill)
-            .align_y(alignment::Vertical::Center),
-        )
-        .height(Length::Fixed(theme::TRANSPORT_HIT))
-        .padding(theme::pad(0.0, theme::GAP_SM))
-        .style(move |_theme, status| theme::now_playing(room, status, run))
-        .on_press(Message::ToggleRun),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .padding(theme::pad(theme::HANG, theme::HANG))
-    .align_x(alignment::Horizontal::Right)
-    .align_y(alignment::Vertical::Top)
-    .into()
 }
 
 /// **The record as the run's head block** — the composition below
@@ -645,48 +731,6 @@ fn sleeve(
     }
 }
 
-/// **Which ground the place is standing on** (doc 12 §5.4's z1).
-///
-/// One object with one ceiling function, and the ceiling is lower where type
-/// is — so the three cases are not three grounds, they are three *domains* of
-/// the same one.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Ground {
-    /// The record alone: the ambient field, full bleed.
-    Ambient,
-    /// Two columns. The ambient field under the record, and under the run's
-    /// own column plus the gutter it hangs in — `f32` px, measured from the
-    /// body's right edge — the field clamped flat to the room's `wall`.
-    Split(f32),
-    /// Re-stacked below [`theme::SPLIT_FLOOR`]: the whole body *is* the run's
-    /// list, so the whole field is the run's ground. Nothing on this surface
-    /// is read over anything lighter than `wall` at this width, which is the
-    /// same sentence as the split case with a wider domain.
-    Still,
-}
-
-/// **Which domain of the field the body's width has put the place in.**
-///
-/// The same two conditions [`run_w`] already answers — is the run standing,
-/// and is there room for two columns — read for the ground instead of for a
-/// width. Stated as its own function so the restack is one decision made once:
-/// a surface whose layout re-stacked at 784 and whose ground re-stacked at
-/// some other number would be two compositions wearing one name.
-fn ground(width: f32, showing_run: bool) -> Ground {
-    if !showing_run {
-        return Ground::Ambient;
-    }
-    let beside = run_w(width, true);
-    if beside > 0.0 {
-        // The run's column and the `HANG` gutter it hangs in — the `GAP_XL`
-        // between the two columns stays on the ambient side, so the ceiling
-        // drops exactly at the list's own left edge (doc 12 §5.4 term 2).
-        Ground::Split(beside + theme::HANG)
-    } else {
-        Ground::Still
-    }
-}
-
 /// **The field, laid under everything** — the place's z1, and the reason a
 /// large screen reads as composed rather than empty.
 ///
@@ -699,29 +743,47 @@ fn ground(width: f32, showing_run: bool) -> Ground {
 /// **It is under, never over.** Nothing is drawn on the sleeve; the field is
 /// the room's own colour changed, it dims no artwork, and it is not a scrim —
 /// [`crate::field`] carries the argument.
-fn field_layer(field: Option<field::Field>, ground: Ground) -> Element<'static, Message> {
+///
+/// # One wash, and the three grounds that went
+///
+/// The owner, 2026-08-10: *"the background fade behind the album art seems to
+/// abruptly end beside the track list which looks bad -- the fade should
+/// continue under the playlist area too"*.
+///
+/// This function used to answer a `Ground` — `Ambient` for the record alone,
+/// `Split(under_run)` for the two columns, `Still` for the re-stacked one —
+/// and in the split case it drew **two washes in a `row!`**. That is worse
+/// than the lightness step it was designed as: two gradients side by side do
+/// not step at their join, the second **restarts the ramp**, so the join was a
+/// hard vertical edge that announced the layout. Doc 12 §5.4's *"the ceiling
+/// is lower where type is"* was drawn as *the ceiling is a different object
+/// where type is*.
+///
+/// It is now one wash over the whole body, and the constraint that produced
+/// the domains is answered by measurement instead:
+/// `field::every_run_row_is_legible_over_the_brightest_field` sweeps every
+/// room × every hue × every ink the run column draws against the field's own
+/// brightest stop, and every one clears the floor its use implies — the
+/// binding case being `paper_faint` at 4.71 : 1 against 4.5.
+///
+/// **The seam is also why `run_w` no longer has a second consumer here.** The
+/// field's domain and the layout's split were two functions of one number
+/// that had to be kept in step, and `the_composition_holds_across_the_restack`
+/// existed to prove they were. One of them is gone, so they cannot disagree.
+fn field_layer(field: Option<field::Field>) -> Element<'static, Message> {
     let Some(field) = field else {
         return Space::new(Length::Fill, Length::Fill).into();
     };
     let room = theme::active();
-    let wash = move |reach| {
-        let gradient = field.wash(room, reach);
-        container(Space::new(Length::Fill, Length::Fill))
-            .height(Length::Fill)
-            .style(move |_theme| container::Style {
-                background: Some(iced::Background::Gradient(gradient.into())),
-                ..container::Style::default()
-            })
-    };
-    match ground {
-        Ground::Ambient => wash(field::Reach::Ambient).width(Length::Fill).into(),
-        Ground::Still => wash(field::Reach::Still).width(Length::Fill).into(),
-        Ground::Split(under_run) => row![
-            wash(field::Reach::Ambient).width(Length::Fill),
-            wash(field::Reach::Still).width(Length::Fixed(under_run)),
-        ]
-        .into(),
-    }
+    let gradient = field.wash(room);
+    container(Space::new(Length::Fill, Length::Fill))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Gradient(gradient.into())),
+            ..container::Style::default()
+        })
+        .into()
 }
 
 /// The record column: the work at `edge`, and the placard under it.
@@ -1104,44 +1166,38 @@ mod tests {
         assert!(run_w(theme::SPLIT_FLOOR, true) > 0.0);
     }
 
-    /// **The composition holds across the restack** — the layout, the artwork
-    /// and the ground all turn at [`theme::SPLIT_FLOOR`] and nowhere else.
+    /// **The composition holds across the restack** — the layout and the
+    /// artwork turn at [`theme::SPLIT_FLOOR`] and nowhere else.
     ///
-    /// Step A2 added a third object to a surface that already had two, and the
-    /// failure it could have introduced is a **seam**: a field whose domain
-    /// changed at one width while the columns re-stacked at another would put
-    /// ambient light under a scrolling list, or a wall-clamped column under
-    /// the work, for the band between the two numbers. Swept 400–4000 the way
-    /// everything else on this surface is.
+    /// # The seam this was written for is now unreachable, and that is the news
+    ///
+    /// It swept a third claim until 2026-08-10: that the **field's domain**
+    /// turned at the same width the columns did. A field whose domain changed
+    /// at one width while the columns re-stacked at another would have put
+    /// ambient light under a scrolling list, or a wall-clamped column under the
+    /// work, for the band between the two numbers.
+    ///
+    /// The owner removed the domains — *"the fade should continue under the
+    /// playlist area too"* — so there is one wash over the whole body and
+    /// **two numbers that had to agree have become one number**. The strongest
+    /// version of a test that two things stay in step is the one you delete
+    /// because there is only one thing. What is asserted instead is the
+    /// property that outlived it: the record's column always has room to be a
+    /// record column inside the split.
     #[test]
     fn the_composition_holds_across_the_restack() {
         for width in sides() {
-            // **One floor, three consequences.** The run's column, the record's
-            // composition and the field's domain are the same decision.
-            let split = width >= theme::SPLIT_FLOOR;
+            // **One floor, two consequences** — the run's column and the
+            // record's composition. The field is no longer a third, because it
+            // no longer has a width in it.
+            let beside = run_w(width, true);
             assert_eq!(
-                ground(width, true),
-                if split {
-                    Ground::Split(theme::RUN_MEASURE + theme::HANG)
-                } else {
-                    Ground::Still
-                },
-                "{width}: the ground turned somewhere the layout did not"
+                beside > 0.0,
+                width >= theme::SPLIT_FLOOR,
+                "{width}: the layout turned somewhere the floor did not"
             );
-            // The run stood down is the ambient field at every width, because
-            // there is no type for the ceiling to be lower under.
-            assert_eq!(ground(width, false), Ground::Ambient, "{width}");
-            // **The clamped domain never eats the record's own column.** The
-            // still region is the run plus its gutter, and the work has to fit
-            // beside it — otherwise the sleeve would hang over a ground meant
-            // for a list.
-            if let Ground::Split(under_run) = ground(width, true) {
-                let beside = run_w(width, true);
+            if beside > 0.0 {
                 let record_right = width - theme::HANG - beside - theme::GAP_XL;
-                assert!(
-                    width - under_run >= record_right,
-                    "{width}: the clamped ground reached under the work"
-                );
                 assert!(
                     record_right >= theme::HANG + theme::ART_MIN,
                     "{width}: the record column fell under its own floor inside the split"
@@ -1269,6 +1325,91 @@ mod tests {
         assert!(
             place.contains("queue::run_column("),
             "the merged place stopped drawing the run column"
+        );
+    }
+
+    /// **The word that chose a density is gone, and the run is a fact.**
+    ///
+    /// The owner, 2026-08-10: *"remove the run button from the now playing"*,
+    /// clarified in the same conversation as *"run button is what I'm referring
+    /// to; just to be clear"*. Three claims, and they are pinned over the
+    /// source for `every_queue_affordance_survives_the_merge`'s reason — this
+    /// is about which widgets and which readings the file builds, and a
+    /// screenshot cannot show a message that came back.
+    ///
+    /// **The distinction this test exists to hold is between the word and the
+    /// column.** The word is deleted; the column is *more* present than it was,
+    /// because nothing may now stand it down. The affordance test above is the
+    /// other half of that sentence and the two must be read together: if this
+    /// one ever passes while that one fails, the wrong thing was removed.
+    #[test]
+    fn the_density_is_gone_and_the_run_stands_on_the_run() {
+        let place = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/now_playing.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+
+        // 1 · The control, and everything that existed to remember its state.
+        // Spelled in halves so this assertion is not its own counter-example —
+        // `implicit.rs`'s rule for a test that searches the file it lives in.
+        //
+        // **`queue::run_column` is deliberately not among these needles**, and
+        // that is the distinction rather than an oversight: the function that
+        // draws the list keeps its name and its fifteen affordances. What may
+        // not come back is the word, its message, and the remembered bool.
+        for (head, tail) in [
+            ("Message::Toggle", "Run"),
+            ("Config::", "run_column"),
+            ("text(\"", "Run\")"),
+        ] {
+            let gone = format!("{head}{tail}");
+            assert!(
+                !place.contains(&gone),
+                "`{gone}` came back to the place the `Run` word left"
+            );
+        }
+        // …and the density is not handed in from the shell either: `view` took
+        // a `run: bool` and does not any more.
+        let signature = place
+            .split_once("pub(crate) fn view<'a>(")
+            .expect("the place's own entry point")
+            .1;
+        let signature = &signature[..signature.find(") -> Element").expect("a signature ends")];
+        assert!(
+            !signature.contains("run: bool"),
+            "the shell is still telling the place which density to draw"
+        );
+
+        // 2 · What decides the run column now: the run itself, and nothing
+        // else. Not a config, not a phase, not a press.
+        assert!(
+            place.contains("let showing_run = player.queue_list().is_some();"),
+            "the run column is conditioned on something other than the run"
+        );
+        // …and the record column on the reading the bar names a track from,
+        // so a paused run and a sounding one draw the same surface.
+        assert!(
+            place.contains("let now = player.now_playing();"),
+            "the record column stopped reading what the bar reads"
+        );
+
+        // 3 · The empty state is drawn in the run column's own frame — the
+        // place's gutter and the rows' own measure — rather than flush against
+        // the body's edge (*"the nothing queued thing is hugging the left with
+        // no padding"*).
+        let empty = place
+            .split_once("return container(container(queue::empty_state())")
+            .expect("the empty state is built in a frame of its own")
+            .1;
+        let empty = &empty[..empty.find(".into();").expect("a return ends")];
+        assert!(
+            empty.contains("width(Length::Fixed(measure))"),
+            "the empty state left the measure its rows are set at"
+        );
+        assert!(
+            empty.contains("padding(crate::views::place_pad())"),
+            "the empty state lost the place's own gutter and is flush again"
         );
     }
 
