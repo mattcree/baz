@@ -285,15 +285,27 @@ impl Place {
         }
     }
 
-    /// Whether the returns lane is drawn beside this place.
+    /// Whether the returns lane is drawn beside this place. **It always is.**
     ///
-    /// **Everywhere but Settings** — ADR-0024 §5's clause 5, inherited
-    /// verbatim by ADR-0030. The standing decisions are the one place whose
-    /// subject is baz rather than the music, and a column of records beside
-    /// them would be the third tenant that killed the last resident column.
+    /// It was everywhere *but* Settings — ADR-0024 §5's clause 5, inherited by
+    /// ADR-0030 on the reading that the standing decisions are the one place
+    /// whose subject is baz rather than the music. That was defensible while
+    /// every place header carried a `‹ Library` door. It stopped being
+    /// defensible the moment the lane made those doors redundant and they were
+    /// removed: Settings then had the lane hidden *and* no door, so the only
+    /// way out was <kbd>Esc</kbd> — a keyboard-only route out of a place you
+    /// can reach with the pointer. The owner found it exactly that way:
+    /// *"when you visit the settings page you cannot return to the main screen
+    /// again because the left hand bar disappears"*.
+    ///
+    /// The panel is still absent there, which is what §5's clause was really
+    /// about — a summoned surface for collecting has no business over the
+    /// standing decisions. The lane is not that; it is the frame, and the
+    /// frame is the frame in every place.
     #[must_use]
     pub fn wears_lane(self) -> bool {
-        self != Self::Settings
+        let _ = self;
+        true
     }
 
     /// Whether the shelf is the place on screen.
@@ -390,7 +402,10 @@ mod tests {
         ] {
             assert!(place.wears_lane(), "{place:?}");
         }
-        assert!(!Place::Settings.wears_lane());
+        assert!(
+            Place::Settings.wears_lane(),
+            "Settings wears it too, or it is a room with no door"
+        );
     }
 
     /// **<kbd>Ctrl</kbd>+<kbd>U</kbd> is the lane row's accelerator**, and so
