@@ -86,25 +86,29 @@ which `docs/BACKLOG.md:9–25` already records as the owner's defect and marks
 
 He has now made it. This record is what he decided.
 
-### Two other agents are working the same ground, and this must not fight them
+### Half of the answer landed on `main` while this was being written
 
-Written down so the reconciliation is deliberate rather than discovered by
-whoever merges last:
+`cad9f5a`, *"Make the implicit list a kind, not an All-songs-shaped thing"*,
+merged in `db73cd3` — reshaped from the same sentence of the owner's, and it
+says in its own module doc exactly where it stops:
 
-- **`feat/shuffle-and-all-songs`** is building `All songs` as an implicit
-  playlist: a front-end `AllSongs` struct that deliberately carries **no id, no
-  path and no `save`**, with a test that greps its own source for those fields'
-  absence, plus `menu.rs`'s `no_menu_anywhere_offers_to_add_to_the_implicit_list`.
-  Both rest on `provenance == None` being **a mechanism**, not merely an absence:
-  it is what makes `Add to "All songs"` unrepresentable for a list with no file
-  to append to (`docs/BACKLOG.md:681–683`, Trap 1).
-- **`design/dynamic-playlists`** proposes rules-not-lists, and refuses provenance
-  for a draw for the same reason.
+> *"So **everything that plays is a list and a cursor**, and lists differ only in
+> what they are made of and what identity they have. A named playlist has a
+> *file*; an album's implicit list would have an *album id*; a draw's list has
+> nothing durable at all; **All songs** has only a name… **Only one origin is
+> built here**… the full model — including the harder half, where the play ledger
+> records one line per *track path* and the engine is never told a run's
+> provenance — **is a separate piece of design work and is not decided here**."*
+> (`implicit.rs:15–28`)
 
-**Neither is contradicted by this record, and §1.3 is why.** A richer origin that
-could name a fileless list would re-open Trap 1 — so the type carries a
-*destination* bit and the picker reads that instead of `is_some()`, which
-reproduces today's behaviour by construction.
+**This record is that separate piece**, and §1.4 says how the two types become
+one rather than two things called `Origin`.
+
+`design/dynamic-playlists`, still unmerged, proposes rules-not-lists and refuses
+provenance for a draw. It is not contradicted either, and §1.3 is why: a richer
+origin that could name a fileless list would re-open `docs/BACKLOG.md:681–683`'s
+Trap 1 — so the type carries a *destination* bit and the picker reads that
+instead of `is_some()`, which reproduces today's behaviour by construction.
 
 ## Decision
 
@@ -119,23 +123,24 @@ the list types. `AllSongs` keeps no id, no path and no `save`; the queue built
 
 ```rust
 /// The list this run is a reification of — origin, never a live link.
-pub(crate) struct Origin {
-    pub kind: OriginKind,
-    /// The identity in the kind's own space; `0` where the kind is a
-    /// singleton (`AllSongs`) or has no identity (`Draw`, `Hand`).
-    pub key: u64,
-    /// What to print. Stored rather than resolved, so a run stays
-    /// readable when the library no longer holds what it came from.
-    pub name: String,
-}
-
-pub(crate) enum OriginKind {
-    Album,      // key = vm::album_id       — the implicit list every record is
-    Artist,     // key = vm::artist_id      — one artist's records, in the page's order
-    Playlist,   // key = playlists::playlist_id — the only kind with a file
-    AllSongs,   // key = 0                  — the wall, named
-    Draw,       // key = 0                  — a shuffle draw: an order, not a place
-    Hand,       // key = 0                  — assembled one transfer at a time
+/// `implicit::Origin` (shipped in `cad9f5a`) grown the three kinds that
+/// have an identity of their own; see §1.4.
+pub(crate) enum Origin {
+    /// The implicit list every record is. `vm::album_id`.
+    Album { id: u64, name: String, artist: String },
+    /// One artist's records, in the artist page's order. `vm::artist_id`.
+    Artist { id: u64, name: String },
+    /// A playlist file — **the only kind with a file**, and so the only
+    /// destination. `playlists::playlist_id` over the name, which *is*
+    /// the filename (ADR-0024 §2).
+    Playlist { id: u64, name: String },
+    /// The wall, in its arrangement. Its identity is its name and nothing
+    /// else, because there is only ever one of it (`implicit.rs:116–121`).
+    AllSongs,
+    /// A shuffle draw: an order, not a place. Nothing durable.
+    Draw,
+    /// Assembled one transfer at a time. There was no list.
+    Hand { was: Option<String> },
 }
 ```
 
@@ -161,7 +166,7 @@ pub(crate) enum OriginKind {
 
 Appending a record to a playlist run makes a run that is no longer that playlist.
 Today `app.rs:2093` answers by nulling provenance. **That answer is kept, and
-restated**: an append moves the run to `OriginKind::Hand` with the name of what
+restated**: an append moves the run to `Origin::Hand` carrying the name of what
 it was —
 
 > `Hand`, `"from Road Trip"` — *you started here and then made it your own.*
@@ -184,10 +189,17 @@ in `Road Trip`. Two facts, two fields, one run.
 
 ```rust
 impl Origin {
-    /// Whether this list is somewhere a track can be *added*.
-    pub fn is_destination(&self) -> bool {
-        matches!(self.kind, OriginKind::Playlist)
+    /// The playlist file this list is stored in — `implicit::Origin::file`
+    /// (`implicit.rs:147–151`), grown the one variant that answers `Some`.
+    pub fn file(&self) -> Option<&str> {
+        match self {
+            Self::Playlist { name, .. } => Some(name),
+            _ => None,
+        }
     }
+
+    /// Whether this list is somewhere a track can be *added*.
+    pub fn is_destination(&self) -> bool { self.file().is_some() }
 }
 ```
 
@@ -203,6 +215,43 @@ The rule stated once, so a seventh kind cannot get it wrong:
 
 > **A list you can be *in* is not the same as a list you can add *to*. Only a
 > file is a destination.**
+
+#### 1.4 There is one `Origin`, and it is `implicit::Origin` grown up
+
+`cad9f5a` shipped `implicit::Origin` — today a one-variant enum (`AllSongs`)
+with `const fn name() -> &'static str` and `const fn file() -> Option<&str>`,
+the latter written as *"the one method that makes the module's load-bearing
+property a fact about the type rather than a convention"* (`implicit.rs:137–151`).
+
+**That is this record's type, one kind short of finished.** Two enums both
+called `Origin`, one naming fileless lists and one naming runs' lists, would be
+the worst possible outcome of two people answering the same sentence. So:
+
+> **`implicit::Origin` is promoted out of `implicit` and gains the file-backed
+> kinds. `ImplicitList` keeps its exact meaning, defined as
+> `origin.file().is_none()` — which is what `implicit.rs:38–46` already says it
+> is.**
+
+Three properties survive the promotion and one is spent, stated so the
+promotion is not mistaken for a rewrite:
+
+- **`file()` survives, and becomes `is_destination()`'s implementation.** It
+  keeps answering `None` for every fileless kind — by construction, per variant
+  — and `menu.rs`'s sweep keeps asserting it.
+- **`name()` survives** and stays `&str`. `AllSongs` and `Draw` keep their
+  `'static` names; `Playlist`, `Album` and `Artist` carry theirs in the variant,
+  which is where an identity that differs per instance belongs.
+- **`ImplicitList` keeps holding no state of its own.** Nothing is added to it.
+  The run's origin lives on the run.
+- **`Copy` and `const` are spent**, and that is the real cost: three kinds carry
+  a `String`, so the enum is `Clone` rather than `Copy` and `name()` is a plain
+  `fn`. Worth it — the alternative is resolving a name against the library at
+  every read, which is exactly what makes a history unreadable after a rescan
+  (§1's second property).
+
+**The taxonomy in `docs/design/09-implicit-playlists.md` §2 gets rewritten once,
+around §6's axes**, rather than twice by two branches pulling its rows in
+different directions.
 
 ### 2. The protocol: one optional field, and not one pinned byte moves
 
@@ -392,7 +441,7 @@ restated rather than amended.**
   `lane::Subject`, and the finding is that **it already is one**:
   `Subject::Record(id)` *is* the album's implicit list. The lane's two subjects
   were list identities before anyone called them that. What changes is that
-  `OriginKind::Draw` credits **nothing** — a draw is not somewhere you return to
+  `Origin::Draw` credits **nothing** — a draw is not somewhere you return to
   — where today it silently credits every record it quoted.
 - **`docs/BACKLOG.md:9–25` closes**, and its own cheaper alternative stays
   refused for its own reason: the marker is *in the ledger*, written by the
@@ -422,5 +471,5 @@ restated rather than amended.**
   opinion about what is queued, and the honest response would be to move the
   ledger write to the front end rather than to widen the engine's remit.
 - **The owner deciding a draw *is* somewhere you return to**, which would give
-  `OriginKind::Draw` a real key (the seed) and a lane row, and would put it back
+  `Origin::Draw` a real key (the seed) and a lane row, and would put it back
   in tension with `design/dynamic-playlists`' refusal.

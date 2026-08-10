@@ -3238,7 +3238,8 @@ the same list twice.
 
 **Step M3 — `Origin`, and the head gains its subject.** *(ADR-0034 §1, §3.5 ①④)*
 
-`Origin` and `OriginKind` in the front end; `QueueVm::provenance` becomes
+`implicit::Origin` promoted and grown its three identified kinds (ADR-0034
+§1.4 — **there is one `Origin`, not two**); `QueueVm::provenance` becomes
 `origin: Option<Origin>`; the six construction sites (`vm.rs:859`, `vm.rs:984`,
 `app.rs:2018`, `app.rs:2062`, `app.rs:2080`, `app.rs:3262`, `app.rs:3321`) say
 which list they are reifying; `queue_provenance()` becomes
@@ -3251,7 +3252,7 @@ protocol.**
 `impl/queue-in-now-playing/01a` with its subject restored — and list attribution
 in the lane within a session.
 *Tests*:
-- `every_run_names_its_list` — one case per `OriginKind`, asserting the head's
+- `every_run_names_its_list` — one case per `Origin` variant, asserting the head's
   string.
 - `only_a_file_is_a_destination` — the picker offers `Add to "{name}"` for
   `Playlist` and for nothing else, which is the assertion that keeps
@@ -3491,7 +3492,7 @@ Everything this study declined, in the order it should be picked up.
 | **D4** | **A first-seen column in the index** | Would make *"added to your collection in 2019"* true. Today only `mtime` exists and a re-tag rewrites it, so the fact would be a plausible-looking lie (§8.1) | A schema change for another reason, which this would ride along with |
 | **D5** | **A second window on a named monitor** (§11.1) | Two blockers, not one: iced exposes no monitor handle, **and** global control flow would couple the kiosk's clock to the main window's idle | iced exposing `MonitorHandle` **and** an answer to the idle coupling. Both, not either |
 | **D6** | **A periodic pixel nudge for burn-in** (§7.6) | The drift already moves the large areas; nudging type would make it shimmer | Real-world evidence of ghosting on a drifting field. Priced at one frame per 60 s so re-proposing costs an observation, not an argument |
-| **D7** | **A lane row for a shuffle draw** (ADR-0034 §6) | A draw is an order, not a place you return to — and `design/dynamic-playlists` refuses draw provenance for its own reasons. Crediting one would need a real key (the seed) and a row to credit | The owner deciding a draw is somewhere you go back to. It is one `OriginKind` variant away, deliberately |
+| **D7** | **A lane row for a shuffle draw** (ADR-0034 §6) | A draw is an order, not a place you return to — and `design/dynamic-playlists` refuses draw provenance for its own reasons. Crediting one would need a real key (the seed) and a row to credit | The owner deciding a draw is somewhere you go back to. It is one `Origin` variant away, deliberately |
 | **D8** | **`Origin` on `Event::TrackStarted`** (ADR-0034 §2) | A front end knows what it sent; echoing it back is ADR-0014 §6's refused move. It becomes necessary the day a *second* front end attaches to a running engine — the same day `EngineHandle::queue()` does | A second front end, which is one event's fan-out away and not close |
 | **D9** | **A `Run`-off composition that states what it is hiding** | With `Run` off the surface says nothing about the list at all, where the bar's continuation line still does. Adding a one-line reading would be a third density | Evidence that kiosk listeners turn the run off and then miss it |
 
