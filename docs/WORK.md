@@ -233,6 +233,51 @@
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **The ladder only tightens** — the owner, looking at the running app: *"why
+  is balanced smaller than compact... I think the dense should be a bit
+  smaller."* Two things in one sentence, and they are kept apart in the commit
+  because one is arithmetic and one is taste. ADR-0028's second amendment;
+  sweeps and frames in `docs/design/impl/the-ladder-only-tightens/`.
+  - **The defect, verified before it was fixed.** Each step brings its own
+    `hang`, and `art = (w − (columns + 1)·hang) / columns` **rises as the hang
+    falls** — so wherever two steps landed on the same column count the
+    *tighter* one drew the *larger* work. **30 of 96 widths** swept 700–2600,
+    and at the shipped window `Balanced` hung 3 × 242.7 against `Compact`'s
+    3 × 253.3.
+  - **It is older than `Compact`, which the history says rather than the
+    assumption.** The same sweep against the three-step ladder inverts at
+    **11 of 96** — `Spacious` under `Balanced` at 720 … 780 and 1060 … 1140 —
+    so the fourth step exposed the defect and did not cause it. It has been
+    true since `b935a4e` gave the wall a zoom.
+  - **The test asserted the wrong quantity, and the file knew.** Column count
+    is monotone by construction and was right the whole time;
+    `a_tighter_step_never_hangs_fewer_works`'s own doc comment had written the
+    art inversion down as a property (*"at 1120 px Spacious hangs 3 × 309.3
+    while Balanced hangs 3 × 320"*). `the_ladder_only_tightens_the_work_it_
+    draws` now sweeps every whole pixel of the band and every quarter pixel
+    below 420, asserting on `art` — a single width proves nothing, since 880
+    inverted and 920 did not.
+  - **Fixed in the construction, not in a guard.** `Density::art_max` is
+    **derived** — the next-looser step's `art_min`, and `art::THUMB_PX` at the
+    loosest — so the four art ranges abut and cannot overlap, and a tighter
+    step's largest work *is* a looser step's smallest. `Grid::art_cap` adds
+    `w − 2 × WIDEST_HANG` for the degenerate tail below 416 px, which is what
+    finally makes `ART_FLOOR`'s own promise about inversion true. Clean at
+    quarter-pixel resolution from 0 to 4000 px.
+  - **It moves the default wall, and that is in the commit rather than in a
+    footnote.** `Balanced` caps at 288 rather than 320, so **744 of 2261
+    widths** draw smaller art with wider gutters, and three rows of §7's
+    published table changed. At those widths the default step had been drawing
+    Spacious-sized covers; about 132 of the 744 were not inversions, and they
+    are the price of the ranges being disjoint rather than merely ordered.
+    **Worth the owner's eye** — it is the one part of this that touches a wall
+    he was not complaining about.
+  - **`Dense` is 160 … 200**, his taste, and `Compact` is re-derived rather
+    than re-tuned (still the widest rung halved). The floor is `THUMB_PX`
+    halved and one hang above `CONTINUE_SLEEVE`, the smallest sleeve the
+    product identifies a record by — `ART_FLOOR` 1.0 was never a design floor.
+    It costs the first amendment's *"nobody loses what they have"* claim,
+    knowingly: `Dense` is no longer the shelf baz drew before density existed.
 - **A 5.1 record is a record baz has** — the queue's *"multichannel files do
   not play at all"*, answered with the ITU-R BS.775 stereo downmix. **3.0, 4.0
   (quadraphonic), 5.0 and 5.1 play**, in WAV, FLAC, Vorbis and ALAC. The matrix

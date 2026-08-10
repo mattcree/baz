@@ -85,6 +85,48 @@
 //! survive the step — `gutter == margin == hang` wherever the art is uncapped
 //! is an algebraic consequence of the formula, and the formula did not change,
 //! so it is true at every step for the same reason it was true at one.
+//!
+//! # A tighter step never draws a larger work, and that is now a proof
+//!
+//! The formula surviving the step is not the same thing as the *ladder*
+//! surviving it, and for a year it did not. Each step brings its own `HANG`,
+//! and `art = (w − (columns + 1) · HANG) / columns` **rises as `HANG` falls**.
+//! So wherever two steps land on the same column count — which they must at
+//! any window narrow enough that the counts are already consecutive integers —
+//! the *tighter* step drew the *larger* work, because its gutters were
+//! smaller. Swept over 300 … 2560 px the shipped four-step ladder inverted at
+//! 30 of the 96 widths on a 20 px grid; the three-step ladder that preceded it
+//! inverted at 11, so the fourth step exposed the defect rather than causing
+//! it (ADR-0028's second amendment; the sweep is in
+//! `docs/design/impl/the-ladder-only-tightens/`).
+//!
+//! It is closed by two facts about the numbers rather than by a test that
+//! happens to notice:
+//!
+//! 1. **The steps partition the art range.** [`Density::art_max`] is no longer
+//!    a tuned row: it *is* the next-looser step's [`Density::art_min`], and the
+//!    loosest step's is [`crate::art::THUMB_PX`]. The four intervals abut and
+//!    do not overlap.
+//! 2. **No work is wider than one column at the loosest hang** —
+//!    [`Grid::art_cap`] takes `w − 2 × WIDEST_HANG` as well.
+//!
+//! Given a looser step `L` and a tighter `T`, `art(T) ≤ art_max(T)` and
+//! `art(T) ≤ w − 2·WIDEST_HANG` by (1) and (2); and `art(L) ≥ min(art_min(L),
+//! w − 2·WIDEST_HANG)`, because `columns ≤ ceiling` forces `art ≥ ART_MIN`
+//! wherever the width has room for one work and two of the widest margins, and
+//! (2) is the floor everywhere else. Since `art_max(T) == art_min(L)`, the two
+//! bounds meet: `art(L) ≥ art(T)`, at **every** width, including the degenerate
+//! tail below 416 px of grid where the count collapses to one column. Rule (2)
+//! exists only for that tail — it binds nowhere a real window reaches — and it
+//! is what finally makes [`ART_FLOOR`]'s own promise true, the one that has
+//! said *a degenerate width yields a small wall instead of an inverted one*
+//! since before there was a ladder to invert.
+//!
+//! The cost is stated in the ADR and repeated here because it is visible: where
+//! two steps tie on columns the tighter one now **flattens against the looser
+//! one's floor** instead of overtaking it, so the rung is short there rather
+//! than backwards. A short rung is a wall that barely changes; a backwards one
+//! is a wall that changes the wrong way, and only one of those is a defect.
 
 use crate::theme::{GAP_LG, HANG, LABEL_H};
 
@@ -169,14 +211,30 @@ fn round_half_up(value: f32) -> f32 {
 ///   [`crate::art::THUMB_PX`], so a looser step could not draw a larger work,
 ///   only more air around the same one.
 /// - **Compact** is the interval between `Balanced` and `Dense`, halved:
-///   208 = (240 + 176)/2, 236 = (272 + 200)/2, 280 = (320 + 240)/2, and the
-///   hang's own midpoint 34 taken down to 32, the nearest value on the 4 px
-///   lattice `theme.rs` holds every measure to. Nothing about it is tuned,
-///   which is the point — it is the ladder's widest rung split in two.
-/// - **Dense** is today's shelf: at the shipped 1280 px window the wall is
-///   1172 px wide once the rail's lane is off it, and Dense hangs
-///   **5 × 200.8** there against the 5 × 208 baz drew before the hang landed.
-///   Nobody loses what they have by the default moving.
+///   200 = (240 + 160)/2, 228 = (272 + 184)/2, and the hang's own midpoint 34
+///   taken down to 32, the nearest value on the 4 px lattice `theme.rs` holds
+///   every measure to. Nothing about it is tuned, which is the point — it is
+///   the ladder's widest rung split in two, and it was re-derived rather than
+///   re-tuned when `Dense` tightened.
+/// - **Dense** is the tightest wall the owner asked for (2026-08-10: *"I think
+///   the dense should be a bit smaller"*), art 160 … 200. It was 176 … 240,
+///   which was *today's shelf* — the 208 px cell baz drew before the hang
+///   landed. That equivalence is what the owner's taste overturned, knowingly:
+///   the step exists to put the most works on screen, and it was not doing
+///   that. At the shipped 1280 px window it now hangs **6 × 162.7** where it
+///   hung 5 × 200.8, and 9 × 170.2 at 1920 where it hung 8 × 195.
+///
+/// # Where the floor is
+///
+/// `Dense.art_min()` 160 is not the smallest number that fits. It is
+/// [`crate::art::THUMB_PX`] **halved**, so the wall never throws away more
+/// than three quarters of the thumbnail the cache paid to decode; and it
+/// stands one Dense hang above [`crate::theme::CONTINUE_SLEEVE`] 132, which is
+/// the smallest sleeve in the product that carries a record's *identity*
+/// (*"large enough that the record is identified by its cover rather than by
+/// its name"*). [`ART_FLOOR`] 1.0 is not a design floor and never was — it is
+/// the backstop that keeps the geometry total. `the_wall_hangs_no_work_below_
+/// the_size_a_cover_identifies_a_record_at` pins both readings.
 ///
 /// `ART_MAX` never exceeds [`crate::art::THUMB_PX`] at any step, so *nothing
 /// upscales* is a property of the system rather than of the default —
@@ -190,7 +248,7 @@ pub enum Density {
     #[default]
     Balanced,
     /// **The fourth step** (2026-08-10, the owner's *"4 levels makes sense to
-    /// me"*): `HANG` 32, art 208 … 280 — the `Balanced`-to-`Dense` interval
+    /// me"*): `HANG` 32, art 200 … 240 — the `Balanced`-to-`Dense` interval
     /// halved.
     ///
     /// It goes here rather than past either end of the ladder because that is
@@ -204,8 +262,13 @@ pub enum Density {
     /// which is the rung a listener actually crosses because `Balanced` is the
     /// default and `Dense` is its neighbour.
     Compact,
-    /// The most works on screen: `HANG` 28, art 176 … 240 — the shelf baz
-    /// shipped before density existed.
+    /// The most works on screen: `HANG` 28, art 160 … 200.
+    ///
+    /// It was 176 … 240 — the shelf baz shipped before density existed — until
+    /// the owner looked at the running app and said *"I think the dense should
+    /// be a bit smaller"* (2026-08-10). The floor is the type's own note: 160
+    /// is `THUMB_PX / 2` and one hang above the smallest sleeve the product
+    /// identifies a record by.
     Dense,
 }
 
@@ -218,6 +281,15 @@ impl Density {
     /// promise this array made while it held three, and which held: the
     /// fourth step cost exactly that in this file, plus its four numbers.
     pub const ALL: [Self; 4] = [Self::Spacious, Self::Balanced, Self::Compact, Self::Dense];
+
+    /// The loosest step's hang: the widest margin the wall ever leaves beside
+    /// a work (logical px).
+    ///
+    /// Read off [`Self::ALL`] rather than written down, so it cannot drift
+    /// from the ladder's own loose end. It is the second half of the module
+    /// docs' monotonicity proof — see [`Grid::art_cap`], which is its only
+    /// consumer.
+    pub const WIDEST_HANG: f32 = Self::ALL[0].hang();
 
     /// The word this step is written as in `config.toml`.
     ///
@@ -268,13 +340,17 @@ impl Density {
     }
 
     /// The smallest work this step will hang (logical px).
+    ///
+    /// Also, by [`Self::art_max`], the *largest* the next step down will hang:
+    /// these four numbers are the ladder's cut points, not four floors that
+    /// happen to be ordered.
     #[must_use]
     pub const fn art_min(self) -> f32 {
         match self {
             Self::Spacious => 288.0,
             Self::Balanced => crate::theme::ART_MIN,
-            Self::Compact => 208.0,
-            Self::Dense => 176.0,
+            Self::Compact => 200.0,
+            Self::Dense => 160.0,
         }
     }
 
@@ -284,20 +360,33 @@ impl Density {
         match self {
             Self::Spacious => 320.0,
             Self::Balanced => crate::theme::ART_TARGET,
-            Self::Compact => 236.0,
-            Self::Dense => 200.0,
+            Self::Compact => 228.0,
+            Self::Dense => 184.0,
         }
     }
 
     /// The largest work this step will hang (logical px), never above the
     /// thumbnail the cache holds.
+    ///
+    /// **Derived, not tuned** — the next-looser step's [`Self::art_min`], and
+    /// the source itself at the loosest step. That is rule (1) of the module
+    /// docs' monotonicity proof: the steps' art intervals abut and cannot
+    /// overlap, so a tighter step's largest work is a looser step's smallest
+    /// and the ladder cannot invert. Writing it as a table of four independent
+    /// numbers is precisely how it inverted for a year — 280 and 240 sat above
+    /// 240 and 208, and every width where two steps tied on columns paid for
+    /// it.
+    ///
+    /// `Spacious` stands on [`crate::theme::ART_MAX`], which *is*
+    /// [`crate::art::THUMB_PX`] — the refusal *nothing upscales*, and the
+    /// reason there is no step looser than this one.
     #[must_use]
     pub const fn art_max(self) -> f32 {
         match self {
-            Self::Spacious => 320.0,
-            Self::Balanced => crate::theme::ART_MAX,
-            Self::Compact => 280.0,
-            Self::Dense => 240.0,
+            Self::Spacious => crate::theme::ART_MAX,
+            Self::Balanced => Self::Spacious.art_min(),
+            Self::Compact => Self::Balanced.art_min(),
+            Self::Dense => Self::Compact.art_min(),
         }
     }
 
@@ -387,12 +476,7 @@ impl Grid {
     )]
     pub fn new(width: f32, density: Density) -> Self {
         let width = width.max(0.0);
-        let (hang, art_min, art_target, art_max) = (
-            density.hang(),
-            density.art_min(),
-            density.art_target(),
-            density.art_max(),
-        );
+        let (hang, art_min, art_target) = (density.hang(), density.art_min(), density.art_target());
         // The count the wall wants, and the count the smallest acceptable work
         // allows. The second is a ceiling rather than a preference: a window
         // gains a column only when the column it gains is still worth looking
@@ -402,7 +486,8 @@ impl Grid {
         let columns = wanted.clamp(1.0, ceiling).max(1.0) as usize;
 
         let count = columns as f32;
-        let art = ((width - (count + 1.0) * hang) / count).clamp(ART_FLOOR, art_max);
+        let art = ((width - (count + 1.0) * hang) / count)
+            .clamp(ART_FLOOR, Self::art_cap(width, density));
         let gutter = if columns > 1 {
             ((width - 2.0 * hang - count * art) / (count - 1.0)).clamp(0.0, 2.0 * hang)
         } else {
@@ -419,6 +504,33 @@ impl Grid {
             margin: ((width - block) / 2.0).max(0.0),
             row_h: art + GAP_LG + LABEL_H + hang,
         }
+    }
+
+    /// The largest work `density` may hang on a grid of `width` logical
+    /// pixels — the step's own [`Density::art_max`], and never more than one
+    /// column at the loosest hang.
+    ///
+    /// The second term is rule (2) of the module docs' proof and it exists for
+    /// the degenerate tail alone: it binds only below `art_max + 2 ×
+    /// WIDEST_HANG` — 416 px of grid at the loosest step — which is narrower
+    /// than any window baz can be given. Down there the column count has
+    /// collapsed to one at every step and `art` is `w − 2 × hang`, which
+    /// *rises* as the step tightens; without this the wall would invert in
+    /// exactly the region [`ART_FLOOR`] was written to keep sane.
+    ///
+    /// It is `w − 2 × WIDEST_HANG` and not `w − 2 × hang` because the pairwise
+    /// form does not compose: capping each step against its own neighbour's
+    /// hang leaves the chain open at the third rung. One number, the ladder's
+    /// widest, closes it for every pair at once.
+    ///
+    /// Never below [`ART_FLOOR`], so the clamp it feeds is always well
+    /// ordered.
+    #[must_use]
+    pub fn art_cap(width: f32, density: Density) -> f32 {
+        density
+            .art_max()
+            .min(width - 2.0 * Density::WIDEST_HANG)
+            .max(ART_FLOOR)
     }
 
     /// A shelf's header band, at this step: **one hang**, exactly as
@@ -794,12 +906,18 @@ mod tests {
         const EPSILON: f32 = 0.01;
 
         for density in Density::ALL {
-            let (hang, art_max) = (density.hang(), density.art_max());
+            let hang = density.hang();
             let step = density.label();
             let mut uncapped = 0;
             let mut capped = 0;
             for width in band() {
                 let grid = Grid::new(width, density);
+                // The *effective* cap, not the step's `art_max`: below 416 px
+                // of grid the width's own cap is the smaller of the two
+                // ([`Grid::art_cap`]), and a work standing on it is capped for
+                // this claim's purposes exactly as one standing on `art_max`
+                // is — the margins take the slack either way.
+                let art_max = Grid::art_cap(width, density);
                 assert!(
                     (grid.hang - hang).abs() < f32::EPSILON,
                     "{step}: the grid took a {} px hang, not {hang}",
@@ -849,9 +967,11 @@ mod tests {
             // branches above is being asserted about nothing. Spacious pins
             // its art at `ART_MAX` over most of the band by design, so the
             // floor is the count Spacious actually reaches rather than
-            // Balanced's.
+            // Balanced's — 917 before the ladder was made monotonic, 801
+            // after, the difference being the degenerate tail below 416 px
+            // where the width's own cap now binds.
             assert!(
-                uncapped > 900,
+                uncapped > 750,
                 "{step}: only {uncapped} uncapped widths in the band"
             );
             assert!(
@@ -880,9 +1000,14 @@ mod tests {
                     grid.art
                 );
                 // `ART_MIN` is a promise about a wall wide enough to keep it:
-                // one work and its two margins. Below that there is one column
-                // and it is as large as the wall allows.
-                if width >= art_min + 2.0 * hang {
+                // one work and two of the *widest* margins the ladder leaves.
+                // Below that there is one column and it is as large as the
+                // wall allows — `Grid::art_cap`'s second term, which is what
+                // keeps the ladder from inverting down there. It was `2 ×
+                // hang`; the 16 px of slack between the two is the price of
+                // the geometry being total, and it is paid at grid widths no
+                // window baz can be given produces.
+                if width >= art_min + 2.0 * Density::WIDEST_HANG {
                     assert!(
                         grid.art >= art_min - 0.01,
                         "{step} at {width} px: {} px of art is below its floor",
@@ -934,10 +1059,20 @@ mod tests {
             (Density::Spacious, 1812.0, 5, 304.8, 48.0, 48.0),
             (Density::Balanced, 1172.0, 4, 243.0, 40.0, 40.0),
             (Density::Balanced, 1812.0, 6, 255.33, 40.0, 40.0),
-            (Density::Compact, 1172.0, 4, 253.0, 32.0, 32.0),
+            // **The inversion, and where it went.** This row read
+            // `4, 253.0, 32.0` and the row above it reads `4, 243.0` — the
+            // same width, the same column count, and the *tighter* step
+            // drawing 10 px more art, which is the defect the owner saw at
+            // this exact window (2026-08-10: *"why is balanced smaller than
+            // compact"*). The table reproduced it faithfully because §7.1's
+            // four independent `ART_MAX` rows produced it. `art_max` is
+            // derived now, so Compact stands on Balanced's floor instead of
+            // stepping over it, and the 49.33 px gutter is the slack going
+            // where a capped step's slack has always gone: the gutters.
+            (Density::Compact, 1172.0, 4, 240.0, 49.33, 32.0),
             (Density::Compact, 1812.0, 7, 222.29, 32.0, 32.0),
-            (Density::Dense, 1172.0, 5, 200.8, 28.0, 28.0),
-            (Density::Dense, 1812.0, 8, 195.0, 28.0, 28.0),
+            (Density::Dense, 1172.0, 6, 162.67, 28.0, 28.0),
+            (Density::Dense, 1812.0, 9, 170.22, 28.0, 28.0),
         ];
         for (density, width, columns, art, gutter, margin) in table {
             let grid = Grid::new(width, density);
@@ -959,16 +1094,28 @@ mod tests {
                 grid.margin
             );
         }
-        // **Dense is today's shelf.** Before the hang landed the wall drew a
-        // fixed 240 px cell with 208 px of art in it — five columns at the
-        // shipped window — so the step that exists so nobody loses what they
-        // have has to still hang five, at very nearly that size.
-        let today = Grid::new(1172.0, Density::Dense);
-        assert_eq!(today.columns, 5);
+        // **Dense was today's shelf, and is not any more.** Before the hang
+        // landed the wall drew a fixed 240 px cell with 208 px of art in it —
+        // five columns at the shipped window — and until 2026-08-10 this test
+        // asserted that Dense still hung five at very nearly that size.
+        //
+        // The owner overturned it looking at the running app: *"I think the
+        // dense should be a bit smaller."* The step exists to put the most
+        // works on screen and it was hanging the same wall baz drew before
+        // there was a ladder, so the equivalence was costing the tight end of
+        // the ladder its job. Asserted in the direction it now runs, so that
+        // the old claim cannot come back by accident: **strictly more columns
+        // and strictly smaller art than the shelf that preceded density.**
+        let dense = Grid::new(1172.0, Density::Dense);
         assert!(
-            (today.art - 208.0).abs() < 8.0,
+            dense.columns > 5,
+            "Dense hangs {} columns where the shipped shelf hung 5",
+            dense.columns
+        );
+        assert!(
+            dense.art < 208.0,
             "Dense hangs {} px of art where the shipped shelf drew 208",
-            today.art
+            dense.art
         );
     }
 
@@ -982,11 +1129,20 @@ mod tests {
     /// stand between them and must repeat a neighbour there. What may never
     /// happen is an **inversion**, and that is what this asserts.
     ///
-    /// The art is deliberately **not** asserted to be monotone with it, and
-    /// that is not an omission: at 1120 px Spacious hangs 3 × 309.3 while
-    /// Balanced hangs 3 × 320, because Balanced's art is capped there and
-    /// Spacious's is not. Fewer columns is the promise; larger art is its
-    /// usual consequence and not its definition.
+    /// **This test asserts the wrong quantity to catch the defect it looks
+    /// like it is catching**, and the note that used to stand here said so
+    /// without noticing: *"the art is deliberately not asserted to be monotone
+    /// with it, and that is not an omission: at 1120 px Spacious hangs
+    /// 3 × 309.3 while Balanced hangs 3 × 320."* That is the inversion — the
+    /// looser step drawing the smaller work — written down as a property and
+    /// waved through, and it stood for a year because nothing checked the size
+    /// a listener actually sees. The column count stays correct throughout;
+    /// the art does not.
+    ///
+    /// The size is now `the_ladder_only_tightens_the_work_it_draws`'s job, and
+    /// the two live side by side because they are two claims: *never fewer
+    /// works* and *never a larger work*. Neither implies the other, and it was
+    /// the first one existing that made the second one's absence invisible.
     #[test]
     fn a_tighter_step_never_hangs_fewer_works() {
         for width in band() {
@@ -999,6 +1155,149 @@ mod tests {
                 "{width} px: the ladder hangs {counts:?} columns"
             );
         }
+    }
+
+    /// **A tighter step never draws a larger work, at any width** — the claim
+    /// the ladder was making to a listener and was not keeping.
+    ///
+    /// The defect the owner saw on 2026-08-10 (*"why is balanced smaller than
+    /// compact"*): each step carries its own hang, and
+    /// `art = (w − (columns + 1)·hang) / columns` **rises as the hang falls**,
+    /// so wherever two steps tied on column count the tighter one drew the
+    /// larger work. The shipped ladder inverted at 30 of the 96 widths on a
+    /// 20 px sweep of 700 … 2600; the three-step ladder before it inverted at
+    /// 11, so `Compact` exposed the defect rather than introducing it.
+    ///
+    /// **Swept, not sampled, and that is the point**: the inversion appears
+    /// and disappears with the window — 880 px inverted, 920 px did not — so a
+    /// single width proves nothing here. It also runs at quarter-pixel
+    /// resolution below 420 px, because a grid width is a float and the
+    /// degenerate tail is where the arithmetic is least well behaved.
+    ///
+    /// It is a **consequence** of the two construction rules, not a
+    /// coincidence this happens to catch — `the_steps_partition_the_art_range`
+    /// pins the first and [`Grid::art_cap`] documents the second. This is the
+    /// property they exist for, asserted over the arithmetic that has to
+    /// deliver it.
+    #[test]
+    fn the_ladder_only_tightens_the_work_it_draws() {
+        let quarters = (0..1680).map(|q| {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a quarter-pixel grid width is exact in f32"
+            )]
+            let q = q as f32;
+            q / 4.0
+        });
+        for width in band().chain(quarters) {
+            let arts: Vec<f32> = Density::ALL
+                .into_iter()
+                .map(|density| Grid::new(width, density).art)
+                .collect();
+            assert!(
+                arts.windows(2).all(|pair| pair[0] >= pair[1]),
+                "{width} px: the ladder draws {arts:?} px of art — a tighter \
+                 step has overtaken a looser one"
+            );
+        }
+    }
+
+    /// **The steps partition the art range**: every step's cap *is* the next
+    /// looser step's floor, and the loosest stands on the source.
+    ///
+    /// Rule (1) of the module docs' proof, and the reason
+    /// `the_ladder_only_tightens_the_work_it_draws` cannot be broken by a
+    /// later hand re-tuning a row. `Grid::new` clamps art to at most the
+    /// step's cap and the column ceiling holds it to at least the step's
+    /// floor, so abutting intervals mean a tighter step's largest work is a
+    /// looser step's smallest and the two can meet but never cross.
+    ///
+    /// Before this the four caps were four independent numbers — 320, 320,
+    /// 280, 240 against floors of 288, 240, 208, 176 — which overlap three
+    /// times over, and every width where two steps tied on columns paid for
+    /// one of them.
+    #[test]
+    fn the_steps_partition_the_art_range() {
+        for pair in Density::ALL.windows(2) {
+            let (looser, tighter) = (pair[0], pair[1]);
+            assert!(
+                (tighter.art_max() - looser.art_min()).abs() < f32::EPSILON,
+                "{} caps at {} where {} floors at {} — the intervals overlap",
+                tighter.label(),
+                tighter.art_max(),
+                looser.label(),
+                looser.art_min()
+            );
+            // A step whose target sat outside its own interval would be a step
+            // asking the column count for a size it may not draw.
+            assert!(
+                tighter.art_target() >= tighter.art_min()
+                    && tighter.art_target() <= tighter.art_max(),
+                "{}'s target is outside its own interval",
+                tighter.label()
+            );
+        }
+        assert!(
+            (Density::ALL[0].art_max() - crate::theme::ART_MAX).abs() < f32::EPSILON,
+            "the loosest step stands on the source, which is what closes that end"
+        );
+        // The widest hang is read off the ladder's loose end, not written
+        // down, so `Grid::art_cap`'s second term cannot drift from it.
+        assert!(
+            (Density::WIDEST_HANG - Density::ALL[0].hang()).abs() < f32::EPSILON,
+            "WIDEST_HANG has drifted from the loosest step's hang"
+        );
+    }
+
+    /// **The wall hangs no work below the size a cover identifies a record
+    /// at** — where the tight end of the ladder stops, and why it stops there
+    /// rather than at [`ART_FLOOR`].
+    ///
+    /// The owner asked for `Dense` to be *"a bit smaller"* (2026-08-10) and
+    /// the question that answer needed was how much smaller is still a wall
+    /// of records. `ART_FLOOR` 1.0 is not the answer — it is the backstop that
+    /// keeps the geometry total. Two of the product's own numbers are:
+    ///
+    /// - [`crate::art::THUMB_PX`] **halved**. The cache decodes to 320 px per
+    ///   edge and the wall is its largest consumer; below half that edge the
+    ///   wall is discarding three quarters of the pixels it paid to decode,
+    ///   and the step stops being a density and starts being a waste.
+    /// - [`crate::theme::CONTINUE_SLEEVE`] 132, the smallest sleeve in the
+    ///   product that carries a record's *identity* — its own token says
+    ///   *"large enough that the record is identified by its cover rather than
+    ///   by its name"*. [`crate::theme::PANEL_SLEEVE`] 40 is below it and is
+    ///   an identifier beside a name, not a cover.
+    ///
+    /// 160 satisfies both, and clears the second by exactly one Dense hang.
+    #[test]
+    fn the_wall_hangs_no_work_below_the_size_a_cover_identifies_a_record_at() {
+        let tightest = Density::ALL[Density::ALL.len() - 1];
+        let floor = tightest.art_min();
+        let cap = f32::from(u16::try_from(crate::art::THUMB_PX).expect("a sane thumbnail edge"));
+        assert!(
+            (floor - cap / 2.0).abs() < f32::EPSILON,
+            "the tightest floor is {floor}, not half the thumbnail's edge"
+        );
+        assert!(
+            floor >= crate::theme::CONTINUE_SLEEVE + tightest.hang(),
+            "the tightest floor {floor} does not clear the smallest sleeve a \
+             record is identified by"
+        );
+        assert!(
+            floor % 4.0 == 0.0,
+            "the tightest floor {floor} is off the 4 px lattice"
+        );
+        // And it is a floor the wall really reaches, rather than a number that
+        // no width produces: the tight end of the ladder has to *arrive*
+        // there for the claim to be about anything.
+        let reached = band()
+            .map(|width| Grid::new(width, tightest).art)
+            .fold(f32::INFINITY, f32::min);
+        assert!(
+            (reached - floor).abs() < 0.01,
+            "the tightest step's smallest work over the band is {reached}, \
+             not its declared floor {floor}"
+        );
     }
 
     /// **The ladder only ever tightens, and the fourth step is the widest
@@ -1056,7 +1355,13 @@ mod tests {
         assert!(
             (mid.art_target() - mean(loose.art_target(), tight.art_target())).abs() < f32::EPSILON
         );
-        assert!((mid.art_max() - mean(loose.art_max(), tight.art_max())).abs() < f32::EPSILON);
+        // `art_max` is deliberately **not** checked against the mean any more.
+        // It stopped being one of the fourth step's own numbers on 2026-08-10:
+        // it is derived from the ladder (`Density::art_max`), which is what
+        // makes the ladder monotonic, and a step whose cap is its neighbour's
+        // floor cannot also be its neighbours' midpoint. The rule that
+        // replaced it is asserted in `the_steps_partition_the_art_range`.
+        //
         // The hang is the mean taken down to the 4 px lattice: 34 → 32.
         let hang_mean = mean(loose.hang(), tight.hang());
         assert!((hang_mean - 34.0).abs() < f32::EPSILON);
@@ -1070,16 +1375,77 @@ mod tests {
         }
     }
 
-    /// **Balanced is the shipped hang, token for token.** The default step is
-    /// not a fourth set of numbers that happens to look like `theme.rs`'s — it
-    /// *is* them, so every measurement taken of the wall before density
-    /// existed still describes the wall a listener meets.
+    /// **Balanced is the shipped hang, token for token — in the three numbers
+    /// that decide a wall.** The default step is not a fourth set of numbers
+    /// that happens to look like `theme.rs`'s — it *is* them, so every
+    /// measurement taken of the wall before density existed still describes
+    /// the wall a listener meets.
+    ///
+    /// The one exception, and it is **the price of the ladder being monotonic
+    /// — stated, measured, and not waved through**: `Balanced.art_max()` is
+    /// 288 where [`crate::theme::ART_MAX`] is 320, since 2026-08-10, because
+    /// the cap is derived from the ladder now (`Density::art_max`) and
+    /// Spacious floors at 288.
+    ///
+    /// This moves the default wall. **744 of the band's 2261 widths draw
+    /// smaller art than they did** — the tops of each column band, where
+    /// Balanced used to run up to the source's own 320 px edge. It is not
+    /// collateral to the fix, it *is* the fix: a step that draws a
+    /// Spacious-sized cover is not a step below Spacious, and at 760, 860 and
+    /// 1120 px of grid the old Balanced drew 320 where Spacious itself drew
+    /// 308, 320 and 302.7. A ladder whose rungs name overlapping sizes has as
+    /// many rungs as it has numbers and no more.
+    ///
+    /// Two things bound the cost, and both are asserted: every width that
+    /// moves moves **down**, and none moves below Balanced's own floor 240, so
+    /// no listener's wall crosses into another step's range. The token still
+    /// means what it says — *no artwork is drawn larger than its source* — and
+    /// 288 is further inside the source, not outside it; `theme::ART_MAX`
+    /// keeps its other consumers, and the album page's sleeve is still 320.
     #[test]
     fn balanced_is_the_hang_the_tokens_publish() {
         const { assert!(Density::Balanced.hang() == HANG) }
         const { assert!(Density::Balanced.art_min() == crate::theme::ART_MIN) }
         const { assert!(Density::Balanced.art_target() == crate::theme::ART_TARGET) }
-        const { assert!(Density::Balanced.art_max() == crate::theme::ART_MAX) }
+        // The cap is the ladder's, and it is inside the source rather than on
+        // it. Asserted as an inequality *and* as a claim about the wall: no
+        // width in the band draws different art for the difference.
+        const { assert!(Density::Balanced.art_max() < crate::theme::ART_MAX) }
+        let mut moved = 0;
+        for width in band() {
+            let grid = Grid::new(width, Density::Balanced);
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "column counts are far below f32's exact-integer range"
+            )]
+            let count = grid.columns as f32;
+            let by_the_token =
+                ((width - (count + 1.0) * HANG) / count).clamp(ART_FLOOR, crate::theme::ART_MAX);
+            if (grid.art - by_the_token).abs() < 0.01 {
+                continue;
+            }
+            moved += 1;
+            assert!(
+                grid.art < by_the_token,
+                "{width} px: the default wall drew {} px of art where the \
+                 token's own cap gave it {by_the_token} — a cap may only take",
+                grid.art
+            );
+            // Above the degenerate tail, where `Grid::art_cap`'s width term
+            // takes over and one column is as large as the wall allows.
+            assert!(
+                width < Density::Balanced.art_min() + 2.0 * Density::WIDEST_HANG
+                    || grid.art >= Density::Balanced.art_min() - 0.01,
+                "{width} px: the default wall fell to {} px, below its own \
+                 floor — the cap has pushed it into another step's range",
+                grid.art
+            );
+        }
+        assert_eq!(
+            moved, 744,
+            "the default wall now moves at {moved} of the band's widths, not \
+             the 744 the ladder's partition was measured to cost"
+        );
         // …and the header band is one hang at every step, which is what
         // `theme::SHELF_HEADER_H` says at the default.
         const { assert!(crate::theme::SHELF_HEADER_H == HANG) }
@@ -1197,12 +1563,20 @@ mod tests {
         // `LABEL_H` 40, `HANG` 40 — because quantising the body's line box to 20
         // makes a wall label exactly one hang tall (composition audit §2.1). It
         // was `art + 92.4`, which is the same table with a fraction in it.
+        // **Three rows moved on 2026-08-10** and the spec moved with them.
+        // 760, 860 and 1120 published 320 px of art — the *source's own edge*,
+        // at the default step — and at all three the looser Spacious step drew
+        // less: 308, 320 and 302.7. That is the inversion the owner saw
+        // (*"why is balanced smaller than compact"*), and the ladder now
+        // partitions the art range so that Balanced caps at Spacious's floor,
+        // 288. The slack goes where a capped step's slack has always gone, so
+        // these three rows keep their column counts and gain gutters.
         let table = [
             (640.0_f32, 2_usize, 260.0_f32, 40.0_f32, 40.0_f32, 356.0_f32),
-            (760.0, 2, 320.0, 40.0, 40.0, 416.0),
-            (860.0, 2, 320.0, 80.0, 70.0, 416.0),
+            (760.0, 2, 288.0, 80.0, 52.0, 384.0),
+            (860.0, 2, 288.0, 80.0, 102.0, 384.0),
             (922.0, 3, 254.0, 40.0, 40.0, 350.0),
-            (1120.0, 3, 320.0, 40.0, 40.0, 416.0),
+            (1120.0, 3, 288.0, 80.0, 48.0, 384.0),
             (1280.0, 4, 270.0, 40.0, 40.0, 366.0),
             (1500.0, 5, 252.0, 40.0, 40.0, 348.0),
             (1920.0, 6, 273.0, 40.0, 40.0, 369.0),
@@ -1352,7 +1726,7 @@ mod tests {
         const EPSILON: f32 = 0.01;
 
         for density in Density::ALL {
-            let (hang, art_max, step) = (density.hang(), density.art_max(), density.label());
+            let (hang, step) = (density.hang(), density.label());
             let mut uncapped = 0;
             for wall in band() {
                 let width = wall - crate::theme::INDEX_LANE_W;
@@ -1360,7 +1734,7 @@ mod tests {
                     continue;
                 }
                 let grid = Grid::new(width, density);
-                if grid.art >= art_max - EPSILON {
+                if grid.art >= Grid::art_cap(width, density) - EPSILON {
                     continue;
                 }
                 uncapped += 1;
@@ -1384,8 +1758,12 @@ mod tests {
                     width - accounted
                 );
             }
+            // 693 at Spacious, which is the floor here for the same reason it
+            // is in the test above: the loosest step spends most of the band
+            // standing on a cap, and 108 px less wall means it reaches one
+            // sooner.
             assert!(
-                uncapped > 900,
+                uncapped > 650,
                 "{step}: only {uncapped} uncapped widths with the rail on"
             );
         }
@@ -1409,14 +1787,14 @@ mod tests {
     #[test]
     fn the_rail_lane_hangs_at_exactly_one_hang_from_the_last_column() {
         for density in Density::ALL {
-            let (hang, art_max, step) = (density.hang(), density.art_max(), density.label());
+            let (hang, step) = (density.hang(), density.label());
             for wall in band() {
                 let width = wall - crate::theme::INDEX_LANE_W;
                 if width <= 0.0 {
                     continue;
                 }
                 let grid = Grid::new(width, density);
-                if grid.art >= art_max - 0.01 {
+                if grid.art >= Grid::art_cap(width, density) - 0.01 {
                     continue; // capped art: the margins take the slack (above)
                 }
                 // The lane starts where the grid's width ends.

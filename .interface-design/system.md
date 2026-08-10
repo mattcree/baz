@@ -313,17 +313,26 @@ density step** (§7.1). The values below are `Balanced`, the default.
 | | `HANG` | `ART_MIN` | `ART_TARGET` | `ART_MAX` |
 |---|---|---|---|---|
 | Spacious | 48 | 288 | 320 | 320 |
-| **Balanced** | **40** | **240** | **272** | **320** |
-| Compact | 32 | 208 | 236 | 280 |
-| Dense | 28 | 176 | 200 | 240 |
+| **Balanced** | **40** | **240** | **272** | **288** |
+| Compact | 32 | 200 | 228 | 240 |
+| Dense | 28 | 160 | 184 | 200 |
+
+**`ART_MAX` is derived, not chosen**: it is the next-looser step's `ART_MIN`,
+and the loosest step's is `art::THUMB_PX`. The four art ranges therefore abut
+and cannot overlap, which is what makes the ladder monotonic — a tighter step's
+largest work is a looser step's smallest, so they meet and never cross
+(ADR-0028's second amendment, 2026-08-10). Before that they were four
+independent numbers and the wall inverted at 30 of 96 swept widths. `Dense`'s
+floor is `THUMB_PX / 2` and one hang above `CONTINUE_SLEEVE`, the smallest
+sleeve in the product that carries a record's identity.
 
 | Shelf width | Columns | Art | Gutter | Margin | Row pitch | Today | Today's dead gutter |
 |---|---|---|---|---|---|---|---|
 | 640 | 2 | 260 | 40 | 40 | 352 | 2 × 208 | 112 px |
-| 760 | 2 | 320 | 40 | 40 | 412 | 2 × 208 | 232 px |
-| 860 | 2 | 320 | 80 | 70 | 412 | 3 × 208 | 92 px |
+| 760 | 2 | 288 | 80 | 52 | 380 | 2 × 208 | 232 px |
+| 860 | 2 | 288 | 80 | 102 | 380 | 3 × 208 | 92 px |
 | **922** (1280 − inspector) | 3 | **254** | 40 | 40 | 346 | 3 × 208 | **154 px** |
-| 1120 | 3 | 320 | 40 | 40 | 412 | 4 × 208 | 112 px |
+| 1120 | 3 | 288 | 80 | 48 | 380 | 4 × 208 | 112 px |
 | **1280** (no inspector) | **4** | **270** | 40 | 40 | 362 | 5 × 208 | 32 px |
 | 1500 (1920 − inspector) | 5 | 252 | 40 | 40 | 344 | 6 × 208 | 12 px |
 | **1920** (no inspector) | **6** | **273** | 40 | 40 | 365 | 7 × 208 | 192 px |
@@ -425,9 +434,18 @@ control, in either axis, and every place that hangs works reads **one** grid —
 | Step | `HANG` | `ART_MIN` | `ART_TARGET` | `ART_MAX` |
 |---|---|---|---|---|
 | Spacious | 48 | 288 | 320 | 320 |
-| **Balanced** | **40** | **240** | **272** | **320** |
-| Compact | 32 | 208 | 236 | 280 |
-| Dense | 28 | 176 | 200 | 240 |
+| **Balanced** | **40** | **240** | **272** | **288** |
+| Compact | 32 | 200 | 228 | 240 |
+| Dense | 28 | 160 | 184 | 200 |
+
+**`ART_MAX` is derived, not chosen**: it is the next-looser step's `ART_MIN`,
+and the loosest step's is `art::THUMB_PX`. The four art ranges therefore abut
+and cannot overlap, which is what makes the ladder monotonic — a tighter step's
+largest work is a looser step's smallest, so they meet and never cross
+(ADR-0028's second amendment, 2026-08-10). Before that they were four
+independent numbers and the wall inverted at 30 of 96 swept widths. `Dense`'s
+floor is `THUMB_PX / 2` and one hang above `CONTINUE_SLEEVE`, the smallest
+sleeve in the product that carries a record's identity.
 
 `Compact` is `Balanced`'s row and `Dense`'s row averaged — 208 = (240+176)/2,
 236 = (272+200)/2, 280 = (320+240)/2 — with the hang's own average 34 taken
