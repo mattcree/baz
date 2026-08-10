@@ -45,12 +45,10 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 | Ask | Landed as |
 |---|---|
-<<<<<<< HEAD
+| *"it would be good if multi CD albums were a single item"* | it already was, for three of the four shapes a two-disc rip arrives in — the shatter was **shape 3**, where the ripper put the disc in the `ALBUM` tag (`… (Disc 2)`, `… CD2`, `… [Disc 2]`). A closed-list marker rule takes it off, but only when a **sibling** exists to merge with, so a lone `Bitches Brew CD1` is never renamed; the marker also supplies the disc number a `CD1`/`CD2` rip never wrote, so the merged record plays and breaks in disc order (ADR-0038, `docs/design/impl/multi-disc/`) |
 | *"how the search works when we're not on the library needs to be decided. should it just pop to the library view when you start typing? or should it search whatever page you are on?"* | **Decided: it pops to the Library, which is what already shipped** — and the field now *says* so, reading `Search library` rather than `Search` in every place. Contextual search refused on one hard constraint: type-anywhere is a promise about the collection, and a scoped well would revoke it on exactly the pages a scope applies to (ADR-0036 §3). The playlist filter the question is really about is costed in [BACKLOG.md](BACKLOG.md) as a *second control*, which is his to call |
 | *"maybe a little x or esc to clear would make sense too"* | the `×` in the well's mark box — the magnifier at rest, the cross while a query stands, so it costs the query none of its 104 px. Pressing it is the identical function `Esc` runs, and it is drawn exactly when `Esc` has that layer to peel (ADR-0036 §4) |
-=======
 | *"also, we have removed the a-z option from grouping? that feels like it should go back and honestly it's the first option, followed by artist"* | `A–Z` is a group key again and first in the row — `A–Z · ARTIST · YEAR · GENRE · ADDED · PLAYED`, <kbd>1</kbd>…<kbd>6</kbd>. It gets a **new** code, `"alphabet"`, because `"artist"` has been repurposed once already (ADR-0035's third amendment). `KEYS_W` 314 → 360; the window's minimum did not move |
->>>>>>> feat/az-and-artist
 | *"artists should be grouping stuff by artist not just alphabetically"* | `ARTIST` groups albums under their artist; `A–Z`, `WallSubject` and 700 lines went with it |
 | *"artists should be grouping stuff by artist not just alphabetically"* | `ARTIST` shelves one artist per shelf, the header a door to their place; `A–Z` and the `ARTISTS` word both gone (ADR-0035) |
 | The `ARTIST` group key and the `Artist` place are both called artist | the key groups by artist now, so the word is true and the two are one thing (ADR-0035) |
