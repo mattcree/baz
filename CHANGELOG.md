@@ -24,8 +24,43 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
+### Fixed
+
+- **Removing a music folder no longer throws away when your records arrived.**
+  Removing a folder and adding it back used to file every album under
+  ADDED = *today* — a real loss of the one fact in the library that nothing on
+  disk carries and no later scan can rediscover. baz now keeps it: forgetting a
+  folder leaves behind, for each of its tracks, the path and the moment the
+  library first saw it, and the ordinary scan that finds the files again hands
+  each record the date it really arrived. The wall you get back is the wall you
+  had (ADR-0042).
+  - The confirming press says so: *"Forget 412 tracks? The files stay on disk;
+    baz stops holding them but remembers when they arrived."*
+  - **A folder removed before this release cannot be repaired** — nothing
+    recorded the fact, so there is nothing to restore. The fix is prospective,
+    and it is the last such loss.
+
 ### Added
 
+- **baz can be told that music is gone, and being wrong about it costs
+  nothing** (ADR-0042). `Library::forget_paths` deletes exactly the rows a
+  listener names — the record-scale twin of removing a folder — and keeps their
+  arrival dates the same way, so asserting that an album is gone when its share
+  was merely unmounted costs a rescan and no facts. That reversibility is what
+  makes the assertion safe to offer at all.
+  - **The scan's own removal is deliberately unchanged.** A row is still deleted
+    automatically only under ADR-0010's four gates, which require the file's
+    parent directory to be present — so an unmounted NAS still prunes nothing,
+    and baz still never guesses that an unreachable folder is a deleted one.
+    What it now has is a door a *person* can open.
+  - **The control for it is not in this release.** A `Forget this record` item
+    on the tile menu is specified in ADR-0042 §8 and is one message away;
+    until it lands, the record-scale forget is library API.
+- **Schema v9**: a `forgotten` table holding a path and one timestamp per row a
+  listener told baz to stop holding. One row per path however many times it is
+  forgotten, spent the moment the path comes back, and swept at every open, so
+  no path is ever both held and remembered. It never expires — the case it
+  exists for is a folder removed one year and added back another.
 - **A library baz will not open now says so, instead of asking where your music
   is** (ADR-0041). Running an older baz against a library a newer one wrote
   used to draw the first-run screen — *"Where's your music?"* — at a listener

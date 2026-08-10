@@ -2,7 +2,8 @@
 
 **Status**: accepted (2026-08-08) · **amends ADR-0008** (its grouping stops
 being the only grouping) · **§2 amended by
-[ADR-0035](0035-the-wall-has-a-subject.md)** (2026-08-10) · implements step 4
+[ADR-0035](0035-the-wall-has-a-subject.md)** (2026-08-10) · **§5 extended by
+[ADR-0042](0042-what-baz-remembers.md)** (2026-08-10) · implements step 4
 of ADR-0017's build plan · builds on ADR-0018's play-history ledger
 
 > **§2 amended by ADR-0035 (2026-08-10).** ARTIST breaks on the **artist**, not
@@ -206,6 +207,30 @@ shelf, and everything scanned *after* the upgrade gets a real first-seen and
 appears at the top, which is the case ADDED exists for ("new rips appear under
 ADDED"). A fabricated backfill would buy a prettier first screen at the cost of
 the only property the column has.
+
+> **Extended 2026-08-10 — [ADR-0042](0042-what-baz-remembers.md), and the
+> structural guarantee above is unchanged by it.** `UPSERT_TRACK` still names
+> `first_seen_ns` in its `INSERT` list and still omits it from its
+> `ON CONFLICT DO UPDATE` list; a row's first-seen is still written exactly once,
+> when the row is created, and there is still no statement anywhere in baz that
+> can move it.
+>
+> What this section did not have to consider is a row **leaving**. Removing a
+> music folder deletes rows (ADR-0022 §4), and until v9 the fact went with them
+> — so a folder removed and added back filed every album under ADDED = *today*,
+> which is exactly the lie the three refused backfills would have told, arrived
+> at by a different route.
+>
+> The fix is the same shape as this section's own reasoning rather than an
+> exception to it: **the fact is not invented, it is kept**. Schema v9's
+> `forgotten` table holds the first-seen of every path a *listener* told baz to
+> stop holding, and the insert that brings the path back is given that value
+> instead of the clock. There is still no backfill, still no guess, and still
+> nothing that can move an existing row's first-seen — the value the once-only
+> write receives is simply the true one.
+>
+> A row whose own first-seen was never recorded leaves no tombstone: it reads
+> `Not recorded` before and after, which is this section's answer, unchanged.
 
 ### 6. PLAYED — wired to the ledger, correct without one
 

@@ -620,26 +620,35 @@ Newest first. Each was asked for in conversation and is now in the product.
   reason — video/subtitle support, a codec only 0.6 has, or an upstream fix
   we need — rather than for its own sake.
 
-- **A deleted *directory*'s tracks still linger in the index.** Removal
-  landed with ADR-0011 and deleting a *file* now clears its row on the next
-  scan — but only under positive confirmation, and one of the four gates is
-  "the file's parent directory is present". So `rm -rf ~/Music/Artist/Album`
-  leaves eight rows behind, deliberately: from the filesystem's side a
-  deleted folder and a mount point that is not mounted right now are the
-  same `NotFound` for every path below, and wrongly wiping a present
+- **A deleted *directory*'s tracks still linger in the index** — **narrowed to
+  a missing control (ADR-0042).** Removal landed with **ADR-0010** (this entry
+  said ADR-0011 for two months; that is the volume ADR) and deleting a *file*
+  now clears its row on the next scan — but only under positive confirmation,
+  and one of the four gates is "the file's parent directory is present". So
+  `rm -rf ~/Music/Artist/Album` leaves eight rows behind, deliberately: from the
+  filesystem's side a deleted folder and a mount point that is not mounted right
+  now are the same `NotFound` for every path below, and wrongly wiping a present
   listener's library is not a bug worth trading a cosmetic stale row for.
+  **That refusal stands and is not being revisited.**
 
-  **What would settle it**, in preference order: (1) a *user-initiated
-  prune* — "these 412 rows point at files I cannot find; remove them?" —
-  which is the honest home for every case automation should decline, and
-  needs a library-maintenance surface baz does not have yet; (2) remembered
-  mount points, so "this directory is gone" can be distinguished from "this
-  directory's filesystem is not attached". ~~(3) a per-row record of which
-  root a track came from~~ — **shipped (ADR-0022)**, and it did replace gate
-  2, but it does not touch this case: a deleted album folder and an unmounted
-  one are still the same `NotFound` from below whichever root recorded the
-  rows. Removing the whole *folder* in the Settings place is now a way out
-  that did not exist before, but it is a different act at a different scale.
+  **What would settle it**, in preference order: ~~(1) a *user-initiated
+  prune*~~ — **the mechanism shipped (ADR-0042)**: `Library::forget_paths`
+  deletes exactly the rows a listener names, and keeps their first-seen in a
+  tombstone so that being wrong — the share was only unmounted — costs a rescan
+  and nothing else. That reversibility is the whole reason a listener-initiated
+  forget is offerable at all. **What remains is its control**: one `Message` and
+  one update arm in `crates/baz/src/app.rs` for a `Forget this record` item on
+  the tile menu, drawn in ADR-0042 §8, and left undone only because another
+  branch held that file. The wider *"these 412 rows point at files I cannot
+  find; remove them?"* surface — grouped by root and counted, so an unmounted
+  share is visible as the shape it makes — is still unbuilt and still wants a
+  library-maintenance place. (2) remembered mount points, so "this directory is
+  gone" can be distinguished from "this directory's filesystem is not attached"
+  — **now unnecessary for this case**, because a person asserting it needs no
+  such signal. ~~(3) a per-row record of which root a track came from~~ —
+  **shipped (ADR-0022)**, and it did replace gate 2, but it does not touch this
+  case: a deleted album folder and an unmounted one are still the same
+  `NotFound` from below whichever root recorded the rows.
 
 - ~~**The index has no notion of which root a row came from.**~~ — **closed
   (ADR-0022).** Schema v8 records the root on every row and adds a `roots`
@@ -659,14 +668,20 @@ Newest first. Each was asked for in conversation and is now in the product.
   remove it and let its rows go with it — but the "these 412 rows point at
   files I cannot find; remove them?" prune below is still unbuilt.
 
-- **Removing a music folder loses its tracks' `first_seen_ns`** (ADR-0022 §4).
-  Removing a folder forgets its rows outright, so adding it back files every
-  album under ADDED = *today*. That is a real loss of the one fact ADR-0019
-  built a column and a structural guarantee to protect, accepted because the
-  alternative — keeping rows for a folder baz can no longer refresh — is a
-  wall of albums nothing can ever correct or remove. A tombstone (remember the
-  first-seen for a forgotten root's paths, and restore it if the folder comes
-  back) would fix it and is its own small design.
+- ~~**Removing a music folder loses its tracks' `first_seen_ns`**~~ (ADR-0022
+  §4) — **closed (ADR-0042).** The tombstone this entry named was designed and
+  built: schema v9's `forgotten` table keeps the path and the first-seen of
+  every row a listener tells baz to stop holding, the rescan that finds the
+  files again spends it, and the memory is consumed by that and swept at open,
+  so it cannot accumulate. ADR-0022 §4's accepted price is withdrawn in place
+  and the Settings sentence says so. Proved through the product, driven by
+  presses, in `docs/design/impl/forget-and-remember/`: the ADDED wall before the
+  round trip and after it differ in **zero pixels**, against timestamps planted
+  four years in the past.
+
+  **What it does not repair**: a folder removed *before* v9. Nothing recorded
+  the fact, so there is nothing to restore — the same wall ADR-0019 §5 hit. The
+  fix is prospective and it is the last such loss.
 - ~~**Multichannel (>2ch) files are rejected**, not downmixed.~~ — **narrowed
   by ADR-0039.** 3.0, 4.0 (quadraphonic), 5.0 and 5.1 now play, folded with the
   ITU-R BS.775 matrix in `playback::downmix`, in WAV, FLAC, Vorbis and ALAC.

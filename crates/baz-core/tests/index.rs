@@ -1841,7 +1841,7 @@ fn a_v1_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let by_path = |needle: &str| {
         library
@@ -2054,7 +2054,7 @@ fn a_v2_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let by_path = |needle: &str| {
         library
@@ -2579,7 +2579,7 @@ fn a_v3_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let by_path = |needle: &str| {
         library
@@ -2935,7 +2935,7 @@ fn a_v4_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let by_path = |needle: &str| {
         library
@@ -3182,7 +3182,7 @@ fn a_v5_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let by_path = |needle: &str| {
         library
@@ -3613,7 +3613,7 @@ fn a_v6_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let by_path = |needle: &str| {
         library
@@ -4569,7 +4569,7 @@ fn a_v7_database_migrates_in_place_without_losing_anything() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("user_version");
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let by_path = |needle: &str| {
         library
@@ -4931,5 +4931,767 @@ fn an_unmounted_folder_keeps_its_rows_and_the_remount_restores_them_unchanged() 
             .collect::<Vec<_>>(),
         first_seen,
         "returning is not arriving: first-seen stands"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// What baz remembers about music it no longer holds (schema v9, ADR-0042)
+// ---------------------------------------------------------------------------
+
+/// **The whole point, at root scale, through real files and real scans.**
+///
+/// A folder is scanned, its records date from the moment they arrived, the
+/// listener removes the folder and adds it back — and the wall files them where
+/// it always did. The assertion that matters is not that a first-seen *exists*
+/// after the round trip but that it is **the value from before**, so the test
+/// plants a first-seen far in the past and checks the restored rows carry it
+/// rather than today.
+#[test]
+fn removing_a_folder_and_adding_it_back_restores_the_first_seen_from_before() {
+    use baz_core::library::{ScanEntry, scan};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let root = dir.path().join("Music");
+    real_wav(&root.join("Artist/Album/01.wav"));
+    real_wav(&root.join("Artist/Album/02.wav"));
+
+    let walk = |root: &Path| -> Vec<TrackMeta> {
+        scan(root)
+            .expect("walk")
+            .filter_map(|entry| match entry {
+                ScanEntry::Track(meta) => Some(meta),
+                _ => None,
+            })
+            .collect()
+    };
+
+    let mut library = Library::open(&db).expect("open");
+    library
+        .add_tracks_under(Some(&root), walk(&root))
+        .expect("first scan");
+    library.record_scan(&root, 1_000).expect("record");
+
+    // Age the library: these records were added years ago, which is the only
+    // state in which "ADDED = today" is visibly a loss. Written straight into
+    // the database, because baz itself structurally cannot move a first-seen.
+    let long_ago = now_ns() - 4 * 365 * 24 * 60 * 60 * 1_000_000_000;
+    {
+        let conn = rusqlite::Connection::open(&db).expect("sqlite");
+        conn.execute("UPDATE tracks SET first_seen_ns = ?1", [long_ago])
+            .expect("age the rows");
+    }
+    let mut library = Library::open(&db).expect("reopen");
+    assert_eq!(library.albums()[0].first_seen_ns, Some(long_ago));
+    assert_eq!(library.forgotten_paths(), 0, "nothing forgotten yet");
+
+    // The listener removes the folder in the Settings place.
+    assert_eq!(library.forget_root(&root).expect("forget"), 2);
+    assert_eq!(library.len(), 0, "the wall is empty");
+    assert_eq!(library.root_stats(&root).tracks, 0);
+    assert_eq!(
+        library.forgotten_paths(),
+        2,
+        "and baz kept one fact about each"
+    );
+    assert_eq!(
+        library.forgotten_first_seen(&root.join("Artist/Album/01.wav")),
+        Some(long_ago),
+    );
+
+    // Across a restart, because a memory only in RAM is not a memory.
+    drop(library);
+    let mut library = Library::open(&db).expect("reopen");
+    assert_eq!(library.len(), 0);
+    assert_eq!(library.forgotten_paths(), 2);
+
+    // The listener adds it back. Nothing on disk ever moved, so this is the
+    // ordinary launch scan and nothing else.
+    library
+        .add_tracks_under(Some(&root), walk(&root))
+        .expect("rescan");
+    assert_eq!(library.len(), 2);
+    assert_eq!(
+        library
+            .albums()
+            .iter()
+            .map(|album| album.first_seen_ns)
+            .collect::<Vec<_>>(),
+        vec![Some(long_ago)],
+        "the record files under the year it really arrived, not today",
+    );
+    assert_eq!(
+        library.forgotten_paths(),
+        0,
+        "and the memory is spent, not accumulated"
+    );
+
+    drop(library);
+    let reopened = Library::open(&db).expect("reopen");
+    assert_eq!(reopened.albums()[0].first_seen_ns, Some(long_ago));
+    assert_eq!(reopened.forgotten_paths(), 0);
+}
+
+/// The same act at record scale: `forget_paths` takes the rows a listener
+/// named and keeps the same one fact, so a record forgotten and restored from a
+/// backup keeps its place on the ADDED wall.
+#[test]
+fn forgetting_a_record_keeps_when_it_arrived_and_the_files_coming_back_restores_it() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let mut library = Library::open(&db).expect("open");
+    library
+        .add_tracks_under(
+            Some(Path::new("/m")),
+            vec![
+                track(
+                    "/m/Gone/01.flac",
+                    "Talk Talk",
+                    "Laughing Stock",
+                    "Myrrhman",
+                    1,
+                ),
+                track(
+                    "/m/Gone/02.flac",
+                    "Talk Talk",
+                    "Laughing Stock",
+                    "Ascension Day",
+                    2,
+                ),
+                track("/m/Kept/01.flac", "Bark Psychosis", "Hex", "The Loom", 1),
+            ],
+        )
+        .expect("add");
+    let arrived = library.albums()[1].first_seen_ns.expect("stamped");
+
+    let gone = ["/m/Gone/01.flac", "/m/Gone/02.flac"];
+    assert_eq!(library.forget_paths(gone).expect("forget"), 2);
+    assert_eq!(library.len(), 1, "only the record named went");
+    assert_eq!(album_titles(&library.albums()), vec!["Hex"]);
+    assert_eq!(library.forgotten_paths(), 2);
+    assert_eq!(
+        library.root_stats(Path::new("/m")).tracks,
+        1,
+        "the folder itself is still held — a record is not its root",
+    );
+
+    // The album comes back off a backup; the ordinary scan finds it again.
+    drop(library);
+    let mut library = Library::open(&db).expect("reopen");
+    library
+        .add_tracks_under(
+            Some(Path::new("/m")),
+            vec![
+                track(
+                    "/m/Gone/01.flac",
+                    "Talk Talk",
+                    "Laughing Stock",
+                    "Myrrhman",
+                    1,
+                ),
+                track(
+                    "/m/Gone/02.flac",
+                    "Talk Talk",
+                    "Laughing Stock",
+                    "Ascension Day",
+                    2,
+                ),
+            ],
+        )
+        .expect("rescan");
+    assert_eq!(
+        library
+            .albums()
+            .iter()
+            .find(|album| album.title == Some("Laughing Stock"))
+            .expect("back on the wall")
+            .first_seen_ns,
+        Some(arrived),
+        "restored with the date it really arrived",
+    );
+    assert_eq!(library.forgotten_paths(), 0);
+}
+
+/// **The two scales are one act.** Forgetting a root and forgetting every path
+/// recorded under it leave the *same* memory — which is the guard against the
+/// two halves of this design drifting into two mechanisms that disagree.
+#[test]
+fn forgetting_a_root_and_forgetting_its_paths_leave_the_same_memory() {
+    let rows = || vec![bare("/m/a.flac"), bare("/m/b.flac"), bare("/m/sub/c.flac")];
+    let paths = ["/m/a.flac", "/m/b.flac", "/m/sub/c.flac"];
+
+    let mut by_root = Library::open_in_memory().expect("open");
+    by_root
+        .add_tracks_under(Some(Path::new("/m")), rows())
+        .expect("add");
+    let stamps: Vec<Option<i64>> = paths
+        .iter()
+        .map(|path| {
+            by_root
+                .tracks()
+                .find(|meta| meta.path == PathBuf::from(path))
+                .and_then(|_| by_root.albums().first().and_then(|a| a.first_seen_ns))
+        })
+        .collect();
+    by_root.forget_root(Path::new("/m")).expect("forget root");
+
+    let mut by_path = Library::open_in_memory().expect("open");
+    by_path
+        .add_tracks_under(Some(Path::new("/m")), rows())
+        .expect("add");
+    by_path.forget_paths(paths).expect("forget paths");
+
+    assert_eq!(by_root.forgotten_paths(), by_path.forgotten_paths());
+    assert_eq!(by_root.forgotten_paths(), 3);
+    for path in paths {
+        let path = Path::new(path);
+        assert!(
+            by_root.forgotten_first_seen(path).is_some(),
+            "{} is remembered by the root's forget",
+            path.display(),
+        );
+        assert!(
+            by_path.forgotten_first_seen(path).is_some(),
+            "{} is remembered by the record's forget",
+            path.display(),
+        );
+    }
+    assert!(stamps.iter().all(Option::is_some));
+}
+
+/// A **scan-confirmed** removal is evidence and leaves nothing behind, where a
+/// listener's assertion leaves a memory. The two doors out of the library are
+/// different doors on purpose.
+#[test]
+fn a_scan_confirmed_removal_remembers_nothing_and_a_listeners_does() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks_under(
+            Some(Path::new("/m")),
+            vec![bare("/m/deleted.flac"), bare("/m/asserted.flac")],
+        )
+        .expect("add");
+
+    // What a scan does after `is_confirmed_gone` said yes.
+    assert_eq!(
+        library.remove_tracks(["/m/deleted.flac"]).expect("remove"),
+        1
+    );
+    assert_eq!(library.forgotten_paths(), 0, "evidence needs no reversal");
+
+    // What a listener does.
+    assert_eq!(
+        library.forget_paths(["/m/asserted.flac"]).expect("forget"),
+        1
+    );
+    assert_eq!(library.forgotten_paths(), 1);
+
+    // So a file the scan removed and the listener later restores is a genuine
+    // arrival, and dates from today.
+    let before = now_ns();
+    library
+        .add_tracks_under(Some(Path::new("/m")), vec![bare("/m/deleted.flac")])
+        .expect("re-add");
+    let restored = library
+        .albums()
+        .iter()
+        .flat_map(|album| album.editions.iter())
+        .flat_map(|edition| edition.tracks.iter())
+        .find(|meta| meta.path == Path::new("/m/deleted.flac"))
+        .map(|_| library.albums()[0].first_seen_ns.expect("stamped"))
+        .expect("back");
+    assert!(restored >= before, "a rediscovered deletion is an arrival");
+}
+
+/// **The tombstone table's bound, asserted rather than asserted about.** One
+/// row per path however many times it is forgotten, and never a row for a path
+/// the library holds — the invariant that stops it being a leak.
+#[test]
+fn a_path_forgotten_many_times_is_remembered_once_and_never_while_held() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let mut library = Library::open(&db).expect("open");
+
+    library
+        .add_tracks_under(Some(Path::new("/m")), vec![bare("/m/a.flac")])
+        .expect("add");
+    let arrived = library.albums()[0].first_seen_ns.expect("stamped");
+
+    for _ in 0..5 {
+        library.forget_paths(["/m/a.flac"]).expect("forget");
+        assert_eq!(
+            library.forgotten_paths(),
+            1,
+            "one row per path, not one per act"
+        );
+        assert_eq!(
+            library.forgotten_first_seen(Path::new("/m/a.flac")),
+            Some(arrived)
+        );
+        library
+            .add_tracks_under(Some(Path::new("/m")), vec![bare("/m/a.flac")])
+            .expect("re-add");
+        assert_eq!(library.forgotten_paths(), 0, "consumed by the return");
+        assert_eq!(library.albums()[0].first_seen_ns, Some(arrived));
+    }
+
+    // The sweep at open makes the invariant true even after a crash between
+    // the row landing and its tombstone being spent — simulated by writing the
+    // contradiction straight into the file.
+    {
+        let conn = rusqlite::Connection::open(&db).expect("sqlite");
+        conn.execute(
+            "INSERT INTO forgotten (path, first_seen_ns) SELECT path, 1 FROM tracks",
+            [],
+        )
+        .expect("plant a stale tombstone");
+    }
+    let library = Library::open(&db).expect("reopen");
+    assert_eq!(
+        library.forgotten_paths(),
+        0,
+        "no path is ever both held and tombstoned",
+    );
+    assert_eq!(library.albums()[0].first_seen_ns, Some(arrived));
+}
+
+/// A row whose own first-seen was never recorded (a pre-v7 row nothing has
+/// re-read) leaves **no** tombstone: there is nothing about it to remember, and
+/// a memory holding no fact would be a leak that buys nothing. It reads
+/// `Not recorded` before and after.
+#[test]
+fn a_row_with_no_recorded_first_seen_is_not_tombstoned() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let mut library = Library::open(&db).expect("open");
+    library
+        .add_tracks_under(Some(Path::new("/m")), vec![bare("/m/a.flac")])
+        .expect("add");
+    drop(library);
+    {
+        let conn = rusqlite::Connection::open(&db).expect("sqlite");
+        conn.execute("UPDATE tracks SET first_seen_ns = NULL", [])
+            .expect("un-stamp it, as a pre-v7 row is");
+    }
+
+    let mut library = Library::open(&db).expect("reopen");
+    assert_eq!(library.albums()[0].first_seen_ns, None);
+    assert_eq!(library.forget_root(Path::new("/m")).expect("forget"), 1);
+    assert_eq!(library.forgotten_paths(), 0);
+
+    let before = now_ns();
+    library
+        .add_tracks_under(Some(Path::new("/m")), vec![bare("/m/a.flac")])
+        .expect("re-add");
+    assert!(
+        library.albums()[0].first_seen_ns.expect("stamped now") >= before,
+        "nothing was remembered, so this is an arrival and says so",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Schema v9: the `forgotten` table (ADR-0042)
+// ---------------------------------------------------------------------------
+
+/// The moment the v8 fixture's rows were first seen — years before the
+/// migration runs, so a backfill that stamped "now" would be visible at a
+/// glance rather than by a millisecond.
+const V8_FIRST_SEEN_NS: i64 = 1_600_000_000_000_000_000;
+
+/// When the v8 fixture's one root last finished a scan.
+const V8_LAST_SCAN_NS: i64 = 1_755_000_000_000_000_000;
+
+/// Build a genuine v8 database with the v8 schema and v8 `INSERT`s only — no
+/// baz code involved — so the v9 upgrade is proved against a database this
+/// build did not create.
+///
+/// It carries everything v1 – v8 ever added: the double rip, the soundtrack, a
+/// real `Various Artists` tag, a real compilation flag, non-ASCII paths and
+/// titles, stamps, tagged and measured ReplayGain, genres, first-seen
+/// timestamps, the recorded root on every row, and a populated `roots` table.
+fn write_v8_database(db: &std::path::Path) {
+    let conn = rusqlite::Connection::open(db).expect("create v8 db");
+    write_v8_schema(&conn);
+    write_v8_rows(&conn);
+}
+
+/// The v8 schema, exactly as v8 wrote it.
+fn write_v8_schema(conn: &rusqlite::Connection) {
+    conn.execute_batch(
+        "
+        BEGIN;
+        CREATE TABLE tracks (
+            id                             INTEGER PRIMARY KEY,
+            path                           BLOB NOT NULL UNIQUE,
+            artist                         TEXT,
+            album                          TEXT,
+            title                          TEXT,
+            track                          INTEGER,
+            disc                           INTEGER,
+            year                           INTEGER,
+            duration_ns                    INTEGER,
+            format                         TEXT,
+            bit_depth                      INTEGER,
+            sample_rate                    INTEGER,
+            bitrate                        INTEGER,
+            album_artist                   TEXT,
+            compilation                    INTEGER,
+            mtime_ns                       INTEGER,
+            file_size                      INTEGER,
+            rg_track_gain_centidb          INTEGER,
+            rg_track_peak_micro            INTEGER,
+            rg_album_gain_centidb          INTEGER,
+            rg_album_peak_micro            INTEGER,
+            rg_computed_track_gain_centidb INTEGER,
+            rg_computed_track_peak_micro   INTEGER,
+            rg_computed_album_gain_centidb INTEGER,
+            rg_computed_album_peak_micro   INTEGER,
+            rg_computed_mtime_ns           INTEGER,
+            rg_computed_file_size          INTEGER,
+            genre                          TEXT,
+            first_seen_ns                  INTEGER,
+            root                           BLOB
+        ) STRICT;
+        CREATE TABLE roots (
+            path         BLOB PRIMARY KEY,
+            last_scan_ns INTEGER
+        ) STRICT;
+        PRAGMA user_version = 8;
+        COMMIT;
+        ",
+    )
+    .expect("v8 schema");
+}
+
+/// The v8 fixture's rows, and its one root.
+fn write_v8_rows(conn: &rusqlite::Connection) {
+    for (n, row) in v3_rows().into_iter().enumerate() {
+        let tagged = row.format == "flac";
+        let mtime = 1_700_000_000_000_000_000_i64 + i64::try_from(n).expect("five rows");
+        let size = 40_000_000_i64 + i64::try_from(n).expect("five rows");
+        conn.execute(
+            "INSERT INTO tracks
+                 (path, artist, album, title, track, disc, year, duration_ns,
+                  format, bit_depth, sample_rate, bitrate, album_artist,
+                  compilation, mtime_ns, file_size,
+                  rg_track_gain_centidb, rg_track_peak_micro,
+                  rg_album_gain_centidb, rg_album_peak_micro,
+                  rg_computed_track_gain_centidb, rg_computed_track_peak_micro,
+                  rg_computed_album_gain_centidb, rg_computed_album_peak_micro,
+                  rg_computed_mtime_ns, rg_computed_file_size,
+                  genre, first_seen_ns, root)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
+                     ?26, ?27, ?28)",
+            rusqlite::params![
+                // The platform's own path encoding, not UTF-8 — see
+                // `write_v7_database`.
+                stored_path_bytes(row.path),
+                row.artist,
+                row.album,
+                row.title,
+                row.track,
+                row.year,
+                row.duration_ns,
+                row.format,
+                row.bit_depth,
+                row.sample_rate,
+                row.bitrate,
+                row.album_artist,
+                row.compilation,
+                mtime,
+                size,
+                tagged.then_some(-775_i64),
+                tagged.then_some(988_525_i64),
+                tagged.then_some(-920_i64),
+                tagged.then_some(1_001_221_i64),
+                tagged.then_some(412_i64),
+                tagged.then_some(750_000_i64),
+                tagged.then_some(318_i64),
+                tagged.then_some(910_000_i64),
+                tagged.then_some(mtime),
+                tagged.then_some(size),
+                if tagged { "Folk" } else { "Game Soundtrack" },
+                V8_FIRST_SEEN_NS + i64::try_from(n).expect("five rows"),
+                stored_path_bytes("/m"),
+            ],
+        )
+        .expect("insert v8 row");
+    }
+    conn.execute(
+        "INSERT INTO roots (path, last_scan_ns) VALUES (?1, ?2)",
+        rusqlite::params![stored_path_bytes("/m"), V8_LAST_SCAN_NS],
+    )
+    .expect("insert v8 root");
+}
+
+#[test]
+fn a_v8_database_migrates_in_place_without_losing_anything() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    write_v8_database(&db);
+
+    let library = Library::open(&db).expect("a v8 database must open");
+    assert_eq!(library.len(), 5, "every v8 row survives the upgrade");
+
+    let conn = rusqlite::Connection::open(&db).expect("raw open");
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("user_version");
+    assert_eq!(version, 9);
+
+    let by_path = |needle: &str| {
+        library
+            .tracks()
+            .find(|t| t.path.to_string_lossy().contains(needle))
+            .cloned()
+            .unwrap_or_else(|| panic!("{needle} must survive"))
+    };
+
+    // Every v8 column is intact — text, numbers, Unicode, the ADR-0008
+    // columns, the ADR-0010 stamp, the ADR-0013 tags, the ADR-0015 measurement,
+    // the ADR-0019 genre and first-seen, and the ADR-0022 root.
+    let unicode = by_path("Größenwahn");
+    assert_eq!(unicode.artist.as_deref(), Some("Größenwahn"));
+    assert_eq!(unicode.album.as_deref(), Some("Debüt"));
+    assert_eq!(unicode.title.as_deref(), Some("Ærø — 序曲"));
+    assert_eq!(unicode.track, Some(3));
+    assert_eq!(unicode.disc, Some(1));
+    assert_eq!(unicode.year, Some(1999));
+    assert_eq!(unicode.duration, Some(Duration::new(215, 123_456_789)));
+    assert_eq!(unicode.format, Some(AudioFormat::Wav));
+    assert_eq!(unicode.bit_depth, Some(24));
+    assert_eq!(unicode.sample_rate, Some(96_000));
+    assert_eq!(unicode.bitrate, Some(4_608));
+    assert_eq!(unicode.album_artist.as_deref(), Some("Various Artists"));
+    assert_eq!(unicode.compilation, Some(true));
+    assert_eq!(unicode.genre.as_deref(), Some("Game Soundtrack"));
+
+    let soundtrack = by_path("Main Menu.flac");
+    assert_eq!(soundtrack.replay_gain.track_gain_centidb, Some(-775));
+    assert_eq!(
+        library
+            .computed_replay_gain(&soundtrack.path)
+            .track_gain_centidb,
+        Some(412),
+        "the measurement v6 stored is still fresh for the same file"
+    );
+    assert_eq!(
+        library
+            .known_files()
+            .values()
+            .filter(|known| known.stamp.is_some())
+            .count(),
+        5,
+        "every v8 stamp survives, so the next scan is still incremental"
+    );
+
+    // The v8 root record survives whole: every row still names its folder, and
+    // the folder still knows when it was last scanned.
+    assert_eq!(library.unrooted_tracks(), 0);
+    assert_eq!(library.root_stats(Path::new("/m")).tracks, 5);
+    assert_eq!(
+        library.root_stats(Path::new("/m")).last_scan_ns,
+        Some(V8_LAST_SCAN_NS),
+    );
+
+    // The first-seen timestamps v8 wrote are untouched — the one column a
+    // migration must never move (ADR-0019).
+    for album in library.albums() {
+        assert!(
+            album
+                .first_seen_ns
+                .is_some_and(|seen| (V8_FIRST_SEEN_NS..V8_FIRST_SEEN_NS + 5).contains(&seen)),
+            "the upgrade must not restamp when an album arrived"
+        );
+    }
+
+    // The new table exists and is **empty**, which is the whole truth about it:
+    // it records acts a listener has not performed, and there has been none.
+    // This is the only migration in the ladder with no backfill to argue about.
+    assert_eq!(library.forgotten_paths(), 0);
+    let forgotten: i64 = conn
+        .query_row("SELECT count(*) FROM forgotten", [], |row| row.get(0))
+        .expect("the forgotten table exists");
+    assert_eq!(forgotten, 0);
+
+    // Grouping is *exactly* the pre-v9 behaviour — the upgrade adds a table and
+    // never changes what the shelf shows.
+    let albums = library.albums();
+    let passage = albums
+        .iter()
+        .find(|a| a.title == Some("Northwest Passage"))
+        .expect("the double rip");
+    assert_eq!(passage.artist, AlbumArtist::Named("Stan Rogers"));
+    assert_eq!(passage.editions.len(), 2);
+    assert_eq!(
+        library.shelves(GroupKey::Genre).len(),
+        2,
+        "Folk and the OST"
+    );
+}
+
+/// The upgrade is **prospective**, and the test says so rather than the ADR
+/// alone: a v8 library that had already lost a first-seen cannot have it back
+/// (nothing recorded it), but the very first forget after the upgrade is
+/// remembered and restored.
+#[test]
+fn a_v9_upgrade_cannot_undo_an_old_loss_and_prevents_the_next_one() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    write_v8_database(&db);
+
+    let mut library = Library::open(&db).expect("open migrates to v9");
+    assert_eq!(
+        library.forgotten_paths(),
+        0,
+        "the upgrade invents no memory of a folder somebody removed last year",
+    );
+
+    let rows: Vec<PathBuf> = library.tracks().map(|meta| meta.path.clone()).collect();
+    assert_eq!(library.forget_root(Path::new("/m")).expect("forget"), 5);
+    assert_eq!(library.forgotten_paths(), 5);
+    for path in &rows {
+        assert!(
+            library
+                .forgotten_first_seen(path)
+                .is_some_and(|seen| (V8_FIRST_SEEN_NS..V8_FIRST_SEEN_NS + 5).contains(&seen)),
+            "{} kept the first-seen v8 recorded for it",
+            path.display(),
+        );
+    }
+}
+
+/// **The case the whole design is insurance against**, walked through with real
+/// files: a listener looks at a record whose share is merely unmounted, decides
+/// it is gone, and says so. baz does exactly what it was told — and the
+/// remount costs them nothing, because the one fact a rescan could not
+/// rediscover was kept.
+///
+/// This is why a listener-initiated forget is offerable at all. ADR-0010
+/// refused to *guess* that an unreachable folder is a deleted one, and it was
+/// right; what it could not offer was a way for a person to say it, because
+/// saying it wrongly was unrecoverable. It no longer is.
+#[test]
+fn forgetting_a_record_that_was_only_unmounted_costs_nothing_when_it_returns() {
+    use baz_core::library::{ScanEntry, scan};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let root = dir.path().join("NAS");
+    real_wav(&root.join("Artist/Album/01.wav"));
+    real_wav(&root.join("Artist/Album/02.wav"));
+
+    let walk = |root: &Path| -> Vec<TrackMeta> {
+        scan(root)
+            .expect("walk")
+            .filter_map(|entry| match entry {
+                ScanEntry::Track(meta) => Some(meta),
+                _ => None,
+            })
+            .collect()
+    };
+
+    let mut library = Library::open(&db).expect("open");
+    library
+        .add_tracks_under(Some(&root), walk(&root))
+        .expect("first scan");
+    library.record_scan(&root, 1_000).expect("record");
+    let arrived = library.albums()[0].first_seen_ns.expect("stamped");
+    let held = library.known_files();
+
+    // The share goes away. Every path beneath it now answers `NotFound` —
+    // which is indistinguishable from the album having been deleted, and is
+    // exactly why baz does not decide this for itself.
+    let parked = dir.path().join("parked");
+    std::fs::rename(&root, &parked).expect("unmount");
+    assert!(
+        scan(&root).is_err(),
+        "an absent folder refuses to be walked"
+    );
+
+    // The listener asserts it anyway, at record scale. baz obeys: the rows go
+    // and the wall is empty.
+    let gone: Vec<PathBuf> = library.tracks().map(|meta| meta.path.clone()).collect();
+    assert_eq!(library.forget_paths(gone).expect("forget"), 2);
+    assert_eq!(library.len(), 0);
+    assert_eq!(library.forgotten_paths(), 2);
+    assert_eq!(
+        library.root_stats(&root).last_scan_ns,
+        Some(1_000),
+        "forgetting records is not forgetting the folder",
+    );
+
+    // The share comes back. The next ordinary pass finds the files, and the
+    // library is *the same library* — not a fresh import wearing its name.
+    std::fs::rename(&parked, &root).expect("remount");
+    library
+        .add_tracks_under(Some(&root), walk(&root))
+        .expect("rescan");
+    assert_eq!(library.len(), 2, "no duplicates");
+    assert_eq!(
+        library.known_files(),
+        held,
+        "same paths, same stamps, same recorded root",
+    );
+    assert_eq!(
+        library.albums()[0].first_seen_ns,
+        Some(arrived),
+        "and the record files under the date it really arrived",
+    );
+    assert_eq!(library.forgotten_paths(), 0);
+}
+
+/// **What else survives a forget, checked rather than assumed.** The design
+/// keeps exactly one fact in the index — but the index is not the only store,
+/// and the scope of this ADR was decided by looking at the others.
+///
+/// The play ledger is a separate append-only file keyed by path
+/// (ADR-0018), and nothing in baz deletes from it, so PLAYED already survives a
+/// folder being removed and added back — with no tombstone, no widening, and
+/// nothing to build. That is worth pinning: a later change that made forgetting
+/// prune the ledger would silently take a fact this design decided it did not
+/// need to keep.
+#[test]
+fn forgetting_and_restoring_a_folder_leaves_the_play_ledger_alone() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let mut library = Library::open(&db).expect("open");
+    library
+        .add_tracks_under(
+            Some(Path::new("/m")),
+            vec![
+                track("/m/1.flac", "Talk Talk", "Laughing Stock", "Myrrhman", 1),
+                track("/m/2.flac", "Bark Psychosis", "Hex", "The Loom", 1),
+            ],
+        )
+        .expect("add");
+
+    let now = now_unix_s();
+    let history = history_of(dir.path(), &[("/m/1.flac", now - 3_600)]);
+    let played = |library: &Library| -> Vec<String> {
+        library
+            .shelves_with_history(GroupKey::Played, Some(&history))
+            .iter()
+            .map(|shelf| shelf.header.label())
+            .collect()
+    };
+    assert_eq!(played(&library), ["This evening", "Never played"]);
+
+    library.forget_root(Path::new("/m")).expect("forget");
+    library
+        .add_tracks_under(
+            Some(Path::new("/m")),
+            vec![
+                track("/m/1.flac", "Talk Talk", "Laughing Stock", "Myrrhman", 1),
+                track("/m/2.flac", "Bark Psychosis", "Hex", "The Loom", 1),
+            ],
+        )
+        .expect("re-add");
+
+    assert_eq!(
+        played(&library),
+        ["This evening", "Never played"],
+        "the ledger is another store and the round trip never touched it",
     );
 }

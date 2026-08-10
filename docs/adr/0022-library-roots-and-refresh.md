@@ -1,9 +1,11 @@
 # ADR-0022: Several music folders, roots as first-class, and three refreshes
 
-**Status**: accepted (2026-08-08) · **replaces gate 2 of ADR-0010's removal
-policy** · closes `docs/BACKLOG.md`'s *"The index has no notion of which root a
-row came from"* · takes *watch folders* out of `VISION.md`'s bigger chapters and
-answers it with a **no**
+**Status**: accepted (2026-08-08) · **§4's accepted price is withdrawn by
+[ADR-0042](0042-what-baz-remembers.md) (2026-08-10)** — everything else in §4
+stands, and the amendment is marked in place · **replaces gate 2 of ADR-0010's
+removal policy** · closes `docs/BACKLOG.md`'s *"The index has no notion of which
+root a row came from"* · takes *watch folders* out of `VISION.md`'s bigger
+chapters and answers it with a **no**
 
 ## Context
 
@@ -158,6 +160,27 @@ That is a real loss of a fact ADR-0019 built a whole column to protect, and it
 is the cost of the reversal being otherwise free. It is not silent — removing is
 two presses and the confirming one says *"Forget N tracks? The files stay on
 disk; baz stops holding them."*
+
+> **Amended 2026-08-10 — the price is withdrawn ([ADR-0042](0042-what-baz-remembers.md)).**
+> The paragraph above is left as written because it is the record of a trade
+> that was made and is now unmade, and because its reasoning was sound: the loss
+> was accepted as the cost of *deleting the rows*, which is still the right
+> thing to do with a folder baz can no longer refresh. What it did not see is
+> that the rows are not the only thing that could carry the fact.
+>
+> Schema v9 keeps it outside them. `forget_root` now writes a **tombstone** —
+> path and first-seen, nothing else — for every row it deletes, in the same
+> transaction, and an ordinary rescan after the folder is added back hands each
+> restored row the moment it really arrived. Everything else in this section is
+> unchanged: the rows still go, still keyed on the recorded root, still with
+> nothing on disk touched, still behind two presses.
+>
+> The confirming sentence changed to say so: *"Forget N tracks? The files stay
+> on disk; baz stops holding them but remembers when they arrived."*
+>
+> This also turns out to be what made the *other* half of the ask offerable at
+> all — a listener-initiated forget is only safe to put in front of somebody
+> once being wrong about it costs nothing. ADR-0042 §2 has that argument.
 
 Nothing on disk is touched. baz has never modified or deleted a music file and
 this does not start.
@@ -319,7 +342,9 @@ same for the same reason.
 - `KnownFiles` changes shape (`Option<FileStamp>` → `KnownFile`), `Scan` and
   `ScanUpdate` gain roots and a mode, and `ScanUpdate::Error` no longer means "a
   folder is missing". All are breaking changes to pre-1.0 internal APIs.
-- Removing a folder loses its tracks' `first_seen_ns` (§4).
+- ~~Removing a folder loses its tracks' `first_seen_ns` (§4).~~ — **withdrawn
+  (ADR-0042).** It is kept in a tombstone and restored when the folder comes
+  back; the act is now reversible at the cost of a rescan and nothing else.
 
 ### Deliberately deferred
 

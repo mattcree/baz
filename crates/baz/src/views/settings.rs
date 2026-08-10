@@ -487,6 +487,14 @@ fn library_section(library: LibraryView<'_>) -> Element<'_, Message> {
 /// single press would be a destructive act with no undo sitting one pixel from
 /// a scroll — and what it destroys is worth naming, because the tracks go
 /// (ADR-0022 §4) even though the files do not.
+///
+/// **And what it does not destroy is worth naming too** (ADR-0042). Since
+/// schema v9 the one fact a rescan could never rediscover — when each of those
+/// tracks first arrived — is kept, and adding the folder back restores it. That
+/// changes what the confirming sentence can honestly promise, so it says it:
+/// the act is now fully reversible, and a listener hesitating over a folder
+/// they might want back should be told that before they press rather than
+/// after.
 fn folder_block(
     index: usize,
     folder: &FolderRow,
@@ -505,13 +513,7 @@ fn folder_block(
         word_control("Remove", true, Message::ConfirmRemoveMusicFolder(index))
     };
     let note = if pending {
-        (
-            format!(
-                "Forget {}? The files stay on disk; baz stops holding them.",
-                tracks_phrase(folder.tracks)
-            ),
-            room.paper,
-        )
+        (forget_phrase(folder.tracks), room.paper)
     } else if folder.unavailable {
         (
             format!(
@@ -663,6 +665,31 @@ fn tracks_phrase(tracks: usize) -> String {
     } else {
         format!("{tracks} tracks")
     }
+}
+
+/// The confirming press's sentence: what goes, what stays, and what comes back.
+///
+/// Three clauses in the order a hesitating listener needs them.
+///
+/// 1. **What goes**, named and counted — *the tracks*, which is the index's
+///    record of them and not the music.
+/// 2. **What is not touched.** `The files stay on disk` is the oldest promise
+///    in this place and it does not move: baz has never deleted a music file.
+/// 3. **What survives the round trip** (ADR-0042). Before schema v9 this act
+///    quietly destroyed each track's first-seen, so a folder removed and added
+///    back filed every album under ADDED = *today*; now it is kept and
+///    restored. A reversible act that reads as irreversible gets refused by
+///    people who would have been fine, so the sentence has to carry it.
+///
+/// `when they arrived` rather than `their ADDED date`: the wall's word is a
+/// column heading, and this is a sentence. It stays true for a pre-v7 row that
+/// never had a first-seen — such a row read `Not recorded` before the act and
+/// reads `Not recorded` after it, so nothing is lost either way.
+fn forget_phrase(tracks: usize) -> String {
+    format!(
+        "Forget {}? The files stay on disk; baz stops holding them but remembers when they arrived.",
+        tracks_phrase(tracks)
+    )
 }
 
 /// When a scan of a folder last finished, in words.
@@ -935,5 +962,32 @@ mod tests {
         assert_eq!(tracks_phrase(0), "0 tracks");
         assert_eq!(tracks_phrase(1), "1 track");
         assert_eq!(tracks_phrase(3_214), "3214 tracks");
+    }
+
+    /// The confirming press's sentence, pinned where it is decided. It has to
+    /// name what goes, refuse to claim anything about the files, and state the
+    /// guarantee that makes the act reversible (ADR-0042) — a listener reading
+    /// only this line must not be able to conclude that removing a folder
+    /// throws away when their records arrived, because since schema v9 it does
+    /// not.
+    #[test]
+    fn the_confirming_press_names_what_goes_what_stays_and_what_comes_back() {
+        let phrase = forget_phrase(412);
+        assert_eq!(
+            phrase,
+            "Forget 412 tracks? The files stay on disk; baz stops holding them \
+             but remembers when they arrived."
+        );
+        assert!(
+            phrase.starts_with("Forget 412 tracks?"),
+            "the count is named"
+        );
+        assert!(phrase.contains("files stay on disk"));
+        assert!(phrase.contains("remembers when they arrived"));
+        assert_eq!(
+            forget_phrase(1),
+            "Forget 1 track? The files stay on disk; baz stops holding them \
+             but remembers when they arrived."
+        );
     }
 }

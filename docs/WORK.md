@@ -98,32 +98,36 @@
 
 ## Next
 
-1. **A deleted folder's records never leave the library.** `rm -rf` an album
-   directory and its eight rows stay on the wall for good. This is
-   **deliberate and the reasoning is sound**: from the filesystem's side a
-   deleted folder and an unmounted NAS are the same `NotFound` for every path
-   beneath, and wiping a present listener's library to tidy a stale row is the
-   worse failure — ADR-0011 chose correctly. What it left undone is the other
-   half: **a way for the listener to say so themselves.** A user-initiated
-   *forget this record* is the settled answer in the backlog's own preference
-   order, and it needs no guessing about mounts because a person is asserting
-   the fact. Related: the owner's library is on a NAS by design (ADR-0025), so
-   the unmount case is his real case and not a hypothetical.
-2. **Removing a music folder destroys `first_seen_ns`.** Remove a root and
-   add it back and every album files under ADDED = *today* — a real loss of
-   the one fact ADR-0019 built a column and a structural guarantee to protect,
-   and it is unrecoverable, which puts it above the two items below it. The
-   fix named in `BACKLOG.md` is a **tombstone**: remember first-seen for a
-   forgotten root's paths and restore it if the folder comes back. Called
-   *"its own small design"* there, which is a design that has never been
-   written rather than a line of code.
-3. **The seek bar says which thing it measures.** The owner: *"I think the seek
+1. **A deleted folder's records never leave the library — and the last thing
+   missing is one press.** `rm -rf` an album directory and its eight rows stay
+   on the wall for good. This is **deliberate and the reasoning is sound**: from
+   the filesystem's side a deleted folder and an unmounted NAS are the same
+   `NotFound` for every path beneath, and wiping a present listener's library to
+   tidy a stale row is the worse failure — **ADR-0010** chose correctly (this
+   item and `BACKLOG.md` both said ADR-0011 for two months; that is the volume
+   ADR, and the citation is fixed). The owner's library is on a NAS by design
+   (ADR-0025), so the unmount case is his real case.
+   - **The mechanism shipped with ADR-0042** and is the same act as removing a
+     folder, at record scale: `Library::forget_paths` deletes exactly the rows a
+     listener names and keeps their first-seen, so asserting it about a share
+     that was only unmounted costs a rescan and nothing else. That
+     reversibility is *why* a user-initiated forget is offerable at all, and it
+     is proved against real files in
+     `forgetting_a_record_that_was_only_unmounted_costs_nothing_when_it_returns`.
+   - **What is left is its control**, and it is small and specified: a
+     `Forget this record` item on the tile menu, its visible twin on the record
+     page's strip, pressing `forget_paths` over the album's tracks — one
+     `Message` variant and one update arm in `crates/baz/src/app.rs`. ADR-0042
+     §8 draws all of it, including the words. It did not land only because that
+     file was held by the `SchemaTooNew` branch, which has since landed
+     (ADR-0041) — so the file is free and this is now the whole of the item.
+2. **The seek bar says which thing it measures.** The owner: *"I think the seek
    bar at the bottom should have a toggle indicating for song or for whole
    playlist"*. Both are true readouts — the track's position and the run's — and
    he is asking to choose. Undesigned; the questions are where the toggle lives
    (the bar is already dense), whether the choice persists, and what the
    elapsed/remaining figures either side of the bar read in run mode.
-4. **An artist has an `All songs` of their own.** The owner: *"the artist page
+3. **An artist has an `All songs` of their own.** The owner: *"the artist page
    should have its own 'all songs' playlist I think"*. `implicit::ImplicitList`
    already gives the library one, with an `Origin` kind and a collage sleeve, so
    this is that list scoped to one artist rather than new machinery. Undecided:
@@ -134,7 +138,7 @@
    word may not need qualifying. It should credit the artist's list rather than
    the underlying records when played, which is the rule that just landed for
    playlists.
-5. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
+4. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
    2026-08-10: *"at full screen the now playing page looks odd because the
    playlist hugs right and the art hugs left"* — which is this item, reported
    from the frame rather than from the measurement, and worth recording as a
@@ -146,7 +150,7 @@
    too — A4 widening the run closes the gap from one side, and if the sleeve is
    also hanging hard left rather than sitting in its column, that is a second
    fault the widening would hide rather than fix.
-6. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+5. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -159,7 +163,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-7. **Rewrite the README as the project's public face**, with the icon and real
+6. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
    last, so it describes what actually ships. Two of those four now exist and
    are regenerable — `docs/screenshots/capture.sh` writes the wall and Now
@@ -169,8 +173,8 @@
    `Ctrl+B` exists. (The group-key row itself is current again — the six words
    and `1`–`6` were corrected when `A–Z` came back.)
 
-8. **Ship the public beta.** The last item by construction: it is the one
-   that makes the seven above reach anybody. `v0.1.0` is prepared up to the
+7. **Ship the public beta.** The last item by construction: it is the one
+   that makes the six above reach anybody. `v0.1.0` is prepared up to the
    tag and `docs/RELEASING.md` holds the owner's three commands, but a *beta*
    asks two more things of the release than a private tag does. **Flathub** —
    an account and a PR to `flathub/flathub`, which is the owner's and has
@@ -318,6 +322,48 @@ call.
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **Removing a music folder no longer destroys `first_seen_ns` — and the two
+  blockers that looked like opposites turned out to be one question.**
+  ADR-0042. *"A deleted folder's records never leave"* forgets too little and
+  *"removing a root destroys first-seen"* forgets too much, and the single
+  answer is: **baz remembers, about music it was told to stop holding, exactly
+  one thing — when it first saw it — because nothing else is unrecoverable.**
+  - **Which is why they had to be answered together.** The reason a
+    listener-initiated *forget* could not be offered was not that nobody had
+    written the verb; it was that being **wrong** about it was unrecoverable,
+    and on the owner's NAS being wrong is one unmounted share away. Fixing the
+    data loss is what makes the destructive act safe enough to put in front of
+    somebody. Two mechanisms would have disagreed; there is one, and
+    `forgetting_a_root_and_forgetting_its_paths_leave_the_same_memory` is the
+    guard that keeps it one.
+  - **Schema v9**: a `forgotten` table of path + first-seen, written in the same
+    transaction as the delete, consumed by the rescan that brings the path back,
+    swept at open, primary-keyed so forgetting the same thing ten times leaves
+    one row, and with **no expiry** — because the case is a folder removed one
+    year and added back another.
+  - **ADR-0019 §5 is not weakened.** `first_seen_ns` is still in the insert list
+    and still absent from the update list; a rescan still cannot move it. The
+    once-only write is simply given the true value instead of the clock.
+  - **`remove_tracks` is untouched, on purpose.** ADR-0010's four gates are
+    evidence baz gathered and evidence needs no reversal, so the scan's door
+    leaves nothing behind. A listener's word is a decision, and decisions get a
+    tombstone. That line is now in the code rather than implied.
+  - **Checked rather than assumed**: the play ledger is a separate file and was
+    never lost, playlists are files on disk and were never touched, and the
+    measured ReplayGain is *recomputable* — so the tombstone stays one column
+    wide. The criterion is written down: **remember only what nothing can
+    recompute.**
+  - **Proof, driven by presses**: `docs/design/impl/forget-and-remember/`. The
+    ADDED wall before the round trip and after it differ in **zero pixels**,
+    against timestamps planted four years in the past; the harness fails loudly
+    on either assertion. `scan/launch_cold_10k` is 81.0 ms against ADR-0010's
+    recorded 83.4 ms — the addition does not appear.
+  - **Blocker 2 is not closed**: its control is one `Message` in `app.rs`,
+    specified in ADR-0042 §8, and it stayed unwritten because `app.rs` was held by
+    the `SchemaTooNew` branch while this work ran. It is item 1 of `## Next`,
+    narrowed to that, and the file is free now that both have landed.
+  - **Found on the way**: `WORK.md` and `BACKLOG.md` both credited the removal
+    policy to ADR-0011, which is the volume ADR. It is ADR-0010. Both fixed.
 - **Fourteen files skipped were one whole album, and one junk byte was the
   whole cause.** The owner's launch scan on 2026-08-10 reported `14 files
   skipped` under his `CDs/MP3` root. All fourteen were Frank Zappa's
@@ -394,7 +440,7 @@ Newest first. Fuller detail in `CHANGELOG.md`.
   - **Checked and left alone**: a music folder that has gone away never reaches
     either screen. The library opens, the scan reports it unavailable, and the
     strip says *"1 folder is not reachable"* with every record still on the
-    wall (ADR-0011). That case was already answered.
+    wall (ADR-0022). That case was already answered.
   - **Found on the way**: a `cfg(test)` helper added to `app.rs` silently
     truncated the source that several `views` tests read, because they split
     that file at its first test attribute. It failed loudly rather than passing
