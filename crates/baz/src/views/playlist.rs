@@ -16,10 +16,21 @@
 //! drag-to-reorder deferred to the shared pointer-capture widget
 //! (ADR-0024 §6 layer 3).
 //!
-//! The declared hierarchy (law L6) is the album page's, re-read for a made
-//! thing: **the work ≫ `Play` → the name → the rows** — the sleeve is a
-//! collage of quotations and it is the only image of the playlist on
-//! screen, so it is first by declaration exactly as the record's is.
+//! **The arrangement is the album page's; the declared hierarchy is not**
+//! (ADR-0024 §A4.2). §A2 imported both, and the second does not transfer:
+//! *the work ≫ `Play` → the title → the rows* is right on a record's page
+//! because **the sleeve is the work** and the title captions it. A playlist's
+//! collage is not an image *of* the list — it is four quotations *from* it,
+//! evidence about rows that are further down the same page, and the contents
+//! change constantly while the name does not. So this page declares
+//! **the name ≫ `Play` → the collage → the rows**.
+//!
+//! Demoting the collage in the *declaration* does not shrink it in the
+//! *layout*: it stays at [`theme::ALBUM_SLEEVE`] in a 320 px aside, because
+//! that width is what lets the aside's blocks share one x-edge (law L5) and
+//! shrinking it would buy nothing. What the demotion buys is the byline line
+//! under the name — see [`identity_block`], which is where the owner's
+//! *"the playlist name isn't really prominent"* is actually answered.
 //!
 //! # The honesty on this surface
 //!
@@ -197,12 +208,37 @@ fn aside<'a>(shelf: &'a Shelf, open: &'a OpenPlaylist, live: bool) -> Element<'a
     block.into()
 }
 
-/// The main column's identity block: **the name at hero scale over the
-/// counts** — `38 of 40 · 2 missing` when entries are missing — the album
-/// header's falling order with the fields a made thing has. Beside the
-/// counts, exactly while there is an edit to take back, stands the
-/// transient `Undo` (doc 11 §5 P2) — the queue place's word, on the page
-/// that is its sibling editor.
+/// The main column's identity block: **the name at hero scale, the byline
+/// under it, then the counts** — `38 of 40 · 2 missing` when entries are
+/// missing — the album header's falling order with the fields a made thing
+/// has. Beside the counts, exactly while there is an edit to take back,
+/// stands the transient `Undo` (doc 11 §5 P2) — the queue place's word, on
+/// the page that is its sibling editor.
+///
+/// # The byline, and why it is the answer to *"the name isn't prominent"*
+///
+/// The owner, 2026-08-10: *"we do not have the playlist name really
+/// prominent."* The name was **already** the album title's own `SIZE_HERO` 28
+/// / `SEMIBOLD`. What it was missing was the line under it: a record's
+/// identity block is three lines — title 28, artist `SIZE_TITLE` 19,
+/// catalogue `SIZE_META` 12, **80 px** (`views/album.rs`'s `album_header`) —
+/// and this one was two, **52 px**.
+/// This page was the album page *with the byline deleted*, so the name
+/// terminated after 52 px and read as a stub rather than a placard
+/// (ADR-0024 §A4.3; design 14 §3.4).
+///
+/// So the slot is restored, at the record's own size and ink, and what fills
+/// it is the word `Playlist`. The two identity blocks are now
+/// **geometrically identical at 80 px** and the difference lives in *what the
+/// middle line says*, which is where a difference between two kinds of thing
+/// belongs. The name is not made larger: `SIZE_HERO` is the top of the ramp,
+/// and the prominence problem was a missing line, not a small number.
+///
+/// **Not *"Made by you"***: ADR-0024 §4 admits `.m3u8` files dropped into the
+/// playlists folder, which this product did not author and whose author no
+/// file records. `Playlist` claims only what the file can prove. Stating the
+/// composition with it — `Playlist · 4 records`, which would also explain the
+/// collage beside it — is design 14 tier 2 and is not shipped here.
 fn identity_block(open: &OpenPlaylist, can_undo: bool) -> Element<'_, Message> {
     let room = theme::active();
     let mut summary = row![
@@ -227,11 +263,25 @@ fn identity_block(open: &OpenPlaylist, can_undo: bool) -> Element<'_, Message> {
         )
         .max_height(2.0 * theme::LINE_HERO)
         .clip(true),
+        // The byline, in the album page's artist slot at the album page's
+        // artist size — the one widget this change adds, and the whole of
+        // the 52 → 80 px correction.
+        text(KIND)
+            .size(theme::SIZE_TITLE)
+            .line_height(theme::LEADING_TITLE)
+            .color(room.paper_dim)
+            .wrapping(text::Wrapping::None),
         summary,
     ]
     .spacing(theme::GAP_XS)
     .into()
 }
+
+/// The word in the byline slot: what this object **is**, in the one place a
+/// record names its artist (ADR-0024 §A3.1 — the kind stated in words, and
+/// the same first token [`crate::playlists::PanelRow::counts`] gives the lane
+/// and the panel).
+pub(crate) const KIND: &str = "Playlist";
 
 /// **Undo** — the file as it stood before the last recorded edit, one press
 /// away (doc 11 §5 P2): the queue place's word and rule, worn by the page.
@@ -688,4 +738,88 @@ fn lamp_dot() -> Element<'static, Message> {
     ))
     .style(move |_theme| theme::lamp_dot(room))
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KIND;
+    use crate::theme;
+
+    /// **The two identity blocks are the same height** — 80 px, a record's —
+    /// and that is the whole of the answer to *"we do not have the playlist
+    /// name really prominent"* (ADR-0024 §A4.3).
+    ///
+    /// The name was never small: it is the album title's own `SIZE_HERO` 28 /
+    /// `SEMIBOLD` and always was. What made it read as a stub was that the
+    /// block *stopped* after 52 px — the record's byline line was missing, so
+    /// a 28 px name was followed straight by a 12 px count, where a record's
+    /// is given a 19 px line of support first. This page was the album page
+    /// with the byline deleted.
+    ///
+    /// Asserted as arithmetic over the two compositions' own tokens, with a
+    /// source sweep to keep the arithmetic describing what is drawn. Both are
+    /// three `column!` children at `GAP_XS`, and the sizes are read off the
+    /// files rather than assumed, because the failure this guards against is
+    /// somebody changing one page's ramp and not the other's.
+    #[test]
+    fn the_two_identity_blocks_are_the_same_height() {
+        let block =
+            theme::LINE_HERO + theme::GAP_XS + theme::LINE_TITLE + theme::GAP_XS + theme::LINE_META;
+        assert!(
+            (block - 80.0).abs() < f32::EPSILON,
+            "32 + 4 + 24 + 4 + 16 = 80, the record's block: {block}"
+        );
+
+        let read = |file: &str| {
+            std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(file))
+                .expect("a view's own source")
+                .replace("\r\n", "\n")
+        };
+        let made = read("src/views/playlist.rs");
+        let found = read("src/views/album.rs");
+
+        // Three lines, in one falling order, in both files: the hero clipped
+        // at two lines, the byline at SIZE_TITLE in `paper_dim`, the facts at
+        // SIZE_META in `paper_faint`.
+        for (page, source) in [("a playlist's", &made), ("a record's", &found)] {
+            for token in [
+                "theme::SIZE_HERO",
+                "theme::LEADING_HERO",
+                "theme::SIZE_TITLE",
+                "theme::LEADING_TITLE",
+                "room.paper_dim",
+                "theme::SIZE_META",
+                "theme::LEADING_META",
+                "theme::GAP_XS",
+            ] {
+                assert!(
+                    source.contains(token),
+                    "{page} identity block sets its {token}"
+                );
+            }
+            assert!(
+                source.contains("max_height(2.0 * theme::LINE_HERO)"),
+                "{page} hero clips at two lines rather than running to a paragraph"
+            );
+        }
+
+        // …and the middle line is the one place the two differ. A record
+        // names its artist there; a made list names what it is, because there
+        // is no author a `.m3u8` file records (ADR-0024 §A4.3).
+        assert!(
+            made.contains("text(KIND)") && KIND == "Playlist",
+            "the playlist's byline slot holds the kind"
+        );
+        assert!(
+            found.contains("text(artist)"),
+            "the record's byline slot holds its artist"
+        );
+        // The byline is a statement about the object, not a control: no
+        // press, no message, nothing to learn. A door in this slot would be
+        // the badge §A3.3 refuses, wearing a word instead of a glyph.
+        assert!(
+            !made.contains("text(KIND)\n            .on_press"),
+            "the byline states; it does not act"
+        );
+    }
 }

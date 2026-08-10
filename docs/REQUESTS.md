@@ -36,8 +36,6 @@
 | *"shuffle... is more about going to an unknown next track rather than actually mutating the track list"* | **building** | traversal, not permutation; gapless is the constraint |
 | *"I wanted the Play all to be more like a tile on the home screen, a special 'playlist'"* | **building** | asked twice before it was built |
 | *"fullscreen the now playing looks weird"* | **building** | the art is clamped at 720; step A2 deletes the cap |
-| *"the information heirarchy isn't great to be able to tell the difference between an album and a playlist"* | **designed, unbuilt** | design 14, ADR-0024 §A3–§A6 — the kind stated in words, the byline line restored; the serif and the sleeve-below-four are his call |
-| *"'save as playlist' really makes no sense on the playlist page for a CD"* | **designed, unbuilt** | design 14 §1, ADR-0024 §A5 — it is drawn on the merged Now playing, not the playlist page, and never says it is saving *the run*; nothing is removed |
 | *"the album and track count below the search bar doesn't look good... maybe this should go into the home as some basic stats?"* | **building** | resting counts to Home; match count into the field |
 | *"every album has a playlist implicitly... which playlist and which track"* | **designing** | everything playing is a list and a cursor; reopens ADR-0018 for the ledger |
 
@@ -50,6 +48,8 @@ Newest first. Each was asked for in conversation and is now in the product.
 | *"artists should be grouping stuff by artist not just alphabetically"* | `ARTIST` groups albums under their artist; `A–Z`, `WallSubject` and 700 lines went with it |
 | *"artists should be grouping stuff by artist not just alphabetically"* | `ARTIST` shelves one artist per shelf, the header a door to their place; `A–Z` and the `ARTISTS` word both gone (ADR-0035) |
 | The `ARTIST` group key and the `Artist` place are both called artist | the key groups by artist now, so the word is true and the two are one thing (ADR-0035) |
+| *"the information heirarchy isn't great to be able to tell the difference between an album and a playlist"* | the line under a name declares its kind first — `Playlist · 14 · 42:10` in the lane and the panel — and the playlist page gets back the byline line the record page always had, so the two identity blocks are one 80 px shape that differ in what the middle line *says* (ADR-0024 §A3, §A4.3). Three of design 14's questions are still his: [WORK.md](WORK.md) waiting |
+| *"'save as playlist' really makes no sense on the playlist page for a CD"* | the run strip names its subject (`Run · 1 of 24 · 1:56:19 left`), and over a run that is already a saved file the word states it — `Saved as "Road Trip"` — going live again as `Save as new playlist` the moment the run is edited (ADR-0024 §A5). Nothing removed: freezing a transient into a file is still one press |
 | *"integrate the queue with now playing so we can remove the queue option from the bottom bar"* | `Place::Queue` deleted, its whole body the merged surface's run column; the bar's door off, its 152 px to the title |
 | *"remove pull since it doesn't make sense here"* | gone, with `History::pull_weight` — its only consumer |
 | *"shuffle as a concept is more about going to an unknown next track rather than actually mutating the track list"* | a traversal in the engine, not a permutation: the run keeps its own order and the walk is a bag. `crates/baz/src/shuffle.rs` deleted with it |
