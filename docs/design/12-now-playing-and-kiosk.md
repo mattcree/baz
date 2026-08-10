@@ -1457,6 +1457,24 @@ instead, stated here so nobody later "fixes" it.
 | 1920 × 1080 | collapsed 96 | 1824 × 999 | 440 | 1280 | 729 | **729** (height) | **0** |
 | 3840 × 2160 | collapsed 96, 3000 px source | 3744 × 2079 | 1100 | 2540 | 1809 | **1809** (height) | **0** |
 
+> **Measured, 2026-08-10, after M1 shipped**
+> ([`impl/queue-merged/`](impl/queue-merged/README.md)). Two corrections to the
+> table above, neither of which touches its argument:
+>
+> 1. **`below` is 130 in the shipped build, not 190.** The 190 includes the
+>    meter's 24, the feed's 20 and one `GAP_LG` — steps A9 and A5, neither
+>    built, and neither may reserve height before it exists. So every
+>    `by_height` here is 60 px larger today and will shrink to the printed
+>    figure as those land. The 1280-lane-open row is unaffected because it is
+>    **width**-bound: `edge` is 456 there at either value, and the frame reads
+>    456 to the pixel.
+> 2. **`run_w` is `RUN_MEASURE` flat**, not `RUN_MEASURE · kiosk_scale`, until
+>    A4 builds `kiosk_scale`. The 3840 row's 1100 is that step's, not this one's.
+>
+> The properties the table exists for survive both: the record is height-bound
+> above the tightest window, the run takes width the record structurally cannot
+> use, and the one row where the cost is real is the one below.
+
 **The run costs the record nothing in five of six rows**, and the one exception
 is 53 px at 1280 with the lane expanded — where the record is width-bound
 because 1000 px of body is the tightest case this product has. That case has a
@@ -3157,15 +3175,15 @@ receipt. It is also the owner's live ask.
 
 | # | Step | Disposition |
 |---|---|---|
-| **M1** | The merged surface: the run column, `Run`, `SPLIT_FLOOR` | New, first |
-| **M2** | The door comes off; `Place::Queue` is deleted | New |
-| **A1** | *Delete the duplicate transport* | **Half void, half survives — folded into M1** |
+| **M1** | The merged surface: the run column, `Run`, `SPLIT_FLOOR` | **✅ Shipped** 2026-08-10 |
+| **M2** | The door comes off; `Place::Queue` is deleted | **✅ Shipped** 2026-08-10 |
+| **A1** | *Delete the duplicate transport* | **✅ Shipped** — its surviving half rode in M1 |
 | **A2** | The hero decode; `NOW_PLAYING_MAX` deleted | Survives, unchanged, **more urgent** |
-| **M3** | `Origin`, and the head gains its subject | New |
+| **M3** | `Origin`, and the head gains its subject | New — after A2, per the order below |
 | **A3** | The field, static | Survives, **+ one clause** (§5.4 term 2) |
 | **A4** | The kiosk type scale | Survives, **+ the run** |
 | **A5** | The feed | Survives, unchanged |
-| **M4** | The run marker: the command field, ledger v1.1, the lane across a quit | New |
+| **M4** | The run marker: the command field, ledger v1.1, the lane across a quit | New — after A5, per the order below |
 | **A6** | The toggles | Survives, unchanged |
 | **A7** | The field drifts *(gated)* | Survives, **+ §5.4 term 3** |
 | **A8** | The tap and the spectrum *(gated)* | Survives, **+ a widened mask and a harder gate** |
@@ -3174,6 +3192,20 @@ receipt. It is also the owner's live ask.
 **Nothing below is void outright, and A1 is the only one that changed shape.**
 
 #### A1 is half done, and the half that is left is a subtraction of 32
+
+> **Done, 2026-08-10, in M1.** `below` is now
+> `LINE_HEADING + LINE_HERO + LINE_BODY + NEEDLE_H + 4 × GAP_LG` = **130**, and
+> `the_placard_reserves_no_transport_it_does_not_draw` pins both that figure and
+> the 162 it replaced. **The 190 below is still the *future* number**: it is 130
+> plus the meter's 24, the feed's 20 and one `GAP_LG` — none of which are built,
+> and none of which may reserve height before they exist. Every `by_height`
+> figure in §5.5 and §5.5a is therefore **60 px larger in the shipped build**
+> than the table states, and will shrink to the table's number as A5 and A9
+> land. The *properties* the tables were making an argument for — the record is
+> height-bound above 1280, the run takes width it cannot use — hold at both
+> values, which is why they were stated as properties in the tests rather than
+> as rows.
+
 
 The duplicate widget is **gone**: `now_playing.rs:178–189` now carries the
 argument in a comment where the call used to be, and there is no
@@ -3187,7 +3219,7 @@ one `GAP_LG` 16, and now says so.
 
 ---
 
-**Step M1 — The merged surface.** *(§3.4, §5.5a — the owner's ask)*
+**Step M1 — The merged surface.** *(§3.4, §5.5a — the owner's ask)* — **✅ shipped 2026-08-10**
 
 `Place::NowPlaying` grows a second column. `views/queue.rs`'s body becomes
 `views/now_playing.rs`'s run column, taking `RUN_MEASURE` and the run's own
@@ -3213,7 +3245,7 @@ reversible.
 
 ---
 
-**Step M2 — The door comes off, and the place with it.** *(§3.4.4, §6.4)*
+**Step M2 — The door comes off, and the place with it.** *(§3.4.4, §6.4)* — **✅ shipped 2026-08-10**
 
 Delete `Place::Queue`, `Place::queue()`, `Message::ToggleQueue`,
 `views::queue`'s place wrapper, `bottom_bar::queue_button`, `theme::UP_NEXT_W`,
@@ -3291,16 +3323,16 @@ credited to the list after a quit.
 
 ---
 
-**Step A1 — Delete the duplicate transport.** *(Half shipped; see §12.0.)*
+**Step A1 — Delete the duplicate transport.** *(**✅ shipped**; see §12.0.)*
 
 ~~Remove `crate::views::bottom_bar::transport(player, ink)` from
 `now_playing.rs:168` and its `GAP_XL`.~~ **Done** — the call is gone and
 `now_playing.rs:178–189` carries the argument where it stood.
 
-**What is left**: drop `TRANSPORT_HIT` from `below` in `art_edge`
+~~**What is left**: drop `TRANSPORT_HIT` from `below` in `art_edge`
 (`now_playing.rs:62–67`, still summing it today), which grows the artwork by
 32 px at every height-bound size for free. **Folded into M1**, which touches
-that function anyway.
+that function anyway.~~ **Done in M1**: `below` is 130.
 
 *Ships*: a larger sleeve, at no cost.
 *Test*: `the_place_draws_no_transport` — the place's element tree contains no

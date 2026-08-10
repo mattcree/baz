@@ -737,7 +737,29 @@ Two traps:
 (the product's standing rule): *"its scope is exactly what the wall shows, in the
 wall's own order — playing what you cannot see is refused."*
 
-### 4. The `Queue` door leaves the bar — the ratchet's escape hatch does not quite fit
+### 4. The `Queue` door leaves the bar — ~~the ratchet's escape hatch does not quite fit~~
+
+> **Shipped, 2026-08-10** (doc 12 §12's M1 and M2), and the analysis below was
+> right about the shape of the problem and wrong about the answer to it. The
+> owner asked for it directly — *"the queue and the now playing need integrated
+> in some way so we can remove the queue option from the bottom bar"* — and the
+> ledger's preamble settles the process: it binds contributors and agents, not
+> him. Both halves of the ratchet are answered rather than blurred (doc 12
+> §6.4.2): the door's **readout** is replaced by the merged surface's head,
+> which states the size *with the cursor in it* (`2 of 24`); the door's
+> **route** is removed, and reaching an editable run went from one press on a
+> bar control to one press on the lane's `Now playing` row — the press count
+> unchanged, the muscle memory not.
+>
+> The three collisions below resolved as follows. **`Ctrl+U` is not
+> keyboard-only**: it is the accelerator of *two* visible controls at once, the
+> lane's row and the place's `Run` word, which is the precedent ADR-0023's
+> amendment already blessed. **The now-playing block was not repointed** — it
+> still presses `ShowPlayingAlbum`, still has no lit state, and the argument at
+> `bottom_bar.rs` stands untouched; the block simply got 160 px wider. And the
+> place did not need a new member: the enum went from eight to **seven**,
+> because the merged surface is `Place::NowPlaying` absorbing `Place::Queue`
+> rather than a new place beside them.
 
 The ratchet (the product's standing rule) permits exactly one removal: *"Replacing a
 slot with a **better statement of the same fact**."* The door's fact is **how

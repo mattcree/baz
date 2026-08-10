@@ -437,6 +437,47 @@ next commit.
   transport. Every measure is derived from the viewport, so the kiosk
   full-screen mode is this surface at a larger size rather than a second one.
   No visualizer and no VU.
+- **The queue and Now playing are one surface, and the bar's `Queue` door is
+  gone.** The owner: *"the queue and the now playing need integrated in some
+  way so we can remove the queue option from the bottom bar"*. **A run is a
+  list and a cursor** — `Place::NowPlaying` was drawing the cursor and
+  `Place::Queue` was drawing the list, each missing the half the other held —
+  so the place enum goes from eight members to seven and the queue place's
+  whole body becomes the merged surface's **run column**. Frames and the
+  measured composition: `docs/design/impl/queue-merged/`;
+  the argument is `docs/design/12-now-playing-and-kiosk.md` §3.4 and §5.5a.
+  - **Fourteen of the queue's fifteen affordances survive**: row click to
+    jump, the per-row ✕, the ▲▼ steppers, the transfer `+`, drag-to-reorder,
+    `Save as playlist` and its field, `Undo` and `Ctrl+Z`, the
+    provenance-led summary, the right-press mirror menu, row hover tracking,
+    the virtual window, the column's own scroll, and the album group headers.
+    The one that goes is the `Queue` header strip — the merged place wears
+    none, because the lane is the route and the run's head states the list.
+    The two empty states become one: the run's wins, because it names the
+    gestures that fill the list.
+  - **Two densities, chosen and remembered.** The `Run` word in the place's
+    top-right decides whether the list is on screen, persisted as
+    `run_column` in `config.toml`. It is **not** bound to full-screen: iced
+    0.13 publishes no monitor enumeration, so baz cannot tell a
+    second-display full-screen from an only-display one, and `F11` stays a
+    *window* act that works in every place. The run column is
+    `RUN_MEASURE` 440 — half the measure a list that owns its surface gets —
+    and below a `SPLIT_FLOOR` 784 body the two columns re-stack into one with
+    the record as the run's head block.
+  - **The run costs the record nothing** wherever the record is height-bound,
+    which is every window above the tightest one this product draws. At
+    1280 × 860 with the returns lane open it costs 113 px, and the remedy is
+    already on screen and already keyed (`Ctrl+B`). Recorded as a cost paid.
+  - **The bar does not move a pixel**, and the door's 152 px goes to the
+    title: the title lane at 1280 is **248 → 408**, and a track title that
+    clipped before clips 160 px later.
+  - `Ctrl+U` is now the lane's `Now playing` row plus the `Run` word, made
+    for you. It stops toggling, because a destination never closes itself;
+    `Esc` is the way out, and always was.
+- **The now-playing sleeve is 32 px larger at every height-bound size.**
+  ADR-0029's first step removed the transport this place was drawing a second
+  time, and the 32 px it had reserved stayed in `art_edge`'s arithmetic. It is
+  gone with it.
 - **A work's own title is set in IBM Plex Serif Italic** — the museum-placard
   convention, on the one string in the product that is a work's name standing
   beside its own facts (the Home placard). The owner saw the typographic risk
