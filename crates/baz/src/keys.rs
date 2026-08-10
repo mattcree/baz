@@ -273,7 +273,7 @@
 //!
 //! # The arrangement — `1` … `5`
 //!
-//! The five group keys (ADR-0019) select from the number row: `1` ARTIST,
+//! The five group keys (ADR-0019) select from the number row: `1` A–Z,
 //! `2` YEAR, `3` GENRE, `4` ADDED, `5` PLAYED, in the order the top bar's row
 //! of words states them and the order
 //! [`GroupKey::ALL`](baz_core::index::GroupKey::ALL) publishes them. The
