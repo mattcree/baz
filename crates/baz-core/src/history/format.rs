@@ -40,6 +40,21 @@ pub(crate) const SKIPPED: &str = "skipped";
 /// The comment marker. A reader skips these lines; a human reads them.
 pub(crate) const COMMENT: char = '#';
 
+/// What opens a **run marker** — the comment line that says which list the
+/// plays after it were reified from (ADR-0034 §4).
+///
+/// A comment rather than a sixth field, and the reason is the whole of why the
+/// line format below is untouched: [`decode`] rejects a six-column line
+/// outright, the file is never rewritten (ADR-0018 §3), and so a sixth column
+/// would leave a permanently mixed file that every older baz reads as partly
+/// corrupt. A `#` line is already skipped by every reader baz has ever shipped
+/// and is already *not* counted as damage, so the grain of the file can change
+/// without the grammar of a line changing at all.
+///
+/// The trailing space is part of the word: `# baz run ` is what a human greps
+/// for and what [`decode_run`] splits on.
+pub(crate) const RUN: &str = "# baz run ";
+
 /// The header written when the ledger file is created, so that the format is
 /// documented inside the file rather than only in this repository.
 ///
@@ -53,8 +68,12 @@ pub(crate) const HEADER: &str = concat!(
     "# listened_ms  milliseconds of this track's audio actually delivered\n",
     "# track_ms     the track's own length, or - when the file declares none\n",
     "# path         escapes: \\\\ \\t \\n \\r and \\xHH for non-UTF-8 bytes\n",
+    "# A line reading `# baz run <started_utc> <list>` opens a run: the plays\n",
+    "# after it were reified from that list. <list> is kind:key:name, or - when\n",
+    "# the run came from no list. It is a comment, so older readers skip it.\n",
     "# Lines starting with # are comments. This is yours: grep it, back it up,\n",
-    "# or delete it. Nothing here is sent anywhere. Format v1.\n",
+    "# or delete it. Nothing here is sent anywhere. Format v1.1 — v1 describes\n",
+    "# a line, and no line changed.\n",
 );
 
 /// What is appended to close off a line an interrupted write left unfinished.
@@ -101,6 +120,53 @@ pub(crate) fn encode(record: &PlayRecord) -> String {
     escape_path(&record.path, &mut line);
     line.push('\n');
     line
+}
+
+/// Encode the marker that opens a run, newline included (ADR-0034 §4).
+///
+/// ```text
+/// # baz run 2026-08-06T07:06:40Z playlist:3b1f00c2a49d7e60:Road Trip
+/// # baz run 2026-08-06T08:02:11Z -
+/// ```
+///
+/// `origin` is opaque here and stays that way: this module escapes it, writes
+/// it and reads it back, and nothing in `baz-core` looks inside it. The one
+/// value with a meaning is its absence — [`UNKNOWN`], the same dash the record
+/// line already spends on a length the file never declared, and read back the
+/// same way: *nothing was declared*, not *nothing happened*.
+///
+/// The timestamp is the run's **first play's** start, so the marker and the
+/// line under it carry the same instant and `sort` still puts the file in the
+/// order it happened.
+pub(crate) fn encode_run(started_unix_s: u64, origin: Option<&str>) -> String {
+    let mut line = String::with_capacity(64);
+    line.push_str(RUN);
+    line.push_str(&format_timestamp(started_unix_s));
+    line.push(' ');
+    match origin.filter(|origin| !origin.is_empty()) {
+        Some(origin) => escape_str(origin, &mut line),
+        None => line.push_str(UNKNOWN),
+    }
+    line.push('\n');
+    line
+}
+
+/// Read a run marker back — `(when, which list)` — or `None` if the line is
+/// not one.
+///
+/// `None` for every other comment, which is what keeps a header line, a
+/// [`TRUNCATED`] terminator and a note a human typed from being read as a run.
+/// The origin is `None` for [`UNKNOWN`]: the run happened, and which list it
+/// came from was not recorded.
+pub(crate) fn decode_run(line: &str) -> Option<(u64, Option<String>)> {
+    let line = line.strip_suffix('\n').unwrap_or(line);
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    let (stamp, origin) = line.strip_prefix(RUN)?.split_once(' ')?;
+    let started = parse_timestamp(stamp)?;
+    if origin == UNKNOWN {
+        return Some((started, None));
+    }
+    Some((started, Some(unescape_text(origin)?)))
 }
 
 /// Read one ledger line back, or `None` if it is not one.
@@ -307,6 +373,22 @@ fn escape_str(text: &str, out: &mut String) {
 /// The inverse of [`escape_path`]. `None` for an escape that does not exist,
 /// which is a line this ledger did not write.
 pub(crate) fn unescape_path(field: &str) -> Option<PathBuf> {
+    Some(path_from_bytes(unescape_bytes(field)?))
+}
+
+/// The inverse of [`escape_str`], for the one field that is text rather than a
+/// path: a run marker's origin.
+///
+/// `None` for an escape that does not exist and for bytes that are not UTF-8 —
+/// the second case cannot arise from anything [`encode_run`] wrote, because the
+/// origin it was handed was a `&str`, and a `\xHH` escape that makes it one is
+/// a line somebody else's tool produced.
+pub(crate) fn unescape_text(field: &str) -> Option<String> {
+    String::from_utf8(unescape_bytes(field)?).ok()
+}
+
+/// The shared half of the two unescapers: the byte string a field denotes.
+fn unescape_bytes(field: &str) -> Option<Vec<u8>> {
     let mut bytes = Vec::with_capacity(field.len());
     let mut chars = field.chars();
     while let Some(ch) = chars.next() {
@@ -330,7 +412,7 @@ pub(crate) fn unescape_path(field: &str) -> Option<PathBuf> {
             _ => return None,
         }
     }
-    Some(path_from_bytes(bytes))
+    Some(bytes)
 }
 
 /// A path's bytes, on a platform whose paths *are* bytes.
@@ -581,5 +663,106 @@ mod tests {
             assert!(line.starts_with(COMMENT), "{line:?}");
             assert!(decode(line).is_none(), "{line:?}");
         }
+    }
+
+    /// The header documents the marker, in the file's own voice — ADR-0018's
+    /// rule that the format is described inside every ledger, applied to the
+    /// one thing ADR-0034 added to it.
+    #[test]
+    fn the_header_documents_the_run_marker() {
+        assert!(HEADER.contains("# baz run"), "{HEADER}");
+        assert!(HEADER.contains("kind:key:name"), "{HEADER}");
+        // And no header line is itself readable as a run, which is what keeps
+        // the documentation out of the data.
+        for line in HEADER.lines() {
+            assert!(decode_run(line).is_none(), "{line:?}");
+        }
+    }
+
+    /// The marker the ADR quotes, byte for byte — the run half of
+    /// `the_documented_line_is_the_line_that_is_written`.
+    #[test]
+    fn the_documented_marker_is_the_marker_that_is_written() {
+        assert_eq!(
+            encode_run(1_786_000_000, Some("playlist:3b1f00c2a49d7e60:Road Trip")),
+            "# baz run 2026-08-06T07:06:40Z playlist:3b1f00c2a49d7e60:Road Trip\n"
+        );
+        assert_eq!(
+            encode_run(1_786_000_000, None),
+            "# baz run 2026-08-06T07:06:40Z -\n"
+        );
+    }
+
+    /// **A marker is a comment first.** Every reader baz has ever shipped
+    /// skips `#` lines before `decode` is reached, so the marker cannot be
+    /// mistaken for a record however it is read.
+    #[test]
+    fn a_run_marker_is_a_comment_and_never_a_record() {
+        for origin in [Some("playlist:0:Road Trip"), Some("all::All songs"), None] {
+            let line = encode_run(1_786_000_000, origin);
+            assert!(line.starts_with(COMMENT), "{line:?}");
+            assert_eq!(decode(&line), None, "{line:?}");
+            assert_eq!(line.matches('\n').count(), 1, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn a_run_marker_round_trips_through_its_own_text() {
+        for origin in [
+            Some("playlist:3b1f00c2a49d7e60:Road Trip"),
+            Some("album:9c4f1a02bb37e5d1:Ochre"),
+            // A display name holding a colon: the grammar splits on the first
+            // two only, so this is not this module's problem — but it must
+            // still survive the file.
+            Some("playlist:0:Side A: the long one"),
+            // The escape set, inside a name.
+            Some("playlist:0:tab\there \\ and\nnewline"),
+            None,
+        ] {
+            let line = encode_run(1_786_000_000, origin);
+            assert_eq!(
+                decode_run(&line),
+                Some((1_786_000_000, origin.map(str::to_owned))),
+                "{line:?}"
+            );
+        }
+        // An empty origin is no origin: there is nothing to say and the dash
+        // says it, rather than a second spelling of the same absence.
+        assert_eq!(
+            decode_run(&encode_run(1_786_000_000, Some(""))),
+            Some((1_786_000_000, None))
+        );
+    }
+
+    /// Every other comment in the file — the header, the truncation
+    /// terminator, a note a human typed — is not a run.
+    #[test]
+    fn a_comment_that_is_not_a_run_marker_is_not_read_as_one() {
+        for line in [
+            "",
+            "# a comment",
+            "# baz run",
+            "# baz run 2026-08-06T07:06:40Z", // no origin field
+            "# baz run not-a-date playlist:0:x",
+            "# baz run 2026-13-08T07:06:40Z playlist:0:x",
+            "#baz run 2026-08-06T07:06:40Z playlist:0:x", // no space after #
+            TRUNCATED.trim_start_matches('\t'),
+            "2026-08-06T07:06:40Z\tplayed\t1\t2\t/a",
+            // An escape that does not exist, inside the origin.
+            "# baz run 2026-08-06T07:06:40Z playlist:0:a\\q",
+        ] {
+            assert!(decode_run(line).is_none(), "{line:?}");
+        }
+    }
+
+    /// A marker copied through a Windows editor still reads, on the same terms
+    /// a record line does.
+    #[test]
+    fn a_run_marker_tolerates_a_crlf_line_ending() {
+        let line = encode_run(1_786_000_000, Some("playlist:0:x")).replace('\n', "\r\n");
+        assert_eq!(
+            decode_run(&line),
+            Some((1_786_000_000, Some("playlist:0:x".to_owned())))
+        );
     }
 }

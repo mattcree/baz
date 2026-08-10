@@ -20,9 +20,32 @@
 //! ```text
 //! # baz play history. One line per play, appended, never rewritten.
 //! # Fields, tab-separated: started_utc, outcome, listened_ms, track_ms, path
+//! # baz run 2026-08-08T19:04:11Z album:9c4f1a02bb37e5d1:Laughing Stock
 //! 2026-08-08T19:04:11Z	played	231480	245013	/home/matt/Music/Talk Talk/01 Myrrhman.flac
 //! 2026-08-08T19:08:20Z	skipped	9200	402000	/home/matt/Music/Talk Talk/02 Ascension Day.flac
 //! ```
+//!
+//! ## Runs
+//!
+//! A `# baz run` line opens a **run**: the plays after it were reified from the
+//! list it names, and the ledger is therefore a list of runs each holding its
+//! plays rather than a flat list of plays (ADR-0034 §4). It carries the run's
+//! first play's timestamp and an opaque `kind:key:name` string, or `-` for a
+//! run that came from no list.
+//!
+//! **The grain of the file changed; the grammar of a line did not**, and that
+//! is the whole of why it is a comment rather than a sixth column. `decode`
+//! rejects a six-field line outright and this file is never rewritten, so a
+//! sixth column would leave a permanently mixed file that every older baz reads
+//! as partly corrupt — silently losing those plays from the play counts, the
+//! `PLAYED` group key and the lane. A `#` line is already skipped by every
+//! reader baz has ever shipped, and is already not counted as damage. So a v1
+//! baz reads a v1.1 ledger exactly as it reads a v1 one, with
+//! [`History::malformed`] still **0**; a v1.1 baz reads a v1 ledger with every
+//! run unknown, which is precisely the behaviour it had before. There is no
+//! migration and no downgrade hazard in either direction.
+//!
+//! Call it **format v1.1**, and mean it: `v1` describes a line.
 //!
 //! ## The fields
 //!
@@ -206,7 +229,8 @@ pub(crate) mod format;
 mod read;
 
 pub use read::{
-    EVENING_SECS, History, MONTH_DAYS, Recency, TrackHistory, WEEK_DAYS, YEAR_DAYS, bucket,
+    EVENING_SECS, History, MONTH_DAYS, PlayedRun, Recency, TrackHistory, WEEK_DAYS, YEAR_DAYS,
+    bucket,
 };
 
 /// The file the ledger lives in, inside baz's data directory — beside
@@ -371,6 +395,10 @@ pub struct HistoryLedger {
 enum Message {
     /// Append this record, then announce it on the channel if one was given.
     Append(Box<(PlayRecord, Option<Sender<Event>>)>),
+    /// A new run has begun, reified from this list. Nothing is written yet:
+    /// the marker goes down with the run's first play, so a run nobody
+    /// listened to leaves nothing behind ([`HistoryLedger::open_run`]).
+    Run(Option<String>),
     /// Answer once everything queued before this has been written.
     Barrier(SyncSender<()>),
 }
@@ -462,6 +490,26 @@ impl HistoryLedger {
         }
     }
 
+    /// **A new run has begun**, reified from the list `origin` names — or from
+    /// no list, which `None` says (ADR-0034 §4).
+    ///
+    /// `origin` is opaque: this type escapes it, writes it and never looks
+    /// inside it. Its grammar is the front end's ([`crate::protocol::Command::SetQueue`]'s
+    /// `origin` field), and the ledger's only interest is that a later reader
+    /// gets back the bytes that were handed over.
+    ///
+    /// **Nothing is written here.** The marker is appended immediately before
+    /// the run's first play line, on the same handle, in the same `write` — so
+    /// a run that was skipped straight through leaves no marker at all, and a
+    /// marker can never be orphaned from the play it opens by a process that
+    /// died between the two. Calling this twice with nothing played between
+    /// leaves one run, which is the truth: only the second one played anything.
+    pub fn open_run(&self, origin: Option<String>) {
+        if let Some(records) = &self.records {
+            let _ = records.send(Message::Run(origin));
+        }
+    }
+
     /// Block until everything queued so far has been written and synced.
     ///
     /// For shutdown paths and for tests that want to assert on the file. Not
@@ -543,11 +591,24 @@ fn writer(
     written: &AtomicUsize,
     failures: &AtomicUsize,
 ) {
+    // The run whose marker has not been written yet, because nothing has been
+    // played in it. `Some(None)` is a run that named no list and still needs
+    // its marker, so that the plays under it are not read as belonging to the
+    // run before them.
+    let mut pending: Option<Option<String>> = None;
     while let Ok(message) = records.recv() {
         match message {
+            Message::Run(origin) => pending = Some(origin),
             Message::Append(payload) => {
                 let (record, announce) = *payload;
-                let line = format::encode(&record);
+                // The marker and the line it opens go down together, in one
+                // `write_all`: a crash between them would leave a run marker
+                // claiming plays that belong to the run before it.
+                let mut line = match &pending {
+                    Some(origin) => format::encode_run(record.started_unix_s, origin.as_deref()),
+                    None => String::new(),
+                };
+                line.push_str(&format::encode(&record));
                 // One `write_all` of the whole line, then a sync. The write is
                 // what makes the line visible to every other reader on the
                 // machine; the sync is what makes it survive the machine.
@@ -559,6 +620,8 @@ fn writer(
                     failures.fetch_add(1, Ordering::Release);
                     continue;
                 }
+                // Only now: a marker whose write failed is still owed.
+                pending = None;
                 written.fetch_add(1, Ordering::Release);
                 // State before event: the line is in the file, and only then
                 // is anyone told about it.
@@ -841,6 +904,145 @@ mod tests {
         let original = record("/music/a.flac", 231_480, Some(245_013));
         let line = original.to_line();
         assert_eq!(PlayRecord::from_line(&line), Some(original));
+    }
+
+    // ----- run markers (ADR-0034) ------------------------------------------
+
+    /// Every line of the file, comments included — what `lines` deliberately
+    /// filters out, and what the marker tests are about.
+    fn all_lines(path: &Path) -> Vec<String> {
+        std::fs::read_to_string(path)
+            .expect("read")
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// **The marker opens the run, and the run's plays follow it** — the whole
+    /// of the writer's contract, in the order the file holds it.
+    #[test]
+    fn a_run_marker_opens_the_run_it_belongs_to() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("history.tsv");
+        let ledger = HistoryLedger::open(&path).expect("open");
+        ledger.open_run(Some("playlist:1f:Road Trip".to_owned()));
+        ledger.record(record("/music/a.flac", 231_480, Some(245_013)), None);
+        ledger.record(record("/music/b.flac", 231_480, Some(245_013)), None);
+        ledger.open_run(None);
+        ledger.record(record("/music/c.flac", 231_480, Some(245_013)), None);
+        ledger.flush();
+
+        let body: Vec<String> = all_lines(&path)
+            .into_iter()
+            .skip(format::HEADER.lines().count())
+            .collect();
+        assert_eq!(
+            body,
+            vec![
+                "# baz run 2026-08-06T07:06:40Z playlist:1f:Road Trip",
+                "2026-08-06T07:06:40Z\tplayed\t231480\t245013\t/music/a.flac",
+                "2026-08-06T07:06:40Z\tplayed\t231480\t245013\t/music/b.flac",
+                "# baz run 2026-08-06T07:06:40Z -",
+                "2026-08-06T07:06:40Z\tplayed\t231480\t245013\t/music/c.flac",
+            ]
+        );
+
+        // And it reads back as the two runs it is.
+        let history = History::read(&path).expect("read");
+        assert_eq!(history.records(), 3);
+        assert_eq!(history.malformed(), 0);
+        assert_eq!(history.runs().len(), 2);
+        assert_eq!(
+            history.runs()[0].origin.as_deref(),
+            Some("playlist:1f:Road Trip")
+        );
+        assert_eq!(history.runs()[1].origin, None);
+        assert_eq!(
+            history.last_played_unlisted(Path::new("/music/a.flac")),
+            None,
+            "a track only ever played inside a list is not a record you put on"
+        );
+        assert_eq!(
+            history.last_played_unlisted(Path::new("/music/c.flac")),
+            Some(1_786_000_000)
+        );
+    }
+
+    /// **A run nobody listened to leaves nothing behind.** The marker is
+    /// written with the first play, so opening a run and playing nothing does
+    /// not litter the file.
+    #[test]
+    fn a_run_that_played_nothing_writes_no_marker() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("history.tsv");
+        {
+            let ledger = HistoryLedger::open(&path).expect("open");
+            for i in 0..8 {
+                ledger.open_run(Some(format!("playlist:{i}:list {i}")));
+            }
+            ledger.flush();
+            assert_eq!(
+                std::fs::read_to_string(&path).expect("read"),
+                format::HEADER
+            );
+            // The last one is the one that plays, and the only one recorded.
+            ledger.record(record("/music/a.flac", 231_480, Some(245_013)), None);
+            ledger.flush();
+        }
+        let history = History::read(&path).expect("read");
+        assert_eq!(history.runs().len(), 1);
+        assert_eq!(
+            history.runs()[0].origin.as_deref(),
+            Some("playlist:7:list 7")
+        );
+    }
+
+    /// **A ledger with markers is still append-only**, and an older baz still
+    /// reads every play in it. This is the claim the whole design rests on, so
+    /// it is made against the file rather than against the parser: the marked
+    /// file's record lines are byte-identical to the unmarked file's.
+    #[test]
+    fn a_marked_ledger_is_what_an_older_baz_already_reads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let plain = dir.path().join("plain.tsv");
+        let marked = dir.path().join("marked.tsv");
+        for (path, origin) in [(&plain, None), (&marked, Some("playlist:1f:Road Trip"))] {
+            let ledger = HistoryLedger::open(path).expect("open");
+            if let Some(origin) = origin {
+                ledger.open_run(Some(origin.to_owned()));
+            }
+            ledger.record(record("/music/a.flac", 231_480, Some(245_013)), None);
+            ledger.record(record("/music/b.flac", 9_200, Some(402_000)), None);
+            ledger.flush();
+        }
+        // The record lines — everything an older baz parses — are the same.
+        assert_eq!(lines(&plain), lines(&marked));
+        // The marked file is the plain one plus comments, and nothing else.
+        assert_eq!(all_lines(&marked).len(), all_lines(&plain).len() + 1);
+
+        // And the reader agrees, on both counts an older baz would report.
+        let history = History::read(&marked).expect("read");
+        assert_eq!(history.records(), 2);
+        assert_eq!(history.malformed(), 0);
+        assert_eq!(history.track(Path::new("/music/a.flac")).plays, 1);
+        assert_eq!(history.track(Path::new("/music/b.flac")).skips, 1);
+    }
+
+    /// A marker never lands in the file without the play it opens, however the
+    /// process dies: the two are one `write_all`.
+    #[test]
+    fn a_marker_is_never_written_without_its_first_play() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("history.tsv");
+        let ledger = HistoryLedger::open(&path).expect("open");
+        ledger.open_run(Some("playlist:1f:Road Trip".to_owned()));
+        ledger.flush();
+        // Everything queued before the barrier is written, and there is no
+        // marker: the run has not played anything yet.
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            format::HEADER
+        );
     }
 
     #[test]

@@ -9,6 +9,15 @@
 //! 2. **[`History::recency`]** — which [`Recency`] bucket a track falls in:
 //!    the PLAYED group key, `THIS EVENING` through to `NEVER`.
 //!
+//! Since ADR-0034 it also answers a question about **runs** rather than
+//! tracks — [`History::runs`], and the per-track reading that goes with it,
+//! [`History::last_played_unlisted`]. That is a second *fold*, not a third
+//! question about a track: [`TrackHistory`] gains nothing, because *how many
+//! times did I play this track* must not become a question about a list.
+//! ADR-0018 §6's refusal is inherited whole — no totals by list, no most-played
+//! list, no charts. A run marker makes an engagement statistic **easier** to
+//! build, which is exactly why the refusal is restated rather than assumed.
+//!
 //! There is deliberately no third. **There was one** — `pull_weight`, the
 //! weighting behind the strip's `Pull` — and it went with the control on
 //! 2026-08-10 (the owner: *"please can we remove pull since it doesn't make
@@ -170,6 +179,34 @@ impl TrackHistory {
     }
 }
 
+/// **One run the ledger recorded**: the list it was reified from, when it
+/// started, and what it played (ADR-0034 §4–§5).
+///
+/// A run is a `# baz run` marker and the play lines under it. A ledger written
+/// before ADR-0034 has no markers at all and therefore no runs, which is the
+/// honest reading: those plays happened, and which list each came from was
+/// never written down.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct PlayedRun {
+    /// **The list this run was a reification of**, exactly as the marker
+    /// spelled it — `kind:key:name`, the encoding ADR-0034 §3 defines.
+    ///
+    /// Opaque here on purpose. `baz-core` carries the string, writes it and
+    /// reads it back; what a `kind` word means is the front end's, and a word
+    /// this baz does not know must be *its* problem to shrug at rather than
+    /// this reader's to reject. `None` is the marker's dash: the run happened
+    /// and its list was not recorded.
+    pub origin: Option<String>,
+    /// When the run's first play started, in seconds since the Unix epoch.
+    pub started_unix_s: u64,
+    /// How many of this run's tracks met [`play_threshold_ms`](super::play_threshold_ms).
+    pub plays: u32,
+    /// When the last of them started. `None` for a run that was skipped
+    /// straight through, and for a marker with nothing under it at all.
+    pub last_played_unix_s: Option<u64>,
+}
+
 /// A snapshot of the ledger, folded per track.
 ///
 /// Built by reading the file once. It is a snapshot rather than a live view on
@@ -181,6 +218,17 @@ impl TrackHistory {
 #[derive(Clone, Debug, Default)]
 pub struct History {
     by_path: HashMap<PathBuf, TrackHistory>,
+    /// The plays that happened **outside** a run that named a list, for the
+    /// tracks where that differs from [`Self::by_path`] — which is exactly the
+    /// tracks a named list has ever quoted.
+    ///
+    /// A key means *this track has been played inside a list*; the value is
+    /// when it was last played outside one, or `None` if it never was. Every
+    /// other track is absent and [`Self::last_played_unlisted`] falls through
+    /// to `by_path`, so a ledger with no markers — every ledger that exists
+    /// today — costs this map exactly nothing.
+    unlisted: HashMap<PathBuf, Option<u64>>,
+    runs: Vec<PlayedRun>,
     records: usize,
     malformed: usize,
     skipped_tail: bool,
@@ -233,6 +281,10 @@ impl History {
         let mut history = Self::default();
         let mut reader = BufReader::new(reader);
         let mut line = Vec::new();
+        // Which run's marker was last seen, and whether it named a list. A
+        // play line with no marker before it is `None` — that is every line in
+        // every existing ledger, and it is the honest reading (ADR-0034 §4).
+        let mut open: Option<usize> = None;
         loop {
             line.clear();
             match reader.read_until(b'\n', &mut line) {
@@ -254,19 +306,67 @@ impl History {
             };
             let trimmed = text.trim_end_matches(['\n', '\r']);
             if trimmed.is_empty() || trimmed.starts_with('#') {
-                continue; // blank lines and the header are not damage
+                // Blank lines, the header and a run marker are not damage. The
+                // marker is read here rather than in `decode` because it is a
+                // comment first: that is the property that lets an older baz
+                // read a v1.1 ledger with `malformed()` still 0.
+                if let Some((started_unix_s, origin)) = format::decode_run(trimmed) {
+                    open = Some(history.runs.len());
+                    history.runs.push(PlayedRun {
+                        origin,
+                        started_unix_s,
+                        plays: 0,
+                        last_played_unix_s: None,
+                    });
+                }
+                continue;
             }
             let Some(record) = format::decode(text) else {
                 history.malformed += 1;
                 continue;
             };
             history.records += 1;
+            history.attribute(open, &record);
             match history.by_path.entry(record.path.clone()) {
                 Entry::Occupied(mut slot) => slot.get_mut().absorb(&record),
                 Entry::Vacant(slot) => slot.insert(TrackHistory::default()).absorb(&record),
             }
         }
         history
+    }
+
+    /// File one play against the run it happened in — the half of the fold
+    /// that is about lists rather than about tracks.
+    ///
+    /// Called **before** the record reaches [`Self::by_path`], because the
+    /// seed a newly-listed track takes is *what was known before this play*.
+    fn attribute(&mut self, open: Option<usize>, record: &PlayRecord) {
+        if record.outcome == PlayOutcome::Skipped {
+            // The lane's question is *when did you last listen to this*, and
+            // starting a track and leaving it is not having listened to it —
+            // the same rule `recency` already keeps.
+            return;
+        }
+        let at = record.started_unix_s;
+        let mut listed = false;
+        if let Some(run) = open.and_then(|index| self.runs.get_mut(index)) {
+            run.plays = run.plays.saturating_add(1);
+            run.last_played_unix_s = Some(run.last_played_unix_s.map_or(at, |had| had.max(at)));
+            listed = run.origin.is_some();
+        }
+        if listed {
+            // Mark the track as one a list has quoted, seeded with what the
+            // ledger already knew about it — a track played on its own on
+            // Monday and inside a list on Tuesday is still a record you
+            // touched on Monday.
+            let seed = self
+                .by_path
+                .get(&record.path)
+                .and_then(|had| had.last_played_unix_s);
+            self.unlisted.entry(record.path.clone()).or_insert(seed);
+        } else if let Some(slot) = self.unlisted.get_mut(&record.path) {
+            *slot = Some(slot.map_or(at, |had| had.max(at)));
+        }
     }
 
     /// What the ledger says about `path` — all zeroes for a track it has never
@@ -291,6 +391,45 @@ impl History {
             return Recency::Never;
         };
         bucket(to_unix_s(now).saturating_sub(last))
+    }
+
+    /// **When `path` was last played by a run that named no list** — the
+    /// reading the returns lane folds onto records (ADR-0034).
+    ///
+    /// The owner: *"when I play a song from a playlist it should only bump the
+    /// recency of that playlist, not the underlying albums"*. A run reified
+    /// from a list touched the **list**; the records it quoted were not what
+    /// he pointed at, and a relaunch that re-derived them from the play lines
+    /// alone is what put them back at the head of his lane.
+    ///
+    /// So this is [`TrackHistory::last_played_unix_s`] minus the plays that
+    /// belong to a list — and for a ledger with no markers, which is every
+    /// ledger written before this shipped, it **is**
+    /// [`TrackHistory::last_played_unix_s`], exactly. An old file folds the way
+    /// it always did.
+    ///
+    /// Note what this is *not*: a claim that those plays did not happen.
+    /// [`Self::track`] still counts every one of them, because how many times
+    /// you played a track is a question about the track. This is the answer to
+    /// a different question — *when did I last put this record on* — and the
+    /// two are allowed to differ.
+    #[must_use]
+    pub fn last_played_unlisted(&self, path: &Path) -> Option<u64> {
+        match self.unlisted.get(path) {
+            Some(when) => *when,
+            None => self.track(path).last_played_unix_s,
+        }
+    }
+
+    /// **Every run the ledger recorded**, in the order the file holds them —
+    /// which is the order they happened (ADR-0034 §5).
+    ///
+    /// Empty for a ledger with no markers. A front end reads this to credit a
+    /// list that was played in a *previous* session: the marker is what
+    /// survives the quit that a queue's provenance does not.
+    #[must_use]
+    pub fn runs(&self) -> &[PlayedRun] {
+        &self.runs
     }
 
     /// Every track the ledger mentions, with what it says about each. The order
@@ -570,6 +709,230 @@ mod tests {
         let history = History::read(&dir.path().join("nothing-here.tsv")).expect("read");
         assert_eq!(history.records(), 0);
         assert_eq!(history.recency(Path::new("/a"), at(NOW)), Recency::Never);
+    }
+
+    // ----- runs (ADR-0034) -------------------------------------------------
+
+    /// A ledger with two runs: an album's, and a list's quoting two records
+    /// the listener last touched long before it.
+    fn marked_ledger() -> String {
+        let mut text = String::from(format::HEADER);
+        let _ = write!(text, "{}", format::encode_run(NOW - 40 * DAY, None));
+        let _ = writeln!(
+            text,
+            "{}\tplayed\t231480\t245013\t/music/ochre/1.flac",
+            format::format_timestamp(NOW - 40 * DAY)
+        );
+        let _ = writeln!(
+            text,
+            "{}\tplayed\t240000\t245013\t/music/violet/1.flac",
+            format::format_timestamp(NOW - 39 * DAY)
+        );
+        let _ = write!(
+            text,
+            "{}",
+            format::encode_run(NOW - 3 * DAY, Some("playlist:1f:Road Trip"))
+        );
+        let _ = writeln!(
+            text,
+            "{}\tplayed\t231480\t245013\t/music/ochre/1.flac",
+            format::format_timestamp(NOW - 3 * DAY)
+        );
+        let _ = writeln!(
+            text,
+            "{}\tplayed\t231480\t245013\t/music/violet/1.flac",
+            format::format_timestamp(NOW - 3 * DAY + 300)
+        );
+        text
+    }
+
+    /// **The list rises, and the records it quoted do not** — the owner's
+    /// defect, read back out of the file a week later.
+    #[test]
+    fn a_run_from_a_list_credits_the_list_and_not_the_records_it_quoted() {
+        let history = History::from_reader(marked_ledger().as_bytes());
+        let ochre = Path::new("/music/ochre/1.flac");
+        let violet = Path::new("/music/violet/1.flac");
+
+        // Both tracks were played three days ago, and the ledger says so.
+        assert_eq!(history.track(ochre).plays, 2);
+        assert_eq!(history.track(ochre).last_played_unix_s, Some(NOW - 3 * DAY));
+        assert_eq!(history.recency(ochre, at(NOW)), Recency::ThisWeek);
+
+        // …but the lane's reading stops at the last time they were played on
+        // their own, which is where the records were before the list ran.
+        assert_eq!(history.last_played_unlisted(ochre), Some(NOW - 40 * DAY));
+        assert_eq!(history.last_played_unlisted(violet), Some(NOW - 39 * DAY));
+
+        // And the list itself is what the run credits.
+        let runs = history.runs();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].origin, None);
+        assert_eq!(runs[0].plays, 2);
+        assert_eq!(runs[1].origin.as_deref(), Some("playlist:1f:Road Trip"));
+        assert_eq!(runs[1].started_unix_s, NOW - 3 * DAY);
+        assert_eq!(runs[1].plays, 2);
+        assert_eq!(runs[1].last_played_unix_s, Some(NOW - 3 * DAY + 300));
+    }
+
+    /// **An old ledger folds exactly as it always did.** Every file that
+    /// exists today has no markers, and the whole design rests on that
+    /// reading being untouched.
+    #[test]
+    fn a_ledger_with_no_markers_reads_as_it_always_did() {
+        let history = read();
+        assert!(history.runs().is_empty());
+        assert_eq!(history.malformed(), 0);
+        for path in ["/music/a.flac", "/music/b.flac", "/music/c stream.mp3"] {
+            let path = Path::new(path);
+            assert_eq!(
+                history.last_played_unlisted(path),
+                history.track(path).last_played_unix_s,
+                "{path:?} folded differently with no marker in the file"
+            );
+        }
+        // A track the file never mentions, on both readings.
+        assert_eq!(history.last_played_unlisted(Path::new("/never")), None);
+    }
+
+    /// **Markers are not damage**, which is the property that lets an older
+    /// baz read this file without losing a play.
+    #[test]
+    fn run_markers_cost_the_file_nothing() {
+        let history = History::from_reader(marked_ledger().as_bytes());
+        assert_eq!(history.records(), 4);
+        assert_eq!(history.malformed(), 0);
+        assert!(!history.skipped_unterminated_tail());
+    }
+
+    /// A track played inside a list and **never** outside one has no unlisted
+    /// moment at all — it is not a record you put on, and the lane must not
+    /// invent a date for it.
+    #[test]
+    fn a_track_only_ever_played_inside_a_list_has_no_unlisted_moment() {
+        let mut text = String::from(format::HEADER);
+        let _ = write!(
+            text,
+            "{}",
+            format::encode_run(NOW - 60, Some("playlist:1f:Road Trip"))
+        );
+        let _ = writeln!(
+            text,
+            "{}\tplayed\t231480\t245013\t/music/only-in-a-list.flac",
+            format::format_timestamp(NOW - 60)
+        );
+        let history = History::from_reader(text.as_bytes());
+        let path = Path::new("/music/only-in-a-list.flac");
+        assert_eq!(history.track(path).plays, 1);
+        assert_eq!(history.last_played_unlisted(path), None);
+        assert_eq!(history.recency(path, at(NOW)), Recency::ThisEvening);
+    }
+
+    /// A play *after* a list's run, outside one, moves the record again — the
+    /// list does not poison the track for ever.
+    #[test]
+    fn playing_a_track_on_its_own_after_a_list_moves_the_record_again() {
+        let mut text = marked_ledger();
+        let _ = writeln!(
+            text,
+            "{}\tplayed\t231480\t245013\t/music/ochre/1.flac",
+            format::format_timestamp(NOW - 60)
+        );
+        let history = History::from_reader(text.as_bytes());
+        // The trailing line sits under the list's marker in the file, but it
+        // is a play like any other for the *track*; what decides the record is
+        // the marker, so a genuinely unlisted play needs its own run.
+        assert_eq!(
+            history.last_played_unlisted(Path::new("/music/ochre/1.flac")),
+            Some(NOW - 40 * DAY)
+        );
+
+        let mut text = marked_ledger();
+        let _ = write!(text, "{}", format::encode_run(NOW - 60, None));
+        let _ = writeln!(
+            text,
+            "{}\tplayed\t231480\t245013\t/music/ochre/1.flac",
+            format::format_timestamp(NOW - 60)
+        );
+        let history = History::from_reader(text.as_bytes());
+        assert_eq!(
+            history.last_played_unlisted(Path::new("/music/ochre/1.flac")),
+            Some(NOW - 60)
+        );
+    }
+
+    /// A skip inside a list is not a play of the list, on the same rule that
+    /// keeps a skip out of `recency`.
+    #[test]
+    fn a_skip_does_not_credit_the_run_it_happened_in() {
+        let mut text = String::from(format::HEADER);
+        let _ = write!(
+            text,
+            "{}",
+            format::encode_run(NOW - 60, Some("playlist:1f:Road Trip"))
+        );
+        let _ = writeln!(
+            text,
+            "{}\tskipped\t2000\t245013\t/music/a.flac",
+            format::format_timestamp(NOW - 60)
+        );
+        let history = History::from_reader(text.as_bytes());
+        assert_eq!(history.runs().len(), 1);
+        assert_eq!(history.runs()[0].plays, 0);
+        assert_eq!(history.runs()[0].last_played_unix_s, None);
+        // And the track's own record of the skip is untouched.
+        assert_eq!(history.track(Path::new("/music/a.flac")).skips, 1);
+    }
+
+    /// **A marker with no plays after it means nothing** — a run started and
+    /// skipped through leaves a dangling marker, and a reader neither counts
+    /// it as damage nor lets it swallow the next run's plays (ADR-0034 §4).
+    #[test]
+    fn a_dangling_marker_is_read_and_costs_nothing() {
+        let mut text = String::from(format::HEADER);
+        let _ = write!(
+            text,
+            "{}",
+            format::encode_run(NOW - 500, Some("draw::Shuffle"))
+        );
+        let _ = write!(
+            text,
+            "{}",
+            format::encode_run(NOW - 60, Some("playlist:1f:Road Trip"))
+        );
+        let _ = writeln!(
+            text,
+            "{}\tplayed\t231480\t245013\t/music/a.flac",
+            format::format_timestamp(NOW - 60)
+        );
+        let history = History::from_reader(text.as_bytes());
+        assert_eq!(history.malformed(), 0);
+        assert_eq!(history.runs().len(), 2);
+        assert_eq!(history.runs()[0].plays, 0);
+        assert_eq!(history.runs()[1].plays, 1);
+    }
+
+    /// An origin this baz does not understand is carried, not rejected — so a
+    /// ledger written by a later baz stays readable by this one.
+    #[test]
+    fn an_origin_from_a_later_baz_is_carried_verbatim() {
+        let mut text = String::from(format::HEADER);
+        let _ = write!(
+            text,
+            "{}",
+            format::encode_run(NOW - 60, Some("moodboard:ff:Rainy Tuesday"))
+        );
+        let _ = writeln!(
+            text,
+            "{}\tplayed\t231480\t245013\t/music/a.flac",
+            format::format_timestamp(NOW - 60)
+        );
+        let history = History::from_reader(text.as_bytes());
+        assert_eq!(history.malformed(), 0);
+        assert_eq!(
+            history.runs()[0].origin.as_deref(),
+            Some("moodboard:ff:Rainy Tuesday")
+        );
     }
 
     #[test]
