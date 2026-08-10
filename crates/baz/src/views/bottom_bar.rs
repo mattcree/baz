@@ -1,33 +1,52 @@
 //! The persistent now-playing bar: current track, transport, the two
-//! timestamps, volume, the door to what is next — and, flush on the window's
-//! bottom edge under all of it, the needle.
+//! timestamps, volume — and, flush on the window's bottom edge under all of
+//! it, the needle.
 //!
-//! # The left zone gained a door, and then stopped needing it
+//! # The left zone gained a door, stopped needing it, and gave it up
 //!
 //! The audit's finding was that there was no route to "what is next" from the
 //! transport, which is where a listener looks for it: the only door was a
 //! toggle in the *top* bar, two hundred pixels from the thing it described. So
-//! the bar carries a **Queue** control beside the track title.
-//!
-//! It is a **labelled** control rather than a gesture on the now-playing block,
-//! and that is the one place this module departs from the design spec as
-//! written — on evidence the spec did not have. See [`queue_button`].
+//! the bar carried a labelled **Queue** control beside the track title.
 //!
 //! A door, though, is still something you have to open. The critique specified
 //! two things for this corner — the wall label *and* "stack status when queued"
-//! — and only the label shipped, which left the popover as the only way to
-//! learn what was coming. So the left zone now states it **ambiently**, on a
-//! third line under the artist ([`continuation_lane`]), and the control's
-//! readout stopped being a position and became the size of what it opens.
-//! Knowing costs nothing; opening is for changing.
+//! — and only the label shipped, which left the queue place as the only way to
+//! learn what was coming. So the left zone states it **ambiently**, on a third
+//! line under the artist ([`continuation_lane`]). Knowing costs nothing;
+//! opening is for changing.
 //!
-//! Every addition is a **reserved slot**, which is the promise this module is
-//! built on: [`theme::UP_NEXT_W`] and [`theme::POSITION_W`] are that wide
-//! whether or not anything is playing, [`theme::CONTINUATION_H`] is that tall
-//! whether or not anything follows this track, and [`theme::now_playing`]'s
-//! border is 1 px in all four states so that finding the control with the
-//! pointer does not move the title under it. The bar gained a route to a new
-//! surface and a running commentary on the queue, and did not move a pixel.
+//! **And then the door came off.** The owner: *"the queue and the now playing
+//! need integrated in some way so we can remove the queue option from the
+//! bottom bar"*. Both halves of the ratchet are answered rather than blurred
+//! (`docs/design/12-now-playing-and-kiosk.md` §6.4.2): the door's *readout* —
+//! the queue's size — is **replaced** by the merged surface's head, which
+//! states it as `2 of 24`, the same fact with the cursor in it; the door's
+//! *route* is **removed**, and the owner asked for it. Reaching an editable run
+//! from the wall was one press to a door in the bar and is now one press to the
+//! lane's `Now playing` row. The press count is unchanged; the muscle memory is
+//! not, and that is recorded rather than smoothed over.
+//!
+//! **The continuation line stays, and earns its place harder.** With the door
+//! gone it is the only statement about the run that exists outside the merged
+//! place; removing it too would leave the bar saying nothing about what is next
+//! and navigation as the only way to ask — which is exactly the audit finding
+//! that put a queue control here to begin with.
+//!
+//! **The bar did not move a pixel**, and that is a property of how it is built
+//! rather than a thing to be careful about: it is three zones — a fill, then
+//! [`theme::TRANSPORT_W`], then a fill, with a [`theme::GAP_LG`] between each
+//! pair — composed under the whole window, and two equal-weight fills keep the
+//! transport optically centred whatever the left zone holds. Removing a 152 px fixed slot from
+//! inside the left zone moves nothing outside it, and what it buys is spent on
+//! the title: a track title that clipped before clips 160 px later.
+//!
+//! Every addition here is still a **reserved slot**, which is the promise this
+//! module is built on: each [`theme::STAMP_W`] is that wide whether or not
+//! anything is playing, [`theme::CONTINUATION_H`] is that tall whether or not
+//! anything follows this track, and [`theme::now_playing`]'s border is 1 px in
+//! all four states so that finding the control with the pointer does not move
+//! the title under it.
 
 use iced::widget::{
     Space, button, column, container, horizontal_rule, image as iced_image, mouse_area, row, stack,
@@ -37,7 +56,6 @@ use iced::{Color, Element, Length, alignment};
 
 use crate::app::Message;
 use crate::motion::{Control, Ink};
-use crate::place::Place;
 use crate::player::PlayerState;
 use crate::{groove, icon, needle, player, theme};
 
@@ -86,7 +104,6 @@ use crate::{groove, icon, needle, player, theme};
 /// event-derived, tested in `player.rs`.
 pub(crate) fn view(
     player: &PlayerState,
-    place: Place,
     ink: Ink,
     cover: Option<iced_image::Handle>,
 ) -> Element<'_, Message> {
@@ -104,7 +121,7 @@ pub(crate) fn view(
     }
     status = status.push(signal_path(player)).push(volume(player, ink));
     let bar = row![
-        container(now_playing_block(player, place, cover))
+        container(now_playing_block(player, cover))
             .width(Length::Fill)
             .clip(true),
         transport_row(player, ink),
@@ -222,11 +239,7 @@ fn tip_layer(preview: Option<player::Preview>) -> Element<'static, Message> {
         .into()
 }
 
-/// The bar's left zone: the now-playing lines, and the **Queue** control
-/// beside them.
-///
-/// This is the *place* a listener looks for what is coming, which is the whole
-/// argument for moving the queue's door here from the top bar.
+/// The bar's left zone: the now-playing lines, and the two timestamps.
 ///
 /// **The now-playing text is the control that takes you to the record**, and
 /// that is the reservation ADR-0016 made being spent.
@@ -239,12 +252,12 @@ fn tip_layer(preview: Option<player::Preview>) -> Element<'static, Message> {
 /// under the lamp, which turned R3 from missing into acute, so the text is now
 /// the door to the sounding record's page.
 ///
-/// Two doors, side by side, both labelled, two subjects: **the text is the
-/// record, the word `Queue` is the queue.** Neither is a bare gesture and
-/// neither is an icon.
+/// **It is the only door in this zone now**, and the block is 160 px wider for
+/// it: the queue's own control came off when its place was absorbed into
+/// `Now playing` (module docs, doc 12 §6.4). One door, one subject, labelled in
+/// words rather than by a gesture or an icon.
 fn now_playing_block(
     player: &PlayerState,
-    place: Place,
     cover: Option<iced_image::Handle>,
 ) -> Element<'_, Message> {
     let stamps = player.stamps();
@@ -275,7 +288,6 @@ fn now_playing_block(
             theme::active().paper_faint,
             alignment::Horizontal::Left,
         ),
-        queue_button(player, place == Place::Queue),
     ]
     .spacing(theme::GAP_SM)
     .align_y(iced::Alignment::Center)
@@ -315,81 +327,6 @@ fn stamp(
         .align_x(align)
         .align_y(alignment::Vertical::Center)
         .into()
-}
-
-/// The **Queue** control: the word, the count of what it opens onto, and the
-/// press that opens it.
-///
-/// Four properties, each of them load-bearing:
-///
-/// - **It is labelled, and it is always there.** Not a gesture, not a bare
-///   figure, not an icon — the word says what the press opens. The study behind
-///   this (`docs/design/03-interface-prior-art.md` §5.3(1)) is unambiguous: an
-///   unlabelled route to a transient surface produces users who cannot tell
-///   what they just did. It is offered with nothing queued too, because the
-///   popover has an honest empty state and a control that came and went with
-///   the music would be a moving target in the one row that does not move.
-/// - **It says what it opens, and nothing else.** The readout used to be the
-///   `3 / 12` position; it is now the queue's size — the critique's
-///   `Queue · N`, with the separator carried by the gap rather than a middle
-///   dot, since the label and the figure sit at opposite ends of a 152 px
-///   control and a dot at the right edge would attach to nothing. The position
-///   moved out into the ambient line beside it, where
-///   [`PlayerState::continuation_note`] states it as *what is left* rather than
-///   *where you are*. Printing both would have been the same subtraction twice.
-///   Nothing was removed from the bar: a slot was replaced by a better
-///   statement of the same fact, which is the one move the product's standing rules
-///   permits here.
-/// - **The readout is a reserved slot.** [`theme::POSITION_W`] wide whether or
-///   not there is anything queued, so a queue arriving moves no title; and
-///   `None` rather than `0`, because a queue that does not exist has no size.
-/// - **The whole control is a reserved slot too** ([`theme::UP_NEXT_W`]), and
-///   [`theme::now_playing`] varies only colour, never geometry — so hovering it
-///   and opening the popover both leave every pixel where it was. The lit state
-///   is the anchor the toolkit will not let the popover draw as a notch.
-///
-/// It is the same message <kbd>Q</kbd> sends.
-fn queue_button(player: &PlayerState, open: bool) -> Element<'_, Message> {
-    let room = theme::active();
-    let readout: Element<'_, Message> = match player.queue_size_note() {
-        None => Space::with_width(Length::Fixed(theme::POSITION_W)).into(),
-        Some(note) => container(
-            text(note)
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_faint)
-                .wrapping(text::Wrapping::None),
-        )
-        .width(Length::Fixed(theme::POSITION_W))
-        .align_x(alignment::Horizontal::Right)
-        .into(),
-    };
-    button(
-        row![
-            text("Queue")
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .font(theme::MEDIUM)
-                .wrapping(text::Wrapping::None),
-            // **The figure sits on the control's own inner edge**, not 36 px
-            // inside it (the audit's defect 13). The readout keeps its reserved
-            // [`theme::POSITION_W`] slot — the bar may not move when a queue
-            // arrives — and the slack between the word and the slot is taken by
-            // a fill rather than left at the right-hand end, so the number lands
-            // on an edge something else shares.
-            Space::with_width(Length::Fill),
-            readout,
-        ]
-        .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Center),
-    )
-    .width(Length::Fixed(theme::UP_NEXT_W))
-    // 8 + a 16 px line box + 8 = `TRANSPORT_HIT`: one control height (law L7).
-    // It stood 24 px tall in a bar whose published floor is 32.
-    .padding(theme::pad(theme::GAP_SM, theme::GAP_SM))
-    .style(move |_theme, status| theme::now_playing(room, status, open))
-    .on_press(Message::ToggleQueue)
-    .into()
 }
 
 /// **The route back to what is playing**: the now-playing lines, wrapped in the
@@ -1278,26 +1215,39 @@ mod tests {
         );
     }
 
-    /// **The bar reserves every slot it can be in** — re-checked for a left
-    /// zone that just gained the two timestamps.
+    /// **The bar reserves every slot it can be in, and does not move when one
+    /// goes** — re-checked for the left zone the `Queue` door came off.
     ///
     /// One of the four properties `docs/design/01-ux-audit-and-ia.md` §5 says
-    /// must not regress. The zone carries a labelled control with a readout that
-    /// comes and goes with the queue, a continuation line that comes and goes
-    /// with the *position in* the queue, and now an elapsed and a total that
-    /// come and go with playback itself. All of them are reservations rather
-    /// than additions: the control is [`theme::UP_NEXT_W`] and the readout
-    /// inside it [`theme::POSITION_W`], each stamp is [`theme::STAMP_W`] whether
-    /// or not there is a figure in it, the continuation's lane is
-    /// [`theme::CONTINUATION_H`] tall whether it says anything or not, and the
-    /// control's border is present in every state.
+    /// must not regress. The zone carries a continuation line that comes and
+    /// goes with the *position in* the run, and an elapsed and a total that
+    /// come and go with playback itself. Both are reservations rather than
+    /// additions: each stamp is [`theme::STAMP_W`] whether or not there is a
+    /// figure in it, and the continuation's lane is [`theme::CONTINUATION_H`]
+    /// tall whether it says anything or not.
+    ///
+    /// **And the door's 152 px went to the title.** The bar is three zones —
+    /// two equal-weight fills around [`theme::TRANSPORT_W`] — so removing a
+    /// fixed slot from *inside* the left zone cannot move the transport
+    /// column; what it does instead is widen the title lane by exactly the slot
+    /// and the gap that carried it (doc 12 §6.4.1).
+    /// Where the transport column's left edge lands in a `window`-wide bar:
+    /// the gutter, one equal flank, one gap. The `Queue` door never appeared
+    /// in this expression, which is why removing it moved nothing.
+    const fn transport_x(window: f32) -> f32 {
+        theme::HANG
+            + (window - 2.0 * theme::HANG - 2.0 * theme::GAP_LG - theme::TRANSPORT_W) / 2.0
+            + theme::GAP_LG
+    }
+
     #[test]
-    fn the_left_zone_reserves_the_stamps_the_continuation_and_the_count() {
-        // The zone's own budget at the shipped window: the two stamps, the
-        // readout, the gaps between them and the button's horizontal padding
-        // all come out of the fill zone, and what is left has to be a real
-        // title lane — wide enough for the continuation line as well as the
-        // title, since they share it.
+    fn the_left_zone_reserves_the_stamps_and_the_continuation() {
+        // **The zone is one of two equal fills**, and that is the whole of the
+        // arithmetic: the bar is `Fill · TRANSPORT_W · Fill` with two `GAP_LG`
+        // inside one `HANG` gutter a side, so each flank gets exactly half of
+        // what the transport and the gaps leave — whatever the *other* flank
+        // happens to be holding. That is why removing a fixed slot from inside
+        // this zone cannot move the transport column.
         //
         // **The centre column gave 268 px back** when the seek row went, and
         // this is where they went: the title lane roughly doubles even after
@@ -1305,19 +1255,40 @@ mod tests {
         // zone wrapping below ~900 px) addressed by arithmetic rather than by a
         // maximum width.
         const SHIPPED: f32 = 1280.0;
-        const ZONE: f32 = SHIPPED
+        const ZONE: f32 = (SHIPPED
             - 2.0 * theme::HANG // the bar's own padding: the one window gutter
             - 2.0 * theme::GAP_LG // the gaps between its three zones
-            - theme::TRANSPORT_W
-            - theme::SIGNAL_W
-            - theme::GAP_SM
-            - theme::VOLUME_BLOCK_W;
-        const TITLE_LANE: f32 =
-            ZONE - theme::UP_NEXT_W - 2.0 * theme::STAMP_W - 3.0 * theme::GAP_SM;
-        /// The zone's whole height: three stacked line boxes, every one of them
-        /// reserved, so this is its height in every state rather than its
-        /// tallest.
-        const LEFT_H: f32 = theme::LINE_BODY + theme::LINE_META + theme::CONTINUATION_H;
+            - theme::TRANSPORT_W)
+            / 2.0;
+        /// What the door and its own gap used to take out of the zone. Kept as
+        /// a literal because it is the *measurement* of what came back, and
+        /// there is no token left to name it: `UP_NEXT_W` went with the
+        /// control.
+        const DOOR: f32 = 152.0 + theme::GAP_SM;
+        const TITLE_LANE: f32 = ZONE - 2.0 * theme::STAMP_W - 2.0 * theme::GAP_SM;
+        // **248 → 408 at 1280**, and the gain is exactly the slot and its gap.
+        //
+        // Doc 12 §6.4.1 computed 288 → 448 from the same tokens and flagged the
+        // figure as unverified; it is 40 px optimistic in both columns, because
+        // the derivation spent `(W − TRANSPORT_W − 2·GAP_LG) / 2` and the bar
+        // also carries its own `2 × HANG` window gutter. **The delta it was
+        // making the argument about — 160 px, all of it to the title — is
+        // exactly right**, and that is the claim that mattered.
+        const { assert!(TITLE_LANE - DOOR == 248.0) }
+        const { assert!(TITLE_LANE == 408.0) }
+        const { assert!(DOOR == 160.0) }
+        // **And the transport column has not moved.** Its left edge is the
+        // window's gutter, plus one flank, plus one gap — an expression the
+        // door never appeared in, at any width. That is the whole reason the
+        // slot could come off without a re-derivation.
+        const {
+            assert!(transport_x(1280.0) == 528.0 + theme::HANG + theme::GAP_LG);
+            assert!(transport_x(1920.0) == 848.0 + theme::HANG + theme::GAP_LG);
+        }
+        // The zone's whole height: three stacked line boxes, every one of them
+        // reserved, so this is its height in every state rather than its
+        // tallest.
+        let left_h = theme::LINE_BODY + theme::LINE_META + theme::CONTINUATION_H;
 
         const { assert!(TITLE_LANE > 200.0) }
         // The zone is the bar's content band **less one lead a side**, so
@@ -1325,8 +1296,8 @@ mod tests {
         // what sets the bar's height, and the zone's middle lane is the bar's
         // centre line (law L4). It used to be *exactly* the band, which is the
         // proportion this bar was re-derived to fix.
-        const { assert!(LEFT_H == theme::NOW_PLAYING_H) }
-        const { assert!(LEFT_H + 2.0 * theme::BAR_ZONE_LEAD == theme::BAR_CONTENT_H) }
+        assert!((left_h - theme::NOW_PLAYING_H).abs() < f32::EPSILON);
+        assert!((left_h + 2.0 * theme::BAR_ZONE_LEAD - theme::BAR_CONTENT_H).abs() < f32::EPSILON);
         // **The stack is symmetric about its middle lane**: the title's lane
         // and the continuation's are the same height, so the artist's line box
         // is the block's exact centre. Without this the middle line sits low
@@ -1349,7 +1320,6 @@ mod tests {
         let mut player = PlayerState::new(Availability::Ready);
         // Nothing queued and nothing playing: neither the count nor the
         // continuation nor a stamp says anything, and every slot is still there.
-        assert_eq!(player.queue_size_note(), None);
         assert_eq!(player.continuation_note(), None);
         assert_eq!(player.stamps(), None);
         // And the needle draws its track with no fill and refuses the pointer,
@@ -1366,11 +1336,10 @@ mod tests {
             },
             &[],
         );
-        // Without a recorded queue there is still nothing to count, nothing to
-        // say follows, and no segment to point at — the front end never invents
-        // any of them (see `player.rs`'s honesty rule). The stamps do appear,
-        // because an elapsed time is a fact the engine reported.
-        assert_eq!(player.queue_size_note(), None);
+        // Without a recorded queue there is still nothing to say follows, and
+        // no segment to point at — the front end never invents either (see
+        // `player.rs`'s honesty rule). The stamps do appear, because an elapsed
+        // time is a fact the engine reported.
         assert_eq!(player.continuation_note(), None);
         assert!(player.stamps().is_some());
         assert!(!player.needle_bar().interactive);

@@ -1,31 +1,33 @@
-//! **The queue place**: what the engine is holding, and where it is in it.
+//! **The run column**: what the engine is holding, and where it is in it.
 //!
-//! # It was a popover, and before that a rail panel
+//! # It was a popover, then a rail panel, then a place — and now it is a half
 //!
 //! ADR-0016 moved the queue out of the right-hand rail and into a 360 px card
 //! floating over the wall, anchored to the bar it describes. ADR-0022 removed
 //! every side surface baz had — the owner's verdict on the pair was *"I really
-//! hate the way queue and selected albums appear"* — so the queue is a
-//! **place**, at the width of the window, and the float is gone with the
-//! column.
+//! hate the way queue and selected albums appear"* — so the queue became a
+//! **place**, at the width of the window.
 //!
-//! What survives is every fact and every gesture: the rows, one list with a
-//! cursor, the summary that reads *what is left*, click-to-jump, the per-row ✕.
-//! What changes is the container and what the container costs:
+//! And then it stopped being one. The owner, 2026-08-10: *"the queue and the
+//! now playing need integrated in some way so we can remove the queue option
+//! from the bottom bar"*. **A run is a list and a cursor**; `Place::NowPlaying`
+//! was drawing the cursor and this was drawing the list, and each was missing
+//! the half the other was holding
+//! (`docs/design/12-now-playing-and-kiosk.md` §3.4). So `Place::Queue` is gone
+//! and this module is the *run column* of the place that absorbed it, drawn
+//! beside the record at [`theme::RUN_MEASURE`] or, below
+//! [`theme::SPLIT_FLOOR`], at the whole measure with the record as its head.
 //!
-//! | | the popover | this place |
-//! |---|---|---|
-//! | width | `POPOVER_W` 360, fixed | the window, capped at [`theme::LIST_MEASURE`] |
-//! | height | `0.6 × window`, then scroll | the window |
-//! | dismissal | `Esc`, ✕, click-outside, the door again | `Esc`, `‹ Library`, the door again |
-//! | arrival | a 140 ms fade and an 8 px rise | a hard cut, like every other place change |
-//! | what it costs the wall | nothing — it floated | the wall, while you are here |
+//! **Every fact and every gesture survived that move** — the rows, one list
+//! with a cursor, the summary that reads *what is left*, click-to-jump, the
+//! per-row ✕, the steppers, the transfer `+`, the drag, `Save as playlist`,
+//! `Undo`, the album headers and the virtual window. What did not is the
+//! header strip: the merged place wears none, because the lane is the route and
+//! the head states the list.
 //!
-//! The last row is the honest price and ADR-0022 states it: knowing what is
-//! next used to cost nothing and now costs leaving the shelf. The mitigation is
-//! that it mostly should not be paid — the bar's own third line states the
-//! continuation ambiently ([`crate::views::bottom_bar`]), so this place is for
-//! *changing* the queue rather than for reading it.
+//! The bar's own third line still states the continuation ambiently
+//! ([`crate::views::bottom_bar`]) — and earns its place harder than before,
+//! since it is now the only statement about the run outside this surface.
 //!
 //! # One list with a cursor
 //!
@@ -65,7 +67,6 @@ use crate::app::Message;
 use crate::player::{PlayerState, QueueRow, QueueRowState};
 use crate::playlists::{Collecting, NameEntry};
 use crate::queue_window::{self, RowShape};
-use crate::views::{place_header, place_pad};
 use crate::{icon, theme};
 
 /// The `Save as playlist` field's id, so the caret can land in it the moment
@@ -94,7 +95,8 @@ pub(crate) struct Frame {
     pub(crate) scroll: f32,
     /// Air above the summary for the place's top-right controls.
     pub(crate) clearance: f32,
-    /// The gutter the column hangs from — [`place_pad`] when the column owns
+    /// The gutter the column hangs from — [`crate::views::place_pad`] when the
+    /// column owns
     /// the body's whole width, and the right-hand column's own inset when it
     /// stands beside the record.
     pub(crate) pad: iced::Padding,
@@ -293,49 +295,6 @@ pub(crate) fn run_column<'a>(
     .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
     .width(Length::Fill)
     .height(Length::Fill)
-    .into()
-}
-
-/// The **Queue** place, for exactly one step longer.
-///
-/// `Place::Queue` is deleted in doc 12 §12's step M2; while it stands, the
-/// place is [`run_column`] under the header strip it has always worn, so that
-/// both doors work for one commit and the merge is reversible.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a pass-through to `run_column`, whose arguments these are"
-)]
-pub(crate) fn view<'a>(
-    player: &'a PlayerState,
-    window: iced::Size,
-    hovered: Option<usize>,
-    saving: Option<&'a NameEntry>,
-    collecting: Collecting,
-    scroll: f32,
-    drag: Option<&'a crate::drag::DragState>,
-    can_undo: bool,
-) -> Element<'a, Message> {
-    let measure =
-        (window.width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).clamp(0.0, theme::LIST_MEASURE);
-    column![
-        place_header("Queue"),
-        run_column(
-            player,
-            Frame {
-                measure,
-                viewport_h: window.height,
-                scroll,
-                clearance: 0.0,
-                pad: place_pad(),
-            },
-            None,
-            hovered,
-            saving,
-            collecting,
-            drag,
-            can_undo,
-        ),
-    ]
     .into()
 }
 

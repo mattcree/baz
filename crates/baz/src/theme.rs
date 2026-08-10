@@ -3321,25 +3321,6 @@ pub const ALBUM_ASIDE_W: f32 = ALBUM_SLEEVE;
 /// [`SETTINGS_BREAKPOINT`].
 pub const ALBUM_BREAKPOINT: f32 = 744.0;
 
-/// Width reserved in the now-playing bar for the **Queue** control's readout
-/// (logical px) — the count of what the door opens onto, beside its label.
-///
-/// A **reserved slot**, exactly like [`SIGNAL_W`] and [`STAMP_W`]: the readout
-/// is absent when nothing is queued and present when something is, and the bar
-/// must not move between those two states.
-///
-/// **56, and unchanged, though what it holds got shorter.** The number was
-/// derived for the `3 / 12` position this slot used to draw — bounded at three
-/// figures a side (`199 / 240`, the same width as `999 / 999`, because the
-/// digits are tabular). The position moved into the ambient continuation line
-/// beside it (`player::PlayerState::continuation_note`), which states what is
-/// left rather than where you are, so the slot now holds a bare `999` and holds
-/// it with room to spare. The width is kept rather than tightened because it is
-/// the one number in this zone's arithmetic that every other reservation is
-/// checked against, and narrowing it would buy 30 px of title lane at the cost
-/// of re-deriving the whole zone.
-pub const POSITION_W: f32 = 56.0;
-
 /// Height reserved in the bar's left zone for the ambient continuation line
 /// (logical px) — `then 2 albums · 1:58:00 left`, under the title and artist.
 ///
@@ -3369,19 +3350,6 @@ pub const POSITION_W: f32 = 56.0;
 /// is exactly the block's middle** — centring the block therefore puts the
 /// zone's own centre line on the bar's, instead of 2 px off it.
 pub const CONTINUATION_H: f32 = LINE_BODY;
-
-/// Width of the bar's **Queue** control (logical px) — the label, the
-/// [`POSITION_W`] readout, and the padding around them.
-///
-/// The control is **labelled and always visible**, and that is a requirement
-/// rather than a preference: `docs/design/03-interface-prior-art.md` §5.3(1)
-/// and R1 record that the closest product to baz in ambition hides the same
-/// surface behind an unlabelled gesture, and has generated years of "where is
-/// my queue / what did I just do" complaints for it. *Transient must not mean
-/// unverifiable.* So the door to the popover says what it opens, in words, in
-/// every state — including with nothing playing, where the readout beside the
-/// label is empty and the slot is still this wide.
-pub const UP_NEXT_W: f32 = 152.0;
 
 // `SETTINGS_TOGGLE_W` is gone (doc 10 §7 step 1): the route to the Settings
 // place is the gear — a [`TRANSPORT_HIT`] square in the strip's corner — so
@@ -3566,7 +3534,7 @@ pub const HALO_BLUR: f32 = 24.0;
 /// Width reserved for a duration at the right edge of a track or queue row
 /// (logical px).
 ///
-/// A **reserved slot**, exactly like [`STAMP_W`] and [`POSITION_W`], and it is
+/// A **reserved slot**, exactly like [`STAMP_W`] and [`SIGNAL_W`], and it is
 /// the fix for a defect visible in every screenshot of the inspector: the
 /// durations were laid out by a `text` sized to its own string, so `9:41` and
 /// `12:07` ended in different columns and a thirteen-track record had a ragged
@@ -4418,16 +4386,6 @@ mod tests {
         // `192 → 176.4 kHz`, seven figures — so that a note appearing there
         // moves nothing beside it.
         const { assert!(SIGNAL_W > SIZE_META * 7.0 * DIGIT_EM) }
-        // And the Queue control's readout is the same rule again: the widest
-        // count it can draw is three figures, the slot holds them, and it is
-        // that wide whether or not anything is queued — so a queue arriving
-        // moves no title. (It is still sized for the six-figure `999 / 999` it
-        // used to hold; see the token.)
-        const { assert!(POSITION_W > SIZE_META * 6.0 * DIGIT_EM) }
-        // …and the control that carries it holds the readout, its label and the
-        // padding around both. The label itself is measured in the face that
-        // draws it by `font.rs`; this is the arithmetic that leaves room.
-        const { assert!(UP_NEXT_W > POSITION_W + 3.0 * GAP_SM) }
         // **The run column's measure holds a run row's whole anatomy**, and
         // holds it with more title lane than the bar's own left block gets for
         // the same reading (doc 12 §5.5a). The sum is the row's fixed furniture
@@ -6659,8 +6617,11 @@ mod tests {
     /// width, by exactly 24 px**. Six of the wall's sixteen x-edges were
     /// singletons because of it.
     ///
-    /// There are four such surfaces and this names all four, by the literal a
-    /// reviewer would have to change to break it.
+    /// There are three such surfaces and this names all three, by the literal
+    /// a reviewer would have to change to break it. The queue place was a
+    /// fourth until it was absorbed into `Now playing`, whose merged
+    /// composition wears no header strip at all — the lane is the route, and
+    /// the run's own head states the list (doc 12 §6.4.4).
     #[test]
     fn one_gutter_touches_every_window_edge() {
         let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
@@ -6681,7 +6642,7 @@ mod tests {
                 "{name} no longer hangs its window-edge strip from HANG"
             );
         }
-        // …and the four places that share it really do use it, rather than
+        // …and the three places that share it really do use it, rather than
         // reinventing a strip of their own — Settings included, since doc 10
         // §7 step 8 folded its private copy into the one function.
         //
@@ -6693,7 +6654,6 @@ mod tests {
         for (name, strip) in [
             ("album.rs", "place_header_led("),
             ("artist.rs", "place_header_led("),
-            ("queue.rs", "place_header("),
             ("playlist.rs", "place_header("),
             // Settings is the one place with a *note* — a statement about
             // itself, not a keyboard hint — so it spends the `_with` form.

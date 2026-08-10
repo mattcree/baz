@@ -297,9 +297,15 @@ pub(crate) enum Message {
     /// Esc anywhere: peel one layer, top down — the place you are in, then the
     /// search query, then the shuffle pool's marks (see [`App::escape`]).
     EscapePressed,
-    /// The bar's labelled `Queue` control, or `Q`: go to the queue place, or
-    /// come back from it (see [`crate::place`]).
-    ToggleQueue,
+    /// <kbd>Ctrl</kbd>+<kbd>U</kbd> — *up next*: go to **Now playing** with
+    /// the run standing.
+    ///
+    /// The accelerator of two visible controls at once, which is what makes it
+    /// legal (ADR-0023's amendment): the lane's `Now playing` row, and the
+    /// place's own `Run` word. It does **not** toggle — it is a destination's
+    /// accelerator, and a destination never closes itself
+    /// ([`crate::place::Place::go`]). <kbd>Esc</kbd> is the way out.
+    ShowTheRun,
     /// **The `Run` word**, in the now-playing place's own top-right corner:
     /// show the run beside the record, or stand it down
     /// (`docs/design/12-now-playing-and-kiosk.md` §3.4.3).
@@ -1265,11 +1271,15 @@ impl App {
             // and the Library's own state — scroll, query, arrangement — is
             // untouched by all of them, which is what makes coming back free.
             Message::ToggleSettings => self.go(Place::settings),
-            Message::ToggleQueue => {
-                // Wherever the door leads, the place's scrollable starts at
-                // the top the next time it exists (see `queue_scroll`).
+            Message::ShowTheRun => {
+                // The place's scrollable starts at the top the next time it
+                // exists (see `queue_scroll`).
                 self.queue_scroll = 0.0;
-                self.go(Place::queue)
+                let task = self.set_run(true);
+                Task::batch([
+                    task,
+                    self.go(|place| place.go(crate::lane::Destination::NowPlaying)),
+                ])
             }
             Message::ToggleRun => self.toggle_run(),
             // **Shift-click a sleeve queues the record** — the one-press
@@ -2720,9 +2730,8 @@ impl App {
                 };
                 open.renaming.take().is_some()
             }
-            // The run's save field, in either place that draws the run — the
-            // queue place for exactly one more step (doc 12 §12, M2).
-            Place::Queue | Place::NowPlaying => self.playlists.saving_queue.take().is_some(),
+            // The run's save field — one place draws the run now.
+            Place::NowPlaying => self.playlists.saving_queue.take().is_some(),
             _ => false,
         }
     }
@@ -3674,7 +3683,7 @@ impl App {
     /// visible twin stands.
     fn undo_edit(&mut self) -> Task<Message> {
         match self.place {
-            Place::Queue | Place::NowPlaying => self.undo_queue_edit(),
+            Place::NowPlaying => self.undo_queue_edit(),
             Place::Playlist(_) => {
                 if let Screen::Shelf(state) = &self.screen {
                     self.playlists.undo_open(&state.library);
@@ -3714,7 +3723,7 @@ impl App {
         if from == self.place {
             return;
         }
-        if matches!(from, Place::Queue | Place::NowPlaying) {
+        if from == Place::NowPlaying {
             self.queue_undo.clear();
         }
         if matches!(from, Place::Playlist(_)) {
@@ -3813,19 +3822,6 @@ impl App {
                     state.view(&self.player, lamp, collecting, ink)
                 }
             }
-            (Screen::Shelf(_), Place::Queue) => views::queue::view(
-                &self.player,
-                iced::Size::new(self.body_width(), self.window.height),
-                // The hover slots go quiet while a row is in the hand: the
-                // gesture's own statements — the ghost and the line — are
-                // the surface's voice mid-drag.
-                self.drag.as_ref().map_or(self.hovered_queue_row, |_| None),
-                self.playlists.saving_queue.as_ref(),
-                collecting,
-                self.queue_scroll,
-                self.drag.as_ref(),
-                self.queue_undo.can_undo(),
-            ),
             (Screen::Shelf(state), Place::Playlist(id)) => match self.playlists.page(id) {
                 Some(open) => views::playlist::view(
                     state,
@@ -3950,7 +3946,7 @@ impl App {
         } else {
             column![
                 screen,
-                views::bottom_bar::view(&self.player, self.place, ink, self.bar_cover()),
+                views::bottom_bar::view(&self.player, ink, self.bar_cover()),
             ]
             .into()
         };
@@ -6187,11 +6183,11 @@ mod tests {
     fn navigating_between_places_costs_the_library_nothing() {
         let place = Place::default();
         assert_eq!(place, Place::Library);
-        // Out to a record's page, on to the queue, on to the settings, home.
+        // Out to a record's page, on to Now playing, on to the settings, home.
         let place = place.album(7);
         assert_eq!(place, Place::Album(7));
-        let place = place.queue();
-        assert_eq!(place, Place::Queue);
+        let place = place.go(crate::lane::Destination::NowPlaying);
+        assert_eq!(place, Place::NowPlaying);
         assert!(!matches!(place, Place::Album(_)), "one place at a time");
         let place = place.settings();
         assert_eq!(place, Place::Settings);
@@ -6278,7 +6274,12 @@ mod tests {
             ),
             ("VolumeStep", "the bottom bar's volume fader"),
             ("ToggleMute", "the bottom bar's speaker button"),
-            ("ToggleQueue", "the bottom bar's labelled `Queue` control"),
+            (
+                "ShowTheRun",
+                "the returns lane's `Now playing` row, plus the place's own \
+                 `Run` word — two visible controls, which is what makes the \
+                 one chord legal (doc 12 §3.4.4)",
+            ),
             ("ToggleSettings", "the top bar's Settings control"),
             ("FocusSearch", "the top bar's search well"),
             ("EscapePressed", "every place's `‹ Library`"),
@@ -6913,9 +6914,9 @@ mod tests {
         );
     }
 
-    /// The two place keys, spelled out: Ctrl+`U` is the same press as the bar's
-    /// labelled `Queue` control, and Ctrl+`,` the same press as the top bar's
-    /// `Settings` word.
+    /// The two place keys, spelled out: Ctrl+`U` is the same press as the
+    /// lane's `Now playing` row *and* the place's `Run` word, and Ctrl+`,` the
+    /// same press as the top bar's `Settings` word.
     ///
     /// Both are modified, and that is the shape of the modifier layer ADR-0017
     /// §1.2 asks for: bare `q` and bare `u` are letters of the query.
@@ -6930,7 +6931,7 @@ mod tests {
         );
         assert_eq!(
             format!("{from_key:?}"),
-            format!("{:?}", Some(Message::ToggleQueue))
+            format!("{:?}", Some(Message::ShowTheRun))
         );
 
         let from_key = keys::binding_for(
@@ -7110,7 +7111,7 @@ mod tests {
         assert!(Place::default().is_library());
         // Anywhere else it is the place's, and one press is enough: there is no
         // second layer to take off underneath.
-        for place in [Place::Album(7), Place::Queue, Place::Settings] {
+        for place in [Place::Album(7), Place::NowPlaying, Place::Settings] {
             assert!(!place.is_library(), "{place:?} answers the press itself");
             assert!(
                 place.back().is_library(),

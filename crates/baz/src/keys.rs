@@ -203,18 +203,30 @@
 //! *place* — there being nothing else left to name (ADR-0022). There were
 //! three; the third is dealt with below.
 //!
-//! <kbd>Ctrl</kbd>+<kbd>U</kbd> goes to the **queue** and comes back from it —
-//! *up next*, which is what the bar's control is labelled. It was bare `Q` and
-//! ADR-0017 §1.2's table moves it, for the reason every letter moved: bare
-//! letters are the query now. The old argument for `Q` being bare — a view key
-//! you press dozens of times a session should not be taxed — is real and is
-//! simply outbid, and the tax it now pays is one modifier on a key that still
-//! resolves to [`Message::ToggleQueue`], the same message the bar's labelled
-//! control sends.
+//! <kbd>Ctrl</kbd>+<kbd>U</kbd> goes to **Now playing** with the run on —
+//! *up next*, which is exactly the half of that surface the queue place used to
+//! be. It was bare `Q` and ADR-0017 §1.2's table moves it, for the reason every
+//! letter moved: bare letters are the query now. The old argument for `Q` being
+//! bare — a view key you press dozens of times a session should not be taxed —
+//! is real and is simply outbid, and the tax it now pays is one modifier.
 //!
-//! What it opens is its third home: a queue *panel* in the right-hand rail,
-//! then a popover anchored to the bar, and now a **place** of its own
-//! (ADR-0022). The key is navigation rather than a request to raise a layer.
+//! **It stops toggling**, and that is the mirror rule rather than a loss: it is
+//! now the accelerator of the lane's own `Now playing` row, and
+//! [`crate::place::Place::go`] settles what a destination does — *pressing the
+//! row you are already on must leave you there*. A key that closed what its
+//! visible twin does not close would be a second behaviour with no control.
+//! <kbd>Esc</kbd> is the way out, and always was.
+//!
+//! **It also turns the run on**, which is legal by an existing precedent rather
+//! than by exception: ADR-0023's amendment blessed an accelerator sending the
+//! two messages its visible controls send, *"resolving to its on-screen control
+//! by construction"*. <kbd>Ctrl</kbd>+<kbd>U</kbd> is the lane's row plus the
+//! place's `Run` word, made for you — and both of them are visible.
+//!
+//! What it reaches is its fourth home: a queue *panel* in the right-hand rail,
+//! then a popover anchored to the bar, then a **place** of its own (ADR-0022),
+//! and now the other half of the place that was already showing the cursor
+//! (`docs/design/12-now-playing-and-kiosk.md` §3.4).
 //!
 //! `U` rather than `Q` because the two are not interchangeable under Ctrl:
 //! <kbd>Ctrl</kbd>+<kbd>Q</kbd> is *quit* on every desktop baz runs on, and a
@@ -385,12 +397,12 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Named(key::Named::ArrowDown) if bare => Some(Message::VolumeStep(-1)),
         Key::Character("m" | "M") if command => Some(Message::ToggleMute),
 
-        // Places. Ctrl+U goes to the queue — what is playing **up next** — and
-        // Ctrl+`,` (Cmd+`,`) to the settings; both are navigation rather than
-        // requests to raise a layer (module docs). **There is no `Ctrl+B`**:
-        // ADR-0022 left no sidebar to hide, and a layout key with no layout to
-        // change is a key that does nothing.
-        Key::Character("u" | "U") if command => Some(Message::ToggleQueue),
+        // Places. Ctrl+U goes to Now playing with the run on — what is playing
+        // and what is **up next** — and Ctrl+`,` (Cmd+`,`) to the settings;
+        // both are navigation rather than requests to raise a layer (module
+        // docs). It does not toggle: it is the accelerator of a destination,
+        // and a destination never closes itself.
+        Key::Character("u" | "U") if command => Some(Message::ShowTheRun),
         Key::Character(",") if command => Some(Message::ToggleSettings),
 
         // The playlist panel's door (ADR-0024 §5): the same press as the
@@ -792,18 +804,22 @@ mod tests {
         );
     }
 
-    /// **Ctrl+U shows and hides Up next**, in either case — and bare `q` is
-    /// query, along with Ctrl+Q, which is *quit* everywhere else and must not
-    /// be a popover here.
+    /// **Ctrl+U goes to the run**, in either case — and bare `q` is query,
+    /// along with Ctrl+Q, which is *quit* everywhere else and must not be a
+    /// place here.
+    ///
+    /// `Q` has not opened the queue since ADR-0017 §1.2 spent every bare letter
+    /// on the query, whatever two stale doc comments used to say; the assertion
+    /// below is where that has been true all along.
     #[test]
-    fn ctrl_u_toggles_the_up_next_popover() {
+    fn ctrl_u_is_the_run_and_bare_q_is_the_query() {
         assert_eq!(
             bind(&ch("u"), Modifiers::COMMAND).as_deref(),
-            Some("ToggleQueue")
+            Some("ShowTheRun")
         );
         assert_eq!(
             bind(&ch("U"), Modifiers::COMMAND).as_deref(),
-            Some("ToggleQueue")
+            Some("ShowTheRun")
         );
         assert_eq!(bind(&ch("q"), none()).as_deref(), Some("QueryTyped(\"q\")"));
         assert_eq!(

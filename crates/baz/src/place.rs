@@ -6,7 +6,7 @@
 //! > **The window holds one place at a time, with the returns lane to its left
 //! > in every place but Settings, and the now-playing bar under all of them.**
 //!
-//! One kind, eight members, one rule. There is no inspector, no popover and no
+//! One kind, seven members, one rule. There is no inspector, no popover and no
 //! rail; a listener has one question to answer about anything on screen —
 //! *which place am I in* — and one key that answers it. (One summoned,
 //! single-tenant panel floats *over* a place without being one — the playlist
@@ -45,9 +45,14 @@
 //!   the inspector is showing, and whether it is showing*. Both facts collapse
 //!   into "is the place an `Album`, and which one" — one field where there were
 //!   two, and a `hidden` flag that no longer has anything to hide.
-//! - **`Queue`** takes over from `overlay.rs`, which held *which popover, if
-//!   any, is floating*. There is no float, so there is no layer to peel before
-//!   the place underneath it.
+//! - **`Queue`** took over from `overlay.rs`, which held *which popover, if
+//!   any, is floating* — and is **gone again**, into the place that was already
+//!   holding its other half. The owner: *"the queue and the now playing need
+//!   integrated in some way so we can remove the queue option from the bottom
+//!   bar"*. A run is a list and a cursor, [`Place::NowPlaying`] was drawing only
+//!   the cursor, and a place holding one half of a thing is not a place
+//!   (`docs/design/12-now-playing-and-kiosk.md` §3.4). The enum went eight to
+//!   seven, and the door in the bar went with it.
 //!
 //! # Why an enum and not a stack
 //!
@@ -88,13 +93,19 @@ pub enum Place {
     /// Not the launch frame and not what `back` returns to — a page you go to,
     /// from the lane's head, like every other place.
     Home,
-    /// **Now playing**: the sounding record at the size it deserves, and the
-    /// surface the kiosk mode will be at a larger size.
+    /// **Now playing**: the sounding record at the size it deserves, the run
+    /// it is a position in, and the surface the kiosk mode will be at a larger
+    /// size.
     ///
     /// Distinct from [`Self::Album`] because its subject is *what is sounding*
     /// rather than *which record I pointed at* — the bottom bar's subject, on
     /// a page. It carries no id for the same reason the bar carries none: the
     /// engine's answer is the only one it may draw.
+    ///
+    /// **It absorbed `Queue` whole.** Both halves of the run live here: the
+    /// cursor in the record column, the list in the run column beside it, and
+    /// every gesture the queue place had. Whether the list is on screen is the
+    /// `Run` word's business and not this enum's — a density is not a place.
     NowPlaying,
     /// **One artist's page**: their name, and their records in the wall's own
     /// tile.
@@ -120,9 +131,6 @@ pub enum Place {
     /// exhaustive walk existed to catch: there is no reachable state that is
     /// "showing an album page for no album".
     Album(u64),
-    /// **The queue**: what the engine is holding and where it is in it, as a
-    /// place of its own rather than a card floating over the wall.
-    Queue,
     /// **One playlist's page** (ADR-0024 §4): its name, its counts, `Play`,
     /// `Queue`, `Rename`, `Delete`, and its rows in the queue place's anatomy.
     ///
@@ -144,28 +152,15 @@ impl Place {
     /// <kbd>Ctrl</kbd>+<kbd>,</kbd>, and the top bar's `Settings` control: go
     /// to the settings, or come back from them.
     ///
-    /// A toggle only against itself. From an album's page or the queue this is
-    /// a *move* to the settings, not a swap — the key means "take me to the
-    /// preferences", and only the preferences answer it with "and back again".
+    /// A toggle only against itself. From an album's page or the now-playing
+    /// place this is a *move* to the settings, not a swap — the key means
+    /// "take me to the preferences", and only the preferences answer it with
+    /// "and back again".
     #[must_use]
     pub fn settings(self) -> Self {
         match self {
             Self::Settings => Self::Library,
             _ => Self::Settings,
-        }
-    }
-
-    /// <kbd>Q</kbd>, and the bar's labelled `Queue` control: go to the queue,
-    /// or come back from it.
-    ///
-    /// The same shape as [`Self::settings`], and for the same reason: a door
-    /// that says *Queue* closes itself when you press it again, and does not
-    /// close anything else.
-    #[must_use]
-    pub fn queue(self) -> Self {
-        match self {
-            Self::Queue => Self::Library,
-            _ => Self::Queue,
         }
     }
 
@@ -248,8 +243,8 @@ impl Place {
     /// **The lane's head, pressed**: go to that destination.
     ///
     /// Not a toggle, and that is the difference between a destination and a
-    /// door. `Queue` and `Settings` are doors — press them again and they
-    /// close — because each names one thing you look at and then put down.
+    /// door. `Settings` is a door — press it again and it closes — because it
+    /// names one thing you look at and then put down.
     /// The head's three name *where you are*, and the current one is drawn in
     /// full paper ink to say so; pressing the row you are already on must
     /// leave you there, because the alternative is a control whose meaning
@@ -275,7 +270,7 @@ impl Place {
     /// Which of the head's three destinations this place *is*, if it is one —
     /// what the lane reads to ink the current row.
     ///
-    /// The four places that are not destinations (`Album`, `Queue`,
+    /// The four places that are not destinations (`Album`, `Artist`,
     /// `Playlist`, `Settings`) light **nothing** in the head rather than
     /// falling back to `Library`. A record's page was reached from the wall,
     /// but it is not the wall, and a head that claimed otherwise would be
@@ -359,7 +354,6 @@ mod tests {
             for from in [
                 Place::Album(7),
                 Place::Artist(5),
-                Place::Queue,
                 Place::Playlist(3),
                 Place::Settings,
             ] {
@@ -375,7 +369,6 @@ mod tests {
         for place in [
             Place::Album(7),
             Place::Artist(5),
-            Place::Queue,
             Place::Playlist(3),
             Place::Settings,
         ] {
@@ -393,7 +386,6 @@ mod tests {
             Place::NowPlaying,
             Place::Album(7),
             Place::Artist(5),
-            Place::Queue,
             Place::Playlist(3),
         ] {
             assert!(place.wears_lane(), "{place:?}");
@@ -401,12 +393,38 @@ mod tests {
         assert!(!Place::Settings.wears_lane());
     }
 
+    /// **<kbd>Ctrl</kbd>+<kbd>U</kbd> is the lane row's accelerator**, and so
+    /// it stops toggling (doc 12 §3.4.4).
+    ///
+    /// The chord resolves to `Place::go(Destination::NowPlaying)` — the same
+    /// answer the lane's own row gives — and **pressing it twice leaves you
+    /// there**, because a key that closed what its visible twin does not close
+    /// would be a second behaviour with no control. `Esc` is the way out, and
+    /// always was.
+    #[test]
+    fn ctrl_u_is_the_lane_rows_accelerator() {
+        use crate::lane::Destination;
+        let chord = |place: Place| place.go(Destination::NowPlaying);
+        for from in [
+            Place::Library,
+            Place::Home,
+            Place::Album(7),
+            Place::Artist(5),
+            Place::Playlist(3),
+            Place::Settings,
+        ] {
+            assert_eq!(chord(from), Place::NowPlaying, "{from:?}");
+        }
+        assert_eq!(chord(Place::NowPlaying), Place::NowPlaying);
+        assert_eq!(chord(chord(Place::Library)), Place::NowPlaying);
+        // …and the way out is the one every place has.
+        assert_eq!(Place::NowPlaying.back(), Place::Library);
+    }
+
     #[test]
     fn each_door_closes_itself_and_nothing_else() {
         assert_eq!(Place::Library.settings(), Place::Settings);
         assert_eq!(Place::Settings.settings(), Place::Library);
-        assert_eq!(Place::Library.queue(), Place::Queue);
-        assert_eq!(Place::Queue.queue(), Place::Library);
         assert_eq!(Place::Library.album(7), Place::Album(7));
         assert_eq!(Place::Album(7).album(7), Place::Library);
         assert_eq!(Place::Library.playlist(3), Place::Playlist(3));
@@ -419,8 +437,7 @@ mod tests {
         // …and a door pressed from *another* place is a move, not a swap back
         // home. The key says where to go; only the place you are in says
         // "and back".
-        assert_eq!(Place::Queue.settings(), Place::Settings);
-        assert_eq!(Place::Album(7).queue(), Place::Queue);
+        assert_eq!(Place::NowPlaying.settings(), Place::Settings);
         assert_eq!(Place::Settings.album(7), Place::Album(7));
         assert_eq!(Place::Album(7).album(8), Place::Album(8));
     }
@@ -434,7 +451,6 @@ mod tests {
             Place::NowPlaying,
             Place::Album(7),
             Place::Artist(5),
-            Place::Queue,
             Place::Playlist(3),
             Place::Settings,
         ] {
@@ -454,7 +470,6 @@ mod tests {
         #[derive(Debug, Clone, Copy)]
         enum Step {
             Settings,
-            Queue,
             Album(u64),
             Artist(u64),
             Playlist(u64),
@@ -463,7 +478,6 @@ mod tests {
         }
         let steps = [
             Step::Settings,
-            Step::Queue,
             Step::Album(1),
             Step::Album(2),
             Step::Artist(5),
@@ -480,7 +494,6 @@ mod tests {
                         for step in [a, b, c, d] {
                             place = match step {
                                 Step::Settings => place.settings(),
-                                Step::Queue => place.queue(),
                                 Step::Album(id) => place.album(id),
                                 Step::Artist(id) => place.artist(id),
                                 Step::Playlist(id) => place.playlist(id),
@@ -514,7 +527,6 @@ mod tests {
                                 + usize::from(place == Place::Home)
                                 + usize::from(place == Place::NowPlaying)
                                 + usize::from(place == Place::Settings)
-                                + usize::from(place == Place::Queue)
                                 + usize::from(place.showing_album().is_some())
                                 + usize::from(matches!(place, Place::Artist(_)))
                                 + usize::from(matches!(place, Place::Playlist(_)));

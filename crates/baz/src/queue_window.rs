@@ -1,14 +1,14 @@
-//! The queue place's virtual window: which slice of the rows the place
+//! The run column's virtual window: which slice of the rows the surface
 //! actually builds, and the two spacers standing in for the rest.
 //!
-//! # Why the queue place virtualizes at all
+//! # Why the run column virtualizes at all
 //!
 //! `Play all` (doc 09 §7.1) reifies the wall — every visible record, in the
 //! wall's arrangement order — into the queue in one press. At a large
 //! library's scale that is a five-figure-track queue, and the engine is
 //! indifferent (a `Vec<PathBuf>`), but a place that draws every row eagerly
 //! is not: forty thousand `button`s per frame is a hang, not a list. Doc 09
-//! names queue-place virtualization as `Play all`'s implementation gate, so
+//! names the run's virtualization as `Play all`'s implementation gate, so
 //! the two ship together. The wall's own virtualizer is the in-repo
 //! precedent ([`crate::shelf::Grid::visible_rows`], `views/shelf.rs`'s
 //! spacer column): everything not on screen is a single [`Space`](iced::widget::Space) of the
@@ -51,7 +51,7 @@ use crate::theme;
 /// rows column starts inside the scrollable content.
 pub const MARGIN: f32 = 600.0;
 
-/// One element of the queue place's rows column, as much of its shape as
+/// One element of the run column's rows, as much of its shape as
 /// the window arithmetic needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RowShape {
@@ -173,7 +173,7 @@ mod tests {
         rows.iter().map(|row| unit_pitch(*row)).sum()
     }
 
-    /// **S6's implementation gate** (doc 09 §7.1): a 40 000-row queue place
+    /// **S6's implementation gate** (doc 09 §7.1): a 40 000-row run column
     /// builds a bounded slice of elements — the window never grows with the
     /// list, only with the viewport — so `Play all` over a five-figure
     /// library costs the frame what a twelve-track record does.

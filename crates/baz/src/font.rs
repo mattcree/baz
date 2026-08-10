@@ -922,34 +922,6 @@ mod tests {
             "TRACK_NO_W",
         );
 
-        // The bar's Queue readout. It draws the queue's *size* now, bounded at
-        // three figures (`999`) — the position it used to draw moved into the
-        // ambient continuation line, which is not a fixed slot and clips. The
-        // slot's width is unchanged, so the two strings it was derived for are
-        // measured too: `199 / 240` is the spec's worst case and `999 / 999` is
-        // the widest the same shape can be, and with tabular figures they are
-        // the same width — which is the whole reason the bound can be stated in
-        // figures rather than in pixels.
-        for position in ["999", "199 / 240", "999 / 999"] {
-            fits(
-                &sans,
-                position,
-                theme::SIZE_META,
-                theme::POSITION_W,
-                "POSITION_W",
-            );
-        }
-
-        // The bar's Queue control: its label in the Medium face it is set
-        // in, inside what the slot has left after the readout and the padding.
-        fits(
-            &Face::parse(SANS_MEDIUM),
-            "Queue",
-            theme::SIZE_META,
-            theme::UP_NEXT_W - theme::POSITION_W - 3.0 * theme::GAP_SM,
-            "UP_NEXT_W",
-        );
-
         // The Settings place's section list: the longest name any of the
         // sections §4.5 plans can have, in the face and size the list draws
         // them at, inside the padding the entry carries.

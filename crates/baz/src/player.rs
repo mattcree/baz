@@ -1746,36 +1746,6 @@ impl PlayerState {
         })
     }
 
-    /// The **Queue** control's readout: how many tracks the door opens onto,
-    /// or `None` when it opens onto nothing.
-    ///
-    /// The control's job is to say *what it opens* — a labelled door and the
-    /// size of the room behind it, the critique's `Queue · N`
-    /// (`docs/design/critique/02-surfaces.md`, *Playback*). It is not where a
-    /// listener learns what is coming; that is
-    /// [`Self::continuation_note`]'s line, in the left zone, where it costs no
-    /// click at all.
-    ///
-    /// **This slot used to read `3 / 12`.** That was a position, and the
-    /// ambient line now states the same fact better — how much is left, and
-    /// what it is — which is the one move the product's standing rules permits on this
-    /// bar: *a slot may be added; none may be removed for tidiness*, and a slot
-    /// may be replaced by a better statement of the same fact. Keeping both
-    /// would have printed "9 more" beside "3 / 12", which are the same
-    /// subtraction twice.
-    ///
-    /// `None` rather than `0` when nothing has been queued: the popover has an
-    /// honest empty state and the control is offered anyway (a door that came
-    /// and went with the music would be a moving target in the one row that
-    /// does not move), but a count of zero would be a claim about a queue that
-    /// does not exist. The slot is [`crate::theme::POSITION_W`] wide either
-    /// way, so the absence costs no movement.
-    #[must_use]
-    pub fn queue_size_note(&self) -> Option<String> {
-        let queue = self.queue.as_ref()?;
-        (!queue.is_empty()).then(|| queue.len().to_string())
-    }
-
     /// The bar's **ambient continuation** — `then 2 albums · 1:58:00 left`, or
     /// `None` when the queue ends with the track that is playing.
     ///
@@ -5377,48 +5347,15 @@ mod tests {
 
     /// The **Queue** control's readout: the size of what the door opens onto,
     /// present exactly when there is a queue and absent — never zero — when
-    /// there is not.
-    ///
-    /// It is deliberately *not* a function of playback. The room behind the
-    /// door is the same size whether the music is playing, paused or stopped,
-    /// and a count that vanished when a run ended would make the control's
-    /// label a lie about a popover that still lists twelve tracks.
-    #[test]
-    fn the_queue_control_counts_what_it_opens_and_nothing_else() {
-        let albums = albums();
-        let mut player = PlayerState::new(Availability::Ready);
-        assert_eq!(
-            player.queue_size_note(),
-            None,
-            "no queue is not a queue of zero"
-        );
-
-        player.note_queue_sent(geogaddi_queue());
-        assert_eq!(
-            player.queue_size_note().as_deref(),
-            Some("2"),
-            "a queue that has not started is still two tracks long"
-        );
-
-        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
-        assert_eq!(player.queue_size_note().as_deref(), Some("2"));
-        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
-        assert_eq!(player.queue_size_note().as_deref(), Some("2"));
-        player.apply(&Event::QueueEnded, &albums);
-        assert_eq!(
-            player.queue_size_note().as_deref(),
-            Some("2"),
-            "an ended run has not emptied the list the popover still shows"
-        );
-    }
-
     /// The engine's position drives the mark, the popover's summary **and** the
     /// bar's ambient line, and it is absent rather than guessed at both ends of
     /// a run.
     ///
     /// `playing_row` is probed directly here because it is the fact under test:
     /// three surfaces read it, and what used to check it — the bar's `3 / 12`
-    /// readout — is no longer drawn (see [`PlayerState::queue_size_note`]).
+    /// readout, and then the `Queue` door's own count — is no longer drawn at
+    /// all. The merged now-playing surface states the size **with the cursor in
+    /// it** (`2 of 24`), which is the same fact said better.
     #[test]
     fn the_position_is_the_engines_and_absent_when_the_engine_has_not_said() {
         let albums = albums();
@@ -5657,10 +5594,10 @@ mod tests {
         );
     }
 
-    /// An empty queue has nothing to count and nothing to continue. Neither
-    /// reading invents a zero.
+    /// An empty queue has nothing to continue, and the reading does not invent
+    /// a zero.
     #[test]
-    fn an_empty_queue_states_neither_a_size_nor_a_continuation() {
+    fn an_empty_queue_states_no_continuation() {
         let mut player = PlayerState::new(Availability::Ready);
         player.note_queue_sent(QueueVm {
             album: None,
@@ -5668,11 +5605,6 @@ mod tests {
             items: Vec::new(),
             provenance: None,
         });
-        assert_eq!(
-            player.queue_size_note(),
-            None,
-            "a queue of zero is no queue"
-        );
         assert_eq!(player.continuation_note(), None);
         // Even if the engine reports a position into it — which it cannot, but
         // the reading must not depend on that.
@@ -5701,10 +5633,6 @@ mod tests {
             None,
             "a queue that has not started has no track for anything to follow"
         );
-        // The size is known, though: the door can say what it opens onto
-        // before a note sounds.
-        assert_eq!(sent.queue_size_note().as_deref(), Some("2"));
-
         let mut stray = PlayerState::new(Availability::Ready);
         stray.note_queue_sent(queue());
         stray.apply(&started("/m/strays/a.wav", 0), &[]);
