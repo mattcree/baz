@@ -87,7 +87,7 @@
 //! # Group keys
 //!
 //! [`Library::shelves`] arranges those albums into the shelves the wall draws,
-//! under one [`GroupKey`] — ARTIST, YEAR, GENRE, ADDED or PLAYED
+//! under one [`GroupKey`] — A–Z, YEAR, GENRE, ADDED or PLAYED
 //! (`docs/adr/0019-group-keys.md`, which amends ADR-0008). Each key is a
 //! *projection* of the same albums and never a filter: every album appears
 //! under every key, once, including the albums whose files declare nothing.
@@ -1400,8 +1400,15 @@ pub struct RootStats {
 /// the active key with no state of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum GroupKey {
-    /// Who the album is filed under — the grouping ADR-0008 decided, now one
-    /// key among several. Headers are A–Z (see [`Initial`]).
+    /// **The album artist's initial** — the grouping ADR-0008 decided, now one
+    /// key among several. Headers are A–Z (see [`Initial`]), with the two
+    /// anonymous ends at either edge.
+    ///
+    /// Its *word* is `A–Z` rather than `Artist` (ADR-0035): the front end also
+    /// has an Artist **place**, and a key that broke records on an initial
+    /// while wearing a subject's name was two different things spelled the same
+    /// on one screen. The variant, and [`GroupKey::code`]'s `"artist"`, are
+    /// unchanged — the code is on-disk data.
     Artist,
     /// Release year, shelved by decade (see [`GroupHeader::Decade`]).
     Year,
@@ -1427,10 +1434,19 @@ impl GroupKey {
 
     /// The word the wall's group-key row shows. Typography — the design draws
     /// this row in caps — is the view's business, not this module's.
+    ///
+    /// **A label may be renamed; a [`code`](GroupKey::code) may not.** The word
+    /// is copy on a screen and answers to the design; the code is on-disk
+    /// config. [`Self::Artist`] is the case that made the difference matter:
+    /// its word became `A–Z` in ADR-0035 while its code stayed `"artist"`, so
+    /// every `config.toml` written by an older baz still resolves.
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            Self::Artist => "Artist",
+            // What it produces, not what it is about: this key breaks records
+            // on the album artist's *initial*, and the front end's Artist
+            // place is the surface whose subject is an artist (ADR-0035).
+            Self::Artist => "A–Z",
             Self::Year => "Year",
             Self::Genre => "Genre",
             Self::Added => "Added",

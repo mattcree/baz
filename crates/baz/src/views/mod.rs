@@ -155,6 +155,17 @@ pub(crate) fn gradient_block(album_id: u64, size: f32, shown: f32) -> Element<'s
 /// cell exceeds the decoded source (§A1 argues both against the refusals by
 /// name). Shared by the panel and the page for [`gradient_block`]'s reason:
 /// two renderings of one identity that could drift apart would be a bug.
+/// **How many records a collage can quote**: four, the 2 × 2 grid's own
+/// capacity (ADR-0024 §A1).
+///
+/// Named here rather than left as a literal because two callers now have to
+/// agree with it from outside — a playlist row resolves four quotations, and
+/// the artists wall's thumbnail prefetch asks for the first four of an
+/// artist's records ([`crate::app`]). A prefetch that asked for a different
+/// number than the collage draws would either miss a cell or decode artwork
+/// nothing shows.
+pub(crate) const SLEEVE_CELLS: usize = 4;
+
 pub(crate) fn playlist_sleeve(
     shelf: &Shelf,
     art: &[u64],

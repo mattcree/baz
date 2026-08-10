@@ -49,7 +49,8 @@ modifier: the letters belong to the query now.
 | <kbd>↑</kbd> <kbd>↓</kbd> | volume up / down, one step (~1 dB at the top of the fader) |
 | <kbd>Ctrl</kbd>+<kbd>M</kbd> | mute / unmute |
 | <kbd>Ctrl</kbd>+<kbd>-</kbd> <kbd>Ctrl</kbd>+<kbd>=</kbd>, or <kbd>Ctrl</kbd>+scroll | hang the wall closer or wider — **spacious**, **balanced**, **dense** |
-| <kbd>1</kbd> … <kbd>5</kbd> | arrange the wall by **artist**, **year**, **genre**, **added** or **played** — the same five words in the top bar |
+| <kbd>1</kbd> … <kbd>5</kbd> | arrange the wall by **A–Z**, **year**, **genre**, **added** or **played** — the same five words in the top bar |
+| <kbd>6</kbd> | show the **artists** instead of the records — the sixth word in that same row. Your arrangement is kept: press <kbd>1</kbd>–<kbd>5</kbd> to come back to it |
 | <kbd>/</kbd>, or <kbd>Ctrl</kbd>+<kbd>F</kbd> | put the caret in the search field without typing anything |
 | <kbd>Ctrl</kbd>+<kbd>U</kbd> | go to **Now playing** with the run beside it — what is playing, and what is **up next**, on one surface |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | go to the settings, or come back |

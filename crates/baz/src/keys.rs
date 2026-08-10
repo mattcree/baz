@@ -285,7 +285,7 @@
 //!
 //! # The arrangement — `1` … `5`
 //!
-//! The five group keys (ADR-0019) select from the number row: `1` ARTIST,
+//! The five group keys (ADR-0019) select from the number row: `1` A–Z,
 //! `2` YEAR, `3` GENRE, `4` ADDED, `5` PLAYED, in the order the top bar's row
 //! of words states them and the order
 //! [`GroupKey::ALL`](baz_core::index::GroupKey::ALL) publishes them. The
@@ -301,10 +301,14 @@
 //! not built; the five group keys are built, they are five and not two, and a
 //! row of words in the top bar already names them.
 //!
-//! **The whole row is out of the query, not just the five keys that bind.**
-//! `0` and `6`–`9` do nothing rather than typing themselves, because a row in
-//! which `1` arranges the wall and `6` types a `6` is two rules wearing one
-//! shape. The cost is stated rather than discovered: from a cold wall you
+//! `6` is the sixth word in the same row — `ARTISTS`, the wall's other subject
+//! (ADR-0035) — and it resolves to [`Message::WallSubjectSelected`], the same
+//! message that word sends.
+//!
+//! **The whole row is out of the query, not just the six keys that bind.**
+//! `0` and `7`–`9` do nothing rather than typing themselves, because a row in
+//! which `1` arranges the wall and `7` types a `7` is two rules wearing one
+//! shape. The room `6` is spent in is room this rule had already reserved. The cost is stated rather than discovered: from a cold wall you
 //! cannot type `1999`. You press `/` first — which is what `/` is for — and
 //! from that moment the well has focus and every digit types, including the
 //! first one.
@@ -435,6 +439,12 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         Key::Character(digit @ ("1" | "2" | "3" | "4" | "5")) if bare => {
             Some(Message::GroupKeySelected(group_key(digit)?))
         }
+        // `6` is the sixth word in that same row — the wall's other subject
+        // (ADR-0035). The digit was already out of the query and already doing
+        // nothing, which is exactly the room the row left itself.
+        Key::Character("6") if bare => Some(Message::WallSubjectSelected(
+            crate::vm::WallSubject::Artists,
+        )),
 
         // Search. `/` is the reflex from every pager and browser; Ctrl+F
         // (Cmd+F) is the reflex from every document. Shift is tolerated on
@@ -481,9 +491,9 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
 ///
 /// Derived from the enum's own order rather than written out, so the row of
 /// words in the top bar, the digits that select them and the order
-/// `baz-core` publishes are one list. A sixth key (CRATES, MOOD) becomes
-/// `6` here with no edit at all — and until then `6` is unbound, because
-/// `ALL` has five entries and this returns `None` past its end.
+/// `baz-core` publishes are one list. A sixth *key* (CRATES, MOOD) becomes
+/// `7` here with no edit at all — `6` is the arrangement row's sixth word, the
+/// wall's subject, which is not a key and is bound in the table above.
 fn group_key(digit: &str) -> Option<baz_core::index::GroupKey> {
     let index = digit.parse::<usize>().ok()?.checked_sub(1)?;
     baz_core::index::GroupKey::ALL.get(index).copied()
@@ -893,7 +903,8 @@ mod tests {
     }
 
     /// **`1`–`5` are the five group keys, in `baz-core`'s own order**, and the
-    /// mapping is that order rather than a copy of it.
+    /// mapping is that order rather than a copy of it; `6` is the sixth word
+    /// in the same row, which is the wall's subject rather than a key.
     #[test]
     fn the_number_row_selects_the_five_arrangements() {
         use baz_core::index::GroupKey;
@@ -916,8 +927,15 @@ mod tests {
             bind(&ch("5"), none()).as_deref(),
             Some("GroupKeySelected(Played)")
         );
-        // There is no sixth key and no zeroth one.
-        assert_eq!(bind(&ch("6"), none()), None);
+        // **`6` is the row's sixth word, not its sixth key** (ADR-0035): it
+        // sends the subject the strip's `ARTISTS` sends, so the digit and the
+        // word are one control with two spellings, exactly as `1`–`5` are.
+        assert_eq!(
+            bind(&ch("6"), none()).as_deref(),
+            Some("WallSubjectSelected(Artists)")
+        );
+        // And there is no seventh word and no zeroth one.
+        assert_eq!(bind(&ch("7"), none()), None);
         assert_eq!(bind(&ch("0"), none()), None);
         // A modifier is not the binding, and a focused well types the digit.
         for modifiers in [Modifiers::COMMAND, Modifiers::ALT, Modifiers::SHIFT] {
@@ -1022,9 +1040,9 @@ mod tests {
     fn space_the_digits_and_the_slash_are_not_query() {
         assert_eq!(bind(&ch(" "), none()).as_deref(), Some("PlayPause"));
         assert_eq!(bind(&ch("/"), none()).as_deref(), Some("FocusSearch"));
-        // The number row is spent as a row: the five that bind arrange the
-        // wall and the five that do not are silent, so `1` and `6` are one
-        // rule rather than two.
+        // The number row is spent as a row: the six that bind state the wall's
+        // arrangement and its subject, and the four that do not are silent, so
+        // `1` and `7` are one rule rather than two.
         for digit in ["1", "2", "3", "4", "5"] {
             assert!(
                 bind(&ch(digit), none())
@@ -1033,7 +1051,13 @@ mod tests {
                 "{digit} should arrange the wall"
             );
         }
-        for digit in ["0", "6", "7", "8", "9"] {
+        assert!(
+            bind(&ch("6"), none())
+                .as_deref()
+                .is_some_and(|tag| tag.starts_with("WallSubjectSelected")),
+            "6 should choose the wall's subject"
+        );
+        for digit in ["0", "7", "8", "9"] {
             assert_eq!(bind(&ch(digit), none()), None, "{digit} must not be query");
         }
         // The predicate itself, stated once rather than inferred from the
@@ -1216,9 +1240,10 @@ mod tests {
             named(key::Named::End),
             named(key::Named::PageUp),
             named(key::Named::F1),
-            // `1`–`5` are the five group keys; the rest of the row is silent,
-            // because the row is spent as a row (module docs).
-            ch("6"),
+            // `1`–`5` are the five group keys and `6` is the wall's subject;
+            // the rest of the row is silent, because the row is spent as a row
+            // (module docs).
+            ch("7"),
             ch("0"),
         ];
         for key in &unbound {

@@ -2,7 +2,7 @@
 
 > Deliberate deferrals, in one place. Everything here was consciously *not* done,
 > with the reason. Roadmap-level scope lives in `VISION.md`; this is the list of
-> known gaps and promises. Updated 2026-08-09.
+> known gaps and promises. Updated 2026-08-10.
 
 ## Product decisions to honour later
 
@@ -94,7 +94,45 @@
   when a volume below unity is scaling the samples — that fact is already on
   screen in the fader beside it.
 
-- **The `ARTIST` group key and the `Artist` place are both called artist**, and
+- ~~**The `ARTIST` group key and the `Artist` place are both called artist**~~ —
+  **shipped, 2026-08-10**, as [ADR-0035](adr/0035-the-wall-has-a-subject.md).
+  The proposal below is struck rather than deleted, because it was measured and
+  the measurements are the interesting part of what happened next.
+
+  **What shipped**, and it is the proposal with one correction: the key's label
+  is `A–Z` and its code is still `"artist"`; `ARTISTS` is a sixth word in the
+  same row holding a `vm::WallSubject` beside `group_key`, with `6` as its
+  accelerator; the artists wall is one tile per person, shelved by `Initial`,
+  indexed by `rail::artist` verbatim, wearing `views::playlist_sleeve`'s
+  collage; the search is spent once and projected onto the people; both wells'
+  figures follow the subject; and the artist tiles' quotations are asked for by
+  the wall's own range guard, which is the only guard that re-fires on a
+  scroll. Home's `COLLECTION` was deliberately left alone — it is an
+  unnarrowed statistic about the whole collection on a different place, and it
+  already names records and artists side by side.
+
+  **The measurements, re-derived rather than trusted.** `KEYS_W` 314 → **368**,
+  which the costing below got exactly right; every figure downstream of it did
+  **not** match, because `Pull` was removed and `Shuffle` moved to the
+  now-playing bar in between, taking `ACTS_W` from 182 to 88:
+
+  | | costed below | shipped |
+  |---|---:|---:|
+  | `LIBRARY_LINE` | 654 | **560** |
+  | the window's own minimum | 750 | **696** (unmoved) |
+  | `TOP_BAR_SPLIT` | 926 | **832** |
+  | `SINGLE_LINE_NO_WELL` vs `WIDEST_LANE_STRIP` 720 | 702 (18 spare) | **608** (112 spare) |
+  | the single-line-with-well band | *deleted* | **832…904, alive** |
+
+  The costing's most valuable line — *"a consequence nobody would predict"* —
+  turned out not to happen, and that is the reason it was worth keeping: the
+  band is now **asserted** in `theme.rs`, because it was predicted not to
+  exist. Frames: [`docs/design/impl/artists-wall/`](design/impl/artists-wall/).
+
+  <details>
+  <summary>The costed proposal as it stood, 2026-08-09</summary>
+
+  **The `ARTIST` group key and the `Artist` place are both called artist**, and
   a measured proposal exists for fixing it. An agent built the whole thing
   before its work was discarded as a duplicate; the numbers below are its
   measurements, kept because re-deriving them is expensive and the decision is
@@ -121,7 +159,11 @@
   single-line-with-well band 872…904 *ceases to exist* — below `SIDEBAR_FLOOR`
   the strip is always two lines.
 
-- **An artist is not admitted to the returns lane, and the rule says why.** The
+  </details>
+
+- **An artist is not admitted to the returns lane, and the rule says why.**
+  Still true after ADR-0035 gave artists a wall of their own — a wall is a
+  place you look, and the lane is a record of things you touched. The
   lane holds records you have *played* and lists you have *made or edited* —
   both backed by an external store with a timestamp (the play ledger, `.m3u8`
   mtimes), which is what makes `(last touched, name)` a total order. An artist
@@ -134,7 +176,22 @@
   with no amendment, because it would then be a thing you touched at a recorded
   moment.
 
-- **An artists wall would cost the rail, density and the sticky headers
+- ~~**An artists wall would cost the rail, density and the sticky headers
+  nothing**~~ — **confirmed and shipped** (ADR-0035). The estimate held in
+  every part: `rail::entries` needed no branch, the density steps and the
+  sticky headers needed no change, and the two things it named as real costs
+  were the two things that were built — one query projected twice
+  (`vm::visible_artists` over the answer `refilter` already had) and the
+  readouts following the subject (`Shelf::wall_counts` / `wall_noun`, in both
+  wells). Its last sentence stands unchanged: **artist search is not built**,
+  and ADR-0021's ranking is still thrown away at the album fold. What the wall
+  narrows by is *whose records matched*, which is a projection of the record
+  search rather than a search of its own.
+
+  <details>
+  <summary>The estimate as it stood, 2026-08-09</summary>
+
+  **An artists wall would cost the rail, density and the sticky headers
   nothing** — `rail::entries` is a pure function of the shelf headers, and an
   artists wall headed by `Initial` reuses `rail::artist()` verbatim with no new
   branch. Two things it *would* need: **one query projected twice, not two
@@ -144,6 +201,8 @@
   the well's counts hard-code *albums*; there is a test pinning those strings).
   Artist search is not built and the level makes it obvious: ADR-0021 already
   ranks by *which field the query landed in* and throws that away.
+
+  </details>
 
 ## Known gaps in shipped features
 

@@ -64,7 +64,7 @@ pub(crate) fn view<'a>(
     lamp: f32,
     collecting: Collecting,
 ) -> Element<'a, Message> {
-    if shelf.visible.is_empty() {
+    if shelf.wall_visible().is_empty() {
         return empty_state(shelf);
     }
     let hang = shelf.grid();
@@ -143,15 +143,20 @@ pub(crate) fn view<'a>(
     // against the same width and the rail stays the sibling of the whole
     // body; absent (not empty) whenever there are no song answers, in which
     // case the composition is exactly what it always was.
-    let body: Element<'a, Message> = if shelf.songs.is_empty() {
-        wall.into()
-    } else {
-        column![
-            songs_section(shelf, player, collecting, hang.block_width()),
-            wall
-        ]
-        .into()
-    };
+    // **Only over a wall of records** (ADR-0035). The section ends in an
+    // `Albums` rule naming the wall beneath it, and its rows are tracks — two
+    // subjects stacked over a third would be the wall answering one query
+    // three ways. Under `ARTISTS` the artists *are* the answer.
+    let body: Element<'a, Message> =
+        if shelf.songs.is_empty() || shelf.subject != vm::WallSubject::Records {
+            wall.into()
+        } else {
+            column![
+                songs_section(shelf, player, collecting, hang.block_width()),
+                wall
+            ]
+            .into()
+        };
     row![body, index_rail(shelf, &shelves)].into()
 }
 
@@ -392,11 +397,24 @@ fn shelf_row<'a>(
         if offset >= run.len {
             break;
         }
-        let Some(&album_index) = shelf.visible.get(run.first + offset) else {
+        let Some(&index) = shelf.wall_visible().get(run.first + offset) else {
             break;
         };
-        if let Some(album) = shelf.albums.get(album_index) {
-            cells = cells.push(tile(shelf, player, hang, album, lamp, collecting));
+        // **The row is the wall's, the tile is the subject's.** Everything
+        // above this line — the runs, the virtualized range, the block width,
+        // the pitch — is one piece of arithmetic for both walls (ADR-0035);
+        // what a cell *is* is the only thing that forks.
+        match shelf.subject {
+            vm::WallSubject::Records => {
+                if let Some(album) = shelf.albums.get(index) {
+                    cells = cells.push(tile(shelf, player, hang, album, lamp, collecting));
+                }
+            }
+            vm::WallSubject::Artists => {
+                if let Some(artist) = shelf.artists.get(index) {
+                    cells = cells.push(artist_tile(shelf, hang, artist));
+                }
+            }
         }
     }
     container(cells)
@@ -497,7 +515,7 @@ fn pinned_header(shelf: &Shelf, hang: Grid, run: Option<Run>, block: f32) -> Ele
 fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
     let room = theme::active();
     let label = shelf
-        .groups
+        .wall_groups()
         .get(run.group)
         .map_or_else(String::new, |group| group.header.label());
     container(
@@ -585,10 +603,20 @@ fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
     let runs = shelves.runs();
     let headers: Vec<vm::GroupHeaderVm> = runs
         .iter()
-        .filter_map(|run| shelf.groups.get(run.group))
+        .filter_map(|run| shelf.wall_groups().get(run.group))
         .map(|group| group.header.clone())
         .collect();
-    let entries = rail::entries(shelf.group_key, &headers);
+    // **The artists wall costs the rail nothing** (ADR-0035). `rail::entries`
+    // is a pure function of the headers, and an artists wall's headers are
+    // `Initial`s — so it is indexed by `rail::artist` verbatim, the alphabet
+    // with the collection's own initials merged in, with no new branch and no
+    // new vocabulary. The key named here is the *shape of the headers*, which
+    // for that wall is the first key's whatever the active one is.
+    let key = match shelf.subject {
+        vm::WallSubject::Records => shelf.group_key,
+        vm::WallSubject::Artists => baz_core::index::GroupKey::Artist,
+    };
+    let entries = rail::entries(key, &headers);
     // Where the wall is: the shelf at the top of the viewport, mapped onto the
     // rail's own list. This is the *only* thing the rail reads about scroll
     // position, and it reads it rather than remembering it.
@@ -1011,6 +1039,120 @@ pub(crate) fn tile<'a>(
         .on_exit(Message::TileLeft(album.id)),
         crate::menu::Target::Album { album: album.id },
     )
+}
+
+/// **One artist tile**: their collage, their name, and how many records of
+/// theirs the collection holds (ADR-0035).
+///
+/// # It is the album tile's anatomy, to the pixel
+///
+/// The same [`Grid::art`] edge inside the same [`theme::SLEEVE_MAT`], the same
+/// two reserved caption lanes in the same [`theme::CAPTION_H`] block, the same
+/// [`RULE_LANE_H`] under it, the same hit box. The two subjects share a wall
+/// and share its arithmetic, so a tile that agreed with the grid only
+/// approximately would show up as a ragged row the moment the density moved.
+///
+/// # The sleeve is the collage, and it is *the* collage
+///
+/// [`crate::views::playlist_sleeve`] — the same 2 × 2-of-the-first-four,
+/// full-bleed-single, designed-rest-tile rule a playlist's sleeve follows, out
+/// of the same thumbnail cache with the same gradient while a decode is in
+/// flight. A second collage would be two renderings of one idea that could
+/// drift apart, which is the argument that made the playlist's own sleeve one
+/// function in two places.
+///
+/// # What it does not have
+///
+/// **No hover options.** The three that overlay a record's sleeve — play,
+/// queue, add — are answers about a *record*, and an artist has no equivalent
+/// verb yet; drawing them would need an "everything by this artist" run that
+/// nothing else in the product offers.
+///
+/// **No right-press menu**, for the same reason: `menu::Target` names records
+/// and lists, and a menu of one item that repeats the press is a menu that
+/// exists to look complete.
+///
+/// **No 2 px opened rule.** [`crate::app::Shelf::opened`] is *the record the
+/// wall was last left for* and it is one value; spending it on an artist would
+/// take the mark off the record it was built for, and the breadcrumb from an
+/// album page opens artists too. The lane is reserved all the same, so the two
+/// subjects' rows are the same height.
+fn artist_tile<'a>(shelf: &'a Shelf, hang: Grid, artist: &'a vm::ArtistVm) -> Element<'a, Message> {
+    let room = theme::active();
+    let edge = hang.art;
+    let work = (edge - 2.0 * theme::SLEEVE_MAT).max(0.0);
+    let sleeve = container(
+        container(crate::views::playlist_sleeve(
+            shelf,
+            &artist.records,
+            &artist.name,
+            work,
+        ))
+        .width(Length::Fixed(work))
+        .height(Length::Fixed(work))
+        .style(move |_theme| theme::sleeve(room, 0.0)),
+    )
+    .width(Length::Fixed(edge))
+    .height(Length::Fixed(edge))
+    .padding(theme::SLEEVE_MAT)
+    .style(move |_theme| theme::sleeve_mat(room));
+    let hovered = shelf.tile_hover.strength(artist.id);
+    let caption_ink = theme::caption_ink(room, hovered);
+    let caption_lane = |content: Element<'a, Message>| {
+        container(content)
+            .width(Length::Fixed(edge))
+            .height(Length::Fixed(theme::CAPTION_LINE_H))
+            .align_y(alignment::Vertical::Top)
+            .clip(true)
+    };
+    // The second line is the record count, where an album tile carries the
+    // artist and the year: the one fact about an artist the collection can
+    // state without going to a network (`views::artist`'s own refusals), and
+    // the same word the artist's page counts in.
+    let records = if artist.records.len() == 1 {
+        "1 record".to_owned()
+    } else {
+        format!("{} records", artist.records.len())
+    };
+    let caption_block = column![
+        caption_lane(
+            text(&artist.name)
+                .size(theme::SIZE_BODY)
+                .line_height(theme::LEADING_BODY)
+                .font(theme::MEDIUM)
+                .color(room.paper)
+                .wrapping(text::Wrapping::None)
+                .into(),
+        ),
+        caption_lane(
+            text(records)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(caption_ink)
+                .wrapping(text::Wrapping::None)
+                .into(),
+        ),
+    ]
+    .width(Length::Fixed(edge))
+    .height(Length::Fixed(theme::CAPTION_H));
+    let label_block = column![caption_block, state_rule(hovered, false, edge)]
+        .spacing(theme::GAP_XS)
+        .width(Length::Fixed(edge));
+    mouse_area(
+        button(
+            column![sleeve, label_block]
+                .spacing(theme::GAP_LG)
+                .width(Length::Fixed(edge)),
+        )
+        .width(Length::Fixed(edge))
+        .height(Length::Fixed(hang.row_h - hang.hang + RULE_LANE_H))
+        .padding(0)
+        .style(move |_theme, status| theme::tile(room, status, false))
+        .on_press(Message::OpenArtist(artist.id)),
+    )
+    .on_enter(Message::TileEntered(artist.id))
+    .on_exit(Message::TileLeft(artist.id))
+    .into()
 }
 
 /// What the state rule costs the tile vertically: the gap under the label plus

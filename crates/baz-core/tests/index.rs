@@ -3627,7 +3627,20 @@ fn group_key_codes_round_trip() {
     assert_eq!(codes.len(), GroupKey::ALL.len());
     assert_eq!(GroupKey::from_code("crates"), None);
     assert_eq!(GroupKey::from_code(""), None);
-    assert_eq!(GroupKey::ALL[0].label(), "Artist");
+
+    // **The word moved and the code did not** (ADR-0035). The first key breaks
+    // records on the album artist's initial, and it used to be labelled
+    // `Artist` — the same word the front end's Artist *place* wears. The label
+    // now names what the key produces; the code is on-disk data in every
+    // `config.toml` baz has ever written, so it is exactly what it was.
+    assert_eq!(GroupKey::ALL[0].label(), "A–Z");
+    assert_eq!(GroupKey::ALL[0].code(), "artist");
+    assert_eq!(GroupKey::from_code("artist"), Some(GroupKey::Artist));
+    // And no key's word is a subject the product has a place for, which is
+    // the defect the rename closed rather than merely moved.
+    for key in GroupKey::ALL {
+        assert_ne!(key.label(), "Artist", "{key:?} names a place, not a break");
+    }
 }
 
 // ---------------------------------------------------------------------------

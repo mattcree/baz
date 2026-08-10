@@ -331,6 +331,43 @@ next commit.
 
 **Interface**
 
+- **The wall has a subject, and one word stopped meaning two things**
+  ([ADR-0035](docs/adr/0035-the-wall-has-a-subject.md)). baz had two things
+  called artist: the wall's `ARTIST` group key, which sorts records by their
+  album artist's initial, and the Artist *place*, whose subject is a person.
+  - **The key's word is `A–Z`**, which names what it produces — its headers are
+    letters and its rail *is* the alphabet. `GroupKey::code()` is still
+    `"artist"`: it is on-disk data in every `config.toml` baz has written, and
+    a label may be renamed where a code may not.
+  - **`ARTISTS` is a sixth word in the same row**, in the same voice — one of a
+    closed set of six, one of them current — with <kbd>6</kbd> as its
+    accelerator. It puts up a wall of **artists**: one tile per person the
+    collection is filed under, shelved by initial, indexed by the same alphabet
+    rail the records get, wearing the same collage a playlist's sleeve wears
+    (2 × 2 of the first four, full-bleed below four).
+  - It is **not** a sixth group key. ADR-0019 promises every key is a
+    projection in which every album appears exactly once and `baz-core` sweeps
+    the keys to assert it; a key that shelved artists would falsify that sweep
+    rather than extend it. The subject is held beside the arrangement instead —
+    so leaving the records on `YEAR`, visiting the artists and pressing `YEAR`
+    again returns a **pixel-identical** wall, which `capture.sh` diffs.
+  - **One query, projected twice**: the search is spent once and its answer
+    projected onto the people, so the two walls cannot disagree and a keystroke
+    costs one search. An artist survives exactly when one of their records
+    does, swept over every subset of a six-record collection.
+  - The **readouts follow the subject** — both wells count whatever the wall is
+    a wall of — and artist tiles have their own art prefetch, because their
+    quotations are outside the wall's visible range and that range is the whole
+    thumbnail guard.
+  - **The strip's budget, re-derived** in the bundled face: `KEYS_W` 314 →
+    **368**, `LIBRARY_LINE` 506 → **560**, `TOP_BAR_SPLIT` 778 → **832**,
+    `SINGLE_LINE_NO_WELL` 554 → **608** against an unmoved `WIDEST_LANE_STRIP`
+    720. The window's own minimum does not move. The costed proposal predicted
+    the single-line-with-well band would cease to exist; `Pull` and `Shuffle`
+    had left the acts cluster in between and paid for the word twice over, so
+    the band 832…904 is alive and is now asserted because it was predicted not
+    to be.
+
 - **The returns lane**: a resident surface at the window's left edge
   (ADR-0030), on the room's `recess` so it reads as cut into the room rather
   than stuck onto it. 280 px open, 96 collapsed, `Ctrl`+`B` or two marks at

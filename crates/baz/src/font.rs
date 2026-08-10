@@ -449,31 +449,19 @@ mod tests {
         }
     }
 
-    /// **The group-key row fits the shipped window**, tracked caps and all.
+    /// **The arrangement row fits the shipped window**, tracked caps and all.
     ///
-    /// The row is five words, each in a button with [`theme::GAP_XS`] of
-    /// padding on both sides and [`theme::GAP_MD`] between them, sitting after
-    /// the search well and the gap that separates the two clusters. The right
-    /// of the bar holds the gear alone at rest. Measured against the 1280 px
-    /// window baz opens at, with the well at its 280 px ceiling — and the
-    /// counts, which now live *inside* the well (doc 10 §7 step 2), are
-    /// measured against the well's own text lane rather than against the
-    /// strip.
+    /// The row is six words (ADR-0035), each in a button with
+    /// [`theme::GAP_XS`] of padding on both sides and [`theme::GAP_MD`]
+    /// between them, sitting after the search well and the gap that separates
+    /// the two clusters. The right of the bar holds the gear alone at rest.
+    /// Measured against the 1280 px window baz opens at — and the counts,
+    /// which now live *inside* the well (doc 10 §7 step 2), are measured
+    /// against the well's own text lane rather than against the strip.
     #[test]
     fn the_group_key_row_fits_the_top_bar_at_the_shipped_window() {
-        use baz_core::index::GroupKey;
-
         let medium = Face::parse(SANS_MEDIUM);
-        let keys: f32 = GroupKey::ALL
-            .iter()
-            .map(|key| {
-                medium.width(
-                    &theme::tracked(&key.label().to_uppercase()),
-                    theme::SIZE_META,
-                ) + 2.0 * theme::GAP_XS
-            })
-            .sum::<f32>()
-            + 4.0 * theme::GAP_MD;
+        let keys = arrangement_row(&medium);
         // **At the shipped window the strip has no well**: the lane holds it
         // (ADR-0030's search amendment), so the strip's left cluster is the
         // states and the acts, hanging from the window gutter, and the strip's
@@ -496,9 +484,37 @@ mod tests {
              (keys {keys:.1}) and {right:.1} right",
             left + theme::GAP_LG + right
         );
-        // And the five words really are the bulk of the cluster, so this is
+        // And the six words really are the bulk of the cluster, so this is
         // measuring the row rather than the acts beside it.
         assert!(keys > 200.0 && keys < 420.0, "the key row is {keys:.1} px");
+    }
+
+    /// **The arrangement row, measured**: the five group keys and the wall's
+    /// sixth word, each tracked, upper-cased and boxed the way
+    /// `views::top_bar` boxes them, with the row's own gaps between.
+    ///
+    /// One function because two tests measure it and they must measure the
+    /// same row — the shipped-window fit above, and the declaration check
+    /// below. It walks `GroupKey::ALL` and `WallSubject::Artists` rather than
+    /// spelling six words out, so a key added, removed or relabelled in
+    /// `baz-core` moves the measurement without an edit here.
+    fn arrangement_row(medium: &Face<'_>) -> f32 {
+        use baz_core::index::GroupKey;
+
+        let boxed = |word: &str| {
+            medium.width(&theme::tracked(&word.to_uppercase()), theme::SIZE_META)
+                + 2.0 * theme::GAP_XS
+        };
+        let words = GroupKey::ALL
+            .iter()
+            .map(|key| key.label())
+            .chain(std::iter::once(crate::vm::WallSubject::Artists.label()));
+        // The gap is counted *between* the words rather than from a length —
+        // one `GAP_MD` for every word after the first, which is the row iced
+        // actually lays out.
+        words.enumerate().fold(0.0, |row, (index, word)| {
+            row + boxed(word) + if index == 0 { 0.0 } else { theme::GAP_MD }
+        })
     }
 
     /// **The lane's well holds a query beside its match count** — the
@@ -611,26 +627,34 @@ mod tests {
     /// a relabel can quietly overflow the budget the law adds up.
     #[test]
     fn the_strips_declared_tenant_widths_hold_their_measured_words() {
-        use baz_core::index::GroupKey;
-
         let medium = Face::parse(SANS_MEDIUM);
 
-        // The group-key row: five tracked caps words, `GAP_XS` padding each
-        // side, `GAP_MD` between.
-        let keys: f32 = GroupKey::ALL
-            .iter()
-            .map(|key| {
-                medium.width(
-                    &theme::tracked(&key.label().to_uppercase()),
-                    theme::SIZE_META,
-                ) + 2.0 * theme::GAP_XS
-            })
-            .sum::<f32>()
-            + 4.0 * theme::GAP_MD;
+        // The arrangement row: six tracked caps words, `GAP_XS` padding each
+        // side, `GAP_MD` between (ADR-0035).
+        let keys = arrangement_row(&medium);
         assert!(
             keys <= crate::views::top_bar::KEYS_W,
             "the key row measures {keys:.2} px against a declared {}",
             crate::views::top_bar::KEYS_W
+        );
+        // **The declaration is the next lattice step above the measurement**,
+        // and both halves are named: `ARTISTS` in its box plus the `GAP_MD`
+        // beside it costs 77.49 px, and the first key's rename from `ARTIST`
+        // to `A–Z` gave 23.98 back. The six words come to 366.50 against a
+        // declared 368 — 1.50 px of margin, which is the tightest reservation
+        // in the strip and the number a seventh word would have to beat.
+        let slack = crate::views::top_bar::KEYS_W - keys;
+        assert!(
+            (1.0..8.0).contains(&slack),
+            "the key row's reservation now carries {slack:.2} px of slack: it \
+             is either overflowing or reserving room for a word that left"
+        );
+        // The en dash is the face's own, not a fallback: `A–Z` set in a face
+        // with no U+2013 would draw a tofu box in the strip's first word.
+        assert_ne!(
+            medium.glyph('\u{2013}'),
+            0,
+            "the bundled face has no en dash, so the A–Z key cannot be set in it"
         );
 
         // The act: the triangle, its word, and their `GAP_SM` padding.

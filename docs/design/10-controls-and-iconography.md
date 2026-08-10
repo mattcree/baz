@@ -433,7 +433,8 @@ removing control density and all three reversed). Lit is the
 note admits, because this control creates playback truth about what
 sounds *next* in the way `Play album` creates it about what sounds now.
 `ACTS_W` fell 144 → 88 with the word, and the strip's split seam
-872 → 778.
+872 → 778. (It rose again to 832 when the arrangement row gained its sixth
+word — ADR-0035 — which is the same arithmetic run the other way.)
 
 ### 3.6 One mark technology, and the vocabulary extension
 
@@ -516,6 +517,22 @@ shipped glyphs have (`icon.rs:407–698`).
 >
 > Frames and the full re-derivation:
 > [`docs/design/impl/search-in-lane/`](impl/search-in-lane/README.md).
+
+> **Superseded again, 2026-08-10 — the row of words is six**
+> ([ADR-0035](../adr/0035-the-wall-has-a-subject.md)). The first key's word
+> became `A–Z` and `ARTISTS` joined the row as the wall's *subject*, so
+> `KEYS_W` is **368**, not 314, and every figure below it moves with it:
+> `LIBRARY_LINE` **560**, `TOP_BAR_SPLIT` **832**, and the well-less single
+> line **608** against the same narrowest strip of 720. `TOP_BAR_FLOOR` 600 and
+> the window's own minimum 696 do **not** move — the floor is also the
+> window's sensible minimum, and it does not chase a strip's population in
+> either direction.
+>
+> The consequence worth reading twice: 832 is still **below** the widest strip
+> that can hold the well (904), so the single-line-with-well band survives the
+> sixth word. The costing that proposed the word predicted it would not, having
+> measured against an acts cluster that `Pull` and `Shuffle` then emptied.
+> Frames: [`docs/design/impl/artists-wall/`](impl/artists-wall/README.md).
 
 All numbers logical px on the 4-lattice; gutters are `HANG` 40 (law L1);
 control height `TRANSPORT_HIT` 32 throughout (L7). Reserved widths:
