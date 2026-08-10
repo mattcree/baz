@@ -2,8 +2,9 @@
 
 > Concrete, ordered, with acceptance criteria. Standards in `ENGINEERING.md`;
 > vision in `VISION.md`; deliberate deferrals in `BACKLOG.md`; what actually
-> landed in `CHANGELOG.md`; **what the owner asked for and where it got to is
-> `REQUESTS.md`**. Updated 2026-08-10.
+> landed in `CHANGELOG.md`; what the owner asked for and where it got to is
+> `REQUESTS.md`. **What to do next is [`WORK.md`](WORK.md)** — start there.
+> Updated 2026-08-10.
 >
 > **Status**: Phases 0–3 ✅. baz scans several folders, shows the collection,
 > plays it gaplessly and bit-perfectly, searches by song and by record, edits
@@ -127,6 +128,11 @@ measurements have never been taken because the feature does not exist yet.
   worth an ADR when one does, or when AccessKit arrives.
 
 ## Standing rules while executing
+
+- **`WORK.md` is the ordered queue and it is kept current in the same commit as
+  the work.** A branch that changes the product and not that file is
+  incomplete. "Blocked on a decision" is a note on an item, never a reason to
+  drop it.
 
 - **Every ask from the owner goes into `REQUESTS.md` when it is made**, and
   leaves only as shipped or as declined with his agreement. It exists because

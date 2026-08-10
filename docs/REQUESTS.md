@@ -18,6 +18,9 @@
 > a decision from him before it can be built, that is a *note on the line*, not
 > a reason to drop it.
 >
+> **This file is the record of asks; [`WORK.md`](WORK.md) is the ordered queue.**
+> An ask logged here without an item there is half-tracked.
+>
 > Related: `CHANGELOG.md` is what landed, `BACKLOG.md` is what was deliberately
 > deferred with reasons, `NEXT-STEPS.md` is the ordered plan. This is the one
 > that answers *"did you do the thing I asked?"*
