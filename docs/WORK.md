@@ -36,7 +36,20 @@
    metainfo, the version edit from `0.0.0`, a `workflow_dispatch` dry run,
    then the tag. **The tag is the owner's to cut** — the workflow produces a
    draft.
-3. **Rewrite the README as the project's public face**, with the icon and real
+3. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+   The owner's *"ideally the by artist page could have more info"*, answered
+   with no network at all. Tier 1: one `SIZE_META` line under the header
+   (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
+   2019`, 40 px of wall pushed down, each term absent rather than empty);
+   `ALSO ON`, the records they guest on, in the wall's own tiles, from one
+   cached fold beside `vm::Collection`; and **`Look up`**, which opens the
+   artist on Wikipedia in the listener's own browser through the D-Bus
+   portal — **zero new crates and no Flatpak network permission**. Tier 2:
+   case-folded genres capped at three, an artist picture off the listener's
+   own disk (`artist.jpg` in the parent of the album folders, through
+   `art.rs`'s existing lookup), and the prose fix for the tile-size claim
+   below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
+4. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
    last, so it describes what actually ships. Its keyboard table is still
    stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode,
@@ -49,6 +62,39 @@ Nothing. The queue above is the next thing.
 
 ## Waiting on the owner
 
+- **May baz make its first network request?** Doc 15 tier 4 / ADR-0037 §6,
+  priced rather than argued. `ureq` 3.4.0 costs **14 net-new crates**, one
+  new `deny.toml` licence (`CDLA-Permissive-2.0`), and no new build tool —
+  but its TLS core, `ring`, is C and per-architecture assembly with a
+  `links` key, and it would be the first C in baz parsing hostile input off
+  the wire. `reqwest` is **57** net-new crates and `aws-lc-sys` with `cmake`
+  + `bindgen`, which is `BACKLOG.md`'s Opus refusal word for word; it is
+  recorded as a finding, not offered as a choice. **The most expensive line
+  is not technical**: `packaging/flatpak/…yml` has no `--share=network`
+  today, so this puts *"Network access"* on baz's Flathub page permanently,
+  for an offline-first player. *Needs: yes or no.* **If no, that is a
+  complete outcome** — doc 15 tier 1's `Look up` already puts the
+  encyclopaedia one press away in his own browser for nothing.
+- **Doc 15's Tier 3**, five questions, three of them about the play ledger.
+  ADR-0018 §6 says **"no totals-by-artist"** in those words, so *first
+  heard*, *last played* and *records never played* on an artist's page each
+  reverse a written decision — and reversing one as a side effect of a page
+  redesign is the failure `WORK.md`'s preamble exists to prevent. The
+  smallest admissible form is drawn for him: `First heard 2019 · Last played
+  3 months ago`, in `Recency::label()`'s own vocabulary, **no counts, no
+  ranking, no comparison to another artist** — history as a door, which the
+  returns lane already does without performing. The other two are a frame
+  question (one band line or two) and the tile-size one below. *Needs: one
+  sentence each.*
+- **Should the artist page's covers be the wall's size to the pixel?**
+  Found while measuring doc 15: `views/artist.rs:19-26` says the tiles are
+  *"the wall's to the pixel"* and they are not. The wall feeds `Grid::new`
+  `window − sidebar − INDEX_LANE_W 108 − 4` (`app.rs:5095-5101`); the artist
+  page and Home feed it `body_width − 2 × HANG 40`. Covers are 4–11 px wider
+  on this page at every size, and **at 1920 with the lane collapsed it draws
+  six columns where the wall draws five**. The prose gets fixed either way;
+  the geometry is a one-line change with one visible consequence. *Needs:
+  his eye on a frame, not an argument.*
 - **Borderless window chrome.** Wayland already draws that title bar inside
   baz's own process, so turning it off is one field — but **iced 0.13 exposes
   no edge-drag resize anywhere in `window::Action`**, so going borderless today
@@ -118,6 +164,41 @@ Newest first. Fuller detail in `CHANGELOG.md`.
   - **Found on the way**: `views::top_bar::group_key`'s doc still carried a
     paragraph about *"none of the five is current while the artists are on the
     wall"*, describing a wall deleted the same day. Corrected.
+- **Design doc 15 — the artist's page**, and ADR-0037. The owner's *"maybe
+  just the wikipedia for the band or something?"* turned out to be **two asks
+  wearing one sentence**, and the study's whole structure is the separation:
+  the page can be worth visiting for **nothing**, and the encyclopaedia is
+  **baz's first network request**. Eleven local facts sort cleanly on
+  `views/home.rs:71-76`'s test — *would this figure be identical if the
+  application had never been opened?* — and the three that fail it are the
+  ledger's, which ADR-0018 §6 already refused **by name** (*"no
+  totals-by-artist"*), so they went to him as three questions rather than
+  into the page.
+  - **The network half was priced rather than argued**, against `deny.toml`
+    and against `BACKLOG.md`'s Opus refusal, by resolving both candidates in
+    a scratch crate outside the repo and intersecting against `Cargo.lock`:
+    `ureq` **14 net-new crates**, `reqwest` **57** plus `aws-lc-sys` with
+    `cmake` and `bindgen`. Three findings fell out that no argument would
+    have produced: `ureq`'s TLS is **not pure Rust** (`ring` has a `links`
+    key and compiles C and per-arch assembly), a C compiler is **already**
+    required so it is a new *C surface* rather than a new *build
+    requirement*, and the largest cost is not technical at all — the
+    Flatpak manifest has no `--share=network`, so this puts *"Network
+    access"* on baz's Flathub page for good.
+  - **Found on the way, twice.** (a) MusicBrainz **returned 503 on the first
+    request** from a non-descriptive User-Agent, which is the receipt that
+    its User-Agent and 1-req/s obligations are enforced rather than
+    advisory. (b) `views/artist.rs:19-26` claims the tiles are *"the wall's
+    to the pixel"* and the arithmetic says otherwise — 4–11 px wider at
+    every size, and six columns against the wall's five at 1920 with the
+    lane collapsed.
+  - **The zero-cost answer that nobody had costed**: `OpenURI` over the
+    D-Bus connection `mpris/server.rs:33` already makes opens the artist on
+    Wikipedia in the listener's own browser for **zero new crates and no
+    sandbox permission**, because the portal runs on the host. It ships in
+    tier 1 as what the page has while the dependency question is open, and
+    it may be all he wanted.
+
 - **Search off the Library, decided and built** — ADR-0036, the owner's *"how
   the search works when we're not on the library needs to be decided… maybe a
   little x or esc to clear would make sense too"*. The first half was **already

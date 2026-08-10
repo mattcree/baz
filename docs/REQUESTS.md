@@ -38,6 +38,7 @@
 | *"fullscreen the now playing looks weird"* | **building** | the art is clamped at 720; step A2 deletes the cap |
 | *"the album and track count below the search bar doesn't look good... maybe this should go into the home as some basic stats?"* | **building** | resting counts to Home; match count into the field |
 | *"every album has a playlist implicitly... which playlist and which track"* | **designing** | everything playing is a list and a cursor; reopens ADR-0018 for the ledger |
+| *"ideally the by artist page could have more info, maybe just the wikipedia for the band or something?"* | **designed; the local half unbuilt, the network half is his call** | design 15 · ADR-0037. Two asks in one sentence: the page can be worth visiting for **nothing** (hours, years, formats, in-library-since, and the records they guest on) and that is tiers 1–2 in [WORK.md](WORK.md); Wikipedia is **baz's first network request**, priced at 14 net-new crates and a permanent *"Network access"* line on Flathub, and put to him as ADR-0037 §6. Tier 1 ships `Look up` — the encyclopaedia in his own browser through the D-Bus portal, **zero new crates** — while he decides |
 
 ## Shipped
 
