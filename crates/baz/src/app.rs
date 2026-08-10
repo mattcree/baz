@@ -147,6 +147,25 @@ pub fn run(started: Instant, cli_dir: Option<PathBuf>) -> iced::Result {
     app.run_with(move || App::new(started, cli_dir))
 }
 
+/// **Whether baz draws the window's chrome itself.**
+///
+/// One answer, read here and nowhere else: `app.rs` turns the platform's
+/// decorations off with it, and the app bar asks it whether to draw the window
+/// buttons. The owner, 2026-08-10, looking at the shipped state: *"until we
+/// have no window chrome, remove the window controls..."* — with the system
+/// title bar above baz's own band, minimise, maximise and close appeared
+/// twice, four pixels apart, and one pair did nothing the other did not.
+///
+/// So the buttons are not *removed*; they are **conditional on baz owning the
+/// chrome**, which is the honest rule and the one that needs no second edit
+/// when `BAZ_BORDERLESS` becomes the default. The bar keeps its drag and its
+/// double-press to maximise either way: those *add* a way to move a window
+/// that already had one, where a second close button subtracts clarity from a
+/// window that already had one of those too.
+fn owns_chrome() -> bool {
+    std::env::var_os("BAZ_BORDERLESS").is_some()
+}
+
 /// The window's settings: its size, on Linux the application id, and — behind
 /// an environment switch — whether the platform draws its title bar.
 ///
@@ -190,7 +209,7 @@ fn window_settings() -> window::Settings {
     )]
     let mut settings = window::Settings {
         size: WINDOW,
-        decorations: std::env::var_os("BAZ_BORDERLESS").is_none(),
+        decorations: !owns_chrome(),
         // The strip's floor **plus the returns lane's rail** is the window's
         // declared minimum width. At 600 the two-line strip holds every
         // tenant (doc 10 §4.3), and below it nothing further collapses —
@@ -4638,7 +4657,13 @@ impl App {
             _ => None,
         };
         let screen: Element<'_, Message> = column![
-            views::app_bar::view(self.window.width, hangs_works, self.window_maximized, ink),
+            views::app_bar::view(
+                self.window.width,
+                hangs_works,
+                self.window_maximized,
+                owns_chrome(),
+                ink,
+            ),
             screen
         ]
         .into();

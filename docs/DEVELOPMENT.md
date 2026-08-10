@@ -137,6 +137,34 @@ messages come from six subscriptions, a scrollable that republishes on every
 layout change and a window that reconfigures on every drag step, which is not a
 thing to reason about from the source.
 
+## The local gate is not CI, and twice today that mattered
+
+Run the whole gate after your **last** edit, not your last interesting one:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo doc --workspace --no-deps          # warnings are errors
+cargo deny check
+python3 packaging/flatpak/check-cargo-sources.py
+```
+
+`main` went red on 2026-08-10 from running everything in that list except the
+first, after a `clippy` fix shortened a line enough for `rustfmt` to want it
+joined.
+
+**Then watch CI, because two of the three platforms exist only there.** The
+same day, two merges went red on `macos-latest` while every one of the commands
+above was green locally, and the cause was not portability trivia — a timing
+assertion held on Linux and failed at **5× the budget** on macOS, because a
+giant allocation is a lazy mapping on one and real pages on the other. That is
+a *finding*, and it was sitting in a job nobody had looked at.
+
+Windows has taught this project three of these the hard way — drive-less
+fixture paths, UTF-16LE stored paths, FILETIME stamps — and macOS has now
+taught it one. A green local gate is necessary and is not sufficient.
+
 ## Headless UI verification
 
 Agents (and you) can render the real binary without touching your desktop
