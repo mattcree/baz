@@ -16,7 +16,7 @@ use crate::player::PlayerState;
 use crate::playlists::Collecting;
 use crate::shelf::{Density, Grid, Run, Shelves};
 use crate::spine::{Slot, Spine};
-use crate::views::{gradient_block, section_rule};
+use crate::views::{DetentAxis, MARK_INSET, gradient_block, section_rule};
 use crate::{icon, rail, theme, vm};
 
 /// **The wall**: the shelved, virtualized grid, its pinned group header, and
@@ -463,8 +463,9 @@ fn shelf_row<'a>(
 /// The band is **one hang** and takes it from the grid rather than from
 /// `theme::SHELF_HEADER_H`, because the hang is the density's
 /// ([`crate::shelf::Grid::header_h`]): a band fixed at 40 while the rows
-/// around it zoomed would put the pinned header a few pixels out at two of the
-/// three steps, which is the one place in the wall a few pixels are visible.
+/// around it zoomed would put the pinned header a few pixels out at every step
+/// but the default, which is the one place in the wall a few pixels are
+/// visible.
 fn header_band(shelf: &Shelf, hang: Grid, run: Run, block: f32) -> Element<'_, Message> {
     container(header_line(shelf, run, block))
         .width(Length::Fixed(block))
@@ -662,8 +663,9 @@ fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
 ///
 /// # The lane's foot carries the density detents
 ///
-/// Below the spine's strip, the three density marks ([`density_control`],
-/// ADR-0028) close the lane. The spine's height is what the marks leave it,
+/// Below the spine's strip, the density marks ([`density_control`], ADR-0028)
+/// close the lane — one per [`Density::ALL`] step, four since the owner's
+/// fourth. The spine's height is what the marks leave it,
 /// and its per-frame elision absorbs the shorter lane exactly as it absorbs
 /// a short window — the fisheye never sees the marks because they are
 /// outside its bounds, and the lane's *width* is [`theme::INDEX_LANE_W`] at
@@ -707,56 +709,16 @@ fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
     .into()
 }
 
-/// The lane inset that stands a mark's ink on the lane's own edge: the
-/// sprite is centred in its [`theme::STEPPER_HIT`] box, so the box overhangs
-/// the window gutter by this much and the sprite's right edge lands on
-/// `W − HANG` — the same line the rail's letters hang from. The wall's
-/// permitted-edge list (law L5) gains nothing.
-const MARK_INSET: f32 = (theme::STEPPER_HIT - theme::ICON_PX) / 2.0;
-
-/// **The density detents** (ADR-0028, doc 11 §5 P8 — the owner's choice):
-/// three marks at the foot of the index rail's lane, one per
-/// [`Density::ALL`] step, loosest at the top — the direction
-/// <kbd>Ctrl</kbd>+<kbd>=</kbd> walks.
+/// **The density detents, in the lane's own geometry** (ADR-0028 §1): the
+/// marks that close the index rail's lane, right-aligned onto the lane's one
+/// declared ink edge with one un-zoomed hang of air above the bar.
 ///
-/// # Why here
-///
-/// Density reads *the viewport, and nothing else* (doc 07 L8.1), so its home
-/// is the place's body — and the lane is the body's one resident
-/// view-subject strip, already reading the arrangement and the viewport. The
-/// wall's own leading band was the other candidate and fails three ways: it
-/// scrolls away, the pinned header claims it the moment the wall moves, and
-/// its height is the step's hang, so a control there would resize itself as
-/// its own effect. The lane's width is constant at every step and window;
-/// nothing about the grid's algebra changes.
-///
-/// # What each mark is
-///
-/// A [`theme::STEPPER_HIT`] box (law L7's named secondary) holding the
-/// step's sprite — the wall itself at that hang: one work, four, nine. The
-/// current step is the full-ink mark ([`theme::GLYPH_OPACITY_HOVER`] against
-/// the others' [`theme::GLYPH_OPACITY`]) — the group-key row's active
-/// treatment translated to sprite ink, and **never the accent**: density is
-/// not playback truth. The wall is the primary readout — the covers' own
-/// size states the step — so the lift confirms rather than carries.
-///
-/// # The press is the gesture's own message
-///
-/// A mark sends [`Message::DensityStep`] with [`Density::steps_to`]'s delta
-/// — the exact signed notch count the <kbd>Ctrl</kbd>+scroll /
-/// <kbd>Ctrl</kbd>+<kbd>±</kbd> gesture would spend, making keys and wheel
-/// *accelerators of a visible control* rather than the control itself
-/// (the mirror rule, doc 07 L8.7; the product's standing rules as amended by
-/// ADR-0028). The **active mark is inert** — pressing the step you are on
-/// would do nothing, and a control that does nothing when pressed is the lie
-/// the rail's absent letters already refuse. It is the fact; the other two
-/// are the controls (L8.3's split).
+/// The marks themselves are [`crate::views::density_marks`] — one function
+/// for every place that hangs works, so the Library, Home and an artist's
+/// page cannot drift into three controls that look alike. What is local to
+/// the wall is this placement, and only this placement.
 fn density_control(current: Density) -> Element<'static, Message> {
-    let mut marks = column![];
-    for step in Density::ALL {
-        marks = marks.push(density_mark(step, current));
-    }
-    container(marks)
+    container(crate::views::density_marks(current, DetentAxis::Column))
         .width(Length::Fixed(theme::INDEX_LANE_W))
         .align_x(alignment::Horizontal::Right)
         .padding(iced::Padding {
@@ -768,63 +730,6 @@ fn density_control(current: Density) -> Element<'static, Message> {
             ..iced::Padding::ZERO
         })
         .into()
-}
-
-/// One detent of [`density_control`]: the step's glyph in a
-/// [`theme::STEPPER_HIT`] box, named by its tooltip (the icon-only law,
-/// doc 10 §3.1 — the tooltip is the accessible name in a toolkit with no
-/// accessibility tree), the hover wash [`theme::transport`]'s — the lane's
-/// established press vocabulary, the same family as the spine's winner chip.
-fn density_mark(step: Density, current: Density) -> Element<'static, Message> {
-    let room = theme::active();
-    let active = step == current;
-    let glyph = match step {
-        Density::Spacious => icon::Glyph::DensitySpacious,
-        Density::Balanced => icon::Glyph::DensityBalanced,
-        Density::Dense => icon::Glyph::DensityDense,
-    };
-    let mark = container(
-        iced_image(icon::handle(glyph))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(if active {
-                theme::GLYPH_OPACITY_HOVER
-            } else {
-                theme::GLYPH_OPACITY
-            }),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(alignment::Horizontal::Center)
-    .align_y(alignment::Vertical::Center);
-    // The active mark is the fact and takes no press; the other two are the
-    // controls and send the gesture's exact message (function docs).
-    let boxed: Element<'static, Message> = if active {
-        container(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .into()
-    } else {
-        button(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .padding(0)
-            .style(move |_theme, status| theme::transport(room, room.wall, status))
-            .on_press(Message::DensityStep(current.steps_to(step)))
-            .into()
-    };
-    iced::widget::tooltip(
-        boxed,
-        text(step.label())
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        // Leftwards: the marks stand on the window's right edge.
-        iced::widget::tooltip::Position::Left,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
 }
 
 /// The shelf with nothing to show: a zero-result search, the first moments of
@@ -1410,6 +1315,11 @@ mod tests {
     /// second grammar — and the active mark takes the inert branch, because
     /// a control that does nothing when pressed is the lie the rail's
     /// absent letters already refuse.
+    ///
+    /// The mark itself moved to `views/mod.rs` when the fourth step made the
+    /// control resident on three places rather than one, so that is the
+    /// source this reads. It stays *this* test because the property it pins
+    /// is the wall's: the marks and the wall's own zoom are one grammar.
     #[test]
     fn the_density_marks_mirror_the_gestures_exact_messages() {
         for current in Density::ALL {
@@ -1424,12 +1334,15 @@ mod tests {
             }
         }
         let source = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/shelf.rs"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/mod.rs"),
         )
-        .expect("this module's own source")
+        .expect("the shared control's source")
         .replace("\r\n", "\n");
+        // `fn density_mark(` — the trailing paren matters, because
+        // `density_marks` (the run) shares the prefix with `density_mark`
+        // (the one detent), and this test is about the detent.
         let mark = source
-            .split_once("fn density_mark")
+            .split_once("fn density_mark(")
             .expect("the density mark exists")
             .1;
         let mark = &mark[..mark.find("\n}\n").expect("a function ends")];
@@ -1462,17 +1375,21 @@ mod tests {
     #[test]
     fn the_density_marks_stand_in_the_lanes_own_geometry() {
         // Law L7: each mark is the named secondary square, and the band of
-        // three sits on the lattice (law L2).
-        const { assert!(super::MARK_INSET == (theme::STEPPER_HIT - theme::ICON_PX) / 2.0) }
-        const { assert!((3.0 * theme::STEPPER_HIT) % 4.0 == 0.0) }
+        // them sits on the lattice (law L2) — at every count `ALL` can have.
+        const { assert!(crate::views::MARK_INSET == (theme::STEPPER_HIT - theme::ICON_PX) / 2.0) }
+        const { assert!(theme::STEPPER_HIT % 4.0 == 0.0) }
         // Law L5/L1: the box overhangs the gutter by exactly the sprite's
         // centring inset, so the ink lands on `W − HANG` — the lane's one
         // declared edge — and the inset padding is itself on the lattice.
-        const { assert!((theme::HANG - super::MARK_INSET) % 4.0 == 0.0) }
+        const { assert!((theme::HANG - crate::views::MARK_INSET) % 4.0 == 0.0) }
         // The lane's width is untouched at every step: the marks live inside
         // `INDEX_LANE_W`, which is what keeps every wall-width test true
         // without a character changing.
-        const { assert!(theme::STEPPER_HIT + (theme::HANG - super::MARK_INSET) < theme::INDEX_LANE_W) }
+        const {
+            assert!(
+                theme::STEPPER_HIT + (theme::HANG - crate::views::MARK_INSET) < theme::INDEX_LANE_W
+            );
+        }
 
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/shelf.rs"),
@@ -1504,8 +1421,25 @@ mod tests {
         let control = &control[..control.find("\n}\n").expect("a function ends")];
         assert!(control.contains("right: theme::HANG - MARK_INSET"));
         assert!(control.contains("bottom: theme::HANG"));
-        assert!(control.contains("for step in Density::ALL"));
+        assert!(control.contains("DetentAxis::Column"));
         assert!(control.contains("alignment::Horizontal::Right"));
+        // The run itself is `ALL`'s own order, in the shared control — so a
+        // step added to the enum is a mark here without an edit, which is
+        // the promise `Density::ALL`'s doc has been making all along.
+        let shared = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/mod.rs"),
+        )
+        .expect("the shared control's source")
+        .replace("\r\n", "\n");
+        let marks = shared
+            .split_once("pub(crate) fn density_marks")
+            .expect("the shared marks exist")
+            .1;
+        let marks = &marks[..marks.find("\n}\n").expect("a function ends")];
+        assert!(
+            marks.contains("crate::shelf::Density::ALL.map("),
+            "the marks are `ALL`'s own run, not a written-out list"
+        );
     }
 
     /// **The rail is the layer under the body, and the bar owns the window's

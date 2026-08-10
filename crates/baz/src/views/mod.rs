@@ -426,6 +426,180 @@ pub(crate) fn section_rule(name: &'static str) -> Element<'static, Message> {
     .into()
 }
 
+/// [`section_rule`], with **the density detents at the rule's right edge** —
+/// the form the control takes on a page whose block of works is a *section*
+/// rather than the whole place (ADR-0028's fourth-step amendment, §3).
+///
+/// The marks stand at the trailing edge of the block they hang, and on Home
+/// and an artist's page that edge is the block's own rule. It is the same
+/// relationship the Library has — there the block is the place, so its
+/// trailing edge is the index rail's lane — expressed on a surface that has
+/// no rail. Nothing here is a second control: [`density_marks`] is one
+/// function and the press is one message.
+///
+/// Why not the returns lane, and why not the strip: density reads **the
+/// viewport** (doc 07 L8.1), so it is a fact about the block of works on
+/// screen, not about the window. A mark in the frame would be on screen on
+/// the four places that hang no works, where it would be present and inert —
+/// which is the one outcome the owner's ask rules out.
+pub(crate) fn section_rule_hung(
+    name: &'static str,
+    current: crate::shelf::Density,
+) -> Element<'static, Message> {
+    let room = theme::active();
+    column![
+        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
+        row![
+            text(theme::tracked(&name.to_uppercase()))
+                .size(theme::SIZE_HEADING)
+                .line_height(theme::LEADING_HEADING)
+                .font(theme::MEDIUM)
+                .color(room.paper_faint),
+            Space::with_width(Length::Fill),
+            density_marks(current, DetentAxis::Row),
+        ]
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(theme::GAP_SM)
+    .into()
+}
+
+/// Which way a run of [`density_marks`] is laid: down the index rail's lane,
+/// or along a section rule.
+///
+/// Two axes, one control. The lane is a vertical strip and the rule is a
+/// horizontal one, and a control that had been copied into each would be two
+/// controls that could drift — which is exactly the defect this whole change
+/// is fixing on the grid arithmetic. Loosest-first either way: down the lane
+/// it is top-first, along a rule it is left-first, and both are the direction
+/// <kbd>Ctrl</kbd>+<kbd>=</kbd> walks in the reading order of their axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DetentAxis {
+    /// Down the index rail's lane — the Library's form (ADR-0028 §1).
+    Column,
+    /// Along a section rule — the form for a place whose works are a block
+    /// inside it ([`section_rule_hung`]).
+    Row,
+}
+
+/// The lane inset that stands a mark's ink on the lane's own edge: the
+/// sprite is centred in its [`theme::STEPPER_HIT`] box, so the box overhangs
+/// the window gutter by this much and the sprite's right edge lands on
+/// `W − HANG` — the same line the rail's letters hang from. The wall's
+/// permitted-edge list (law L5) gains nothing.
+pub(crate) const MARK_INSET: f32 = (theme::STEPPER_HIT - theme::ICON_PX) / 2.0;
+
+/// **The density detents** (ADR-0028, doc 11 §5 P8 — the owner's choice; the
+/// fourth-step amendment of 2026-08-10): one mark per [`crate::shelf::Density`]
+/// step, loosest first — the direction <kbd>Ctrl</kbd>+<kbd>=</kbd> walks.
+///
+/// # Where they stand
+///
+/// Density reads *the viewport, and nothing else* (doc 07 L8.1), so its home
+/// is the place's body — and specifically **the trailing edge of the block of
+/// works it hangs**. On the Library that block is the whole place, and its
+/// trailing edge is the index rail's lane, already the body's one resident
+/// view-subject strip (`shelf::density_control`). On Home and an artist's
+/// page the block is a named section, and its trailing edge is that section's
+/// rule ([`section_rule_hung`]). Four places hang no works at all, and the
+/// marks are absent there rather than inert.
+///
+/// # What each mark is
+///
+/// A [`theme::STEPPER_HIT`] box (law L7's named secondary) holding the
+/// step's sprite — the wall itself at that hang: one work, four, nine,
+/// sixteen. The current step is the full-ink mark ([`theme::GLYPH_OPACITY_HOVER`]
+/// against the others' [`theme::GLYPH_OPACITY`]) — the group-key row's active
+/// treatment translated to sprite ink, and **never the accent**: density is
+/// not playback truth. The works themselves are the primary readout — their
+/// own size states the step — so the lift confirms rather than carries.
+///
+/// # The press is the gesture's own message
+///
+/// A mark sends [`Message::DensityStep`] with [`crate::shelf::Density::steps_to`]'s
+/// delta — the exact signed notch count the <kbd>Ctrl</kbd>+scroll /
+/// <kbd>Ctrl</kbd>+<kbd>±</kbd> gesture would spend, making keys and wheel
+/// *accelerators of a visible control* rather than the control itself
+/// (the mirror rule, doc 07 L8.7; the product's standing rules as amended by
+/// ADR-0028). The **active mark is inert** — pressing the step you are on
+/// would do nothing, and a control that does nothing when pressed is the lie
+/// the rail's absent letters already refuse. It is the fact; the others are
+/// the controls (L8.3's split).
+pub(crate) fn density_marks(
+    current: crate::shelf::Density,
+    axis: DetentAxis,
+) -> Element<'static, Message> {
+    let marks = crate::shelf::Density::ALL.map(|step| density_mark(step, current));
+    match axis {
+        DetentAxis::Column => column(marks).into(),
+        DetentAxis::Row => row(marks).into(),
+    }
+}
+
+/// One detent of [`density_marks`]: the step's glyph in a
+/// [`theme::STEPPER_HIT`] box, named by its tooltip (the icon-only law,
+/// doc 10 §3.1 — the tooltip is the accessible name in a toolkit with no
+/// accessibility tree), the hover wash [`theme::transport`]'s — the lane's
+/// established press vocabulary, the same family as the spine's winner chip.
+fn density_mark(
+    step: crate::shelf::Density,
+    current: crate::shelf::Density,
+) -> Element<'static, Message> {
+    use crate::shelf::Density;
+
+    let room = theme::active();
+    let active = step == current;
+    let glyph = match step {
+        Density::Spacious => crate::icon::Glyph::DensitySpacious,
+        Density::Balanced => crate::icon::Glyph::DensityBalanced,
+        Density::Compact => crate::icon::Glyph::DensityCompact,
+        Density::Dense => crate::icon::Glyph::DensityDense,
+    };
+    let mark = container(
+        iced_image(crate::icon::handle(glyph))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(if active {
+                theme::GLYPH_OPACITY_HOVER
+            } else {
+                theme::GLYPH_OPACITY
+            }),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    // The active mark is the fact and takes no press; the others are the
+    // controls and send the gesture's exact message (function docs).
+    let boxed: Element<'static, Message> = if active {
+        container(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .into()
+    } else {
+        iced::widget::button(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .padding(0)
+            .style(move |_theme, status| theme::transport(room, room.wall, status))
+            .on_press(Message::DensityStep(current.steps_to(step)))
+            .into()
+    };
+    iced::widget::tooltip(
+        boxed,
+        text(step.label())
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        // Leftwards: on the lane the marks stand on the window's right edge,
+        // and on a section rule they stand on the block's.
+        iced::widget::tooltip::Position::Left,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
+    .into()
+}
+
 /// [`section_rule`], with one quiet fact at the rule's right edge — the
 /// Songs section teaching its own accelerator (*"Enter plays the first
 /// match."*, doc 11 §5 P6.4): the era printed the shortcut beside the verb
@@ -620,5 +794,80 @@ mod tests {
         // Not vacuous: the wall's rows, the panel's, the menu card's and the
         // returns lane's are all in the walk.
         assert!(sites >= 6, "only {sites} row call sites found");
+    }
+
+    /// **Every place that hangs works hangs them on one grid** — the shell's,
+    /// resolved once, handed down.
+    ///
+    /// This is the assertion behind the defect the fourth-step work fixed.
+    /// Home and an artist's page each resolved a grid of their own,
+    /// `Grid::new(width − 2 × HANG, Density::Balanced)`, and it was wrong in
+    /// two ways at once: it named a step outright, so the density control and
+    /// both zoom keys did nothing on those pages; and its width was a
+    /// hand-written guess at [`place_pad`]'s horizontals that missed the
+    /// scrollbar lane. Measured at 1920 px with the returns lane collapsed it
+    /// drew **six columns of 244 px art where the wall drew five of 294 px** —
+    /// the same record, a press apart, 50 px different.
+    ///
+    /// So the rule is that a view file may not resolve a grid at all. The
+    /// shell resolves [`crate::app::Shelf::grid`] and every place that hangs
+    /// works is given it, which makes the sizes equal by construction rather
+    /// than by two functions agreeing.
+    ///
+    /// Read off the source, the way the density marks' placement is: what is
+    /// being pinned is the *composition*, and the composition is the code.
+    #[test]
+    fn every_place_that_hangs_works_hangs_them_on_one_grid() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        // The three places that hang works, and `page.rs` — the record's and
+        // the playlist's shared composition, which hangs **rows** and must
+        // therefore never grow a grid at all.
+        for page in ["home.rs", "artist.rs", "shelf.rs", "page.rs"] {
+            let source = std::fs::read_to_string(root.join("views").join(page))
+                .expect("a view source")
+                .replace("\r\n", "\n");
+            let code = source
+                .split("#[cfg(test)]")
+                .next()
+                .expect("a source has a head");
+            for line in code.lines() {
+                let line = line.trim_start();
+                assert!(
+                    line.starts_with("//") || !line.contains("Grid::new("),
+                    "{page} resolves a grid of its own: `{line}`"
+                );
+            }
+        }
+        // …and the shell hands the two pages that used to the wall's own.
+        let shell = std::fs::read_to_string(root.join("app.rs"))
+            .expect("the shell's source")
+            .replace("\r\n", "\n");
+        let shell = shell.split("#[cfg(test)]").next().expect("a head");
+        for call in ["views::artist::view(", "views::home::view("] {
+            let at = shell.find(call).expect("the page is composed here");
+            // The argument list, to its own closing parenthesis — the calls
+            // are several lines each and a fixed window would either miss an
+            // argument or run into the next arm.
+            let tail = &shell[at + call.len()..];
+            let mut depth = 1usize;
+            let mut end = tail.len();
+            for (index, ch) in tail.char_indices() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = index;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            assert!(
+                tail[..end].contains("state.grid()"),
+                "{call} is not handed the wall's own grid"
+            );
+        }
     }
 }

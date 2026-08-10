@@ -173,9 +173,10 @@
 //! wall's density (ADR-0017 step 6, [`crate::shelf::Density`]), and
 //! <kbd>Ctrl</kbd>+scroll is the same gesture with a pointer
 //! ([`wheel_binding`]). Both are **accelerators of a visible control** — the
-//! three detent marks at the foot of the index rail's lane (ADR-0028), which
-//! send the identical message with the mirror delta — exactly as the digits
-//! accelerate the group keys' row. The two keys are the zoom pair every
+//! four detent marks (ADR-0028 as amended), which send the identical message
+//! with the mirror delta — exactly as the digits accelerate the group keys'
+//! row. The marks stand on every place that hangs works, so the keys have a
+//! visible twin wherever they change anything. The two keys are the zoom pair every
 //! browser, editor and image viewer has trained: the physical keys are
 //! adjacent, they are *not* letters, and neither is anything baz could have
 //! spent on the query.
@@ -183,8 +184,9 @@
 //! Shift is tolerated on both, because `+` is Shift+`=` on most layouts and a
 //! listener pressing <kbd>Ctrl</kbd>+<kbd>+</kbd> means the same thing as one
 //! pressing <kbd>Ctrl</kbd>+<kbd>=</kbd>. `_` joins `-` for the same reason.
-//! There is no <kbd>Ctrl</kbd>+<kbd>0</kbd> reset: there are three steps and
-//! the default is one press from either end.
+//! There is no <kbd>Ctrl</kbd>+<kbd>0</kbd> reset: the marks name every step
+//! and the default is one press from either neighbour, so a reset would be a
+//! second way to reach a mark that is already on screen.
 //!
 //! **One toolkit limit, stated where it bites.** While the search well has
 //! focus, iced's `text_input` swallows a chord whose key produces a printable

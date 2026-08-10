@@ -936,10 +936,55 @@ next commit.
   rather than the action's only route — closing the law-contradiction doc 11
   named (*no action may be gesture-only*). The view-options rule is
   narrowed under the ledger's editing rule, not deleted: menus, choosers, free
-  zoom sliders and Settings rows stay refused, the three named steps stay
-  three, the step still persists as state, and the wall's width algebra is
-  untouched at every step (the marks live inside the lane's constant 108 px).
-  Captures at `docs/design/impl/density-control/`.
+  zoom sliders and Settings rows stay refused, the steps stay a small named set
+  (three then, four now — see below), the step still persists as state, and the
+  wall's width algebra is untouched at every step (the marks live inside the
+  lane's constant 108 px). Captures at `docs/design/impl/density-control/`.
+- **A fourth density step, and the marks on every page that hangs works**
+  (ADR-0028's 2026-08-10 amendment). The owner: *"we should ensure the density
+  options are available on all pages..."* and *"4 levels makes sense to me"*.
+  - **`Compact` — `HANG` 32, art 208 … 280 — goes *inside* the ladder**, and
+    where it goes was measured rather than chosen. Swept at the width the wall
+    really gets, for seven windows in both lane states: `Balanced` → `Dense`
+    jumps two to four columns at every window from 1280 up (5 → 8 at 1920 with
+    the lane collapsed), where `Spacious` → `Balanced` jumps nought or one and
+    at 1280 collapsed jumps nothing at all. Both other directions are closed —
+    **looser than `Spacious` cannot draw a larger work**, its `ART_MAX` being
+    already `art::THUMB_PX`, so it could only add air; tighter than `Dense`
+    would leave the widest rung exactly where it is. The numbers are that rung
+    halved — 208 = (240 + 176)/2, 236 = (272 + 200)/2, 280 = (320 + 240)/2 —
+    with the hang's midpoint 34 taken down to 32, the nearest value on
+    `theme.rs`'s 4 px lattice. Asserted, so the row cannot be quietly re-tuned.
+  - **`spacious`, `balanced` and `dense` keep their exact spellings** and
+    `Balanced` is still the default, so no existing `config.toml` re-hangs a
+    wall. The new word is `compact`, and it is pinned by name.
+  - **The marks stand at the trailing edge of the block of works they hang**:
+    the index rail's lane on the Library — unmoved, to the pixel — and the
+    block's own section rule on Home (`RECENTLY ADDED`) and an artist's page
+    (`RECORDS`). One function in two axes, so three places cannot drift into
+    three controls that look alike.
+  - **Density does not apply to a page of rows, and the marks are absent from
+    a record's page, a playlist's page, `Now playing` and Settings.** Decided
+    on a measurement: a track row's height is `TRANSPORT_HIT` 32, which is the
+    **pointer-target floor** — the mitigation for a toolkit with no
+    accessibility tree — rather than a spacing choice, so a tighter step could
+    not shrink one without breaking the rule ADR-0028 exists to serve, and a
+    looser step could only pad text. That is also why the marks are **not** in
+    the returns lane, where they would be resident on all seven places and
+    inert on four; a control that is present and does nothing is the lie the
+    inert active mark already refuses.
+  - **The detent glyphs re-keyed rather than grew.** They depict the wall at
+    their own hang and there is no whole number of columns between two and
+    three, so `Compact` wears the 3 × 3 field `Dense` used to and `Dense`
+    gains a 4 × 4 — sixteen works. At 16 px its cells minify to 2.25 px, which
+    is flagged for the owner's eye.
+  - **The keyboard is untouched and now works.** <kbd>Ctrl</kbd>+<kbd>=</kbd> /
+    <kbd>Ctrl</kbd>+<kbd>-</kbd> and <kbd>Ctrl</kbd>+scroll were never gated by
+    place — they stepped the state from anywhere and only the wall redrew,
+    because Home and the artist page named `Balanced` in their own source. Not
+    a line of `keys.rs` changed.
+  - Captures, the full fourteen-width measurement and the two comparison
+    frames at `docs/design/impl/density-on-every-page/`.
 - **Search answers in songs** (design doc 09 §5, step 3 of its §13; ADR-0023
   §2's amendment, accepted): while a query is live the Library place's body
   opens with a ranked **Songs** section — up to eight track rows, ADR-0021's
@@ -1689,6 +1734,30 @@ next commit.
   things that would reverse this are recorded in `docs/BACKLOG.md`.
 
 ### Fixed
+
+- **A record is the same size wherever it is drawn.** `views/home.rs` and
+  `views/artist.rs` each resolved a grid of their own —
+  `Grid::new(width − 2 × HANG, Density::Balanced)` — which was wrong three
+  ways. It named a step outright, so neither page answered the density control
+  or its two zoom keys. Its width was a hand-written guess at `place_pad`'s
+  horizontals that missed `SCROLLBAR_LANE`, so the block was resolved for 10 px
+  the page does not have. And it bore no relation to the wall's own reservation.
+
+  Measured at 1920 with the returns lane collapsed, on the same sixteen records
+  one press apart: **the artist page drew six columns of 244 px art where the
+  wall drew five of 294**. The two widths straddled a column boundary that 22 px
+  of arithmetic decided — `(1712 − 40)/280 = 5.97` against
+  `(1744 − 40)/280 = 6.09` — which is how fragile a second answer to *how wide
+  is the grid* is.
+
+  The shell resolves `Shelf::grid` once and hands it to every place that hangs
+  works, and a view file may not resolve a grid at all:
+  `every_place_that_hangs_works_hangs_them_on_one_grid` reads the sources and
+  fails if `home.rs`, `artist.rs`, `views/shelf.rs` or `views/page.rs` grows a
+  `Grid::new`, or if `app.rs` stops passing `state.grid()` down. It costs those
+  two pages 22 px of block width at the trailing edge, where nothing hangs
+  from. Before and after at
+  `docs/design/impl/density-on-every-page/08c-artist-over-wall-*.png`.
 
 - **A shuffled run's continuation counts records, not visits.** The owner: *"the
   album count in the bottom bar when in shuffle mode is weird... way too many

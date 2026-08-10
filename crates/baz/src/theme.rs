@@ -986,8 +986,8 @@ pub const LABEL_H: f32 = CAPTION_H;
 /// **The wall reads it from the grid, not from here** —
 /// [`crate::shelf::Grid::header_h`] — because ADR-0017 step 6 makes the hang a
 /// function of the density step, and a band fixed at 40 while the rows around
-/// it zoomed would break the exactness in the paragraph above at two of the
-/// three steps. This constant is the default's value and the one the type
+/// it zoomed would break the exactness in the paragraph above at every step
+/// but the default. This constant is the default's value and the one the type
 /// scale was derived against; it is *asserted* equal to the grid's band at
 /// `Balanced` rather than read by the view.
 pub const SHELF_HEADER_H: f32 = HANG;
