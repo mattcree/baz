@@ -1,0 +1,122 @@
+[startup] room: Closing Time
+built without audio output — see docs/DEVELOPMENT.md
+[history] recording to /tmp/baz-resize-scratch.041SgT/data/baz/history.tsv
+[session] no interrupted run
+[mpris] no session bus; desktop media controls unavailable (I/O error: No such file or directory (os error 2))
+[history] 0 records over 0 tracks from /tmp/baz-resize-scratch.041SgT/data/baz/history.tsv
+[startup] library open + hydrate: 1.8 ms (0 albums / 0 shelves by artist at Balanced / 0 tracks) from /tmp/baz-resize-scratch.041SgT/data/baz/library.db
+[playlists] folder: /tmp/baz-resize-scratch.041SgT/data/baz/playlists
+libEGL warning: DRI3 error: Could not get DRI3 device
+libEGL warning: Activate DRI3 at Xorg or build mesa with DRI2
+libEGL warning: DRI3 error: Could not get DRI3 device
+libEGL warning: Activate DRI3 at Xorg or build mesa with DRI2
+vulkan: No DRI3 support detected - required for presentation
+Note: you can probably enable DRI3 in your Xorg config
+[scan] /var/home/cree/.claude/jobs/4effb994/tmp/resize/fix-400: 3200 added, 0 updated, 0 unchanged, 0 skipped
+[scan] done: 3200 added, 0 updated, 0 unchanged, 0 removed, 0 files skipped, 0 folders unavailable, 0.0 s (91645 tracks/s)
+[startup] startup-to-interactive: 354.9 ms
+[msg] 51/s  MotionTick 24  ·  ThumbLoaded 16  ·  Scrolled 3  ·  FirstFrame 2  ·  ModifiersChanged 1  ·  RefreshTick 1  ·  ScanTick 1  ·  TileEntered 1  ·  TileLeft 1  ·  WindowResized 1
+[probe] views 31 | view ms mean 0.933 p50 0.084 p90 0.090 max 26.569 | draw-to-draw ms p50 7.7 p90 48.4 max 59574.9 | Grid::new 98 | Shelves::new 37 | thumbreq 7 guarded 4 decodes 15
+[msg] 1/s  WindowResized 1
+[probe] views 1 | view ms mean 0.070 p50 0.070 p90 0.070 max 0.070 | draw-to-draw ms p50 5334.3 p90 5334.3 max 5334.3 | Grid::new 5 | Shelves::new 3 | thumbreq 2 guarded 2 decodes 0
+[msg] 89/s  Scrolled 58  ·  WindowResized 31
+[probe] views 58 | view ms mean 0.074 p50 0.073 p90 0.098 max 0.156 | draw-to-draw ms p50 27.1 p90 29.3 max 36.0 | Grid::new 263 | Shelves::new 147 | thumbreq 89 guarded 88 decodes 0
+[msg] 78/s  Scrolled 47  ·  WindowResized 31
+[probe] views 48 | view ms mean 0.087 p50 0.087 p90 0.119 max 0.182 | draw-to-draw ms p50 26.7 p90 33.5 max 35.0 | Grid::new 222 | Shelves::new 126 | thumbreq 78 guarded 77 decodes 0
+[msg] 87/s  Scrolled 56  ·  WindowResized 31
+[probe] views 57 | view ms mean 0.099 p50 0.097 p90 0.127 max 0.173 | draw-to-draw ms p50 24.8 p90 31.1 max 33.9 | Grid::new 258 | Shelves::new 144 | thumbreq 87 guarded 86 decodes 0
+[probe] views 61 | view ms mean 0.108 p50 0.107 p90 0.147 max 0.184 | draw-to-draw ms p50 12.3 p90 27.9 max 32.8 | Grid::new 274 | Shelves::new 152 | thumbreq 91 guarded 91 decodes 0
+[msg] 93/s  Scrolled 62  ·  WindowResized 31
+[probe] views 59 | view ms mean 0.104 p50 0.106 p90 0.135 max 0.178 | draw-to-draw ms p50 23.8 p90 27.2 max 56.6 | Grid::new 266 | Shelves::new 148 | thumbreq 89 guarded 89 decodes 0
+[msg] 90/s  Scrolled 60  ·  WindowResized 30
+[probe] views 62 | view ms mean 0.100 p50 0.099 p90 0.132 max 0.190 | draw-to-draw ms p50 18.9 p90 27.5 max 30.9 | Grid::new 278 | Shelves::new 154 | thumbreq 92 guarded 92 decodes 0
+[msg] 92/s  Scrolled 61  ·  WindowResized 31
+[probe] views 57 | view ms mean 0.096 p50 0.096 p90 0.125 max 0.143 | draw-to-draw ms p50 24.8 p90 28.8 max 33.3 | Grid::new 259 | Shelves::new 145 | thumbreq 88 guarded 87 decodes 0
+[msg] 88/s  Scrolled 57  ·  WindowResized 31
+[probe] views 62 | view ms mean 0.083 p50 0.083 p90 0.114 max 0.118 | draw-to-draw ms p50 17.6 p90 28.2 max 33.0 | Grid::new 277 | Shelves::new 153 | thumbreq 91 guarded 91 decodes 0
+[msg] 91/s  Scrolled 60  ·  WindowResized 31
+[probe] views 44 | view ms mean 0.080 p50 0.078 p90 0.107 max 0.117 | draw-to-draw ms p50 27.4 p90 33.1 max 37.5 | Grid::new 206 | Shelves::new 118 | thumbreq 74 guarded 73 decodes 0
+[msg] 74/s  Scrolled 43  ·  WindowResized 31
+[probe] views 60 | view ms mean 0.074 p50 0.075 p90 0.096 max 0.112 | draw-to-draw ms p50 23.7 p90 29.7 max 57.8 | Grid::new 268 | Shelves::new 148 | thumbreq 88 guarded 87 decodes 0
+[msg] 88/s  Scrolled 58  ·  WindowResized 30
+[probe] views 51 | view ms mean 0.073 p50 0.071 p90 0.097 max 0.130 | draw-to-draw ms p50 27.8 p90 32.9 max 35.2 | Grid::new 235 | Shelves::new 133 | thumbreq 82 guarded 81 decodes 0
+[msg] 81/s  Scrolled 50  ·  WindowResized 31
+[probe] views 54 | view ms mean 0.082 p50 0.082 p90 0.106 max 0.121 | draw-to-draw ms p50 26.4 p90 32.4 max 33.3 | Grid::new 247 | Shelves::new 139 | thumbreq 85 guarded 84 decodes 0
+[msg] 86/s  Scrolled 55  ·  WindowResized 31
+[probe] views 57 | view ms mean 0.088 p50 0.086 p90 0.117 max 0.144 | draw-to-draw ms p50 24.4 p90 28.5 max 36.9 | Grid::new 259 | Shelves::new 145 | thumbreq 88 guarded 87 decodes 0
+[msg] 88/s  Scrolled 57  ·  WindowResized 31
+[probe] views 62 | view ms mean 0.103 p50 0.105 p90 0.130 max 0.172 | draw-to-draw ms p50 20.1 p90 27.0 max 30.0 | Grid::new 279 | Shelves::new 155 | thumbreq 93 guarded 93 decodes 0
+[msg] 93/s  Scrolled 62  ·  WindowResized 31
+[probe] views 60 | view ms mean 0.094 p50 0.094 p90 0.129 max 0.146 | draw-to-draw ms p50 23.0 p90 27.6 max 53.7 | Grid::new 270 | Shelves::new 150 | thumbreq 90 guarded 90 decodes 0
+[msg] 90/s  Scrolled 60  ·  WindowResized 30
+[probe] views 62 | view ms mean 0.093 p50 0.090 p90 0.124 max 0.167 | draw-to-draw ms p50 19.1 p90 27.1 max 31.8 | Grid::new 277 | Shelves::new 153 | thumbreq 91 guarded 91 decodes 0
+[msg] 91/s  Scrolled 60  ·  WindowResized 31
+[probe] views 57 | view ms mean 0.092 p50 0.091 p90 0.118 max 0.126 | draw-to-draw ms p50 24.5 p90 28.7 max 36.4 | Grid::new 258 | Shelves::new 144 | thumbreq 87 guarded 86 decodes 0
+[msg] 87/s  Scrolled 56  ·  WindowResized 31
+[probe] views 62 | view ms mean 0.084 p50 0.086 p90 0.115 max 0.129 | draw-to-draw ms p50 19.8 p90 28.1 max 31.7 | Grid::new 278 | Shelves::new 154 | thumbreq 92 guarded 92 decodes 0
+[msg] 92/s  Scrolled 61  ·  WindowResized 31
+[probe] views 44 | view ms mean 0.076 p50 0.076 p90 0.099 max 0.119 | draw-to-draw ms p50 28.4 p90 33.5 max 39.8 | Grid::new 206 | Shelves::new 118 | thumbreq 74 guarded 73 decodes 0
+[msg] 74/s  Scrolled 43  ·  WindowResized 31
+[probe] views 60 | view ms mean 0.076 p50 0.073 p90 0.104 max 0.131 | draw-to-draw ms p50 26.3 p90 28.8 max 63.1 | Grid::new 270 | Shelves::new 150 | thumbreq 90 guarded 88 decodes 0
+[msg] 90/s  Scrolled 60  ·  WindowResized 30
+[probe] views 43 | view ms mean 0.081 p50 0.080 p90 0.104 max 0.113 | draw-to-draw ms p50 28.5 p90 33.1 max 34.1 | Grid::new 203 | Shelves::new 117 | thumbreq 74 guarded 73 decodes 0
+[msg] 74/s  Scrolled 43  ·  WindowResized 31
+[probe] views 62 | view ms mean 0.085 p50 0.085 p90 0.114 max 0.160 | draw-to-draw ms p50 22.3 p90 27.8 max 33.3 | Grid::new 279 | Shelves::new 155 | thumbreq 93 guarded 93 decodes 0
+[msg] 93/s  Scrolled 62  ·  WindowResized 31
+[probe] views 57 | view ms mean 0.091 p50 0.086 p90 0.118 max 0.174 | draw-to-draw ms p50 24.9 p90 28.4 max 33.7 | Grid::new 259 | Shelves::new 145 | thumbreq 88 guarded 87 decodes 0
+[msg] 88/s  Scrolled 57  ·  WindowResized 31
+[probe] views 62 | view ms mean 0.092 p50 0.093 p90 0.122 max 0.152 | draw-to-draw ms p50 22.0 p90 27.0 max 31.1 | Grid::new 279 | Shelves::new 155 | thumbreq 93 guarded 93 decodes 0
+[msg] 93/s  Scrolled 62  ·  WindowResized 31
+[probe] views 60 | view ms mean 0.099 p50 0.097 p90 0.130 max 0.143 | draw-to-draw ms p50 22.6 p90 26.7 max 58.6 | Grid::new 270 | Shelves::new 150 | thumbreq 90 guarded 90 decodes 0
+[msg] 90/s  Scrolled 60  ·  WindowResized 30
+[probe] views 62 | view ms mean 0.099 p50 0.099 p90 0.128 max 0.218 | draw-to-draw ms p50 20.3 p90 27.4 max 33.3 | Grid::new 274 | Shelves::new 150 | thumbreq 88 guarded 88 decodes 0
+[msg] 88/s  Scrolled 57  ·  WindowResized 31
+[probe] views 57 | view ms mean 0.086 p50 0.086 p90 0.115 max 0.166 | draw-to-draw ms p50 23.0 p90 31.1 max 34.5 | Grid::new 257 | Shelves::new 143 | thumbreq 86 guarded 85 decodes 0
+[msg] 86/s  Scrolled 55  ·  WindowResized 31
+[probe] views 56 | view ms mean 0.083 p50 0.083 p90 0.113 max 0.131 | draw-to-draw ms p50 25.0 p90 31.9 max 33.5 | Grid::new 255 | Shelves::new 143 | thumbreq 87 guarded 86 decodes 0
+[msg] 86/s  Scrolled 55  ·  WindowResized 31
+[probe] views 49 | view ms mean 0.077 p50 0.079 p90 0.098 max 0.123 | draw-to-draw ms p50 27.5 p90 33.4 max 36.4 | Grid::new 226 | Shelves::new 128 | thumbreq 79 guarded 78 decodes 0
+[msg] 80/s  Scrolled 49  ·  WindowResized 31
+[msg] 24/s  Scrolled 16  ·  WindowResized 8
+[probe] views 18 | view ms mean 0.079 p50 0.079 p90 0.109 max 0.115 | draw-to-draw ms p50 24.3 p90 32.6 max 4993.4 | Grid::new 81 | Shelves::new 45 | thumbreq 27 guarded 25 decodes 0
+[msg] 91/s  Scrolled 61  ·  WindowResized 30
+[probe] views 61 | view ms mean 0.081 p50 0.079 p90 0.110 max 0.140 | draw-to-draw ms p50 6.0 p90 29.2 max 60.6 | Grid::new 274 | Shelves::new 152 | thumbreq 91 guarded 87 decodes 0
+[msg] 90/s  Scrolled 60  ·  WindowResized 30
+[probe] views 60 | view ms mean 0.078 p50 0.078 p90 0.108 max 0.132 | draw-to-draw ms p50 23.9 p90 29.3 max 65.8 | Grid::new 270 | Shelves::new 150 | thumbreq 90 guarded 84 decodes 0
+[msg] 89/s  Scrolled 59  ·  WindowResized 30
+[probe] views 60 | view ms mean 0.082 p50 0.081 p90 0.105 max 0.151 | draw-to-draw ms p50 15.3 p90 29.3 max 61.4 | Grid::new 269 | Shelves::new 149 | thumbreq 89 guarded 89 decodes 0
+[msg] 90/s  Scrolled 60  ·  WindowResized 30
+[probe] views 60 | view ms mean 0.081 p50 0.078 p90 0.113 max 0.125 | draw-to-draw ms p50 18.9 p90 31.2 max 63.2 | Grid::new 270 | Shelves::new 150 | thumbreq 90 guarded 84 decodes 0
+[msg] 87/s  Scrolled 58  ·  WindowResized 29
+[probe] views 58 | view ms mean 0.078 p50 0.077 p90 0.101 max 0.114 | draw-to-draw ms p50 21.8 p90 29.3 max 65.2 | Grid::new 261 | Shelves::new 145 | thumbreq 87 guarded 81 decodes 0
+[msg] 89/s  Scrolled 59  ·  WindowResized 30
+[probe] views 60 | view ms mean 0.077 p50 0.077 p90 0.114 max 0.145 | draw-to-draw ms p50 23.2 p90 29.3 max 55.0 | Grid::new 269 | Shelves::new 149 | thumbreq 89 guarded 89 decodes 0
+[msg] 90/s  Scrolled 60  ·  WindowResized 30
+[probe] views 60 | view ms mean 0.083 p50 0.080 p90 0.110 max 0.136 | draw-to-draw ms p50 22.4 p90 30.1 max 65.6 | Grid::new 270 | Shelves::new 150 | thumbreq 90 guarded 84 decodes 0
+[msg] 89/s  Scrolled 59  ·  WindowResized 30
+[probe] views 60 | view ms mean 0.080 p50 0.077 p90 0.112 max 0.148 | draw-to-draw ms p50 22.0 p90 29.5 max 60.7 | Grid::new 269 | Shelves::new 149 | thumbreq 89 guarded 87 decodes 0
+[msg] 87/s  Scrolled 58  ·  WindowResized 29
+[probe] views 58 | view ms mean 0.085 p50 0.084 p90 0.117 max 0.158 | draw-to-draw ms p50 20.0 p90 29.9 max 66.6 | Grid::new 261 | Shelves::new 145 | thumbreq 87 guarded 83 decodes 0
+[msg] 65/s  Scrolled 43  ·  WindowResized 22
+[probe] views 45 | view ms mean 0.074 p50 0.073 p90 0.100 max 0.131 | draw-to-draw ms p50 7.8 p90 29.8 max 1987.4 | Grid::new 199 | Shelves::new 109 | thumbreq 64 guarded 60 decodes 0
+[msg] 89/s  Scrolled 59  ·  WindowResized 30
+[probe] views 60 | view ms mean 0.099 p50 0.098 p90 0.133 max 0.167 | draw-to-draw ms p50 21.8 p90 27.7 max 56.7 | Grid::new 270 | Shelves::new 150 | thumbreq 90 guarded 90 decodes 0
+[msg] 90/s  Scrolled 60  ·  WindowResized 30
+[probe] views 60 | view ms mean 0.089 p50 0.088 p90 0.118 max 0.165 | draw-to-draw ms p50 22.7 p90 27.1 max 59.8 | Grid::new 270 | Shelves::new 150 | thumbreq 90 guarded 90 decodes 0
+[msg] 90/s  Scrolled 60  ·  WindowResized 30
+[probe] views 60 | view ms mean 0.094 p50 0.095 p90 0.127 max 0.139 | draw-to-draw ms p50 21.6 p90 27.4 max 57.3 | Grid::new 270 | Shelves::new 150 | thumbreq 90 guarded 90 decodes 0
+[msg] 90/s  Scrolled 60  ·  WindowResized 30
+[probe] views 60 | view ms mean 0.096 p50 0.095 p90 0.133 max 0.151 | draw-to-draw ms p50 22.8 p90 27.2 max 59.6 | Grid::new 270 | Shelves::new 150 | thumbreq 90 guarded 90 decodes 0
+[msg] 86/s  Scrolled 57  ·  WindowResized 29
+[probe] views 58 | view ms mean 0.101 p50 0.096 p90 0.139 max 0.191 | draw-to-draw ms p50 21.3 p90 27.6 max 58.7 | Grid::new 260 | Shelves::new 144 | thumbreq 86 guarded 86 decodes 0
+[msg] 89/s  Scrolled 59  ·  WindowResized 30
+[probe] views 60 | view ms mean 0.092 p50 0.088 p90 0.128 max 0.148 | draw-to-draw ms p50 19.3 p90 27.9 max 57.2 | Grid::new 269 | Shelves::new 149 | thumbreq 89 guarded 89 decodes 0
+[msg] 90/s  Scrolled 60  ·  WindowResized 30
+[probe] views 60 | view ms mean 0.085 p50 0.078 p90 0.129 max 0.153 | draw-to-draw ms p50 24.6 p90 27.6 max 59.3 | Grid::new 270 | Shelves::new 150 | thumbreq 90 guarded 90 decodes 0
+[msg] 90/s  Scrolled 60  ·  WindowResized 30
+[probe] views 60 | view ms mean 0.086 p50 0.084 p90 0.123 max 0.129 | draw-to-draw ms p50 21.9 p90 27.5 max 60.0 | Grid::new 270 | Shelves::new 150 | thumbreq 90 guarded 90 decodes 0
+[msg] 88/s  Scrolled 58  ·  WindowResized 29  ·  RefreshTick 1
+[probe] views 58 | view ms mean 0.087 p50 0.085 p90 0.119 max 0.127 | draw-to-draw ms p50 21.7 p90 28.0 max 59.9 | Grid::new 261 | Shelves::new 145 | thumbreq 87 guarded 87 decodes 0
+### IDLE 5s
+### SCROLL 60 wheel steps (for comparison: the other thing that redraws)
+### DONE

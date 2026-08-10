@@ -862,6 +862,108 @@ sight of an album, which is exactly when a listener is dragging the window to
 see more of the wall. A debounce on the resize path — request thumbs when the
 size *settles*, not on every configure — costs nothing and removes the burst.
 
+> **Withdrawn on 2026-08-10 by the measurement below.** The burst is real but
+> it is *one-shot and already small*: over a whole session of driven dragging
+> across 400 records the decode counter reads **40**, every one of them at
+> startup or at the single moment the wall first revealed a row it had never
+> shown, and **nought** in every subsequent resize second. The range guard
+> above is what does it, and it does it at the answer rather than at the
+> question. A debounce would remove only the decodes for albums revealed
+> *transiently* mid-drag and un-revealed before it ends — and it would still
+> decode them the moment the drag passed that width again. The paragraph is
+> left standing because its file:line reading of the decode path is correct
+> and is what made the guard findable.
+
+### The CPU side, counted and timed — 2026-08-10
+
+The owner, after the day's grid-arithmetic build: *"resize is much better now
+but somehow it just doesn't seem… smooth? maybe need some basic debounce on
+layout"*. **A debounce is the right fix for one cause and actively wrong for
+the others** — deferring layout that was never slow rubber-bands content that
+used to track the pointer — so the half of it Xvfb *can* answer was counted
+first. Harness, raw logs and the shape of the (temporary, reverted) probe:
+`docs/design/impl/resize-cost/`.
+
+Per second of a dragged edge driven at ~30 Hz, release build, private Xvfb:
+
+| library, as shelved | msg/s | resize steps/s | view builds/s | view build p50 / p90 | `Grid::new`/s | `Shelves::new`/s | decodes |
+|---|---|---|---|---|---|---|---|
+| 25 records, one shelf | 88 | 31 | 59 | **0.08 / 0.11 ms** | 266 | 148 | 0 |
+| 400 records, 120 shelves | 89 | 30 | 60 | **0.09 / 0.12 ms** | 269 | 149 | 0 |
+| 400 records, one shelf | 86 | 31 | 57 | **0.14 / 0.18 ms** | 258 | 143 | 0 |
+| …the same, at 1900 px only | 58 | 24 | 35 | **0.22 / 0.28 ms** | 161 | 91 | 0 |
+
+Read per resize *step*, those are the same four numbers every time: **three
+messages, two view builds, nine `Grid::new`, five `Shelves::new`, and three
+calls to `request_visible_thumbs` of which the range guard answers all three.**
+Idle draws nothing at all — every phase mark that is not a sweep produced no
+`[probe]` line, because there was no redraw to time.
+
+So **the whole of baz's own per-step work is 0.18 ms at 25 records and 0.44 ms
+at 400** — two view builds — against 16.7 ms of a 60 Hz frame. Sixteen times
+the library costs 2.75 times the view build, and only because a wider window
+with one big shelf has more tiles on it; the *shelving* is free, 120 shelves
+being no dearer than one. `Grid::new` and `Shelves::new` are called nine and
+five times a step and are not measurable in the total: they are arithmetic and
+one pass over the group counts.
+
+**Nothing on the artwork path is on the resize path.** The thumbnail cache is
+keyed on the album id and `THUMB_PX` is a constant, so **no width change can
+re-tier or re-decode anything** — that is a property of the code, not a
+sample. What a width change *can* do is reveal a record never seen before, and
+the counter says how often: 40 decodes in a 400-record run, none of them
+during a resize second after the first.
+
+**There is between eight and nine times the headroom needed.** Driven flat out
+with no pause between steps, the app took **284 `WindowResized` a second** (447
+messages, 163 draws) at 25 records and 261 (410, 153) at 400 — while
+rasterising a 1900 × 900 window **in software**, because Xvfb has no GPU. A
+dragged edge delivers about 30. And the coalescing a debounce would add is
+already there and already engages under load: at 30 Hz the shell sees three
+messages and draws twice per step; at 284 Hz it sees 1.6 and draws 0.6. The
+toolkit sheds this work by itself, exactly when it is worth shedding.
+
+**So the debounce is refused, on the numbers, and nothing was built.** It would
+defer 0.44 ms of a frame's 16.7 and buy its own window of tracking lag — and
+it could not defer the part that might actually be expensive, because
+`WindowResized` is a report of a reconfiguration that has *already happened*:
+iced lays out and draws on the toolkit's own schedule whether or not baz has
+updated its grid. All a debounce can hold back is baz's `grid_size`, whose
+whole cost is measured above. If the wall is later wanted to stop re-columning
+mid-drag, that is an **aesthetic** decision for the owner and should be argued
+as one, not sold as a performance fix.
+
+**Which leaves the presentation path, and one honest gap in this record.** The
+probe times the construction of the element tree; it does not separate iced's
+own layout, text shaping and draw, which run after `view` returns. The
+draw-to-draw figure brackets all of it — 6.0 ms a draw at saturation with
+software rasterisation included, so under 6 ms of CPU for everything iced does
+per frame at these widths, and less than that on a machine with a GPU doing the
+drawing. Nothing in the CPU side, ours or the toolkit's, accounts for treacle.
+
+**And the day's improvement is itself evidence.** The owner felt this get
+better after the grid-arithmetic build, but the numbers above are the same
+three messages and two view builds a step that `BAZ_MSG_LOG` recorded the night
+before: the fourth detent (`shelf.rs`'s `Density`) and the wall's scrollbar
+move (`WALL_RESERVE` 4 → 112, and the rail stacked under the scrollable rather
+than a `row!` sibling) change *what is drawn and where*, not how much baz
+computes to draw it. The one thing that did cut per-step work — the
+`request_visible_thumbs` range guard — landed the evening *before* the build he
+was reacting to. A change that improves the feel while leaving the CPU side
+untouched is a change in how many pixels the wall asks the presentation path
+for, which is the third suspect below and not one Xvfb can see.
+
+**The single most useful thing to do, still, is one command on his machine:**
+
+```sh
+ICED_BACKEND=tiny-skia baz    # smooth => it is wgpu surface reconfiguration
+                              # treacle here too => it is iced's own layout,
+                              #   which is the only CPU cost not bounded above
+```
+
+If that comes back smooth, `ICED_PRESENT_MODE=immediate baz` is the follow-up
+and a one-line default if it settles it.
+
 ## The strip demolition — four removals the owner asked for
 
 > **Three of the four shipped on 2026-08-10** (`feat/shuffle-and-all-songs`).
