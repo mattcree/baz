@@ -34,7 +34,8 @@
 //! else on screen.
 //!
 //! The well is also **as much a readout as an input**: it is where you read
-//! what you asked for and how much of the collection answered. A readout of
+//! what you asked for and how much of the collection answered — the match
+//! count sits inside the field, which is what [`well`] argues. A readout of
 //! the frame's own state belongs in the frame's own resident surface, and it
 //! is the last piece of the frame that was still in the strip. With it moved,
 //! the strip stops carrying identity — it is the wall's arrangement and the
@@ -311,38 +312,52 @@ fn destination_row(
 /// **The search well** — the lane's fourth head row, and the only field in the
 /// frame.
 ///
-/// # Expanded: a field over one quiet line
+/// # Expanded: one field, one control tall
 ///
-/// It takes the lane row's own anatomy — the body size over the meta size,
-/// which is the wall label's own pair (doc 13 §2.6) — and that is what makes it read
-/// as part of the lane rather than as a widget docked in it. The magnifier is
-/// laid over the field's left padding as a `stack` (doc 10 §4.1: iced 0.13's
-/// `text_input::Icon` is font-based and therefore not it), and the field's
-/// left padding is [`theme::SIDEBAR_HEAD_TEXT_X`], so **the mark stands on the
-/// destinations' glyph vertical and the query stands on their word vertical**.
-/// Four head rows, two verticals.
+/// The magnifier is laid over the field's left padding as a `stack` (doc 10
+/// §4.1: iced 0.13's `text_input::Icon` is font-based and therefore not it),
+/// and the field's left padding is [`theme::SIDEBAR_HEAD_TEXT_X`], so **the
+/// mark stands on the destinations' glyph vertical and the query stands on
+/// their word vertical**. Four head rows, two verticals.
 ///
-/// # The counts and the match count are re-homed onto that quiet line
+/// # The two figures separate: one is a statistic, one is feedback
 ///
-/// In the strip they rode *inside* the well: the counts as the placeholder,
-/// the match count in a reserved [`crate::views::top_bar::MATCH_W`] 88 slot at
-/// the right edge. Neither survives the move, and the reason is arithmetic
-/// rather than taste. The lane's measure is [`theme::SIDEBAR_MEASURE`] 232
-/// against the strip's 280, and 232 less the 44 px text inset less the 88 px
-/// reserved slot leaves **100 px for the query itself** — a third of what doc
-/// 10 §4.1 sized the slot to sit beside. So both figures come out of the well
-/// and onto the line under it, where they get the whole measure and the query
-/// gets the whole field:
+/// The well shipped with a quiet line under it carrying both — `25 albums ·
+/// 206 tracks` at rest, `12 of 25 albums` while narrowing — and the owner read
+/// the built thing: *"the album and track count below the search bar doesn't
+/// look good… maybe this should go into the home as some basic stats?"*. He is
+/// right, and the reason is that the two states were never one readout:
 ///
-/// - **at rest**: `25 albums · 206 tracks` — the corpus, under the glyph that
-///   says *search this*, which is L8.3's valve exactly as the placeholder was.
-/// - **narrowing**: `12 of 25 albums` — and the caption returns, because
-///   outside the control being typed into `12 / 25` is a figure with no
-///   subject. Doc 07 §3.1's own words, in doc 10's position.
+/// - **The resting counts are a statistic about the collection.** Nothing is
+///   being searched when they are on screen, and they were standing in the
+///   lane's most valuable space — above the records you actually return to.
+///   They are the Home place's `COLLECTION` footer now
+///   ([`crate::views::home`]), where a fact about the whole library belongs.
+/// - **The match count is feedback about the query**, so it stays with the
+///   field that answers it — and it goes **inside** the field, right-aligned
+///   in a reserved [`theme::SIDEBAR_MATCH_W`] 72 slot. That is the ordinary
+///   anatomy of a search input, it is doc 07 §3.1's own prescription (`12 / 25`
+///   reads inside the control it is about, where the query is its subject), and
+///   it costs no line at all.
 ///
-/// The line is **always drawn** and left-aligned, which is the reserved-slot
-/// discipline in its cheaper form: the first character never moves, the tail
-/// shortens, and no lane row below is pushed down by a keystroke.
+/// The slot is the lane's own 72 rather than the strip's
+/// [`crate::views::top_bar::MATCH_W`] 88, and that is what makes it fit where
+/// the shipped design said it would not:
+///
+/// ```text
+///   SIDEBAR_MEASURE                     232
+///     − SIDEBAR_HEAD_TEXT_X              44
+///     − GAP_MD                           12
+///     − SIDEBAR_MATCH_W                  72     (was MATCH_W 88)
+///     = the query's own room            104     (was 88)
+/// ```
+///
+/// **Nothing moves when the first character lands.** The reservation is on the
+/// *right* and the query sets from the left, so the caret does not shift; the
+/// well's block is [`theme::SIDEBAR_WELL_H`], one control tall in both states,
+/// so no `RECENT` row below is pushed down; and the slot is a fixed width with
+/// the figures right-aligned in it, so `12 / 25` becoming `3 / 25` changes in
+/// place.
 ///
 /// # Collapsed: the mark, and the press that opens the lane
 ///
@@ -356,6 +371,9 @@ fn well(shelf: &Shelf, open: bool) -> Element<'_, Message> {
     if !open {
         return collapsed_well(filtering);
     }
+    // **The placeholder says what the field is for.** With the collection's
+    // counts gone to Home the placeholder lane is free, and the one word a
+    // search field owes a first-time listener is the word for what it does.
     let input = text_input("Search", &shelf.query)
         .id(search_id())
         .on_input(Message::SearchChanged)
@@ -365,7 +383,15 @@ fn well(shelf: &Shelf, open: bool) -> Element<'_, Message> {
         .on_submit(Message::PlayFirstMatch)
         .padding(iced::Padding {
             top: theme::WELL_PAD_V,
-            right: theme::GAP_MD,
+            // While a query narrows the collection the match count holds a
+            // reserved slot at the field's right edge, and the input's own
+            // padding is what keeps the query out of it. At rest there is no
+            // count, so the field is the query's whole width.
+            right: if filtering {
+                theme::GAP_MD + theme::SIDEBAR_MATCH_W
+            } else {
+                theme::GAP_MD
+            },
             bottom: theme::WELL_PAD_V,
             left: theme::SIDEBAR_HEAD_TEXT_X,
         })
@@ -382,33 +408,36 @@ fn well(shelf: &Shelf, open: bool) -> Element<'_, Message> {
     .height(Length::Fixed(theme::TRANSPORT_HIT))
     .padding(theme::pad(0.0, theme::SIDEBAR_WELL_GLYPH_LEAD))
     .align_y(alignment::Vertical::Center);
-    container(
-        column![
-            iced::widget::stack![input, magnifier],
+    let mut layers = iced::widget::stack![input, magnifier];
+    if filtering {
+        // **The match count, inside the control being typed into.** Right
+        // aligned in a fixed slot, so the figure shrinking from `12 / 25` to
+        // `3 / 25` moves nothing; `paper_faint`, which is a readout's ink and
+        // never a control's.
+        layers = layers.push(
             container(
-                text(readout(shelf, filtering))
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_faint)
-                    .wrapping(text::Wrapping::None),
+                container(
+                    text(match_count(shelf))
+                        .size(theme::SIZE_META)
+                        .line_height(theme::LEADING_META)
+                        .color(room.paper_faint)
+                        .wrapping(text::Wrapping::None),
+                )
+                .width(Length::Fixed(theme::SIDEBAR_MATCH_W))
+                .align_x(alignment::Horizontal::Right)
+                .clip(true),
             )
             .width(Length::Fill)
-            // The left inset is the head's word vertical; the right is the
-            // field's own trailing padding, so the readout's lane is the
-            // query's lane exactly.
-            .padding(iced::Padding {
-                top: 0.0,
-                right: theme::GAP_MD,
-                bottom: 0.0,
-                left: theme::SIDEBAR_HEAD_TEXT_X,
-            })
-            .clip(true),
-        ]
-        .spacing(theme::GAP_XS),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(theme::SIDEBAR_WELL_H))
-    .into()
+            .height(Length::Fixed(theme::TRANSPORT_HIT))
+            .padding(theme::pad(0.0, theme::GAP_MD))
+            .align_x(alignment::Horizontal::Right)
+            .align_y(alignment::Vertical::Center),
+        );
+    }
+    container(layers)
+        .width(Length::Fill)
+        .height(Length::Fixed(theme::SIDEBAR_WELL_H))
+        .into()
 }
 
 /// The well at [`theme::SIDEBAR_RAIL_W`]: the mark alone, in the head's own
@@ -459,22 +488,21 @@ fn collapsed_well(filtering: bool) -> Element<'static, Message> {
     .into()
 }
 
-/// The well's quiet line: the collection at rest, the query answered while one
-/// narrows the wall.
+/// **The query, answered**: `3 / 25`, in the well's reserved right-hand slot.
 ///
-/// One function so the two strings are one decision — they share a line, a
-/// size, an ink and a left edge, and a figure that changed voice between the
-/// two states would be two readouts sharing a slot.
-fn readout(shelf: &Shelf, filtering: bool) -> String {
-    if filtering {
-        format!("{} of {} albums", shelf.visible.len(), shelf.albums.len())
-    } else {
-        format!(
-            "{} albums · {} tracks",
-            shelf.albums.len(),
-            shelf.library.len()
-        )
-    }
+/// The pair rather than the bare figure, and the slash rather than a caption:
+/// inside the control being typed into the query is the count's subject, so
+/// `3 / 25` needs no word to say what it counts — and the denominator is what
+/// turns *three* into *three of a small collection*, which is the whole of what
+/// a match count is for. Doc 07 §3.1's own form, in the position it was written
+/// for — and the identical string the strip's own well has drawn all along
+/// (`views::top_bar`'s `match_count`), so the two regimes answer one query one
+/// way.
+///
+/// Albums, because the collection this narrows is a collection of records; the
+/// `Songs` section states its own count in its own heading.
+fn match_count(shelf: &Shelf) -> String {
+    format!("{} / {}", shelf.visible.len(), shelf.albums.len())
 }
 
 /// The lamp dot on `Now playing`: [`theme::DOT`], the accent, and nothing
@@ -825,38 +853,66 @@ mod tests {
         );
     }
 
-    /// **The two figures are on the readout line, never back inside the
-    /// field** — the re-homing the lane's 232 px measure forced.
+    /// **The well is one control tall, and the only figure in it is the match
+    /// count** — the owner's *"the album and track count below the search bar
+    /// doesn't look good… maybe this should go into the home as some basic
+    /// stats?"*, delivered.
     ///
-    /// `MATCH_W` 88 inside a 232 px well would leave the query 100 px. Both
-    /// figures went onto the line under the field, which is always drawn so
-    /// that the first keystroke moves no row below it, and left-aligned so the
-    /// figures change in place.
+    /// The two states of the retired readout had two different jobs. The
+    /// resting counts are a statistic about the collection and are Home's
+    /// `COLLECTION` footer now — the pin for that lives in
+    /// [`crate::views::home`]'s tests, and this one is its other half: the
+    /// second line is **gone from the lane**, not merely quieter. The match
+    /// count is feedback about the query, so it is inside the field it answers,
+    /// right-aligned in [`theme::SIDEBAR_MATCH_W`] rather than the strip's
+    /// wider `MATCH_W`, which is the whole reason it fits.
     #[test]
-    fn the_wells_figures_share_one_always_drawn_line() {
+    fn the_wells_one_figure_is_the_match_count_inside_the_field() {
         let source = source();
         let well = body(&source, "fn well(shelf: &Shelf, open: bool)");
+        let shipped = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a source has a head");
         assert!(
-            !well.contains("MATCH_W"),
-            "the lane's well reserved the strip's match slot inside itself"
+            !shipped.contains("fn readout"),
+            "the well's second line is still being built; the collection's \
+             counts belong to the Home place now"
         );
         assert!(
             well.contains("text_input(\"Search\", &shelf.query)"),
             "the lane's well no longer names itself in its placeholder"
         );
         assert!(
-            well.contains("readout(shelf, filtering)"),
-            "the readout line is not drawn"
+            well.contains("match_count(shelf)"),
+            "the match count is not drawn in the well"
         );
+        // The lane's own slot, never the strip's 88 — 88 inside a 232 px well
+        // is what drove both figures out of the field in the first place.
+        assert!(
+            well.contains("theme::GAP_MD + theme::SIDEBAR_MATCH_W")
+                && well.contains("Length::Fixed(theme::SIDEBAR_MATCH_W)"),
+            "the count's slot is not both reserved by the field's padding and \
+             drawn at one fixed width, so typed text can collide with it"
+        );
+        assert!(
+            !well.contains("top_bar::MATCH_W"),
+            "the lane's well reserved the strip's wider match slot"
+        );
+        // Nothing moves as the first character lands: the reservation is on
+        // the right, and the block is a fixed height whatever is in it.
         assert!(
             well.contains("Length::Fixed(theme::SIDEBAR_WELL_H)"),
             "the well's block is not held at a fixed height, so a keystroke \
              would push the lane's rows down"
         );
-        let readout = body(&source, "fn readout(shelf: &Shelf, filtering: bool)");
+        let count = body(&source, "fn match_count(shelf: &Shelf)");
         assert!(
-            readout.contains("{} of {} albums") && readout.contains("{} albums · {} tracks"),
-            "the readout lost one of its two states"
+            count.contains("{} / {}")
+                && count.contains("shelf.visible.len()")
+                && count.contains("shelf.albums.len()"),
+            "the match count is no longer the query's answer over the \
+             collection's size"
         );
     }
 

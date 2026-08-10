@@ -192,8 +192,87 @@
 >
 > Frames — the band present, the band gone, and the same band back on a pause:
 > [`docs/design/impl/home-continue/`](../design/impl/home-continue/README.md).
+>
+> ## Fourth amendment (2026-08-10) — the well's second line, split in two
+>
+> The owner, looking at the shipped well: *"the album and track count below the
+> search bar doesn't look good… maybe this should go into the home as some
+> basic stats?"*. The **second amendment's §3 is replaced**, and §6's inventory
+> gains its third fact.
+>
+> The line carried two strings — `25 albums · 206 tracks` at rest and
+> `12 of 25 albums` while narrowing — and the second amendment treated them as
+> one readout in two states. They are not. **They have different subjects and
+> therefore different homes:**
+>
+> - **The resting counts are a statistic about the collection.** Nothing is
+>   being searched while they are on screen, and they were standing in the
+>   lane's most valuable space — the block directly above `RECENT`, which is
+>   the surface's whole point. A fact about the whole library belongs on the
+>   surface whose subject is the whole library.
+> - **The match count is feedback about the query**, so it stays with the field
+>   that answers it. It does not go to Home, and the reason is not taste: while
+>   you are narrowing the collection, Home is not on screen.
+>
+> **1. The match count goes back inside the field**, right-aligned in a
+> reserved `SIDEBAR_MATCH_W` **72** — the lane's own slot, not the strip's
+> `MATCH_W` 88. That is what makes it fit where §3 said it would not:
+>
+> ```text
+>   SIDEBAR_MEASURE 232 − SIDEBAR_HEAD_TEXT_X 44 − GAP_MD 12 − 72 = 104 px
+>                                                        (with MATCH_W: 88)
+> ```
+>
+> 72 holds `9999 / 9999` measured in the bundled face — a collection ten times
+> the owner's — and 104 px is more room than the arrangement §3 rejected would
+> have left, which is the whole argument. §3's discipline is kept rather than
+> dropped: the slot is fixed and right-aligned so the figures change **in
+> place**; it is reserved on the *right* and the query sets from the left, so
+> the caret and the first character it lands never move; and the well's block
+> is still a fixed height, so no `RECENT` row is pushed down by a keystroke.
+>
+> **2. `SIDEBAR_WELL_H` falls from 52 to 32** — one control, nothing under it —
+> and the list below gets the 20 px back. **Measured** off two runs of the same
+> capture script against the binary either side of the change, rather than
+> predicted: **11 `RECENT` rows at 1920 × 1080 where the second amendment left
+> 10**; **7 either way at 1280 × 860**, where the 20 px buys three eighths of a
+> row and no whole one. The second amendment's own note — and doc 13 §9.2's,
+> which repeated it — said the well cost a row at 860 and would give that one
+> back; the frames say otherwise, and the frames win. With the counts gone the
+> placeholder is free to say what the field is for, so it says `Search`.
+>
+> **3. §6's inventory gains `COLLECTION`, and it is a *footer*.** Four figures:
+> albums, artists, tracks, and total playing time in one unit. It is the last
+> section on the page, under `RECENTLY ADDED`, because Home's job is to put you
+> back into music — `CONTINUE` is the one thing on the page you press, and an
+> inventory must not push it down. It is also the only section here that is
+> pure statement, and leading with the part you cannot use would be the wrong
+> way round.
+>
+> **This does not reopen §6's refusal of engagement statistics.** The line it
+> draws holds, and `COLLECTION` is on the other side of it: every figure
+> describes **what you own**, and every one would be identical if the
+> application had never been opened. Three candidates were cut *by* that line
+> and by L8.6:
+>
+> - **When the collection was last added to** — `RECENTLY ADDED` is drawn one
+>   section above and says it with covers. One fact drawn twice is L8.6's test.
+> - **Records never played** — read out of the play ledger, and it changes
+>   while you sit looking at it. An engagement statistic wearing an inventory's
+>   clothes, which is why it is named here rather than quietly omitted.
+> - **Size on disk** — a filesystem fact, and nothing a listener would act on.
+>   The record page's `Details` block is where bytes belong.
+>
+> **4. §4's responsiveness contract is honoured, not excepted.** Three of the
+> four figures are a walk over every track, so they are counted where the view
+> model is built (`Shelf::rebuild_shelves`) and held as four scalars —
+> **one pass per rebuild, zero per frame**, the same shape as the ledger fold
+> §4 already licenses.
+>
+> Frames and the measured row count:
+> [`docs/design/impl/home-stats/`](../design/impl/home-stats/README.md).
 
-**Status**: accepted and shipped, as amended above (2026-08-09) · extracts the decisions of
+**Status**: accepted and shipped, as amended above (2026-08-09, 2026-08-10) · extracts the decisions of
 [`docs/design/13-everyday-flow.md`](../design/13-everyday-flow.md) §2, §3,
 §5 and §7 · **supersedes the product's no-resident-side-surfaces
 entry and `11-jobs-era-critique.md` P10** · **restates ADR-0022's

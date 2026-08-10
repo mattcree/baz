@@ -1158,17 +1158,46 @@ pub const SIDEBAR_HEAD_TEXT_X: f32 = GAP_SM + SIDEBAR_GLYPH_BOX + GAP_MD;
 /// it rather than leaving it 4 px off three glyphs above it.
 pub const SIDEBAR_WELL_GLYPH_LEAD: f32 = SIDEBAR_HEAD_GLYPH_X - ICON_PX / 2.0;
 
-/// **The search well's block in the lane's head**: **52** — the field at
-/// [`TRANSPORT_HIT`] 32, [`GAP_XS`] 4, and one [`LINE_META`] 16 readout line
-/// under it.
+/// **The search well's block in the lane's head**: **32** — the field, and
+/// nothing under it.
 ///
-/// The readout is **always drawn**, because a line that appeared when you
-/// typed would push [`SIDEBAR_ROW_H`]-pitched rows down by 16 px on the first
-/// keystroke. It carries the collection's counts at rest and the query's
-/// match count while one narrows the wall — the same reserved-slot discipline
-/// the well used inside itself when it lived in the strip, kept by holding the
-/// *line* rather than a width.
-pub const SIDEBAR_WELL_H: f32 = TRANSPORT_HIT + GAP_XS + LINE_META;
+/// It was 52: the field over an always-drawn [`LINE_META`] line carrying the
+/// collection's counts at rest and the query's match count while one narrowed
+/// the collection. The owner read the built thing — *"the album and track count
+/// below the search bar doesn't look good… maybe this should go into the home
+/// as some basic stats?"* — and the two figures on that line turned out to have
+/// two different jobs. **The resting counts are a statistic about the
+/// collection** and are the Home place's footer now; **the match count is
+/// feedback about the query** and went *inside* the field, right-aligned in
+/// [`SIDEBAR_MATCH_W`], which is where a search field has always put it and
+/// which costs no line at all.
+///
+/// So the block is one control tall, the head is 20 px shorter, and the list
+/// below it gets that back: **11 whole `RECENT` rows at 1920 × 1080 where
+/// there were 10**, measured off the frames in
+/// `docs/design/impl/home-stats/`. At 1280 × 860 the same 20 px buys three
+/// eighths of a row and no whole one — 7 rows either way — which is stated
+/// because the arithmetic that preceded the measurement predicted the opposite.
+/// The height is still *fixed* for the reason it always was: nothing below the
+/// well may move when a key lands in it.
+pub const SIDEBAR_WELL_H: f32 = TRANSPORT_HIT;
+
+/// **The match count's reserved slot inside the lane's well**: **72**.
+///
+/// The lane's own figure, not the strip's. [`crate::views::top_bar::MATCH_W`]
+/// is 88 because the strip could afford room for `40000 / 40000` beside a
+/// 280 px well; at [`SIDEBAR_MEASURE`] 232 that reservation would leave the
+/// query 88 px, which is what drove both figures out of the field in the first
+/// place. 72 holds `9999 / 9999` — a collection ten times the owner's — and
+/// leaves the query **104 px**, which `font.rs` measures rather than assumes
+/// (`the_lanes_well_holds_a_query_beside_its_match_count`).
+///
+/// Fixed, for the reason every readout slot in the product is fixed: the
+/// figures change as the query narrows, and a right-aligned slot of constant
+/// width means they change **in place**. The field reserves it only while a
+/// query stands, and the reservation is on the *right*, so the caret and the
+/// first character it sets never move.
+pub const SIDEBAR_MATCH_W: f32 = 72.0;
 
 /// **A work's own title**, and the one place in the product it is set: the
 /// Home place's `CONTINUE` placard.
@@ -1206,6 +1235,29 @@ pub const NEEDLE_TICK_W: f32 = 1.0;
 /// the needle takes, which is the rule that makes the whole band read as one
 /// object.
 pub const CONTINUE_SLEEVE: f32 = 132.0;
+
+/// **One cell of the Home place's `COLLECTION` footer**: **96**, a figure over
+/// its word.
+///
+/// A *pitch*, not a maximum: the four cells stand on one lattice so the figures
+/// line up as a row rather than drifting with the length of the words under
+/// them. 96 is [`GAP_XL`] × 4, and `font.rs` measures both lines of every cell
+/// against it (`the_home_collection_cells_hold_their_figures_and_their_words`).
+///
+/// Four of them with [`GAP_XL`] between comes to 456, which fits the narrowest
+/// body the product can produce — the const-assert below is that claim, and it
+/// is why this footer needs no responsive form.
+pub const STAT_W: f32 = GAP_XL * 4.0;
+
+/// The `COLLECTION` footer fits the narrowest place body baz can draw.
+///
+/// The floor window is `TOP_BAR_FLOOR + SIDEBAR_RAIL_W` (`app.rs`'s `min_size`),
+/// where the lane is always the rail, so the body is [`TOP_BAR_FLOOR`] and the
+/// content lane is that less [`place_pad`]'s two [`HANG`]s and the scrollbar's.
+const _: () = assert!(
+    4.0 * STAT_W + 3.0 * GAP_XL <= TOP_BAR_FLOOR - 2.0 * HANG - SCROLLBAR_LANE,
+    "the COLLECTION footer overflows the narrowest place body"
+);
 
 /// **The lane's ground**: [`Palette::recess`], one plane *below* the wall.
 ///

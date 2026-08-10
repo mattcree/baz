@@ -1415,12 +1415,22 @@ gives **13**.
 > `2 × GAP_MD + STEPPER_HIT` = 48. With a head of `3 × 40` that gives **7 rows**
 > at 860 and **11** at 1080.
 >
-> **The search well costs one of them.** ADR-0030's second amendment puts it in
-> the head: `GAP_SM` 8 plus `SIDEBAR_WELL_H` 52 — the field at `TRANSPORT_HIT`,
-> `GAP_XS`, and one `LINE_META` readout line that is always drawn. The head
-> becomes 180, and the list holds **6 rows** at 860 and **10** at 1080. Stated
-> here rather than in the commit, because it is the one thing the move takes
-> from §1's subject and the owner should be able to find it.
+> **The search well costs the list height, and the cost is now measured
+> rather than derived.** ADR-0030's second amendment puts it in the head:
+> `GAP_SM` 8 plus `SIDEBAR_WELL_H`, which was 52 — the field at
+> `TRANSPORT_HIT` over an always-drawn `LINE_META` readout line. The note here
+> said that cost one row at 860, taking 7 to 6. **It did not**: the shipped
+> frame holds **7** rows at 860 and 10 at 1080, and the arithmetic above is
+> ~24 px out somewhere between the bar and the foot marks.
+>
+> The **fourth amendment** takes the readout line away — the collection's
+> counts are Home's footer and the match count is inside the field — so
+> `SIDEBAR_WELL_H` is 32 and the head is 160. Measured off the same capture
+> script run against the binary either side of the change
+> (`docs/design/impl/home-stats/`): **11 rows at 1080 where there were 10**,
+> and **7 either way at 860**, where 20 px is three eighths of a 64 px row.
+> Stated here rather than in the commit, because it is the one thing the move
+> takes from §1's subject and the owner should be able to find it.
 
 ### 9.3 Content share, both readings
 

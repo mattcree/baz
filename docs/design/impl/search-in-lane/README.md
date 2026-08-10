@@ -106,6 +106,17 @@ lead: 60 px, which is most of one `SIDEBAR_ROW_H`. Stated rather than hidden:
 `(H − bar 83 − 2 × GAP_XL 48 − head − rule 25 − heading 36 − marks 48) / 64`,
 where `head` is `3 × 40` and now `+ GAP_SM + 52`.
 
+> **Corrected 2026-08-10 — that table is derived, and it is wrong.** The
+> frames from *this* commit were later counted directly
+> (`../home-stats/measure.py`, against a rebuilt binary of this very revision)
+> and the lane holds **7** rows at 1280 × 860 and **10** at 1920 × 1080 — so
+> the well cost a row at 1080, not at 860, and the formula above is about
+> 24 px out somewhere between the bar and the foot marks. The measured
+> before/after pair lives in
+> [`../home-stats/`](../home-stats/README.md); this paragraph stays rather
+> than being edited away, because the derivation was believed twice and the
+> second time it decided a design.
+
 ---
 
 ## The strip's budget, re-derived

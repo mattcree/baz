@@ -363,13 +363,18 @@ next commit.
     destination: baz has type-anywhere, so the query is open before you decide
     to search, and a destination row would say *go somewhere first*. Its mark
     stands on the destinations' glyph vertical and its text on their word
-    vertical, and it wears the lane row's own two-line anatomy — the field over
-    one quiet readout line.
-    - **The counts and the match count moved onto that line**:
-      `25 albums · 206 tracks` at rest, `12 of 25 albums` while narrowing. The
-      reserved in-well slot would have left the query 88 px of the lane's
-      232 px measure. The line is always drawn and left-aligned, so a keystroke
-      moves no row below it and the figures change in place.
+    vertical, and it is **one control tall**.
+    - **The match count is inside the field**, right-aligned in a reserved
+      72 px slot: `3 / 25`, which is the pair the strip's own well has always
+      drawn. The slot is the lane's own rather than the strip's 88, which is
+      what makes it fit — 232 less the 44 px text inset, a `GAP_MD` and 72
+      leaves the query **104 px**, more than a reserved 88 would have. Fixed
+      and right-aligned, so the figures change in place; reserved only while a
+      query stands, and on the *right*, so nothing moves as the first
+      character lands.
+    - **The collection's counts are not in the lane at all** — they are the
+      Home place's `COLLECTION` footer (below). The well's placeholder is free
+      to say `Search`.
     - **Collapsed**, the well is the magnifier in the destinations' anatomy,
       tooltipped `Search`, taking the lit ink while a query stands. Pressing
       it, `/`, `Ctrl`+`F` and the first key of a query all open the lane onto
@@ -395,8 +400,23 @@ next commit.
   the elapsed fraction with a 1 px tick at the position — then `Resume ·
   Anhydrous 11 · 3:12 of 4:34`. **The placard carries the needle and nothing is
   drawn on the artwork.** `RECENTLY ADDED` is one row of the wall's own tiles by
-  first-seen, with the wall's own hover options. Both bands are absent, not
-  empty.
+  first-seen, with the wall's own hover options. `COLLECTION` closes the page
+  with four figures — `25 ALBUMS`, `9 ARTISTS`, `206 TRACKS`,
+  `14 hours OF MUSIC` — a figure at the emphasis size over a tracked word, on a
+  96 px lattice, nothing pressable and nothing in colour. Every band is absent,
+  not empty.
+  - **It is a footer because you come to Home to get back into music**, not to
+    read numbers: `CONTINUE` is the one thing on the page you press and an
+    inventory must not push it down. Cut from the four and each for a reason —
+    *when the collection was last added to* (`RECENTLY ADDED` says it one
+    section above, with covers); *how many records have never been played* (a
+    fact about the listener, and ADR-0030 §6 refuses engagement statistics);
+    *the size on disk* (a filesystem fact, and the record page's `Details`
+    block is where bytes belong).
+  - The four are counted where the wall's view model is built — one pass over
+    every track per rebuild, never per frame, which is ADR-0030 §4's contract.
+    Artists are **named album artists, case-folded**, so a library that spells
+    one band two ways is not told it has two.
 - **`Place::Artist`** — an artist's page: their name, their counts, and their
   records in **the wall's own tile**, so a record behaves the same there as it
   does on the wall. Reached from the record page's new breadcrumb. It carries
@@ -857,6 +877,22 @@ next commit.
 
 ### Changed
 
+- **The search well's second line is gone; its two figures went to two
+  different places** (ADR-0030's fourth amendment). The owner, reading the
+  shipped lane: *"the album and track count below the search bar doesn't look
+  good… maybe this should go into the home as some basic stats?"*. The line
+  carried `25 albums · 206 tracks` at rest and `12 of 25 albums` while
+  narrowing, and those were never one readout: the resting counts are a
+  **statistic about the collection**, standing in the lane's most valuable
+  space with nothing being searched, and they are the Home place's
+  `COLLECTION` footer now; the match count is **feedback about the query**, so
+  it moved *inside* the field it answers, right-aligned in a 72 px slot, where
+  it costs no line at all. The well's block falls from 52 px to 32, and the
+  `RECENT` list gets the difference: **11 rows at 1920 × 1080 where there were
+  10**, measured off the frames rather than predicted — at 1280 × 860 the
+  20 px buys three eighths of a row and the count stays at 7. The strip's own
+  well, drawn only below `SIDEBAR_FLOOR`, is unchanged — a strip is one control
+  tall and never had a second line to lose.
 - **Home's `CONTINUE` band is the question you ask in the silence** (ADR-0030's
   third amendment). It used to be a reading of the launch snapshot, so pressing
   `Resume` left a frozen placard describing where you *were* on screen while
