@@ -96,6 +96,27 @@ Nothing. The queue above is the next thing.
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **Search off the Library, decided and built** — ADR-0036, the owner's *"how
+  the search works when we're not on the library needs to be decided… maybe a
+  little x or esc to clear would make sense too"*. The first half was **already
+  half-answered**: every road to the query has gone to the Library first since
+  the well moved into the lane (`App::reach_the_well`). What was missing is that
+  the field never said so, so the placeholder now names its subject —
+  **`Search library`**, in every place, in the field's resting 176 px, which
+  costs nothing because a placeholder and the count's slot are never on screen
+  together. **Contextual search is refused** on one hard constraint rather than
+  on taste: type-anywhere is a promise about the collection, and a scoped well
+  would revoke it on exactly the pages a scope applies to. And the **`×`** ships
+  in the mark's own box — the magnifier at rest, the cross while a query stands
+  — because the field's right edge is full and the swap costs the query none of
+  its 104 px. It runs `Esc`'s own function. Frames at
+  `docs/design/impl/search-scope/`.
+  - **The one thing this declines and does not dismiss**: a filter for a long
+    playlist's rows. Costed in `BACKLOG.md` as a *second control on the
+    playlist page* — its state beside `renaming`, peeled by
+    `peel_place_states`, and needing a key of its own because `/` and `Ctrl`+`F`
+    belong to the well. One surface earns it; that is the owner's call to make.
+
 - Doc 14 Tier 2 — **the distinction moves into the type**. A record's page sets
   its title in the serif italic; a playlist's page deliberately keeps the sans,
   and that asymmetry *is* the design. The two identity blocks did not move a

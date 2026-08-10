@@ -1123,6 +1123,45 @@ next commit.
 
 ### Changed
 
+- **The well has one meaning and now says so, and it has an `×`**
+  ([ADR-0036](docs/adr/0036-the-wells-one-meaning.md)). The owner: *"how the
+  search works when we're not on the library needs to be decided… maybe a
+  little x or esc to clear would make sense too"*.
+  - **It searches the collection, from every place** — unchanged behaviour,
+    now a decision. Every road to the query already went to the Library first
+    (`App::reach_the_well`): a printable key from anywhere, `/`, `Ctrl`+`F`,
+    the collapsed magnifier. What was missing is that the field never said so.
+  - **The placeholder names the scope: `Search library`**, permanently, in
+    every place — the noun on the destination row two below it, which is where
+    the query lands. It costs nothing, because a placeholder is drawn exactly
+    when the query is empty and the count's 72 px slot is reserved exactly when
+    it is not: the word sets in the field's resting **176 px**, not in the 104
+    a query gets. Swept past two longer candidates so a later edit cannot clip.
+  - **Contextual search is refused, and type-anywhere is the reason.** A well
+    scoped to the page would make the collection unreachable *by typing* on
+    exactly the pages a scope applies to — the distinctive gesture revoked
+    where the feature is most wanted. It would also mean two live queries or a
+    field that empties as you navigate, an `Esc` peel whose length depends on
+    where you stand, and — for the honest version, a separate per-page filter —
+    a second key, since `/` and `Ctrl`+`F` are spoken for. Exactly one surface
+    would have earned one (a long playlist's rows; a record's tracks and an
+    artist's records are short enough that a filter is noise, and the run is
+    the one list you reorder by dragging). Recorded in `docs/BACKLOG.md` with
+    its shape.
+  - **The `×` is in the mark's own box, on the left**, because the field's
+    right edge is full: `GAP_MD` + `SIDEBAR_MATCH_W` 72 is sized for
+    `1284 / 1284`, and a glyph box beside it would take the query's room from
+    104 px to 80 — below the 88 the design measured and rejected. The mark's
+    box is already `SIDEBAR_GLYPH_BOX` 24 (which is `STEPPER_HIT`) on the
+    destinations' glyph vertical, so the swap moves nothing on either edge:
+    **the magnifier at rest, the cross while a query stands.** A field with
+    text and a count in it does not need to be told it is a search field.
+  - **The `×` is `Esc`'s pointer route** — the identical function
+    (`Shelf::clear_query`), so the query goes, the caret leaves the field and
+    the transport gets the keyboard back. Drawn exactly while a query stands,
+    which is exactly when the key has that layer to peel; tooltipped
+    `Clear the search (Esc)`. Both wells draw it from one function, so the
+    pointer route exists at every width the keyboard route does.
 - **The search well's second line is gone; its two figures went to two
   different places** (ADR-0030's fourth amendment). The owner, reading the
   shipped lane: *"the album and track count below the search bar doesn't look
