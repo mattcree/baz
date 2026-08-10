@@ -91,6 +91,20 @@ byline extended to state its composition.
 the owner's *"right now they are different but for no good reason"*; §A4.5
 is the strip's lead, and the frames are at
 [`docs/design/impl/one-page-two-subjects/`](../design/impl/one-page-two-subjects/README.md).
+**And the row inside it, later the same day** — the owner's *"ensure our
+playlist view in the now playing and the playlist view/album view are the same
+thing"*: a record's track, a playlist's entry and the **run column's** row were
+three literal copies of one anatomy, the record head was two, and `views/queue.rs`
+held four more copies of the reserved icon slot this ADR had already shared for
+the two pages. They are `views::page::track_row`, `list_head` and `icon_slot`
+now, moving no pixels. **The one-arrangement rule reaches the row, and it stops
+at the composition**: the run column is not drawn through `page::view`, because
+`view` is a centred aside-and-main document in one scroll and the run is a
+virtualized column standing beside the record inside `Place::NowPlaying`'s own
+two-column layout. What may differ is the owner's `DETAILS`, the next-track
+ring, the trailing slot sets and the head — a page states a *name*, a run
+states a *position*. Frames at
+[`docs/design/impl/one-list-drawn-once/`](../design/impl/one-list-drawn-once/README.md).
 §A3's closing paragraph and §A4.4's last sentence are the two questions
 **left to the owner** ·
 extracts the decisions of

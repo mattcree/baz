@@ -134,19 +134,7 @@
    word may not need qualifying. It should credit the artist's list rather than
    the underlying records when played, which is the rule that just landed for
    playlists.
-5. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
-   2026-08-10: *"at full screen the now playing page looks odd because the
-   playlist hugs right and the art hugs left"* — which is this item, reported
-   from the frame rather than from the measurement, and worth recording as a
-   confirmation that the queued defect is the one a listener actually sees.
-   Visible in a committed frame: at 2560 with the run standing, ~700 px of
-   field sits between the sleeve and the run column, because the record column
-   hangs left and the run stays 440 wide. A4 takes it to ~1100 at that size.
-   His phrasing names both edges, so check the *record* column's own alignment
-   too — A4 widening the run closes the gap from one side, and if the sleeve is
-   also hanging hard left rather than sitting in its column, that is a second
-   fault the widening would hide rather than fix.
-6. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+5. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -159,7 +147,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-7. **Rewrite the README as the project's public face**, with the icon and real
+6. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
    last, so it describes what actually ships. Two of those four now exist and
    are regenerable — `docs/screenshots/capture.sh` writes the wall and Now
@@ -169,8 +157,8 @@
    `Ctrl+B` exists. (The group-key row itself is current again — the six words
    and `1`–`6` were corrected when `A–Z` came back.)
 
-8. **Ship the public beta.** The last item by construction: it is the one
-   that makes the seven above reach anybody. `v0.1.0` is prepared up to the
+7. **Ship the public beta.** The last item by construction: it is the one
+   that makes the six above reach anybody. `v0.1.0` is prepared up to the
    tag and `docs/RELEASING.md` holds the owner's three commands, but a *beta*
    asks two more things of the release than a private tag does. **Flathub** —
    an account and a PR to `flathub/flathub`, which is the owner's and has
@@ -317,6 +305,53 @@ call.
 ## Recently done
 
 Newest first. Fuller detail in `CHANGELOG.md`.
+
+- **`Now playing` makes sense at width, and the run column stopped being the
+  third copy of the track list.** Two of the owner's asks on 2026-08-10, on one
+  surface. Frames, both builds, at 1280 / 1920 / 2560:
+  [`docs/design/impl/one-list-drawn-once/`](design/impl/one-list-drawn-once/README.md).
+  - **Doc 12 step A4 (the run's half), and a second fault beside it.** The
+    queued item had one cause; the owner's own phrasing — *"the playlist hugs
+    right and the art hugs left"* — had two, and it was right. `RUN_MEASURE`
+    was flat 440 at every size **and** the record column hung from the body's
+    left gutter while the run was pinned to the right, so every pixel the two
+    could not use piled up between them. Measured at 2560 × 1440: **1171 px**
+    of bare field, not the ~700 this item carried — that figure assumed a
+    1024 px cover and the field is *everything the work cannot use*, so a
+    smaller cover leaves more of it.
+  - **A4 alone would not have fixed it.** It takes the run 440 → 692 at that
+    window and the gap 1171 → 919. The work there is bound by the **file**, so
+    none of that field was the run's to give back; the pair centring is the
+    other half. The gap is **36 px** at every size now, and 1280 × 860 is
+    *pixel-identical* — the two columns' band diffs at **0**.
+  - **The run now grows with the panel**: `RUN_MEASURE · kiosk_scale`, 440 up
+    to a 720 px work, 472 at 1920, 692 at 2560, 1100 at 4K, capped so the
+    record keeps `ART_MIN` above `SPLIT_FLOOR`. **Doc 12 §11.2's claim that
+    every window at or below 720 is untouched is not quite true** and the code
+    says so: a 1920 body's work is 773 px, because `below` is 146 today and not
+    the 190 §11.2 was written against. Nothing a listener sees moves badly —
+    the work is 773 px at either measure — but it is a real disagreement
+    between the document and the build, recorded rather than tuned away.
+  - **One row, drawn once.** A record's track, a playlist's entry and a run's
+    row were three literal copies of one anatomy; the record head was two
+    (`playlist::record_head`, `queue::album_group`); and `views::queue` held
+    **four more copies** of the reserved icon slot that
+    `impl/one-page-two-subjects/` had already shared for the two pages. All of
+    it is `views::page::track_row`, `list_head` and `icon_slot` now. The
+    refactor moves **no pixels**: both pages diff at 1–3 px between the builds
+    outside the bottom bar's clock.
+  - **What honestly did not merge**, each named where it is drawn: `DETAILS`
+    (the owner's own *"album exploration type data"*), the next-track ring (a
+    run has a cursor, a document does not), the trailing slot sets, the head (a
+    *name* against a *position*), and the page composition itself — the run is
+    a virtualized column inside another surface's two-column layout, not a
+    document in one scroll.
+  - **A test that could not fail**, found on the way:
+    `queue::tests::the_queue_place_is_virtual_and_its_rows_are_the_playlist_editors`
+    reads its own file, so every needle it spelled satisfied itself. It had
+    gone stale twice — `window.height` after that argument became `viewport_h`,
+    and a slot literal that had changed module — and passed both times. It now
+    searches the code half only, the way `views::page::tests::pages` does.
 
 - **Fourteen files skipped were one whole album, and one junk byte was the
   whole cause.** The owner's launch scan on 2026-08-10 reported `14 files

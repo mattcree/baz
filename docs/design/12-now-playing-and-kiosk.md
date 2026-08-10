@@ -3142,7 +3142,23 @@ never outgrows the work it labels.
 
 The clamp's floor of 1.0 is what keeps every window at or below 720 px of work
 **pixel-identical to what ships today**, so this change cannot regress the
-desktop case. The ceiling of 2.5 stops a very large source producing type that
+desktop case.
+
+> **Corrected 2026-08-10, when A4's run half shipped.** *"Every window at or
+> below 720 px of work"* does not include 1920 × 1080, and this section was
+> written as though it did. A 1920 body's work is **773 px**, because `below` is
+> **146** in the build and not the 190 §11.2 assumed — the same stale input
+> §5.5a's table corrects twice for other rows. So the run at 1920 is
+> `440 × 1.074` = **472**, not 440.
+>
+> **Nothing a listener sees moves badly**, which is why it was allowed rather
+> than tuned: the work at 1920 is 773 px with the run at 440 and 773 px with it
+> at 472, because the run takes width the record is structurally unable to use.
+> `1280 × 860` — the window every composition audit in this project is taken at
+> — is genuinely untouched, and measured so: the two columns' band diffs at
+> **0 pixels** between the builds. Keying the reference to make 1920 land on
+> exactly 1.0 would be a constant chosen to flatter this table, and the table is
+> the thing that is stale. The ceiling of 2.5 stops a very large source producing type that
 is absurd at 60 cm on the same panel.
 
 **What does not change at any size**, and this is the property that made the
@@ -3472,6 +3488,28 @@ over `hero_px ∈ {120, 320, 500, 1024}` × sides 400–4000, mirroring
 > px of field sits between the sleeve and the run. That is §5.5a's left-hang
 > working as written; **A4** scales `RUN_MEASURE` by `kiosk_scale` — 440 → ~1100
 > at this size — which is most of that gap.
+>
+> > **Measured and shipped 2026-08-10** — the run's half of A4, on the owner's
+> > *"make sure the layout of the now playing makes sense on wider screens"*.
+> > [`impl/one-list-drawn-once/`](impl/one-list-drawn-once/README.md).
+> > **Three corrections to the paragraph above.**
+> >
+> > 1. **The gap is 1171 px at 2560 × 1440, not ~700.** The ~700 assumes a
+> >    1024 px cover; the field between the columns is *everything the work
+> >    cannot use*, so a smaller cover leaves more of it, and the fixture's
+> >    covers are 600 px. The arithmetic was right about its own cover and the
+> >    defect is worse than it read.
+> > 2. **`RUN_MEASURE · kiosk_scale` is ~692 at 2560, not ~1100.** 1100 is the
+> >    scale at its 2.5 **ceiling**, which is a 4K figure; 2560 × 1440 gives a
+> >    1133 px `by_height` and a scale of 1.57.
+> > 3. **A4 is not most of that gap, and it is not the whole fault.** It closes
+> >    1171 → 919. The work at that window is bound by the **file**, so none of
+> >    the rest was the run's to give back. The owner's own first telling had
+> >    both halves — *"the playlist hugs right and the art hugs left"* — and the
+> >    left one is `view`'s: the record's container was `width(Fill)` with no
+> >    `align_x`, so every spare pixel piled up between the columns. The two
+> >    columns centre as one pair now, which is `views::page::view`'s rule, and
+> >    the gap is one `GAP_XL` at every size.
 
 ---
 
@@ -3518,9 +3556,20 @@ exceeds L 0.22; a cover with no chroma yields the room rather than a grey wash.
 
 ---
 
-**Step 4 — The kiosk type scale.** *(§11.2)*
+**Step 4 — The kiosk type scale.** *(§11.2)* — **the run's half shipped
+2026-08-10; the type is not built**
 
 `kiosk_scale(edge)` and its application to the placard, the feed and the needle.
+
+> **What shipped is `kiosk_scale` itself and its one consumer, `run_w`** —
+> `views::now_playing`, on the owner's *"wider screens"* report, because that
+> was a queued beta blocker and the type scale is a 1.0 kiosk surface
+> (`docs/WORK.md`'s scope). The placard, the feed and the needle are **not**
+> scaled and no size token moved, so `the_type_scale_is_identity_below_720`
+> below is still unwritten and still the gate for the rest of this step.
+> `kiosk_scale` lives in `views::now_playing` rather than `theme` for the same
+> reason — it has one consumer — and moves to `theme` when the type takes it.
+> Frames: [`impl/one-list-drawn-once/`](impl/one-list-drawn-once/README.md).
 
 *Ships*: 4K becomes a kiosk rather than a postage stamp.
 *Test*: `the_type_scale_is_identity_below_720` — every size token at

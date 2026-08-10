@@ -141,20 +141,94 @@ use crate::playlists::{Collecting, NameEntry};
 use crate::theme;
 use crate::views::{gradient_block, queue};
 
-/// **The run column's width in a body `width` px wide**, or `0` when the run is
-/// not standing beside the record.
+/// **The work size the desktop composition was tuned at** — the old
+/// `NOW_PLAYING_MAX`, kept as the *reference* it always secretly was after step
+/// A2 deleted it as a *ceiling*.
 ///
-/// Two conditions, and since the `Run` word went **both** are facts rather than
-/// preferences: there is no run at all, or the body is below
+/// It is the denominator of [`kiosk_scale`] and nothing else. A2's finding was
+/// that 720 is a lie when it bounds a decode; it is an honest number when it
+/// names the size this surface's measures were chosen against, which is what
+/// makes the scale's floor of `1.0` a promise that every window at or below it
+/// is pixel-identical to the build before A4.
+const FAR_FIELD_REF: f32 = 720.0;
+
+/// The ceiling on [`kiosk_scale`] — doc 12 §11.2's `2.5`. It stops a very large
+/// panel producing measures that are absurd at 60 cm on that same panel.
+const KIOSK_SCALE_MAX: f32 = 2.5;
+
+/// **How much larger than the desktop composition this window is** — doc 12
+/// §11.2's `kiosk_scale`, `1.0` at every window this product was designed at
+/// and up to [`KIOSK_SCALE_MAX`] beyond it.
+///
+/// # It is keyed to the height, and that is deliberate
+///
+/// §11.2 prints `kiosk_scale(edge)`; §5.5a prints `kiosk_scale(by_height)` and
+/// explains why the second is the one that can be built: **`edge` depends on
+/// `run_w`, and `run_w` is what this scales.** Keying the scale to the work's
+/// resolved size would make the run's width depend on the record's width, which
+/// depends on the run's width, and the fixed point would have to be iterated or
+/// fudged. `by_height` — the height-bound candidate for the work — is the same
+/// quantity one term earlier, and it does not depend on the run at all.
+///
+/// So this takes the **window's height**, computes `art_edge`'s own height term
+/// from it, and hands back a ratio. One honest substitution, named here so
+/// nobody later "fixes" it into a cycle.
+#[must_use]
+fn kiosk_scale(height: f32) -> f32 {
+    let by_height = height - 2.0 * theme::HANG - BELOW;
+    (by_height / FAR_FIELD_REF).clamp(1.0, KIOSK_SCALE_MAX)
+}
+
+/// **The run column's width in a body `width` × `height` px**, or `0` when the
+/// run is not standing beside the record.
+///
+/// Two conditions for the zero, and since the `Run` word went **both** are facts
+/// rather than preferences: there is no run at all, or the body is below
 /// [`theme::SPLIT_FLOOR`] and the two columns have re-stacked into one, where
 /// the run takes the whole measure and the record becomes its head.
+///
+/// # It grows with the window — doc 12 step A4, and the owner's own report
+///
+/// The owner, 2026-08-10: *"at full screen the now playing page looks odd
+/// because the playlist hugs right and the art hugs left"*. [`theme::RUN_MEASURE`]
+/// **440** is half of [`theme::LIST_MEASURE`], derived for a 1280–1920 window,
+/// and it stayed 440 at every size — so at 2560 the run was a 440 px ribbon
+/// with **1171 px of bare field between it and the sleeve**, measured off the
+/// frames in `docs/design/impl/one-list-drawn-once/`. This is the *right* edge of his
+/// sentence; [`view`]'s centring is the left one, and neither alone is the fix.
+///
+/// So the measure is scaled by [`kiosk_scale`] — 440 up to a
+/// [`FAR_FIELD_REF`] work, **472** at 1920 × 1080, **692** at 2560 × 1440, and
+/// **1100** at 4K where the scale reaches its ceiling.
+///
+/// The 1920 figure is 440 in doc 12 §5.5a's table and it is **472** here;
+/// `the_run_grows_with_the_panel_and_the_gap_does_not` carries the reconciliation,
+/// which is the same stale `below` the table already corrects twice for other
+/// rows. The work at that size does not change either way.
+///
+/// # The cap, which is the floor `SPLIT_FLOOR` guarantees, held at every size
+///
+/// [`theme::SPLIT_FLOOR`] is *derived* as `ART_MIN + 2·HANG + RUN_MEASURE +
+/// GAP_XL` — the narrowest body in which the record can be [`theme::ART_MIN`]
+/// **and** the run can be `RUN_MEASURE`. A run that grows without a cap breaks
+/// the half of that guarantee it does not own: a tall, narrow window (784 × 4000
+/// is above the floor) would scale the run to 1100 and leave the record
+/// *negative*.
+///
+/// So the scaled measure is capped at whatever leaves the record its floor. The
+/// cap can never bite below `RUN_MEASURE`, because that is what `SPLIT_FLOOR`
+/// being derived from these four terms *means* — and at the floor itself the cap
+/// is exactly 440, which is why the record does not lurch across it.
 #[must_use]
-pub(crate) fn run_w(width: f32, run: bool) -> f32 {
-    if run && width >= theme::SPLIT_FLOOR {
-        theme::RUN_MEASURE
-    } else {
-        0.0
+pub(crate) fn run_w(width: f32, height: f32, run: bool) -> f32 {
+    if !(run && width >= theme::SPLIT_FLOOR) {
+        return 0.0;
     }
+    // Spelled `.max(RUN_MEASURE)` rather than left to the arithmetic so this
+    // cannot become a `clamp` whose low exceeds its high and panics — the
+    // derivation above says it cannot, and a floor costs nothing to state.
+    let cap = (width - 2.0 * theme::HANG - theme::GAP_XL - theme::ART_MIN).max(theme::RUN_MEASURE);
+    (theme::RUN_MEASURE * kiosk_scale(height)).clamp(theme::RUN_MEASURE, cap)
 }
 
 /// What the placard under the work needs: the gap off the sleeve, three lines,
@@ -237,7 +311,7 @@ pub(crate) fn record_edge(width: f32, height: f32, run: bool, source: f32) -> f3
     if run && width < theme::SPLIT_FLOOR {
         theme::ART_MIN.min(source)
     } else {
-        art_edge(width, height, run_w(width, run), source)
+        art_edge(width, height, run_w(width, height, run), source)
     }
 }
 
@@ -315,6 +389,38 @@ pub(crate) fn art_edge(width: f32, height: f32, run_w: f32, source: f32) -> f32 
 /// readings the bar under this place is drawn from, so this surface cannot
 /// contradict the one beneath it. See the module docs for the `Run` word that
 /// used to sit over this and for the one lie its removal took with it.
+///
+/// # The two columns centre as one pair, and used to hang from both edges
+///
+/// The owner, 2026-08-10: *"at full screen the now playing page looks odd
+/// because the playlist hugs right and the art hugs left"*. **Both halves of
+/// that sentence were literally true.** The record's container was
+/// `width(Fill)` with no `align_x`, so the work sat at exactly [`theme::HANG`]
+/// from the body's left edge; the run was pinned to the right by a trailing
+/// `HANG` spacer; and every pixel the two could not use piled up *between*
+/// them — **1171** of them at 2560 × 1440 and 531 at 1920 × 1080, measured in
+/// `docs/design/impl/one-list-drawn-once/`.
+///
+/// The comment that stood in that branch defended the hang: *"centring the work
+/// in what remains would leave the placard's left alignment pointing at
+/// nothing"*. It does not survive reading [`record_column`] — the placard is
+/// `width(Fixed(edge))` and the sleeve is `edge` wide, so the two share a left
+/// edge **with each other** wherever the column is put. What the hang aligned
+/// the placard to was the body's gutter, and nothing else on this surface is on
+/// that lane.
+///
+/// So the pair is `edge + GAP_XL + run_w`, centred — which is
+/// [`crate::views::page::view`]'s own rule (grow with the window until the
+/// measures cap, then centre in what is left) reaching the one surface that did
+/// not have it. The air is *outside* the composition instead of inside it, and
+/// the seam between the work and the list is one [`theme::GAP_XL`] at every
+/// size.
+///
+/// **It cannot overflow**: [`art_edge`]'s own `by_width` term is
+/// `width − 2·HANG − (run_w + GAP_XL)`, so the pair is at most `width − 2·HANG`
+/// and the centring always leaves at least a `HANG` on each side. At 1280 × 860
+/// the pair fills the body exactly and the centring is a no-op, which is why
+/// that window is pixel-identical across the change.
 #[expect(
     clippy::too_many_arguments,
     reason = "the surface is two halves and each half's readings arrive \
@@ -380,7 +486,7 @@ pub(crate) fn view<'a>(
             .align_y(alignment::Vertical::Center)
             .into();
     }
-    let run_w = run_w(width, showing_run);
+    let run_w = run_w(width, height, showing_run);
     // **The source's own pixels**, which is what bounds the work now that
     // `NOW_PLAYING_MAX` is gone. Resolved once, here, so the number the layout
     // clamps against and the picture the layout draws are the same decode.
@@ -411,32 +517,11 @@ pub(crate) fn view<'a>(
         // it stood before the merge, at the size this window gives it. Reached
         // only when the engine is naming a track that came from no run of ours.
         Some(record) if !showing_run => container(record).center(Length::Fill).into(),
-        // **Two columns.** The record column is *left-hung*, not centred: with
-        // the run taking the right edge, centring the work in what remains
-        // would leave the placard's left alignment pointing at nothing. The
-        // work and its placard share a left edge with each other and hang from
-        // the body's own `HANG`.
-        //
-        // **The record's column is drawn even when there is no record**, which
-        // is the composition holding rather than an empty box: a run loaded and
-        // stopped becomes a run sounding without one pixel of the list moving,
-        // and the field already believed this — [`ground`] answers
-        // `Ground::Split` on the run alone, so a body that re-stacked here
-        // would put a scrolling list under ambient light. The layout was the
-        // half that disagreed.
-        record if run_w > 0.0 => row![
-            container(record.unwrap_or_else(|| Space::new(Length::Fill, Length::Fill).into()))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .padding(iced::Padding {
-                    top: theme::HANG,
-                    right: 0.0,
-                    bottom: theme::HANG,
-                    left: theme::HANG,
-                })
-                .align_y(alignment::Vertical::Center),
-            Space::with_width(Length::Fixed(theme::GAP_XL)),
-            container(run_scroll(
+        // **Two columns, and the pair centres** — see [`split`], which owns the
+        // arrangement and the argument for it.
+        record if run_w > 0.0 => split(
+            record,
+            run_scroll(
                 player,
                 queue::Frame {
                     measure: run_w - theme::SCROLLBAR_LANE,
@@ -455,12 +540,10 @@ pub(crate) fn view<'a>(
                 collecting,
                 drag,
                 can_undo,
-            ))
-            .width(Length::Fixed(run_w))
-            .height(Length::Fill),
-            Space::with_width(Length::Fixed(theme::HANG)),
-        ]
-        .into(),
+            ),
+            edge,
+            run_w,
+        ),
         // **One column, below `SPLIT_FLOOR`**: the run wins and the record
         // becomes its head. The record cannot be the size it deserves at this
         // width in any case, and what is left worth doing is the list — so the
@@ -562,7 +645,7 @@ pub(crate) fn follow(
     // exists below `SPLIT_FLOOR`, and it is inside the scroll there, so it is
     // part of the offset the rows begin at.
     let now = player.now_playing();
-    let run_w = run_w(width, true);
+    let run_w = run_w(width, height, true);
     let head_h = if run_w > 0.0 {
         0.0
     } else {
@@ -582,6 +665,54 @@ pub(crate) fn follow(
         return None;
     }
     Some((top - FOLLOW_LEAD).max(0.0))
+}
+
+/// **The two columns, centred as one pair** — the composition above
+/// [`theme::SPLIT_FLOOR`].
+///
+/// `edge + GAP_XL + run_w`, centred in the body, which is
+/// [`crate::views::page::view`]'s own rule (grow with the window until the
+/// measures cap, then centre in what is left) reaching the one surface that did
+/// not have it. See [`view`]'s docs for the two edges the owner named and for
+/// the comment that used to defend hanging from both of them.
+///
+/// **It cannot overflow**: [`art_edge`]'s `by_width` term is
+/// `width − 2·HANG − (run_w + GAP_XL)`, so the pair is at most `width − 2·HANG`
+/// and the centring always leaves at least a [`theme::HANG`] on each side. At
+/// 1280 × 860 it fills the body exactly and the centring is a no-op, which is
+/// why that window is pixel-identical across the change.
+///
+/// **The record's column is drawn even when there is no record**, which is the
+/// composition holding rather than an empty box: a run loaded and stopped
+/// becomes a run sounding without one pixel of the list moving. It holds `edge`
+/// rather than filling, so the run does not slide sideways when the engine
+/// finally names a track.
+fn split<'a>(
+    record: Option<Element<'a, Message>>,
+    run: Element<'a, Message>,
+    edge: f32,
+    run_w: f32,
+) -> Element<'a, Message> {
+    container(
+        row![
+            container(
+                record.unwrap_or_else(|| Space::new(Length::Fixed(edge), Length::Fill).into())
+            )
+            .width(Length::Fixed(edge))
+            .height(Length::Fill)
+            .padding(theme::pad(theme::HANG, 0.0))
+            .align_y(alignment::Vertical::Center),
+            Space::with_width(Length::Fixed(theme::GAP_XL)),
+            container(run)
+                .width(Length::Fixed(run_w))
+                .height(Length::Fill),
+        ]
+        .align_y(alignment::Vertical::Center),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .into()
 }
 
 /// [`queue::run_column`], named here so the two call sites above read as one
@@ -1096,7 +1227,7 @@ mod tests {
         for source in SOURCES {
             for side in sides() {
                 for run in [false, true] {
-                    let beside = run_w(side, run);
+                    let beside = run_w(side, side, run);
                     assert!(
                         art_edge(side, side, beside, source) <= source,
                         "{side}² with {beside} beside: {} px drawn from {source} px",
@@ -1129,7 +1260,7 @@ mod tests {
         // …and it never collapses below the floor, whatever the window does.
         for height in [0.0, 1.0, 120.0, 300.0] {
             for run in [false, true] {
-                let edge = art_edge(1280.0, height, run_w(1280.0, run), f32::INFINITY);
+                let edge = art_edge(1280.0, height, run_w(1280.0, height, run), f32::INFINITY);
                 assert!((edge - theme::ART_MIN).abs() < f32::EPSILON, "run {run}");
             }
         }
@@ -1194,7 +1325,7 @@ mod tests {
         for width in sides() {
             for height in sides() {
                 for source in SOURCES {
-                    let edge = art_edge(width, height, run_w(width, true), source);
+                    let edge = art_edge(width, height, run_w(width, height, true), source);
                     // The split branch's own budget, which is the tight one.
                     let budget = height - 2.0 * theme::HANG;
                     assert!(
@@ -1220,9 +1351,9 @@ mod tests {
     fn the_run_costs_the_record_nothing_where_it_is_height_bound() {
         for width in sides() {
             for height in sides() {
-                let with = art_edge(width, height, run_w(width, true), f32::INFINITY);
+                let with = art_edge(width, height, run_w(width, height, true), f32::INFINITY);
                 let without = art_edge(width, height, 0.0, f32::INFINITY);
-                let beside = run_w(width, true);
+                let beside = run_w(width, height, true);
                 if beside <= 0.0 {
                     assert!((with - without).abs() < f32::EPSILON, "{width}×{height}");
                     continue;
@@ -1246,10 +1377,12 @@ mod tests {
         // a cost hidden.
         let (body_w, body_h) = (1000.0, 779.0);
         let bare = |w: f32, beside: f32| art_edge(w, body_h, beside, f32::INFINITY);
-        assert!(bare(body_w, run_w(body_w, true)) < bare(body_w, 0.0));
+        assert!(bare(body_w, run_w(body_w, body_h, true)) < bare(body_w, 0.0));
         // …and with the lane collapsed at the same window, it is free again.
         let body_w = 1184.0;
-        assert!((bare(body_w, run_w(body_w, true)) - bare(body_w, 0.0)).abs() < f32::EPSILON);
+        assert!(
+            (bare(body_w, run_w(body_w, body_h, true)) - bare(body_w, 0.0)).abs() < f32::EPSILON
+        );
     }
 
     /// **The two columns re-stack below the split floor**, swept 400–4000 the
@@ -1258,34 +1391,168 @@ mod tests {
     /// Below [`theme::SPLIT_FLOOR`] the record cannot be the size it deserves
     /// in any case, so the run takes the measure and the record becomes its
     /// head — **one composition degrading, not a second layout**. Above it the
-    /// two stand side by side at every size, with the run always exactly
-    /// [`theme::RUN_MEASURE`].
+    /// two stand side by side at every size.
+    ///
+    /// # The run is no longer flat, and the two claims that replaced that one
+    ///
+    /// This asserted `split == RUN_MEASURE` at every width until step A4. It is
+    /// now `RUN_MEASURE · kiosk_scale`, so what is swept instead is the pair of
+    /// properties the flat number was a special case of:
+    ///
+    /// 1. **The floor is exact.** At or below a [`FAR_FIELD_REF`] work the
+    ///    scale is `1.0` and the measure is 440 *to the pixel* — which is what
+    ///    makes A4 unable to move any window this product has ever been audited
+    ///    at (1280 × 860 and 1920 × 1080 both have `by_height` well under 720).
+    /// 2. **The record keeps [`theme::ART_MIN`] anyway.** This is the half of
+    ///    [`theme::SPLIT_FLOOR`]'s derivation that a growing run could break,
+    ///    and the cap in [`run_w`] is what holds it. It is swept over **both**
+    ///    axes here rather than width alone, because a run that scales with the
+    ///    height cannot be checked at one height — 784 × 4000 is the case that
+    ///    would have gone negative.
     #[test]
     fn the_two_columns_restack_below_the_split_floor() {
         for width in sides() {
-            let split = run_w(width, true);
-            assert_eq!(
-                split > 0.0,
-                width >= theme::SPLIT_FLOOR,
-                "{width}: the split floor is the only condition"
-            );
-            if split > 0.0 {
-                assert!((split - theme::RUN_MEASURE).abs() < f32::EPSILON, "{width}");
-                // At the floor itself the record still clears its own floor,
-                // which is what the floor was derived from.
+            for height in sides() {
+                let split = run_w(width, height, true);
+                assert_eq!(
+                    split > 0.0,
+                    width >= theme::SPLIT_FLOOR,
+                    "{width}: the split floor is the only condition"
+                );
+                if split > 0.0 {
+                    // Never narrower than the desktop measure, and never so
+                    // wide that the record loses its floor.
+                    assert!(split >= theme::RUN_MEASURE, "{width}×{height}: {split}");
+                    assert!(
+                        width - 2.0 * theme::HANG - (split + theme::GAP_XL) >= theme::ART_MIN,
+                        "{width}×{height}: the record fell below ART_MIN inside the split"
+                    );
+                    // …and it is *exactly* the desktop measure wherever the
+                    // work this surface can show is one the desktop
+                    // composition was designed for.
+                    if height - 2.0 * theme::HANG - BELOW <= FAR_FIELD_REF {
+                        assert!(
+                            (split - theme::RUN_MEASURE).abs() < f32::EPSILON,
+                            "{width}×{height}: A4 moved a window it must not"
+                        );
+                    }
+                }
+                // The word turned off is the whole body, at every width.
                 assert!(
-                    width - 2.0 * theme::HANG - (split + theme::GAP_XL) >= theme::ART_MIN,
-                    "{width}: the record fell below ART_MIN inside the split"
+                    (run_w(width, height, false)).abs() < f32::EPSILON,
+                    "{width}"
                 );
             }
-            // The word turned off is the whole body, at every width.
-            assert!((run_w(width, false)).abs() < f32::EPSILON, "{width}");
         }
         // The floor bites at a 1064 px window with the lane open and an 880 px
         // window with it collapsed — both below the 1280 the composition
         // audits are taken at, so the regime is real rather than theoretical.
-        assert!((run_w(theme::SPLIT_FLOOR - 1.0, true)).abs() < f32::EPSILON);
-        assert!(run_w(theme::SPLIT_FLOOR, true) > 0.0);
+        assert!((run_w(theme::SPLIT_FLOOR - 1.0, 999.0, true)).abs() < f32::EPSILON);
+        assert!(run_w(theme::SPLIT_FLOOR, 999.0, true) > 0.0);
+        // **At the floor itself the cap is exactly `RUN_MEASURE`**, whatever
+        // the height — which is why the record does not lurch across it: the
+        // 240 px it gets in the split is the 240 px the head block gives it
+        // one pixel below.
+        for height in sides() {
+            assert!(
+                (run_w(theme::SPLIT_FLOOR, height, true) - theme::RUN_MEASURE).abs() < f32::EPSILON,
+                "{height}: the cap at the floor is not the measure"
+            );
+        }
+    }
+
+    /// **Doc 12 §5.5a's own table, at the three sizes the frames are taken
+    /// at** — the arithmetic step A4 exists to produce, and the measurement in
+    /// `docs/design/impl/one-list-drawn-once/` in one assertion.
+    ///
+    /// Body dimensions, not window: the shell hands [`view`] `body_width` and
+    /// `body_height`, and a 2560 × 1440 window with the returns lane standing
+    /// is a 2280 × 1359 body.
+    ///
+    /// The gap the owner reported is the last column: the field between the
+    /// work's right edge and the run's left. It was `record_w − edge` with the
+    /// record hung left; it is one [`theme::GAP_XL`] now, at every size, because
+    /// the pair centres.
+    ///
+    /// # 1920 moves, and doc 12 §11.2 says it must not
+    ///
+    /// §11.2: *"the clamp's floor of 1.0 is what keeps every window at or below
+    /// 720 px of work pixel-identical to what ships today"*. **A 1920 × 1080
+    /// body's work is 773 px, not 720**, so the scale is 1.074 there and the run
+    /// goes 440 → 472. The document is not wrong about its own arithmetic; it is
+    /// out of date about one input, and this is the same correction §5.5a's
+    /// table already carries twice: `below` was 190 when §11.2 was written, it
+    /// is [`BELOW`] **146** until steps A5 and A9 build the meter and the feed,
+    /// and 44 px of `below` is what puts a 1920 work over the reference.
+    ///
+    /// **It is allowed to move because nothing a listener can see moves badly.**
+    /// The work at 1920 is height-bound at 773 px with the run at 440 and still
+    /// 773 px with it at 472 — the run takes width the record structurally
+    /// cannot use, which is the property `the_run_costs_the_record_nothing…`
+    /// sweeps. What changes is that 32 px of the 323 px hole at that size closes
+    /// by measure and the rest closes by centring. Recorded rather than tuned
+    /// away: keying the reference to make 1920 land on exactly 1.0 would be a
+    /// constant chosen to flatter a table, and the table is the thing that is
+    /// stale.
+    #[test]
+    fn the_run_grows_with_the_panel_and_the_gap_does_not() {
+        // (body, source, the run's measure)
+        for (body_w, body_h, source, run) in [
+            // 1280 × 860, lane open — a 553 px work, under the reference, so
+            // the scale's floor holds it at exactly the desktop measure.
+            (1000.0_f32, 779.0_f32, 1024.0_f32, 440.0_f32),
+            // 1920 × 1080, lane open — a 773 px work, just over. See above.
+            (1640.0, 999.0, 1024.0, 440.0 * (773.0 / 720.0)),
+            // 2560 × 1440, lane open — the window the owner was looking at.
+            (2280.0, 1359.0, 1024.0, 440.0 * (1133.0 / 720.0)),
+            // 3840 × 2160, lane collapsed — the scale at its ceiling.
+            (3744.0, 2079.0, 3000.0, 440.0 * KIOSK_SCALE_MAX),
+        ] {
+            let split = run_w(body_w, body_h, true);
+            assert!(
+                (split - run).abs() < 0.5,
+                "{body_w}×{body_h}: the run is {split}, not {run}"
+            );
+            // The pair fits the body with a `HANG` to spare on each side, which
+            // is what makes the centring in `view` safe at every one of them.
+            let edge = record_edge(body_w, body_h, true, source);
+            let pair = edge + theme::GAP_XL + split;
+            assert!(
+                pair <= body_w - 2.0 * theme::HANG,
+                "{body_w}×{body_h}: the pair {pair} overflows the body"
+            );
+        }
+        // **The defect itself, as arithmetic.** Before A4 and the centring the
+        // record's column was the whole of what the run left and the work hung
+        // at its left edge, so the bare field between the two was *everything
+        // the work could not use* — which grows with the panel and shrinks with
+        // the cover, and is therefore worst exactly where the owner met it.
+        //
+        // Both terms are stated because the gap is a function of two things and
+        // the frames and the queue quote disagree about one of them: doc 12
+        // §5.5a's note says *"~700 px"* from a **1024 px** cover, and
+        // `measure.py` reads **1171** off the real frames because the fixture's
+        // covers are **600 px**. Neither is wrong; a smaller cover leaves more
+        // field. After the change the gap is one `GAP_XL` at every size and at
+        // every cover, which is why there is one figure below and not a table.
+        let (body_w, body_h) = (2280.0, 1359.0);
+        let hung_left =
+            |source: f32| body_w - 2.0 * theme::HANG - theme::RUN_MEASURE - theme::GAP_XL - source;
+        assert!((hung_left(1024.0) - 712.0).abs() < 1.0, "doc 12's cover");
+        assert!(
+            (hung_left(600.0) - 1136.0).abs() < 1.0,
+            "the fixture's cover"
+        );
+        // …and the work at that window is bound by the file rather than by
+        // either column, before and after — so none of that field was the run's
+        // to give back, and widening the run alone could never have closed it.
+        for source in [600.0_f32, 1024.0] {
+            let edge = record_edge(body_w, body_h, true, source);
+            assert!(
+                (edge - source).abs() < f32::EPSILON,
+                "source-bound at {edge}"
+            );
+        }
     }
 
     /// **The composition holds across the restack** — the layout and the
@@ -1312,18 +1579,25 @@ mod tests {
             // **One floor, two consequences** — the run's column and the
             // record's composition. The field is no longer a third, because it
             // no longer has a width in it.
-            let beside = run_w(width, true);
-            assert_eq!(
-                beside > 0.0,
-                width >= theme::SPLIT_FLOOR,
-                "{width}: the layout turned somewhere the floor did not"
-            );
-            if beside > 0.0 {
-                let record_right = width - theme::HANG - beside - theme::GAP_XL;
-                assert!(
-                    record_right >= theme::HANG + theme::ART_MIN,
-                    "{width}: the record column fell under its own floor inside the split"
+            //
+            // Swept at a kiosk height as well as a desktop one since A4: the
+            // run's width is a function of both axes now, and the tall case is
+            // the one where its cap does the work.
+            for height in [999.0_f32, 2079.0] {
+                let beside = run_w(width, height, true);
+                assert_eq!(
+                    beside > 0.0,
+                    width >= theme::SPLIT_FLOOR,
+                    "{width}: the layout turned somewhere the floor did not"
                 );
+                if beside > 0.0 {
+                    let record_right = width - theme::HANG - beside - theme::GAP_XL;
+                    assert!(
+                        record_right >= theme::HANG + theme::ART_MIN,
+                        "{width}×{height}: the record column fell under its own \
+                         floor inside the split"
+                    );
+                }
             }
         }
 
@@ -1413,7 +1687,22 @@ mod tests {
         );
         // 13 · album group headers — albums are listed as albums, never
         // flattened (ADR-0014).
-        assert!(run.contains("fn album_group("), "the record headers went");
+        //
+        // **It is `page::list_head` now**, the block a playlist page draws over
+        // each of its records, which this file used to have a private copy of
+        // under the name `album_group`. The affordance is what survives; which
+        // module draws it is what the 2026-08-10 merge changed, so the needle
+        // moved with it rather than being deleted.
+        assert!(
+            run.matches("page::list_head(").count() == 2
+                && run.contains("head.album.as_deref()")
+                && run.contains("list.album.as_deref()"),
+            "the record headers went"
+        );
+        assert!(
+            read("page.rs").contains("pub(crate) fn list_head("),
+            "the shared record head went"
+        );
         // 8 · the provenance-led summary, promoted to the surface's head.
         assert!(run.contains("text(list.summary)"), "the run's head went");
         // 15 · the empty state — and it is **the one this surface now uses**,

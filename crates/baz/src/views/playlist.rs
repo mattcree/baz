@@ -60,6 +60,8 @@
 //!   the file as it stood is one press — or <kbd>Ctrl</kbd>+<kbd>Z</kbd> —
 //!   away, through the same fingerprint guard as the edit it reverses.
 
+use std::borrow::Cow;
+
 use iced::widget::{button, column, container, mouse_area, row, text, text_input};
 use iced::{Element, Length, alignment};
 
@@ -159,7 +161,7 @@ fn entry_rows<'a>(
     let mut rows: Vec<Element<'a, Message>> = Vec::new();
     for (index, page_row) in open.rows.iter().enumerate() {
         if let Some((album, artist)) = &page_row.head {
-            rows.push(record_head(album, artist, rows.is_empty()));
+            rows.push(page::list_head(Some(album), artist, rows.is_empty()));
         }
         let playing =
             page_row.playable_position.is_some() && page_row.playable_position == playing_playable;
@@ -322,33 +324,6 @@ fn rename_field(entry: &NameEntry) -> Element<'_, Message> {
     block.into()
 }
 
-/// A record's name where its run begins — the queue place's group-header
-/// rule, drawn over consecutive same-record runs so the playlist stays a
-/// track list that still says where things came from.
-fn record_head(album: &str, artist: &str, first: bool) -> Element<'static, Message> {
-    let room = theme::active();
-    let air = if first { 0.0 } else { theme::GAP_MD };
-    let mut block = column![
-        text(album.to_owned())
-            .size(theme::SIZE_BODY)
-            .line_height(theme::LEADING_BODY)
-            .font(theme::MEDIUM)
-            .color(room.paper_dim)
-            .wrapping(text::Wrapping::None),
-    ]
-    .spacing(theme::GAP_XXS);
-    if !artist.is_empty() {
-        block = block.push(
-            text(artist.to_owned())
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.heading())
-                .wrapping(text::Wrapping::None),
-        );
-    }
-    container(block).padding(theme::pad(air, 0.0)).into()
-}
-
 /// One entry's row: position (or the lamp dot), title over its artist — or
 /// over its path, when the entry is missing — duration, and the three
 /// reserved edit slots.
@@ -375,7 +350,6 @@ fn record_head(album: &str, artist: &str, first: bool) -> Element<'static, Messa
 /// `+`'s own refusal, held by the drag. Sugar only: the ▲▼, ✕ and `+`
 /// remain, and the sub-threshold press is the row's ordinary click.
 #[expect(
-    clippy::too_many_lines,
     clippy::too_many_arguments,
     clippy::fn_params_excessive_bools,
     reason = "a row is one anatomy — marker, title, duration, four reserved \
@@ -408,65 +382,31 @@ fn entry_row(
             .color(room.paper_faint)
             .into()
     };
-    let heading = text(page_row.title.clone())
-        .size(theme::SIZE_BODY)
-        .line_height(theme::LEADING_BODY)
-        .color(ink)
-        .wrapping(text::Wrapping::None);
-    let heading = if playing {
-        heading.font(theme::MEDIUM)
+    // The second line is the artist — or, for an entry whose file has gone,
+    // **the path it went to**, one glance away (ADR-0024 §3). Two different
+    // facts in one slot, which is what the slot is for.
+    let under = if page_row.missing {
+        Some((
+            Cow::Owned(page_row.path.display().to_string()),
+            room.paper_muted,
+        ))
     } else {
-        heading
+        page_row
+            .artist
+            .as_deref()
+            .map(|artist| (Cow::Borrowed(artist), room.paper_dim))
     };
-    let mut title = column![heading].spacing(theme::GAP_XXS);
-    if page_row.missing {
-        // The path, one glance away (ADR-0024 §3): a missing entry's row is
-        // drawn from its stem, and this line is where it went.
-        title = title.push(
-            text(page_row.path.display().to_string())
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_muted)
-                .wrapping(text::Wrapping::None),
-        );
-    } else if let Some(artist) = &page_row.artist {
-        title = title.push(
-            text(artist.clone())
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_dim)
-                .wrapping(text::Wrapping::None),
-        );
-    }
-    let body = button(
-        row![
-            container(marker)
-                .width(Length::Fixed(theme::TRACK_NO_W))
-                .height(Length::Fixed(theme::CAPTION_LINE_H))
-                .align_x(alignment::Horizontal::Right)
-                .align_y(alignment::Vertical::Center),
-            container(title).width(Length::Fill),
-            container(
-                text(page_row.duration.clone())
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_faint)
-                    .wrapping(text::Wrapping::None)
-            )
-            .width(Length::Fixed(theme::DURATION_W))
-            .height(Length::Fixed(theme::CAPTION_LINE_H))
-            .align_x(alignment::Horizontal::Right)
-            .align_y(alignment::Vertical::Center),
-        ]
-        .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Start),
-    )
-    .width(Length::Fill)
-    .padding(theme::pad(theme::GAP_XS, 0.0))
-    .style(move |_theme, status| theme::track_row(room, room.wall, status, playing))
-    // A missing entry is not a control: pressing a row plays from it, and
-    // there is nothing there to play.
-    .on_press_maybe((live && !page_row.missing).then_some(Message::PlaylistPlayTrack(index)));
+    let body = page::track_row(page::TrackRow {
+        marker,
+        title: page_row.title.as_str().into(),
+        ink,
+        under,
+        duration: page_row.duration.as_str().into(),
+        playing,
+        // A missing entry is not a control: pressing a row plays from it, and
+        // there is nothing there to play.
+        press: (live && !page_row.missing).then_some(Message::PlaylistPlayTrack(index)),
+    });
     // The drag wrapper owns the pointer for the body (crate::drag): every
     // row of the artefact is draggable — a file edit needs no engine, the
     // steppers' own rule — and the sub-threshold click keeps the button's

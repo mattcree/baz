@@ -7124,29 +7124,42 @@ mod tests {
                 .expect("a view module baz ships")
                 .replace("\r\n", "\n")
         };
-        // The two lists are the same twelve rows in two surfaces, and both hang
-        // from their surface's own content lane.
-        for name in ["album.rs", "queue.rs"] {
-            let source = read(name);
+        // **The three lists are one row now** — a record's tracks, a made
+        // list's entries and the run's rows all come out of
+        // `views::page::track_row` since 2026-08-10 — so the lane rule is
+        // asserted once, where the lane is actually spelled.
+        let shared = read("page.rs");
+        assert!(
+            shared.contains("theme::pad(theme::GAP_XS, 0.0)"),
+            "the shared row carries a horizontal inset of its own"
+        );
+        assert!(
+            !shared.contains("theme::pad(theme::GAP_XS, theme::GAP_XS)"),
+            "the shared row insets by GAP_XS, which is the 21-left / \
+             14-right asymmetry the audit measured"
+        );
+        // A record's name inside a list sits on the heading lane rather than 4
+        // and 5 px inside it. It carries a *vertical* inset — the air above a
+        // new record's name — and that is a different axis: this law is about
+        // x-edges, and the assertion is that the horizontal half is literally
+        // zero.
+        assert!(
+            shared.contains("container(block).padding(theme::pad(air, 0.0))"),
+            "a record's head inside a list has a horizontal inset again"
+        );
+        // …and **no surface lays a row out for itself any more**, which is what
+        // lets the three assertions above stand for all of them. This is the
+        // L5 half of `views::page`'s own
+        // `the_two_pages_are_one_composition`: a view that spelled the row's
+        // pad again would be a fourth lane nobody declared.
+        for name in ["album.rs", "playlist.rs", "queue.rs"] {
             assert!(
-                source.contains("theme::pad(theme::GAP_XS, 0.0)"),
-                "{name}'s rows carry a horizontal inset of their own"
-            );
-            assert!(
-                !source.contains("theme::pad(theme::GAP_XS, theme::GAP_XS)"),
-                "{name} still insets a row by GAP_XS, which is the 21-left / \
-                 14-right asymmetry the audit measured"
+                !read(name).contains(".padding(theme::pad(theme::GAP_XS, 0.0))"),
+                "{name} pads a list row of its own again — the anatomy is \
+                 `views::page::track_row`, and a private copy is the drift \
+                 that put eight x-edges in a 340 px column"
             );
         }
-        // The popover's album group sits on the header lane rather than 4 and
-        // 5 px inside it. It gained a *vertical* inset when a queue could hold
-        // more than one record — the air above a new record's name — and that is
-        // a different axis: this law is about x-edges, and the assertion is that
-        // the horizontal half of the pad is literally zero.
-        assert!(
-            read("queue.rs").contains("container(block).padding(theme::pad(air, 0.0))"),
-            "the popover's album group has a horizontal inset again"
-        );
         // The scrollbar's lane is *declared* rather than absorbed: it is the one
         // inset the right-hand edge is allowed, and it is a token both the bar
         // and the gutter are built from.

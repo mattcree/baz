@@ -54,14 +54,51 @@
 //! (`Playlist · 12 records`) instead of at 15 px in the chrome strip. So the rule is now one rule on both pages: **the strip names what
 //! you are looking at; the byline says what kind of thing it is.**
 //!
-//! # What is deliberately not shared
+//! # …and one level down, the rows — 2026-08-10, the same instruction again
 //!
-//! The rows. A record's rows and a playlist's rows have one anatomy — marker,
-//! title over its second line, duration in a reserved lane, then reserved
-//! slots — but they are built from different values and carry different edit
-//! sets, so each page builds its own and hands the finished list over. The
-//! *slots* are shared ([`icon_slot`], [`transfer_slot`], [`lamp_dot`]), which
-//! is where the four copies were.
+//! The owner, the same day: *"I think ideally we could ensure our playlist view
+//! in the now playing and the playlist view/album view are the same thing. the
+//! only thing that changes in now playing is that we don't see file details
+//! etc. — that is more like a album exploration type data"*.
+//!
+//! This module's first version said the rows were *"deliberately not shared…
+//! each page builds its own and hands the finished list over"*, on the grounds
+//! that they are built from different values and carry different edit sets.
+//! **Both halves of that were true and the conclusion did not follow.** The
+//! values differ, so they are arguments ([`TrackRow`]); the edit sets differ,
+//! so the slots stay with the caller. What was left over once those two were
+//! taken out was the *anatomy* — the [`theme::TRACK_NO_W`] number lane, the
+//! title over its second line, the [`theme::DURATION_W`] duration lane, the
+//! button's paint and its padding — and that was written **three** times, in
+//! `views::album`, `views::playlist` and `views::queue`.
+//!
+//! So [`track_row`] draws it once, and [`list_head`] draws the record heading
+//! that stood between them twice. The third surface is the run column on
+//! `Now playing`, which is the same list of tracks read as a position rather
+//! than as a document.
+//!
+//! ## What the owner named as the difference, and what else stayed
+//!
+//! `DETAILS` — format, bit depth, sample rate, size, folder — is *"album
+//! exploration type data"* and lives on a record's page in the aside, which the
+//! run column does not have. That is his own line and it holds.
+//!
+//! Three more differences survived the merge because they are facts about the
+//! subject rather than drift, and each is named where it is drawn:
+//!
+//! - **the next-track ring** (`views::queue`'s `next_ring`) — a run has a
+//!   cursor, so it has a *next*; a document has neither;
+//! - **the trailing slots** — ▲▼✕ belong to an editable list (doc 09 §8.2) and
+//!   a published record's tracks are not one;
+//! - **the head** — a page states a *name* ([`Identity`], 80 px, three lines);
+//!   the run states a *position* (`3 of 12 · 38:12 left`). They are different
+//!   sentences, not two spellings of one.
+//!
+//! The run column is also not drawn *through* [`view`], and that is the honest
+//! limit of this merge: [`view`] composes a centred aside-and-main document in
+//! one scroll, and the run is a virtualized column standing beside the record
+//! inside another surface's two-column layout. Same rows, same heads, same
+//! slots; a different thing holding them.
 
 use iced::widget::{
     Column, Row, Space, button, column, container, image as iced_image, row, scrollable, text,
@@ -375,6 +412,177 @@ pub(crate) fn act(
     .style(move |_theme, status| theme::transport(room, room.wall, status))
     .on_press_maybe(enabled.then_some(message))
     .into()
+}
+
+/// **One row of a list of tracks**, in the anatomy all three surfaces wear.
+///
+/// The owner, 2026-08-10: *"I think ideally we could ensure our playlist view
+/// in the now playing and the playlist view/album view are the same thing."*
+/// The same instruction that made a record's page and a list's page one
+/// composition, one level down: a record's track, a list's entry and a run's
+/// row were **three literal copies** of the marker lane, the title stack, the
+/// duration lane and the button's paint.
+///
+/// What genuinely differs is in this struct and nowhere else — what the marker
+/// is, what the two lines say and in what ink, and what the press does. The
+/// *geometry* (the [`theme::TRACK_NO_W`] number lane right-aligned and centred
+/// on the title's own line, the title filling, the [`theme::DURATION_W`]
+/// duration lane, the [`theme::GAP_SM`] between them, the top alignment, the
+/// [`theme::GAP_XS`] vertical padding and the absent horizontal one) is here,
+/// once.
+///
+/// **The trailing slots are not part of it.** A run's row and a list's entry
+/// carry ▲▼✕ and a record's track does not, which is doc 09 §8.2's own
+/// distinction — a durable artefact and a transient run are editors, a
+/// published record is not. Each caller hangs its own slots off the returned
+/// body with [`icon_slot`], which is the shared thing they *are* made of.
+pub(crate) struct TrackRow<'a> {
+    /// The number lane's occupant: a position, the lamp dot, or the next
+    /// ring — whatever this surface has to say about where the music is.
+    pub(crate) marker: Element<'a, Message>,
+    /// The row's own line.
+    pub(crate) title: std::borrow::Cow<'a, str>,
+    /// The title's ink. **Stated rather than inherited**: a record's row used
+    /// to set no colour at all and take [`theme::track_row`]'s
+    /// `text_color`, which is [`theme::Palette::paper`] — the same ink the
+    /// other two name explicitly. Identical on screen, and one fewer fact a
+    /// reader has to go to the style function to learn.
+    pub(crate) ink: iced::Color,
+    /// The second line, where there is one: a track artist, or the path a
+    /// missing entry went to.
+    pub(crate) under: Option<(std::borrow::Cow<'a, str>, iced::Color)>,
+    /// The duration, already formatted.
+    pub(crate) duration: std::borrow::Cow<'a, str>,
+    /// Whether this is the sounding row — the medium weight and the card.
+    pub(crate) playing: bool,
+    /// What pressing it does, or `None` where it cannot act: no engine, or a
+    /// missing file with nothing to play.
+    pub(crate) press: Option<Message>,
+}
+
+/// Draw a [`TrackRow`] — the shared body, without its trailing slots.
+///
+/// The number column and the duration lane are centred on the **title's own
+/// line**, not on the row's block, and the row is top-aligned so they stay
+/// there. Centred on the block, a soundtrack row that carries a composer under
+/// its title dragged its number and its duration halfway down two lines.
+///
+/// **No horizontal inset**: the number column starts on the column's own
+/// content lane and the duration lane ends on it, so the block a listener reads
+/// down shares its edges with whatever holds it (law L5). That is why this is
+/// one function across a 880 px page column and a 692 px run column — the
+/// anatomy is expressed in reserved lanes and a `Fill`, so it is the same row
+/// at any measure.
+pub(crate) fn track_row(row: TrackRow<'_>) -> Element<'_, Message> {
+    let room = theme::active();
+    let TrackRow {
+        marker,
+        title,
+        ink,
+        under,
+        duration,
+        playing,
+        press,
+    } = row;
+    let heading = text(title)
+        .size(theme::SIZE_BODY)
+        .line_height(theme::LEADING_BODY)
+        .color(ink)
+        .wrapping(text::Wrapping::None);
+    // The playing row's title takes the medium weight the now-playing bar gives
+    // the same string — one more place the surfaces agree about what is
+    // sounding.
+    let heading = if playing {
+        heading.font(theme::MEDIUM)
+    } else {
+        heading
+    };
+    let mut stack = column![heading].spacing(theme::GAP_XXS);
+    if let Some((line, line_ink)) = under {
+        stack = stack.push(
+            text(line)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(line_ink)
+                .wrapping(text::Wrapping::None),
+        );
+    }
+    button(
+        row![
+            container(marker)
+                .width(Length::Fixed(theme::TRACK_NO_W))
+                .height(Length::Fixed(theme::CAPTION_LINE_H))
+                .align_x(alignment::Horizontal::Right)
+                .align_y(alignment::Vertical::Center),
+            container(stack).width(Length::Fill),
+            container(
+                text(duration)
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper_faint)
+                    .wrapping(text::Wrapping::None)
+            )
+            .width(Length::Fixed(theme::DURATION_W))
+            .height(Length::Fixed(theme::CAPTION_LINE_H))
+            .align_x(alignment::Horizontal::Right)
+            .align_y(alignment::Vertical::Center),
+        ]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Start),
+    )
+    .width(Length::Fill)
+    .padding(theme::pad(theme::GAP_XS, 0.0))
+    .style(move |_theme, status| theme::track_row(room, room.wall, status, playing))
+    .on_press_maybe(press)
+    .into()
+}
+
+/// **The head over one record's run of rows** — its title, and who it is filed
+/// under, in the room's quietest voice.
+///
+/// A playlist page's `record_head` and the run column's `album_group` were the
+/// same block written twice, differing only in how they spelled *is this the
+/// first one* (a `bool` on one side, a raw number of pixels on the other) and
+/// in which of the two strings was allowed to be absent. Both spellings said
+/// [`theme::GAP_MD`] or nothing, and the anatomy under them was identical.
+///
+/// `air` goes **above**: a break needs room before it because it is a break,
+/// and a head sitting directly under the `TRACKS` rule is not breaking
+/// anything — so the first one in a list takes none.
+///
+/// A record with no title of its own is headed by its artist, and the artist
+/// line beneath is dropped rather than repeating it — which is the run
+/// column's own rule, and a playlist page inherits it rather than being unable
+/// to express it.
+///
+/// **On the column's own heading lane**, with no inset of its own: two x-edges
+/// in the surface rather than four (law L5).
+pub(crate) fn list_head(
+    album: Option<&str>,
+    artist: &str,
+    first: bool,
+) -> Element<'static, Message> {
+    let room = theme::active();
+    let mut block = column![
+        text(album.unwrap_or(artist).to_owned())
+            .size(theme::SIZE_BODY)
+            .line_height(theme::LEADING_BODY)
+            .font(theme::MEDIUM)
+            .color(room.paper_dim)
+            .wrapping(text::Wrapping::None),
+    ]
+    .spacing(theme::GAP_XXS);
+    if album.is_some() && !artist.is_empty() {
+        block = block.push(
+            text(artist.to_owned())
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(room.heading())
+                .wrapping(text::Wrapping::None),
+        );
+    }
+    let air = if first { 0.0 } else { theme::GAP_MD };
+    container(block).padding(theme::pad(air, 0.0)).into()
 }
 
 /// **One row's reserved control slot**: the drawn glyph while the pointer is

@@ -77,6 +77,51 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Changed
 
+- **`Now playing` composes itself at width, instead of hanging from both
+  edges.** The owner: *"also please make sure the layout of the now playing
+  makes sense on wider screens"*, and, the first time he reported it, *"at full
+  screen the now playing page looks odd because the playlist hugs right and the
+  art hugs left"*. Both edges were real faults and the queued item (doc 12 step
+  A4) only had one.
+  - **The run column grows with the panel** — `RUN_MEASURE · kiosk_scale`,
+    keyed to the height-bound candidate for the work so the run's width cannot
+    depend on the record's width depending on the run's. 440 up to a 720 px
+    work, 472 at 1920, **692** at 2560 and 1100 at 4K, capped so the record
+    keeps `ART_MIN` at every window above `SPLIT_FLOOR`.
+  - **The two columns centre as one pair**, which is `views::page::view`'s own
+    rule reaching the surface that did not have it. The record's container was
+    `width(Fill)` with no `align_x` and the run was pinned right, so the work
+    sat at exactly `HANG` from the body's left edge and every pixel the two
+    could not use piled up between them: **1171 px** of bare field at
+    2560 × 1440, measured off the frames.
+  - **Widening the run alone would not have fixed it** — it closes 1171 → 919,
+    because the work at that window is bound by the file and none of that field
+    was the run's to give back. The gap is one `GAP_XL` at every size now, the
+    work is unchanged at every size, and **1280 × 860 is pixel-identical**: the
+    two columns' band diffs at 0.
+  - Frames from both builds at 1280, 1920 and 2560, and the numbers read back
+    out of them: `docs/design/impl/one-list-drawn-once/`.
+- **A record's tracks, a playlist's entries and the run's rows are one row.**
+  The owner: *"I think ideally we could ensure our playlist view in the now
+  playing and the playlist view/album view are the same thing. the only thing
+  that changes in now playing is that we don't see file details etc."* The row
+  anatomy was **three literal copies**, the record head was two
+  (`playlist::record_head`, `queue::album_group`), and `views::queue` carried
+  **four more copies** of the reserved icon slot that the record-and-playlist
+  merge had already shared. All of it is `views::page::track_row`, `list_head`
+  and `icon_slot` now, and the change moves **no pixels** — both pages diff at
+  1–3 px between the builds, outside the bottom bar's clock.
+  - **What stayed different is named where it is drawn**: `DETAILS`, which is
+    his own *"album exploration type data"*; the next-track ring, because a run
+    has a cursor and a document does not; the trailing slot sets, because an
+    editable list earns ▲▼✕ and a published record's tracks do not; and the
+    head, because a page states a *name* and the run states a *position*.
+  - **The run column is not drawn through `page::view`**, and that is the
+    honest limit of the merge rather than an omission: `view` composes a
+    centred aside-and-main document in one scroll, and the run is a virtualized
+    column standing beside the record inside another surface's two-column
+    layout.
+
 - **The display options moved from the wall to the app bar**, on the owner's
   instruction — off the index rail's foot on the Library and off the section
   rules on Home and an artist's page, into a slot that is reserved in every
@@ -111,6 +156,16 @@ Every release is built from a tag by CI, gated on the full test suite — see
   and stands one hang above the smallest sleeve baz identifies a record by.
 
 ### Fixed
+
+- **A test that could not fail, and had been passing for it.**
+  `views::queue`'s `the_queue_place_is_virtual_and_its_rows_are_the_playlist_editors`
+  sweeps **the file it lives in**, so every literal it looked for was satisfied
+  by the assertion that spelled it. It had gone stale twice without ever going
+  red: it looked for `window.height` after that argument was renamed
+  `viewport_h`, and for a reserved-slot literal that had moved module
+  entirely. It now takes the cut `views::page::tests::pages` takes and searches
+  only the code half, and both stale needles are corrected — so the properties
+  it claims about the run's virtualization and its edit set are claims again.
 
 - **One junk byte in a year tag no longer costs a whole album.** Fourteen
   MP3s — every track of Frank Zappa's *Unmitigated Audacity*, ripped by
