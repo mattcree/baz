@@ -24,10 +24,82 @@
 > is what was deliberately *not* done and why, `NEXT-STEPS.md` is the shape of
 > the project, `REQUESTS.md` is the owner's asks verbatim with their fate.
 > **This is the ordered queue.** If they disagree, this one is wrong — fix it.
+>
+> ## How this list is ordered
+>
+> **Functional work comes first.** The owner, 2026-08-10: *"please ensure we
+> prioritise functional changes"*. A functional change is one that alters what
+> baz can *do* — a file that would not play now plays, a library fact that was
+> wrong is right, something that could not be installed can be. An interface
+> change makes what it already does easier or nicer to look at. Both are worth
+> doing and this project has shipped a great deal of the second; the ordering
+> rule is that the first does not wait behind the second.
+>
+> **This rule exists because the queue had drifted.** Every item on it was an
+> interface item, while `BACKLOG.md`'s *"Known gaps in shipped features"*
+> section held formats that do not play, an index that keeps deleted folders
+> and a stamp that is lost on removal — none of them queued, because a backlog
+> is where things go to be *reasoned about* and this is where they go to be
+> *done*. The gaps below were promoted out of it on the strength of that
+> sentence.
+>
+> **What still comes before everything:** a defect the owner is looking at.
+> A report from him is a functional change by definition, because the thing he
+> is looking at is the product.
 
 ## Next
 
-1. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
+1. **Cut v0.1.** Nothing is installable, so **every other item on this list
+   reaches nobody until this one lands** — which is why it leads a
+   functional-first ordering rather than sitting where a release chore usually
+   sits. The icon, the release rehearsal and the Flatpak build are all done;
+   what is left is a screenshot for the metainfo, the version edit from
+   `0.0.0`, a `workflow_dispatch` dry run, then the tag. **The tag is the
+   owner's to cut** — the workflow produces a draft, and an agent may take
+   every step before it.
+2. **Multichannel files do not play at all.** Anything over two channels is
+   refused with a typed error rather than downmixed, so a 5.1 record is not a
+   record baz has. The error is honest — silently wrong output would be worse
+   — but *"this file is not supported"* is a gap and not a feature. A stereo
+   downmix (ITU-R BS.775 coefficients, the ordinary answer) is unwritten.
+   `docs/BACKLOG.md`, *Known gaps in shipped features*.
+3. **A deleted folder's records never leave the library.** `rm -rf` an album
+   directory and its eight rows stay on the wall for good. This is
+   **deliberate and the reasoning is sound**: from the filesystem's side a
+   deleted folder and an unmounted NAS are the same `NotFound` for every path
+   beneath, and wiping a present listener's library to tidy a stale row is the
+   worse failure — ADR-0011 chose correctly. What it left undone is the other
+   half: **a way for the listener to say so themselves.** A user-initiated
+   *forget this record* is the settled answer in the backlog's own preference
+   order, and it needs no guessing about mounts because a person is asserting
+   the fact. Related: the owner's library is on a NAS by design (ADR-0025), so
+   the unmount case is his real case and not a hypothetical.
+4. **Removing a music folder destroys `first_seen_ns`.** Remove a root and
+   add it back and every album files under ADDED = *today* — a real loss of
+   the one fact ADR-0019 built a column and a structural guarantee to protect,
+   and it is unrecoverable, which puts it above the two items below it. The
+   fix named in `BACKLOG.md` is a **tombstone**: remember first-seen for a
+   forgotten root's paths and restore it if the folder comes back. Called
+   *"its own small design"* there, which is a design that has never been
+   written rather than a line of code.
+5. **The seek bar says which thing it measures.** The owner: *"I think the seek
+   bar at the bottom should have a toggle indicating for song or for whole
+   playlist"*. Both are true readouts — the track's position and the run's — and
+   he is asking to choose. Undesigned; the questions are where the toggle lives
+   (the bar is already dense), whether the choice persists, and what the
+   elapsed/remaining figures either side of the bar read in run mode.
+6. **An artist has an `All songs` of their own.** The owner: *"the artist page
+   should have its own 'all songs' playlist I think"*. `implicit::ImplicitList`
+   already gives the library one, with an `Origin` kind and a collage sleeve, so
+   this is that list scoped to one artist rather than new machinery. Undecided:
+   its **order** (their records by year and then track order is the honest
+   default — an artist's songs have a chronology the library's `All songs` does
+   not); whether the tile sits with the artist's records or above them; and what
+   it says, since `All songs` on an artist's page means *their* songs and the
+   word may not need qualifying. It should credit the artist's list rather than
+   the underlying records when played, which is the rule that just landed for
+   playlists.
+7. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
    2026-08-10: *"at full screen the now playing page looks odd because the
    playlist hugs right and the art hugs left"* — which is this item, reported
    from the frame rather than from the measurement, and worth recording as a
@@ -39,29 +111,7 @@
    too — A4 widening the run closes the gap from one side, and if the sleeve is
    also hanging hard left rather than sitting in its column, that is a second
    fault the widening would hide rather than fix.
-2. **The seek bar says which thing it measures.** The owner: *"I think the seek
-   bar at the bottom should have a toggle indicating for song or for whole
-   playlist"*. Both are true readouts — the track's position and the run's — and
-   he is asking to choose. Undesigned; the questions are where the toggle lives
-   (the bar is already dense), whether the choice persists, and what the
-   elapsed/remaining figures either side of the bar read in run mode.
-3. **An artist has an `All songs` of their own.** The owner: *"the artist page
-   should have its own 'all songs' playlist I think"*. `implicit::ImplicitList`
-   already gives the library one, with an `Origin` kind and a collage sleeve, so
-   this is that list scoped to one artist rather than new machinery. Undecided:
-   its **order** (their records by year and then track order is the honest
-   default — an artist's songs have a chronology the library's `All songs` does
-   not); whether the tile sits with the artist's records or above them; and what
-   it says, since `All songs` on an artist's page means *their* songs and the
-   word may not need qualifying. It should credit the artist's list rather than
-   the underlying records when played, which is the rule that just landed for
-   playlists.
-4. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
-   the Flatpak build are all done; what is left is a screenshot for the
-   metainfo, the version edit from `0.0.0`, a `workflow_dispatch` dry run,
-   then the tag. **The tag is the owner's to cut** — the workflow produces a
-   draft.
-5. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+8. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -74,7 +124,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-6. **Rewrite the README as the project's public face**, with the icon and real
+9. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
    last, so it describes what actually ships. Its keyboard table is still
    stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode,
@@ -87,6 +137,18 @@
 
 ## Waiting on the owner
 
+- **Should baz play Opus?** Promoted here rather than into `## Next`, because
+  it is the largest *functional* gap in the product and the only one whose fix
+  is a decision rather than work. `.opus` is out of `AUDIO_EXTENSIONS`
+  entirely, so those files do not reach the shelf — nothing is skipped
+  silently, there is simply nothing listed, which is worse in one way (a
+  listener cannot tell baz from a missing folder) and better in another.
+  **Symphonia has no Opus decoder in any released version** — 0.5's crate is a
+  one-byte placeholder never published, 0.6.0 still lists it as `-` — so the
+  route is libopus, which is C, and `BACKLOG.md` refused a C dependency in
+  those words for `reqwest`'s TLS. *Needs: is Opus in his collection?* If it
+  is not, the refusal stands on its own and this line can close; if it is,
+  the price is worth paying and the decision reverses cleanly.
 - **May baz make its first network request?** Doc 15 tier 4 / ADR-0037 §6,
   priced rather than argued. `ureq` 3.4.0 costs **14 net-new crates**, one
   new `deny.toml` licence (`CDLA-Permissive-2.0`), and no new build tool —
