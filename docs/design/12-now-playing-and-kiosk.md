@@ -40,7 +40,11 @@
 > 1. **The transport comes off the surface.** It is drawn twice today — the
 >    place calls the bar's own `transport()` (`now_playing.rs:168`) while the
 >    bar draws it 24 px below (`app.rs:3744–3752`). Same function, same state,
->    two copies, one screen. §6.
+>    two copies, one screen. §6. **The widget half of this shipped**
+>    (2026-08-10: `now_playing.rs:178–189` now carries the argument where the
+>    call stood) — but the 32 px it reserved is **still summed into `art_edge`'s
+>    `below`** (`now_playing.rs:62–67`), so the sleeve is still 32 px short at
+>    every height-bound size. §12.0 says where that goes.
 > 2. **The artwork becomes the field, and the refusal it argues with is already
 >    broken.** `NOW_PLAYING_MAX` is 720 px (`now_playing.rs:81`) and the cache
 >    it draws from is 320 px (`art.rs:48`) — the shipped surface upscales
@@ -84,6 +88,12 @@
 >    [`impl/queue-in-now-playing/`](impl/queue-in-now-playing/README.md).
 >    §3.4 is the argument, §5.5a is the drawing, §6.4 is what the bar does
 >    afterwards.
+> **Every `file:line` in §3.4, §3.5, §5.5a, §6.4 and §12.0 is read against
+> `c768035`**, and three other branches are editing `app.rs`, `views/lane.rs`,
+> `views/home.rs`, `views/top_bar.rs` and `theme.rs` concurrently. Check
+> `git log` before quoting a line number from those five; the *claims* are about
+> named functions and constants and survive the drift, the numbers may not.
+>
 > 8. **What is playing is *which list, and which track in it*.**
 >    (2026-08-10, the same conversation: *"probably the basic model is that
 >    every album has a playlist implicitly… it should be basically which

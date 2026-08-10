@@ -23,6 +23,21 @@
   writing its own small "lists played" file beside `session.toml` — is a second
   store of a fact the ledger should hold, and is recorded here as *considered
   and not taken* rather than done quietly. **Owner decision.**
+  > **Decided, 2026-08-10** — the owner: *"when we track the state of what is
+  > playing now or what our recent plays were… it should be basically which
+  > playlist and which track"*. The design is
+  > [ADR-0034](adr/0034-the-run-and-its-list.md), and specifying it changed one
+  > half of the sentence above: **the sixth ledger field is the wrong answer.**
+  > `history::format::decode` rejects a six-column line outright
+  > (`format.rs:128–133`), and the file is never rewritten (ADR-0018 §3), so a
+  > v2 writer would leave a permanently mixed file that every older baz reads as
+  > partly corrupt. `#` lines are already skipped and **not** counted as damage
+  > (`read.rs:266–269`), so the ledger gains a **`# baz run` marker** instead:
+  > the grain of the file changes, the grammar of a line does not, and there is
+  > no downgrade hazard in either direction. The command field stands as
+  > written, and costs **no pinned wire byte** — `skip_serializing_if` keeps
+  > `command_wire_format_is_stable`'s bytes exactly. Closed when M4 of doc 12
+  > §12.0 ships.
 - **The lane and the panel both list playlists**, and that is an accepted
   transitional state rather than a design (ADR-0030's amendment). The panel
   cannot go while it is the picker for `Add to…` — ADR-0031's card at the

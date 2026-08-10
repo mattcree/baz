@@ -79,6 +79,11 @@ matter because they change what the decisions are *about*:
    `bottom_bar::transport(player, ink)` — the bar's own function — while
    `app.rs:3744–3752` appends the bar under every place unconditionally. The
    owner's *"does not need the play pause controls"* is a bug report.
+   **(Half fixed since, 2026-08-10.** The call is gone and
+   `now_playing.rs:178–189` carries the argument where it stood — but the 32 px
+   the widget reserved is **still summed into `art_edge`'s `below`**
+   (`now_playing.rs:62–67`), so the artwork is 32 px smaller than it should be at
+   every height-bound size. §8's step M1 takes it out.)
 2. **The surface upscales artwork, and the ledger says it never does.** The
    handle comes from the 320 px thumbnail cache (`art.rs:48`,
    `now_playing.rs:106`) and is drawn at up to `NOW_PLAYING_MAX` 720
