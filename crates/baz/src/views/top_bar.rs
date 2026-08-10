@@ -347,16 +347,21 @@ fn play_all() -> Element<'static, Message> {
 /// product — which is what puts the bar's left and right clusters on one
 /// vertical grid instead of merely on one centre line.
 ///
-/// # The magnifier is the well's label, not a control
+/// # The mark's box holds the label at rest and the clear control under a query
 ///
 /// The universal mark, in the universal corner — the second of the two
 /// symbols L8.4's amendment admits as door labels (doc 10 §3.4) — drawn as a
 /// **layer** over the input (the mechanism the bar's tip layers already use;
-/// iced 0.13's `text_input::Icon` is font-based and therefore not it). The
-/// well remains the only focusable widget (ADR-0017 §1.2), the glyph takes
-/// the resting glyph ink and answers nothing, and the input's own left
-/// padding reserves the lane the glyph sits in, so the caret and the mark
+/// iced 0.13's `text_input::Icon` is font-based and therefore not it). At rest
+/// it answers nothing: the well remains the only focusable widget
+/// (ADR-0017 §1.2), the glyph takes the resting glyph ink, and the input's own
+/// left padding reserves the lane the glyph sits in, so the caret and the mark
 /// cannot collide.
+///
+/// **While a query stands the box holds the `×` instead** (ADR-0036 §4) — one
+/// box, two meanings, no reflow, and the right-hand furniture untouched because
+/// the count's [`MATCH_W`] slot is already the whole of what the field's right
+/// edge can spend. `crate::views::clear_mark` draws it for both wells.
 ///
 /// # `on_submit` is what makes Enter mean one thing
 ///
@@ -395,16 +400,34 @@ fn well(shelf: &Shelf, width: f32) -> Element<'_, Message> {
         .line_height(theme::LEADING_BODY)
         .width(Length::Fixed(width))
         .style(move |_theme, status| theme::input(room, status));
-    let magnifier = container(
-        iced_image(icon::handle(icon::Glyph::Magnifier))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::GLYPH_OPACITY),
-    )
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_MD))
-    .align_y(alignment::Vertical::Center);
-    let mut layers = stack![input, magnifier];
+    // The mark's box, in one of its two states — the label at rest, the clear
+    // control while a query stands (ADR-0036 §4). The lane's well makes the
+    // identical swap in the identical box, so the `×` is in the same place at
+    // every width; `crate::views::clear_mark` is the one function.
+    //
+    // The left padding differs by 4 px from the lane's and the centre does not:
+    // the glyph sits at `GAP_MD` 12 + `ICON_PX` / 2 = 20 here and at
+    // `SIDEBAR_HEAD_GLYPH_X` = 20 there, so a `STEPPER_HIT` 24 box centred on
+    // the same 20 is inset `GAP_SM` in both.
+    let mark: Element<'_, Message> = if filtering {
+        container(crate::views::clear_mark(room.recess))
+            .height(Length::Fixed(theme::TRANSPORT_HIT))
+            .padding(theme::pad(0.0, theme::GAP_SM))
+            .align_y(alignment::Vertical::Center)
+            .into()
+    } else {
+        container(
+            iced_image(icon::handle(icon::Glyph::Magnifier))
+                .width(Length::Fixed(theme::ICON_PX))
+                .height(Length::Fixed(theme::ICON_PX))
+                .opacity(theme::GLYPH_OPACITY),
+        )
+        .height(Length::Fixed(theme::TRANSPORT_HIT))
+        .padding(theme::pad(0.0, theme::GAP_MD))
+        .align_y(alignment::Vertical::Center)
+        .into()
+    };
+    let mut layers = stack![input, mark];
     if filtering {
         // **The match count, inside the control being typed into** — the
         // in-well slot doc 07 §3.1 prescribed, delivered (doc 10 §4.1).

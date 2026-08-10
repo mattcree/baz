@@ -88,8 +88,20 @@ use crate::app::{Message, Shelf, search_id};
 use crate::lane::{Destination, Subject, Touched};
 use crate::place::Place;
 use crate::playlists::Playlists;
-use crate::views::playlist_sleeve;
+use crate::views::{clear_mark, playlist_sleeve};
 use crate::{icon, theme};
+
+/// **What the well searches, said in the field itself** — ADR-0036 §2.
+///
+/// The well is resident in all seven places and searches exactly one of them,
+/// so `Search` alone was a promise about the control rather than about its
+/// subject. `Search library` is the noun on the destination row two rows below
+/// it, which is where the query lands.
+///
+/// Set in the field's *placeholder* lane, which is free exactly when the query
+/// is empty — the same slot the collection's counts held before they left for
+/// Home, and the whole reason this costs nothing.
+pub(crate) const SCOPE: &str = "Search library";
 
 /// The lane, at the width its state says.
 ///
@@ -365,16 +377,52 @@ fn destination_row(
 /// [`Message::FocusSearch`] — which expands the lane and lands the caret in
 /// one frame (`app.rs`'s `focus_the_well`). The mark takes the lit ink while a
 /// query stands, so the rail says *the wall is filtered* without a word.
+///
+/// # The placeholder names the scope, because the well is resident in seven
+/// places and searches one
+///
+/// ADR-0036. The owner asked what search should do off the Library — *"should
+/// it just pop to the library view when you start typing? or should it search
+/// whatever page you are on?"* — and the answer is that it keeps the one
+/// meaning it already has: **it searches the collection**, from anywhere, and
+/// the road there is `app.rs`'s `reach_the_well`. What was missing was
+/// that the field never *said* so. It said `Search`, which is a promise about
+/// the control and not about its subject, and a field that reads `Search` while
+/// the window is showing `Road Trip` is fairly read as offering to search
+/// `Road Trip`.
+///
+/// So it reads **`Search library`**, in every place, permanently — the same
+/// noun as the destination row two rows below it, which is the thing the query
+/// will take you to. It costs no chrome and no pixel: the placeholder is drawn
+/// exactly when the query is empty, which is exactly when the count's
+/// [`theme::SIDEBAR_MATCH_W`] slot is *not* reserved, so the lane it sets in is
+/// the field's whole 176 px rather than the 104 a query gets
+/// (`crate::font`'s `the_lanes_well_names_the_scope_it_searches`).
+///
+/// # The clear mark takes the magnifier's box
+///
+/// The `×` the owner asked for, and it is on the **left**, in the mark's own
+/// slot, because the right-hand furniture is full and the query's room is the
+/// scarce thing. The right of the field is `GAP_MD` 12 + `SIDEBAR_MATCH_W` 72,
+/// sized for `1284 / 1284` at a library ten times the owner's, and putting a
+/// glyph box beside it would take the query's own room from the 104 px that
+/// justified this arrangement down to 80 — *below* the 88 the design measured
+/// and rejected when the count was moved into the field. The mark's box is
+/// already paid for, and it is 24 px wide on the destinations' glyph vertical,
+/// so the swap moves nothing at all: at rest the box holds the magnifier, which
+/// is a label saying *this field searches*; with a query standing it holds the
+/// cross, which is a control saying *press to stop*. A field with text and a
+/// count in it does not need to be told it is a search field.
 fn well(shelf: &Shelf, open: bool) -> Element<'_, Message> {
     let room = theme::active();
     let filtering = !shelf.query.trim().is_empty();
     if !open {
         return collapsed_well(filtering);
     }
-    // **The placeholder says what the field is for.** With the collection's
-    // counts gone to Home the placeholder lane is free, and the one word a
-    // search field owes a first-time listener is the word for what it does.
-    let input = text_input("Search", &shelf.query)
+    // **The placeholder names what the field searches** (ADR-0036 §2). The
+    // well is resident in every place and searches exactly one of them, so the
+    // one line it owes a listener standing on a playlist is which.
+    let input = text_input(SCOPE, &shelf.query)
         .id(search_id())
         .on_input(Message::SearchChanged)
         // Enter plays the top-ranked match, whichever road reached the query
@@ -399,16 +447,29 @@ fn well(shelf: &Shelf, open: bool) -> Element<'_, Message> {
         .line_height(theme::LEADING_BODY)
         .width(Length::Fill)
         .style(move |_theme, status| theme::input(room, status));
-    let magnifier = container(
-        iced_image(icon::handle(icon::Glyph::Magnifier))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::GLYPH_OPACITY),
-    )
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::SIDEBAR_WELL_GLYPH_LEAD))
-    .align_y(alignment::Vertical::Center);
-    let mut layers = iced::widget::stack![input, magnifier];
+    // The mark's box, in one of its two states — the label at rest, the clear
+    // control while a query stands. Both stand on [`theme::SIDEBAR_HEAD_GLYPH_X`],
+    // the destinations' own glyph vertical, so the swap is a change of meaning
+    // and not of geometry.
+    let mark: Element<'_, Message> = if filtering {
+        container(clear_mark(room.recess))
+            .height(Length::Fixed(theme::TRANSPORT_HIT))
+            .padding(theme::pad(0.0, theme::GAP_SM))
+            .align_y(alignment::Vertical::Center)
+            .into()
+    } else {
+        container(
+            iced_image(icon::handle(icon::Glyph::Magnifier))
+                .width(Length::Fixed(theme::ICON_PX))
+                .height(Length::Fixed(theme::ICON_PX))
+                .opacity(theme::GLYPH_OPACITY),
+        )
+        .height(Length::Fixed(theme::TRANSPORT_HIT))
+        .padding(theme::pad(0.0, theme::SIDEBAR_WELL_GLYPH_LEAD))
+        .align_y(alignment::Vertical::Center)
+        .into()
+    };
+    let mut layers = iced::widget::stack![input, mark];
     if filtering {
         // **The match count, inside the control being typed into.** Right
         // aligned in a fixed slot, so the figure shrinking from `12 / 25` to
@@ -776,6 +837,9 @@ fn lane_toggle(open: bool, can_expand: bool) -> Element<'static, Message> {
 
 #[cfg(test)]
 mod tests {
+    use super::SCOPE;
+    use crate::theme;
+
     /// This file's own source, for the pins below.
     fn source() -> String {
         include_str!("lane.rs").replace("\r\n", "\n")
@@ -897,7 +961,7 @@ mod tests {
              counts belong to the Home place now"
         );
         assert!(
-            well.contains("text_input(\"Search\", &shelf.query)"),
+            well.contains("text_input(SCOPE, &shelf.query)"),
             "the lane's well no longer names itself in its placeholder"
         );
         assert!(
@@ -928,6 +992,90 @@ mod tests {
             count.contains("shelf.visible.len()") && count.contains("shelf.albums.len()"),
             "the match count is no longer the query's answer over the \
              collection's size"
+        );
+    }
+
+    /// **The well says what it searches, and the answer is never the place you
+    /// are standing in** — ADR-0036 §2.
+    ///
+    /// The owner asked what search should do off the Library. The decision is
+    /// that it keeps one meaning — the collection — and that the field states
+    /// it, because a resident field reading `Search` over a page called
+    /// `Road Trip` is fairly read as offering to search `Road Trip`. Two things
+    /// are pinned here: the placeholder is the scope word, and it is a
+    /// **constant** rather than anything resolved from [`crate::place::Place`],
+    /// which is what makes a scoped well a visible edit rather than a quiet
+    /// drift.
+    #[test]
+    fn the_wells_placeholder_names_the_one_thing_it_searches() {
+        let source = source();
+        let well = body(&source, "fn well(shelf: &Shelf, open: bool)");
+        assert_eq!(
+            SCOPE, "Search library",
+            "the well's placeholder no longer names the collection"
+        );
+        assert!(
+            well.contains("text_input(SCOPE, &shelf.query)"),
+            "the well's placeholder is not the scope word"
+        );
+        assert!(
+            !well.contains("Place"),
+            "the well resolves its placeholder against the place — that is a \
+             scoped search, and ADR-0036 §3 refused it because type-anywhere \
+             is a promise about the collection"
+        );
+    }
+
+    /// **One box, two meanings**: the magnifier at rest, the `×` under a query
+    /// (ADR-0036 §4, the owner's *"maybe a little x or esc to clear"*).
+    ///
+    /// The claim that matters is geometric. The clear mark could not go beside
+    /// the count — the field's right edge already spends `GAP_MD` 12 +
+    /// [`theme::SIDEBAR_MATCH_W`] 72 and a glyph box more would take the
+    /// query's own room to 80 px, below the 88 the design measured and rejected
+    /// (`crate::font`'s `the_lanes_well_holds_a_query_beside_its_match_count`).
+    /// The mark's box on the left is already paid for and is exactly
+    /// [`theme::STEPPER_HIT`] wide on [`theme::SIDEBAR_HEAD_GLYPH_X`], so the
+    /// swap moves nothing — which is the same guarantee the count's fixed slot
+    /// gives, on the other side of the field.
+    #[test]
+    fn the_wells_mark_is_a_label_at_rest_and_the_clear_under_a_query() {
+        let source = source();
+        let well = body(&source, "fn well(shelf: &Shelf, open: bool)");
+        assert!(
+            well.contains("let mark: Element<'_, Message> = if filtering {")
+                && well.contains("clear_mark(room.recess)"),
+            "the well's mark does not become the clear control under a query"
+        );
+        assert!(
+            well.contains("icon::Glyph::Magnifier"),
+            "the well lost the label it wears at rest"
+        );
+        // The swap costs the field nothing on either edge: the left lead is
+        // the mark's own box and the right is the count's reserved slot,
+        // unchanged.
+        assert!(
+            !well.contains("theme::SIDEBAR_MATCH_W + ")
+                && !well.contains("+ theme::STEPPER_HIT")
+                && !well.contains("theme::SIDEBAR_MATCH_W\n                    +"),
+            "the clear mark took room from the query's own 104 px"
+        );
+        // Centred on the destinations' glyph vertical without a constant of
+        // its own: SIDEBAR_HEAD_GLYPH_X = GAP_SM + SIDEBAR_GLYPH_BOX / 2, and
+        // the box is STEPPER_HIT = SIDEBAR_GLYPH_BOX, so the inset is GAP_SM.
+        assert!(
+            well.contains(".padding(theme::pad(0.0, theme::GAP_SM))"),
+            "the clear mark is not inset to the head's glyph vertical"
+        );
+        assert!(
+            (theme::STEPPER_HIT - theme::SIDEBAR_GLYPH_BOX).abs() < f32::EPSILON,
+            "a control's box and the head's glyph box have diverged, so the \
+             clear mark needs an inset of its own"
+        );
+        assert!(
+            (theme::GAP_SM + theme::STEPPER_HIT / 2.0 - theme::SIDEBAR_HEAD_GLYPH_X).abs()
+                < f32::EPSILON,
+            "the clear mark's centre is off the destinations' glyph vertical"
         );
     }
 

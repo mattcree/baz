@@ -740,6 +740,49 @@ mod tests {
         );
     }
 
+    /// **The well's placeholder names its scope inside the field** — ADR-0036
+    /// §2, and the arithmetic that made it free.
+    ///
+    /// `Search library` is longer than the `Search` it replaces, and the
+    /// question a longer placeholder always raises is what it costs. Nothing,
+    /// and the reason is a coincidence the design can rely on: **a placeholder
+    /// is drawn exactly when the query is empty, and the count's slot is
+    /// reserved exactly when it is not.** So the placeholder's lane is the
+    /// field's resting width — 232 − 44 − 12 = 176 px — not the 104 px a query
+    /// gets while the count stands beside it.
+    ///
+    /// Swept past the word actually shipped, because the next reasonable
+    /// candidate for it is longer still and the slot should be known to hold
+    /// that too.
+    #[test]
+    fn the_lanes_well_names_the_scope_it_searches() {
+        let sans = sans();
+        let resting = theme::SIDEBAR_MEASURE - theme::SIDEBAR_HEAD_TEXT_X - theme::GAP_MD;
+        assert!(
+            (resting - 176.0).abs() < f32::EPSILON,
+            "the placeholder's lane is {resting} px, not the 176 the design \
+             records"
+        );
+        fits(
+            &sans,
+            crate::views::lane::SCOPE,
+            theme::SIZE_BODY,
+            resting,
+            "the well's resting width",
+        );
+        // The longer candidates the word was chosen from, so a later edit to
+        // `SCOPE` cannot silently clip.
+        for candidate in ["Search the library", "Search collection"] {
+            fits(
+                &sans,
+                candidate,
+                theme::SIZE_BODY,
+                resting,
+                "the well's resting width",
+            );
+        }
+    }
+
     /// **Every cell of Home's `COLLECTION` footer holds both its lines** at
     /// [`theme::STAT_W`] — the figure and the tracked word under it.
     ///

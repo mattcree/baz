@@ -254,6 +254,17 @@ pub(crate) enum Message {
     SetupSubmit,
     /// Shelf: search text changed.
     SearchChanged(String),
+    /// **The well's clear mark** — the `×` the owner asked for (2026-08-10:
+    /// *"maybe a little x or esc to clear would make sense too"*).
+    ///
+    /// It is <kbd>Esc</kbd>'s pointer route and nothing more: both land in
+    /// [`Shelf::clear_query`], so the query goes, the caret leaves the field
+    /// and the transport gets the keyboard back. Present exactly while a query
+    /// stands, which is exactly when <kbd>Esc</kbd> has that layer to peel —
+    /// the rule ADR-0036 §4 states, that no pointer route may exist for a
+    /// state the keyboard cannot reach and none may act where the key would
+    /// not.
+    ClearSearch,
     /// **Type anywhere**: a bare printable character was pressed with nothing
     /// focused, so it is the query's (ADR-0017 §1.2, [`crate::keys`]).
     ///
@@ -4663,6 +4674,9 @@ impl Shelf {
                     self.request_visible_thumbs(),
                 ])
             }
+            // **The `×`, which is `Esc`'s pointer route** — the identical
+            // function, so the two cannot drift (ADR-0036 §4).
+            Message::ClearSearch => self.clear_query(),
             // **Type anywhere** has no arm here any more. Its message is
             // answered by the shell (`App::type_anywhere`), which reaches the
             // well — the Library, and the lane opened if the well is in it —
@@ -6603,7 +6617,12 @@ mod tests {
             ),
             ("ToggleSettings", "the top bar's Settings control"),
             ("FocusSearch", "the top bar's search well"),
-            ("EscapePressed", "every place's `‹ Library`"),
+            (
+                "EscapePressed",
+                "every place's `‹ Library`, and — for the query layer the peel \
+                 ends on — the well's own clear mark, which is this key's \
+                 pointer route into the identical function (ADR-0036 §4)",
+            ),
             (
                 "QueryTyped",
                 "the top bar's search well — the field ADR-0017 §1.2 kept, \
@@ -7398,6 +7417,57 @@ mod tests {
             set.contains("theme::sidebar_can_expand(state.window_w)"),
             "`set_lane` can expand the lane at a width that cannot hold it"
         );
+    }
+
+    /// **The `×` is <kbd>Esc</kbd>'s pointer route, and it is the same
+    /// function** — ADR-0036 §4, the owner's *"maybe a little x or esc to clear
+    /// would make sense too"*.
+    ///
+    /// He named both roads in one sentence, which is the requirement stated:
+    /// they must not merely agree, they must be one act. So both arms call
+    /// [`Shelf::clear_query`] — the query goes, the caret leaves the field and
+    /// the transport gets the keyboard back — and neither has a body of its
+    /// own to drift in.
+    ///
+    /// The other half of the rule is *when*: the mark is drawn exactly while a
+    /// query stands, which is exactly the condition under which the key has
+    /// that layer to peel. A cross over an empty field would be a control that
+    /// does nothing, and a key that clears with no query is the same defect
+    /// from the other side.
+    #[test]
+    fn the_wells_clear_mark_and_escape_are_one_act() {
+        let source = include_str!("app.rs").replace("\r\n", "\n");
+        assert!(
+            source.contains("Message::ClearSearch => self.clear_query(),"),
+            "the well's `×` no longer resolves to the query's one clear"
+        );
+        let rest = source
+            .split_once("fn peel(&mut self) -> Task<Message> {")
+            .expect("the shelf's Escape peel")
+            .1;
+        let peel = &rest[..rest.find("\n    }\n").expect("a function ends")];
+        assert!(
+            peel.contains("self.clear_query()"),
+            "Escape's query layer and the `×` have stopped being one function"
+        );
+        assert!(
+            peel.contains("!self.query.is_empty()"),
+            "Escape clears a query that is not there, so the `×` it mirrors \
+             would be a control with nothing to act on"
+        );
+        // And the mark itself is drawn under the same predicate, in both
+        // wells — the lane's above `SIDEBAR_FLOOR` and the strip's below it.
+        for well in [
+            include_str!("views/lane.rs"),
+            include_str!("views/top_bar.rs"),
+        ] {
+            assert!(
+                well.contains("let mark: Element<'_, Message> = if filtering {")
+                    && well.contains("clear_mark(room.recess)"),
+                "a well draws its clear mark on something other than a live \
+                 query, or not at all"
+            );
+        }
     }
 
     /// **The blur is a different id, and that is the whole mechanism.**
