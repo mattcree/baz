@@ -213,6 +213,12 @@ stop
 # --------------------------------------------------------------- 1920 × 1080
 W=1920; H=1080
 launch $W $H
+# **The subject is remembered**, so this window opens on the artists — the two
+# strip runs above left it there. Put the records back first, or `20` would be
+# a second copy of `21` rather than the frame it is labelled as. (That the
+# config carried the subject across three launches is itself the persistence
+# claim, arrived at by accident and kept on purpose.)
+key 1
 park
 shot 20-records-wall-1920
 click_artists

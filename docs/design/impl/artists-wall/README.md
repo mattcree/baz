@@ -73,6 +73,14 @@ are measured against the declaration in the bundled face in
 words measure **366.50 px** against a declared 368 — 1.50 px, the tightest
 reservation in the strip, and the number a seventh word would have to beat.
 
+## One thing the frames caught by accident
+
+The 1920 run opens on the **artists**, because the two strip runs before it
+left the subject there and the scratch config carried it across three launches.
+`capture.sh` puts the records back before `20` for that reason, and the comment
+says so — the subject is persisted on `group_key`'s exact terms, and this is
+what that looks like from outside.
+
 ## The fixture
 
 `mkfixture.sh`'s own 25 records / 206 tracks, with **four of them re-filed
