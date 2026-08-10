@@ -48,8 +48,6 @@
 
 ## Doing
 
-- **The artists wall groups by artist**, not alphabetically — may delete
-  `WallSubject` and the `A–Z` key with it.
 - **Shuffle stops permuting the run**, and `Play all` becomes a tile on Home.
   The constraint that decides the design: baz is gapless, so the next track
   must be chosen *before* the current one ends.
@@ -88,6 +86,11 @@
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- `ARTIST` groups albums under their artist. It turned out to be an ordinary
+  group key rather than a subject beside one — `shelves(Artist)` is `albums()`
+  with its breaks named — and that identity retired `A–Z` too, since both are
+  `albums()` differing only in where the headers fall. **−700 lines**, no
+  migration.
 - Settings wears the lane — it had neither lane nor door, so `Esc` was the only
   way out of a place you reach with the pointer.
 - The bar's now-playing block leads to `Now playing` rather than to the record.
