@@ -1560,6 +1560,30 @@ next commit.
 
 ### Fixed
 
+- **A shuffled run's continuation counts records, not visits.** The owner: *"the
+  album count in the bottom bar when in shuffle mode is weird... way too many
+  albums shown"*. The bar's ambient line groups the queue's remainder so that a
+  stacked record reads as one thing rather than eleven, and it did that by
+  folding *adjacent* items sharing an album title. Under a shuffled pass the
+  items of one record are no longer adjacent, so every return to a record
+  started a new entry: a three-record run read `then 10 albums` on the first
+  seed tried.
+
+  The grouping is now conditional, because the old rule is right about the case
+  it was written for. Adjacency encodes a fact about **the listener's own
+  order** — a record stacked twice with something between it really is two
+  things, and the run being broken is the listener's doing. A shuffled walk has
+  no such order to break; it simply returns. So albums fold by title under
+  shuffle and by adjacency without it, and
+  `a_record_stacked_twice_is_two_entries` keeps its deliberate reading
+  untouched. Loose songs are distinct things either way and were left alone.
+
+  Pinned twice over: one test asserting both readings of the same five items,
+  since the difference between them *is* the fix, and one sweeping 32 seeds of
+  the shuffle the player actually performs, because a single permutation proves
+  only that one permutation is safe and this defect does not appear until the
+  walk happens to return.
+
 - **`Now playing` shows what the bar names, whether or not it is sounding.**
   The owner: *"it should probably just show whatever the now playing is
   indicating, just not playing"*. The two halves are now read from the two

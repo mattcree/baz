@@ -53,16 +53,30 @@
    - **idle must return to zero** — the tween ends, its subscription ends, the
      surface is static. `the_ambient_clock_is_absent_outside_its_place` is the
      shape of the test that keeps that honest.
-2. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** Visible in a
-   committed frame: at 2560 with the run standing, ~700 px of field sits
-   between the sleeve and the run column, because the record column hangs left
-   and the run stays 440 wide. A4 takes it to ~1100 at that size.
-3. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
+2. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
+   2026-08-10: *"at full screen the now playing page looks odd because the
+   playlist hugs right and the art hugs left"* — which is this item, reported
+   from the frame rather than from the measurement, and worth recording as a
+   confirmation that the queued defect is the one a listener actually sees.
+   Visible in a committed frame: at 2560 with the run standing, ~700 px of
+   field sits between the sleeve and the run column, because the record column
+   hangs left and the run stays 440 wide. A4 takes it to ~1100 at that size.
+   His phrasing names both edges, so check the *record* column's own alignment
+   too — A4 widening the run closes the gap from one side, and if the sleeve is
+   also hanging hard left rather than sitting in its column, that is a second
+   fault the widening would hide rather than fix.
+3. **The seek bar says which thing it measures.** The owner: *"I think the seek
+   bar at the bottom should have a toggle indicating for song or for whole
+   playlist"*. Both are true readouts — the track's position and the run's — and
+   he is asking to choose. Undesigned; the questions are where the toggle lives
+   (the bar is already dense), whether the choice persists, and what the
+   elapsed/remaining figures either side of the bar read in run mode.
+4. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
    the Flatpak build are all done; what is left is a screenshot for the
    metainfo, the version edit from `0.0.0`, a `workflow_dispatch` dry run,
    then the tag. **The tag is the owner's to cut** — the workflow produces a
    draft.
-3. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+5. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -75,7 +89,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-4. **Rewrite the README as the project's public face**, with the icon and real
+6. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
    last, so it describes what actually ships. Its keyboard table is still
    stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode,
@@ -84,7 +98,25 @@
 
 ## Doing
 
-Nothing. The queue above is the next thing.
+- **The shuffled continuation counted visits, not records** —
+  `fix/shuffled-continuation-counts-records`. The owner: *"the album count in
+  the bottom bar when in shuffle mode is weird... way too many albums shown"*.
+  Diagnosed and fixed: `continuation` grouped only *adjacent* items sharing an
+  album title, which is exactly right for a run in the listener's own order and
+  wrong under a walk that returns to a record — seed 0 of a three-record run
+  read `then 10 albums`. Counted distinct under shuffle only, so
+  `a_record_stacked_twice_is_two_entries` keeps its deliberate rule.
+- **The lane's lamp dot follows the sounding record, not the playing list** —
+  with the ledger agent, because one answer must serve both the dot and the
+  recency ordering or they will drift. The owner: *"I still see albums
+  specifically appearing as if they are playing rather than the playlist...
+  it only affects the little pip"*.
+- **The play ledger remembers which list played**, so a run's origin survives a
+  quit — ADR-0018 reopened, the `# baz run` marker.
+- **One composition for a record's page and a list's page** — the owner's *"can
+  we reuse the basic layout and view of the playlist for the album view"*.
+- **Multi-disc albums are one record** — the owner's *"it would be good if
+  multi CD albums were a single item"*.
 
 ## Waiting on the owner
 

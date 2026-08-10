@@ -1941,7 +1941,7 @@ impl PlayerState {
         let queue = self.queue.as_ref()?;
         let current = queue.items.get(self.playing_row()?)?;
         let (_, rest) = self.pass();
-        continuation(current, &rest, self.elapsed_ms)
+        continuation(current, &rest, self.elapsed_ms, self.shuffle())
     }
 
     /// The queue this process handed the engine, if it has handed it one.
@@ -2604,16 +2604,22 @@ impl<'a> Entry<'a> {
 /// of queue` — the product's standing rules makes silence a feature, and the interface
 /// announcing the silence it promised would be the announcement, not the
 /// silence.
-fn continuation(current: &QueueItemVm, tail: &[&QueueItemVm], elapsed_ms: u64) -> Option<String> {
+fn continuation(
+    current: &QueueItemVm,
+    tail: &[&QueueItemVm],
+    elapsed_ms: u64,
+    shuffled: bool,
+) -> Option<String> {
     // How much of the record now playing is still ahead. Only a *named* album
     // can be continued: two adjacent loose songs are two things, not a run.
     //
-    // `tail` is **the pass's remainder**, so this generalises rather than
-    // changes: an unshuffled run through one record still reads `then 9 more`,
-    // and a shuffled pass over that same record reads it too — every entry left
-    // is still that record's, whatever order they come in. A shuffled pass over
-    // a mixed run stops sharing a title after the first entry and falls into
-    // the counted forms below, which is the truth about it.
+    // `tail` is **the pass's remainder**, so a run through one record reads
+    // `then 9 more` whether or not it is shuffled — every entry left is still
+    // that record's, whatever order they come in.
+    //
+    // A shuffled pass over *several* records is where the adjacency grouping
+    // below stops telling the truth, and `shuffled` is why this function takes
+    // the flag at all. See the counted forms.
     let playing_album = current.album.as_deref();
     let rest = playing_album.map_or(0, |album| {
         tail.iter()
@@ -2643,8 +2649,32 @@ fn continuation(current: &QueueItemVm, tail: &[&QueueItemVm], elapsed_ms: u64) -
         [] => format!("{rest} more"),
         [only] => only.name().to_owned(),
         many => {
-            let albums = many.iter().filter(|entry| entry.is_album()).count();
-            let tracks = many.len() - albums;
+            // **Under shuffle a record is counted once, however often the walk
+            // returns to it.** The adjacency grouping above is a statement about
+            // *the listener's own order*: a record stacked twice with something
+            // between it is two things because the listener broke the run, which
+            // is what `a_record_stacked_twice_is_two_entries` pins. Shuffle has
+            // no such order to break — the walk simply visits — so counting each
+            // visit reported the owner's *"way too many albums shown"*: three
+            // records interleaved came out as thirty.
+            //
+            // Loose songs are already distinct things and are left alone; only
+            // the album entries fold. The tracks figure is derived from what is
+            // left rather than recomputed, so the two can never disagree.
+            let mut counted = many.to_vec();
+            if shuffled {
+                let mut seen: Vec<&str> = Vec::new();
+                counted.retain(|entry| match entry {
+                    Entry::Album(name) if seen.contains(name) => false,
+                    Entry::Album(name) => {
+                        seen.push(name);
+                        true
+                    }
+                    Entry::Track(_) => true,
+                });
+            }
+            let albums = counted.iter().filter(|entry| entry.is_album()).count();
+            let tracks = counted.len() - albums;
             match (albums, tracks) {
                 (0, tracks) => plural(tracks, "track"),
                 (albums, 0) => plural(albums, "album"),
@@ -6149,6 +6179,81 @@ mod tests {
             player.continuation_note().as_deref(),
             Some("then 2 albums · 10:00 left")
         );
+    }
+
+    /// **A shuffled pass counts records, not visits.** The rule above — a
+    /// record stacked twice is two things — is a statement about *the
+    /// listener's own order*: they broke the run, so the count says so. A
+    /// shuffled walk has no such order to break; it simply returns. Counting
+    /// each return is what produced the owner's *"the album count in the bottom
+    /// bar when in shuffle mode is weird... way too many albums shown"*.
+    ///
+    /// Both readings of the same five items are asserted here, because the
+    /// difference between them **is** the fix.
+    #[test]
+    fn a_shuffled_pass_counts_records_not_visits() {
+        let queue = stacked(&[
+            (Some("Geogaddi"), "Ready Lets Go", 200),
+            (Some("Kid A"), "Everything In Its Right Place", 200),
+            (Some("Geogaddi"), "Music Is Math", 200),
+            (Some("Kid A"), "Kid A", 200),
+            (Some("Geogaddi"), "Dawn Chorus", 200),
+        ]);
+        let items: Vec<&QueueItemVm> = queue.items.iter().collect();
+        let (current, tail) = items.split_first().expect("a queue");
+
+        assert_eq!(
+            continuation(current, tail, 0, true).as_deref(),
+            Some("then 2 albums · 16:40 left"),
+            "two records are ahead — the walk visits them four times between it"
+        );
+        assert_eq!(
+            continuation(current, tail, 0, false).as_deref(),
+            Some("then 4 albums · 16:40 left"),
+            "in the listener's own order the same five items are four stacks, \
+             because they are the four the listener built"
+        );
+    }
+
+    /// The property the fix is really claiming, held against the shuffle the
+    /// player actually performs rather than a hand-built interleave: **however
+    /// the walk falls, the line never claims more records than the run holds.**
+    ///
+    /// Seeds are swept because a single one proves only that one permutation
+    /// is safe, and the defect this pins is precisely a permutation-dependent
+    /// one — it does not appear until the walk returns to a record.
+    #[test]
+    fn no_shuffle_of_a_run_claims_more_records_than_it_holds() {
+        let items: Vec<(Option<&str>, &str, u64)> = ["Geogaddi", "Kid A", "Amnesiac"]
+            .iter()
+            .flat_map(|album| {
+                (1..=6_u64).map(move |track| (Some(*album), "track", 60 + track))
+            })
+            .collect();
+
+        for seed in 0..32_u64 {
+            let mut player = PlayerState::new(Availability::Ready);
+            player.seed_traversal(Traversal::Shuffled { seed });
+            player.note_queue_sent(stacked(&items));
+            player.apply(&started("/m/stack/0.flac", 0), &[]);
+
+            let Some(note) = player.continuation_note() else {
+                continue;
+            };
+            // `then N albums · …` — the only numeral before the word.
+            if let Some((count, _)) = note.split_once(" album") {
+                let claimed: usize = count
+                    .rsplit(' ')
+                    .next()
+                    .expect("a word")
+                    .parse()
+                    .unwrap_or(0);
+                assert!(
+                    claimed <= 3,
+                    "seed {seed} claimed {claimed} records of a run holding 3: {note}"
+                );
+            }
+        }
     }
 
     /// **An edit does not blank the mark.** ADR-0014's whole bargain is that
