@@ -745,6 +745,37 @@ next commit.
   made of the answer. It now names where the record sits, and the artist half
   is a door. Frames and the measured strip height:
   `docs/design/impl/artist-page/`.
+- **The artwork crosses when the record changes.** The owner: *"when changing
+  track there isn't any kind of nice visual transition for album art in now
+  playing. we should have something a bit nicer, like a quick fade"*. A
+  **200 ms linear dissolve** of the Now playing hero — `motion::DISSOLVE`,
+  which *is* `motion::LAMP`, because the lamp warms and the picture crosses on
+  the same event and two statements of one fact must finish together. It is
+  ADR-0020 §3's *album-art crossfade* refusal reversed, deliberately and
+  narrowly: that refusal was written when the artwork was a 320 px tile among a
+  hundred, and on a surface whose **subject** is one work the picture changing
+  *is* the change (ADR-0020's third amendment; ADR-0029's).
+  - **It fires on the picture, never the track.** Consecutive tracks on one
+    record share a cover, so a twelve-track album is twelve track changes, no
+    transition, and no clock — the shell compares the handle it has committed
+    to drawing.
+  - **It begins when the new art is ready.** `art::load_hero` decodes
+    off-thread, so the surface **holds** the picture it has until there is an
+    answer for the incoming record. That also removes a wart: a record change
+    used to cut to the 320 px thumbnail, on a room with no field, and pop to
+    full size when the hero landed — both cuts are visible in
+    `docs/design/impl/art-crossfade/01-the-cover-crossing-before.png`.
+  - **The field crosses with it**, off the same number, so the wash the owner
+    had de-seamed in space cannot grow a seam in time.
+  - **No new memory and no new cache.** The hero LRU's two entries already hold
+    the record that just stopped, and the outgoing handle is an `Arc` onto the
+    same pixels.
+  - Hard cuts are kept where a dissolve would say something untrue: a record
+    with no art (the gradient is a stand-in, and fading a stand-in is
+    decoration), and two covers whose decodes resolve to different squares (a
+    dissolve that was also a resize would animate geometry).
+  - Filmed at 60 fps and read back frame by frame:
+    `docs/design/impl/art-crossfade/`.
 - **`Place::NowPlaying`** — the sounding record at the size it deserves:
   artwork, identity, the same needle at the work's width, the bar's own
   transport. Every measure is derived from the viewport, so the kiosk

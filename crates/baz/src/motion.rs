@@ -40,11 +40,22 @@
 //!
 //! # What may move
 //!
-//! ADR-0020 §2's five, and nothing else. Still refused, and they are refusals
-//! rather than omissions (a standing rule of the product): shelf-grid stagger or pop-in, any
-//! fade as a thumbnail decodes, album-art crossfades, **the bar's geometry**,
-//! and anything at all that needs a redraw while the window is idle. Motion
-//! states what changed; it never decorates, and it never moves the transport.
+//! ADR-0020 §2's five, and **the hero's dissolve** its third amendment adds.
+//! Still refused, and they are refusals rather than omissions (a standing rule
+//! of the product): shelf-grid stagger or pop-in, any fade as a thumbnail
+//! decodes, **the bar's geometry**, and anything at all that needs a redraw
+//! while the window is idle. Motion states what changed; it never decorates,
+//! and it never moves the transport.
+//!
+//! **`album-art crossfades` used to stand on that list**, and the owner
+//! reversed it on 2026-08-10: *"when changing track there isn't any kind of
+//! nice visual transition for album art in now playing. we should have
+//! something a bit nicer, like a quick fade"*. It comes off the list rather
+//! than being quietly ignored, and it comes off **narrowly** — see
+//! [`DISSOLVE`], and ADR-0020's amendment for the boundary. The neighbouring
+//! refusal, *any fade as a thumbnail decodes*, is untouched and is what keeps
+//! the reversal from spreading: the wall's tiles arrive as hard as they ever
+//! did.
 
 use std::time::{Duration, Instant};
 
@@ -84,7 +95,43 @@ pub const TILE: Duration = Duration::from_millis(90);
 /// The lamp warming when the light moves to another record: **200 ms**, and
 /// **linear** — the one transition of the five that is not eased (ADR-0020 §2.5,
 /// `docs/design/02-visual-language.md` §7 named it first).
+///
+/// **It has a second consumer**, and that is deliberate rather than
+/// incidental: see [`DISSOLVE`].
 pub const LAMP: Duration = Duration::from_millis(200);
+
+/// **The Now playing hero's crossfade when the record changes — [`LAMP`]'s own
+/// 200 ms, and [`Curve::Linear`]** (ADR-0020's third amendment).
+///
+/// # It is an alias, and that is the whole decision
+///
+/// The owner asked for *"a quick fade"* and named no number, so this module's
+/// standing rule applies: **take one of the product's own durations, or say
+/// why none fits.** [`INK`] and [`TILE`] are 90 ms, which is a pointer's own
+/// latency and under six ticks of [`TICK`] — a dissolve that short is a cut
+/// with a smear on it. [`LAMP`] fits, and not merely by being the one left:
+///
+/// > **It is the same event.** The lamp warms *because the light moved to
+/// > another record*; the hero dissolves *because the picture of that record
+/// > changed*. Two statements of one fact, finishing at different times, would
+/// > be the surface saying the same thing twice out of step — which is the
+/// > class of seam the owner has had removed from this place once already,
+/// > there in space and here in time.
+///
+/// So it is spelled `= LAMP` rather than `from_millis(200)`, and
+/// `the_dissolve_is_the_lamps_own_number` pins it: an edit wanting a different
+/// feel has to argue with the *decision* rather than drift a digit past it.
+///
+/// # Linear, and the curve is arithmetic rather than taste
+///
+/// A cross-dissolve composites `old · (1 − t) + new · t`, so `t` **is** the
+/// mix. [`Curve::EaseOut`] is front-loaded — well past half the distance at
+/// half the time — which puts the new cover almost fully in place in the first
+/// few frames and then spends the rest of the flight taking a ghost off it.
+/// That reads as a cut with a lag: the two worse halves of both answers.
+/// Linear *is* the dissolve, and it is the lamp's own curve for the lamp's own
+/// reason — nothing about a picture arriving has a reason to decelerate.
+pub const DISSOLVE: Duration = LAMP;
 
 /// How a tween gets from where it is to where it is going.
 ///
@@ -680,9 +727,41 @@ mod tests {
         assert_eq!(INK, Duration::from_millis(90));
         assert_eq!(TILE, Duration::from_millis(90));
         assert_eq!(LAMP, Duration::from_millis(200));
+        assert_eq!(DISSOLVE, LAMP);
         // The tick is finer than half a frame at 60 Hz, so it never becomes the
         // thing that decides how smooth a transition looks.
         assert!(TICK * 2 <= FRAME);
+    }
+
+    /// **The hero's dissolve and the lamp are one number**, because they are
+    /// one event (ADR-0020's third amendment; see [`DISSOLVE`]).
+    ///
+    /// Asserted as an *identity* rather than as two equal literals: the claim
+    /// is that the picture and the light finish together, and two constants
+    /// that merely happened to read `200` would let one of them drift.
+    #[test]
+    fn the_dissolve_is_the_lamps_own_number() {
+        assert_eq!(DISSOLVE, LAMP);
+        // …and they finish together from the same start, which is the whole of
+        // what "one event" means on screen.
+        let start = Instant::now();
+        let mut lamp = Tween::settled(0.0).with_curve(Curve::Linear);
+        let mut hero = Tween::settled(0.0).with_curve(Curve::Linear);
+        lamp.go(1.0, LAMP, start);
+        hero.go(1.0, DISSOLVE, start);
+        let mut at = start;
+        while lamp.live() || hero.live() {
+            at += FRAME;
+            lamp.tick(at);
+            hero.tick(at);
+            assert_eq!(
+                lamp.live(),
+                hero.live(),
+                "the light and the picture parted company at {:?}",
+                at.duration_since(start)
+            );
+            assert!((lamp.value() - hero.value()).abs() < f32::EPSILON);
+        }
     }
 
     /// Every icon button is in [`Control::ALL`], and each is its own identity —

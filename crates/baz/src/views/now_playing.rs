@@ -384,15 +384,26 @@ pub(crate) fn view<'a>(
     // **The source's own pixels**, which is what bounds the work now that
     // `NOW_PLAYING_MAX` is gone. Resolved once, here, so the number the layout
     // clamps against and the picture the layout draws are the same decode.
-    let (handle, source) = now.map_or((None, f32::INFINITY), |now| work(shelf, now));
-    let edge = record_edge(width, height, showing_run, source);
+    let work = work(shelf, now);
+    let edge = record_edge(width, height, showing_run, work.source);
+    // **One `t` for the cover and the room**, resolved here and passed to both.
+    // See [`field_layer`] for why it is one number rather than two agreeing
+    // ones, and [`Work::dissolve_at`] for the one case that refuses it.
+    let t = work.dissolve_at(edge, width, height, showing_run);
     let stacked = showing_run && run_w <= 0.0;
-    let field = field_layer(field_of(shelf, now));
+    let field = field_layer(
+        work.from
+            .as_ref()
+            .and_then(|&(_, _, field)| field)
+            .filter(|_| t < 1.0),
+        work.field,
+        t,
+    );
     let record = now.map(|now| {
         if stacked {
-            head_block(player, handle, now, edge, measure)
+            head_block(player, &work, t, now, edge, measure)
         } else {
-            record_column(player, handle, now, edge)
+            record_column(player, &work, t, now, edge)
         }
     });
     let body: Element<'a, Message> = match record {
@@ -555,9 +566,8 @@ pub(crate) fn follow(
     let head_h = if run_w > 0.0 {
         0.0
     } else {
-        now.map_or(0.0, |now| {
-            let (_, source) = work(shelf, now);
-            record_edge(width, height, true, source) + HEAD_BELOW + theme::GAP_XL
+        now.map_or(0.0, |_| {
+            record_edge(width, height, true, work(shelf, now).source) + HEAD_BELOW + theme::GAP_XL
         })
     };
     let pad_top = theme::HANG;
@@ -608,7 +618,8 @@ fn run_scroll<'a>(
 /// use.
 fn head_block<'a>(
     player: &'a PlayerState,
-    handle: Option<iced_image::Handle>,
+    work: &Work,
+    t: f32,
     now: &'a crate::player::NowPlaying,
     edge: f32,
     measure: f32,
@@ -649,7 +660,7 @@ fn head_block<'a>(
     }
     column![
         row![
-            sleeve(handle, now, edge),
+            sleeve(work, t, now, edge),
             container(identity)
                 .width(Length::Fill)
                 .height(Length::Fixed(edge))
@@ -687,47 +698,142 @@ fn head_block<'a>(
 /// [`Shelf::request_hero`](crate::app::Shelf::request_hero), which asks for
 /// the hero the moment the engine names a record rather than when this place
 /// is opened.
-fn work(shelf: &Shelf, now: &crate::player::NowPlaying) -> (Option<iced_image::Handle>, f32) {
-    let Some(id) = now.album_id else {
-        return (None, f32::INFINITY);
+fn work(shelf: &Shelf, now: Option<&crate::player::NowPlaying>) -> Work {
+    let showing = shelf.showing();
+    // **The committed hero, which is not always the sounding record's.** While
+    // a new record's decode is in flight there is no answer for it yet, so the
+    // shell holds the picture it has and this draws that — see
+    // [`crate::app::Shelf::settle_art`] rule 2. The placard above has already
+    // changed; the cover follows when there is a cover to follow with, which is
+    // a few tens of milliseconds and is the whole reason the dissolve can be a
+    // dissolve rather than a fade to nothing.
+    if let Some(hero) = showing.hero {
+        return Work {
+            handle: Some(hero.handle.clone()),
+            source: hero.px,
+            field: hero.field,
+            from: showing
+                .from
+                .map(|from| (from.handle.clone(), from.px, from.field)),
+            t: showing.t,
+        };
+    }
+    let Some(id) = now.and_then(|now| now.album_id) else {
+        return Work::bare();
     };
-    if let Some(hero) = shelf.hero(id) {
-        return (Some(hero.handle.clone()), hero.px);
-    }
     match (shelf.thumbs.peek(&id), shelf.thumb_edge(id)) {
-        (Some(handle), Some(px)) => (Some(handle.clone()), px),
-        _ => (None, f32::INFINITY),
+        (Some(handle), Some(px)) => Work {
+            handle: Some(handle.clone()),
+            source: px,
+            field: None,
+            from: None,
+            t: 1.0,
+        },
+        _ => Work::bare(),
     }
 }
 
-/// The record's ambient field, when it has one — `None` for a record with no
-/// art, a record whose hero has not landed, and a **monochrome** record, all
-/// three of which get the room (story S7, [`crate::field`]).
+/// **What this surface draws of the record** — the picture, the number that
+/// bounds it, the field derived from the same decode, and, while the record is
+/// changing, the picture it is dissolving away from.
 ///
-/// Read from the hero alone rather than from the thumbnail: 320 px is enough
-/// pixels for a palette, but a field that changed colour when the hero
-/// replaced the thumbnail would be the room flickering on every record change.
-/// One decode, one field, arriving together.
-fn field_of(shelf: &Shelf, now: Option<&crate::player::NowPlaying>) -> Option<field::Field> {
-    shelf.hero(now?.album_id?)?.field
+/// One value because the field is a *reading of the cover*: two functions
+/// answering separately could put one record's room behind another record's
+/// sleeve for a frame, which is precisely the seam ADR-0020's third amendment
+/// exists to avoid putting into time.
+struct Work {
+    /// The picture, or `None` for the wall's deterministic gradient.
+    handle: Option<iced_image::Handle>,
+    /// `min(w, h)` of the decode being drawn — [`art_edge`]'s third term.
+    source: f32,
+    /// The field derived from that same decode. Read from the **hero** alone:
+    /// 320 px is enough pixels for a palette, but a field that changed colour
+    /// when the hero replaced the thumbnail would be the room flickering on
+    /// every record change.
+    field: Option<field::Field>,
+    /// The outgoing picture, its own bound, and its own field, for as long as
+    /// the dissolve runs.
+    from: Option<(iced_image::Handle, f32, Option<field::Field>)>,
+    /// The incoming picture's opacity, `[0, 1]`. `1.0` at rest.
+    t: f32,
 }
 
-/// The work itself at `edge` — the decoded cover, or the wall's own
-/// deterministic gradient where a record has none.
+impl Work {
+    /// A record with nothing decoded: the gradient, and no bound at all — a
+    /// gradient has no resolution, so *larger than its source* is not a
+    /// predicate that applies to it.
+    fn bare() -> Self {
+        Self {
+            handle: None,
+            source: f32::INFINITY,
+            field: None,
+            from: None,
+            t: 1.0,
+        }
+    }
+
+    /// **How far the dissolve may be drawn at `edge`** — `1.0` wherever it may
+    /// not be drawn at all.
+    ///
+    /// The one condition, and it is a refusal rather than a tuning: **both
+    /// pictures must be drawn at one edge.** [`art_edge`]'s third term is the
+    /// decode's own pixels, so two decodes that do not agree about it are two
+    /// different sizes of sleeve — and a dissolve between two sizes is a
+    /// dissolve *and* a resize, which is animating geometry and is on
+    /// ADR-0020's standing refusal list. Where they disagree the change stays
+    /// the hard cut it has always been, and the sleeve is the incoming one at
+    /// full strength from the first frame.
+    ///
+    /// It is asked of the **drawn** edges rather than of the two `source`
+    /// values, because the ordinary case is two covers of different native
+    /// sizes that the viewport bounds to the same number — a 700 px sleeve and
+    /// a 1024 px one are one 634 px square in a 1280 × 860 window, and refusing
+    /// those would refuse most of the feature.
+    fn dissolve_at(&self, edge: f32, width: f32, height: f32, run: bool) -> f32 {
+        let Some((_, from_source, _)) = self.from else {
+            return 1.0;
+        };
+        if (record_edge(width, height, run, from_source) - edge).abs() < 0.5 {
+            self.t
+        } else {
+            1.0
+        }
+    }
+}
+
+/// The work itself at `edge` — the decoded cover over the picture it is
+/// replacing, or the wall's own deterministic gradient where a record has none.
+///
+/// **The dissolve is two layers and one opacity**, which is the cheapest honest
+/// crossfade the toolkit offers: the outgoing picture at full strength
+/// underneath, the incoming one over it at `t`, so the composite is
+/// `old · (1 − t) + new · t` and neither is ever drawn larger than its own
+/// source ([`Work::dissolve_at`] is what guarantees the second half). At rest —
+/// every frame but the twelve a record change spends — `t` is `1.0` and this is
+/// the single `image` it has always been, with no stack and no second layer.
 fn sleeve(
-    handle: Option<iced_image::Handle>,
+    work: &Work,
+    t: f32,
     now: &crate::player::NowPlaying,
     edge: f32,
 ) -> Element<'static, Message> {
-    match handle {
-        Some(handle) => iced_image(handle)
-            .width(Length::Fixed(edge))
-            .height(Length::Fixed(edge))
-            .into(),
+    let Some(handle) = work.handle.clone() else {
         // The wall's own deterministic gradient, at this scale — the same
         // stand-in a tile shows, so a record with no cover is the same object
-        // here as it is there.
-        None => gradient_block(now.album_id.unwrap_or_default(), edge, 1.0),
+        // here as it is there. **Never dissolved**: it is a stand-in rather
+        // than artwork, and fading a stand-in is decoration (ADR-0020 §3).
+        return gradient_block(now.album_id.unwrap_or_default(), edge, 1.0);
+    };
+    let square = |handle: iced_image::Handle| {
+        iced_image(handle)
+            .width(Length::Fixed(edge))
+            .height(Length::Fixed(edge))
+    };
+    match &work.from {
+        Some((from, _, _)) if t < 1.0 => {
+            stack![square(from.clone()), square(handle).opacity(t)].into()
+        }
+        _ => square(handle).into(),
     }
 }
 
@@ -770,12 +876,27 @@ fn sleeve(
 /// field's domain and the layout's split were two functions of one number
 /// that had to be kept in step, and `the_composition_holds_across_the_restack`
 /// existed to prove they were. One of them is gone, so they cannot disagree.
-fn field_layer(field: Option<field::Field>) -> Element<'static, Message> {
-    let Some(field) = field else {
+///
+/// # And the same seam, in time
+///
+/// The wash **travels with the cover** (ADR-0020's third amendment): `t` here
+/// is the *same number* the sleeve's incoming layer is drawn at, so a record
+/// change moves the picture and the room together or moves neither. It is one
+/// argument rather than two because that is what makes them unable to
+/// disagree — a field that cut while the cover dissolved would put the edge the
+/// owner just had removed back into the surface, in time instead of in space,
+/// and it would be *more* visible there: a wash over the whole body changing in
+/// one frame is a light being switched, and the record it belongs to would
+/// still be arriving.
+fn field_layer(
+    from: Option<field::Field>,
+    to: Option<field::Field>,
+    t: f32,
+) -> Element<'static, Message> {
+    let room = theme::active();
+    let Some(gradient) = field::dissolve(from, to, t, room) else {
         return Space::new(Length::Fill, Length::Fill).into();
     };
-    let room = theme::active();
-    let gradient = field.wash(room);
     container(Space::new(Length::Fill, Length::Fill))
         .width(Length::Fill)
         .height(Length::Fill)
@@ -789,12 +910,13 @@ fn field_layer(field: Option<field::Field>) -> Element<'static, Message> {
 /// The record column: the work at `edge`, and the placard under it.
 fn record_column<'a>(
     player: &'a PlayerState,
-    handle: Option<iced_image::Handle>,
+    work: &Work,
+    t: f32,
     now: &'a crate::player::NowPlaying,
     edge: f32,
 ) -> Element<'a, Message> {
     let room = theme::active();
-    let work = sleeve(handle, now, edge);
+    let sleeve = sleeve(work, t, now, edge);
 
     // Owned: the two figures are `String`s the reading builds, and a borrow
     // of them cannot outlive this function.
@@ -854,7 +976,7 @@ fn record_column<'a>(
     // it deserves, who made it, where the needle stands. The one place in the
     // product where the same fact appears twice on purpose is the lamp — and
     // that is a mark, not a button.
-    column![work, placard]
+    column![sleeve, placard]
         .spacing(theme::GAP_XL)
         .align_x(alignment::Horizontal::Center)
         .width(Length::Shrink)
@@ -1447,6 +1569,96 @@ mod tests {
                     win.end - win.first
                 );
             }
+        }
+    }
+
+    /// A [`Work`] carrying two decodes: an incoming cover bounded at
+    /// `to` px and an outgoing one bounded at `from`.
+    fn crossing(from: f32, to: f32) -> Work {
+        let handle = || iced_image::Handle::from_rgba(1, 1, vec![0_u8; 4]);
+        Work {
+            handle: Some(handle()),
+            source: to,
+            field: None,
+            from: Some((handle(), from, None)),
+            t: 0.5,
+        }
+    }
+
+    /// **A dissolve is drawn only where both pictures are drawn at one edge**
+    /// ([`Work::dissolve_at`]).
+    ///
+    /// Two claims, and the second is what stops the refusal from eating the
+    /// feature:
+    ///
+    /// 1. Two decodes the viewport bounds to the **same** square dissolve, even
+    ///    when their native sizes differ by hundreds of pixels — which is the
+    ///    ordinary case, since most covers exceed what a window can show.
+    /// 2. Two decodes that resolve to **different** squares do not, at any
+    ///    window, in either composition. A dissolve between two sizes would be
+    ///    a dissolve *and* a resize, and animating geometry is on ADR-0020's
+    ///    standing refusal list.
+    #[test]
+    fn a_dissolve_is_refused_where_the_two_covers_are_not_one_square() {
+        for side in sides() {
+            for run in [false, true] {
+                // Both above whatever this viewport allows: one square, so the
+                // pictures cross.
+                let large = crossing(f32::INFINITY, f32::INFINITY);
+                let edge = record_edge(side, side, run, large.source);
+                assert!(
+                    (large.dissolve_at(edge, side, side, run) - 0.5).abs() < f32::EPSILON,
+                    "{side} px, run {run}: two unbounded covers are one square and must cross"
+                );
+
+                // A cover smaller than the square the other one takes: two
+                // sizes, so the change stays the cut it has always been.
+                let small = theme::ART_MIN;
+                let mixed = crossing(small, f32::INFINITY);
+                let mixed_edge = record_edge(side, side, run, mixed.source);
+                let expected = if (record_edge(side, side, run, small) - mixed_edge).abs() < 0.5 {
+                    0.5
+                } else {
+                    1.0
+                };
+                assert!(
+                    (mixed.dissolve_at(mixed_edge, side, side, run) - expected).abs()
+                        < f32::EPSILON,
+                    "{side} px, run {run}: a {small} px cover and an unbounded one"
+                );
+            }
+        }
+        // …and at a window where the two genuinely differ, the refusal is the
+        // answer rather than an accident of the sweep's step.
+        let (w, h) = (1280.0, 860.0);
+        let mixed = crossing(240.0, f32::INFINITY);
+        let edge = record_edge(w, h, false, mixed.source);
+        assert!(
+            edge > 240.0,
+            "the viewport allows more than the small cover"
+        );
+        assert!(
+            (mixed.dissolve_at(edge, w, h, false) - 1.0).abs() < f32::EPSILON,
+            "a 240 px cover and a {edge} px square are not one dissolve"
+        );
+    }
+
+    /// **A settled surface draws exactly one picture** — the property that
+    /// keeps the ordinary frame as cheap as it was before the crossfade
+    /// existed.
+    ///
+    /// `t` at rest is `1.0`, and at `1.0` [`sleeve`] takes the branch with no
+    /// `stack!` and no second `image` in it. Asserted through `dissolve_at`
+    /// rather than by reading the widget tree, because the number is the thing
+    /// the branch turns on.
+    #[test]
+    fn a_settled_surface_has_nothing_to_dissolve() {
+        let bare = Work::bare();
+        assert!((bare.t - 1.0).abs() < f32::EPSILON);
+        assert!(bare.from.is_none());
+        for side in sides() {
+            let edge = record_edge(side, side, false, bare.source);
+            assert!((bare.dissolve_at(edge, side, side, false) - 1.0).abs() < f32::EPSILON);
         }
     }
 }

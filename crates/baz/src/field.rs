@@ -334,12 +334,78 @@ impl Field {
     /// reported. A single value cannot have a seam.
     #[must_use]
     pub(crate) fn wash(self, room: &theme::Palette) -> iced::gradient::Linear {
-        let [near, mid, far] = self.colors(room);
-        iced::gradient::Linear::new(iced::Radians(ANGLE))
-            .add_stop(0.0, near)
-            .add_stop(0.5, mid)
-            .add_stop(1.0, far)
+        wash_of(self.colors(room))
     }
+}
+
+/// **The field part-way between two records** — the wash the Now playing place
+/// draws while its hero is dissolving (ADR-0020's third amendment, ADR-0029).
+///
+/// `t` is the incoming hero's own opacity, so **one number drives the cover and
+/// the room**. That is not tidiness: the field is derived from the cover, and a
+/// cover that dissolved over 200 ms while the wash behind it cut would put the
+/// seam the owner had removed from this surface back into it — *in time instead
+/// of space* (`crate::views::now_playing::field_layer`). Passing one `t` makes
+/// them unable to disagree rather than obliged to agree.
+///
+/// # Why the colours are mixed and no second layer is drawn
+///
+/// A field is three hue angles; its **lightness and chroma are the room's and
+/// are pinned** ([`CHROMA`], [`RUNGS`]), so two fields differ in hue alone. A
+/// straight mix of the two stop triples is therefore exactly what stacking one
+/// wash over the other at alpha `t` would composite to, with none of the cost:
+/// one gradient value per frame instead of two containers, and no alpha at all
+/// in a background the toolkit would have to blend.
+///
+/// It is a **chord** across the constant-lightness circle rather than a hue
+/// rotation, and that is the right shape: a rotation would travel through hues
+/// **neither record has** — red to blue by way of green — which is a third
+/// record's field appearing for 100 ms. The chord dips in chroma at the
+/// midpoint instead, toward the room's own near-neutral, which is what a
+/// dissolve *is*. It also cannot leave sRGB: every stop is a convex combination
+/// of two colours [`Field::colors`] has already placed inside it
+/// (`a_dissolve_never_leaves_the_gamut_its_ends_sit_in`).
+///
+/// `None` on either side is **the room** — a monochrome sleeve, or a record
+/// with no hue worth reading (story S7) — and it is spelled as three `wall`
+/// stops rather than as a special case, so a field arriving over the room and a
+/// field leaving it are one code path. `None` on *both* sides is `None`: there
+/// is nothing to draw, and the place puts a `Space` there exactly as it does at
+/// rest.
+#[must_use]
+pub(crate) fn dissolve(
+    from: Option<Field>,
+    to: Option<Field>,
+    t: f32,
+    room: &theme::Palette,
+) -> Option<iced::gradient::Linear> {
+    // The two ends are answered before anything is mixed, so a settled surface
+    // — which is every frame but the twelve a record change spends — costs
+    // exactly what it cost before this function existed.
+    if t >= 1.0 {
+        return to.map(|field| field.wash(room));
+    }
+    if t <= 0.0 {
+        return from.map(|field| field.wash(room));
+    }
+    if from.is_none() && to.is_none() {
+        return None;
+    }
+    let stops = |field: Option<Field>| field.map_or([room.wall; 3], |field| field.colors(room));
+    let (from, to) = (stops(from), stops(to));
+    Some(wash_of(std::array::from_fn(|rung| {
+        theme::Palette::mix(from[rung], to[rung], t)
+    })))
+}
+
+/// The three stops laid along [`ANGLE`], brightest first — the still field and
+/// the dissolving one drawn by one function, so the two can never disagree
+/// about where the light comes from or where the ramp turns over.
+fn wash_of([near, mid, far]: [Color; 3]) -> iced::gradient::Linear {
+    iced::gradient::Linear::new(iced::Radians(ANGLE))
+        .add_stop(0.0, near)
+        .add_stop(0.5, mid)
+        .add_stop(1.0, far)
 }
 
 /// Where the three colours sit on the room's ladder, brightest first.
@@ -802,5 +868,134 @@ mod tests {
                 room.name
             );
         }
+    }
+
+    /// **The dissolve starts where the old record's field stood and ends where
+    /// the new one's does** — and the ends cost nothing extra to draw.
+    ///
+    /// The three claims a crossfade of the room has to make: it begins at the
+    /// outgoing wash, it lands *exactly* on the incoming one (a field that
+    /// settled a shade off would leave every record's room slightly wrong for
+    /// as long as it played), and both ends are the same value the still field
+    /// has always produced — so a settled surface is byte-for-byte what it was
+    /// before this function existed.
+    #[test]
+    fn a_dissolve_begins_and_lands_on_the_two_fields_it_joins() {
+        let ochre = Field {
+            hues: [42.0, 38.0, 30.0],
+        };
+        let verdigris = Field {
+            hues: [168.0, 175.0, 190.0],
+        };
+        for room in [&theme::CLOSING_TIME, &theme::READING_ROOM] {
+            let at = |t| dissolve(Some(ochre), Some(verdigris), t, room);
+            assert_eq!(at(0.0), Some(ochre.wash(room)), "{}", room.name);
+            assert_eq!(at(1.0), Some(verdigris.wash(room)), "{}", room.name);
+            // Past either end is the end, not an extrapolation: a tick that
+            // arrives late may land a transition, never overshoot it.
+            assert_eq!(at(-0.5), at(0.0));
+            assert_eq!(at(9.0), at(1.0));
+
+            // The room is a field's absence, spelled as three `wall` stops, so
+            // arriving over the room and leaving it are one path — and two
+            // absences are still nothing to draw.
+            assert_eq!(
+                dissolve(None, Some(ochre), 1.0, room),
+                Some(ochre.wash(room))
+            );
+            assert_eq!(dissolve(Some(ochre), None, 1.0, room), None);
+            assert_eq!(dissolve(None, None, 0.5, room), None);
+            let onto_room = dissolve(Some(ochre), None, 0.5, room).expect("half off the field");
+            assert_ne!(onto_room, ochre.wash(room));
+        }
+    }
+
+    /// **A dissolve never leaves the gamut its ends sit in.**
+    ///
+    /// [`CHROMA`] is measured — 11 % under the largest chroma that clips
+    /// nowhere — and that measurement is about the *ends*. The mix is a convex
+    /// combination of two colours already inside sRGB, so it cannot escape;
+    /// this asserts it rather than reasoning it, at every hue pairing on a
+    /// coarse sweep and at every step of the flight, because a colour that
+    /// silently clips is a hue that is no longer either record's.
+    #[test]
+    fn a_dissolve_never_leaves_the_gamut_its_ends_sit_in() {
+        for room in [&theme::CLOSING_TIME, &theme::READING_ROOM] {
+            for from_hue in (0..360).step_by(30) {
+                for to_hue in (0..360).step_by(30) {
+                    #[expect(
+                        clippy::cast_precision_loss,
+                        reason = "hue angles under 360 are exact in f32"
+                    )]
+                    let (from, to) = (
+                        Field {
+                            hues: [from_hue as f32; 3],
+                        },
+                        Field {
+                            hues: [to_hue as f32; 3],
+                        },
+                    );
+                    for step in 0..=20_u8 {
+                        let t = f32::from(step) / 20.0;
+                        let wash = dissolve(Some(from), Some(to), t, room)
+                            .expect("two fields make a wash");
+                        for stop in wash.stops.into_iter().flatten() {
+                            let c = stop.color;
+                            for channel in [c.r, c.g, c.b, c.a] {
+                                assert!(
+                                    (0.0..=1.0).contains(&channel),
+                                    "{}: {from_hue}° → {to_hue}° at t={t} left sRGB",
+                                    room.name
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// **The midpoint is between the two, and nearer the room than either
+    /// end** — the chord, asserted.
+    ///
+    /// Two fields differ in hue alone, so the honest mix crosses the
+    /// constant-lightness circle rather than travelling round it. Two
+    /// consequences the eye can see and this pins: no third hue appears (the
+    /// mix is inside the segment, never beyond it), and the halfway colour is
+    /// **less saturated** than either end for hues far enough apart — which is
+    /// what a dissolve looks like and what a hue rotation does not.
+    #[test]
+    fn the_midpoint_of_a_dissolve_is_a_chord_and_not_a_rotation() {
+        let room = &theme::CLOSING_TIME;
+        // A half-turn apart: the case where a rotation and a chord disagree
+        // most, and the one that would show a third record's colour.
+        let (from, to) = (Field { hues: [20.0; 3] }, Field { hues: [200.0; 3] });
+        let ends = (from.colors(room)[1], to.colors(room)[1]);
+        let half = dissolve(Some(from), Some(to), 0.5, room).expect("a wash");
+        let mid = half.stops[1].expect("the middle stop").color;
+
+        // Inside the segment its ends define, on every channel — so no hue
+        // neither record has can appear at any point of the flight.
+        for (a, b, m) in [
+            (ends.0.r, ends.1.r, mid.r),
+            (ends.0.g, ends.1.g, mid.g),
+            (ends.0.b, ends.1.b, mid.b),
+        ] {
+            assert!(
+                m >= a.min(b) - f32::EPSILON && m <= a.max(b) + f32::EPSILON,
+                "the mix left the segment: {m} outside [{a}, {b}]",
+            );
+        }
+        // …and it passes near the room rather than round the wheel: at a half
+        // turn the chord runs through the neutral, so the midpoint carries
+        // less chroma than either end.
+        let chroma = |color| oklch(color).1;
+        assert!(
+            chroma(mid) < chroma(ends.0).min(chroma(ends.1)),
+            "the midpoint was not a chord: {} against {} and {}",
+            chroma(mid),
+            chroma(ends.0),
+            chroma(ends.1)
+        );
     }
 }

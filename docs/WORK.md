@@ -27,33 +27,7 @@
 
 ## Next
 
-1. **A crossfade on the artwork when the record changes.** The owner,
-   2026-08-10: *"when changing track there isn't any kind of nice visual
-   transition for album art in now playing. we should have something a bit
-   nicer, like a quick fade"*. **Deliberately deferred out of that afternoon's
-   batch** — six changes to that one surface landed together and a seventh done
-   hastily is worse than a seventh done next. Everything needed to build it is
-   written down here so nothing has to be rediscovered:
-   - a **bounded** crossfade of the hero, which is a *transition* and not
-     ambient motion — ADR-0020 permits exactly this class, and `crate::motion`
-     already owns the product's durations and easing. Do not invent a number.
-   - **fade only when the artwork actually changes.** Consecutive tracks on one
-     record share a cover, and fading a picture into an identical picture is a
-     flicker nobody can find a reason for. Compare the handle being drawn, not
-     the track.
-   - **start when the new art is ready, not when the track starts.**
-     `art::load_hero` decodes off-thread at 1024 px; beginning before the decode
-     lands fades to nothing and then pops, which is worse than today's cut.
-   - the **two-entry hero LRU** is what makes this possible with no new caching
-     — its second slot holds the record that just stopped, so both images are
-     alive at once. Written for prefetch; check it holds before relying on it.
-   - **the field must travel with the art.** It is one continuous wash since
-     this batch; if the cover crossfades while the room's colour cuts, the seam
-     the owner just had removed comes back in time instead of space.
-   - **idle must return to zero** — the tween ends, its subscription ends, the
-     surface is static. `the_ambient_clock_is_absent_outside_its_place` is the
-     shape of the test that keeps that honest.
-2. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
+1. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
    2026-08-10: *"at full screen the now playing page looks odd because the
    playlist hugs right and the art hugs left"* — which is this item, reported
    from the frame rather than from the measurement, and worth recording as a
@@ -65,13 +39,13 @@
    too — A4 widening the run closes the gap from one side, and if the sleeve is
    also hanging hard left rather than sitting in its column, that is a second
    fault the widening would hide rather than fix.
-3. **The seek bar says which thing it measures.** The owner: *"I think the seek
+2. **The seek bar says which thing it measures.** The owner: *"I think the seek
    bar at the bottom should have a toggle indicating for song or for whole
    playlist"*. Both are true readouts — the track's position and the run's — and
    he is asking to choose. Undesigned; the questions are where the toggle lives
    (the bar is already dense), whether the choice persists, and what the
    elapsed/remaining figures either side of the bar read in run mode.
-4. **An artist has an `All songs` of their own.** The owner: *"the artist page
+3. **An artist has an `All songs` of their own.** The owner: *"the artist page
    should have its own 'all songs' playlist I think"*. `implicit::ImplicitList`
    already gives the library one, with an `Origin` kind and a collage sleeve, so
    this is that list scoped to one artist rather than new machinery. Undecided:
@@ -82,12 +56,12 @@
    word may not need qualifying. It should credit the artist's list rather than
    the underlying records when played, which is the rule that just landed for
    playlists.
-5. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
+4. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
    the Flatpak build are all done; what is left is a screenshot for the
    metainfo, the version edit from `0.0.0`, a `workflow_dispatch` dry run,
    then the tag. **The tag is the owner's to cut** — the workflow produces a
    draft.
-6. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+5. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -100,7 +74,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-7. **Rewrite the README as the project's public face**, with the icon and real
+6. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
    last, so it describes what actually ships. Its keyboard table is still
    stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode,
@@ -184,6 +158,44 @@
 ## Recently done
 
 Newest first. Fuller detail in `CHANGELOG.md`.
+
+- **The artwork crosses when the record changes** — the owner's *"when
+  changing track there isn't any kind of nice visual transition for album art
+  in now playing. we should have something a bit nicer, like a quick fade"*.
+  A 200 ms linear dissolve of the Now playing hero, with the field crossing on
+  the same number. Filmed at 60 fps and read back frame by frame:
+  `docs/design/impl/art-crossfade/`. ADR-0020's third amendment (which
+  **reverses** its own §3 refusal of album-art crossfades, narrowly and with
+  the argument written down), ADR-0029's.
+  - **`motion::DISSOLVE` is `motion::LAMP`**, not a copy of its digits: the
+    lamp warms because the light moved to another record and the hero crosses
+    because that record's picture changed, so they are one event and land on
+    the same tick. No number was invented; 90 ms was considered and is a cut
+    with a smear on it.
+  - **The predicate is the handle being drawn.** A twelve-track record is
+    twelve track changes, no transition and no clock.
+  - **The surface holds what it has until the incoming hero lands.** That is
+    what makes it a dissolve rather than a fade to nothing followed by a pop —
+    and it removed a wart nobody had reported: a record change used to cut to
+    the 320 px thumbnail on a room with no field and then pop to full size.
+    Both cuts are in `01-the-cover-crossing-before.png`.
+  - **Measured**: twelve distinct frames on screen against the old build's
+    one — and twelve is what `a_200ms_transition_is_about_twelve_frames_at_60hz`
+    derives from the tween's arithmetic with no window in sight. The cover's
+    fraction and the field's never part by more than 0.018. CPU at rest is flat
+    between the two builds.
+  - **Found while building it, and left for the owner's eye:** the hold is the
+    wait for `art::load_hero` — **33 ms** on a quiet machine with 600 px
+    fixture covers, 100–320 ms on a loaded one, and longer for a library of
+    3000 px scans. It goes to **zero** the moment the *successor's* hero is
+    prefetched, which `art::HERO_CACHE_ENTRIES` already describes as one line
+    once ADR-0034's `Origin` work can name the next record. **The crossfade is
+    the first consumer that makes that prefetch worth having**, so if he finds
+    the hold long, that is the fix rather than a shorter tween.
+  - The two refusals kept: a record with **no art** does not dissolve (the
+    gradient is a stand-in, and fading a stand-in is decoration), and two
+    covers whose decodes resolve to **different squares** do not (a dissolve
+    that was also a resize would animate geometry).
 
 - **The frame is the frame in every place, and now it is.**
   `views::place_header_led` boxes its lead at `TRANSPORT_HIT`, so a strip led
