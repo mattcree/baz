@@ -1,7 +1,7 @@
 # ADR-0028: Three visible detents for the wall's density
 
 **Status**: accepted (2026-08-09) · ships doc 11 §5 P8, the owner choosing
-option **(a)** · **overturns one clause of a REFUSALS entry under the
+option **(a)** · **overturns one clause of a standing rule under the
 ledger's editing rule** — "no grid-size picker" as applied to three quiet
 detent marks in the place's own body; the entry otherwise stands and is
 narrowed, not deleted · amends doc 07 L8.1's density row · adds no state, no

@@ -13,8 +13,7 @@ use std::time::{Duration, SystemTime};
 
 use baz_core::engine::{EngineHandle, OfflineOutput, spawn_offline};
 use baz_core::history::{
-    History, HistoryLedger, PLAY_THRESHOLD_CAP_MS, PULL_NEVER_WEIGHT, PlayRecord, Recency,
-    play_threshold_ms,
+    History, HistoryLedger, PLAY_THRESHOLD_CAP_MS, PlayRecord, Recency, play_threshold_ms,
 };
 use baz_core::playback::{CHANNELS, EngineConfig};
 use baz_core::protocol::{Command, Event, PlayOutcome};
@@ -419,9 +418,11 @@ fn the_play_recorded_event_follows_the_line_into_the_file() {
     rig.finish();
 }
 
-/// The three surfaces, read back off a ledger a real engine wrote.
+/// The read surfaces, read back off a ledger a real engine wrote — the card
+/// and the group key, since the pull's weighting went with the pull
+/// (ADR-0018's amended third surface).
 #[test]
-fn the_three_read_surfaces_answer_from_a_real_run() {
+fn the_read_surfaces_answer_from_a_real_run() {
     let mut rig = Rig::new();
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone(), rig.b.clone()],
@@ -446,11 +447,6 @@ fn the_three_read_surfaces_answer_from_a_real_run() {
     // 2. The group key.
     assert_eq!(history.recency(&rig.a, now), Recency::ThisEvening);
     assert_eq!(history.recency(&rig.long, now), Recency::Never);
-
-    // 3. The pull.
-    assert_eq!(history.pull_weight(&rig.a, now), 1);
-    assert_eq!(history.pull_weight(&rig.long, now), PULL_NEVER_WEIGHT);
-    assert!(history.pull_weight(&rig.long, now) > history.pull_weight(&rig.a, now));
 }
 
 /// The threshold is the engine's, and it is reachable by a front end that wants

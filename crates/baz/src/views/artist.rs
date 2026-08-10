@@ -120,13 +120,7 @@ pub(crate) fn view<'a>(
     let mut in_row = 0usize;
     for album in &records {
         current = current.push(crate::views::shelf::tile(
-            shelf,
-            player,
-            hang,
-            album,
-            0.0,
-            (false, false),
-            collecting,
+            shelf, player, hang, album, 0.0, collecting,
         ));
         in_row += 1;
         if in_row == hang.columns {

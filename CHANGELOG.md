@@ -507,7 +507,7 @@ next commit.
   <kbd>Ctrl</kbd>+scroll and <kbd>Ctrl</kbd>+<kbd>-</kbd> /
   <kbd>Ctrl</kbd>+<kbd>=</kbd> are now accelerators of a visible control
   rather than the action's only route — closing the law-contradiction doc 11
-  named (*no action may be gesture-only*). The REFUSALS view-options entry is
+  named (*no action may be gesture-only*). The view-options rule is
   narrowed under the ledger's editing rule, not deleted: menus, choosers, free
   zoom sliders and Settings rows stay refused, the three named steps stay
   three, the step still persists as state, and the wall's width algebra is
@@ -547,6 +547,13 @@ next commit.
   the product's standing rules rules out. There is no shuffle *mode*, nothing to turn off,
   and no "vibe shuffle": a mood is a group key or a query, so a future `MOOD`
   key needs no new code here and no new control.
+
+  *Superseded 2026-08-10 — see "Shuffle is a property of the player" under
+  Changed.* There **is** a mode now, on the owner's decision, and the draw and
+  its pool are gone; the "no vibe shuffle" half is untouched. Left standing
+  here because this section records what shipped, and a changelog that edited
+  its own history would be the one document in the repo you could not use to
+  reconstruct one.
 - **The pull** (ADR-0017 step 19) — `Ctrl+R`, or the word in the top bar. One
   record from the same pool, weighted by the ledger's own
   `History::pull_weight` (one per day since it was last heard, capped at a
@@ -885,19 +892,142 @@ next commit.
   string, and Flatpak requires that string to be reverse-DNS. The MPRIS *bus*
   name is unaffected and remains `org.mpris.MediaPlayer2.baz`.
 
+### Added
+
+- **`All songs` — the implicit playlist, given a type.** The owner: *"the
+  'all songs' should be an implicit playlist."* `docs/design/09-implicit-playlists.md`
+  §2 had listed *"the wall, in its arrangement"* among the implicit playlists
+  since the study was written, but the vocabulary was design language and not a
+  thing in the code — `grep -rn "implicit playlist" crates/` returned one
+  comment. It is `crate::implicit::ImplicitList` now: a name, a counts line, a
+  collage sleeve, and a row at the head of the playlist panel, above the
+  unnamed sounding list it is a sibling of.
+
+  **The type is the kind, not the instance**, on the owner's steer that *"the
+  basic model is that every album has a playlist implicitly… it should be
+  basically which playlist and which track"*. So it is an `Origin` with a
+  variant rather than a bespoke `AllSongs` struct, and each origin carries the
+  identity that kind actually has: a named playlist has a **file**, an album's
+  list would have an **album id**, a draw has **nothing durable**, and
+  All songs has only a **name**. Only the All-songs origin is built — the
+  others are recorded in `Origin`'s own docs with what each would carry, so
+  adding one is a variant and a constructor. The state-tracking half of that
+  model (what "recent plays" means when the ledger records one line per track
+  path and the engine is never told a run's origin) is separate design work
+  and is deliberately not decided here.
+
+  Two things fall out of building it as a kind. `Origin::file()` answers
+  `None` for every origin, and the panel *reads* that to decide the row cannot
+  be a pick destination — so a later origin inherits the refusal instead of
+  needing to be remembered about. And `narrowed_from` is an `Option`: All songs
+  is a view of the library and prints `7 of 25 records` under a query, where a
+  list whose extent is fixed by what it is (an album's tracks) has no whole to
+  be part of and must not invent one.
+
+  **`Play all` is its `Play`** — one concept where there were two. The strip's
+  word no longer builds a queue of its own; it resolves the list and plays it.
+
+  **It is ordered by the wall's arrangement and the wall's filter**, and it says
+  so rather than pretending to be a snapshot: playing it twice with the wall
+  unchanged is the same list, and what changes it is a control the listener
+  pressed. Under a query the counts read `7 of 1284 records` rather than
+  letting the name claim otherwise, because a list called *All songs* holding
+  seven of twelve hundred would be lying.
+
+  **It is playable and viewable, never a destination.** There is no file behind
+  it, so the picker never offers `Add to "All songs"` — swept in `menu.rs` over
+  every target and every reachable set of facts, and closed at its source in
+  `implicit.rs`, which pins that the list's run carries no provenance (giving
+  the wall's run provenance is exactly what would put the name into a transfer
+  verb).
+
+  **Where you look at it is the wall.** Doc 09 §2's own table already answered
+  that — *"the wall itself"* — and a second page listing the same music as text
+  would be doc 07 L8.6's one fact drawn twice, drawn worse and without the art.
+  The panel's row is the handle; its press goes to the Library.
+
+  ADR-0024 §1's definition of a playlist (*"made by a person, stored in a file
+  that person owns"*) is amended to say why All songs is deliberately **not**
+  one, and why the definition is not widened to swallow it.
+
+### Changed
+
+- **Shuffle is a property of the player, not an act.** The owner: *"can you
+  make shuffle a property of the player i.e. toggle on/off."* It was one press
+  in the Library strip that drew eight records out of the wall and started
+  them, with nothing to turn off. It is now a **toggle** — the crossed arrows
+  on the now-playing bar, lit in the accent while it is on, remembered in
+  `config.toml` beside the other standing decisions — that says what order
+  things play in from here.
+
+  **Turning it off restores the order the run would have had.** That is the
+  part that would have felt broken if it were wrong, so the rule is stated
+  exactly: what is retained is the run's paths in the order the gesture laid
+  them out — inert data, read at one moment by one caller. It is invalidated by
+  a new run, and by a **hand reorder** (a stepper press or a drag restates the
+  order in as many words, and the hand beats the machine's memory). A row
+  deleted while shuffled stays deleted; a row appended stays at the end, where
+  the append put it; a file listed twice comes back twice. A run restored from
+  a snapshot has no retained order and is left exactly as it stands.
+
+  **Nothing stops in either direction.** On and off both go out as
+  `UpdateQueue`, which ADR-0014 guarantees disturbs no delivered sample: on
+  permutes what is in front of the needle only, because what is behind it is
+  history and history does not re-order.
+
+  **Every play gesture agrees**, structurally rather than by convention — press
+  `Play` on a record with shuffle on and the record plays shuffled, and
+  `Play all`, a playlist's `Play` and a track click all build the list their
+  gesture means and hand it to the same arranger. A **track click** says both
+  of the things it means: the clicked track leads, and the rest follows
+  shuffled.
+
+  **The crossed-arrows glyph, taken.** `docs/design/10-controls-and-iconography.md`
+  §3.2 refused it *only* because the symbol promises a mode with a lit state
+  and baz's shuffle was an act — a conditional argument that named its own
+  condition. It is a mode now, so the clause is rewritten and the symbol is
+  honest. It went to the **bar** rather than staying in the strip because a
+  control goes where what it reads is: what a mode reads is the player, and the
+  player's surface is under every place where the strip is under one.
+
+  **What went with the act**: the wall's shuffle pool and its two marks — the
+  35 % dimming of every record outside the draw, and the ring on the next two.
+  Both existed to answer one question about a draw whose source was only
+  implied: *what can this shuffle play?* A mode has no source of its own, so
+  **the pool is the run** — the queue, a place you can open and read row by
+  row — and the question answers itself. The design line the marks served still
+  holds and holds more strongly: a listener can see everything shuffle can
+  play. The ring's reserved lane stays as the sleeve's mat; only the ink went.
+
+  Recorded in ADR-0023's amendment — which had said there is *"no live context
+  object that keeps acting after the gesture"* and now states precisely what is
+  retained, why an inert list of paths is not that object, and what invalidates
+  it — in ADR-0024 §1's first honesty clause (which said *no shuffle-on-play*),
+  and in doc 10 §3.2, where the crossed-arrows clause lives.
+
+  Captures, with the run before shuffle and the run after on-then-off compared
+  at **zero differing pixels**: `docs/design/impl/shuffle-and-all-songs/`.
+
 ### Removed
 
-- **`‹ Prev` / `Next ›` in the record page's header**, and the
-  <kbd>Ctrl</kbd>+<kbd>[</kbd> / <kbd>Ctrl</kbd>+<kbd>]</kbd> that accelerated
-  them. The owner: *"previous and next on albums doesn't make sense on the
-  album view."* They stepped along **the wall's current arrangement** — its
-  group key, its query, its sort — none of which is on screen from a record's
-  page, so they were two labelled doors whose destination could not be known
-  before pressing them. The comparison debt doc 07 §3.2 raised them for is paid
-  by the breadcrumb and the Artist place instead, and §3.2 is amended in place
-  rather than merely disobeyed. `vm::neighbours` and the header strip's
-  extra-tenant slot went with them.
+- **`Pull`, and everything that existed only for it.** The owner: *"please can
+  we remove pull since it doesn't make sense here."* Gone: the Library strip's
+  `Pull` word and its tooltip, <kbd>Ctrl</kbd>+<kbd>R</kbd>, the record page's
+  `The pull · Last played 3 years ago` line, the draw itself (~125 lines of
+  `shuffle.rs`), and `baz-core`'s `History::pull_weight` with `PULL_DAY_CAP`
+  and `PULL_NEVER_WEIGHT` — the weighting had exactly one consumer, and a
+  weighted draw nothing draws from is a recommendation engine's foundations
+  left in the ground. **Shuffle is untouched**: the two shared one function,
+  `shuffle::Pool::from_wall`, and shuffle owns it now.
 
+  This is also the third answer to `docs/design/11-jobs-era-critique.md` **P9**
+  (*"`Pull`: explain it or rename it"*), which was an open question addressed
+  to the owner: he removed the control instead. Recorded there, in
+  ADR-0018 §6, whose third read surface is struck with its behaviour preserved
+  in the text so it stays findable. Two knock-ons worth naming: the copy
+  sweep's licence list held `Pull` and `The pull` and nothing else, so **P4's
+  one-vocabulary rule is now total**; and the strip's acts cluster fell from
+  182 px to 144, taking the two-line split seam from 872 to 834.
 - **The playlist delete confirmation.** *"Delete "{name}"? The file goes;
   your music stays."* was the correct fallback while deletion was
   irreversible; the trash makes it reversible, and the 1992 HIG's ranking —

@@ -373,6 +373,9 @@ pub enum Control {
     /// The Library strip's gear — the door to the Settings place
     /// (doc 10 §3.4), the one icon-only control outside the bottom bar.
     Settings,
+    /// The bottom bar's crossed arrows — the player's shuffle property
+    /// (2026-08-10, the owner).
+    Shuffle,
 }
 
 /// What every icon button needs to know to ink itself: which one the pointer is
@@ -692,6 +695,7 @@ mod tests {
             Control::Next,
             Control::Mute,
             Control::Settings,
+            Control::Shuffle,
         ];
         for (index, control) in all.iter().enumerate() {
             for other in &all[index + 1..] {
