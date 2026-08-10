@@ -163,6 +163,7 @@ fn a_run_of_playback_writes_exactly_the_expected_lines() {
     let before = SystemTime::now();
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone(), rig.b.clone()],
+        origin: None,
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::QueueEnded));
@@ -213,6 +214,7 @@ fn an_engine_with_no_ledger_writes_nothing() {
     rig.engine.as_ref().expect("engine").set_history(None);
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone(), rig.b.clone()],
+        origin: None,
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::QueueEnded));
@@ -228,6 +230,7 @@ fn a_track_left_early_is_recorded_as_a_skip() {
     let mut rig = Rig::new();
     rig.send(Command::SetQueue {
         paths: vec![rig.long.clone(), rig.b.clone()],
+        origin: None,
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::TrackStarted { position: 0, .. }));
@@ -260,6 +263,7 @@ fn a_queue_entry_that_was_jumped_over_is_never_recorded() {
     let mut rig = Rig::new();
     rig.send(Command::SetQueue {
         paths: vec![rig.long.clone(), rig.a.clone(), rig.b.clone()],
+        origin: None,
     });
     // Straight to the last entry: nothing before it is ever delivered.
     rig.send(Command::JumpTo { position: 2 });
@@ -275,6 +279,7 @@ fn stopping_mid_track_still_files_the_play() {
     let mut rig = Rig::new();
     rig.send(Command::SetQueue {
         paths: vec![rig.long.clone()],
+        origin: None,
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::TrackStarted { .. }));
@@ -294,6 +299,7 @@ fn shutting_the_engine_down_files_the_play_in_progress() {
     let mut rig = Rig::new();
     rig.send(Command::SetQueue {
         paths: vec![rig.long.clone()],
+        origin: None,
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::TrackStarted { .. }));
@@ -312,6 +318,7 @@ fn seeking_inside_a_track_is_one_play() {
     let mut rig = Rig::new();
     rig.send(Command::SetQueue {
         paths: vec![rig.long.clone()],
+        origin: None,
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::TrackStarted { .. }));
@@ -336,6 +343,7 @@ fn restarting_a_track_is_a_second_play() {
     let mut rig = Rig::new();
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone()],
+        origin: None,
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::TrackStarted { .. }));
@@ -358,6 +366,7 @@ fn pausing_adds_nothing_to_what_was_heard() {
     let mut rig = Rig::new();
     rig.send(Command::SetQueue {
         paths: vec![rig.long.clone()],
+        origin: None,
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::TrackStarted { .. }));
@@ -394,6 +403,7 @@ fn the_play_recorded_event_follows_the_line_into_the_file() {
     let mut rig = Rig::new();
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone(), rig.b.clone()],
+        origin: None,
     });
     rig.send(Command::Play);
     let event = rig.wait_for(|event| matches!(event, Event::PlayRecorded { .. }));
@@ -426,6 +436,7 @@ fn the_read_surfaces_answer_from_a_real_run() {
     let mut rig = Rig::new();
     rig.send(Command::SetQueue {
         paths: vec![rig.a.clone(), rig.b.clone()],
+        origin: None,
     });
     rig.send(Command::Play);
     rig.wait_for(|event| matches!(event, Event::QueueEnded));
@@ -456,4 +467,174 @@ fn the_threshold_is_public_and_says_what_the_ledger_did() {
     assert_eq!(play_threshold_ms(Some(300_000)), 150_000);
     assert_eq!(play_threshold_ms(Some(3_600_000)), PLAY_THRESHOLD_CAP_MS);
     assert_eq!(play_threshold_ms(None), PLAY_THRESHOLD_CAP_MS);
+}
+
+/// **The engine writes down which list a run came from** (ADR-0034 §2 and §4)
+/// — the whole point of the origin on the command, asserted on the file.
+///
+/// The owner: *"when I play a song from a playlist it should only bump the
+/// recency of that playlist, not the underlying albums"*. The live half of that
+/// already worked; this is the half that survives a quit, because the engine
+/// was finally told what it was playing from.
+#[test]
+fn a_run_told_which_list_it_came_from_says_so_in_the_ledger() {
+    let mut rig = Rig::new();
+    rig.send(Command::SetQueue {
+        paths: vec![rig.a.clone(), rig.b.clone()],
+        origin: Some("playlist:3b1f00c2a49d7e60:Road Trip".to_owned()),
+    });
+    rig.send(Command::Play);
+    rig.wait_for(|event| matches!(event, Event::QueueEnded));
+    rig.finish();
+
+    let history = History::read(&rig.ledger_path).expect("read");
+    assert_eq!(history.records(), 2);
+    // A marker is a comment, so it is not damage — the property an older baz
+    // depends on, checked here against a file a real engine wrote.
+    assert_eq!(history.malformed(), 0);
+
+    let runs = history.runs();
+    assert_eq!(runs.len(), 1, "{runs:#?}");
+    assert_eq!(
+        runs[0].origin.as_deref(),
+        Some("playlist:3b1f00c2a49d7e60:Road Trip")
+    );
+    assert_eq!(runs[0].plays, 2);
+
+    // The tracks were played — and yet neither is a record the listener put
+    // on, which is the attribution the lane folds at launch.
+    for path in [&rig.a, &rig.b] {
+        assert_eq!(history.track(path).plays, 1);
+        assert_eq!(
+            history.last_played_unlisted(path),
+            None,
+            "{} was credited to its record",
+            path.display()
+        );
+    }
+
+    // The marker sits above the plays it opens, and it is a comment.
+    let text = std::fs::read_to_string(&rig.ledger_path).expect("read");
+    let markers: Vec<&str> = text
+        .lines()
+        .filter(|line| line.starts_with("# baz run"))
+        .collect();
+    assert_eq!(markers.len(), 1, "{text}");
+    assert!(
+        markers[0].ends_with(" playlist:3b1f00c2a49d7e60:Road Trip"),
+        "{:?}",
+        markers[0]
+    );
+    let marker_at = text.find("# baz run").expect("the marker is in the file");
+    let first_play = text
+        .lines()
+        .find(|line| !line.starts_with('#') && !line.is_empty())
+        .expect("a play line");
+    assert!(
+        marker_at < text.find(first_play).expect("the play is in the file"),
+        "the marker did not open the run"
+    );
+}
+
+/// **A run with no origin still folds onto its records** — an album's run, a
+/// draw, `Play all`. The marker's job is to stop a *playlist's* run crediting
+/// its albums, not to stop an album being credited when an album is what
+/// played.
+#[test]
+fn a_run_that_named_no_list_still_credits_the_records_it_played() {
+    let mut rig = Rig::new();
+    rig.send(Command::SetQueue {
+        paths: vec![rig.a.clone(), rig.b.clone()],
+        origin: None,
+    });
+    rig.send(Command::Play);
+    rig.wait_for(|event| matches!(event, Event::QueueEnded));
+    rig.finish();
+
+    let history = History::read(&rig.ledger_path).expect("read");
+    assert_eq!(history.malformed(), 0);
+    for path in [&rig.a, &rig.b] {
+        assert_eq!(
+            history.last_played_unlisted(path),
+            history.track(path).last_played_unix_s,
+            "{} folded differently from an unmarked ledger",
+            path.display()
+        );
+        assert!(history.last_played_unlisted(path).is_some());
+    }
+}
+
+/// Two runs in one session, and the second does not inherit the first's list.
+#[test]
+fn a_second_run_replaces_the_first_runs_origin() {
+    let mut rig = Rig::new();
+    rig.send(Command::SetQueue {
+        paths: vec![rig.a.clone()],
+        origin: Some("playlist:1f:Road Trip".to_owned()),
+    });
+    rig.send(Command::Play);
+    rig.wait_for(|event| matches!(event, Event::QueueEnded));
+    rig.send(Command::SetQueue {
+        paths: vec![rig.b.clone()],
+        origin: None,
+    });
+    rig.send(Command::Play);
+    rig.wait_for(|event| matches!(event, Event::QueueEnded));
+    rig.finish();
+
+    let history = History::read(&rig.ledger_path).expect("read");
+    assert_eq!(history.records(), 2);
+    assert_eq!(history.malformed(), 0);
+    let runs = history.runs();
+    assert_eq!(runs.len(), 2, "{runs:#?}");
+    assert_eq!(runs[0].origin.as_deref(), Some("playlist:1f:Road Trip"));
+    assert_eq!(runs[1].origin, None);
+    // The list's track is not a record the listener put on; the second run's
+    // is, because that run named no list.
+    assert_eq!(history.last_played_unlisted(&rig.a), None);
+    assert!(history.last_played_unlisted(&rig.b).is_some());
+}
+
+/// **A ledger this baz writes is one an older baz reads whole.** The claim is
+/// made against the current parser's own reading — `PlayRecord::from_line`,
+/// which is the entire vocabulary a v1 baz has — over a file a v1.1 engine
+/// wrote with markers in it.
+#[test]
+fn an_older_baz_reads_every_play_in_a_marked_ledger() {
+    let mut rig = Rig::new();
+    rig.send(Command::SetQueue {
+        paths: vec![rig.a.clone(), rig.b.clone()],
+        origin: Some("playlist:1f:Road Trip".to_owned()),
+    });
+    rig.send(Command::Play);
+    rig.wait_for(|event| matches!(event, Event::QueueEnded));
+    rig.finish();
+
+    let text = std::fs::read_to_string(&rig.ledger_path).expect("read");
+    // What a v1 reader does, in the two lines it is: skip `#`, decode the rest.
+    let mut read = 0usize;
+    let mut damaged = 0usize;
+    for line in text.lines() {
+        if line.is_empty() || line.starts_with('#') {
+            continue; // not damage — the rule every reader baz has shipped
+        }
+        match PlayRecord::from_line(line) {
+            Some(_) => read += 1,
+            None => damaged += 1,
+        }
+    }
+    assert_eq!(read, 2, "an older baz lost a play\n{text}");
+    assert_eq!(damaged, 0, "an older baz saw damage\n{text}");
+    // And every line of the file is still one of the two things it ever was.
+    for line in text.lines() {
+        assert!(
+            line.starts_with('#') || PlayRecord::from_line(line).is_some(),
+            "{line:?}"
+        );
+        assert_eq!(
+            line.matches('\t').count(),
+            usize::from(!line.starts_with('#')) * 4,
+            "{line:?}"
+        );
+    }
 }

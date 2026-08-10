@@ -2419,7 +2419,10 @@ impl App {
             return;
         }
         let paths = queue.paths();
-        if self.playback.send(Command::SetQueue { paths }) {
+        if self.playback.send(Command::SetQueue {
+            paths,
+            origin: None,
+        }) {
             self.player.note_queue_sent(queue);
         }
     }
@@ -3395,7 +3398,10 @@ impl App {
         // There is no branch here any more and that is the reduction: what
         // shuffle changes is the walk, which the engine was told about above.
         let paths = queue.paths();
-        if !self.playback.send(Command::SetQueue { paths }) {
+        if !self.playback.send(Command::SetQueue {
+            paths,
+            origin: None,
+        }) {
             self.player.engine_closed();
             return None;
         }
