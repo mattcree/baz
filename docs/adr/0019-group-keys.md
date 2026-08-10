@@ -16,6 +16,15 @@ of ADR-0017's build plan · builds on ADR-0018's play-history ledger
 > `shelves(GroupKey::Artist)` is still `albums()` with its breaks named,
 > element for element — only finer. The key's word went back to `Artist`, and
 > its code never moved.
+>
+> **And a sixth key was added the same day**, by ADR-0035's third amendment:
+> the initial grouping this §2 describes came back as `GroupKey::Alphabet`,
+> word `A–Z`, **first** in the row — so the title above says five and the
+> product says six. It is a *new* variant with a **new** code, `"alphabet"`;
+> `"artist"` was not given back to it, because that code had already been
+> repurposed once without saying so. Everything §2 says about `Initial` now
+> describes both a wall header and the rail's letter, one mapping serving
+> both, which is exactly what §2 said it was for.
 
 ## Context
 

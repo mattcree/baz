@@ -438,6 +438,41 @@ next commit.
 
 **Interface**
 
+- **`A–Z` is a group key again, first in the row**
+  ([ADR-0035](docs/adr/0035-the-wall-has-a-subject.md), third amendment). The
+  owner, on the wall that shipped an hour earlier: *"also, we have removed the
+  a-z option from grouping? that feels like it should go back and honestly it's
+  the first option, followed by artist"*. The strip reads **A–Z · ARTIST ·
+  YEAR · GENRE · ADDED · PLAYED**, and <kbd>1</kbd>…<kbd>6</kbd> select them in
+  that order.
+  - **Two densities of one order, on purpose.** `A–Z` breaks the wall into 27
+    letter shelves; `ARTIST` breaks the same traversal finer, one shelf per
+    person. The entry below deleted `A–Z` on the ground that the two are the
+    same traversal, which is true and is now the reason both exist: the owner
+    uses them differently, and the coarser wall is not a caption for the finer
+    one at the sizes a real library reaches.
+  - **A new code, `"alphabet"`.** `GroupKey::code` is on-disk config and a code
+    is never repurposed — so the restored key does **not** take `"artist"`
+    back. That word already changed meaning once without saying so (it named
+    the initial grouping before ADR-0035 and the artist grouping after), which
+    is now recorded on `GroupKey::code` itself; giving it away again would make
+    one code name three arrangements. Every `config.toml` on disk keeps the
+    arrangement it currently resolves to.
+  - **The rail gained no branch.** One function serves both keys: the first
+    shelf of each initial's run, which is a letter per artist-run under
+    `ARTIST` and the identity under `A–Z`. `Initial` is unchanged and is now
+    both a wall header and a rail letter, one mapping asked of `baz-core` in
+    both places. `A–Z`'s headers are inert text — a letter is not a place —
+    while `ARTIST`'s header is still the door to the artist's page.
+  - **The strip's budget, re-derived rather than reused.** The row has carried
+    a sixth word before and it was `ARTISTS`, at 77.49 px; `A–Z` costs
+    **44.92**, so the figures are not the earlier costing's. Measured row
+    357.91, `KEYS_W` 314 → **360**, `LIBRARY_LINE` 506 → **552**,
+    `TOP_BAR_SPLIT` 778 → **824**, `SINGLE_LINE_NO_WELL` 554 → **600** against
+    an unmoved `WIDEST_LANE_STRIP` 720. **The window's own minimum did not have
+    to move** — the library line sits 48 px under the 600 floor — and the
+    single-line-with-well band survives at 824…904.
+
 - **`ARTIST` groups the wall by artist**
   ([ADR-0035](docs/adr/0035-the-wall-has-a-subject.md)). The owner, on the
   artists wall that shipped earlier the same day: *"artists should be grouping

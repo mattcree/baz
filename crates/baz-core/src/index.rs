@@ -87,7 +87,7 @@
 //! # Group keys
 //!
 //! [`Library::shelves`] arranges those albums into the shelves the wall draws,
-//! under one [`GroupKey`] — ARTIST, YEAR, GENRE, ADDED or PLAYED
+//! under one [`GroupKey`] — A–Z, ARTIST, YEAR, GENRE, ADDED or PLAYED
 //! (`docs/adr/0019-group-keys.md`, which amends ADR-0008). Each key is a
 //! *projection* of the same albums and never a filter: every album appears
 //! under every key, once, including the albums whose files declare nothing.
@@ -1253,6 +1253,10 @@ impl Library {
     /// and the difference is only whether the breaks between them — one per
     /// artist — are stated
     /// (`the_artist_key_is_the_flat_shelf_with_its_breaks_named`).
+    /// [`GroupKey::Alphabet`] is the same list again with **coarser** breaks,
+    /// one per letter, which is why the two keys are two densities of one
+    /// order rather than two orders
+    /// (`the_alphabet_key_is_the_artist_key_with_coarser_breaks`).
     #[must_use]
     pub fn albums(&self) -> Vec<Album<'_>> {
         (0..self.index.album_starts.len())
@@ -1385,7 +1389,7 @@ impl Library {
         }
         // Sort the shelves, carrying their albums with them. `albums()` yields
         // library order, so each shelf's contents are already in it and stay
-        // there — within a decade, a genre or an artist the wall reads
+        // there — within a decade, a genre, a letter or an artist the wall reads
         // alphabetically, which is the order every other view of this library
         // uses.
         let mut order: Vec<usize> = (0..shelves.len()).collect();
@@ -1423,6 +1427,20 @@ pub struct RootStats {
 /// the active key with no state of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum GroupKey {
+    /// **The album artist's initial** — one shelf per letter, headed `A`, `C`,
+    /// `S` (see [`Initial`]), with the two anonymous buckets at either end.
+    ///
+    /// It is [`Self::Artist`]'s traversal with **coarser headers**: both walk
+    /// the library in [`Library::albums`] order, and they differ only in where
+    /// the breaks are named. ADR-0035's third amendment is that the coarseness
+    /// is the point rather than a redundancy — 27 letter shelves and a shelf
+    /// per artist are two densities of one order, and the owner uses them
+    /// differently. It is first in the row because he put it first.
+    ///
+    /// Its **code is `"alphabet"`, not `"artist"`** ([`GroupKey::code`]): the
+    /// word `A–Z` once belonged to the variant below, and giving this one that
+    /// variant's code back would make a `config.toml` name a third thing.
+    Alphabet,
     /// **The album artist** — the grouping ADR-0008 decided, now one key among
     /// several. One shelf per artist, headed by their name (see
     /// [`GroupHeader::Artist`]), unknowns first and unnamed compilations last.
@@ -1432,9 +1450,10 @@ pub enum GroupKey {
     /// was a key called `Artist` that grouped by something else, which is what
     /// made its word collide with the front end's Artist **place** — the
     /// owner's finding, *"artists should be grouping stuff by artist not just
-    /// alphabetically"*. Grouping by the artist makes the word true, and the
-    /// alphabet survives where it was always the useful thing: the index rail
-    /// (see [`Initial`]).
+    /// alphabetically"*. Grouping by the artist makes the word true. The
+    /// initial grouping is not gone — it is [`Self::Alphabet`], with a word
+    /// and a code of its own — and the alphabet also stays where it was always
+    /// the useful thing: the index rail (see [`Initial`]).
     Artist,
     /// Release year, shelved by decade (see [`GroupHeader::Decade`]).
     Year,
@@ -1450,7 +1469,8 @@ pub enum GroupKey {
 
 impl GroupKey {
     /// Every key, in the order the wall's row of words states them.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
+        Self::Alphabet,
         Self::Artist,
         Self::Year,
         Self::Genre,
@@ -1467,11 +1487,14 @@ impl GroupKey {
     /// its word was briefly `A–Z`, for the release in which the key grouped by
     /// initial while wearing an artist's name, and came back to `Artist` when
     /// the key started grouping by artist (ADR-0035). Its code was `"artist"`
-    /// throughout, so every `config.toml` baz has ever written still resolves
-    /// — and now resolves to the arrangement its word always claimed.
+    /// throughout — which is the *label* rule applied to a case where the
+    /// meaning moved too, and is why the word `A–Z` now belongs to a variant
+    /// with a code of its own. See [`Self::code`].
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
+            // An en dash, not a hyphen: it is a range.
+            Self::Alphabet => "A–Z",
             Self::Artist => "Artist",
             Self::Year => "Year",
             Self::Genre => "Genre",
@@ -1481,11 +1504,36 @@ impl GroupKey {
     }
 
     /// The stable lowercase code for persisting which key is active. Never
-    /// change an existing code: it is on-disk data (config), and
-    /// [`GroupKey::from_code`] is its only reader.
+    /// change an existing code, and **never repurpose one**: it is on-disk
+    /// data (config), and [`GroupKey::from_code`] is its only reader.
+    ///
+    /// # `"artist"` was repurposed once, quietly, and that is why `A–Z` gets a
+    /// new code
+    ///
+    /// `"artist"` meant *group by the album artist's initial* for every
+    /// release up to ADR-0035, and *group by the album artist* from ADR-0035
+    /// on. The variant and the code both stood still while the arrangement
+    /// under them changed, so a `config.toml` written before that day names a
+    /// different wall than it did when it was written. Nothing failed and
+    /// nobody was told; it is the failure this rule exists to prevent, and it
+    /// is recorded here because a rule with a silent exception in its own
+    /// history is folklore.
+    ///
+    /// So [`Self::Alphabet`] — which *is* the arrangement `"artist"` used to
+    /// name — is **`"alphabet"`**, and does not take the old code back.
+    /// Handing it `"artist"` would make one word mean the initial grouping,
+    /// then the artist grouping, then the initial grouping again, and a
+    /// pre-ADR-0035 config would land on the right wall only by accident.
+    /// Among the codes that were free, `"alphabet"` names the **vocabulary the
+    /// shelves are headed in**, which is what a reader picking the word out of
+    /// a config file needs to know; `"a-z"` is the label, and labels are the
+    /// thing this method exists to be independent of; `"initial"` names the
+    /// derivation rather than the arrangement, and [`Initial`] is a public
+    /// type whose consumer has already moved once.
     #[must_use]
     pub fn code(self) -> &'static str {
         match self {
+            Self::Alphabet => "alphabet",
             Self::Artist => "artist",
             Self::Year => "year",
             Self::Genre => "genre",
@@ -1524,6 +1572,9 @@ pub struct Shelf<'a> {
 /// `shelves(key).iter().map(|s| s.header.label())`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GroupHeader<'a> {
+    /// [`GroupKey::Alphabet`] — the album artist's first letter, or one of the
+    /// two anonymous buckets. See [`Initial`].
+    Initial(Initial),
     /// [`GroupKey::Artist`] — **the artist the shelf holds the records of**.
     ///
     /// [`AlbumArtist::Named`] carries the spelling that sorts first among the
@@ -1560,6 +1611,7 @@ impl<'a> GroupHeader<'a> {
     #[must_use]
     pub fn label(&self) -> String {
         match self {
+            Self::Initial(initial) => initial.label(),
             Self::Artist(AlbumArtist::Named(name)) => (*name).to_owned(),
             Self::Artist(AlbumArtist::Various) => "Various".to_owned(),
             Self::Artist(AlbumArtist::Unknown) => "Unknown".to_owned(),
@@ -1574,6 +1626,7 @@ impl<'a> GroupHeader<'a> {
     /// The header one album lands under, for `key`.
     fn of(key: GroupKey, album: &Album<'a>, now: SystemTime, history: Option<&History>) -> Self {
         match key {
+            GroupKey::Alphabet => Self::Initial(Initial::of(album.artist)),
             GroupKey::Artist => Self::Artist(album.artist),
             GroupKey::Year => Self::Decade(album.year.map(|year| year - year % 10)),
             GroupKey::Genre => Self::Genre(album.genre),
@@ -1583,15 +1636,23 @@ impl<'a> GroupHeader<'a> {
     }
 }
 
-/// **The index rail's letter for an album artist** — the alphabet, plus the
-/// two ends of it that are not letters.
+/// **The letter an album artist files under** — the alphabet, plus the two
+/// ends of it that are not letters.
 ///
-/// It was the wall's own header until ADR-0035, when [`GroupKey::Artist`]
-/// started breaking on the artist rather than on their initial. The alphabet
-/// did not stop being useful when it stopped being a header: it is what the
-/// index rail speaks, and a rail is the one place a coarse bucket earns its
-/// keep, because you aim at a letter and land on the first artist under it.
-/// So this type stayed exactly as it was and only its consumer moved.
+/// It has **two consumers and one definition**, which is the whole reason it
+/// is a type rather than a `char`:
+///
+/// - it is [`GroupKey::Alphabet`]'s own header, one shelf per letter, which is
+///   what it was built to be;
+/// - it is the index rail's letter under [`GroupKey::Artist`] too, where the
+///   headers are the artists themselves and a rail of four hundred names would
+///   be the wall again. A rail is the one place a coarse bucket earns its keep,
+///   because you aim at a letter and land on the first artist under it.
+///
+/// Between ADR-0035 and its third amendment it was only the second of those.
+/// The type did not change when the first came back, and it will not: one
+/// mapping, asked of `baz-core` in both places, is what stops the wall's
+/// letters and the rail's letters from ever disagreeing.
 ///
 /// Variant order *is* wall order, and it is the order [`Library::albums`]
 /// already sorts in (see `ArtistKey`): the unknowns first, then everything
@@ -1617,7 +1678,7 @@ pub enum Initial {
 }
 
 impl Initial {
-    /// The rail entry a resolved album artist files under.
+    /// The shelf, and the rail entry, a resolved album artist files under.
     #[must_use]
     pub fn of(artist: AlbumArtist<'_>) -> Self {
         match artist {
@@ -1698,6 +1759,8 @@ const NANOS_PER_SECOND: i64 = 1_000_000_000;
 /// sort case-folded while its header keeps the tag's own spelling.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum ShelfSort {
+    /// [`GroupKey::Alphabet`]: variant order is shelf order.
+    Initial(Initial),
     /// [`GroupKey::Artist`]: the album artist, case-folded — which is
     /// `ArtistKey`, the key [`Library::albums`] already sorts by. Reused
     /// rather than restated, because "the order the artist shelves go in" and
@@ -1718,6 +1781,7 @@ enum ShelfSort {
 impl ShelfSort {
     fn of(key: GroupKey, album: &Album<'_>, now: SystemTime, history: Option<&History>) -> Self {
         match key {
+            GroupKey::Alphabet => Self::Initial(Initial::of(album.artist)),
             GroupKey::Artist => Self::Artist(ArtistKey::of_album_artist(album.artist)),
             GroupKey::Year => Self::Decade(album.year.map(|year| year - year % 10)),
             GroupKey::Genre => Self::Genre(album.genre.map(str::to_lowercase)),
