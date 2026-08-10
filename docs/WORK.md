@@ -27,20 +27,15 @@
 
 ## Next
 
-1. **The lane's scrollbar looks inset on the right.** *"scroll bar is in a
-   strange location… it seems to have padding on the right"*. The lane's gutter
-   was moved onto its contents so the bar could reach the edge; it evidently
-   still does not. Measure it on a rendered frame rather than reasoning from
-   the code — `docs/design/impl/search-in-lane/` has the harness.
-2. **Doc 14's Tier 2 — the serif on the two pages.** Held back tonight only
+1. **Doc 14's Tier 2 — the serif on the two pages.** Held back tonight only
    because `views/now_playing.rs` argues in prose *against* the serif and must
    be amended in the same commit, and that file was another agent's. Do it
    next, and amend the prose with it or the code argues with the ADR.
-3. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and the
+2. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and the
    Flatpak build are all done; what is left is a screenshot for the metainfo,
    the version edit from `0.0.0`, a `workflow_dispatch` dry run, then the tag.
    **The tag is the owner's to cut** — the workflow produces a draft.
-4. **Rewrite the README as the project's public face**, with the icon and real
+3. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately near
    last, so it describes what actually ships. Its keyboard table is badly stale
    today: `Pull` is gone, `Q` never opened the queue, shuffle is a mode, the
@@ -54,6 +49,13 @@
 - **The artwork at full size** (doc 12 step A2) — deletes the 720 px clamp that
   makes full-screen *"look weird"*, adds the 1024 px hero decode and the
   cover-derived field.
+- **The wall's scrollbar sits 108 px inboard of the window.** Measured on an
+  isolated 1280×860 frame: the bar is at x 1168–1171 and the rail's letters at
+  1233–1239, so the rail's whole lane sits between the bar and the window edge
+  — the owner's *"strange location… padding on the right"*. It is the **wall's**
+  bar, not the lane's; the lane draws none at all with a short list. The open
+  question is whether the bar should take the window edge outboard of the rail,
+  and what that costs the rail's edge-flingable hit bands.
 - **Doc 14 Tier 1** — the kind in the line under a name (`Playlist · 14 ·
   42:10`), the byline that makes the two identity blocks the same height, and
   the `Save as playlist` fixes: the run strip gains its noun, and the word
