@@ -88,6 +88,9 @@ pub(crate) mod now_playing;
 pub(crate) mod page;
 pub(crate) mod playlist;
 pub(crate) mod playlist_panel;
+// The queue renderer is retained while its next dedicated surface is decided;
+// Now playing deliberately no longer mounts it.
+#[allow(dead_code)]
 pub(crate) mod queue;
 pub(crate) mod settings;
 pub(crate) mod setup;

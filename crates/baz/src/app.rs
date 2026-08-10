@@ -383,16 +383,16 @@ pub(crate) enum Message {
     /// Esc anywhere: peel one layer, top down — the place you are in, then the
     /// search query, then the shuffle pool's marks (see [`App::escape`]).
     EscapePressed,
-    /// **The bar's now-playing block, and <kbd>Ctrl</kbd>+<kbd>U</kbd>**: go
-    /// to `Now playing`.
+    /// **The returns lane's Now playing row, and <kbd>Ctrl</kbd>+<kbd>U</kbd>**:
+    /// go to `Now playing`.
     ///
     /// The prior-art study's R3 — *get back to what is playing* — which every
     /// product it surveyed spends an affordance on and baz had none for. It
     /// used to open the *record's page*, and that was right while the record's
     /// page was the only surface that knew what was sounding. `Now playing`
-    /// exists now and is that surface, so the block leads there: the text
-    /// naming what is playing takes you to the place about what is playing.
-    /// The record is one step further on, which is the right way round.
+    /// exists now and is that surface, so the dedicated lane row leads there.
+    /// The persistent bar's track block instead follows the same provenance
+    /// road as the source footer: playlist when there is one, album otherwise.
     ///
     /// **`Message::ShowTheRun` folded into this one** when the `Run` word was
     /// removed. That message was this message plus *turn the density on*, and
@@ -403,6 +403,10 @@ pub(crate) enum Message {
     /// destination never closes itself ([`crate::place::Place::go`]) — and
     /// <kbd>Esc</kbd> is the way out.
     ShowNowPlaying,
+    /// The subtle provenance link on Now playing: open the album the sounding
+    /// track belongs to, without inheriting a wall tile's shift-click queue
+    /// gesture.
+    OpenAlbum(u64),
     /// A row of the **Queue** place was clicked: play the queue from that
     /// zero-based position ([`Command::JumpTo`], ADR-0014).
     ///
@@ -1667,6 +1671,7 @@ impl App {
             Message::ShowNowPlaying => {
                 self.go(|place| place.go(crate::lane::Destination::NowPlaying))
             }
+            Message::OpenAlbum(id) => self.open_album(id),
             // The Settings place's spine. Session state and deliberately not
             // persisted: which section you were last reading is not a standing
             // decision.
@@ -1693,20 +1698,8 @@ impl App {
             Message::FirstFrame => self.log_first_frame(),
             Message::SetupSubmit => self.submit_setup(),
             Message::Playback(event) => {
-                // **The track's own identity, before and after.**
-                // `track_seq` is documented as a count that changes exactly
-                // when the playing track changes — and, because it is bumped
-                // only on a genuinely different path, a *seek* does not move
-                // it. That is precisely the trigger the run's follow wants:
-                // the engine's own confirmation of a new track, never a clock
-                // and never a request.
-                let before = self.player.track_seq();
                 self.apply_player_event(event);
-                if self.player.track_seq() == before {
-                    Task::none()
-                } else {
-                    self.follow_the_run()
-                }
+                Task::none()
             }
             Message::PlayAlbum(id) => {
                 self.play_album(id);
@@ -2262,6 +2255,23 @@ impl App {
         self.playlists
             .holds(name)
             .then(|| (crate::playlists::playlist_id(name), name.to_owned()))
+    }
+
+    /// The one quiet road out of Now playing: the file-backed playlist the
+    /// run came from while it still exists, otherwise the sounding track's
+    /// resolved album.
+    fn now_playing_source(&self) -> Option<views::now_playing::Source> {
+        let now = self.player.now_playing()?;
+        if let Some((id, name)) = self.current_playlist() {
+            return Some(views::now_playing::Source::Playlist { id, name });
+        }
+        Some(views::now_playing::Source::Album {
+            id: now.album_id?,
+            name: now
+                .album
+                .clone()
+                .unwrap_or_else(|| "Unknown Album".to_owned()),
+        })
     }
 
     /// Answer a message that belongs to the **playlist surfaces** — the
@@ -3286,8 +3296,8 @@ impl App {
         Task::none()
     }
 
-    /// **Open a record's page** — a tile press, or the bar's now-playing
-    /// block.
+    /// **Open a record's page** — a tile press, or source navigation from Now
+    /// playing and the persistent bar.
     ///
     /// Two things happen and they are deliberately separable: the *place*
     /// changes, and the wall remembers which record you left it for
@@ -3335,9 +3345,9 @@ impl App {
         entering
     }
 
-    /// <kbd>Esc</kbd>'s place-level share of the peel: the transient fields
-    /// standing *on* the current place — a rename mid-type, the queue's
-    /// save field — each one press, before the place itself leaves. (The
+    /// <kbd>Esc</kbd>'s place-level share of the peel: the transient field
+    /// standing *on* the current place — a playlist rename mid-type — takes
+    /// one press before the place itself leaves. (The
     /// armed delete peeled here until doc 11 §5 P2 retired the confirm:
     /// deletion is one press into the trash now, so there is no armed layer
     /// left to peel.)
@@ -3349,8 +3359,6 @@ impl App {
                 };
                 open.renaming.take().is_some()
             }
-            // The run's save field — one place draws the run now.
-            Place::NowPlaying => self.playlists.saving_queue.take().is_some(),
             _ => false,
         }
     }
@@ -4272,20 +4280,15 @@ impl App {
     }
 
     /// The place's transient `Undo`, resolved against **which list surface
-    /// the window is showing** (doc 11 §5 P2): the Queue place takes back a
-    /// run edit, an open playlist page takes back a file edit, and anywhere
-    /// else the press asks for nothing — undo is one history per surface,
-    /// never a global stack, and its accelerator is legal exactly where its
-    /// visible twin stands.
+    /// the window is showing** (doc 11 §5 P2). Only an open playlist page is
+    /// an editor now; everywhere else the press asks for nothing. Undo is one
+    /// history per visible surface, never a global stack, and its accelerator
+    /// is legal exactly where its visible twin stands.
     fn undo_edit(&mut self) -> Task<Message> {
-        match self.place {
-            Place::NowPlaying => self.undo_queue_edit(),
-            Place::Playlist(_) => {
-                if let Screen::Shelf(state) = &self.screen {
-                    self.playlists.undo_open(&state.library);
-                }
-            }
-            _ => {}
+        if let Place::Playlist(_) = self.place
+            && let Screen::Shelf(state) = &self.screen
+        {
+            self.playlists.undo_open(&state.library);
         }
         Task::none()
     }
@@ -4298,6 +4301,10 @@ impl App {
     /// `SetQueue` and no `JumpTo` anywhere on this path, so nothing ever
     /// sounds, stops, or moves because of an undo. The cursor finds its
     /// track again by path, exactly as it does through every other edit.
+    // Retained with the dormant queue renderer: if that editor gains a
+    // dedicated surface again, its bounded undo path returns with it rather
+    // than being reimplemented from scratch.
+    #[allow(dead_code)]
     fn undo_queue_edit(&mut self) {
         let Some(restored) = self.queue_undo.pop() else {
             return;
@@ -4311,79 +4318,11 @@ impl App {
         self.publish_mpris(false);
     }
 
-    /// **Bring the sounding row into view in the run column**, or leave the
-    /// column exactly where it is.
-    ///
-    /// The owner, 2026-08-10: *"ideally the currently playing item in the
-    /// playlist is where our scroll goes to i.e. it should be visible when we
-    /// change track"*.
-    ///
-    /// Everything about *whether* to move is
-    /// [`views::now_playing::follow`]'s — it answers `None` for a row that is
-    /// already on screen, which is most track changes inside one record. What
-    /// is here is the two halves the view cannot do: the place check, and the
-    /// widget operation.
-    ///
-    /// **Only while the place is on screen.** A follow computed for a surface
-    /// nobody is looking at would be spent on a scrollable that iced has not
-    /// built, and the offset would be stale by the time it was. Arriving at the
-    /// place computes its own ([`Self::note_place_left`]), which is the same
-    /// call with the same function.
-    ///
-    /// `queue_scroll` is written here as well as driven, so the **virtual
-    /// window** and the widget agree on the same frame: the window is computed
-    /// from this field, and a widget that had scrolled while the field had not
-    /// would draw the slice for the old offset.
-    fn follow_the_run(&mut self) -> Task<Message> {
-        if self.place != Place::NowPlaying {
-            return Task::none();
-        }
-        let Screen::Shelf(state) = &self.screen else {
-            return Task::none();
-        };
-        let Some(target) = views::now_playing::follow(
-            state,
-            &self.player,
-            self.body_width(),
-            self.body_height(),
-            self.queue_scroll,
-        ) else {
-            return Task::none();
-        };
-        self.queue_scroll = target;
-        scrollable::scroll_to(
-            views::queue::run_scroll_id(),
-            AbsoluteOffset { x: 0.0, y: target },
-        )
-    }
-
     /// Bookkeeping for a place change: an edit history belongs to the
     /// surface that shows its `Undo` word, and leaving that surface is one
     /// of the three things that end it (P2: "until the next edit, a
     /// navigation, or the run ending").
     ///
-    /// # …and the run's scroll, on the way *in*
-    ///
-    /// [`Self::queue_scroll`]'s own note says the offset must be re-established
-    /// when the place is entered, because iced 0.13 keys widget state by tree
-    /// position: leaving unmounts the run's scrollable and coming back
-    /// re-creates it at the top, so a remembered offset windows rows the widget
-    /// is not showing.
-    ///
-    /// **It was written on one route in and not on the others.**
-    /// `Message::ShowTheRun` reset it to zero; the lane's `Now playing` row and
-    /// the bar's now-playing block did not, so those two reached the place with
-    /// a stale offset and the virtual window drew the wrong slice. That message
-    /// has gone with the `Run` word, which is what forced the question — and
-    /// the answer is that this belongs to *entering the place*, not to one
-    /// press. So it is here, where every route already passes.
-    ///
-    /// **And it is no longer zero.** The owner asked for the sounding row to be
-    /// where the scroll goes, and *arriving* is the first moment that is true
-    /// of: opening the place on the top of a run you are forty tracks into is
-    /// the same defect as not following a track change, reached by a different
-    /// door. So the entry offset is [`Self::follow_the_run`]'s answer, and zero
-    /// only when there is nothing to follow.
     fn note_place_left(&mut self, from: Place) -> Task<Message> {
         if from == self.place {
             return Task::none();
@@ -4394,14 +4333,7 @@ impl App {
         if matches!(from, Place::Playlist(_)) {
             self.playlists.clear_undo();
         }
-        if self.place != Place::NowPlaying {
-            return Task::none();
-        }
-        // The widget is about to be built fresh at zero, so the follow is
-        // computed against zero rather than against what the *last* visit left
-        // in `queue_scroll` — the field is stale by definition on this path.
-        self.queue_scroll = 0.0;
-        self.follow_the_run()
+        Task::none()
     }
 
     /// Send a transport command, marking it pending on acceptance and
@@ -4540,15 +4472,7 @@ impl App {
                 &self.player,
                 self.body_width(),
                 self.body_height(),
-                // The hover slots go quiet while a row is in the hand: the
-                // gesture's own statements — the ghost and the line — are
-                // the surface's voice mid-drag.
-                self.drag.as_ref().map_or(self.hovered_queue_row, |_| None),
-                self.playlists.saving_queue.as_ref(),
-                collecting,
-                self.queue_scroll,
-                self.drag.as_ref(),
-                self.queue_undo.can_undo(),
+                self.now_playing_source(),
             ),
             (Screen::Shelf(state), Place::Settings) => {
                 // Built here rather than inside the view: the folders come from
@@ -4675,7 +4599,13 @@ impl App {
         } else {
             column![
                 screen,
-                views::bottom_bar::view(&self.player, ink, self.bar_cover()),
+                views::bottom_bar::view(
+                    &self.player,
+                    ink,
+                    self.bar_cover(),
+                    self.now_playing_source()
+                        .map(|source| source.open_message()),
+                ),
             ]
             .into()
         };
@@ -7496,9 +7426,7 @@ mod tests {
             ("ToggleMute", "the bottom bar's speaker button"),
             (
                 "ShowNowPlaying",
-                "the returns lane's `Now playing` row, and the bar's own \
-                 now-playing block — two visible controls sending this exact \
-                 message, which is what makes the one chord legal",
+                "the returns lane's labelled `Now playing` row",
             ),
             ("ToggleSettings", "the top bar's Settings control"),
             ("FocusSearch", "the top bar's search well"),
@@ -8179,8 +8107,8 @@ mod tests {
     }
 
     /// The two place keys, spelled out: Ctrl+`U` is the same press as the
-    /// lane's `Now playing` row and the bar's now-playing block, and Ctrl+`,`
-    /// the same press as the top bar's `Settings` word.
+    /// lane's `Now playing` row, and Ctrl+`,` the same press as the top bar's
+    /// `Settings` word.
     ///
     /// Ctrl+`U` used to be that row **plus the place's `Run` word**, which is
     /// the construction ADR-0023's amendment blesses for an accelerator that

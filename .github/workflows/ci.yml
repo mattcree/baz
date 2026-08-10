@@ -7,10 +7,22 @@ on:
   schedule:
     - cron: "17 4 * * 1" # weekly: fuzz + fresh advisory sweep
   workflow_dispatch:
+    inputs:
+      run_fuzz:
+        description: Run the six five-minute discovery fuzz targets
+        required: false
+        type: boolean
+        default: true
   # Callable so the release workflow can make this whole suite a hard
   # dependency of shipping a binary (.github/workflows/release.yml). The
   # release gate is *this* definition of green, not a copy of it.
   workflow_call:
+    inputs:
+      run_fuzz:
+        description: Include discovery fuzzing in the caller's gate
+        required: false
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -156,8 +168,12 @@ jobs:
           echo "application id consistent: $id"
 
   fuzz:
-    name: fuzz (scheduled)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    name: fuzz (scheduled/manual)
+    # Discovery fuzzing is intentionally not part of an ordinary push, PR, or
+    # release gate. Direct manual CI dispatches opt in by default; reusable
+    # callers have to ask for it. The hostile inputs already found here live
+    # in crates/baz-core/tests/hostile_media.rs, which every gate does run.
+    if: github.event_name == 'schedule' || inputs.run_fuzz
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

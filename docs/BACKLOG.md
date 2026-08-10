@@ -625,8 +625,9 @@ Newest first. Each was asked for in conversation and is now in the product.
   reason — video/subtitle support, a codec only 0.6 has, or an upstream fix
   we need — rather than for its own sake.
 
-- **A deleted *directory*'s tracks still linger in the index** — **narrowed to
-  a missing control (ADR-0042).** Removal landed with **ADR-0010** (this entry
+- **A deleted *directory*'s tracks still linger in the index** — **the answer
+  must be automatic pruning, not a per-record control.** Removal landed with
+  **ADR-0010** (this entry
   said ADR-0011 for two months; that is the volume ADR) and deleting a *file*
   now clears its row on the next scan — but only under positive confirmation,
   and one of the four gates is "the file's parent directory is present". So
@@ -634,23 +635,27 @@ Newest first. Each was asked for in conversation and is now in the product.
   filesystem's side a deleted folder and a mount point that is not mounted right
   now are the same `NotFound` for every path below, and wrongly wiping a present
   listener's library is not a bug worth trading a cosmetic stale row for.
-  **That refusal stands and is not being revisited.**
+  **The unavailable-root guarantee stands; the coarse result does not.** The
+  replacement must distinguish a reachable held root with a deleted child from
+  a root that is itself unavailable, then let the ordinary case follow the
+  filesystem without another removal gesture.
 
   **What would settle it**, in preference order: ~~(1) a *user-initiated
   prune*~~ — **the mechanism shipped (ADR-0042)**: `Library::forget_paths`
   deletes exactly the rows a listener names, and keeps their first-seen in a
   tombstone so that being wrong — the share was only unmounted — costs a rescan
   and nothing else. That reversibility is the whole reason a listener-initiated
-  forget is offerable at all. **What remains is its control**: one `Message` and
-  one update arm in `crates/baz/src/app.rs` for a `Forget this record` item on
-  the tile menu, drawn in ADR-0042 §8, and left undone only because another
-  branch held that file. The wider *"these 412 rows point at files I cannot
+  forget would be mechanically reversible. **The owner explicitly rejected
+  that control on 2026-08-10:** if someone wants a record removed, they delete
+  or move its files out of the held library; baz should prune the index. Do not
+  rebuild `Forget this record`. The remaining problem is therefore the wider
+  *"these 412 rows point at files I cannot
   find; remove them?"* surface — grouped by root and counted, so an unmounted
   share is visible as the shape it makes — is still unbuilt and still wants a
   library-maintenance place. (2) remembered mount points, so "this directory is
   gone" can be distinguished from "this directory's filesystem is not attached"
-  — **now unnecessary for this case**, because a person asserting it needs no
-  such signal. ~~(3) a per-row record of which root a track came from~~ —
+  — **now the preferred route**, because automatic pruning needs that signal.
+  ~~(3) a per-row record of which root a track came from~~ —
   **shipped (ADR-0022)**, and it did replace gate 2, but it does not touch this
   case: a deleted album folder and an unmounted one are still the same
   `NotFound` from below whichever root recorded the rows.

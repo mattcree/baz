@@ -86,6 +86,10 @@
 >   decision. It reopens only if a beta tester asks.
 > - **Resize smoothness** — the owner's own *"lower priority"*, measured and
 >   left with its numbers.
+> - **An individual-record forget control.** Explicitly rejected by the owner
+>   on 2026-08-10 when it was shown: deleting or moving the files is the removal
+>   gesture, and baz's index should follow the filesystem. The internal
+>   `forget_paths` mechanism is not permission to add a second UI workflow.
 > - **The engine's remaining known gaps** — sample-accurate splices, the
 >   Symphonia 0.6 upgrade, the density cache's decode size, FLAC-in-MP4's ALAC
 >   label, AAC's missing gapless trim. Each is real, none is a reason a
@@ -98,44 +102,13 @@
 
 ## Next
 
-1. **A deleted folder's records never leave the library — and the last thing
-   missing is one press.** **Blocked, briefly and on purpose:** ADR-0042 §8
-   puts the item's *visible twin* on the record page's own strip, and that strip
-   is being rewritten right now by the branch merging the run column with the
-   two pages (the owner's *"the playlist view in the now playing and the
-   playlist view/album view are the same thing"*). Adding a control to a
-   composition mid-restructure is how `WORK.md` itself got mangled three times.
-   **Take this the moment that branch lands** — the design below is complete and
-   nothing about it depends on the outcome.
-   `rm -rf` an album directory and its eight rows stay
-   on the wall for good. This is **deliberate and the reasoning is sound**: from
-   the filesystem's side a deleted folder and an unmounted NAS are the same
-   `NotFound` for every path beneath, and wiping a present listener's library to
-   tidy a stale row is the worse failure — **ADR-0010** chose correctly (this
-   item and `BACKLOG.md` both said ADR-0011 for two months; that is the volume
-   ADR, and the citation is fixed). The owner's library is on a NAS by design
-   (ADR-0025), so the unmount case is his real case.
-   - **The mechanism shipped with ADR-0042** and is the same act as removing a
-     folder, at record scale: `Library::forget_paths` deletes exactly the rows a
-     listener names and keeps their first-seen, so asserting it about a share
-     that was only unmounted costs a rescan and nothing else. That
-     reversibility is *why* a user-initiated forget is offerable at all, and it
-     is proved against real files in
-     `forgetting_a_record_that_was_only_unmounted_costs_nothing_when_it_returns`.
-   - **What is left is its control**, and it is small and specified: a
-     `Forget this record` item on the tile menu, its visible twin on the record
-     page's strip, pressing `forget_paths` over the album's tracks — one
-     `Message` variant and one update arm in `crates/baz/src/app.rs`. ADR-0042
-     §8 draws all of it, including the words. It did not land only because that
-     file was held by the `SchemaTooNew` branch, which has since landed
-     (ADR-0041) — so the file is free and this is now the whole of the item.
-2. **The seek bar says which thing it measures.** The owner: *"I think the seek
+1. **The seek bar says which thing it measures.** The owner: *"I think the seek
    bar at the bottom should have a toggle indicating for song or for whole
    playlist"*. Both are true readouts — the track's position and the run's — and
    he is asking to choose. Undesigned; the questions are where the toggle lives
    (the bar is already dense), whether the choice persists, and what the
    elapsed/remaining figures either side of the bar read in run mode.
-3. **An artist has an `All songs` of their own.** The owner: *"the artist page
+2. **An artist has an `All songs` of their own.** The owner: *"the artist page
    should have its own 'all songs' playlist I think"*. `implicit::ImplicitList`
    already gives the library one, with an `Origin` kind and a collage sleeve, so
    this is that list scoped to one artist rather than new machinery. Undecided:
@@ -146,7 +119,7 @@
    word may not need qualifying. It should credit the artist's list rather than
    the underlying records when played, which is the rule that just landed for
    playlists.
-4. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+3. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -159,22 +132,21 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-5. **Ship the public beta.** The last item by construction: it is the one
-   that makes the six above reach anybody. `v0.1.0` is prepared up to the
+4. **Ship the public beta.** The last item by construction: it is the one
+   that makes the blockers above reach anybody. `v0.1.0` is prepared up to the
    tag and `docs/RELEASING.md` holds the owner's three commands, but a *beta*
    asks two more things of the release than a private tag does. **Flathub** —
    an account and a PR to `flathub/flathub`, which is the owner's and has
    never been an agent's; the manifest wants `tag` and `commit` filled from
-   the cut tag. And **the three platform builds have still never run in CI**:
-   the dry run's fuzz failure gated them, so the one part of the release path
-   nobody has exercised is the part that produces the artefacts. Run it before
-   the tag rather than discovering it after.
+   the cut tag. And **the corrected release dry run still needs to run on
+   GitHub**: it now gives a rehearsal the same non-fuzz CI gate as a tag, so it
+   can finally exercise all three platform builds and their checksums before
+   the tag rather than discovering them after.
 
 ## Doing
 
-*Nothing in flight.* The interface freeze is on: `## Next` is beta
-blockers only, and the app bar was the last interface work by the owner's own
-call.
+*Nothing in flight.* The interface freeze is on: `## Next` is beta blockers
+only.
 
 ## Waiting on the owner
 
@@ -331,6 +303,14 @@ call.
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **Now playing is one current song, not another list page.** The large centred
+  cover, track-led placard, needle and figures are the whole composition. A
+  quiet, borderless source footer spans the bottom of the place and leads to
+  the originating playlist when it still exists, otherwise to the sounding
+  track's album. The bottom bar's track block follows that same source route,
+  while the lane keeps the dedicated road into the artwork view. The queue is
+  not drawn on this surface; the album and playlist pages remain the places for
+  lists.
 - **The README is the project's public face, and the word on the front is
   `public beta`.** The owner's *"can we get the README sorted"*, and his
   earlier *"a real public facing view of the app and its features. with an
@@ -507,10 +487,10 @@ Newest first. Fuller detail in `CHANGELOG.md`.
     against timestamps planted four years in the past; the harness fails loudly
     on either assertion. `scan/launch_cold_10k` is 81.0 ms against ADR-0010's
     recorded 83.4 ms — the addition does not appear.
-  - **Blocker 2 is not closed**: its control is one `Message` in `app.rs`,
-    specified in ADR-0042 §8, and it stayed unwritten because `app.rs` was held by
-    the `SchemaTooNew` branch while this work ran. It is item 1 of `## Next`,
-    narrowed to that, and the file is free now that both have landed.
+  - **Blocker 2's mechanism landed here, but its proposed control was later
+    rejected by the owner.** Filesystem changes followed by automatic pruning
+    are the product workflow; `BACKLOG.md` retains the unreachable-directory
+    distinction that still needs solving.
   - **Found on the way**: `WORK.md` and `BACKLOG.md` both credited the removal
     policy to ADR-0011, which is the volume ADR. It is ADR-0010. Both fixed.
 - **Fourteen files skipped were one whole album, and one junk byte was the
@@ -711,10 +691,10 @@ Newest first. Fuller detail in `CHANGELOG.md`.
       that set the flag to `0`, which in libFuzzer means *"use
       `rss_limit_mb`"* rather than *"off"* and changed nothing — caught by
       re-running, not by reading.
-  - **Left for the owner's eye, and it is a policy question rather than a
-    defect:** the release gate is still weaker than the dry run. The fuzz job
-    stays `schedule` + `workflow_dispatch`, argued in `docs/RELEASING.md`; what
-    changed is that the class most worth catching no longer waits for it.
+  - **The release rehearsal no longer inherits discovery fuzzing.** A direct
+    manual CI dispatch and the weekly schedule still fuzz; PRs, pushes, release
+    dry runs and tags run the hostile-input regression tests instead. That
+    gives the rehearsal and tag the same gate and lets the rehearsal build.
 - **The ladder only tightens** — the owner, looking at the running app: *"why
   is balanced smaller than compact... I think the dense should be a bit
   smaller."* Two things in one sentence, and they are kept apart in the commit
@@ -851,17 +831,11 @@ Newest first. Fuller detail in `CHANGELOG.md`.
     CI job but one came out green; the fuzz job — which had never run anywhere,
     because it goes on `schedule` and `workflow_dispatch` and neither had
     fired — found an OOM in forty seconds. `build` `needs` the gate, so **the
-    three platform builds and the checksum step still have not run in CI**.
-    They are the last unexercised thing in the release path. This entry said
-    *"only a green dry run reaches them"*; ADR-0040 established that
-    `playback_decode` stays red on a Symphonia panic no fix inside baz can
-    hide from libFuzzer, so **the tag reaches them and the dry run does not** —
-    the fuzz job is skipped on `push`. `docs/RELEASING.md` now says so where
-    he will be standing.
-  - **The tag is not blocked by it**: the fuzz job is skipped on `push`, so the
-    gate a tag is held to is the one that went green. `docs/RELEASING.md` says
-    this where he will be standing when he needs it, because a red dry run
-    looks like a reason to stop and this one is not.
+    three platform builds and the checksum step did not run in CI**. They are
+    the last unexercised thing in the release path. The reusable workflow now
+    takes an explicit `run_fuzz` input: direct manual CI defaults it on, while
+    the release passes `false`. A corrected dry run and a tag therefore use
+    the same gate and both reach the builds; the former publishes nothing.
   - **Nothing was tagged, pushed or published**, which is the standing rule and
     not an omission.
 

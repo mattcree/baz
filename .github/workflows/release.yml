@@ -88,14 +88,16 @@ jobs:
   # workflow rather than copying its jobs is the point: there is one
   # definition of "green", and it cannot drift from what PRs are held to.
   #
-  # Note: under `workflow_call` the called workflow sees the *caller's*
-  # event, so CI's scheduled fuzz job runs on a dry run (workflow_dispatch)
-  # and is skipped on a tag push (push). That is CI's own condition; this
-  # workflow does not override it.
+  # Discovery fuzzing is not part of this gate. CI still runs it weekly and on
+  # a direct manual CI dispatch; hostile inputs it has already found are
+  # permanent cargo tests. Giving a dry run and a tag the same gate is what
+  # lets the rehearsal reach and prove the artifact matrix.
   # ---------------------------------------------------------------------
   gate:
     name: CI gate
     uses: ./.github/workflows/ci.yml
+    with:
+      run_fuzz: false
     permissions:
       contents: read
 

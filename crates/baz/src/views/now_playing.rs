@@ -1,145 +1,38 @@
-//! **The Now playing place** — the sounding record at the size it deserves.
+//! **The Now playing place** — the current song, and nothing competing with it.
 //!
-//! The owner's extension of the returns lane's head: *"as an extension we will
-//! want a Now playing page at the top with the Home and Library"*.
-//!
-//! # Why it is not `Place::Album`
-//!
-//! Its subject is **what is sounding**, which is the bottom bar's subject on a
-//! page. `Place::Album`'s subject is *the record you pointed at*. The two are
-//! the same record most of the time and that is exactly why they must be
-//! different surfaces: a page that silently changed which record it was about
-//! when a track ended would be an album page that navigates itself, and a page
-//! that did not follow the music would be a now-playing screen that lies. This
-//! one carries no id, for the same reason the bar carries none — the engine's
-//! answer is the only one it may draw.
-//!
-//! # The queue is not a second place — it is this surface's other half
-//!
-//! The owner, 2026-08-10: *"the queue and the now playing need integrated in
-//! some way so we can remove the queue option from the bottom bar"*. So
-//! `Place::Queue` is deleted and this place absorbs it whole, and the argument
-//! is stronger than adjacency (`docs/design/12-now-playing-and-kiosk.md`
-//! §3.4.1):
-//!
-//! > **A run is a list and a cursor. Now playing is the cursor. The queue is
-//! > the list. They are two readings of one object.**
-//!
-//! What was on screen before the merge read as a defect rather than a layout:
-//! *a surface about what is playing that could not say what it was playing
-//! **in**, beside a surface about the list that did not show what was sounding
-//! **from** it.* Each held the half the other was missing. The list half is
-//! [`crate::views::queue::run_column`], drawn here at [`theme::RUN_MEASURE`],
-//! with every one of the fifteen gestures the queue place had
-//! (`every_queue_affordance_survives_the_merge`).
-//!
-//! # One density, because the list is not a preference
-//!
-//! The owner, 2026-08-10: *"remove the run button from the now playing"*. The
-//! `Run` word that stood in this place's top-right is gone, and so is what it
-//! chose between — the toggle message it sent, the shell's remembered bool, the
-//! config key under it, and the whole idea that this surface has two densities.
-//!
-//! **The run column stands whenever there is a run to show, and nothing else
-//! decides it.** That is a reduction rather than a default: a surface whose own
-//! argument is *a run is a list and a cursor* was offering a control that hid
-//! the list, which is the surface disagreeing with itself. Doc 12 §12's M1 made
-//! the density *"a stated control"*; the owner has reversed that half of M1 and
-//! this file records the reversal rather than arguing with it.
-//!
-//! What the word was defending against needed no word. It was never bound to
-//! full-screen — iced 0.13 publishes no monitor enumeration at all, so baz
-//! cannot tell *full-screen on the second monitor* from *full-screen on the only
-//! monitor*, and a single-display listener pressing `F11` must not lose the run
-//! editor to a window act. `F11` stays a **window** act that works in every
-//! place; what genuinely changes with size is arithmetic — which axis the two
-//! columns sit on ([`theme::SPLIT_FLOOR`]) — and not mode. **That is now true
-//! because there is no mode left to bind.**
-//!
-//! # What the surface shows is what the bar names
-//!
-//! The owner, in the same breath: *"it should probably just show whatever the
-//! now playing is indicating, just not playing"*. The two halves are read from
-//! the two questions the bar under this place already answers, and from nothing
-//! else:
-//!
-//! - the **record column** draws exactly when
-//!   [`PlayerState::now_playing`] answers — which is the bar's own condition
-//!   for naming a track (`bottom_bar::now_playing_line`), so a paused run draws
-//!   here as surely as a sounding one;
-//! - the **run column** draws exactly when [`PlayerState::queue_list`] answers,
-//!   whatever the phase — so a run restored from `session.toml` at launch, or a
-//!   run that has played to its end, is on this screen rather than denied by it.
-//!
-//! The empty state is therefore reachable in **one** case: no record and no
-//! run. Before the density went there was a second, and it was a plain lie —
-//! with the `Run` word off and a stopped run loaded, this place printed
-//! *"Nothing queued"* over a queue it was holding.
-//!
-//! # A first version, and what it is designed to become
-//!
-//! Deliberately simple: the artwork large, the identity under it, the needle
-//! and the position — and the run beside it. No transport — the bar under this
-//! place carries it, and drawing it twice was a defect. No visualizer and no
-//! VU — those are future work and are not allowed to constrain this.
-//!
-//! **The kiosk full-screen mode is this same surface at a larger size**, and
-//! that is a property of the composition rather than a plan: every measure
-//! here is derived from the viewport by [`art_edge`], so the place at 3840 px
-//! is this place with a bigger number in it. `docs/design/12-now-playing-and-kiosk.md`
-//! argues the *reason* — the surface is read at two distances that do not
-//! overlap, the far field wants very few very large statements, and the near
-//! field already has the bar, which is in every place. Nothing here forecloses
-//! it.
-//!
-//! # This surface stays in the sans, and the reason is sharper than it was
-//!
-//! It used to read: *the serif italic is the museum placard's convention and
-//! there is one placard in the product; a second consumer would be a display
-//! face arriving one surface at a time.* **The concern was right and it is
-//! kept. The boundary was wrong.**
-//!
-//! *One placard* is a **quantity**, and a quantity cannot answer whether the
-//! next string may have the face — which is exactly how a display face arrives
-//! one surface at a time. It also could not survive its first real case: doc
-//! 14 found the strongest honest signal baz has for telling a found thing from
-//! a made one is that **a record's title is a work's and a playlist's name is
-//! a label somebody typed**, and that signal is worth nothing until the
-//! record's own page states it. So the record page's hero took the serif
-//! (ADR-0024 §A4.4), and the boundary became a rule instead of a count:
-//!
-//! > **The serif italic sets an album's title, on the surface whose subject
-//! > that album is.**
-//!
-//! Under that rule this place is in the sans **more firmly than before**, and
-//! for a reason about the strings rather than about the tally:
-//!
-//! - the hero here is `NowPlaying::title` — **a track's**
-//!   title, not an album's. baz is album-oriented (`VISION.md`): the album is
-//!   the work, a track is a part of one. The serif has never been offered to
-//!   it and is not now.
-//! - the album line under it (`Ochre`, at body size in `paper_dim`) is
-//!   an album's title standing as **a fact about the track above it** —
-//!   *where this came from* — and the placard convention sets facts in roman.
-//!   Italicising it would leave the smallest line the only italic one on the
-//!   surface, which inverts the convention rather than applying it.
-//!
-//! What that leaves is the original worry, undiluted: nothing may take this
-//! face by accretion. `the_serif_is_the_work_titles_and_nothing_else` is an
-//! **enumeration** of two views and a proof that nothing names the family
-//! directly, so a third consumer fails the build. Whether the rule should
-//! reach the wall's captions and the returns lane's rows is the owner's open
-//! question (`docs/WORK.md`) and is not answered here.
+//! One large source-bounded cover, the track-led placard, needle and figures.
+//! The run is not another version of an album or playlist page and is not
+//! drawn here. A quiet provenance link is the road to the real source page:
+//! the originating playlist when one still exists, otherwise the sounding
+//! track's album. The persistent bottom bar remains the only transport.
 
-use iced::widget::{Space, column, container, image as iced_image, row, stack, text};
+use iced::widget::{Space, button, column, container, image as iced_image, row, stack, text};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
 use crate::field;
 use crate::player::PlayerState;
-use crate::playlists::{Collecting, NameEntry};
 use crate::theme;
-use crate::views::{gradient_block, queue};
+use crate::views::gradient_block;
+
+/// The source page Now playing can quietly lead to.
+#[derive(Debug, Clone)]
+pub(crate) enum Source {
+    /// A run reified from a playlist file that still exists.
+    Playlist { id: u64, name: String },
+    /// The record the sounding track resolves into.
+    Album { id: u64, name: String },
+}
+
+impl Source {
+    /// The shared navigation used by both the footer and the persistent bar.
+    pub(crate) fn open_message(&self) -> Message {
+        match self {
+            Self::Playlist { id, .. } => Message::OpenPlaylist(*id),
+            Self::Album { id, .. } => Message::OpenAlbum(*id),
+        }
+    }
+}
 
 /// **The work size the desktop composition was tuned at** — the old
 /// `NOW_PLAYING_MAX`, kept as the *reference* it always secretly was after step
@@ -272,22 +165,8 @@ const BELOW: f32 = theme::GAP_XL                                  // work → pl
     + theme::NEEDLE_H + theme::GAP_XS + theme::GAP_XS             // the needle, tick included
     + theme::LINE_META; // the two figures
 
-/// What the **head block** needs under the sleeve, below [`theme::SPLIT_FLOOR`]
-/// — **38**.
-///
-/// [`head_block`] is a different column from [`record_column`]: the identity
-/// stands *beside* the cover rather than under it, and the block has no
-/// `.spacing()` of its own. So it is `GAP_LG` of air, the needle with its tick,
-/// and the two figures — and it is **not** [`BELOW`], which is what the code
-/// passed before this step and which over-reserved by 108 px.
-///
-/// The number is the run column's `rows_top` (`views::queue`), which is the
-/// offset [`crate::queue_window`] measures the virtual slice from. An
-/// over-reservation there is not blank space — the block draws at its natural
-/// height either way — it is **the wrong rows**, appearing once the restacked
-/// surface is scrolled. Pre-existing, from M1, and named here because A2 is
-/// the step that had to read this arithmetic closely enough to see it.
-const HEAD_BELOW: f32 = theme::GAP_LG + theme::NEEDLE_H + theme::GAP_XS + theme::LINE_META;
+/// The full-width source footer reserved at the bottom of the place.
+const SOURCE_CARD_H: f32 = 76.0;
 
 /// **The edge the record is actually drawn at**, whichever composition the
 /// body's width has put it in.
@@ -367,13 +246,17 @@ pub(crate) fn record_edge(width: f32, height: f32, run: bool, source: f32) -> f3
 /// the field is what makes that composed rather than broken.
 #[must_use]
 pub(crate) fn art_edge(width: f32, height: f32, run_w: f32, source: f32) -> f32 {
+    art_edge_with_below(width, height, run_w, source, BELOW)
+}
+
+fn art_edge_with_below(width: f32, height: f32, run_w: f32, source: f32, below: f32) -> f32 {
     let beside = if run_w > 0.0 {
         run_w + theme::GAP_XL
     } else {
         0.0
     };
     let by_width = width - 2.0 * theme::HANG - beside;
-    let by_height = height - 2.0 * theme::HANG - BELOW;
+    let by_height = height - 2.0 * theme::HANG - below;
     by_width
         .min(by_height)
         .max(theme::ART_MIN)
@@ -381,72 +264,15 @@ pub(crate) fn art_edge(width: f32, height: f32, run_w: f32, source: f32) -> f32 
         .max(0.0)
 }
 
-/// **The merged Now playing place**: the record, and the run it is a position
-/// in (doc 12 §3.4, `Place::Queue`'s whole inheritance).
-///
-/// **Neither half is a preference.** The record column draws when the engine
-/// has a track to name and the run column draws when there is a run — the two
-/// readings the bar under this place is drawn from, so this surface cannot
-/// contradict the one beneath it. See the module docs for the `Run` word that
-/// used to sit over this and for the one lie its removal took with it.
-///
-/// # The two columns centre as one pair, and used to hang from both edges
-///
-/// The owner, 2026-08-10: *"at full screen the now playing page looks odd
-/// because the playlist hugs right and the art hugs left"*. **Both halves of
-/// that sentence were literally true.** The record's container was
-/// `width(Fill)` with no `align_x`, so the work sat at exactly [`theme::HANG`]
-/// from the body's left edge; the run was pinned to the right by a trailing
-/// `HANG` spacer; and every pixel the two could not use piled up *between*
-/// them — **1171** of them at 2560 × 1440 and 531 at 1920 × 1080, measured in
-/// `docs/design/impl/one-list-drawn-once/`.
-///
-/// The comment that stood in that branch defended the hang: *"centring the work
-/// in what remains would leave the placard's left alignment pointing at
-/// nothing"*. It does not survive reading [`record_column`] — the placard is
-/// `width(Fixed(edge))` and the sleeve is `edge` wide, so the two share a left
-/// edge **with each other** wherever the column is put. What the hang aligned
-/// the placard to was the body's gutter, and nothing else on this surface is on
-/// that lane.
-///
-/// So the pair is `edge + GAP_XL + run_w`, centred — which is
-/// [`crate::views::page::view`]'s own rule (grow with the window until the
-/// measures cap, then centre in what is left) reaching the one surface that did
-/// not have it. The air is *outside* the composition instead of inside it, and
-/// the seam between the work and the list is one [`theme::GAP_XL`] at every
-/// size.
-///
-/// **It cannot overflow**: [`art_edge`]'s own `by_width` term is
-/// `width − 2·HANG − (run_w + GAP_XL)`, so the pair is at most `width − 2·HANG`
-/// and the centring always leaves at least a `HANG` on each side. At 1280 × 860
-/// the pair fills the body exactly and the centring is a no-op, which is why
-/// that window is pixel-identical across the change.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the surface is two halves and each half's readings arrive \
-              whole: the record's from the shelf and the engine, the run's \
-              from the four independent studies `views::queue` already names"
-)]
+/// Draw the current song at the size the viewport and its source permit.
 pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     player: &'a PlayerState,
     width: f32,
     height: f32,
-    hovered: Option<usize>,
-    saving: Option<&'a NameEntry>,
-    collecting: Collecting,
-    scroll: f32,
-    drag: Option<&'a crate::drag::DragState>,
-    can_undo: bool,
+    source: Option<Source>,
 ) -> Element<'a, Message> {
-    let now = player.now_playing();
-    // **There is a run, so the run is on this screen.** The whole of the
-    // condition since the `Run` word went: no listener state, no config, no
-    // phase — a stopped run and a sounding one are the same list.
-    let showing_run = player.queue_list().is_some();
-    let measure =
-        (width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).clamp(0.0, theme::LIST_MEASURE);
-    if now.is_none() && !showing_run {
+    let Some(now) = player.now_playing() else {
         // **A start in flight is not silence.** `Resume` on the Home place
         // navigates here in the same press that asks the engine to begin
         // (`App::resume_the_run`), and the engine's `TrackStarted` is a frame
@@ -462,41 +288,31 @@ pub(crate) fn view<'a>(
         if player.transport_pending() {
             return Space::new(Length::Fill, Length::Fill).into();
         }
-        // **The two empty states became one** (doc 12 §6.4.4). This surface
-        // would otherwise carry both *"Nothing playing."* and *"Nothing
-        // queued"*; the run's wins, because it is strictly more informative —
-        // it names the gestures that fill the list, and it carries the
-        // silence-is-a-feature sentence the product wants said at exactly this
-        // moment.
-        //
-        // **It is drawn in the run column's own frame** — the place's gutter,
-        // and the same `measure` the rows would have taken — rather than
-        // dropped straight into the body. The owner, 2026-08-10: *"the nothing
-        // queued thing is hugging the left with no padding"*. `empty_state` is
-        // `width(Fill)` on purpose, so that inside the column it shares the
-        // rows' left edge; a `Fill` block handed to a centring container is
-        // flush against the window instead, which is exactly what he was
-        // looking at. So the frame is stated here, and the sentence lands where
-        // the list it replaces would have.
-        return container(container(queue::empty_state()).width(Length::Fixed(measure)))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(crate::views::place_pad())
-            .align_x(alignment::Horizontal::Center)
-            .align_y(alignment::Vertical::Center)
-            .into();
-    }
-    let run_w = run_w(width, height, showing_run);
+        let room = theme::active();
+        return container(
+            text("Nothing playing")
+                .size(theme::SIZE_EMPHASIS)
+                .line_height(theme::LEADING_EMPHASIS)
+                .color(room.paper_dim),
+        )
+        .center(Length::Fill)
+        .into();
+    };
     // **The source's own pixels**, which is what bounds the work now that
     // `NOW_PLAYING_MAX` is gone. Resolved once, here, so the number the layout
     // clamps against and the picture the layout draws are the same decode.
-    let work = work(shelf, now);
-    let edge = record_edge(width, height, showing_run, work.source);
+    let work = work(shelf, Some(now));
+    let edge = art_edge_with_below(
+        width,
+        height,
+        0.0,
+        work.source,
+        BELOW + if source.is_some() { SOURCE_CARD_H } else { 0.0 },
+    );
     // **One `t` for the cover and the room**, resolved here and passed to both.
     // See [`field_layer`] for why it is one number rather than two agreeing
     // ones, and [`Work::dissolve_at`] for the one case that refuses it.
-    let t = work.dissolve_at(edge, width, height, showing_run);
-    let stacked = showing_run && run_w <= 0.0;
+    let t = work.dissolve_at(edge, width, height, false);
     let field = field_layer(
         work.from
             .as_ref()
@@ -505,304 +321,16 @@ pub(crate) fn view<'a>(
         work.field,
         t,
     );
-    let record = now.map(|now| {
-        if stacked {
-            head_block(player, &work, t, now, edge, measure)
-        } else {
-            record_column(player, &work, t, now, edge)
-        }
-    });
-    let body: Element<'a, Message> = match record {
-        // **The record alone**, centred in the body: the composition exactly as
-        // it stood before the merge, at the size this window gives it. Reached
-        // only when the engine is naming a track that came from no run of ours.
-        Some(record) if !showing_run => container(record).center(Length::Fill).into(),
-        // **Two columns, and the pair centres** — see [`split`], which owns the
-        // arrangement and the argument for it.
-        record if run_w > 0.0 => split(
-            record,
-            run_scroll(
-                player,
-                queue::Frame {
-                    measure: run_w - theme::SCROLLBAR_LANE,
-                    viewport_h: height,
-                    scroll,
-                    pad: iced::Padding {
-                        top: theme::HANG,
-                        right: theme::SCROLLBAR_LANE,
-                        bottom: theme::HANG,
-                        left: 0.0,
-                    },
-                },
-                None,
-                hovered,
-                saving,
-                collecting,
-                drag,
-                can_undo,
-            ),
-            edge,
-            run_w,
-        ),
-        // **One column, below `SPLIT_FLOOR`**: the run wins and the record
-        // becomes its head. The record cannot be the size it deserves at this
-        // width in any case, and what is left worth doing is the list — so the
-        // same four objects are re-hung rather than a second layout drawn.
-        record => {
-            let head = record.map(|record| (record, edge + HEAD_BELOW));
-            run_scroll(
-                player,
-                queue::Frame {
-                    measure,
-                    viewport_h: height,
-                    scroll,
-                    pad: crate::views::place_pad(),
-                },
-                head,
-                hovered,
-                saving,
-                collecting,
-                drag,
-                can_undo,
-            )
-        }
-    };
-    // **z1 · z2**, in doc 12 §5.4's own order: the field under everything and
-    // the place over it. z3 — the place's own top-right controls — was the
-    // `Run` word and is now empty; `Ambient` (step A6) is the next thing that
-    // may claim it, and it arrives whole or not at all. z1.5, the spectrum in
-    // the field's shader, is step A8's and is not reserved for here.
-    stack![field, body].into()
-}
-
-/// **Where the sounding row should land**: two rows' worth of list above it.
-///
-/// The owner asked for the row to be *visible*, and the convention — every
-/// player that follows a run does this — is that it lands a little way down
-/// rather than flush at the top edge. Flush reads as a jump and hides what came
-/// before it; two rows of history is enough that the surface still shows you
-/// where you have come from.
-///
-/// It is expressed as **two of the run's own rows** rather than as a pixel
-/// count, so it stays two rows if the row pitch ever moves. A one-line row is
-/// used for the reckoning because it is the shorter of the two — the lead is a
-/// floor on how much history stays visible, and a floor should be computed from
-/// the smaller unit.
-const FOLLOW_LEAD: f32 = 2.0 * crate::queue_window::row_pitch(false);
-
-/// **The offset that brings the sounding row into view, or `None` for leave it
-/// alone** (the owner, 2026-08-10: *"ideally the currently playing item in the
-/// playlist is where our scroll goes to i.e. it should be visible when we
-/// change track"*).
-///
-/// # The three rules that make this bearable rather than annoying
-///
-/// 1. **Only when the row is not already visible.** A view that jumps when it
-///    did not need to is worse than one that never moves, so a row wholly
-///    inside the viewport returns `None` and nothing happens. Most track
-///    changes inside one record are exactly this case, which is why the
-///    ordinary experience of a twelve-track album is no movement at all.
-/// 2. **Only on the engine's own confirmation**, which is the caller's half —
-///    `App` spends this on `Event::TrackStarted` and on arriving at the place,
-///    never on a clock and never per frame. This product reports position from
-///    engine events and never extrapolates, and a scroll caused by playback
-///    obeys the same rule.
-/// 3. **A manual scroll is not fought, it is reconciled.** Nothing here
-///    notices that the listener has scrolled away, and that is deliberate: the
-///    *next track change* is the moment the surface is allowed to move, because
-///    it is the only boundary at which a listener is not mid-gesture. Between
-///    two tracks the column is theirs.
-///
-/// # It computes the offset from the same arithmetic the column is built from
-///
-/// [`queue::rows_top`] for where the rows begin inside the scroll and
-/// [`crate::queue_window::row_box`] for where the row sits inside them — the
-/// two functions `queue::run_column` itself builds from. That is what lets a
-/// follow reach a row **outside the built slice** in one step: the window is
-/// recomputed from the new offset on the next view, so the target is never a
-/// spacer.
-#[must_use]
-pub(crate) fn follow(
-    shelf: &Shelf,
-    player: &PlayerState,
-    width: f32,
-    height: f32,
-    scroll: f32,
-) -> Option<f32> {
-    let list = player.queue_list()?;
-    let row = player.playing_queue_row()?;
-    let shapes: Vec<crate::queue_window::RowShape> = list
-        .rows
-        .iter()
-        .map(|row_state| crate::queue_window::RowShape {
-            head: row_state.head.as_ref().map(|head| head.album.is_some()),
-            two_line: row_state.artist.is_some(),
-        })
-        .collect();
-    let (top, row_h) = crate::queue_window::row_box(&shapes, row)?;
-
-    // The composition, read exactly as `view` reads it — the head block only
-    // exists below `SPLIT_FLOOR`, and it is inside the scroll there, so it is
-    // part of the offset the rows begin at.
-    let now = player.now_playing();
-    let run_w = run_w(width, height, true);
-    let head_h = if run_w > 0.0 {
-        0.0
-    } else {
-        now.map_or(0.0, |_| {
-            record_edge(width, height, true, work(shelf, now).source) + HEAD_BELOW + theme::GAP_XL
-        })
-    };
-    let pad_top = theme::HANG;
-    let rows_top = queue::rows_top(pad_top, head_h, list.album.is_some());
-    let top = rows_top + top;
-
-    // Already on screen, whole: do nothing. The bottom edge is the viewport's
-    // own, and the scrollable's viewport is the body's height — the same
-    // number `Frame::viewport_h` hands the virtual window, so "visible" here
-    // and "built" there cannot disagree.
-    if top >= scroll && top + row_h <= scroll + height {
-        return None;
-    }
-    Some((top - FOLLOW_LEAD).max(0.0))
-}
-
-/// **The two columns, centred as one pair** — the composition above
-/// [`theme::SPLIT_FLOOR`].
-///
-/// `edge + GAP_XL + run_w`, centred in the body, which is
-/// [`crate::views::page::view`]'s own rule (grow with the window until the
-/// measures cap, then centre in what is left) reaching the one surface that did
-/// not have it. See [`view`]'s docs for the two edges the owner named and for
-/// the comment that used to defend hanging from both of them.
-///
-/// **It cannot overflow**: [`art_edge`]'s `by_width` term is
-/// `width − 2·HANG − (run_w + GAP_XL)`, so the pair is at most `width − 2·HANG`
-/// and the centring always leaves at least a [`theme::HANG`] on each side. At
-/// 1280 × 860 it fills the body exactly and the centring is a no-op, which is
-/// why that window is pixel-identical across the change.
-///
-/// **The record's column is drawn even when there is no record**, which is the
-/// composition holding rather than an empty box: a run loaded and stopped
-/// becomes a run sounding without one pixel of the list moving. It holds `edge`
-/// rather than filling, so the run does not slide sideways when the engine
-/// finally names a track.
-fn split<'a>(
-    record: Option<Element<'a, Message>>,
-    run: Element<'a, Message>,
-    edge: f32,
-    run_w: f32,
-) -> Element<'a, Message> {
-    container(
-        row![
-            container(
-                record.unwrap_or_else(|| Space::new(Length::Fixed(edge), Length::Fill).into())
-            )
-            .width(Length::Fixed(edge))
+    let song = container(record_column(player, &work, t, now, edge)).center(Length::Fill);
+    let body: Element<'a, Message> = match source {
+        Some(source) => column![song, source_link(source)]
             .height(Length::Fill)
-            .padding(theme::pad(theme::HANG, 0.0))
-            .align_y(alignment::Vertical::Center),
-            Space::with_width(Length::Fixed(theme::GAP_XL)),
-            container(run)
-                .width(Length::Fixed(run_w))
-                .height(Length::Fill),
-        ]
-        .align_y(alignment::Vertical::Center),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(alignment::Horizontal::Center)
-    .into()
-}
-
-/// [`queue::run_column`], named here so the two call sites above read as one
-/// thing rather than as eight arguments twice.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a pass-through: every argument is `queue::run_column`'s own, and \
-              naming them again in a struct would name this call site and \
-              nothing else"
-)]
-fn run_scroll<'a>(
-    player: &'a PlayerState,
-    frame: queue::Frame,
-    head: Option<(Element<'a, Message>, f32)>,
-    hovered: Option<usize>,
-    saving: Option<&'a NameEntry>,
-    collecting: Collecting,
-    drag: Option<&'a crate::drag::DragState>,
-    can_undo: bool,
-) -> Element<'a, Message> {
-    queue::run_column(
-        player, frame, head, hovered, saving, collecting, drag, can_undo,
-    )
-}
-
-/// **The record as the run's head block** — the composition below
-/// [`theme::SPLIT_FLOOR`], where the two columns have re-stacked into one.
-///
-/// The cover at [`theme::ART_MIN`] on the left with the artist, the title and
-/// the record beside it, and the needle under the pair at the head's own width.
-/// **It scrolls away with the list**, which would be wrong above the floor and
-/// is right here: at this width the surface has become the editor, and an
-/// editor whose first 300 px are a fixed hero is an editor you scroll past to
-/// use.
-fn head_block<'a>(
-    player: &'a PlayerState,
-    work: &Work,
-    t: f32,
-    now: &'a crate::player::NowPlaying,
-    edge: f32,
-    measure: f32,
-) -> Element<'a, Message> {
-    let room = theme::active();
-    let stamps = player.stamps();
-    let elapsed = player.elapsed_ms();
-    let total = player.track_ms().unwrap_or(0);
-    let mut identity = column![
-        text(theme::tracked(
-            &now.artist
-                .clone()
-                .or_else(|| now.track_artist.clone())
-                .unwrap_or_default()
-                .to_uppercase()
-        ))
-        .size(theme::SIZE_HEADING)
-        .line_height(theme::LEADING_HEADING)
-        .font(theme::MEDIUM)
-        .color(room.paper_faint),
-        text(now.title.clone())
-            .size(theme::SIZE_TITLE)
-            .line_height(theme::LEADING_TITLE)
-            .font(theme::SEMIBOLD)
-            .color(room.paper)
-            .wrapping(text::Wrapping::None),
-    ]
-    .spacing(theme::GAP_XS)
-    .width(Length::Fill);
-    if let Some(album) = &now.album {
-        identity = identity.push(
-            text(album.clone())
-                .size(theme::SIZE_BODY)
-                .line_height(theme::LEADING_BODY)
-                .color(room.paper_dim)
-                .wrapping(text::Wrapping::None),
-        );
-    }
-    column![
-        row![
-            sleeve(work, t, now, edge),
-            container(identity)
-                .width(Length::Fill)
-                .height(Length::Fixed(edge))
-                .align_y(alignment::Vertical::Bottom),
-        ]
-        .spacing(theme::GAP_LG),
-        Space::with_height(Length::Fixed(theme::GAP_LG)),
-        crate::views::home::needle(elapsed, total, measure),
-        figures(stamps, room),
-    ]
-    .into()
+            .into(),
+        None => song.into(),
+    };
+    // The artwork-derived field sits under the one centred current-song
+    // composition. Nothing else competes for this place's body.
+    stack![field, body].into()
 }
 
 /// **What this surface has to draw of a record, and the number that bounds
@@ -1114,6 +642,69 @@ fn record_column<'a>(
         .into()
 }
 
+/// A quiet full-width footer at the bottom of Now playing, leading to the
+/// source's real page. It is a provenance statement first and a control
+/// second: one faint plane, no border, and no navigation chrome beyond the
+/// arrow.
+fn source_link(source: Source) -> Element<'static, Message> {
+    let room = theme::active();
+    let message = source.open_message();
+    let (kind, name) = match source {
+        Source::Playlist { name, .. } => ("Playlist", name),
+        Source::Album { name, .. } => ("Album", name),
+    };
+    button(
+        row![
+            column![
+                text("Source")
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper_faint),
+                container(
+                    text(name)
+                        .size(theme::SIZE_EMPHASIS)
+                        .line_height(theme::LEADING_EMPHASIS)
+                        .font(theme::MEDIUM)
+                        .color(room.paper)
+                        .wrapping(text::Wrapping::None),
+                )
+                .height(Length::Fixed(theme::LINE_EMPHASIS)),
+                text(kind)
+                    .size(theme::SIZE_META)
+                    .line_height(theme::LEADING_META)
+                    .color(room.paper_muted),
+            ]
+            .spacing(0)
+            .width(Length::Fill),
+            text("→")
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .color(room.paper_dim),
+        ]
+        .align_y(alignment::Vertical::Center),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(SOURCE_CARD_H))
+    .padding([theme::GAP_SM, theme::HANG])
+    .style(move |_theme, status| {
+        let ground = room.step_up(room.wall);
+        let background = match status {
+            button::Status::Hovered => room.step_up(ground),
+            button::Status::Pressed => room.ink_wash(ground),
+            button::Status::Active | button::Status::Disabled => ground,
+        };
+        button::Style {
+            background: Some(iced::Background::Color(background)),
+            text_color: room.paper,
+            border: iced::Border::default(),
+            ..button::Style::default()
+        }
+    })
+    .on_press(message)
+    .into()
+}
+
 /// `3:12` and `6:27`, at the two ends of the needle's own width.
 ///
 /// The bar's own two timestamps, in the bar's own vocabulary: the position
@@ -1298,11 +889,6 @@ mod tests {
         const { assert!(BELOW == 146.0) }
         const { assert!(BELOW + theme::TRANSPORT_HIT == 178.0) }
         const { assert!(BELOW == theme::GAP_XL + CHILDREN + 5.0 * theme::GAP_XS) }
-        // The head block below `SPLIT_FLOOR` is a *different* column — the
-        // identity beside the cover, no spacing of its own — and reserves its
-        // own height rather than borrowing this one.
-        const { assert!(HEAD_BELOW == 38.0) }
-        const { assert!(HEAD_BELOW < BELOW) }
         // 1280 × 860 with the returns lane collapsed: 1184 × 779 of body,
         // height-bound, and the sleeve is the height less the gutter and the
         // placard.
@@ -1617,210 +1203,44 @@ mod tests {
         }
     }
 
-    /// **Every queue affordance survives the merge** — doc 12 §6.4.4's table
-    /// of fifteen, as a source assertion over the two modules that now hold
-    /// them between them.
-    ///
-    /// Pinned over the source the way `views/queue.rs` and `views/shelf.rs`
-    /// pin their own rulers: the property is about which widgets and which
-    /// messages these files build, there is no `PlayerState` to construct
-    /// without an engine, and the literals below are exactly what a reviewer
-    /// would have to delete to break them. **A merge that quietly dropped a
-    /// gesture is the failure this exists to catch**, and it is the one
-    /// failure a screenshot cannot show.
+    /// Now playing is one current-song surface, with provenance as its only
+    /// road onward. The queue renderer must not creep back into its body.
     #[test]
-    fn every_queue_affordance_survives_the_merge() {
-        let read = |name: &str| {
-            std::fs::read_to_string(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("src/views")
-                    .join(name),
-            )
-            .expect("a view module's own source")
-            .replace("\r\n", "\n")
-        };
-        let run = read("queue.rs");
-        let place = read("now_playing.rs");
-
-        // 1 · row click → jump. 2 · the per-row ✕. 3 · the ▲▼ steppers.
-        // 4 · the transfer `+`. 5 · drag-to-reorder, and its observation wire.
-        // 6 · `Save as playlist` and its field. 7 · `Undo`. 12 · the column's
-        // own scroll.
-        for spent in [
-            "Message::JumpToQueued(index)",
-            "Message::RemoveQueued(index)",
-            "Message::ShiftQueued(index, -1)",
-            "Message::ShiftQueued(index, 1)",
-            "Message::AddQueuedToPlaylist(index)",
-            "Message::DragLift(crate::drag::List::Queue, index, at)",
-            "Message::DragOverRow(crate::drag::List::Queue, index, before)",
-            "Message::SaveQueueStart",
-            "Message::SaveQueueInput",
-            "Message::SaveQueueSubmit",
-            "Message::Undo",
-            "Message::QueueScrolled",
-        ] {
-            assert!(
-                run.contains(spent),
-                "the run column no longer spends `{spent}`"
-            );
-        }
-        // 9 · the right-press mirror menu. 10 · row hover tracking.
-        for wired in [
-            "crate::menu::Target::QueueRow { row: index }",
-            "Message::QueueRowEntered(index)",
-            "Message::QueueRowLeft(index)",
-        ] {
-            assert!(
-                run.contains(wired),
-                "the run column no longer wires `{wired}`"
-            );
-        }
-        // 11 · the virtual window, with both spacers — the load-bearing one,
-        // because `Play all` can reify a whole library into this run.
-        assert!(
-            run.contains("queue_window::window(&shapes, scroll - rows_top, viewport_h)")
-                && run.contains("for index in win.first..win.end")
-                && run.contains("Space::with_height(Length::Fixed(win.top))")
-                && run.contains("Space::with_height(Length::Fixed(win.bottom))"),
-            "the run is no longer virtual"
-        );
-        // 13 · album group headers — albums are listed as albums, never
-        // flattened (ADR-0014).
-        //
-        // **It is `page::list_head` now**, the block a playlist page draws over
-        // each of its records, which this file used to have a private copy of
-        // under the name `album_group`. The affordance is what survives; which
-        // module draws it is what the 2026-08-10 merge changed, so the needle
-        // moved with it rather than being deleted.
-        assert!(
-            run.matches("page::list_head(").count() == 2
-                && run.contains("head.album.as_deref()")
-                && run.contains("list.album.as_deref()"),
-            "the record headers went"
-        );
-        assert!(
-            read("page.rs").contains("pub(crate) fn list_head("),
-            "the shared record head went"
-        );
-        // 8 · the provenance-led summary, promoted to the surface's head.
-        assert!(run.contains("text(list.summary)"), "the run's head went");
-        // 15 · the empty state — and it is **the one this surface now uses**,
-        // which is the merge decision §6.4.4 records: the queue's wins,
-        // because it names the gestures that fill the list.
-        assert!(
-            place.contains("queue::empty_state()"),
-            "the merged surface draws its own empty state again"
-        );
-        // 14 · the header strip and the second empty state are the two that
-        // **go**: the merged place wears no header (the lane is the route, and
-        // the head states the list), and it says nothing about silence that
-        // the run's own empty state does not say better.
-        //
-        // Both needles are spelled in halves so that this assertion is not its
-        // own counter-example — `implicit.rs`'s rule for a test that searches
-        // the file it lives in.
-        for (head, tail) in [("text", "(\"Nothing"), ("place", "_header")] {
-            let gone = format!("{head}{tail}");
-            assert!(
-                !place.contains(&gone),
-                "`{gone}` came back to the merged place"
-            );
-        }
-        // …and the branch above the empty state stays: a start in flight is
-        // not silence.
-        assert!(place.contains("player.transport_pending()"));
-
-        // And the surface reaches all of it through the one column, rather
-        // than by copying a row anatomy that would then drift.
-        assert!(
-            place.contains("queue::run_column("),
-            "the merged place stopped drawing the run column"
-        );
-    }
-
-    /// **The word that chose a density is gone, and the run is a fact.**
-    ///
-    /// The owner, 2026-08-10: *"remove the run button from the now playing"*,
-    /// clarified in the same conversation as *"run button is what I'm referring
-    /// to; just to be clear"*. Three claims, and they are pinned over the
-    /// source for `every_queue_affordance_survives_the_merge`'s reason — this
-    /// is about which widgets and which readings the file builds, and a
-    /// screenshot cannot show a message that came back.
-    ///
-    /// **The distinction this test exists to hold is between the word and the
-    /// column.** The word is deleted; the column is *more* present than it was,
-    /// because nothing may now stand it down. The affordance test above is the
-    /// other half of that sentence and the two must be read together: if this
-    /// one ever passes while that one fails, the wrong thing was removed.
-    #[test]
-    fn the_density_is_gone_and_the_run_stands_on_the_run() {
+    fn the_current_song_links_to_its_source_and_draws_no_queue() {
         let place = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/now_playing.rs"),
         )
         .expect("this module's own source")
         .replace("\r\n", "\n");
-
-        // 1 · The control, and everything that existed to remember its state.
-        // Spelled in halves so this assertion is not its own counter-example —
-        // `implicit.rs`'s rule for a test that searches the file it lives in.
-        //
-        // **`queue::run_column` is deliberately not among these needles**, and
-        // that is the distinction rather than an oversight: the function that
-        // draws the list keeps its name and its fifteen affordances. What may
-        // not come back is the word, its message, and the remembered bool.
-        for (head, tail) in [
-            ("Message::Toggle", "Run"),
-            ("Config::", "run_column"),
-            ("text(\"", "Run\")"),
+        // Inspect production code only: the guard's own needles necessarily
+        // contain the words it checks have not returned.
+        let place = place.split_once("#[cfg(test)]").expect("test boundary").0;
+        let app = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
+        )
+        .expect("the shell source");
+        let bar = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/bottom_bar.rs"),
+        )
+        .expect("the persistent bar source");
+        for token in [
+            "Source::Playlist",
+            "Source::Album",
+            "Message::OpenPlaylist(*id)",
+            "Message::OpenAlbum(*id)",
         ] {
-            let gone = format!("{head}{tail}");
-            assert!(
-                !place.contains(&gone),
-                "`{gone}` came back to the place the `Run` word left"
-            );
+            assert!(place.contains(token), "the source road lost `{token}`");
         }
-        // …and the density is not handed in from the shell either: `view` took
-        // a `run: bool` and does not any more.
-        let signature = place
-            .split_once("pub(crate) fn view<'a>(")
-            .expect("the place's own entry point")
-            .1;
-        let signature = &signature[..signature.find(") -> Element").expect("a signature ends")];
+        assert!(app.contains("fn now_playing_source(&self)"));
         assert!(
-            !signature.contains("run: bool"),
-            "the shell is still telling the place which density to draw"
-        );
-
-        // 2 · What decides the run column now: the run itself, and nothing
-        // else. Not a config, not a phase, not a press.
-        assert!(
-            place.contains("let showing_run = player.queue_list().is_some();"),
-            "the run column is conditioned on something other than the run"
-        );
-        // …and the record column on the reading the bar names a track from,
-        // so a paused run and a sounding one draw the same surface.
-        assert!(
-            place.contains("let now = player.now_playing();"),
-            "the record column stopped reading what the bar reads"
-        );
-
-        // 3 · The empty state is drawn in the run column's own frame — the
-        // place's gutter and the rows' own measure — rather than flush against
-        // the body's edge (*"the nothing queued thing is hugging the left with
-        // no padding"*).
-        let empty = place
-            .split_once("return container(container(queue::empty_state())")
-            .expect("the empty state is built in a frame of its own")
-            .1;
-        let empty = &empty[..empty.find(".into();").expect("a return ends")];
-        assert!(
-            empty.contains("width(Length::Fixed(measure))"),
-            "the empty state left the measure its rows are set at"
+            bar.contains("source: Option<Message>") && bar.contains(".on_press(source)"),
+            "the persistent track block stopped sharing the source road"
         );
         assert!(
-            empty.contains("padding(crate::views::place_pad())"),
-            "the empty state lost the place's own gutter and is flush again"
+            !place.contains("queue::run_column(")
+                && !place.contains("\"Show queue\"")
+                && !place.contains("ToggleNowPlayingMode"),
+            "the queue or its old mode switch came back"
         );
     }
 

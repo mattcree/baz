@@ -106,6 +106,7 @@ pub(crate) fn view(
     player: &PlayerState,
     ink: Ink,
     cover: Option<iced_image::Handle>,
+    source: Option<Message>,
 ) -> Element<'_, Message> {
     let room = theme::active();
     let mut status = row![]
@@ -121,7 +122,7 @@ pub(crate) fn view(
     }
     status = status.push(signal_path(player)).push(volume(player, ink));
     let bar = row![
-        container(now_playing_block(player, cover))
+        container(now_playing_block(player, cover, source))
             .width(Length::Fill)
             .clip(true),
         transport_row(player, ink),
@@ -241,7 +242,7 @@ fn tip_layer(preview: Option<player::Preview>) -> Element<'static, Message> {
 
 /// The bar's left zone: the now-playing lines, and the two timestamps.
 ///
-/// **The now-playing text is the control that takes you to the record**, and
+/// **The now-playing text is the control that takes you to its source**, and
 /// that is the reservation ADR-0016 made being spent.
 ///
 /// The prior-art study's R3 is the most-supported affordance in the field —
@@ -249,8 +250,9 @@ fn tip_layer(preview: Option<player::Preview>) -> Element<'static, Message> {
 /// now-playing block's press on it. baz had none. ADR-0016 left the text
 /// deliberately free for it and gave the queue the labelled control beside it;
 /// ADR-0022 removed the last persistent surface that knew which record was
-/// under the lamp, which turned R3 from missing into acute, so the text is now
-/// the door to the sounding record's page.
+/// under the lamp, which turned R3 from missing into acute. The Now playing
+/// footer later made the source explicit, so the bar now follows that same
+/// road: originating playlist when one exists, album otherwise.
 ///
 /// **It is the only door in this zone now**, and the block is 160 px wider for
 /// it: the queue's own control came off when its place was absorbed into
@@ -259,6 +261,7 @@ fn tip_layer(preview: Option<player::Preview>) -> Element<'static, Message> {
 fn now_playing_block(
     player: &PlayerState,
     cover: Option<iced_image::Handle>,
+    source: Option<Message>,
 ) -> Element<'_, Message> {
     let stamps = player.stamps();
     // **The two timestamps moved here** (ADR-0017 §1.1), into the same
@@ -275,7 +278,7 @@ fn now_playing_block(
         theme::active().paper_faint
     };
     row![
-        container(back_to_playing(player, cover))
+        container(back_to_source(player, cover, source))
             .width(Length::Fill)
             .clip(true),
         stamp(
@@ -329,8 +332,8 @@ fn stamp(
         .into()
 }
 
-/// **The route back to what is playing**: the now-playing lines, wrapped in the
-/// press that opens the sounding record's page.
+/// **The route to where this is playing from**: the now-playing lines, wrapped
+/// in the same source navigation as the Now playing footer.
 ///
 /// `docs/design/03-interface-prior-art.md` R3 — *get back to what is playing* —
 /// is band A in the study, every product surveyed spends an affordance on it,
@@ -354,15 +357,16 @@ fn stamp(
 ///   height for a control that is a *box*, and a control that is a block of
 ///   type is bounded below by the same number rather than exempt from it. The
 ///   assertion is in this module's tests.
-fn back_to_playing(
+fn back_to_source(
     player: &PlayerState,
     cover: Option<iced_image::Handle>,
+    source: Option<Message>,
 ) -> Element<'_, Message> {
     let room = theme::active();
     let lines = now_playing_line(player);
-    if player.playing_album().is_none() {
+    let Some(source) = source else {
         return lines;
-    }
+    };
     // **The sounding record's sleeve, inside the block's own hit box.** One
     // object: the cover and the type are the same control and go to the same
     // place, which is why the image is a child of the button rather than a
@@ -386,11 +390,10 @@ fn back_to_playing(
         .align_y(iced::Alignment::Center)
         .into(),
     };
-    // There is no lit state, where the `Queue` door beside it has one: pressing
-    // this while already on that record's page is `Place::album`'s toggle
-    // taking you back to the wall, and a now-playing block that lit up would be
-    // the bar claiming a state about the *record* rather than about the door.
-    // The page's own `‹ Library` is the labelled way out.
+    // There is no lit state: this block names the playing track, while its
+    // destination may be either a playlist or an album. Lighting it for either
+    // page would make the bar claim a selection state that is not playback
+    // truth.
     //
     // The block's right press opens its mirror menu (doc 09 §5.2) — what
     // makes S4 two gestures *from anywhere*: the sounding track is always
@@ -403,8 +406,8 @@ fn back_to_playing(
                 .width(Length::Fill)
                 .padding(0)
                 .style(move |_theme, status| theme::now_playing_text(room, status))
-                .on_press(Message::ShowNowPlaying),
-            text("Go to the record that is playing")
+                .on_press(source),
+            text("Go to where this is playing from")
                 .size(theme::SIZE_CAPTION)
                 .line_height(theme::LEADING_CAPTION),
             tooltip::Position::Top,
@@ -1147,7 +1150,7 @@ mod tests {
     /// Two claims, both about where the widget sits rather than about what it
     /// says, so both are pinned to the source:
     ///
-    /// 1. The image is built **inside** `back_to_playing`, before the
+    /// 1. The image is built **inside** `back_to_source`, before the
     ///    `button` — so the cover and the type are one hit target that goes
     ///    one place, not a picture beside a link.
     /// 2. The `None` arm returns the lines untouched. No reserved lane, no
@@ -1161,7 +1164,7 @@ mod tests {
         .expect("this module's own source")
         .replace("\r\n", "\n");
         let rest = source
-            .split_once("fn back_to_playing")
+            .split_once("fn back_to_source")
             .expect("the now-playing block exists")
             .1;
         let block = &rest[..rest.find("\n}\n").expect("a function ends")];
@@ -1313,7 +1316,7 @@ mod tests {
         // hanging below it the way it did beside the groove.
         const { assert!(theme::STAMP_W > 0.0 && theme::LINE_META <= theme::BAR_CONTENT_H) }
         // **The now-playing block is a pointer target now** — the route back to
-        // the record that is sounding (R3) — and law L7's floor holds for it:
+        // the source of what is sounding (R3) — and law L7's floor holds for it:
         // the law sets one height for a control that is a *box*, and a control
         // that is a block of type is bounded below by the same number rather
         // than exempt from it. 56 against 32, with no padding and no border, so

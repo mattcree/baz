@@ -26,6 +26,19 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Fixed
 
+- **Now playing is simply the song that is playing.** It keeps the large
+  centred artwork, current-track placard, needle and figures, with no queue or
+  second layout competing for the page. A restrained full-width source footer
+  at the bottom leads to the originating playlist when it still exists, or
+  otherwise to the track's album; those source pages remain the places for
+  browsing the list. The track-information block in the persistent bottom bar
+  follows the same source route; the lane's dedicated `Now playing` row remains
+  the route to the artwork view.
+- **A release dry run can now reach the artifact builds it exists to test.**
+  The reusable CI gate no longer mistakes the release workflow's manual
+  dispatch for a request to run discovery fuzzing. Scheduled and directly
+  dispatched CI still fuzz; release rehearsals and tags use the same gate,
+  including permanent hostile-media regression tests, before building.
 - **Removing a music folder no longer throws away when your records arrived.**
   Removing a folder and adding it back used to file every album under
   ADDED = *today* — a real loss of the one fact in the library that nothing on
@@ -42,20 +55,19 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Added
 
-- **baz can be told that music is gone, and being wrong about it costs
-  nothing** (ADR-0042). `Library::forget_paths` deletes exactly the rows a
-  listener names — the record-scale twin of removing a folder — and keeps their
-  arrival dates the same way, so asserting that an album is gone when its share
-  was merely unmounted costs a rescan and no facts. That reversibility is what
-  makes the assertion safe to offer at all.
+- **Library removal no longer loses arrival history** (ADR-0042).
+  `Library::forget_paths` deletes exactly the rows a caller names and keeps
+  their arrival dates, the same mechanism folder removal uses. It remains
+  library machinery rather than an individual-record feature in the interface.
   - **The scan's own removal is deliberately unchanged.** A row is still deleted
     automatically only under ADR-0010's four gates, which require the file's
     parent directory to be present — so an unmounted NAS still prunes nothing,
     and baz still never guesses that an unreachable folder is a deleted one.
-    What it now has is a door a *person* can open.
-  - **The control for it is not in this release.** A `Forget this record` item
-    on the tile menu is specified in ADR-0042 §8 and is one message away;
-    until it lands, the record-scale forget is library API.
+    Explicit library removal uses the same preservation mechanism.
+  - **There is deliberately no `Forget this record` control.** The owner did
+    not request it and rejected it when shown: records leave baz by deleting or
+    moving their files out of a held library, and scanning owns pruning the
+    index. Do not turn this internal API into a second removal workflow.
 - **Schema v9**: a `forgotten` table holding a path and one timestamp per row a
   listener told baz to stop holding. One row per path however many times it is
   forgotten, spent the moment the path comes back, and swept at every open, so
@@ -219,8 +231,9 @@ Every release is built from a tag by CI, gated on the full test suite — see
   target and fails at the end with the list — a `run:` block is `bash -e`, so
   the first failure used to abort the step, which matters because
   `playback_decode` stays red on a Symphonia panic that no fix inside baz can
-  hide from libFuzzer (§4). Its **triggers are unchanged**: fuzzing is still
-  `schedule` and `workflow_dispatch` only.
+  hide from libFuzzer (§4). It still runs weekly and on a direct manual CI
+  dispatch, but a release rehearsal no longer inherits it merely because the
+  calling release workflow was manually dispatched.
 - **`symphonia-metadata` is now a direct dependency** — **zero net-new
   crates**, since it was already in the graph as Symphonia's own. baz needs to
   name it to register the ID3v2 reader on the probe it now builds itself.

@@ -56,6 +56,9 @@ mod player;
 mod playlists;
 mod pointer;
 mod queue_edit;
+// Virtual queue geometry remains with the dormant queue renderer; Now playing
+// is intentionally a current-song surface again.
+#[allow(dead_code)]
 mod queue_window;
 mod rail;
 mod replaygain;

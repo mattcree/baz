@@ -1,6 +1,6 @@
 //! **The run column**: what the engine is holding, and where it is in it.
 //!
-//! # It was a popover, then a rail panel, then a place — and now it is a half
+//! # It was a popover, then a rail panel, then a place — and is now dormant
 //!
 //! ADR-0016 moved the queue out of the right-hand rail and into a 360 px card
 //! floating over the wall, anchored to the bar it describes. ADR-0022 removed
@@ -8,22 +8,19 @@
 //! hate the way queue and selected albums appear"* — so the queue became a
 //! **place**, at the width of the window.
 //!
-//! And then it stopped being one. The owner, 2026-08-10: *"the queue and the
-//! now playing need integrated in some way so we can remove the queue option
-//! from the bottom bar"*. **A run is a list and a cursor**; `Place::NowPlaying`
-//! was drawing the cursor and this was drawing the list, and each was missing
-//! the half the other was holding
-//! (`docs/design/12-now-playing-and-kiosk.md` §3.4). So `Place::Queue` is gone
-//! and this module is the *run column* of the place that absorbed it, drawn
-//! beside the record at [`theme::RUN_MEASURE`] or, below
-//! [`theme::SPLIT_FLOOR`], at the whole measure with the record as its head.
+//! The queue was then folded into Now playing while the two surfaces were being
+//! reconciled. That made Now playing a second album/playlist page, which was
+//! the wrong destination: it is now deliberately only the current song and a
+//! quiet link to the real source page. `Place::Queue` remains gone and this
+//! renderer is retained, unmounted, while any future dedicated queue surface
+//! is decided. Keeping the tested list/editor machinery here does not reserve
+//! space for it in Now playing.
 //!
-//! **Every fact and every gesture survived that move** — the rows, one list
-//! with a cursor, the summary that reads *what is left*, click-to-jump, the
-//! per-row ✕, the steppers, the transfer `+`, the drag, `Save as playlist`,
-//! `Undo`, the album headers and the virtual window. What did not is the
-//! header strip: the merged place wears none, because the lane is the route and
-//! the head states the list.
+//! **Every fact and gesture survives in this dormant renderer** — the rows,
+//! one list with a cursor, the summary that reads *what is left*, click-to-jump,
+//! the per-row ✕, the steppers, the transfer `+`, the drag, `Save as playlist`,
+//! `Undo`, the album headers and the virtual window. What did not is the header
+//! strip from its former place integration.
 //!
 //! The bar's own third line still states the continuation ambiently
 //! ([`crate::views::bottom_bar`]) — and earns its place harder than before,

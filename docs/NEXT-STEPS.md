@@ -54,12 +54,12 @@ tag exists.)
    what the mark is and why. The binary still sets no window icon: winit 0.30
    supports that on Windows and X11 only, and the reasoning and the patch are
    in that README.
-2. ~~**Dry-run the release**~~ **Done locally, not in CI.** `RELEASING.md` now
-   carries the rehearsal it never had — every gate, the release build, the
-   staging and the checksum step, all run on the maintainer's machine, with
-   the corrections that turned up. What is still unrehearsed is the part only
-   GitHub can run: `workflow_dispatch` on the release workflow, which nobody
-   has fired.
+2. ~~**Dry-run the release**~~ **The first CI run found and exposed the gate
+   defect.** It inherited manual discovery fuzzing, hit a known upstream panic,
+   and never reached the builds. The release now opts out of discovery fuzzing
+   just like a tag while keeping all hostile-input regression tests. Re-run
+   `workflow_dispatch` after pushing the release commit to exercise the three
+   artifact builds and checksums without publishing.
 3. ~~**Verify the Flatpak actually builds**~~ **Done.** It does now. It did
    not before: `cargo-sources.json` had seven crates unpacked without their
    `.cargo-checksum.json` and cargo refused the whole build. Regenerated,

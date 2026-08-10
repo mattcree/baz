@@ -7,8 +7,19 @@ word of it; **completes the first item of [ADR-0010](0010-incremental-scanning-a
 §3's deferred list** (a user-initiated removal for the cases automation declines)
 · `SCHEMA_VERSION` 8 → 9, one table, no backfill · **overturns nothing in
 ADR-0010's four gates** — the refusal to guess about mounts stands exactly as
-written · closes `docs/WORK.md` beta blocker 3 and builds the mechanism for
-blocker 2 · zero new dependencies
+written · closes `docs/WORK.md` beta blocker 3 and builds the mechanism once
+proposed for blocker 2 · zero new dependencies
+
+> ## Amendment (2026-08-10) — the record-scale control is rejected
+>
+> The owner did not ask for `Forget this record` and rejected it when the
+> proposed control was shown: if someone wants a record removed, they delete or
+> move its files out of the held library, and baz prunes the index. The control
+> was removed. `Library::forget_paths` remains library machinery and test
+> coverage for the tombstone invariant; it is not a product workflow. Section
+> 8 remains below as the proposal's history, not an implementation instruction.
+> `docs/BACKLOG.md` retains the actual gap: safe automatic pruning beneath a
+> reachable root without weakening ADR-0010's unavailable-root guarantee.
 
 ## Context
 
@@ -296,8 +307,9 @@ re-deciding it:
   and an in-RAM mirror of the new table alongside its `roots` mirror. Additive.
 - `Library::remove_tracks`'s contract is now written down as *the scan's door*
   rather than *the only door*, and says why it leaves nothing behind.
-- The Settings place's confirming sentence grew one clause. No new control, no
-  new message, no new state.
+- The Settings place's confirming sentence grew one clause. No record page or
+  tile-menu control is added; the amendment above rejects that proposed
+  workflow.
 - Zero new dependencies; `cargo deny` unchanged; no Flatpak permission moves.
 
 ### The one thing that needs the owner's eye
@@ -313,8 +325,9 @@ a second control and a different ADR; it is not smuggled in here.
 
 ### Deliberately deferred
 
-- **A control for the record-scale forget.** §8. One `Message` and one arm in
-  `app.rs`, blocked only by file coordination.
+- **A control for the record-scale forget is rejected, not deferred.** The
+  owner chose filesystem removal plus automatic pruning; do not rebuild §8's
+  proposal from the existence of `forget_paths`.
 - **A user-initiated prune** — *"these 412 rows point at files I cannot find;
   remove them?"* — the second item of ADR-0010 §3's list, and the surface that
   answers the whole stale-row family at once rather than a record at a time. It
