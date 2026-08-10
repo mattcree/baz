@@ -6680,15 +6680,17 @@ mod tests {
         // reinventing a strip of their own — Settings included, since doc 10
         // §7 step 8 folded its private copy into the one function.
         //
-        // Two of them lead with something other than a bare place name and so
-        // spend the `_led` door: the Album place's `Artist › Album` breadcrumb
-        // and the Artist place's own name, which is a runtime string. They are
-        // still the *same strip* — that is what the shared function is for, and
-        // it is why the breadcrumb did not get a header of its own.
+        // Three of them lead with something other than a bare place name and so
+        // spend the `_led` door: the Artist place's own name, which is a
+        // runtime string, and the two subject pages — a record's `Artist ›
+        // Album` breadcrumb and a playlist's own name — which since
+        // *one page, two subjects* (ADR-0024 §A2's arrangement made literal)
+        // draw one strip in `page.rs` and hand it a lead each. They are still
+        // the *same strip* — that is what the shared function is for, and it is
+        // why the breadcrumb did not get a header of its own.
         for (name, strip) in [
-            ("album.rs", "place_header_led("),
+            ("page.rs", "place_header_led("),
             ("artist.rs", "place_header_led("),
-            ("playlist.rs", "place_header("),
             // Settings is the one place with a *note* — a statement about
             // itself, not a keyboard hint — so it spends the `_with` form.
             ("settings.rs", "place_header_with("),
@@ -6696,6 +6698,15 @@ mod tests {
             assert!(
                 read(name).contains(strip),
                 "{name} draws a header of its own instead of the frame's"
+            );
+        }
+        // …and the two pages hand that one strip their subject rather than
+        // reaching for a strip of their own.
+        for name in ["album.rs", "playlist.rs"] {
+            let source = read(name);
+            assert!(
+                source.contains("lead:") && !source.contains("place_header"),
+                "{name} draws a header beside the composition's"
             );
         }
         // The now-playing bar. Its vertical padding is zero because the band is
@@ -7388,23 +7399,17 @@ mod tests {
     /// function, with the named exemptions the rule itself makes:
     ///
     /// - **a glyph beside a word is not icon-only** — the word is the name
-    ///   (`play_album`, the playlist page's `play_control`, the strip's
-    ///   `play_all`, the panel's `ghost_row`, whose plus stands in the sleeve
-    ///   slot beside the words `New playlist`, and the Home place's
-    ///   `resume_line`, whose triangle leads the word `Resume`);
+    ///   (`views::page`'s `commitment`, which is `Play album` on a record and
+    ///   `Play` on a made list and was two functions until *one page, two
+    ///   subjects*; the strip's `play_all`; the panel's `ghost_row`, whose plus
+    ///   stands in the sleeve slot beside the words `New playlist`; and the
+    ///   Home place's `resume_line`, whose triangle leads the word `Resume`);
     /// - **the well's magnifier is not a control** — the well is the
     ///   control; the glyph is its label (doc 10 §4.1), and the well itself
     ///   is reachable by every printable key.
     #[test]
     fn every_icon_only_control_carries_a_tooltip() {
-        const EXEMPT: [&str; 6] = [
-            "play_album",
-            "play_control",
-            "play_all",
-            "well",
-            "ghost_row",
-            "resume_line",
-        ];
+        const EXEMPT: [&str; 5] = ["commitment", "play_all", "well", "ghost_row", "resume_line"];
         let views = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views");
         let mut bare: Vec<String> = Vec::new();
         let mut checked = 0_u32;

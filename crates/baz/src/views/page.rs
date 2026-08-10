@@ -1,0 +1,650 @@
+//! **One page, two subjects** — the composition a record's page and a made
+//! list's page both wear, written down once.
+//!
+//! The owner, 2026-08-10: *"can we reuse the basic layout and view of the
+//! playlist for the album view and the playlist view accessed via clicking
+//! into info — right now they are different but for no good reason."*
+//!
+//! # What was already decided, and what was merely drift
+//!
+//! ADR-0024 §A2 gave a playlist's page the record page's two-column
+//! arrangement, and design 14 §6 confirmed it: **share the arrangement, not
+//! the hierarchy**. What §A2 could not do was make the two pages *one
+//! implementation*, so [`views::album`](super::album) and
+//! [`views::playlist`](super::playlist) were written weeks apart and drifted —
+//! two copies of the same breakpoint arithmetic, two copies of the scroll, two
+//! identity blocks held level only by a test that read both files' tokens, two
+//! spellings of the quiet act, two `Play` buttons, two lamp dots and four
+//! copies of one reserved icon slot.
+//!
+//! This module is §A2's arrangement made literal. It takes what genuinely
+//! differs and draws everything else exactly once:
+//!
+//! | | a record's page | a playlist's page |
+//! |---|---|---|
+//! | the strip's lead | `Anne-Marie Puig › Ochre`, the artist half a door | `Road Trip` |
+//! | the sleeve | the cover, one authored image | the collage of quotations (§A1) |
+//! | the commitment | `Play album` | `Play` |
+//! | the acts | `Add to playlist…` | `Queue` · `Rename` · `Delete` |
+//! | the aside's tail | the edition selector, then `DETAILS` | the rename field, while renaming |
+//! | the hero's face | `theme::WORK_TITLE`, serif italic — a work's own title | [`theme::SEMIBOLD`], sans — a label the owner typed |
+//! | the byline | the artist | `Playlist · 12 records` |
+//! | the facts | `1999 · 12 tracks · 59:18 · FLAC · 16-bit · 44.1 kHz` | `14 tracks · 2:02:56`, with `Undo` beside it while there is an edit to take back |
+//! | a row's trailing slots | the transfer `+` | ▲▼, ✕, and the transfer `+` |
+//! | the empty state | its own sentence | its own sentence |
+//!
+//! Everything to the left of those two columns — the gutter, the breakpoint,
+//! the aside's width and order, the identity block's three lines and their
+//! pitch, the `TRACKS` rule, the row spacing, the one scroll — is here, once.
+//!
+//! # The strip leads with the subject, on both
+//!
+//! [`super::place_header_led`]'s own rule: *"Four of the places lead with
+//! [`super::place_name`] and nothing else. Two do not"* — the Album place,
+//! which leads with `Artist › Album`, and the Artist place, which leads with a
+//! runtime string. **A place whose subject changes leads with its subject**,
+//! and a playlist's page is the third member of that set. It led with the word
+//! `Playlist` because it predates the breadcrumb by weeks, which is exactly the
+//! *"different for no good reason"* the owner named.
+//!
+//! The kind word did not go anywhere. Design 14 §3.5 had already called the
+//! chrome the wrong place for it — *"58 px above the name… invisible at the
+//! moment the eye is actually deciding"* — and tier 1 moved it to the byline,
+//! where it is stated at 19 px directly under the name
+//! (`Playlist · 12 records`) instead of at 15 px in the chrome strip. So the rule is now one rule on both pages: **the strip names what
+//! you are looking at; the byline says what kind of thing it is.**
+//!
+//! # What is deliberately not shared
+//!
+//! The rows. A record's rows and a playlist's rows have one anatomy — marker,
+//! title over its second line, duration in a reserved lane, then reserved
+//! slots — but they are built from different values and carry different edit
+//! sets, so each page builds its own and hands the finished list over. The
+//! *slots* are shared ([`icon_slot`], [`transfer_slot`], [`lamp_dot`]), which
+//! is where the four copies were.
+
+use iced::widget::{
+    Column, Row, Space, button, column, container, image as iced_image, row, scrollable, text,
+    tooltip,
+};
+use iced::{Element, Font, Length, alignment};
+
+use crate::app::Message;
+use crate::views::{place_header_led, place_pad, section_rule};
+use crate::{icon, theme};
+
+/// **The page's identity block**: the name, the byline under it, and the line
+/// of facts under that — three lines, three sizes, three inks, one falling
+/// order, [`theme::GAP_XS`] between them.
+///
+/// It measures 32 + 4 + 24 + 4 + 16 = **80 px** on both pages, which is the
+/// whole of the answer to the owner's *"we do not have the playlist name
+/// really prominent"* (design 14 §3.4, ADR-0024 §A4.3): the name was always the
+/// album title's own hero size, and what it was missing was the 19 px line of
+/// support a record's title is given. That equality used to be
+/// held by a test that read both view sources for their tokens; it is now held
+/// by there being one composition.
+pub(crate) struct Identity<'a> {
+    /// The hero: an album's title, or a list's name.
+    pub(crate) name: String,
+    /// The face the hero is set in — **the axis that tells the two kinds
+    /// apart** (design 14 §5.2, ADR-0024 §A4.4). A record's page passes the
+    /// serif italic, because an album's title is a work someone published; a
+    /// playlist's passes the sans, because its name is a label the owner
+    /// typed, like the search query and the rename field two blocks away.
+    ///
+    /// The token itself is named at the two call sites rather than here, and
+    /// that is load-bearing:
+    /// `theme::the_serif_is_the_work_titles_and_nothing_else` enumerates the
+    /// files that may set it, and a shared composition that named it would put
+    /// the serif one argument away from every page in the product.
+    pub(crate) face: Font,
+    /// The middle line: a record's artist, or `Playlist · 12 records`.
+    pub(crate) byline: String,
+    /// The facts line: the catalogue line, or the counts.
+    pub(crate) facts: String,
+    /// One transient control beside the facts — the playlist page's `Undo`,
+    /// drawn exactly while there is an edit to take back (doc 11 §5 P2).
+    pub(crate) beside_facts: Option<Element<'a, Message>>,
+}
+
+/// **A page about one thing**: the header strip, then the object beside what
+/// is written about it, in one scroll.
+pub(crate) struct Page<'a> {
+    /// The strip's lead — the subject, in whatever shape the subject has.
+    pub(crate) lead: Element<'static, Message>,
+    /// The object itself, at [`theme::ALBUM_SLEEVE`].
+    pub(crate) sleeve: Element<'a, Message>,
+    /// The page's one commitment, under the sleeve at the sleeve's whole
+    /// width. `None` where there is no engine in the build at all to send it
+    /// to — a control that can never act is not drawn.
+    pub(crate) commitment: Option<Element<'a, Message>>,
+    /// The quieter acts, in one row under the commitment.
+    pub(crate) acts: Vec<Element<'a, Message>>,
+    /// Whatever else the aside carries, in order, below the acts.
+    pub(crate) aside_tail: Vec<Element<'a, Message>>,
+    /// The identity block that heads the main column.
+    pub(crate) identity: Identity<'a>,
+    /// The rows, built by the page that owns them.
+    pub(crate) rows: Vec<Element<'a, Message>>,
+    /// What the `TRACKS` block says when there are none.
+    pub(crate) empty: &'static str,
+}
+
+/// Draw a [`Page`] at `window_width`.
+///
+/// `window_width` decides the arrangement and nothing else. The page grows
+/// with the window until its list reaches [`theme::LIST_MEASURE`] and then
+/// stops, centring in what is left — a measure has a comfortable range rather
+/// than a single right answer, and a track list set 1500 px wide is a row of
+/// two words at opposite ends of the screen. Below
+/// [`theme::ALBUM_BREAKPOINT`] the two columns stack, because at that point
+/// the list would be narrower than the sleeve beside it and two columns have
+/// stopped being two columns.
+///
+/// This arithmetic was written twice and is now written once, which is the
+/// half of *"they are different for no good reason"* that no frame would ever
+/// have shown: the two copies agreed, and nothing but a reviewer's memory kept
+/// them agreeing.
+pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message> {
+    let room = theme::active();
+    // What the page's own block has to fit in: the window, less the one gutter
+    // on both sides and the scrollbar's declared lane on the right
+    // ([`super::place_pad`]).
+    let content = (window_width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).max(0.0);
+    let side_by_side = window_width >= theme::ALBUM_BREAKPOINT;
+    let measure = if side_by_side {
+        (content - theme::ALBUM_ASIDE_W - theme::GAP_XL).clamp(0.0, theme::LIST_MEASURE)
+    } else {
+        content.min(theme::LIST_MEASURE)
+    };
+
+    let Page {
+        lead,
+        sleeve,
+        commitment,
+        acts,
+        aside_tail,
+        identity,
+        rows,
+        empty,
+    } = page;
+
+    // **The aside**, fixed at [`theme::ALBUM_ASIDE_W`] — the sleeve's own edge
+    // — so its blocks share one lane and the page has two x-edges on this side
+    // rather than three (law L5).
+    let mut aside = column![sleeve].spacing(theme::GAP_MD);
+    if let Some(commitment) = commitment {
+        aside = aside.push(commitment);
+    }
+    if !acts.is_empty() {
+        aside = aside.push(
+            Row::with_children(acts)
+                .spacing(theme::GAP_SM)
+                .align_y(iced::Alignment::Center),
+        );
+    }
+    for block in aside_tail {
+        aside = aside.push(block);
+    }
+
+    let body: Element<'a, Message> = if rows.is_empty() {
+        text(empty)
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_faint)
+            .into()
+    } else {
+        Column::with_children(rows).spacing(theme::GAP_XS).into()
+    };
+    let main = column![
+        identity_block(identity),
+        column![section_rule("Tracks"), body].spacing(theme::GAP_SM),
+    ]
+    .spacing(theme::GAP_XL);
+
+    let composed: Element<'a, Message> = if side_by_side {
+        row![
+            container(aside).width(Length::Fixed(theme::ALBUM_ASIDE_W)),
+            container(main).width(Length::Fixed(measure)),
+        ]
+        .spacing(theme::GAP_XL)
+        .align_y(iced::Alignment::Start)
+        .into()
+    } else {
+        column![
+            container(aside).width(Length::Fixed(theme::ALBUM_ASIDE_W)),
+            container(main).width(Length::Fixed(measure)),
+        ]
+        .spacing(theme::GAP_XL)
+        .into()
+    };
+
+    column![
+        place_header_led(lead, None),
+        // **One scroll for the whole page.** A page is one document and
+        // turning it over is one gesture. The gutter the bar needs is
+        // reserved whether or not the page overflows, so a fourteenth track
+        // arriving shunts no duration sideways.
+        scrollable(
+            container(composed)
+                .width(Length::Fill)
+                .padding(place_pad())
+                .align_x(alignment::Horizontal::Center)
+        )
+        .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
+        .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
+        .width(Length::Fill)
+        .height(Length::Fill),
+    ]
+    .into()
+}
+
+/// The identity block itself — see [`Identity`] for what the 80 px is and why
+/// it is the answer to *"the name isn't really prominent"*.
+///
+/// The hero clips at **two lines**. `Wrapping::None` does not stop iced 0.13
+/// laying a long string over several lines, and a box-set title running to four
+/// lines pushes everything under it down the page. Two lines is a title; more
+/// is a paragraph.
+fn identity_block(identity: Identity<'_>) -> Element<'_, Message> {
+    let room = theme::active();
+    let mut facts = row![
+        text(identity.facts)
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_faint)
+            .wrapping(text::Wrapping::None),
+    ]
+    .spacing(theme::GAP_SM)
+    .align_y(iced::Alignment::Center);
+    if let Some(beside) = identity.beside_facts {
+        facts = facts.push(beside);
+    }
+    column![
+        container(
+            text(identity.name)
+                .size(theme::SIZE_HERO)
+                .line_height(theme::LEADING_HERO)
+                .font(identity.face)
+                .color(room.paper)
+        )
+        .max_height(2.0 * theme::LINE_HERO)
+        .clip(true),
+        text(identity.byline)
+            .size(theme::SIZE_TITLE)
+            .line_height(theme::LEADING_TITLE)
+            .color(room.paper_dim),
+        facts,
+    ]
+    .spacing(theme::GAP_XS)
+    .into()
+}
+
+/// **The page's one commitment** — `Play album` on a record, `Play` on a list
+/// — a lamp outline with a paper triangle and a paper label, and the only
+/// control in baz drawn in the accent.
+///
+/// It is the switch that turns the picture light on — the one control in the
+/// product that *creates* playback truth — which is why it is allowed the
+/// colour and why there is at most one of it on screen. It takes the sleeve's
+/// whole width and stands directly under it, which since ADR-0022 makes the
+/// press that replaced the wall's double-click a 320 × 32 target in a fixed
+/// place rather than a 400 ms timing gesture.
+pub(crate) fn commitment(
+    label: &'static str,
+    live: bool,
+    message: Message,
+) -> Element<'static, Message> {
+    let room = theme::active();
+    button(
+        // **The box centres the ink, in both axes** (law L3).
+        container(
+            row![
+                iced_image(icon::handle(icon::Glyph::Play))
+                    .width(Length::Fixed(theme::ICON_PX))
+                    .height(Length::Fixed(theme::ICON_PX))
+                    .opacity(theme::glyph_opacity(live, false)),
+                text(label)
+                    .size(theme::SIZE_BODY)
+                    .line_height(theme::LEADING_BODY)
+                    .font(theme::SEMIBOLD)
+                    .wrapping(text::Wrapping::None),
+            ]
+            .spacing(theme::GAP_SM)
+            .align_y(iced::Alignment::Center),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(alignment::Horizontal::Center)
+        .align_y(alignment::Vertical::Center),
+    )
+    .width(Length::Fill)
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_MD))
+    .style(move |_theme, status| theme::primary(room, status))
+    .on_press_maybe(live.then_some(message))
+    .into()
+}
+
+/// **A quiet act** — `Add to playlist…` on a record, `Queue` · `Rename` ·
+/// `Delete` on a list — at the product's one control height, no accent: the
+/// lamp stays spent on playback truth alone.
+///
+/// The two pages spelled this differently and the difference was invisible
+/// until they were laid side by side. A record's single act was a *centred,
+/// full-width* box in [`theme::word_button`]'s paint, resting at
+/// [`theme::Palette::paper_dim`]; a list's three were natural-width words in
+/// [`theme::transport`]'s, resting at [`theme::Palette::paper`]. One slot, two
+/// inks, two alignments, for no reason either file could name. They are one
+/// word now, hanging from the aside's own lane like everything else in it
+/// (law L5) — which is what a full-width centred box could not do.
+pub(crate) fn act(
+    label: &'static str,
+    enabled: bool,
+    message: Message,
+) -> Element<'static, Message> {
+    let room = theme::active();
+    button(
+        container(
+            text(label)
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(theme::MEDIUM)
+                .color(if enabled {
+                    room.paper
+                } else {
+                    room.paper_muted
+                })
+                .wrapping(text::Wrapping::None),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_MD))
+    .style(move |_theme, status| theme::transport(room, room.wall, status))
+    .on_press_maybe(enabled.then_some(message))
+    .into()
+}
+
+/// **One row's reserved control slot**: the drawn glyph while the pointer is
+/// on the row, and a space of exactly [`theme::STEPPER_HIT`] when it is not,
+/// so no duration slides as the pointer crosses a row.
+///
+/// There were four copies of this — a record row's `+`, a playlist row's `+`,
+/// its ▲ and ▼, and its ✕ — differing in the glyph, the tooltip and whether
+/// the control could act. Those three are the arguments; everything else (the
+/// square, the reservation, the ink, the tooltip's own anatomy) was identical
+/// in all four and is written here once.
+///
+/// Icon-only, so the tooltip carries the name (doc 10 §3.1); `can` is false
+/// where the act is unavailable at this row — the first row's ▲ — and the
+/// glyph dims rather than vanishing, because a slot that emptied would move
+/// the row.
+pub(crate) fn icon_slot(
+    glyph: icon::Glyph,
+    name: &'static str,
+    can: bool,
+    offered: bool,
+    message: Message,
+) -> Element<'static, Message> {
+    let room = theme::active();
+    if !offered {
+        return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
+    }
+    let mark = container(
+        iced_image(icon::handle(glyph))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(if can {
+                theme::GLYPH_OPACITY_HOVER
+            } else {
+                theme::GLYPH_OPACITY_DISABLED
+            }),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    tooltip(
+        button(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .padding(0)
+            .style(move |_theme, status| theme::transport(room, room.wall, status))
+            .on_press_maybe(can.then_some(message)),
+        text(name)
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Left,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
+    .into()
+}
+
+/// **The transfer `+`** (09 §8.1): this row's track, toward a destination of
+/// the user's choosing — the picker opens holding it, its first row the Queue.
+///
+/// One function, and one tooltip string, for the three surfaces that draw it:
+/// a record page's track row, a playlist page's entry row, and the wall's
+/// `Songs` rows. They had three copies of the same words.
+pub(crate) fn transfer_slot(offered: bool, message: Message) -> Element<'static, Message> {
+    icon_slot(
+        icon::Glyph::Plus,
+        "Add to a playlist, or the queue",
+        true,
+        offered,
+        message,
+    )
+}
+
+/// The playing row's lamp dot — the same amber circle, and the same token, the
+/// wall puts beside the playing record and the run column beside its row.
+pub(crate) fn lamp_dot() -> Element<'static, Message> {
+    let room = theme::active();
+    container(Space::new(
+        Length::Fixed(theme::DOT),
+        Length::Fixed(theme::DOT),
+    ))
+    .style(move |_theme| theme::lamp_dot(room))
+    .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::theme;
+
+    /// Both view sources, **code only** — no test module and no comment lines.
+    ///
+    /// A file that names a token in prose in order to say it is deliberately
+    /// *not* using it is not a consumer, and a sweep that could not tell the
+    /// difference would punish a page for explaining itself. This is
+    /// `theme::the_serif_is_the_work_titles_and_nothing_else`'s own rule.
+    fn pages() -> [(&'static str, String); 2] {
+        let read = |file: &str| {
+            let source = std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(file),
+            )
+            .expect("a view's own source")
+            .replace("\r\n", "\n");
+            source
+                .split("#[cfg(test)]")
+                .next()
+                .expect("a source has a head")
+                .lines()
+                .filter(|line| {
+                    let line = line.trim_start();
+                    !(line.starts_with("//") || line.starts_with("/*"))
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        [
+            ("a record's", read("src/views/album.rs")),
+            ("a playlist's", read("src/views/playlist.rs")),
+        ]
+    }
+
+    /// **The page's two columns add up to the window** at every width the
+    /// two-column arrangement is used at, and stop growing when the list
+    /// reaches its measure.
+    ///
+    /// This is the arithmetic `views::settings`'s `content_width` needed a
+    /// rendered frame to catch (the segmented control ran 998 px wide inside a
+    /// 640 px cap), asserted here instead — the widths are the composition's
+    /// own arithmetic and nothing about them depends on the toolkit. It lived
+    /// in `views::album` while the record's page owned a copy of it; there is
+    /// one copy now, so the test is where the arithmetic is.
+    #[test]
+    fn the_page_fills_the_window_until_its_list_reaches_its_measure() {
+        let list = |w: f32| {
+            (w - 2.0 * theme::HANG - theme::SCROLLBAR_LANE - theme::ALBUM_ASIDE_W - theme::GAP_XL)
+                .clamp(0.0, theme::LIST_MEASURE)
+        };
+        let page = |w: f32| theme::ALBUM_ASIDE_W + theme::GAP_XL + list(w);
+
+        // At the shipped window the page hangs from both gutters exactly, the
+        // scrollbar's declared lane included.
+        let inner = |w: f32| w - 2.0 * theme::HANG - theme::SCROLLBAR_LANE;
+        assert!((page(1280.0) - inner(1280.0)).abs() < f32::EPSILON);
+        // At 1920 the list has reached its measure, so the page stops growing
+        // and centres in what is left rather than setting a track title and a
+        // duration 1500 px apart.
+        assert!((list(1920.0) - theme::LIST_MEASURE).abs() < f32::EPSILON);
+        assert!(page(1920.0) < inner(1920.0));
+        // And the breakpoint is where the list stops being wider than the
+        // sleeve beside it, which is the point at which two columns have
+        // stopped being two columns.
+        assert!(list(theme::ALBUM_BREAKPOINT) <= theme::ALBUM_ASIDE_W);
+        assert!(list(theme::ALBUM_BREAKPOINT + 4.0 * theme::HANG) > theme::ALBUM_ASIDE_W);
+    }
+
+    /// **The two identity blocks are the same height** — 80 px, a record's —
+    /// and that is the whole of the answer to *"we do not have the playlist
+    /// name really prominent"* (ADR-0024 §A4.3).
+    ///
+    /// The name was never small: it is the album title's own hero size, 28 px,
+    /// and always was. What made it read as a stub was
+    /// that the block *stopped* after 52 px — the record's byline line was
+    /// missing, so a 28 px name was followed straight by a 12 px count, where a
+    /// record's is given a 19 px line of support first.
+    #[test]
+    fn the_identity_block_is_eighty_pixels_of_one_composition() {
+        let block =
+            theme::LINE_HERO + theme::GAP_XS + theme::LINE_TITLE + theme::GAP_XS + theme::LINE_META;
+        assert!(
+            (block - 80.0).abs() < f32::EPSILON,
+            "32 + 4 + 24 + 4 + 16 = 80, the block both pages wear: {block}"
+        );
+    }
+
+    /// **Neither page composes itself any more**, which is what makes the
+    /// equality above a fact rather than a coincidence two files happen to
+    /// share.
+    ///
+    /// The test this replaces read both sources for `SIZE_HERO`,
+    /// `LEADING_TITLE`, `paper_dim` and six other tokens and asserted that each
+    /// appeared in both — a way of checking that two hand-built blocks still
+    /// matched. There is one block now, so the assertion inverts: the
+    /// composition's tokens must appear in **neither** view, because a view
+    /// that named one would be building a second page beside the shared one.
+    ///
+    /// The list is the vocabulary of the arrangement — the identity block's
+    /// ramp, the aside's width, the breakpoint, the measure, the scroll and the
+    /// section rule. It is deliberately not exhaustive: it is the set of things
+    /// that were literally duplicated on 2026-08-10, and a new duplicate that
+    /// avoids all of them is a new duplicate somebody chose.
+    #[test]
+    fn the_two_pages_are_one_composition() {
+        for (page, source) in pages() {
+            for token in [
+                "theme::SIZE_HERO",
+                "theme::LEADING_HERO",
+                "theme::LINE_HERO",
+                "theme::ALBUM_ASIDE_W",
+                "theme::ALBUM_BREAKPOINT",
+                "theme::LIST_MEASURE",
+                "theme::SCROLLBAR_LANE",
+                "place_pad()",
+                "scrollable(",
+            ] {
+                assert!(
+                    !source.contains(token),
+                    "{page} page names {token} — the arrangement is \
+                     `views::page` and a view that lays itself out again is \
+                     the drift ADR-0024 §A2 was made literal to end"
+                );
+            }
+            assert!(
+                source.contains("page::view(") && source.contains("Page {"),
+                "{page} page must reach the shared composition"
+            );
+        }
+    }
+
+    /// **The hero's face is the axis, and it is named at the call sites.**
+    ///
+    /// The two pages differ in what the words say and in the face the name is
+    /// set in, and in nothing else about the block (design 14 §5.2). The token
+    /// stays out of this module on purpose:
+    /// `theme::the_serif_is_the_work_titles_and_nothing_else` enumerates the
+    /// files allowed to name `WORK_TITLE`, and a shared composition holding it
+    /// would put the serif one argument away from every page in the product.
+    #[test]
+    fn the_record_sets_its_hero_in_the_serif_and_the_list_does_not() {
+        let [(_, found), (_, made)] = pages();
+        assert!(
+            found.contains("face: theme::WORK_TITLE"),
+            "a record's title is a work's, and it is set in the placard's italic"
+        );
+        assert!(
+            made.contains("face: theme::SEMIBOLD") && !made.contains("WORK_TITLE"),
+            "a playlist's name is a label the owner typed, and it is sans"
+        );
+        assert!(
+            !this_module().contains("WORK_TITLE"),
+            "the shared composition must not name the serif"
+        );
+    }
+
+    /// This module's own code, for the assertion above — comments stripped by
+    /// [`pages`]'s rule, since the table at the head of this file names the
+    /// token in order to say which page carries it.
+    fn this_module() -> String {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/page.rs"),
+        )
+        .expect("this module's own source");
+        source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a source has a head")
+            .lines()
+            .filter(|line| {
+                let line = line.trim_start();
+                !(line.starts_with("//") || line.starts_with("/*"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// **Both pages state what an empty list looks like.**
+    ///
+    /// A record's page had no empty state at all: with no readable edition it
+    /// drew the `TRACKS` rule over nothing, which is the interface saying
+    /// neither *"there is nothing"* nor *"something went wrong"*. The playlist
+    /// page has had a sentence since doc 09 §9. The slot is the shared
+    /// composition's now, so having one is not optional.
+    #[test]
+    fn neither_page_rules_off_an_empty_list_in_silence() {
+        for (page, source) in pages() {
+            assert!(
+                source.contains("empty:"),
+                "{page} page hands the composition no empty state"
+            );
+        }
+    }
+}
