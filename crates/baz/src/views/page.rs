@@ -221,32 +221,16 @@ pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message
     };
 
     column![
-        // **The lead stands in a [`theme::TRANSPORT_HIT`] box**, which is what
-        // makes the two strips one strip.
+        // **The lead's box is [`place_header_led`]'s now**, not this page's.
         //
-        // Found in a frame rather than in the source: a record's page put its
-        // sleeve at y = 88 and a playlist's at y = 77. `theme::TOP_BAR_H` is
-        // `2 · TOP_BAR_PAD_V + TRANSPORT_HIT + 1` = 49, but
-        // [`place_header_led`] does not hold its lead to it — it lays out
-        // whatever it is handed. A record's breadcrumb is a *control* and so
-        // declares 32 of its own; a playlist's name was a bare `LINE_EMPHASIS`
-        // 20, so its strip came to 37 and the whole page rode 12 px higher.
-        // Two pages of one composition, 12 px apart, from a difference in what
-        // the lead happened to be made of.
-        //
-        // Stated here rather than in the shared strip because **the rest of
-        // the product has the same 12 px** — Queue, Settings and the Artist
-        // place all lead with a bare name — and moving every place at once is
-        // a change to the frame, which is `views::mod`'s to make and is logged
-        // in `docs/WORK.md` with this measurement. What is fixed here is what
-        // this change is about: the two subject pages agreeing.
-        place_header_led(
-            container(lead)
-                .height(Length::Fixed(theme::TRANSPORT_HIT))
-                .align_y(alignment::Vertical::Center)
-                .into(),
-            None,
-        ),
+        // It stood here for one build, because this page found the defect —
+        // a record's sleeve at y = 88 against a playlist's at y = 77 — and
+        // fixing it generally would have moved four other places' content on
+        // screen in a commit that was about something else. It has since been
+        // moved into the shared strip, where Queue, Settings and the Artist
+        // place get it too, and the local box is gone rather than left as a
+        // second answer to a question that now has one.
+        place_header_led(lead, None),
         // **One scroll for the whole page.** A page is one document and
         // turning it over is one gesture. The gutter the bar needs is
         // reserved whether or not the page overflows, so a fourteenth track
@@ -656,33 +640,27 @@ mod tests {
             .join("\n")
     }
 
-    /// **The two strips are one strip**, because the composition holds its
-    /// lead at the height the frame's own token is built from.
+    /// **This page does not box its own lead**, because the shared strip does
+    /// it for every place now.
     ///
-    /// The defect this pins was found in a frame and is invisible in the
-    /// source: `theme::TOP_BAR_H` is `2 · TOP_BAR_PAD_V + TRANSPORT_HIT + 1`,
-    /// but `views::place_header_led` lays out whatever lead it is handed, so a
-    /// strip led by a *control* came to 49 px and a strip led by a bare name
-    /// to 37. A record's breadcrumb is a control and a playlist's name is not,
-    /// so the two pages of one composition sat 12 px apart — measured at
-    /// `docs/design/impl/one-page-two-subjects/`, sleeve top y = 88 against
-    /// y = 77.
+    /// The defect was found here — a record's sleeve at y = 88 against a
+    /// playlist's at y = 77, `docs/design/impl/one-page-two-subjects/` — and
+    /// fixed here first, locally, because the general fix moves Queue,
+    /// Settings and the Artist place on screen and did not belong in a commit
+    /// about these two pages agreeing. The general fix has since landed, and
+    /// this asserts the local one went with it: **a second box here would be a
+    /// second answer**, and the next person to change the strip's height would
+    /// move five places and not seven, which is the drift this composition
+    /// exists to end.
+    ///
+    /// The fact itself is pinned in `views::mod`'s
+    /// `every_place_leads_at_the_height_the_frame_declares`.
     #[test]
-    fn the_lead_stands_at_the_height_the_frame_declares() {
+    fn this_page_leaves_the_leads_box_to_the_shared_strip() {
         assert!(
-            (theme::TOP_BAR_H - 2.0f32.mul_add(theme::TOP_BAR_PAD_V, theme::TRANSPORT_HIT + 1.0))
-                .abs()
-                < f32::EPSILON,
-            "the strip's declared height is not built from the control height"
-        );
-        let source = this_module();
-        let at = source
-            .find("container(lead)")
-            .expect("the composition boxes its lead");
-        assert!(
-            source[at..source.len().min(at + 200)].contains("theme::TRANSPORT_HIT"),
-            "the lead's box is not the control height, so a page led by a word \
-             and a page led by a control are two different strips"
+            !this_module().contains("container(lead)"),
+            "this page boxes its own lead again, so the strip's height has two \
+             answers and they can drift apart"
         );
     }
 

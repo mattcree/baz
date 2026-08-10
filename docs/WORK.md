@@ -82,31 +82,12 @@
    word may not need qualifying. It should credit the artist's list rather than
    the underlying records when played, which is the rule that just landed for
    playlists.
-5. **The frame is not the frame in every place, by 12 px.** `theme::TOP_BAR_H`
-   is `2 · TOP_BAR_PAD_V + TRANSPORT_HIT + 1` = 49, but
-   `views::place_header_led` lays out whatever lead it is handed. A lead that
-   is a *control* — the Album place's breadcrumb, and `views::page`'s boxed
-   lead — makes a 49 px strip; a lead that is a bare `place_name` makes a
-   37 px one. So **Queue, Settings and the Artist place all sit 12 px above
-   where the Library, the record's page and the playlist's page sit**, and
-   `views/mod.rs`'s own sentence — *"the frame is the frame in every place —
-   navigating may not slide the content area by a pixel"* — is false by that
-   much today.
-
-   The fix is one line: hold the strip's lead at `TRANSPORT_HIT` inside
-   `place_header_led`, and delete `views::page`'s local box, which exists only
-   because the general fix moves four places' content on screen at once. It
-   wants its own commit, frames of all six places, and the `y=105`-style
-   measurements in `docs/design/impl/queue-merged/` and
-   `docs/design/12-now-playing-and-kiosk.md` re-read afterwards. Found in a
-   frame and measured at `docs/design/impl/one-page-two-subjects/` — a
-   playlist page's sleeve top at y = 77 against a record page's y = 88.
-6. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
+5. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
    the Flatpak build are all done; what is left is a screenshot for the
    metainfo, the version edit from `0.0.0`, a `workflow_dispatch` dry run,
    then the tag. **The tag is the owner's to cut** — the workflow produces a
    draft.
-7. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+6. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -119,7 +100,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-8. **Rewrite the README as the project's public face**, with the icon and real
+7. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
    last, so it describes what actually ships. Its keyboard table is still
    stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode,
@@ -203,6 +184,35 @@
 ## Recently done
 
 Newest first. Fuller detail in `CHANGELOG.md`.
+
+- **The frame is the frame in every place, and now it is.**
+  `views::place_header_led` boxes its lead at `TRANSPORT_HIT`, so a strip led
+  by a word is the same 49 px as a strip led by a control. Frames and the
+  hairline measurements at `docs/design/impl/one-frame-everywhere/`.
+  - **The item this closes was wrong about two of its three places, and that
+    is the useful part.** It said *"Queue, Settings and the Artist place all
+    sit 12 px above"*. Measured: **`Place::Queue` no longer exists** — it was
+    deleted when the run column merged into `Now playing`, and the item
+    outlived the place it named. **The Artist place was already at 48**,
+    because it had grown its own copy of the box. Only **Settings** was
+    actually drifting, at 36.
+  - So the defect was one place wide and the fix is three places wide: one
+    answer where there were two local copies (`views/page.rs`'s and
+    `views/artist.rs`'s, both deleted here) and one absence. The artist page
+    **does not move** across the change, which is the evidence that the shared
+    box subsumes the local ones exactly rather than merely agreeing with them
+    today.
+  - The `y = 105`-style measurements the item said to re-read do not exist in
+    `docs/design/impl/queue-merged/` or `docs/design/12-now-playing-and-kiosk.md`
+    — searched for and not found. Neither surface uses `place_header_led`, so
+    neither moved.
+  - **Two harness faults are written up rather than quietly fixed**, because
+    both produced frames that looked like results: a click at the wrong `y`
+    photographed the record's page and labelled it the artist's, and two agents
+    writing a binary to the same scratch filename made one run compare this
+    branch's base against a different branch's build. The second is why the
+    Library appeared to move at all, and it was caught only because *"the
+    Library must not move"* had been written down first.
 
 - **Density: a fourth step, and the control wherever the works are** — the
   owner's *"we should ensure the density options are available on all

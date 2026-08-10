@@ -1735,6 +1735,28 @@ next commit.
 
 ### Fixed
 
+- **Every place's content starts at the same y.** `views/mod.rs` has said in
+  prose that *"the frame is the frame in every place — navigating may not slide
+  the content area by a pixel"*, and it was false by **12 px** for about a
+  month. `place_header_led` lays out whatever lead it is handed, and what it is
+  handed differs in kind: a breadcrumb is a *control* declaring `TRANSPORT_HIT`
+  32, a bare place name is `LEADING_EMPHASIS` 20, so the strip came to 49 px
+  under one and 37 px under the other. `TOP_BAR_H` was never wrong — the
+  Library's own strip honours it — which is why the source reads as though
+  nothing is the matter. The strip now boxes its lead at the control height.
+
+  **The defect was one place wide, not three.** It had been recorded as *"Queue,
+  Settings and the Artist place"*: `Place::Queue` no longer exists, the Artist
+  place had grown its own copy of the box, and only **Settings** was drifting,
+  at 36 against everything else's 48. The fix is three places wide even so — one
+  shared answer replacing two local copies (`views/page.rs`'s and
+  `views/artist.rs`'s) and one absence. The artist page does not move across the
+  change, which is what shows the shared box subsumes the local ones rather than
+  merely matching them today.
+
+  Frames of four places from two builds, with the hairline measured rather than
+  eyeballed, at `docs/design/impl/one-frame-everywhere/`.
+
 - **A record is the same size wherever it is drawn.** `views/home.rs` and
   `views/artist.rs` each resolved a grid of their own —
   `Grid::new(width − 2 × HANG, Density::Balanced)` — which was wrong three

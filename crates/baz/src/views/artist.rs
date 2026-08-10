@@ -135,10 +135,10 @@ pub(crate) fn view<'a>(
     // **The header's lead is the artist's name**, at the same height the Album
     // place's breadcrumb takes — the two places are joined by one press and a
     // strip that changed height between them would make that press a jump.
-    let lead = container(place_name(name))
-        .height(Length::Fixed(theme::TRANSPORT_HIT))
-        .align_y(iced::alignment::Vertical::Center)
-        .into();
+    // The lead is boxed to the control height by [`place_header_led`] itself
+    // now, for every place at once. This page carried its own copy of that box
+    // — the second of three — until the general fix landed.
+    let lead = place_name(name);
 
     let mut rows = column![].spacing(hang.gutter);
     let mut current = row![].spacing(hang.gutter);

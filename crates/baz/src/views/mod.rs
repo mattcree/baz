@@ -362,9 +362,34 @@ pub(crate) fn place_header_led(
     note: Option<String>,
 ) -> Element<'static, Message> {
     let room = theme::active();
-    let mut strip = row![lead]
-        .spacing(theme::GAP_LG)
-        .align_y(iced::Alignment::Center);
+    // **The lead stands in a [`theme::TRANSPORT_HIT`] box.** Without it this
+    // function lays out whatever it is handed, and what it is handed differs in
+    // kind: the Album place's breadcrumb and the Artist place's name are
+    // *controls* and declare 32 of their own, while a bare [`place_name`] is
+    // `LEADING_EMPHASIS` 20. So the strip came to 49 px in some places and
+    // 37 px in others, and every place in the second group drew its whole body
+    // **12 px higher** than every place in the first.
+    //
+    // That made this file's own sentence false — *"the frame is the frame in
+    // every place; navigating may not slide the content area by a pixel"* — and
+    // it was false for about a month, in the one direction a reader of the
+    // source would not look: `TOP_BAR_H` is a correct constant, honoured by the
+    // Library's own strip, and the drift was in the *other* strip not being
+    // held to it.
+    //
+    // Found in a frame, not in the source, and it took a particular kind of
+    // frame: the study that found it shot two pages at the same **window**
+    // coordinates rather than cropping each page's header out of its own
+    // picture. Cropping compares shapes; a shared crop compares positions, and
+    // the two identity blocks were the same 80 px shape sitting 12 px apart.
+    // `docs/design/impl/one-page-two-subjects/`.
+    let mut strip = row![
+        container(lead)
+            .height(Length::Fixed(theme::TRANSPORT_HIT))
+            .align_y(alignment::Vertical::Center)
+    ]
+    .spacing(theme::GAP_LG)
+    .align_y(iced::Alignment::Center);
     strip = strip.push(Space::with_width(Length::Fill));
     if let Some(note) = note {
         strip = strip.push(
@@ -634,6 +659,55 @@ pub(crate) fn section_rule_noted(
 
 #[cfg(test)]
 mod tests {
+    /// **The frame is the frame in every place**, which this file claims in
+    /// prose and did not hold for about a month.
+    ///
+    /// [`super::place_header_led`] lays out whatever lead it is handed, and
+    /// what it is handed differs in kind: the Album place's breadcrumb and the
+    /// Artist place's name are controls declaring [`theme::TRANSPORT_HIT`] 32,
+    /// while a bare [`super::place_name`] is `LEADING_EMPHASIS` 20. So the
+    /// strip came to 49 px under a control and 37 px under a word, and **Queue,
+    /// Settings and the Artist place drew their whole bodies 12 px above** the
+    /// Library and the two subject pages.
+    ///
+    /// Two assertions, because the defect had two halves. The arithmetic one
+    /// says [`theme::TOP_BAR_H`] is still built from the control height — if
+    /// that stops being true the box below is holding the lead to a number the
+    /// frame no longer declares, which would be a *quieter* version of this
+    /// same bug. The source one says the strip actually boxes its lead.
+    ///
+    /// Source-scanned rather than measured because the layout is iced's to
+    /// perform and this crate cannot render in a unit test; the frames that
+    /// found it are at `docs/design/impl/one-page-two-subjects/`.
+    #[test]
+    fn every_place_leads_at_the_height_the_frame_declares() {
+        use crate::theme;
+        assert!(
+            (theme::TOP_BAR_H - 2.0f32.mul_add(theme::TOP_BAR_PAD_V, theme::TRANSPORT_HIT + 1.0))
+                .abs()
+                < f32::EPSILON,
+            "the strip's declared height is no longer built from the control \
+             height, so holding the lead to that height means nothing"
+        );
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/mod.rs"),
+        )
+        .expect("this source")
+        .replace("\r\n", "\n");
+        let body = source
+            .split_once("pub(crate) fn place_header_led")
+            .expect("the shared strip")
+            .1;
+        let at = body
+            .find("container(lead)")
+            .expect("the shared strip boxes its lead");
+        assert!(
+            body[at..body.len().min(at + 200)].contains("theme::TRANSPORT_HIT"),
+            "the lead's box is not the control height, so a place led by a word \
+             and a place led by a control are two different strips again"
+        );
+    }
+
     /// Every string literal in the view sources' *code* lines — comments
     /// stripped — which is a conservative superset of what can ship on
     /// screen.
