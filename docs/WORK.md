@@ -44,7 +44,27 @@
 
 ## Doing
 
-Nothing. The queue above is the next thing.
+- **The owner's `Now playing` batch, 2026-08-10** — seven asks on one surface,
+  on `feat/now-playing-shows-the-run`. Four have landed and three are in the
+  same branch:
+  - ✅ the `Run` word and the two densities removed; the run column stands
+    whenever there is a run
+  - ✅ the place shows whatever the bar names, sounding or not; the record's
+    column is drawn even when empty so the composition never lurches
+  - ✅ the `Nothing queued` state inset like the rows it replaces
+  - ✅ three kinds of list (`RunSource`), so the save word appears only for a
+    run assembled from nothing
+  - ⏳ *"the background fade... should continue under the playlist area too"* —
+    the field is clamped flat under the run column and ends in a hard vertical
+    seam. Continue it, and settle legibility by **measuring** the composited
+    contrast of every run-row ink against the field at its brightest rather
+    than by eye.
+  - ⏳ *"ideally the currently playing item in the playlist is where our scroll
+    goes to"* — follow the sounding row on `TrackStarted` only, only when it is
+    out of view, landing it a little way down rather than flush at the top.
+  - ⏳ *"that needs a scrollbar as well since playlists can be long"* — the run
+    column already draws `list_scrollbar()` 10 px; find out from a frame of a
+    long run what he is actually not seeing before changing the form.
 
 ## Waiting on the owner
 

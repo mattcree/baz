@@ -813,20 +813,84 @@ pub struct QueueVm {
     /// unit [`Event::TrackStarted`](baz_core::protocol::Event::TrackStarted)
     /// reports in.
     pub items: Vec<QueueItemVm>,
-    /// **Playing provenance** (`docs/design/09-implicit-playlists.md` §6,
-    /// ADR-0023's amendment): the name of the playlist *file* this run was
-    /// reified from, when a play gesture reified one — `None` for every other
-    /// origin (a record, a shuffle draw, a stacked queue).
+    /// **Where this run came from** — the three kinds of list, on the record
+    /// itself. See [`RunSource`].
+    pub source: RunSource,
+}
+
+/// **The three kinds of list a run can be**, which is the distinction the
+/// summary strip's save word turns on.
+///
+/// The owner, 2026-08-10: *"underlying we should have playlists which are like
+/// 'fixed' i.e. a CD's track listing and some which are unnamed i.e. when we
+/// just 'add to queue' and some which are named i.e. we saved it already. the
+/// only one which has any kind of indicator to save is the 2nd case."*
+///
+/// # It replaced a `Option<String>`, and the `None` was the defect
+///
+/// This field was `provenance: Option<String>` — the playlist file's name, or
+/// nothing — and the save word was drawn on `None`. That reading cannot tell
+/// **a list that exists without a file** from **a list that does not exist at
+/// all**, so a record's run and a hand-built queue looked identical to it and
+/// both were offered the creation act. The owner saw the wrong half of that:
+/// *"I still see save as playlist on the queue when playing a CD"*.
+///
+/// The predicate that was wanted is not *has a file* but **did the listener
+/// assemble this**, so it is spelled as a kind rather than as an absence. A
+/// later kind — an artist's records, a genre, a dynamic rule — lands on
+/// [`Self::Fixed`] and inherits *offer nothing*, which is the safe direction:
+/// a new origin cannot start advertising a creation act by forgetting to say
+/// it exists elsewhere.
+///
+/// # It is still origin, never a link
+///
+/// ADR-0023 §3 and ADR-0024 §1 are untouched. Nothing here is consulted for
+/// behaviour beyond which word the strip draws, no run ever writes back into
+/// the file it names, and the value travels with the record through every edit
+/// (`crate::queue_edit` clones it) exactly as the name it replaced did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunSource {
+    /// **A list that already exists and is not the listener's to name** — a
+    /// record's track listing, `All songs`, a `Play all` of the wall, a
+    /// shuffle draw over it.
     ///
-    /// A statement about **origin, never a live link** — Plexamp's
-    /// `playQueueSourceURI`, adopted by name. It travels with the record
-    /// through every edit (`crate::queue_edit` clones it, appends extend
-    /// [`Self::items`] on the same value), survives `QueueEnded`, and is
-    /// replaced only when the queue is replaced: a `SetQueue` from any other
-    /// gesture carries a record built with `None` here. Nothing consults it
-    /// for behaviour — it powers the Queue place's summary lead and the
-    /// picker's hoisted *playing* row, both readings.
-    pub provenance: Option<String>,
+    /// There is no creation act to offer here: the list exists, and freezing it
+    /// into a playlist would make a second copy of something nobody assembled.
+    Fixed,
+    /// **Reified from the named playlist file** by a play gesture
+    /// (`docs/design/09-implicit-playlists.md` §6, ADR-0023's amendment) — the
+    /// playing provenance this field used to be, and the same string.
+    ///
+    /// Also offered no save word, and that is the owner's correction of the
+    /// same afternoon: *"nah I think adding more stuff to an existing playlist
+    /// is fine, that does not need a save -- it's a low bar to edit a
+    /// playlist"*. A run that came from a file never needs a second route to
+    /// change one; the playlist's own page is the route.
+    Playlist(String),
+    /// **Assembled by the listener out of nothing** — the picker's `Queue`
+    /// row, a track's `+` onto a run, a shift-clicked sleeve onto an empty
+    /// one.
+    ///
+    /// The only kind the save word is drawn for, because it is the only kind
+    /// where a list exists nowhere else and would otherwise be lost at the end
+    /// of the night (ADR-0024 §4's creation act, finally aimed).
+    Assembled,
+}
+
+impl QueueVm {
+    /// **Playing provenance**: the playlist file's name this run was reified
+    /// from, or `None` for a list that came from anywhere else.
+    ///
+    /// The old field, kept as a reading — the picker's hoisted *playing* row
+    /// and the returns lane both want exactly this and have no interest in the
+    /// other two kinds.
+    #[must_use]
+    pub fn provenance(&self) -> Option<&str> {
+        match &self.source {
+            RunSource::Playlist(name) => Some(name),
+            RunSource::Fixed | RunSource::Assembled => None,
+        }
+    }
 }
 
 /// One track in the queue, as much of it as the panel shows.
@@ -970,9 +1034,13 @@ pub fn album_queue(album: &AlbumVm, chosen: Option<EditionKey>) -> QueueVm {
         album: album.title.clone(),
         artist: album.artist.label().to_owned(),
         items: album_items(album, chosen),
-        // A record is not a playlist file: no provenance, and a run this
-        // gesture replaces loses whatever provenance it had (09 §6).
-        provenance: None,
+        // **A record's track listing is a fixed list**: it exists already, it
+        // is not the listener's to name, and there is nothing here to offer to
+        // save (the owner: *"I still see save as playlist on the queue when
+        // playing a CD"*). It is also not a playlist *file*, so it carries no
+        // provenance and a run this gesture replaces loses whatever it had
+        // (09 §6).
+        source: RunSource::Fixed,
     }
 }
 
@@ -1023,7 +1091,7 @@ pub fn restored_queue(
     albums: &[AlbumVm],
     paths: &[std::path::PathBuf],
     cursor: usize,
-    provenance: Option<String>,
+    source: RunSource,
 ) -> (QueueVm, Option<usize>) {
     let mut by_path: std::collections::HashMap<&Path, (&AlbumVm, &TrackVm)> =
         std::collections::HashMap::new();
@@ -1062,7 +1130,7 @@ pub fn restored_queue(
             .and_then(|item| item.album_artist.clone())
             .unwrap_or_default(),
         items,
-        provenance,
+        source,
     };
     (queue, landed)
 }
@@ -1096,8 +1164,10 @@ pub fn stacked_queue(picks: &[(&AlbumVm, Option<EditionKey>)]) -> QueueVm {
         artist: first.map_or_else(String::new, |album| album.artist.label().to_owned()),
         items,
         // A draw is an implicit playlist, but not a *file*: no provenance
-        // (09 §6 — playlist files only).
-        provenance: None,
+        // (09 §6 — playlist files only) — and **fixed**, because `Play all`
+        // and `All songs` are lists that already exist. Neither is assembled
+        // by the listener, so neither offers to be frozen into a copy.
+        source: RunSource::Fixed,
     }
 }
 
@@ -2433,7 +2503,7 @@ mod tests {
             album: None,
             artist: UNKNOWN_ARTIST.to_owned(),
             items: Vec::new(),
-            provenance: None,
+            source: RunSource::Fixed,
         };
         assert!(empty.is_empty());
         assert_eq!(empty.playing(0, &first), None);
@@ -2456,7 +2526,7 @@ mod tests {
             album: Some("Loop".to_owned()),
             artist: "A".to_owned(),
             items: vec![item("once"), item("again")],
-            provenance: None,
+            source: RunSource::Fixed,
         };
         // The position is exact and its path agrees, so it is the answer.
         assert_eq!(queue.playing(1, &path), Some(1));
@@ -2505,7 +2575,7 @@ mod tests {
             album: None,
             artist: UNKNOWN_ARTIST.to_owned(),
             items: Vec::new(),
-            provenance: None,
+            source: RunSource::Fixed,
         };
         assert!(empty.holds_exactly(&[]));
         assert!(!empty.holds_exactly(&flac.tracks));
@@ -2538,7 +2608,7 @@ mod tests {
             album: Some("Loop".to_owned()),
             artist: "A".to_owned(),
             items: vec![item("/m/a/1.flac"), item("/m/a/1.flac")],
-            provenance: None,
+            source: RunSource::Fixed,
         };
         assert!(queue.holds_exactly(&listed));
         // The repetition is not collapsed: one entry is not two.

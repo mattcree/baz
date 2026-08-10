@@ -603,15 +603,11 @@ next commit.
     none, because the lane is the route and the run's head states the list.
     The two empty states become one: the run's wins, because it names the
     gestures that fill the list.
-  - **Two densities, chosen and remembered.** The `Run` word in the place's
-    top-right decides whether the list is on screen, persisted as
-    `run_column` in `config.toml`. It is **not** bound to full-screen: iced
-    0.13 publishes no monitor enumeration, so baz cannot tell a
-    second-display full-screen from an only-display one, and `F11` stays a
-    *window* act that works in every place. The run column is
-    `RUN_MEASURE` 440 — half the measure a list that owns its surface gets —
-    and below a `SPLIT_FLOOR` 784 body the two columns re-stack into one with
-    the record as the run's head block.
+  - ~~**Two densities, chosen and remembered.**~~ **Reversed by the owner the
+    same day** — see *The `Run` word is gone* under Removed. The run column
+    stands whenever there is a run. It is `RUN_MEASURE` 440 — half the measure
+    a list that owns its surface gets — and below a `SPLIT_FLOOR` 784 body the
+    two columns re-stack into one with the record as the run's head block.
   - **The run costs the record nothing** wherever the record is height-bound,
     which is every window above the tightest one this product draws. At
     1280 × 860 with the returns lane open it costs 113 px, and the remedy is
@@ -1393,6 +1389,44 @@ next commit.
 
 ### Removed
 
+- **The `Run` word, and the two densities it chose between.** The owner:
+  *"remove the run button from the now playing"*, and, when asked to be sure
+  which control was meant, *"run button is what I'm referring to; just to be
+  clear"*.
+
+  **The run column is not what went — it is what stands.** The list, the rows,
+  the steppers, the ✕, the transfer `+`, drag-to-reorder, `Undo`, the
+  provenance-led summary and the virtual window are all untouched
+  (`every_queue_affordance_survives_the_merge` is unchanged and still green).
+  What went is the *word* in the place's top-right and everything that existed
+  only to remember which reading it had last chosen: `Message::ToggleRun`,
+  `App::run_column`, `App::toggle_run`, `App::set_run`, `persist_run_column`,
+  the `run_column` key in `config.toml`, the `run: bool` parameter of the
+  place's `view`, `theme::now_playing` (its last consumer was that word), and
+  the `clippy::struct_excessive_bools` expectation on `App`, which fell silent
+  by itself once the flag went.
+
+  **The run column now stands whenever there is a run, and nothing else decides
+  it.** That is a reversal of M1's *"the density is a stated control"*,
+  recorded as the owner's decision rather than argued with: a surface whose own
+  argument is *a run is a list and a cursor* was offering a control that hid
+  the list. It also removed a lie — with the density off and a stopped run
+  loaded, the place printed *"Nothing queued"* over a queue it was holding.
+
+  Two consequences worth naming. `Message::ShowTheRun` folded into
+  `Message::ShowNowPlaying`, because with no density to set it was that message
+  with a longer name; <kbd>Ctrl</kbd>+<kbd>U</kbd> now sends the message two
+  visible controls already send — the lane's `Now playing` row and the bar's
+  now-playing block — which is a simpler legality than the two-message
+  construction it replaces. And the run column lost its 48 px `clearance`
+  strip, which was air reserved for the word; step A6's `Ambient` door brings
+  its own back if it claims that corner.
+
+  A `config.toml` carrying `run_column = false` is read without harm and the
+  key is not written back — a listener who had the density off upgrades into
+  the surface with *more* on it, never into a blank half
+  (`the_retired_density_key_is_neither_written_nor_honoured`).
+
 - **`Pull`, and everything that existed only for it.** The owner: *"please can
   we remove pull since it doesn't make sense here."* Gone: the Library strip's
   `Pull` word and its tooltip, <kbd>Ctrl</kbd>+<kbd>R</kbd>, the record page's
@@ -1451,6 +1485,75 @@ next commit.
   things that would reverse this are recorded in `docs/BACKLOG.md`.
 
 ### Fixed
+
+- **`Now playing` shows what the bar names, whether or not it is sounding.**
+  The owner: *"it should probably just show whatever the now playing is
+  indicating, just not playing"*. The two halves are now read from the two
+  questions the bar under the place already answers and from nothing else — the
+  record column draws when `PlayerState::now_playing` answers, the run column
+  when `queue_list` does — so the place cannot contradict the bar beneath it. A
+  paused run, and a run restored from `session.toml` at launch, both draw.
+  The empty state is reachable in exactly one case: no record and no run.
+
+  **The record's column is now drawn even when there is no record**, which
+  fixed a composition that disagreed with itself: with a run standing and
+  nothing sounding, the body dropped to the re-stacked single column while the
+  field still painted `Ground::Split`, so a scrolling list sat under ambient
+  light at a full-width window. The field was right and the layout was the half
+  that was wrong. It also means a loaded run becoming a sounding one moves not
+  one pixel of the list.
+
+- **The `Nothing queued` state is inset like the rows it replaces.** The owner:
+  *"the nothing queued thing is hugging the left with no padding"*. It was
+  handed to a centring container at `width(Fill)`, which defeats the centring
+  and lands the block flush against the window's edge; it is now drawn in the
+  run column's own frame — the place's gutter, and the measure the rows are set
+  at. The other two empty states were checked and are correct: the wall's is a
+  shrink-width block genuinely centred, and the playlist page's sits inside
+  `place_pad()` on the same heading lane as the `Tracks` rule above it.
+
+- **The run column's scroll offset is reset on every route into the place.**
+  `queue_scroll`'s own note says it must be zero when the place is entered,
+  because iced 0.13 keys widget state by tree position and a remembered offset
+  windows rows the widget is not showing. Only `Message::ShowTheRun` wrote it;
+  the lane's `Now playing` row and the bar's now-playing block did not, so
+  those two arrived with a stale offset. Deleting that message forced the
+  question, and the reset moved to `note_place_left`, where every route passes.
+
+- **`Save as playlist` is offered only for a run the listener assembled.** The
+  owner: *"I still see save as playlist on the queue when playing a CD... we
+  should only be showing that in a situation where there isn't an existing
+  playlist"*, and then, narrowing it: *"nah I think adding more stuff to an
+  existing playlist is fine, that does not need a save -- it's a low bar to
+  edit a playlist"*.
+
+  `QueueVm::provenance: Option<String>` — the playlist file's name, or nothing
+  — becomes `QueueVm::source: RunSource`, the **three kinds of list** he named:
+  `Fixed` (a record's track listing, `All songs`, `Play all`), `Playlist(name)`
+  (reified from a file), `Assembled` (built by hand). The old reading could not
+  tell *a list that exists without a file* from *a list that does not exist at
+  all*, so a CD's run and a hand-built queue were the same `Unfiled` and both
+  were offered the creation act. The predicate wanted was never *has a file*
+  but **did the listener assemble this**, so it is spelled as a kind: a later
+  origin lands on `Fixed` and inherits *offer nothing*, which is the safe
+  direction.
+
+  The strip, in four states: `Fixed` says nothing (in a reserved slot of the
+  strip's own height, so `rows_top` stays true); `Saved as "Road Trip"`
+  unedited; **`From "Road Trip"`** once edited — it may not keep claiming to
+  *be* the file, which is the lie ADR-0024 §A5.2 removed, and it may not offer
+  a new one either; `Save as playlist`, live, for an assembled run **and for a
+  fixed run that has been edited**, because that has become something that
+  exists nowhere else and there is no file to go and edit instead.
+
+  **Nothing writes back.** ADR-0024 §1's decoupling and ADR-0023 §3's
+  origin-never-a-link are untouched: *"a low bar to edit a playlist"* is an
+  argument about how easy the playlist's page is to reach, not licence for the
+  queue to edit files somebody owns. The run's kind survives a quit
+  (`session.toml` gains `assembled`), so the strip offers the same word
+  tomorrow that it offers tonight; the *edit* flag is session state and
+  deliberately does not.
+
 
 - **The decode was enlarging covers smaller than its own tier.**
   `image::DynamicImage::thumbnail` scales **to fit**, in both directions, and

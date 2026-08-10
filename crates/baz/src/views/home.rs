@@ -915,6 +915,7 @@ mod tests {
             cursor: 1,
             position_ms: 192_000,
             provenance: None,
+            assembled: false,
         }
     }
 

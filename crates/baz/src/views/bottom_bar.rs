@@ -44,9 +44,9 @@
 //! Every addition here is still a **reserved slot**, which is the promise this
 //! module is built on: each [`theme::STAMP_W`] is that wide whether or not
 //! anything is playing, [`theme::CONTINUATION_H`] is that tall whether or not
-//! anything follows this track, and [`theme::now_playing`]'s border is 1 px in
-//! all four states so that finding the control with the pointer does not move
-//! the title under it.
+//! anything follows this track, and [`theme::now_playing_text`] carries no
+//! border in any state so that finding the control with the pointer does not
+//! move the title under it.
 
 use iced::widget::{
     Space, button, column, container, horizontal_rule, image as iced_image, mouse_area, row, stack,

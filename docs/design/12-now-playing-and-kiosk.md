@@ -702,7 +702,21 @@ type scale (§11.2). That keeps `now_playing.rs:24–31`'s standing claim true �
 *"the kiosk is this same surface at a larger size, and that is a property of the
 composition rather than a plan"* — for the merged surface as well.
 
-#### 3.4.3 `Run`: one word, remembered
+#### 3.4.3 `Run`: one word, remembered — **removed by the owner, 2026-08-10**
+
+> **This section is superseded and kept for the argument it made.** The owner,
+> hours after M1 shipped: *"remove the run button from the now playing"*, and,
+> asked which control he meant, *"run button is what I'm referring to; just to
+> be clear"*. **The run column stands whenever there is a run**; there is no
+> density, no word, and no config key. ADR-0029 §8.5 records the decision and
+> what it costs step A6 — which is that `Ambient` must now design its own
+> control rather than adding a second word to an existing pair.
+>
+> What survives of the text below is the *other* half of its argument: the
+> density was never bound to full-screen, and that is now true because there is
+> no mode left to bind. What does not survive is the premise that the surface
+> should offer the choice at all — a place whose argument is *a run is a list
+> and a cursor* was offering a control that hid the list.
 
 A labelled word-door in the place's top-right, beside `Ambient` (§3.2), visible
 at rest, persisted like every other place-level setting. On by default.
@@ -737,11 +751,13 @@ deleted. Three notes:
 - **`U` still means what it meant.** `keys.rs:206–223` spends the letter on
   *up next*, and up next is exactly the half of this surface that was the
   queue. The reflex lands on a surface that contains what it always contained.
-- **It also turns the run on**, and that is legal by an existing precedent
-  rather than by exception: ADR-0023's amendment blessed the context menu's
-  `Queue` item as *"two messages visible controls also send… the accelerator
-  resolving to its on-screen control by construction"*. `Ctrl+U` is the lane's
-  row plus the place's `Run` word, made for you. Both are visible.
+- ~~**It also turns the run on**~~ — **moot since 2026-08-10.** It was legal by
+  ADR-0023's amendment (*"two messages visible controls also send"*), and the
+  removal of the `Run` word removed the second message rather than the
+  legality: the chord now sends `Message::ShowNowPlaying`, which is what the
+  lane's row **and** the bar's now-playing block both send. One message, two
+  visible twins, no construction required — a simpler legality than the one it
+  replaces.
 
 **`Q` is not bound to the queue and has not been for some time.** The brief for
 this revision said it was; the code says otherwise, and the code is right:
@@ -3201,7 +3217,7 @@ receipt. It is also the owner's live ask.
 
 | # | Step | Disposition |
 |---|---|---|
-| **M1** | The merged surface: the run column, `Run`, `SPLIT_FLOOR` | **✅ Shipped** 2026-08-10 |
+| **M1** | The merged surface: the run column, ~~`Run`~~, `SPLIT_FLOOR` | **✅ Shipped** 2026-08-10 — **the `Run` word was removed by the owner the same day** (§3.4.3) |
 | **M2** | The door comes off; `Place::Queue` is deleted | **✅ Shipped** 2026-08-10 |
 | **A1** | *Delete the duplicate transport* | **✅ Shipped** — its surviving half rode in M1 |
 | **A2** | The hero decode; `NOW_PLAYING_MAX` deleted | **✅ Shipped** 2026-08-10 — **and it took A3 with it**, see below |
@@ -3210,7 +3226,7 @@ receipt. It is also the owner's live ask.
 | **A4** | The kiosk type scale | Survives, **+ the run** |
 | **A5** | The feed | Survives, unchanged |
 | **M4** | The run marker: the command field, ledger v1.1, the lane across a quit | New — after A5, per the order below |
-| **A6** | The toggles | Survives, unchanged |
+| **A6** | The toggles | Survives, **and must now design its own control** — `Run` is gone, so `Ambient` has no peer to sit beside (ADR-0029 §8.5) |
 | **A7** | The field drifts *(gated)* | Survives, **+ §5.4 term 3** |
 | **A8** | The tap and the spectrum *(gated)* | Survives, **+ a widened mask and a harder gate** |
 | **A9** | The meter | Survives, unchanged |
