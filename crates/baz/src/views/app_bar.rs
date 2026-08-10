@@ -45,14 +45,16 @@
 //! every width and in every place:
 //!
 //! ```text
-//!   baz  ·······························  ▤ ▤ ▤ ▤    ⚙    ─  □  ✕
-//!    1              2                        3       4       5
-//!   name          handle                    view    app    window
+//!   ▧  ·······························  ▤ ▤ ▤ ▤    ⚙    ─  □  ✕
+//!   1              2                       3       4       5
+//!  mark          handle                   view    app    window
 //! ```
 //!
-//! 1. **The window's name.** What this window *is* — the one thing a title bar
-//!    says that nothing else in baz says, and the only zone that is a
-//!    statement rather than a control (L8.5).
+//! 1. **The application's mark.** What this window *is* — the one thing a title
+//!    bar says that nothing else in baz says, and the only zone that is a
+//!    statement rather than a control (L8.5). It was the word `baz` until the
+//!    owner asked for the icon on 2026-08-10; [`mark`] records why it replaced
+//!    the word rather than joining it.
 //! 2. **The handle.** Never a tenant. It is the gesture surface: press and
 //!    travel moves the window, press twice maximises it. A control admitted
 //!    here would be a control that eats the window's own gesture.
@@ -102,14 +104,26 @@
 //! If this bar could not have carried them as they are, that would have been a
 //! fact about the bar to solve rather than a licence to redraw them.
 //!
-//! # Both reserved slots are reserved in every place
+//! # One slot is reserved in every place, and the other is not
 //!
-//! [`theme::APP_BAR_MARKS_W`] and [`theme::APP_BAR_BUTTONS_W`] are fixed
-//! widths, held whether or not anything is drawn in them. That is what lets
-//! this bar be *the same bar* on all seven places while still obeying
-//! ADR-0028's *absent, not disabled*: on a record's page, a playlist's, Now
-//! playing and Settings there are no works to hang, so there are no marks —
-//! and the gear and the buttons do not move a pixel to notice.
+//! [`theme::APP_BAR_MARKS_W`] is a fixed width, held whether or not anything is
+//! drawn in it. That is what lets this bar be *the same bar* on all seven
+//! places while still obeying ADR-0028's *absent, not disabled*: on a record's
+//! page, a playlist's, Now playing and Settings there are no works to hang, so
+//! there are no marks — and the gear does not move a pixel to notice.
+//!
+//! [`theme::APP_BAR_BUTTONS_W`] is a declaration of what the buttons *take*
+//! when they are drawn, and it is **not** held open when they are not. The two
+//! cases look alike and are not: the marks come and go *within a run*, as you
+//! walk between places, so a collapsing slot would be the frame sliding under
+//! the pointer; the buttons are settled once per process by `app::owns_chrome`,
+//! so there is no frame in which they arrive and nothing can be seen to move.
+//! Holding their 120 px would be dead gutter in every build that ships.
+//!
+//! What that does mean is that **the gear is the trailing control in one state
+//! and not in the other**, so the bar's alignment rule is written over *the
+//! trailing control* rather than over the gear — see the gutter note on the
+//! band below, and `theme::the_bars_trailing_ink_lands_on_the_windows_gutter`.
 //!
 //! # The whole band is the handle
 //!
@@ -150,8 +164,15 @@ use crate::{icon, theme};
 /// window chrome, remove the window controls..."*. Their slot is not held
 /// open: an empty reservation for a control that cannot exist in this state is
 /// the "present and inert" failure this bar's own admission rule refuses, and
-/// nothing to the left of them moves when they appear, because they sit at the
-/// trailing edge.
+/// `owns_chrome` is settled once per process, so there is no frame in which
+/// they arrive and nothing can be seen to move.
+///
+/// **This sentence used to end differently** — *"nothing to the left of them
+/// moves when they appear"* — and that was simply false: with the slot not
+/// held, everything to the left of them moves by 120 px when they appear, which
+/// is the price of not holding it. Worse, it was false by a further 16 px in
+/// the state that ships, because the row spent a seam on the `Space` that stood
+/// in for them. Both are fixed above; the claim is now the one that is true.
 pub(crate) fn view(
     window_w: f32,
     density: Option<crate::shelf::Density>,
@@ -160,33 +181,23 @@ pub(crate) fn view(
     ink: Ink,
 ) -> Element<'static, Message> {
     let room = theme::active();
-    // The window's name — what the platform title bar said before baz took the
-    // band over. Quiet: the metadata size in the faintest readout ink, which
-    // is one step below the group keys and two below anything you press. It is
-    // a **statement**, not a control (L8.5), and it is the one thing in this
-    // bar that is neither.
-    let name: Element<'static, Message> = container(
-        text("baz")
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .font(theme::MEDIUM)
-            .color(room.paper_faint)
-            .wrapping(text::Wrapping::None),
-    )
-    .width(Length::Fixed(theme::APP_BAR_NAME_W))
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .align_y(alignment::Vertical::Center)
-    .into();
+    let name = mark();
     let furniture = row![marks(density), gear(ink),]
         .spacing(theme::GAP_LG)
         .align_y(iced::Alignment::Center);
     // Absent rather than disabled, and absent rather than a held slot: see the
     // note on `owns_chrome` above.
-    let buttons: Element<'static, Message> = if owns_chrome {
-        window_controls(maximized, ink)
-    } else {
-        Space::with_width(Length::Shrink).into()
-    };
+    //
+    // **`None`, not a zero-width `Space`**, and the difference is 16 px of the
+    // owner's complaint. `Row::spacing` puts a seam between every *pair of
+    // children*, and a shrink-width `Space` is a child like any other: the bar
+    // spent a `GAP_LG` on a placeholder for a control that was not there, so
+    // the gear — the last thing actually drawn — stood at `W − HANG − GAP_LG`
+    // while this file claimed it stood at `W − HANG`. `Row::push_maybe` pushes
+    // nothing for a `None` (`iced_widget-0.13.4/src/row.rs:148`), so there is
+    // no child and therefore no seam.
+    let buttons: Option<Element<'static, Message>> =
+        owns_chrome.then(|| window_controls(maximized, ink));
     // The bar's one flexible region. It is a plain `Space` and **not** a
     // handle of its own: the whole bar is the handle (see below), so a second
     // one here would be two answers to one gesture.
@@ -195,7 +206,8 @@ pub(crate) fn view(
     // arrangement rather than a mirrored pair: the owner's *"as long as we
     // have a sensible consistent pattern"* is better served by one layout
     // everywhere than by two that are each correct on one platform.
-    let line = row![name, gap, furniture, buttons]
+    let line = row![name, gap, furniture]
+        .push_maybe(buttons)
         .spacing(theme::GAP_LG)
         .align_y(iced::Alignment::Center);
     // **The whole bar is the title bar's own gesture surface.** One
@@ -216,10 +228,19 @@ pub(crate) fn view(
         container(line)
             // One window gutter, law L1 — the same `HANG` the wall, both
             // strips, the now-playing bar and the index rail hang from. This
-            // bar spans the **window**, not the body, so its right edge is the
-            // window's `W − HANG`: the window buttons belong to the window and
-            // may not be inset by a lane.
-            .padding(theme::pad(theme::APP_BAR_PAD_V, theme::HANG))
+            // bar spans the **window**, not the body, so its edges are the
+            // window's: the window buttons belong to the window and may not be
+            // inset by a lane.
+            //
+            // **The two horizontal gutters differ, and both put ink on
+            // `HANG`.** Zone 1 holds a mark whose ink fills its own box, so the
+            // leading gutter is `HANG`. Zones 3–5 hold sprites centred in boxes
+            // twice their size, so the trailing gutter is `HANG` *less* that
+            // inset ([`theme::APP_BAR_HANG_R`]) — otherwise the box lands on the
+            // line and the drawing lands 8 px inside it, which is the other
+            // half of the 2026-08-10 defect. The arithmetic and the measurement
+            // are in `theme::app_bar_pad`.
+            .padding(theme::app_bar_pad())
             .width(Length::Fixed(window_w))
             // The now-playing bar's own ground. The window's two chrome bands
             // are one surface interrupted by the places between them, and
@@ -239,6 +260,56 @@ pub(crate) fn view(
         band,
         horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
     ]
+    .into()
+}
+
+/// **Zone 1 — the application's mark**, hanging from the window's leading
+/// gutter in its [`theme::APP_BAR_NAME_W`] slot.
+///
+/// The owner, 2026-08-10: *"we probably want an icon for our app to show in the
+/// bar"*. It replaces the word `baz`, which stood here at the metadata size in
+/// the faintest readout ink — and *replaces* rather than joins, which is the
+/// choice worth stating because the other one was available:
+///
+/// - **The slot does not move.** It was 24 for a 19.54 px word and it is 24 for
+///   a 16 px mark and one `GAP_SM`; the bar's budget, its drag gap and every
+///   coordinate in `docs/design/impl/app-bar/` are unchanged. Icon *and* word
+///   would have widened zone 1 to 48 and been the only ask of the three that
+///   cost the composition anything.
+/// - **They would say the same thing twice.** On a single-window product this
+///   zone's content never varies — it is `baz` in every place, in every state,
+///   forever — so it carries identity and nothing else, and a mark carries
+///   identity better than a three-letter lowercase word at the faintest ink in
+///   the room. It is the same reading that put a gear where the word `Settings`
+///   used to be (doc 10 §3.4), arrived at from the other direction: there the
+///   symbol had to earn a *door's* label, here there is no door and no label,
+///   only a statement.
+/// - **It is what the reference does.** The owner named it — *"similar to stuff
+///   like spotify"* — and that window's chrome carries the mark, not the word.
+///
+/// **It is still a statement and not a control** (L8.5): no button, no tooltip,
+/// no press of its own, which means it is 16 px more of the band that drags the
+/// window rather than 16 px less. That is also why the icon-only law (doc 10
+/// §3.1) does not reach it — the law is about a *control* naming itself with a
+/// symbol, and this names nothing because it does nothing. The same reasoning
+/// ADR-0040 §3 used to admit the three window buttons without a new licence.
+///
+/// What it costs is one accent that is not playback truth; [`icon::app_mark`]
+/// states the exception and its boundary, and ADR-0040's amendment states the
+/// reversal.
+fn mark() -> Element<'static, Message> {
+    container(
+        iced_image(icon::app_mark())
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX)),
+    )
+    .width(Length::Fixed(theme::APP_BAR_NAME_W))
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    // Leading, not centred: the mark's ink hangs from the window's gutter
+    // exactly as the word's did, and the slot's spare `GAP_SM` falls on the
+    // drag gap's side where nothing is looking at it.
+    .align_x(alignment::Horizontal::Left)
+    .align_y(alignment::Vertical::Center)
     .into()
 }
 
@@ -468,19 +539,95 @@ mod tests {
             .expect("the test module")
             .0
             .to_owned();
-        let at = src
-            .find("let buttons: Element<'static, Message> = if owns_chrome {")
-            .expect("the buttons are drawn behind the chrome question");
-        let arm = &src[at..src[at..].find("};").expect("the arm ends") + at];
         assert!(
-            arm.contains("window_controls(maximized, ink)"),
-            "the buttons are no longer drawn in the owns-chrome arm"
+            src.contains("owns_chrome.then(|| window_controls(maximized, ink))"),
+            "the buttons are no longer drawn behind the chrome question"
         );
         assert_eq!(
             src.matches("window_controls(maximized, ink)").count(),
             1,
             "the buttons are drawn from more than one place, so one of them \
              can escape the condition"
+        );
+        // **And absent means no child, not a child of no width.** `Row`'s
+        // spacing falls between every pair of *children*, so a placeholder
+        // `Space` still collects a `GAP_LG` and pushes everything to its left
+        // 16 px off the window's gutter. That is exactly what shipped, and it
+        // is 16 of the 25 px the owner saw between the gear and the index rail
+        // on 2026-08-10. `push_maybe(None)` pushes nothing
+        // (`iced_widget-0.13.4/src/row.rs:148`).
+        assert!(
+            src.contains(".push_maybe(buttons)"),
+            "the buttons are no longer pushed conditionally into the row"
+        );
+        assert!(
+            !src.contains("Space::with_width(Length::Shrink)"),
+            "a zero-width placeholder is back in the bar's row, and it takes a \
+             GAP_LG seam with it — the trailing control no longer stands on \
+             the window's gutter"
+        );
+    }
+
+    /// **The trailing gutter is the ink gutter, and the view spends it from
+    /// one place.**
+    ///
+    /// The owner, 2026-08-10: *"the settings cog is padded in quite a bit and
+    /// does not align with the rail"*. The arithmetic, the measurement and the
+    /// rule live in `theme::app_bar_pad` and
+    /// `theme::the_bars_trailing_ink_lands_on_the_windows_gutter`; what this
+    /// file has to hold is that it **asks for them** rather than rebuilding a
+    /// padding of its own, because a view that spelled `HANG` on both edges
+    /// would silently put the bar's trailing glyph 8 px inside the line the
+    /// index rail draws its letters on and nothing would look broken.
+    #[test]
+    fn the_band_hangs_from_the_gutter_the_theme_derives() {
+        let source = source();
+        let code = source.split("#[cfg(test)]").next().expect("a head");
+        assert!(
+            code.contains(".padding(theme::app_bar_pad())"),
+            "the band no longer takes its padding from the theme"
+        );
+        assert!(
+            !code.contains("theme::pad(theme::APP_BAR_PAD_V"),
+            "the band has gone back to a symmetric gutter"
+        );
+    }
+
+    /// **Zone 1 is the application's mark, and it is not a control.**
+    ///
+    /// The owner, 2026-08-10: *"we probably want an icon for our app to show in
+    /// the bar"*. Two things are worth pinning and they are both about what
+    /// zone 1 *is not*:
+    ///
+    /// 1. **It is not on the glyph sheet.** [`icon::app_mark`] is the
+    ///    launcher's own full-colour PNG, decoded once; `icon::handle` is a
+    ///    coverage sprite the room inks. Drawing zone 1 through `handle` would
+    ///    mean somebody had flattened the mark to a monochrome outline and made
+    ///    a second master of it.
+    /// 2. **It is not a button.** L8.5's statement/control split is the whole
+    ///    reason this zone can be a bare symbol with no tooltip, and it is also
+    ///    what keeps those 16 px part of the band that drags the window. A
+    ///    `button` here would take the press the title bar needs.
+    #[test]
+    fn the_windows_name_is_the_applications_mark_and_not_a_control() {
+        let source = source();
+        let code = source.split("#[cfg(test)]").next().expect("a head");
+        let rest = code.split_once("fn mark()").expect("zone 1").1;
+        let body = &rest[..rest.find("\n}\n").expect("a function ends")];
+        assert!(
+            body.contains("icon::app_mark()"),
+            "zone 1 no longer draws the application's own mark"
+        );
+        assert!(
+            !body.contains("icon::handle(") && !body.contains("Glyph::"),
+            "zone 1 draws a sheet glyph: the application's icon is a \
+             full-colour asset with one master (packaging/icons), and a \
+             monochrome outline of it would be a second"
+        );
+        assert!(
+            !body.contains("button(") && !body.contains("tooltip("),
+            "zone 1 has become a control, which takes a press the band needs \
+             to drag the window and spends a licence L8.5 does not require"
         );
     }
 
@@ -625,7 +772,8 @@ mod tests {
         let source = source();
         let code = source.split("#[cfg(test)]").next().expect("a head");
         assert!(
-            code.contains("let line = row![name, gap, furniture, buttons]"),
+            code.contains("let line = row![name, gap, furniture]")
+                && code.contains(".push_maybe(buttons)"),
             "the bar's zones are no longer in the order the pattern states"
         );
         assert!(
