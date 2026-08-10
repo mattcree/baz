@@ -423,6 +423,15 @@ Newest first. Each was asked for in conversation and is now in the product.
   in the log, which is the evidence needed to fix it properly. If it recurs,
   fix the race — do not weaken the assertion.
 
+- **Opus is not played, and therefore not listed.** **Closed 2026-08-10 on
+  evidence rather than deferred**: the owner's library was scanned for
+  `.opus`, `.ogg` and `.oga` across `~/Music` and both NAS shares and holds
+  **zero** of them. The reasoning below stands unchanged and is kept because it
+  is what a future request has to argue against — but the question *"is it
+  worth a C dependency"* had an unexamined premise, and the premise was false.
+  It reopens if a beta tester asks, and the README's known limitations say so
+  out loud rather than leaving it to be discovered.
+
 - **Opus is not played, and therefore not listed.** *(Decided 2026-08-07;
   `.ogg`/Vorbis shipped in the same commit and plays.)* `.opus` is out of
   `AUDIO_EXTENSIONS` and `AudioFormat::is_decodable` returns `false` for it,

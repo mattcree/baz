@@ -47,6 +47,54 @@
 > **What still comes before everything:** a defect the owner is looking at.
 > A report from him is a functional change by definition, because the thing he
 > is looking at is the product.
+>
+> ## The public beta is the goal, and this list is its scope
+>
+> The owner, 2026-08-10: *"can we start to hone in on what a public beta would
+> look like? can we trim anything ongoing/in the backlog so we can focus on
+> getting that ready?"*
+>
+> **The bar he chose: the core loop feels complete.** Not *"it won't break"*
+> (which would have cut the interface work) and not *"it looks finished"*
+> (which would have pulled in the ambient surface and become a 1.0). So the
+> beta promises: **you can find your music, play it, make lists of it, and
+> nothing baz does loses or corrupts anything** — and the few things it cannot
+> do are stated on the front page rather than discovered.
+>
+> **Everything in `## Next` is a beta blocker.** That is the whole of what the
+> list now means. Nothing joins it that is not, and an item finishing does not
+> entitle the next idea to the slot.
+>
+> **What is deliberately not in the beta**, recorded here rather than left to
+> be re-argued each time somebody reads the backlog and finds something
+> appealing:
+>
+> - **The ambient `Now playing`** — the spectrum, the meter, the facts feed
+>   (ADR-0029, design 12 steps A2–A9). The largest unbuilt thing in the
+>   product and the most tempting; it is a 1.0 surface.
+> - **Kiosk mode**, for the same reason and because iced cannot enumerate
+>   monitors.
+> - **Vibe- or prompt-generated playlists** — designed, unmerged, and a whole
+>   feature rather than a finish.
+> - **Borderless window chrome and the iced fork.** The app bar lands with the
+>   system decorations still on; a forked dependency in a first public release
+>   is a cost with no beta-shaped benefit.
+> - **Opus.** Closed rather than deferred: the owner's library was scanned on
+>   2026-08-10 and holds **zero** `.opus`, `.ogg` or `.oga` files across
+>   `~/Music` and both NAS shares. The refusal in *Known gaps* stands on its
+>   own evidence and becomes a documented limitation, not a dependency
+>   decision. It reopens only if a beta tester asks.
+> - **Resize smoothness** — the owner's own *"lower priority"*, measured and
+>   left with its numbers.
+> - **The engine's remaining known gaps** — sample-accurate splices, the
+>   Symphonia 0.6 upgrade, the density cache's decode size, FLAC-in-MP4's ALAC
+>   label, AAC's missing gapless trim. Each is real, none is a reason a
+>   listener would put baz down, and **each must appear in the README's known
+>   limitations** — which is the item that converts a gap from a defect into an
+>   honest promise.
+>
+> **The one thing that outranks this list** is unchanged: a defect the owner is
+> looking at. A beta scope is not a reason to tell him his own product is fine.
 
 ## Next
 
@@ -143,9 +191,29 @@
    `Ctrl+B` exists. (The group-key row itself is current again — the six words
    and `1`–`6` were corrected when `A–Z` came back.)
 
+9. **Ship the public beta.** The last item by construction: it is the one
+   that makes the eight above reach anybody. `v0.1.0` is prepared up to the
+   tag and `docs/RELEASING.md` holds the owner's three commands, but a *beta*
+   asks two more things of the release than a private tag does. **Flathub** —
+   an account and a PR to `flathub/flathub`, which is the owner's and has
+   never been an agent's; the manifest wants `tag` and `commit` filled from
+   the cut tag. And **the three platform builds have still never run in CI**:
+   the dry run's fuzz failure gated them, so the one part of the release path
+   nobody has exercised is the part that produces the artefacts. Run it before
+   the tag rather than discovering it after.
+
 ## Doing
 
-*Nothing in flight.*
+- **One app bar on every screen** — the owner's *"we should have replaced the
+  top window chrome with an app bar which has this + settings + the window
+  controls, the same on all screens"*, with `Play all` off the strip and the
+  display options in. **The last interface work before the freeze**, by his
+  own call: *"let it land, then freeze"*. Borderless chrome is **not** in it —
+  the system decorations stay for the beta, and the iced fork stays a question.
+- **A 29-byte malformed FLAC asks baz for 4 GB** — `## Next` item 1, in flight.
+- **What resize actually costs** — measurement only, no product change, at the
+  owner's *"lower priority"*. Its numbers go into `BACKLOG.md`'s treacle
+  section and nothing ships.
 
 ## Waiting on the owner
 
