@@ -107,8 +107,28 @@ pub enum Glyph {
     Speaker,
     /// Speaker, muted: the same cone with a cross where the waves were.
     SpeakerMuted,
-    /// Close: the dismissal cross, for the panels in the right-hand rail.
+    /// Close: the dismissal cross, for the panels in the right-hand rail —
+    /// and, since ADR-0040, for the app bar's own window control, which is
+    /// the same mark meaning the same thing about a larger object.
     Close,
+    /// **Minimise**: one short bar low in the box — the window put down.
+    ///
+    /// The first of the three window controls (ADR-0040 §3). It is
+    /// deliberately *not* [`Self::Minus`]: a minus is a stepper's other half
+    /// and sits on the box's centre line, whereas this bar sits low, which is
+    /// where every desktop draws it and is the whole of what distinguishes
+    /// "put the window down" from "one less". Two glyphs rather than one
+    /// shared sprite, because a sheet where one drawing means two things is a
+    /// sheet a reader has to be told about.
+    WindowMinimise,
+    /// **Maximise**: an empty square at the set's stroke — the window filling
+    /// the screen.
+    WindowMaximise,
+    /// **Restore**: [`Self::WindowMaximise`]'s square with a second one behind
+    /// its top-right corner — the window given back its old size. The pair is
+    /// self-depicting the way the two lane marks are: what differs between the
+    /// two drawings is what differs on screen.
+    WindowRestore,
     /// Search: the magnifier that marks the well (doc 10 §4.1). Not a
     /// control's mark — the well is the control; this is its label.
     Magnifier,
@@ -295,6 +315,51 @@ const SPEAKER_MUTED: &[Outline] = &[
 const CLOSE: &[Outline] = &[
     &[(0.16, 0.26), (0.26, 0.16), (0.84, 0.74), (0.74, 0.84)],
     &[(0.16, 0.74), (0.26, 0.84), (0.84, 0.26), (0.74, 0.16)],
+];
+
+/// Minimise — **one bar, low in the box** (ADR-0040 §3).
+///
+/// At the set's 0.145 stroke, and short of the box's full measure so that it
+/// reads as *a window laid down* rather than as a rule. Its distance from
+/// [`MINUS`] is the whole point: the stepper's bar is centred and full-measure,
+/// this one sits at the box's lower third and is inset. Symmetric about the
+/// vertical axis, so the mark is centred in its button.
+const WINDOW_MINIMISE: &[Outline] = &[&[
+    (0.220, 0.6650),
+    (0.780, 0.6650),
+    (0.780, 0.8100),
+    (0.220, 0.8100),
+]];
+
+/// Maximise — **an empty square at the set's stroke**: the window filling the
+/// screen (ADR-0040 §3).
+///
+/// Outer edge 0.18…0.82, four bars 0.145 thick, so the hole is 0.35 across —
+/// wide enough to read as *empty* at 16 px, which is what keeps it off
+/// [`LANE_FRAME`]'s three-sided mark and off a filled block.
+const WINDOW_MAXIMISE: &[Outline] = &[
+    &[(0.18, 0.180), (0.82, 0.180), (0.82, 0.325), (0.18, 0.325)],
+    &[(0.18, 0.675), (0.82, 0.675), (0.82, 0.820), (0.18, 0.820)],
+    &[(0.18, 0.180), (0.325, 0.180), (0.325, 0.820), (0.18, 0.820)],
+    &[(0.675, 0.180), (0.82, 0.180), (0.82, 0.820), (0.675, 0.820)],
+];
+
+/// Restore — **two offset squares**: the one in front is the window at the
+/// size it goes back to, the one behind is the screen it is coming off.
+///
+/// Only the back square's top and right arms are drawn, which is what an
+/// occluded square looks like and what every desktop draws here. The front
+/// square is [`WINDOW_MAXIMISE`]'s construction at 0.12…0.90, down and left;
+/// the two never touch, so the offset is legible rather than a smudge.
+const WINDOW_RESTORE: &[Outline] = &[
+    // The front square.
+    &[(0.12, 0.300), (0.70, 0.300), (0.70, 0.445), (0.12, 0.445)],
+    &[(0.12, 0.755), (0.70, 0.755), (0.70, 0.900), (0.12, 0.900)],
+    &[(0.12, 0.300), (0.265, 0.300), (0.265, 0.900), (0.12, 0.900)],
+    &[(0.555, 0.300), (0.70, 0.300), (0.70, 0.900), (0.555, 0.900)],
+    // The back square, its left and bottom hidden behind the front one.
+    &[(0.30, 0.100), (0.88, 0.100), (0.88, 0.245), (0.30, 0.245)],
+    &[(0.735, 0.100), (0.88, 0.100), (0.88, 0.700), (0.735, 0.700)],
 ];
 
 /// The magnifier's ring — a **keyhole outline**, because [`Glyph::covers`]
@@ -1011,10 +1076,13 @@ impl Glyph {
         Self::LaneExpanded,
         Self::LaneCollapsed,
         Self::Shuffle,
+        Self::WindowMinimise,
+        Self::WindowMaximise,
+        Self::WindowRestore,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 25;
+    const COUNT: usize = 28;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -1027,6 +1095,9 @@ impl Glyph {
             Self::Speaker => SPEAKER,
             Self::SpeakerMuted => SPEAKER_MUTED,
             Self::Close => CLOSE,
+            Self::WindowMinimise => WINDOW_MINIMISE,
+            Self::WindowMaximise => WINDOW_MAXIMISE,
+            Self::WindowRestore => WINDOW_RESTORE,
             Self::Magnifier => MAGNIFIER,
             Self::Gear => GEAR,
             Self::Plus => PLUS,
@@ -1076,6 +1147,9 @@ impl Glyph {
             Self::LaneExpanded => 22,
             Self::LaneCollapsed => 23,
             Self::Shuffle => 24,
+            Self::WindowMinimise => 25,
+            Self::WindowMaximise => 26,
+            Self::WindowRestore => 27,
         }
     }
 
@@ -1597,6 +1671,88 @@ mod tests {
                     "close is not top-bottom symmetric at {row},{column}"
                 );
             }
+        }
+    }
+
+    /// **The three window controls are three different drawings, on the set's
+    /// stroke band, and none of them is a glyph the sheet already had**
+    /// (ADR-0040 §3).
+    ///
+    /// Asserted rather than looked at, because these three are the marks a
+    /// reader is most likely to mistake for each other and for
+    /// [`Glyph::Minus`] — a minimise bar and a stepper's minus are the same
+    /// shape one position apart, and a maximise square and the lane marks'
+    /// frame are the same shape one arm apart. The frames in
+    /// `docs/design/impl/app-bar/` show them at size; this holds the geometry
+    /// that makes them tellable.
+    #[test]
+    fn the_window_controls_are_three_marks_on_the_sets_stroke() {
+        // **Minimise is a bar, and it is not the stepper's minus.** Both are
+        // one horizontal run at the set's stroke; what separates them is
+        // where they sit and how wide they are, so both are asserted.
+        let minimise = runs_along(Glyph::WindowMinimise, 0.74);
+        assert_eq!(minimise.len(), 1, "minimise is one bar");
+        let (start, width) = minimise[0];
+        assert!(
+            (0.55..0.60).contains(&width),
+            "the minimise bar is {width:.3} wide — it should be inset from the \
+             box, which is what keeps it off a full-measure rule"
+        );
+        assert!(
+            (start - (1.0 - start - width)).abs() < 0.01,
+            "the minimise bar is not centred in its box"
+        );
+        assert!(
+            runs_along(Glyph::WindowMinimise, 0.50).is_empty(),
+            "the minimise bar is on the box's centre line, where it would be \
+             `Minus` with a different name"
+        );
+        assert!(
+            !runs_along(Glyph::Minus, 0.50).is_empty(),
+            "…and the stepper's minus still is, which is the contrast"
+        );
+
+        // **Maximise is an empty square**: a cut across its middle meets two
+        // arms with a hole between them, and the arms are the set's stroke.
+        let across = runs_along(Glyph::WindowMaximise, 0.50);
+        assert_eq!(across.len(), 2, "maximise is a square, not a filled block");
+        for (_, width) in &across {
+            assert!(
+                (0.14..=0.15).contains(width),
+                "a maximise arm is {width:.3} thick, outside the set's band"
+            );
+        }
+        let hole = across[1].0 - (across[0].0 + across[0].1);
+        assert!(
+            hole > 0.3,
+            "the square's hole is {hole:.3} — too tight to read as empty at 16 px"
+        );
+
+        // **Restore is two squares, offset**: a cut through the back square's
+        // right arm, above the front square entirely, meets exactly one run.
+        let high = runs_along(Glyph::WindowRestore, 0.18);
+        assert_eq!(high.len(), 1, "the back square's top is one bar");
+        let mid = runs_along(Glyph::WindowRestore, 0.50);
+        assert_eq!(
+            mid.len(),
+            3,
+            "a cut through both squares meets the front square's two arms and \
+             the back square's right one — which is what *offset* means"
+        );
+
+        // And no two of the sheet's marks are the same drawing. Cheap and
+        // total: the sprite bytes, over the whole sheet.
+        let mut seen: Vec<(Glyph, Vec<u8>)> = Vec::new();
+        for glyph in Glyph::ALL {
+            let pixels = rasterize(glyph, [255, 255, 255]);
+            for (other, earlier) in &seen {
+                assert!(
+                    *earlier != pixels,
+                    "{glyph:?} and {other:?} rasterize identically — one \
+                     drawing cannot mean two things"
+                );
+            }
+            seen.push((glyph, pixels));
         }
     }
 

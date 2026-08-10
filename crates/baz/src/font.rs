@@ -617,7 +617,10 @@ mod tests {
     /// with
     /// [`theme::GAP_XS`] of padding on both sides and [`theme::GAP_MD`]
     /// between them, sitting after the search well and the gap that separates
-    /// the two clusters. The right of the bar holds the gear alone at rest.
+    /// the two clusters. **Nothing stands to the row's right any more**: the
+    /// gear went to the app bar and `Play all` went altogether (ADR-0040), so
+    /// the strip's whole tenancy is this row, the transient notes, and the
+    /// well at the widths the lane cannot hold it.
     /// Measured against the 1280 px window baz opens at — and the counts,
     /// which now live *inside* the well (doc 10 §7 step 2), are measured
     /// against the well's own text lane rather than against the strip.
@@ -627,19 +630,19 @@ mod tests {
         let keys = arrangement_row(&medium);
         // **At the shipped window the strip has no well**: the lane holds it
         // (ADR-0030's search amendment), so the strip's left cluster is the
-        // states and the acts, hanging from the window gutter, and the strip's
-        // own width is the window less the expanded lane.
+        // states alone, hanging from the window gutter, and the strip's own
+        // width is the window less the expanded lane.
         assert!(
             !theme::strip_holds_the_well(1280.0),
             "at the shipped window the well is the lane's"
         );
         let strip = 1280.0 - theme::sidebar_w(1280.0, true);
-        let left = theme::HANG + keys + theme::GAP_XL + crate::views::top_bar::ACTS_W;
+        let left = theme::HANG + keys;
 
-        // The strip's right side at rest is the gear alone — a
-        // `TRANSPORT_HIT` square, not a word with a reserved width (doc 10
-        // §7 step 1) — over the window's own gutter.
-        let right = theme::TRANSPORT_HIT + theme::HANG;
+        // The strip's right side at rest is the window's own gutter and
+        // nothing else — the gear that used to stand there is the app bar's
+        // now (ADR-0040 §1).
+        let right = theme::HANG;
 
         assert!(
             left + theme::GAP_LG + right <= strip,
@@ -648,7 +651,7 @@ mod tests {
             left + theme::GAP_LG + right
         );
         // And the words really are the bulk of the cluster, so this is
-        // measuring the row rather than the acts beside it.
+        // measuring the row rather than the air beside it.
         assert!(keys > 200.0 && keys < 420.0, "the key row is {keys:.1} px");
     }
 
@@ -875,17 +878,13 @@ mod tests {
             "and it is the cheaper of the two sixth words this row has carried"
         );
 
-        // The act: the triangle, its word, and their `GAP_SM` padding.
-        // `Pull` and `Shuffle` were measured here beside it until 2026-08-10,
-        // when the owner removed the first and moved the second to the
-        // now-playing bar.
-        let word = |label: &str| medium.width(label, theme::SIZE_META);
-        let acts = 2.0 * theme::GAP_SM + theme::ICON_PX + theme::GAP_SM + word("Play all");
-        assert!(
-            acts <= crate::views::top_bar::ACTS_W,
-            "the acts cluster measures {acts:.2} px against a declared {}",
-            crate::views::top_bar::ACTS_W
-        );
+        // The acts cluster was measured here — the triangle, `Play all`, and
+        // their `GAP_SM` padding — until the owner removed the word on
+        // 2026-08-10 (*"please remove the 'Play all' button at the top of the
+        // library"*, ADR-0040). `Pull` and `Shuffle` had gone the same
+        // morning. There is no act left in this strip to measure, and a
+        // measurement of a control that is not drawn is exactly the rot the
+        // declaration/measurement pairing exists to prevent.
 
         // The `Playlists` door was measured here until ADR-0030 §5 removed
         // it: the returns lane is the resident index of lists, so the strip
@@ -893,6 +892,36 @@ mod tests {
         // freed is spent in `theme`'s own budget arithmetic
         // (`the_strip_holds_its_tenants_at_the_single_line_floor`), which is
         // where a *width* claim belongs.
+    }
+
+    /// **The app bar's name fits its declared slot** — L9's declaration/
+    /// measurement pairing, applied to the one word in the window's own chrome
+    /// (ADR-0040 §2).
+    ///
+    /// `baz` is drawn at the metadata size in the Medium face, in a
+    /// [`theme::APP_BAR_NAME_W`] box. The declaration is only worth asserting
+    /// if the face is measured against it, which is the same discipline the
+    /// arrangement row keeps — and it matters more here than it looks, because
+    /// the slot's neighbour is a **fill**: a word that overran would push the
+    /// drag region rather than clip, and the bar would silently stop being the
+    /// geometry the budget adds up.
+    #[test]
+    fn the_app_bars_name_fits_its_declared_slot() {
+        let medium = Face::parse(SANS_MEDIUM);
+        let name = medium.width("baz", theme::SIZE_META);
+        assert!(
+            name <= theme::APP_BAR_NAME_W,
+            "the window's name measures {name:.2} px against a declared {}",
+            theme::APP_BAR_NAME_W
+        );
+        // Not a slot ten times the word: the slack is stated so that a
+        // reservation nothing needs would be visible rather than comfortable.
+        let slack = theme::APP_BAR_NAME_W - name;
+        assert!(
+            (1.0..8.0).contains(&slack),
+            "the name's reservation carries {slack:.2} px of slack: it is \
+             either overflowing or reserving room for a word that is not there"
+        );
     }
 
     /// **The returns lane holds its head's three words** at the measure the

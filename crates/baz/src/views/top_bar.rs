@@ -1,5 +1,4 @@
-//! The slim Library strip: **how the wall is arranged and what may be done to
-//! it**, with the route to the Settings in the corner.
+//! The slim Library strip: **how the wall is arranged**.
 //!
 //! # What it is now, after the well left
 //!
@@ -13,14 +12,28 @@
 //! should really be in the sidebar"* — because the query is the frame's state
 //! and the frame's resident surface is the lane.
 //!
-//! What is left is one subject, stated in the two vocabularies doc 10 §0.3
-//! separates: **the states** — A–Z · ARTIST · YEAR · GENRE · ADDED · PLAYED,
-//! caps and tracked, one of them current — and **the act** — `Play all`, one
-//! sentence-case word behind the play triangle. Narrow-then-arrange used to read
-//! left to right across this strip; the narrowing is in the lane now and the
-//! strip begins at the arrangement. The gear stays in the corner because it is
-//! the *application's* affair rather than the frame's, and the lane's head is
-//! a closed set of three (ADR-0030's amendment).
+//! What is left, since ADR-0040, is **one vocabulary and one subject**: the
+//! states — A–Z · ARTIST · YEAR · GENRE · ADDED · PLAYED, caps and tracked,
+//! one of them current. Narrow-then-arrange used to read left to right across
+//! this strip; the narrowing is in the lane now and the strip is the
+//! arrangement and nothing else.
+//!
+//! # Two more tenants left on 2026-08-10, and neither was relocated here
+//!
+//! `Play all` **went**, on the owner's *"please remove the 'Play all' button
+//! at the top of the library"*. It is not elsewhere: it was the wall's one
+//! act, the owner asked for it to go, and a verb quietly re-homed into the
+//! window's chrome would have been the removal not done.
+//!
+//! The **gear** went *up*, into [`crate::views::app_bar`] — the same control,
+//! the same message, the same corner, now resident in all seven places rather
+//! than only this one. That is what "the application's affair rather than the
+//! frame's" always implied and what a Library-only strip could not deliver.
+//!
+//! Both departures make this strip **smaller**, which is the point worth
+//! stating against the owner's standing complaint (*"just adding stuff into
+//! that top bar isn't good"*, 2026-08-09): the answer to a crowded strip was
+//! not a better arrangement of its tenants but two fewer of them.
 //!
 //! # The well is still drawn here at the widths the lane cannot hold it
 //!
@@ -33,13 +46,12 @@
 
 use baz_core::index::GroupKey;
 use iced::widget::{
-    Space, button, column, container, horizontal_rule, image as iced_image, mouse_area, row, stack,
-    text, text_input, tooltip,
+    Space, button, column, container, horizontal_rule, image as iced_image, row, stack, text,
+    text_input,
 };
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf, search_id};
-use crate::motion::{Control, Ink};
 
 use crate::{icon, theme};
 
@@ -73,17 +85,6 @@ pub(crate) const WELL_W: f32 = 200.0;
 /// word that is not there.
 pub(crate) const KEYS_W: f32 = 360.0;
 
-/// The act's reserved width (logical px): the triangle, its word, and their
-/// padding.
-///
-/// It was 182 with `Pull` and `Shuffle` in it. Both left on 2026-08-10 on the
-/// owner's decision — `Pull` removed outright, `Shuffle` **moved** to the
-/// now-playing bar when it stopped being an act and became a property of the
-/// player. A slot still reserving room for a control that is elsewhere is the
-/// strip's budget lying about what it holds (ADR-0026 §3's *asserted in
-/// code*), so the reservation follows the words: 182 → 144 → 88.
-pub(crate) const ACTS_W: f32 = 88.0;
-
 /// The slim Library strip — one line at [`theme::TOP_BAR_SPLIT`] and above,
 /// two below it, a hairline rule under either.
 ///
@@ -94,10 +95,10 @@ pub(crate) const ACTS_W: f32 = 88.0;
 /// the well is a tenant at all is [`theme::strip_holds_the_well`]'s answer,
 /// read off `shelf.window_w`.
 ///
-/// **The split is the charter drawn** (doc 10 §4.3): below
-/// [`theme::TOP_BAR_SPLIT`] the frame's furniture — the well and the gear —
-/// stays on the window line, and the library's verbs and states take a line of
-/// their own. Nothing hides, nothing overflows, no menu appears; every control
+/// **The split is the charter drawn** (doc 10 §4.3), as ADR-0040 leaves it:
+/// below [`theme::TOP_BAR_SPLIT`] the frame's furniture — the well, and the
+/// transient notes beside it — stays on the window line, and the library's
+/// states take a line of their own. Nothing hides, nothing overflows, no menu appears; every control
 /// keeps its exact form. It can only be reached where the well is a tenant:
 /// once the well is in the lane the strip's tenants sum to 608 against a
 /// narrowest possible strip of 720, asserted in `theme.rs`. Below
@@ -107,7 +108,7 @@ pub(crate) const ACTS_W: f32 = 88.0;
 /// The resolved height is [`theme::top_bar_h`], and `app.rs`'s viewport
 /// estimate reads the same function — the pair of tokens and the breakpoint
 /// are one decision, not two that must agree.
-pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Message> {
+pub(crate) fn view(shelf: &Shelf, strip_width: f32) -> Element<'_, Message> {
     let room = theme::active();
     let holds_well = theme::strip_holds_the_well(shelf.window_w);
     let mut keys_row = row![]
@@ -120,13 +121,10 @@ pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Mes
     // fixed-width slots — `font.rs` measures the words against the
     // reservations — so the budget the law adds up is the geometry actually
     // drawn, and the left cluster's landmarks survive a resize (doc 10
-    // §4.2: at 1440 and 1920 the keys, acts and doors do not move relative
-    // to the well; slack is air, not drift).
+    // §4.2: at 1440 and 1920 the keys do not move relative to the well;
+    // slack is air, not drift).
     let keys = container(keys_row)
         .width(Length::Fixed(KEYS_W))
-        .align_x(alignment::Horizontal::Left);
-    let acts = container(draws())
-        .width(Length::Fixed(ACTS_W))
         .align_x(alignment::Horizontal::Left);
     // The status row holds only the transient notes — the counts went with
     // the well, first into it (doc 10 §4.1) and now into the lane's own
@@ -171,19 +169,14 @@ pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Mes
         // to split — asserted in `theme.rs`, not assumed here.
         //
         // The frame line: the well, the transient notes in the slack, then the
-        // gear at the corner. The library line: the arrangement's states, then
-        // the wall's acts. The seam is the charter's own division — frame
-        // furniture above, library verbs below — and both lines keep every
-        // control at its exact single-line form.
-        let frame_line = row![
-            well(shelf, WELL_W),
-            Space::with_width(Length::Fill),
-            status,
-            settings_gear(ink),
-        ]
-        .spacing(theme::GAP_LG)
-        .align_y(iced::Alignment::Center);
-        let library_line = row![keys, acts]
+        // notes in the slack. The library line: the arrangement's states.
+        // The seam is the charter's own division — frame furniture above, the
+        // library's own words below — and both lines keep every control at
+        // its exact single-line form.
+        let frame_line = row![well(shelf, WELL_W), Space::with_width(Length::Fill), status]
+            .spacing(theme::GAP_LG)
+            .align_y(iced::Alignment::Center);
+        let library_line = row![keys]
             .spacing(theme::GAP_XL)
             .align_y(iced::Alignment::Center);
         return column![
@@ -198,7 +191,6 @@ pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Mes
         ]
         .into();
     }
-    status = status.push(settings_gear(ink));
     // **The left cluster**, in the order the gestures happen: narrow, arrange,
     // then play or draw. The narrowing is in the lane at every width the lane
     // can hold it, so at those widths the cluster begins at the arrangement
@@ -214,7 +206,7 @@ pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Mes
             row![
                 // Held apart by the ladder's largest gap so they read as two
                 // groups on one line rather than as ten controls.
-                cluster.push(keys).push(acts),
+                cluster.push(keys),
                 // The strip's one flexible region. The row's `GAP_SM` counts
                 // once each side of it, which is the 16 px status lead the
                 // budget arithmetic reserves (doc 10 §4.2) — at the regime
@@ -235,98 +227,6 @@ pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Mes
         .padding(theme::pad(theme::TOP_BAR_PAD_V, theme::HANG)),
         horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
     ]
-    .into()
-}
-
-/// **The wall's one act**: `Play all`, beside the arrangement.
-///
-/// # Why it is here and not in the transport
-///
-/// It is a question asked *of the collection* — "play what I am looking at, in
-/// order" — and the answer is decided entirely by what the wall is showing.
-/// That is this bar's subject (L8.1: a control goes where what it reads is).
-/// The now-playing bar's subject is the record that is sounding; putting this
-/// there would also mean moving the transport, which the product's standing rules does
-/// not permit for tidiness and would not be tidy anyway.
-///
-/// # `Shuffle` stood beside it, and L8.1 is why it does not
-///
-/// It was the second act, asking the same question a different way: *play what
-/// I am looking at, by chance*. The owner made shuffle a property of the player
-/// on 2026-08-10 — *"can you make shuffle a property of the player i.e. toggle
-/// on/off"* — and L8.1 then moves it on its own: a control goes where what it
-/// reads is, what a mode reads is **the player**, and the player's surface is
-/// the now-playing bar, which is in every place where this strip is in one. A
-/// mode that governs a playlist's `Play` cannot live on a control a listener
-/// cannot see from the playlist page. It is `crate::views::bottom_bar`'s
-/// `shuffle_toggle` now, and it wears the crossed arrows doc 10 §3.2 refused it
-/// while it was an act.
-///
-/// `Play all` sits *after* the group keys, in the same cluster, because the
-/// cluster reads left to right as **narrow, then arrange, then play** — the
-/// order the gestures actually happen in. Its scope *is* the wall: the empty
-/// query plays everything, a filter plays the matches, a YEAR arrangement plays
-/// the collection in chronological order.
-///
-/// # It is a control, and that is not optional
-///
-/// the product's standing rules: *"Every action in baz has a visible, pointer-reachable
-/// control. No action is keyboard-only, and no control's only affordance is
-/// hover."* `Play all` has no key; it has this. It sends the identical message
-/// any other route sends, which is the same discipline the group keys and the
-/// transport already keep.
-///
-/// # And it is a word
-///
-/// Sentence case in the Medium face, like the doors: this is an **action**,
-/// where the caps-and-tracked row beside it is a set of *states* one of which
-/// is current — two of doc 10 §0.3's three vocabularies, and the third (the
-/// drawn glyph) enters this strip only where its rule admits it: the gear, the
-/// magnifier, and `Play all`'s leading triangle.
-fn draws() -> Element<'static, Message> {
-    row![play_all()]
-        .spacing(theme::GAP_XS)
-        .align_y(iced::Alignment::Center)
-        .into()
-}
-
-/// **`Play all`, wearing the triangle** (doc 10 §3.5, §7 step 4): `Play
-/// album`'s glyph + word anatomy, in the strip's own quiet ink.
-///
-/// The act is conventional — a triangle means *press = sound now*,
-/// everywhere — but the **scope** (the wall, as arranged) is baz's own, so
-/// the rule of §3.1 lands it in the hybrid form: recognition from the
-/// symbol, semantics from the word. One deliberate difference from `Play
-/// album`: **no lamp.** The accent belongs to the pages' one commitment
-/// (`02` §5.3); here the triangle takes the ordinary resting glyph ink, and
-/// the button is the word-acts' own. The triangle is also the one non-type
-/// mark in the left cluster, anchoring the seam where states (caps words)
-/// end and acts (sentence words) begin.
-fn play_all() -> Element<'static, Message> {
-    let room = theme::active();
-    button(
-        container(
-            row![
-                iced_image(icon::handle(icon::Glyph::Play))
-                    .width(Length::Fixed(theme::ICON_PX))
-                    .height(Length::Fixed(theme::ICON_PX))
-                    .opacity(theme::GLYPH_OPACITY),
-                text("Play all")
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .font(theme::MEDIUM)
-                    .wrapping(text::Wrapping::None),
-            ]
-            .spacing(theme::GAP_SM)
-            .align_y(iced::Alignment::Center),
-        )
-        .height(Length::Fill)
-        .align_y(alignment::Vertical::Center),
-    )
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_SM))
-    .style(move |_theme, status| theme::word_button(room, room.wall, status))
-    .on_press(Message::PlayAll)
     .into()
 }
 
@@ -454,74 +354,6 @@ fn well(shelf: &Shelf, width: f32) -> Element<'_, Message> {
         );
     }
     layers.into()
-}
-
-/// The route to the Settings **place** — **the gear**, in the corner where
-/// every application this audience arrives from keeps it.
-///
-/// It sits at the far right of the top bar, which is where an application's
-/// own affairs belong: the bottom bar is the transport, every pixel of it
-/// reserved so that nothing moves as the music does, and it was not touched
-/// to put this here.
-///
-/// It is the one door in baz labelled by a symbol rather than a word, and
-/// the licence is narrow (doc 10 §3.4, ADR-0026 §2): L8.4's amendment
-/// enumerates exactly two symbols that count as labels — the gear and the
-/// magnifier — because both are universal in symbol *and* position, and the
-/// tooltip carries the word for the hover (the accessible name,
-/// ADR-0017 §4c). It replaced an 84 px word with a 32 px square, which is
-/// most of the slack the strip got back.
-///
-/// It is **navigation**, not a panel toggle, and it is drawn as such: no
-/// "open" state, because the place it leads to fills the window and takes
-/// this bar with it, so there is no frame in which the control could be lit
-/// and visible at once. The same message <kbd>Ctrl</kbd>+<kbd>,</kbd> sends,
-/// and the same one the Settings place's own Back sends.
-///
-/// The anatomy is the transport's own ([`crate::views::bottom_bar`]'s glyph
-/// button): the mark is a rasterised sprite, so the ink — not the button
-/// style's `text_color`, which never reaches an image — carries the state,
-/// through the same `mouse_area` crossings and the same 90 ms tween
-/// (ADR-0020 §2.1).
-fn settings_gear(ink: Ink) -> Element<'static, Message> {
-    let room = theme::active();
-    let mark = container(
-        iced_image(icon::handle(icon::Glyph::Gear))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::glyph_ink(
-                true,
-                false,
-                ink.hover(Control::Settings),
-                ink.pressed(Control::Settings),
-            )),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(alignment::Horizontal::Center)
-    .align_y(alignment::Vertical::Center);
-    let control = button(mark)
-        .width(Length::Fixed(theme::TRANSPORT_HIT))
-        .height(Length::Fixed(theme::TRANSPORT_HIT))
-        .padding(0)
-        .style(move |_theme, status| theme::transport(room, room.wall, status))
-        .on_press(Message::ToggleSettings);
-    let named = tooltip(
-        control,
-        text("Settings")
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        // Below the control rather than above it: the gear stands in the
-        // window's own top corner, and a tip above it would clip.
-        tooltip::Position::Bottom,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room));
-    mouse_area(named)
-        .on_enter(Message::ControlEntered(Control::Settings))
-        .on_exit(Message::ControlLeft(Control::Settings))
-        .into()
 }
 
 /// Width of the well's reserved match-count slot (logical px): room for
@@ -674,7 +506,7 @@ mod tests {
         let source = source();
         let view = body(
             &source,
-            "pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink)",
+            "pub(crate) fn view(shelf: &Shelf, strip_width: f32)",
         );
         assert!(
             view.contains("for key in GroupKey::ALL {")

@@ -158,11 +158,7 @@ pub(crate) fn view<'a>(
         rows = rows.push(current);
     }
 
-    let body = column![
-        crate::views::section_rule_hung("Records", hang.density),
-        rows
-    ]
-    .spacing(theme::GAP_LG);
+    let body = column![crate::views::section_rule("Records"), rows].spacing(theme::GAP_LG);
 
     column![
         place_header_led(lead, Some(counts(&records))),

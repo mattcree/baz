@@ -147,7 +147,32 @@ pub fn run(started: Instant, cli_dir: Option<PathBuf>) -> iced::Result {
     app.run_with(move || App::new(started, cli_dir))
 }
 
-/// The window's settings: its size, and on Linux the application id.
+/// The window's settings: its size, on Linux the application id, and — behind
+/// an environment switch — whether the platform draws its title bar.
+///
+/// # `BAZ_BORDERLESS=1`
+///
+/// Turns the platform's decorations **off**, which is the last step of
+/// ADR-0040 and the one step that is not taken by default. With it set, baz's
+/// own app bar is the window's only chrome; without it, the app bar is drawn
+/// underneath the system's title bar, which is the state this ships in.
+///
+/// **It is a switch rather than a default because of one missing API.** iced
+/// 0.13 exposes no edge-drag resize: the whole `window::Action` enum is
+/// `iced_runtime-0.13.2/src/window.rs:24–161` and it has no resize-direction
+/// variant, and winit's own frame gives its resize edges up entirely when
+/// decorations go (`sctk-adwaita`'s hidden frame drops the decoration
+/// subsurfaces, so the pointer has nothing to grab). So `decorations: false`
+/// today buys the clean top edge and **loses pointer resizing**, and that is
+/// not a trade to make silently for a window whose whole job is to be sized
+/// to the wall you want. iced **0.14** has the missing call
+/// (`window::drag_resize`, `iced_runtime-0.14.0/src/window.rs:304`); moving to
+/// it is a dependency decision, priced in ADR-0040 §6 and waiting on the
+/// owner's answer.
+///
+/// Until then the switch is how the finished bar can be *looked at* borderless
+/// without anybody committing to the trade — including by the capture harness,
+/// which photographs both states.
 ///
 /// iced 0.13 leaves the Wayland `app_id` / X11 `WM_CLASS` empty by default,
 /// which is what makes a launcher show a running window as an unrelated
@@ -165,6 +190,7 @@ fn window_settings() -> window::Settings {
     )]
     let mut settings = window::Settings {
         size: WINDOW,
+        decorations: std::env::var_os("BAZ_BORDERLESS").is_none(),
         // The strip's floor **plus the returns lane's rail** is the window's
         // declared minimum width. At 600 the two-line strip holds every
         // tenant (doc 10 §4.3), and below it nothing further collapses —
@@ -186,6 +212,19 @@ fn window_settings() -> window::Settings {
     }
     settings
 }
+
+/// How close two presses on the app bar have to be to count as a double —
+/// **400 ms**, the interval every mainstream desktop uses as its default and
+/// the one GNOME ships (`org.gnome.desktop.peripherals.mouse double-click`).
+///
+/// A constant rather than the desktop's own `double-click` setting, and the
+/// reason is what a wrong answer costs: a double-click window 100 ms from the
+/// system's is a gesture that occasionally has to be repeated, which is not
+/// worth a `gsettings` spawn at startup and a dconf dependency to avoid. (The
+/// bar's *side* was a different question with a different answer — see
+/// [`crate::views::app_bar`] — and the owner settled it by declining the
+/// per-platform path there too.)
+const BAR_DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
 /// **The message meter** — `BAZ_MSG_LOG=1`, the sibling of `BAZ_FRAME_LOG`.
 ///
@@ -289,9 +328,9 @@ pub(crate) enum Message {
     /// which is why step 12 had to land before step 11 could.
     PlayFirstMatch,
     /// Step the density: a press on one of the four detent marks (ADR-0028
-    /// as amended) — at the foot of the index rail's lane on the Library, on
-    /// the block's own section rule on Home and an artist's page — or its
-    /// accelerators, <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd>
+    /// as amended, and ADR-0040 §5) — **in the app bar's display-options
+    /// slot**, in every place that hangs works — or its accelerators,
+    /// <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd>
     /// and <kbd>Ctrl</kbd>+scroll. Those work in every place, and since the
     /// three places that hang works all read one grid, they are visible
     /// wherever they are legal. `+1` loosens the hang and `-1`
@@ -613,26 +652,16 @@ pub(crate) enum Message {
     /// [`PlayerState::play_from`](crate::player::PlayerState::play_from)'s
     /// decision, not the view's.
     PlayTrack(u64, usize),
-    /// **Play everything the wall shows** — the Library strip's `Play all`
-    /// (doc 09 §7.1, S6).
-    ///
-    /// Reifies the wall's current scope — every visible record, whole, in
-    /// the arrangement's own order — into the queue and plays from the top.
-    /// The scope is always on screen: a query or a group key narrows it,
-    /// "everything in the library" is the empty query, and an empty wall
-    /// means nothing happens and nothing is claimed. What **order** it plays
-    /// in is the player's shuffle property's answer, the same as every other
-    /// play gesture's ([`App::send_run`]).
-    PlayAll,
     /// **Home's `All songs` tile was pressed**: play everything you own.
     ///
-    /// The strip's [`Self::PlayAll`] with a different scope, and the difference
-    /// is the whole reason there are two: `Play all` sits beside the query and
-    /// the arrangement that decide the wall, and plays exactly what the wall
-    /// shows. **Home shows no wall**, so its tile plays the collection whole
-    /// rather than silently applying a filter set on another page
-    /// (`crate::implicit::ImplicitList::everything`). The tile states its own
-    /// scope in its counts line, so what it will play is on screen beside it.
+    /// **The only `play everything` gesture there is**, since the owner
+    /// removed the Library strip's `Play all` on 2026-08-10 (ADR-0040). That
+    /// one plays the wall *as arranged*; this one plays the collection whole
+    /// (`crate::implicit::ImplicitList::everything`), because **Home shows no
+    /// wall** and a tile that applied a filter set on another page would be
+    /// acting on state the listener cannot see from where they are standing.
+    /// The tile states its own scope in its counts line, so what it will play
+    /// is on screen beside it.
     PlayEverything,
     /// The pointer entered (`true`) or left (`false`) Home's `All songs` tile.
     ///
@@ -688,8 +717,52 @@ pub(crate) enum Message {
     FocusSearch,
     /// MPRIS `Raise`: ask the compositor to bring the window forward.
     Raise,
-    /// MPRIS `Quit`: close baz.
+    /// MPRIS `Quit`: close baz — and, since ADR-0040, the app bar's own
+    /// close button. One exit path, two doors to it.
     Quit,
+    /// **The app bar's minimise button** (ADR-0040 §3): put the window down.
+    WindowMinimised,
+    /// **The app bar's maximise button**: fill the screen, or come back off
+    /// it. One control and one message, because `window::toggle_maximize` is
+    /// one action — the button's *drawing* is what carries the state.
+    WindowMaximiseToggled,
+    /// **A press anywhere in the app bar that no control took**: move the
+    /// window, or — if it is the second press inside
+    /// [`BAR_DOUBLE_CLICK`] — maximise or restore it.
+    ///
+    /// One message for both because iced 0.13's `mouse_area` has no
+    /// `on_double_click` (0.14 adds one), so the second press has to be
+    /// recognised here, against the first's clock. Every control in the bar is
+    /// a `button` and captures its own press before the bar's `mouse_area`
+    /// sees it, so this only ever arrives from the gaps, the window's name and
+    /// the empty slots — which is exactly the surface a platform title bar
+    /// treats as its handle.
+    WindowDragged,
+    /// **A right press in the app bar**: ask the platform for the window menu
+    /// (move, resize, always-on-top, workspace — whatever this desktop puts
+    /// in it).
+    ///
+    /// It is best-effort by nature. `window::show_system_menu` is serviced on
+    /// the backends that have such a menu and is a no-op on the ones that do
+    /// not, which is the correct behaviour for a gesture that offers the
+    /// platform's own affordance: baz does not grow a menu of its own to fill
+    /// the gap, because a window menu that is baz's would not contain the
+    /// entries the desktop's does.
+    ///
+    /// **It is also the standing answer to the resize question on GNOME**: the
+    /// system menu's own `Resize` is a keyboard resize the compositor drives,
+    /// and it is reachable from here without an edge to grab.
+    WindowMenuRequested,
+    /// The window's maximised state, as the window itself reports it.
+    ///
+    /// Asked for after every resize, because a maximise or an unmaximise is
+    /// always a resize and there is no event that says so directly in
+    /// iced 0.13. The cost is one oneshot per resize message against a full
+    /// relayout per resize message, which is not a cost; what it buys is a
+    /// maximise button that says `Restore` on a maximised window, which is the
+    /// icon-only law's *stable in every state* clause (doc 10 §3.1) holding in
+    /// the one state anybody checks.
+    WindowMaximizedChanged(bool),
     /// The needle: the pointer went down on it, this far along the window.
     /// Nothing is requested and nothing moves yet — the gesture is a click
     /// until it travels [`player::DRAG_THRESHOLD_PX`].
@@ -860,11 +933,21 @@ pub(crate) enum Message {
     FileHoverLeft,
 }
 
-// The `clippy::struct_excessive_bools` expectation that stood here is gone with
-// the run column's density: the shell held one flag per remembered *view*
-// decision, and removing the `Run` word took the count back under the lint's
-// threshold on its own. A silenced lint that falls silent by itself is the
-// tidiest evidence a reduction was real.
+// The `clippy::struct_excessive_bools` expectation went away on its own when
+// the run column's density left — the shell held one flag per remembered
+// *view* decision, and removing the `Run` word took the count back under the
+// lint's threshold. It is back, and the honest thing is to say what put it
+// back rather than to leave the note claiming a reduction that no longer
+// holds: `window_maximized` (ADR-0040 §3) is one more flag, and it is one the
+// shell cannot avoid holding, because iced 0.13 publishes no event for a
+// window being maximised and the app bar's button has to draw one of two
+// glyphs.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the shell's flags are each a distinct fact about a distinct \
+              subsystem — no two of them are a state machine in disguise, \
+              which is what the lint is for"
+)]
 struct App {
     started: Instant,
     first_frame_logged: bool,
@@ -950,6 +1033,20 @@ struct App {
     /// measured geometry; that one is the *viewport's*, which is not the
     /// window's once the bars and the rail have taken their share.
     window: Size,
+    /// Whether the window is maximised, as the window itself last reported it
+    /// ([`Message::WindowMaximizedChanged`]).
+    ///
+    /// Read by exactly one control — the app bar's maximise button, which
+    /// draws a square when it will maximise and two offset squares when it
+    /// will restore. It is *asked for* after every resize rather than tracked
+    /// optimistically, because a button that flipped its own drawing and then
+    /// found the compositor had refused would be a control that lies about the
+    /// window: on Wayland a maximise request is a request.
+    window_maximized: bool,
+    /// When the app bar was last pressed, for the double-press that maximises
+    /// ([`Message::WindowDragged`]). `None` at rest and immediately after a
+    /// double, so that three presses are a double and a single.
+    last_bar_press: Option<Instant>,
     /// The engine connection (or its documented absence) — spawned once at
     /// app start, before the first screen.
     playback: Playback,
@@ -1227,6 +1324,8 @@ impl App {
             menu: None,
             playlists: crate::playlists::Playlists::start(),
             window: WINDOW,
+            window_maximized: false,
+            last_bar_press: None,
             playback,
             player,
             mpris,
@@ -1393,10 +1492,19 @@ impl App {
             }
             Message::WindowResized(size) => {
                 self.window = size;
-                match &mut self.screen {
+                let laid_out = match &mut self.screen {
                     Screen::Shelf(state) => state.update(Message::WindowResized(size)),
                     Screen::Setup(_) => Task::none(),
-                }
+                };
+                // A maximise and an unmaximise are both resizes, and iced 0.13
+                // publishes no event for either — so the state the app bar's
+                // button draws is asked for here (`Message::WindowMaximizedChanged`).
+                Task::batch([
+                    laid_out,
+                    window::get_latest()
+                        .and_then(window::get_maximized)
+                        .map(Message::WindowMaximizedChanged),
+                ])
             }
             Message::FirstFrame => self.log_first_frame(),
             Message::SetupSubmit => self.submit_setup(),
@@ -1437,10 +1545,6 @@ impl App {
                 self.toggle_shuffle();
                 Task::none()
             }
-            Message::PlayAll => {
-                self.play_all();
-                Task::none()
-            }
             Message::PlayEverything => {
                 self.play_everything();
                 Task::none()
@@ -1464,6 +1568,43 @@ impl App {
             Message::FocusSearch => self.focus_the_well(),
             Message::QueryTyped(text) => self.type_anywhere(&text),
             Message::Quit => self.leave_for_good(),
+            // **The three window controls.** Each is the platform's own
+            // action, spent through iced's own task — baz does not
+            // reimplement any of them, which is the whole argument for
+            // drawing the bar rather than the behaviour.
+            Message::WindowMinimised => {
+                window::get_latest().and_then(|id| window::minimize(id, true))
+            }
+            Message::WindowMaximiseToggled => {
+                window::get_latest().and_then(window::toggle_maximize)
+            }
+            // **Move, or maximise on the second press.** The gesture a title
+            // bar makes: press and travel moves the window, press twice in
+            // place toggles the maximised state. The first press still starts
+            // an interactive move — it has to, because the compositor owns the
+            // gesture from the moment the button goes down and there is no way
+            // to know yet whether a second press is coming — and a move that
+            // travels nowhere costs nothing, which is why the double press can
+            // simply act on top of it.
+            Message::WindowDragged => {
+                let now = Instant::now();
+                let doubled = self
+                    .last_bar_press
+                    .is_some_and(|last| now.duration_since(last) <= BAR_DOUBLE_CLICK);
+                // Cleared on the double so that three presses are one double
+                // and one single, rather than two overlapping doubles.
+                self.last_bar_press = (!doubled).then_some(now);
+                if doubled {
+                    window::get_latest().and_then(window::toggle_maximize)
+                } else {
+                    window::get_latest().and_then(window::drag)
+                }
+            }
+            Message::WindowMenuRequested => window::get_latest().and_then(window::show_system_menu),
+            Message::WindowMaximizedChanged(maximized) => {
+                self.window_maximized = maximized;
+                Task::none()
+            }
             // Best effort by nature: a Wayland compositor is entitled to
             // refuse a focus request, and refusing is not an error here.
             Message::Raise => window::get_latest().and_then(window::gain_focus),
@@ -3553,62 +3694,19 @@ impl App {
         self.publish_mpris(false);
     }
 
-    /// **Play everything the wall shows** (doc 09 §7.1, S6): the wall is a
-    /// list, so play it.
-    ///
-    /// One press reifies the wall's scope — every record `Shelf::visible`
-    /// holds, whole, in the arrangement's own order — into the queue
-    /// ([`vm::stacked_queue`], the shape shuffle already sends) and plays
-    /// from the top. **The scope is the wall, always**: a query or a group
-    /// key narrows it, a YEAR-arranged wall plays the collection in
-    /// chronological order, and "everything in the library" is the empty
-    /// query, one <kbd>Esc</kbd> away. Playing what you cannot see is refused
-    /// (a standing rule of the product) — which is why this reads `visible` and nothing
-    /// wider, and why an empty wall means nothing happens and nothing is
-    /// claimed. No confirmation stands between the press and the sound at any
-    /// scale: the queue place is virtualized (`crate::queue_window`, §7.1's
-    /// named gate), so a five-figure run is an ordinary queue — readable,
-    /// jumpable, editable, saveable, and it **ends**.
-    ///
-    /// **What order it plays in is not this function's business.** It was:
-    /// `Play all` was *"shuffle's sibling, never a mode"*, the plain half of a
-    /// pair whose other half drew eight records by chance. Shuffle became a
-    /// property of the player on 2026-08-10 and the pairing dissolved — this
-    /// builds the list the gesture means and [`Self::send_run`] decides the
-    /// order, exactly as it does for a record, a playlist and a track click.
-    fn play_all(&mut self) {
-        let Screen::Shelf(state) = &self.screen else {
-            return;
-        };
-        // **`Play all` is the All songs list's own `Play`.** It used to build
-        // its own queue out of `state.visible`; it now resolves the implicit
-        // playlist and plays that, which is what makes the two one concept
-        // rather than two that had to be kept agreeing.
-        let list = state.all_songs();
-        if list.is_empty() {
-            // The wall is showing nothing — an empty library, or a query
-            // that matched no record. Nothing to play, so nothing happens
-            // and nothing is claimed. Silence is the correct answer here
-            // too.
-            return;
-        }
-        println!("[all-songs] play — {}", list.counts());
-        self.start(list);
-    }
-
     /// **Play everything you own** — Home's `All songs` tile (the owner,
     /// 2026-08-10: *"again I wanted the Play all, to be more like a tile on the
     /// home screen, a special 'playlist'"*).
     ///
-    /// [`Self::play_all`] with the collection as its scope rather than the
-    /// wall's. The two share the list type, the origin, the queue shape and the
-    /// arranger, and differ in exactly one argument — which is the shape
-    /// `crate::implicit` was built for and the reason this is four lines rather
-    /// than a second gesture.
+    /// It resolves the implicit `everything` list and plays it — the list
+    /// type, the origin, the queue shape and the arranger are
+    /// `crate::implicit`'s, which is the reason this is four lines rather than
+    /// a gesture of its own.
     ///
-    /// **Why Home's tile does not read the wall's query.** `Play all` lives in
-    /// the strip beside the query and the arrangement that decide the wall, and
-    /// its contract is *exactly what you can see*. Home shows no wall. A tile
+    /// **Why Home's tile does not read the wall's query.** The strip's
+    /// `Play all` lived beside the query and the arrangement that decide the
+    /// wall, and its contract was *exactly what you can see*. Home shows no
+    /// wall, and the strip's control is gone besides. A tile
     /// there that applied a filter set on another page would be acting on state
     /// the listener cannot see or clear from where they are standing — the same
     /// rule, on a surface where "what you can see" is a different set. What this
@@ -4079,9 +4177,7 @@ impl App {
         let collecting = self.playlists.collecting();
         let screen: Element<'_, Message> = match (&self.screen, self.place) {
             (Screen::Setup(setup), _) => return views::setup::view(setup),
-            (Screen::Shelf(state), Place::Library) => {
-                state.view(&self.player, lamp, collecting, ink)
-            }
+            (Screen::Shelf(state), Place::Library) => state.view(&self.player, lamp, collecting),
             (Screen::Shelf(state), Place::Album(id)) => match state.album(id) {
                 Some(album) => views::album::view(
                     state,
@@ -4096,7 +4192,7 @@ impl App {
                 // The wall is the honest answer — better than a page about
                 // nothing — and it is drawn rather than navigated to, because a
                 // view function may not change state.
-                None => state.view(&self.player, lamp, collecting, ink),
+                None => state.view(&self.player, lamp, collecting),
             },
             (Screen::Shelf(state), Place::Artist(id)) => {
                 // The artist vanished under a rescan while their page was
@@ -4106,7 +4202,7 @@ impl App {
                 if views::artist::label(state, id).is_some() {
                     views::artist::view(state, &self.player, id, state.grid(), collecting)
                 } else {
-                    state.view(&self.player, lamp, collecting, ink)
+                    state.view(&self.player, lamp, collecting)
                 }
             }
             (Screen::Shelf(state), Place::Playlist(id)) => match self.playlists.page(id) {
@@ -4125,7 +4221,7 @@ impl App {
                 // The playlist vanished under its page — deleted or renamed
                 // on disk. The wall is the honest answer, drawn rather than
                 // navigated to, exactly as a vanished record's page is.
-                None => state.view(&self.player, lamp, collecting, ink),
+                None => state.view(&self.player, lamp, collecting),
             },
             // **Home** and **Now playing** — the two places the owner added
             // to ADR-0030 (`place.rs` records the overrule). Their bodies land
@@ -4240,6 +4336,37 @@ impl App {
         } else {
             screen
         };
+        // **The app bar, over everything** (ADR-0040): the band a platform
+        // title bar occupies, drawn by baz, resident and identical in all
+        // seven places.
+        //
+        // It is composed **here**, outside the lane and outside the place,
+        // for the reason the lane is composed outside the place: a surface
+        // that is the same everywhere must be assembled once, or it is seven
+        // surfaces that happen to agree. And it spans the *window* rather than
+        // the body, because the window controls in its right corner belong to
+        // the window and may not be inset by a lane whose width changes.
+        //
+        // **Which places hang works is answered here, not in the view.** The
+        // display options are drawn where there is a wall of records to hang
+        // and absent where there is not (ADR-0028's *absent, not disabled*, as
+        // ADR-0040 §5 preserves it), and that is a fact about the composition
+        // — this `match` — rather than something a view file should be
+        // guessing from a `Place`.
+        let hangs_works = match (&self.screen, self.place) {
+            (Screen::Shelf(state), Place::Library | Place::Home | Place::Artist(_)) => {
+                Some(state.grid().density)
+            }
+            // A record's page, a playlist's, Now playing and Settings hang
+            // rows or nothing, and density's unit is the column (ADR-0028's
+            // amendment §2). No marks — **absent, not disabled**.
+            _ => None,
+        };
+        let screen: Element<'_, Message> = column![
+            views::app_bar::view(self.window.width, hangs_works, self.window_maximized, ink),
+            screen
+        ]
+        .into();
         // The persistent bottom bar lives under every place — unless this build
         // has no audio output at all, in which case playback UI is hidden
         // entirely.
@@ -4315,13 +4442,14 @@ impl App {
     ///
     /// Only that place asks. It is the one place whose composition is bounded
     /// in both axes, because it is the one place that must fit without
-    /// scrolling. The two new places wear no strip of their own — the returns
-    /// lane is the route in and out of them — so nothing comes off the top.
+    /// scrolling. It wears no *strip* of its own — the returns lane is the
+    /// route in and out of it — but since ADR-0040 it wears the **app bar**,
+    /// like every other place, and that does come off the top.
     fn body_height(&self) -> f32 {
         if *self.player.availability() == Availability::NotBuilt {
-            return self.window.height;
+            return (self.window.height - theme::APP_BAR_H).max(0.0);
         }
-        (self.window.height - theme::BAR_CONTENT_H - 1.0).max(0.0)
+        (self.window.height - theme::APP_BAR_H - theme::BAR_CONTENT_H - 1.0).max(0.0)
     }
 
     /// Whether the playlist panel is on screen: summoned, over a shelf, and
@@ -4894,7 +5022,7 @@ impl Shelf {
             scroll_offset: 0.0,
             grid_size: Size::new(
                 WINDOW.width - theme::INDEX_LANE_W,
-                WINDOW.height - theme::top_bar_h(WINDOW.width, lane_open),
+                WINDOW.height - theme::APP_BAR_H - theme::top_bar_h(WINDOW.width, lane_open),
             ),
             last_scan_log: Instant::now(),
             hovered_album: None,
@@ -4997,7 +5125,8 @@ impl Shelf {
                 // exactly those 40 px. One function, both facts.
                 self.grid_size = Size::new(
                     self.grid_width(),
-                    (size.height - theme::top_bar_h(size.width, self.lane_open)).max(100.0),
+                    (size.height - theme::APP_BAR_H - theme::top_bar_h(size.width, self.lane_open))
+                        .max(100.0),
                 );
                 self.request_visible_thumbs()
             }
@@ -6354,10 +6483,9 @@ impl Shelf {
         player: &'a PlayerState,
         lamp: f32,
         collecting: crate::playlists::Collecting,
-        ink: Ink,
     ) -> Element<'a, Message> {
         column![
-            views::top_bar::view(self, self.body_width(), ink),
+            views::top_bar::view(self, self.body_width()),
             views::shelf::view(self, player, lamp, collecting)
         ]
         .into()
@@ -7246,7 +7374,6 @@ mod tests {
         // owner asked to agree.
         for gesture in [
             "play_album",
-            "play_all",
             "play_everything",
             "play_playlist",
             "play_track",
@@ -7332,60 +7459,57 @@ mod tests {
         }
     }
 
-    /// **S6 — `Play all` reifies the wall's scope and plays from the top**
-    /// (doc 09 §7.1).
+    /// **S6 — the `All songs` gesture reifies its scope and plays from the
+    /// top** (doc 09 §7.1).
     ///
-    /// Pinned over the source for
+    /// There were two of these until 2026-08-10. The strip's `Play all` played
+    /// **the wall as arranged**; Home's `All songs` tile plays **the
+    /// collection**. The owner removed the first that evening — *"please
+    /// remove the 'Play all' button at the top of the library"* (ADR-0040) —
+    /// and the action went with the control rather than lingering as a message
+    /// nothing sends: an action with no visible control is the visible-control
+    /// rule failing in the direction nobody checks for.
+    ///
+    /// So what is pinned here is the survivor, over the source for
     /// [`Self::every_play_gesture_arranges_its_run_through_one_function`]'s
     /// reason — there is no `Shelf` to construct without a database and a scan
     /// thread — with each criterion named by the literal a reviewer would have
     /// to move:
     ///
-    /// - *the scope is the wall*: the queue is the **All songs** list, which
-    ///   is `state.visible` in its order as whole records
-    ///   (`crate::all_songs`, whose own tests pin that and `vm`'s pin
-    ///   `stacked_queue`'s order-preservation under it);
+    /// - *the scope is the collection, never a query set on another page*;
     /// - *the first track sounds*: the run goes out and `Play` follows, one
     ///   press, no confirmation at any scale — §7.1's answer to the
     ///   10 000-track question is the virtual window, not a dialog;
-    /// - *an empty wall does nothing and claims nothing*.
-    ///
-    /// It used to carry a fourth: *shuffle's sibling, never a mode* — no pool
-    /// claimed, the marks of a superseded draw taken off. Shuffle **is** a mode
-    /// now (2026-08-10, the owner), there is no pool and no draw to supersede,
-    /// and the relationship between the two is stated where it now lives: what
-    /// order this run plays in is [`App::send_run`]'s answer, the same as every
-    /// other gesture's.
+    /// - *an empty library does nothing and claims nothing*.
     #[test]
-    fn play_all_reifies_the_wall_in_order() {
+    fn the_all_songs_gesture_reifies_its_scope_in_order() {
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
         )
         .expect("this module's own source")
         .replace("\r\n", "\n");
-        let start = source
-            .find("fn play_all(&mut self")
-            .expect("play_all exists");
-        let rest = &source[start..];
-        let play_all = &rest[..rest.find("\n    }\n").expect("a function ends")];
 
+        // **`Play all` is gone, control and action together.** A message no
+        // control sends is the removal half-done. Read off the shipped half
+        // of the file only — this test names both literals, and a sweep that
+        // found its own assertion would never be able to pass.
+        let code = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a source has a head");
         assert!(
-            play_all.contains("state.all_songs()"),
-            "`Play all` is the All songs list's own Play — one concept, not two"
+            !code.contains("fn play_all(&mut self"),
+            "`play_all` outlived the button the owner removed"
         );
         assert!(
-            play_all.contains("self.start(list)"),
-            "and it plays that list, rather than building a second one beside it"
-        );
-        assert!(
-            play_all.contains("if list.is_empty()"),
-            "an empty wall: nothing happens and nothing is claimed"
+            !code.contains("PlayAll"),
+            "`Message::PlayAll` is still in the enum with nothing to send it"
         );
 
-        // **Home's tile is the same list at a different scope**, which is the
-        // owner's *"more like a tile on the home screen, a special 'playlist'"*
-        // built as one concept rather than two. Same tail, same emptiness rule,
-        // and the only difference is which wall the list is a view of.
+        // **Home's tile plays the collection**, which is the owner's *"more
+        // like a tile on the home screen, a special 'playlist'"*. It reads
+        // `everything()` rather than `all_songs()`, so it cannot silently
+        // apply a filter set on a page the listener is not standing on.
         let start = source
             .find("fn play_everything(&mut self")
             .expect("play_everything exists");
@@ -8574,7 +8698,6 @@ mod tests {
         for elsewhere in [
             "play_album",
             "play_track",
-            "play_all",
             "play_playlist",
             "play_playlist_track",
             "play_first_match",

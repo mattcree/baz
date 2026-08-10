@@ -213,16 +213,9 @@
 
 ## Doing
 
-- **One app bar on every screen** — the owner's *"we should have replaced the
-  top window chrome with an app bar which has this + settings + the window
-  controls, the same on all screens"*, with `Play all` off the strip and the
-  display options in. **The last interface work before the freeze**, by his
-  own call: *"let it land, then freeze"*. Borderless chrome is **not** in it —
-  the system decorations stay for the beta, and the iced fork stays a question.
-- **A 29-byte malformed FLAC asks baz for 4 GB** — `## Next` item 1, in flight.
-- **What resize actually costs** — measurement only, no product change, at the
-  owner's *"lower priority"*. Its numbers go into `BACKLOG.md`'s treacle
-  section and nothing ships.
+*Nothing in flight.* The interface freeze is on: `## Next` is beta
+blockers only, and the app bar was the last interface work by the owner's own
+call.
 
 ## Waiting on the owner
 
@@ -262,11 +255,36 @@
   returns lane already does without performing. The other two are a frame
   question (one band line or two) and the tile-size one below. *Needs: one
   sentence each.*
-- **Borderless window chrome.** Wayland already draws that title bar inside
-  baz's own process, so turning it off is one field — but **iced 0.13 exposes
-  no edge-drag resize anywhere in `window::Action`**, so going borderless today
-  loses pointer resizing. The route is a ~30-line upstream-shaped iced patch,
-  which means a forked dependency. *Needs: yes or no to the fork.*
+- **Borderless window chrome — the bar is built; the field is not flipped.**
+  The app bar shipped (ADR-0040): it is resident in all seven places, it moves
+  and maximises and closes the window, and it holds the display options, the
+  gear and the three window buttons. What is not done is `decorations: false`,
+  so the platform still draws its title bar *above* baz's own — the whole cost
+  of the change, and it clears the moment this is answered.
+  - **The fork is off the table, and that is the news.** `BACKLOG.md` priced
+    this as a ~30-line patch to a forked iced. It is no longer a fork:
+    **iced 0.14.0 ships `window::drag_resize(id, Direction)` upstream**
+    (`iced_runtime-0.14.0/src/window.rs:304`, serviced at
+    `iced_winit-0.14.0/src/lib.rs:1438`). Re-verified against the pinned 0.13
+    sources too — there is genuinely nothing there, and winit's own frame
+    gives its resize edges up when decorations go, so there is no platform
+    fallback either.
+  - So the question changed shape: **do we take iced 0.13 → 0.14?** Measured
+    in ADR-0040 §"What the owner still has to answer": ~130–170 edited lines
+    across 12–14 files, all five hand-built `Widget`s touched, wgpu 0.19 → 27
+    and cosmic-text 0.12 → 0.15 in the graph, ~15–25 new Flatpak pins — and,
+    on the other side, **both RUSTSEC ignores in `deny.toml` can be deleted**,
+    because cosmic-text 0.15 completes the fontations migration they are
+    waiting on.
+  - `BAZ_BORDERLESS=1` runs it borderless today, so the finished thing can be
+    looked at before the decision. *Needs: yes or no to the iced 0.14 upgrade.*
+- **Is the `Dense` display-option mark legible enough?** He said *"the way they
+  appear for the library is nice"* and the four marks moved into the app bar
+  unchanged on the strength of it. The fourth is a 4 × 4 whose cells minify to
+  2.25 px at 1×, and beside the other three at the bar's real size it is
+  visibly softer — `docs/design/impl/app-bar/12-marks-4x-*.png`, magnified with
+  a point filter so the question is not answered by blurring it. A larger
+  sprite for that one mark is small. *Needs: his eye on that frame.*
 - **Doc 14's Tier 3**, three questions rather than tasks. Tiers 1 and 2 both
   shipped without touching any of them, and each needs one sentence from him.
   The first has got **sharper** rather than softer now that tier 2 has landed:
@@ -310,6 +328,37 @@
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **The app bar — baz draws the window's chrome, and it is the same band in
+  every place.** Three asks in one change (ADR-0040): `Play all` removed, the
+  display options moved to the top bar, and a resident app bar carrying them
+  with the gear and the window buttons. It drags the window, maximises on a
+  double press, and right-presses to the desktop's own window menu; the buttons
+  are minimise, maximise, close, on the right, always.
+  - **The admission rule is the owner's and it is a test, not a sentiment**:
+    *"adding controls that apply to all windows makes sense in the top bar"* —
+    a control enters only if it applies in **every** place, and if it applies to
+    one place the bar is not where it goes. That is what puts `Play all` out
+    (the Library's alone) and the gear in (the application's), and it is what
+    the closed tenancy is asserted against, because the failure mode of a
+    resident bar is accretion.
+  - **The tension worth knowing about**: ADR-0028 decided that morning that a
+    density mark must be *absent* rather than present-and-inert where no works
+    hang, and *"the same on all screens"* pulls the other way. Resolved by
+    making the **slot** resident and the **control** conditional — so nothing
+    is ever inert, and the gear and the window buttons are in register across
+    all seven places (`docs/design/impl/app-bar/10-every-band-after-*.png` is
+    that claim as one picture).
+  - **The strip got smaller rather than rearranged**, which is the point
+    against the owner's standing *"just adding stuff into that top bar isn't
+    good"*: it lost two tenants, and `TOP_BAR_SPLIT` fell 824 → 680 with them.
+  - **Found on the way**: `Message::PlayAll` and `App::play_all` were deleted
+    with the button. A message no control sends is the visible-control rule
+    failing in the direction nobody checks for.
+  - A `chrome` module that read GNOME's `button-layout` and KDE's `kwinrc` and
+    mirrored the bar was built and then **deleted**, on his *"I don't mind if
+    we have the controls on the right hand side as long as we have a sensible
+    consistent pattern"*. macOS will look foreign; the reversal is one line and
+    is recorded in ADR-0040 §4.
 - **A 29-byte malformed FLAC asks baz for 4 GB — and the answer is that the
   bound is symphonia's, while the *panics* were baz's to catch and are caught.**
   ADR-0040. Reproduced first, as the item asked: `cargo fuzz run

@@ -2002,39 +2002,32 @@ pub const WINDOW_FLOOR_H: f32 = TOP_BAR_2LINE_H
     + crate::shelf::Density::Dense.hang();
 
 /// **Strip width** below which the Library strip splits into its two lines
-/// (logical px) — **824**, an exact sum rather than a rounded one.
+/// (logical px) — **680**, an exact sum rather than a rounded one.
 ///
-/// It was 960: the tenants summed to 958 with the well at its 200 px floor and
-/// the seam was declared on the next lattice step up. Three of those tenants
-/// have since left, and a fourth moved. The `Playlists` door went with the
-/// returns lane (ADR-0030 §5), giving back its 64 px and the [`GAP_XL`] beside
-/// it — 88 — which took 960 to 872. Then, on 2026-08-10 and both on the owner's
-/// decision, **`Pull` was removed** and **`Shuffle` moved to the now-playing
-/// bar** as a property of the player, taking
-/// [`crate::views::top_bar::ACTS_W`] from 182 to 88 and this seam from 872 to
-/// 778. A split declared where the line still fits would put the strip on two
-/// rows for controls it no longer draws.
+/// It has been 960, 872, 778, 832, 778 and 824, and every one of those numbers
+/// was the sum of the tenants standing at the time. It is 680 now because
+/// **two more tenants left on 2026-08-10, on the owner's decision** (ADR-0040):
+/// `Play all` was removed outright — *"please remove the 'Play all' button at
+/// the top of the library"* — taking [`crate::views::top_bar`]'s `ACTS_W` 88
+/// and the [`GAP_XL`] beside it, 112 in all; and the **gear** moved up into
+/// the app bar, taking its [`TRANSPORT_HIT`] 32 with it. 824 − 112 − 32 = 680.
 ///
-/// The row of words has been **six** twice, and cost a different number each
-/// time — which is why it is measured each time. `ARTISTS` joined it beside a
-/// first key relabelled `A–Z`, taking [`crate::views::top_bar::KEYS_W`] from
-/// 314 to 368 and this seam to 832; the sixth word then became the first key's
-/// own grouping (ADR-0035) and both movements reversed, back to 778. The row
-/// is six again now that **`A–Z` is a key of its own, first in the row**
-/// (ADR-0035's third amendment) — but `A–Z` is a shorter word than `ARTISTS`,
-/// so `KEYS_W` is 360 rather than 368 and the seam is **824** rather than 832.
 /// The seam follows the tenants **up** as readily as it follows them down,
-/// which is the property that makes it arithmetic rather than a judgement.
+/// which is the property that makes it arithmetic rather than a judgement —
+/// and this is the largest single fall it has ever taken, because it is the
+/// first time two tenants left in one change.
 ///
 /// **The well left too** (ADR-0030's search amendment), but it left only where
 /// the lane can hold it, which is exactly the widths at which this seam cannot
 /// be reached: see [`strip_holds_the_well`]. So the split's own arithmetic
-/// still counts the well, and 824 is the sum with it in.
+/// still counts the well, and 680 is the sum with it in.
 ///
 /// The number this is compared against is the **strip's** width — the window
 /// less the returns lane — never the window's. See [`top_bar_h`], which is the
-/// one place that resolution happens.
-pub const TOP_BAR_SPLIT: f32 = 824.0;
+/// one place that resolution happens. The **app bar** above it is a different
+/// band with a different width (the window's own) and no split at all; see
+/// [`APP_BAR_H`].
+pub const TOP_BAR_SPLIT: f32 = 680.0;
 
 /// The strip's floor, and the window's sensible minimum (logical px) —
 /// **600**, from the two-line regime's own arithmetic (doc 10 §4.3): the
@@ -2042,16 +2035,15 @@ pub const TOP_BAR_SPLIT: f32 = 824.0;
 /// collapses — there is no third regime, and a proposal that needs one has
 /// outgrown the strip (doc 10 §8).
 ///
-/// **It no longer sits exactly on that sum, and it does not follow it.** Both
-/// draw words left the acts cluster on 2026-08-10 and the library line came to
-/// 506; the arrangement row's sixth word took it to 560, then back to 506, and
-/// `A–Z` (ADR-0035's third amendment) now puts it at **552**. The floor stays
-/// at 600 through all of it because it is *also* the window's sensible
-/// minimum, and a window minimum that moved every time a word joined or left a
-/// strip would be a promise about the smallest usable baz that was really a
-/// statement about the strip's current population. The slack — 48 px, and it
-/// is the first thing to read if a seventh word is ever proposed — is recorded
-/// in `the_strip_holds_its_tenants_at_the_single_line_floor`, which asserts the
+/// **It no longer sits exactly on that sum, and it does not follow it.** The
+/// library line has been 506, 560, 506 and 552; with `Play all` removed on
+/// 2026-08-10 (ADR-0040) it is **440**. The floor stays at 600 through all of
+/// it because it is *also* the window's sensible minimum, and a window minimum
+/// that moved every time a word joined or left a strip would be a promise
+/// about the smallest usable baz that was really a statement about the strip's
+/// current population. The slack — **160 px** now, and it is the first thing
+/// to read if a seventh word is ever proposed — is recorded in
+/// `the_strip_holds_its_tenants_at_the_single_line_floor`, which asserts the
 /// line fits under the floor rather than meeting it.
 pub const TOP_BAR_FLOOR: f32 = 600.0;
 
@@ -2065,6 +2057,73 @@ pub const TOP_BAR_FLOOR: f32 = 600.0;
 /// and an estimate that disagreed with the drawing has already cost the rail
 /// its capacity math once.
 pub const TOP_BAR_2LINE_H: f32 = 3.0 * TOP_BAR_PAD_V + 2.0 * TRANSPORT_HIT + 1.0;
+
+/// Vertical lead of the **app bar** (logical px) — [`GAP_XS`] **4**, half the
+/// place strip's.
+///
+/// The two bands are led differently because they hold different things
+/// (ADR-0040 §2). The place strip's [`TOP_BAR_PAD_V`] 8 is optical air around
+/// *words and a text well*, which need it; the app bar holds nothing but
+/// [`TRANSPORT_HIT`] boxes and one quiet name, and a control box already
+/// carries its own air inside it. Spending 8 there would be 8 px of the
+/// collection bought with nothing.
+pub const APP_BAR_PAD_V: f32 = GAP_XS;
+
+/// Height of the **app bar**, hairline included — **41** (ADR-0040 §2).
+///
+/// `2 × APP_BAR_PAD_V + TRANSPORT_HIT + 1`, derived the way every band in this
+/// file is derived — a control row plus a named lead each side (L4) — and
+/// stated here rather than measured, because `app.rs`'s virtualizer estimate
+/// reads it and an estimate that disagrees with the drawing is mis-virtualized
+/// shelf on the first frame.
+///
+/// **It is 41 against the platform title bar's ~37–46**, which is the number
+/// the whole trade turns on: while `decorations` stays true baz pays this band
+/// *on top of* the system's, and the day the flip lands it pays it *instead
+/// of* the system's. Doc 10 §6.10 refused a permanent second header line at
+/// 40 px — "the wall pays and the wide window gains nothing" — and ADR-0040 §6
+/// answers that refusal head-on rather than around it.
+pub const APP_BAR_H: f32 = 2.0 * APP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
+
+/// The app bar's reserved slot for the **display options** (logical px) —
+/// four [`STEPPER_HIT`] detent marks, **96**.
+///
+/// Reserved at every width and in **every place**, including the four that
+/// hang no works and draw no marks (ADR-0040 §5). That is the whole mechanism
+/// by which one bar can be the same bar everywhere while still obeying
+/// ADR-0028's *absent, not disabled*: the marks are absent where they would be
+/// inert, and the **slot** they leave is not, so the gear and the window
+/// buttons stand on the same two vertical lines in all seven places. A bar
+/// whose right cluster slid 96 px as you navigated would be the frame moving,
+/// which is the one thing the frame may not do.
+pub const APP_BAR_MARKS_W: f32 = 4.0 * STEPPER_HIT;
+
+/// The app bar's reserved slot for the **window's name** (logical px) — **32**.
+///
+/// `baz` at the metadata size in the Medium face measures **19.54 px**
+/// (`font.rs`), and this is the second 4 px lattice step above it rather than
+/// the first. Every other reservation in the product takes the first — the
+/// arrangement row's 360 sits 2.09 px over its measurement — and this one does
+/// not, for a reason worth writing down: 20 would leave 0.46 px, which is
+/// inside the range a hinting or rasterizer change could move a three-letter
+/// word, and the neighbour here is a **fill**. A word that overran would push
+/// the drag region rather than clip, so the bar would stop being the geometry
+/// the budget adds up without anything looking wrong.
+///
+/// It is declared at all — rather than left to shrink to its content — because
+/// L9 wants every tenant of a strip to declare, and a fill next to an
+/// undeclared word is a region whose width nobody has written down.
+pub const APP_BAR_NAME_W: f32 = 24.0;
+
+/// The app bar's reserved slot for the **window controls** (logical px) —
+/// three [`TRANSPORT_HIT`] boxes on a [`GAP_XS`] rhythm, **104**.
+///
+/// The three are drawn unconditionally and on the right, at every width and
+/// on every platform (ADR-0040 §4, the owner's decision). The width is still
+/// *declared* rather than left to the row, for [`APP_BAR_MARKS_W`]'s reason:
+/// L9 wants every tenant of a strip to state what it takes, and the budget the
+/// law adds up has to be the geometry actually drawn.
+pub const APP_BAR_BUTTONS_W: f32 = 3.0 * TRANSPORT_HIT + 2.0 * GAP_XS;
 
 /// **Whether the Library strip carries the search well** — true exactly where
 /// the returns lane cannot hold it.
@@ -6744,6 +6803,15 @@ mod tests {
                 "{name} draws a header beside the composition's"
             );
         }
+        // **The app bar**, which since ADR-0040 is the fifth window-edge
+        // surface and the only one that touches *three* of the window's edges
+        // — top, left and right. Its lead is its own (`APP_BAR_PAD_V`, half
+        // the strip's) and its gutter is the same `HANG` as everything else's,
+        // which is the whole of what this law asks.
+        assert!(
+            read("app_bar.rs").contains("theme::pad(theme::APP_BAR_PAD_V, theme::HANG)"),
+            "the app bar no longer hangs from HANG"
+        );
         // The now-playing bar. Its vertical padding is zero because the band is
         // `BAR_CONTENT_H` and the lane that centres the transport is inside it.
         assert!(
@@ -7233,11 +7301,20 @@ mod tests {
         /// What the door gave back to the strip: its width and the `GAP_XL`
         /// seam beside it.
         const FREED: f32 = PLAYLISTS_DOOR_W + GAP_XL;
-        /// What the two words gave back on 2026-08-10, as the drop in the acts
-        /// cluster's declared width: `Pull` removed (182 → 144), then `Shuffle`
-        /// moved to the now-playing bar when it became a property of the player
-        /// (144 → 88).
-        const ACTS_FREED: f32 = 182.0 - top_bar::ACTS_W;
+        /// **What `Play all` gave back on 2026-08-10** — the whole acts
+        /// cluster and the seam beside it. The cluster was 182 px in the
+        /// morning (`Play all · Shuffle · Pull`), 88 by the afternoon, and
+        /// zero by the evening, when the owner said *"please remove the 'Play
+        /// all' button at the top of the library"* (ADR-0040). Stated as the
+        /// whole 182 rather than as the last 88, because what the strip has
+        /// actually got back over the day is what the next tenant is argued
+        /// against.
+        const ACTS_FREED: f32 = 182.0 + GAP_XL;
+        /// **What the gear gave back**, moving up into the app bar the same
+        /// evening: its `TRANSPORT_HIT` box. Its `2 × GAP_SM` status lead
+        /// stays, because the status notes are still tenants and still need
+        /// their flanks.
+        const GEAR_FREED: f32 = TRANSPORT_HIT;
         /// What the arrangement row has spent, as the rise in that cluster's
         /// declared width — **46 px, for `A–Z` back in the row and first in it**
         /// (ADR-0035's third amendment).
@@ -7251,19 +7328,21 @@ mod tests {
         /// The window a strip at its floor now needs, with the lane's rail
         /// always beside it.
         const STRIP_FLOOR_WINDOW: f32 = TOP_BAR_FLOOR + SIDEBAR_RAIL_W;
+        /// The acts cluster's last declared width, the evening it was
+        /// deleted — kept as a measurement here for `PLAYLISTS_DOOR_W`'s
+        /// reason: there is nothing left to reserve for, and a token that
+        /// nothing draws with is a comment that can rot.
+        const ACTS_W_WAS: f32 = 88.0;
 
-        /// The single-line regime **with the well** (doc 10 §4.2): the gutter,
-        /// the well, the two `GAP_XL` seams and the left cluster, the fill's
-        /// two `GAP_SM` flanks (the status lead), the gear, the gutter.
-        const SINGLE_LINE: f32 = HANG
-            + top_bar::WELL_W
-            + GAP_XL
-            + top_bar::KEYS_W
-            + GAP_XL
-            + top_bar::ACTS_W
-            + 2.0 * GAP_SM
-            + TRANSPORT_HIT
-            + HANG;
+        /// The single-line regime **with the well** (doc 10 §4.2, as ADR-0040
+        /// leaves it): the gutter, the well, the seam, the arrangement row,
+        /// the fill's two `GAP_SM` flanks (the status lead), the gutter.
+        ///
+        /// **There is no third term any more.** The acts cluster and the gear
+        /// were the two tenants between the row and the right gutter, and both
+        /// left on 2026-08-10.
+        const SINGLE_LINE: f32 =
+            HANG + top_bar::WELL_W + GAP_XL + top_bar::KEYS_W + 2.0 * GAP_SM + HANG;
 
         /// The single-line regime **without it** — the strip at every width
         /// the returns lane can hold the well, which is
@@ -7276,72 +7355,63 @@ mod tests {
 
         /// The **widest** strip that can still be carrying the well: the
         /// window one step below the lane's floor, less the collapsed lane.
-        /// Above this the well is the lane's ([`strip_holds_the_well`]), so
-        /// this is the ceiling of the band the split has to fit under for a
-        /// single-line-with-well regime to exist at all.
         const WIDEST_STRIP_WITH_WELL: f32 = SIDEBAR_FLOOR - SIDEBAR_RAIL_W;
 
-        /// The frame line below the split (doc 10 §4.3): the well, the
-        /// empty status slot's flanks, the gear — `GAP_LG` between the row's
-        /// four members.
-        const FRAME_LINE: f32 = HANG + top_bar::WELL_W + 3.0 * GAP_LG + TRANSPORT_HIT + HANG;
+        /// The frame line below the split (doc 10 §4.3): the well, then the
+        /// transient notes in the slack — `GAP_LG` between the row's three
+        /// members, of which the middle one is the fill.
+        const FRAME_LINE: f32 = HANG + top_bar::WELL_W + 2.0 * GAP_LG + HANG;
 
-        /// The library line: the states, one seam, the acts.
-        const LIBRARY_LINE: f32 = HANG + top_bar::KEYS_W + GAP_XL + top_bar::ACTS_W + HANG;
+        /// The library line: the states, and nothing beside them.
+        const LIBRARY_LINE: f32 = HANG + top_bar::KEYS_W + HANG;
 
         const { assert!(FRAME_LINE <= TOP_BAR_FLOOR) }
         const { assert!(LIBRARY_LINE <= TOP_BAR_FLOOR) }
 
-        // **The split is an exact sum, not a rounded one.** It was 960 for a
-        // line of 958. The `Playlists` door's 64 px and the `GAP_XL` beside it
-        // went with ADR-0030 §5 — 88 px — taking it to 872; then both draw
-        // words went on 2026-08-10 on the owner's decision, taking `ACTS_W`
-        // from 182 to 88 and this seam to 778; then the arrangement row gained
-        // a sixth word, spending 54 of that back and taking the seam to 832;
-        // then that word became the first key's own grouping (ADR-0035) and
-        // gave all 54 back, returning the seam to 778; and now the row is six
-        // again with `A–Z` restored as a key of its own, first in it, which
-        // costs 46 of the 94 and puts the seam at **824**. The seam follows
-        // the tenants in **both** directions, because a split declared where
-        // the line still fits would put the strip on two rows for controls it
-        // no longer draws, and one declared where the line no longer fits
-        // would let a word run off the window's edge.
+        // **The split is an exact sum, not a rounded one**, and this is the
+        // largest fall it has taken: 824 → **680**, because two tenants left
+        // in one change rather than the usual one. `Play all` was removed
+        // outright and the gear moved into the app bar, which is 88 + 24 + 32
+        // = 144 px off the line. Every earlier movement is still in the
+        // arithmetic below rather than in prose, so the seam cannot be right
+        // by coincidence.
         const { assert!(FREED == 88.0) }
-        const { assert!(ACTS_FREED == 94.0) }
+        const { assert!(ACTS_FREED == 206.0) }
+        const { assert!(GEAR_FREED == 32.0) }
         const { assert!(KEYS_SPENT == 46.0) }
-        const { assert!(SINGLE_LINE == 824.0) }
-        const { assert!(SINGLE_LINE + FREED + ACTS_FREED - KEYS_SPENT == 960.0) }
+        const { assert!(SINGLE_LINE == 680.0) }
         const { assert!(SINGLE_LINE == TOP_BAR_SPLIT) }
-        // **And the two six-word rows are not the same six-word row.** The
-        // earlier costing measured 368 for a sixth word that was `ARTISTS`;
-        // this one is `A–Z`, 8 px cheaper in its declaration and the reason
-        // every figure below is re-derived rather than read off that table.
-        const { assert!(KEYS_SPENT < 54.0) }
+        // The seam as it stood before ADR-0040, re-derived: the two departures
+        // are worth exactly 144 px between them.
+        const { assert!(SINGLE_LINE + ACTS_W_WAS + GAP_XL + GEAR_FREED == 824.0) }
+        // …and 960 is still reachable from here through every movement since,
+        // which is the claim that the seam has never once been rounded.
+        const {
+            assert!(
+                SINGLE_LINE + ACTS_W_WAS + GAP_XL + GEAR_FREED + FREED + (182.0 - ACTS_W_WAS)
+                    - KEYS_SPENT
+                    == 960.0
+            );
+        }
 
-        // **The two-line split still earns its keep, and no removal bought it
-        // away.** The frame line is what the door and the well stood on, so
-        // those removals made *that* line cheaper — but the split exists for
-        // the **library** line, and both draw words were on it. The line now
-        // comes to 552 against a floor of 600, so it fits **under** the floor
-        // with 48 px to spare rather than meeting it exactly; the floor does
-        // not follow, because it is also the window's sensible minimum (see
-        // [`TOP_BAR_FLOOR`]). Between 600 and 824 there is still no single line
-        // that fits and a two-line pair that does, which is the band the split
-        // serves.
+        // **The two-line split still earns its keep, but it earns less of it
+        // than it did**, and that is the honest reading. The library line is
+        // now the arrangement row between two gutters and nothing else — 440
+        // against a floor of 600, so it fits **under** the floor with 160 px
+        // to spare where it had 48. The floor does not follow, because it is
+        // also the window's sensible minimum (see [`TOP_BAR_FLOOR`]).
         //
-        // **The 94 px the acts cluster freed is what the sixth word came out
-        // of**, and both halves are stated as differences of the movements
-        // that produced them rather than as numbers, so neither can be right by
-        // coincidence: the acts gave 94 back, the arrangement row has spent 46
-        // of it on `A–Z`, and 48 is what is left under the floor. A seventh
-        // word is argued against that 48, and the two prices already on record
-        // — 46 for `A–Z`, 54 for `ARTISTS` — are what it would be estimated
-        // from.
-        const { assert!(LIBRARY_LINE == 552.0) }
-        const { assert!(TOP_BAR_FLOOR - LIBRARY_LINE == ACTS_FREED - KEYS_SPENT) }
-        const { assert!(ACTS_FREED - KEYS_SPENT == 48.0) }
+        // Between 600 and 680 there is still no single line that fits and a
+        // two-line pair that does, so the regime is not dead — but the band it
+        // serves is **80 px wide** where it was 224, and a third tenant leaving
+        // this strip would close it. That is a thing to notice rather than to
+        // fix: the regime should end because the strip no longer needs it, not
+        // because a number was tuned.
+        const { assert!(LIBRARY_LINE == 440.0) }
+        const { assert!(TOP_BAR_FLOOR - LIBRARY_LINE == 160.0) }
         const { assert!(LIBRARY_LINE < TOP_BAR_FLOOR) }
         const { assert!(TOP_BAR_FLOOR < SINGLE_LINE) }
+        const { assert!(SINGLE_LINE - TOP_BAR_FLOOR == 80.0) }
         // The strip's width is the *body's* — the window less the returns
         // lane — so the split's band is reached at a wider window than
         // before: `TOP_BAR_SPLIT + SIDEBAR_RAIL_W` collapsed, and
@@ -7349,41 +7419,32 @@ mod tests {
         // hold its tenants at all rises with it.
         const { assert!(STRIP_FLOOR_WINDOW == 696.0) }
 
-        // **And the band the split serves is exactly the band the well is
+        // **And the band the split serves is inside the band the well is
         // still a tenant of.** Once the well is the lane's the strip wants
-        // 608 px, and the narrowest strip that can happen in is 720 — the
+        // 456 px, and the narrowest strip that can happen in is 720 — the
         // lane's own floor less the lane's own width. So the strip is one line
         // at every width above `SIDEBAR_FLOOR`, in either lane state, and
         // `top_bar_h`'s `strip_holds_the_well` branch is a fact rather than a
-        // hope. It was 648 before the two draw words left and 554 after; a
-        // sixth word put 54 of that back for one release, ADR-0035 took it out
-        // again, and `A–Z` now puts 46 back — **600**, with 120 px of headroom
-        // against the narrowest strip the regime can be handed. That it lands
-        // on `TOP_BAR_FLOOR`'s own figure is a coincidence of two independent
-        // sums and is asserted as an inequality against 720, which is the
-        // claim that matters.
-        const { assert!(SINGLE_LINE_NO_WELL == 600.0) }
+        // hope. It was 648, then 554, then 600; ADR-0040's two departures put
+        // it at **456**, with 264 px of headroom against the narrowest strip
+        // the regime can be handed.
+        const { assert!(SINGLE_LINE_NO_WELL == 456.0) }
         const { assert!(WIDEST_LANE_STRIP == 720.0) }
         const { assert!(SINGLE_LINE_NO_WELL < WIDEST_LANE_STRIP) }
-        const { assert!(WIDEST_LANE_STRIP - SINGLE_LINE_NO_WELL == 120.0) }
+        const { assert!(WIDEST_LANE_STRIP - SINGLE_LINE_NO_WELL == 264.0) }
         // The rail is wider still, so the collapsed lane cannot reach it either.
         const { assert!(SIDEBAR_FLOOR - SIDEBAR_RAIL_W > WIDEST_LANE_STRIP) }
 
         // **The single-line-with-well band is wider than it has ever been.**
-        // It is asserted because a costing once predicted it would not exist:
-        // the proposal kept in `docs/BACKLOG.md` measured a six-word row
-        // against a strip whose acts cluster was still 182 px wide and put the
-        // split at 926 — *above* the widest strip that can hold the well at
-        // all (`SIDEBAR_FLOOR − SIDEBAR_RAIL_W` = 904), which would have
-        // deleted the band outright and made the strip two lines at every
-        // width below the lane's floor. `Pull` and `Shuffle` left in between
-        // and paid for the word twice over. The row is six words again and the
-        // band is still there: the seam is 824 and the band is **824…904**,
-        // 80 px wide. That is the narrowest it has been since the two draw
-        // words left, and it is the figure a seventh word would close.
+        // It is asserted because a costing once predicted it would not exist
+        // at all: the proposal in `docs/BACKLOG.md` measured a six-word row
+        // against a 182 px acts cluster and put the split at 926 — *above*
+        // `SIDEBAR_FLOOR − SIDEBAR_RAIL_W` = 904, which would have deleted the
+        // band and made the strip two lines at every width below the lane's
+        // floor. The band is **680…904**, 224 px.
         const { assert!(WIDEST_STRIP_WITH_WELL == 904.0) }
         const { assert!(SINGLE_LINE < WIDEST_STRIP_WITH_WELL) }
-        const { assert!(WIDEST_STRIP_WITH_WELL - SINGLE_LINE == 80.0) }
+        const { assert!(WIDEST_STRIP_WITH_WELL - SINGLE_LINE == 224.0) }
 
         // The two-line band is the single-line band's own lead three times
         // around two control rows — 8+32+8+32+8, plus the hairline: 89
@@ -7420,6 +7481,79 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// **The app bar holds its tenants at the window's own declared minimum**
+    /// — L9 applied to the second strip in the product (ADR-0040 §2).
+    ///
+    /// The law says a strip enumerates its tenants' reserved widths, that the
+    /// sum plus the frame's gutters must fit the strip's declared floor, and
+    /// that the sum is asserted in code. This bar's floor is not a strip floor
+    /// of its own: it spans the **window**, so its floor is the window's
+    /// `min_size`, which is [`TOP_BAR_FLOOR`] + [`SIDEBAR_RAIL_W`] = 696.
+    ///
+    /// **And it does not split.** The whole line comes to 400 against 696, so
+    /// there is 296 px of slack at the narrowest window baz opens — which is
+    /// why this bar has one regime where the place strip below it has two. A
+    /// bar of five 32 px boxes and one short word does not need a collapse
+    /// order, and giving it one "for symmetry" would be inventing a breakpoint
+    /// nothing can reach.
+    #[test]
+    fn the_app_bar_holds_its_tenants_at_the_windows_own_floor() {
+        /// The window's declared minimum width (`app.rs`'s `min_size`).
+        const FLOOR: f32 = TOP_BAR_FLOOR + SIDEBAR_RAIL_W;
+        /// How far the gear's box stands from the window's right edge — a
+        /// constant with no term in it that can be zero, which is the
+        /// arithmetic form of "both reserved slots are held in every place".
+        const GEAR_FROM_RIGHT: f32 = HANG + APP_BAR_BUTTONS_W + GAP_LG;
+        /// The same, for the display options' slot.
+        const MARKS_FROM_RIGHT: f32 = GEAR_FROM_RIGHT + TRANSPORT_HIT + GAP_LG;
+        /// The bar's one line: the gutter, the window's name, the drag gap's
+        /// two `GAP_LG` flanks, the display options' reserved slot, the seam,
+        /// the gear, the seam, the window controls' reserved slot, the gutter.
+        ///
+        /// The drag gap contributes **zero** of its own — it is the fill, and
+        /// what the law has to hold is the line with the fill at nothing.
+        const LINE: f32 = HANG
+            + APP_BAR_NAME_W
+            + 2.0 * GAP_LG
+            + APP_BAR_MARKS_W
+            + GAP_LG
+            + TRANSPORT_HIT
+            + GAP_LG
+            + APP_BAR_BUTTONS_W
+            + HANG;
+
+        const { assert!(APP_BAR_MARKS_W == 96.0) }
+        const { assert!(APP_BAR_BUTTONS_W == 104.0) }
+        const { assert!(LINE == 400.0) }
+        const { assert!(LINE <= FLOOR) }
+        // The slack is stated rather than left implicit, because it is the
+        // figure any future tenant of this bar is argued against — the same
+        // service `TOP_BAR_FLOOR`'s 160 does for the strip below.
+        const { assert!(FLOOR - LINE == 296.0) }
+
+        // **Both reserved slots are held in every place**, which is what makes
+        // one bar the same bar everywhere (ADR-0040 §5). Stated as arithmetic:
+        // the distance from the window's right edge to the gear is a constant,
+        // and it does not contain a term that could be zero.
+        const { assert!(GEAR_FROM_RIGHT == 160.0) }
+        const { assert!(MARKS_FROM_RIGHT == 208.0) }
+
+        // **The band's height is a control row plus a named lead each side**
+        // (law L4), and it is smaller than the place strip's on purpose: this
+        // bar holds boxes and one word, the strip below holds words and a text
+        // well. 4 + 32 + 4, plus the hairline.
+        const { assert!(APP_BAR_PAD_V == GAP_XS) }
+        const { assert!(APP_BAR_H == 41.0) }
+        const { assert!(APP_BAR_H < TOP_BAR_H) }
+        // **What the whole top of the window now costs**, which is the number
+        // doc 10 §6.10's refusal of a permanent second header line has to be
+        // met with: 41 + 49 = 90 on the five places that wear a strip, against
+        // 49 before — plus, today and only today, the platform title bar that
+        // is still drawn above it. ADR-0040 §6 takes that debt deliberately
+        // and names what clears it.
+        const { assert!(APP_BAR_H + TOP_BAR_H == 90.0) }
     }
 
     /// **Every icon-only control carries a tooltip** — the form rule's

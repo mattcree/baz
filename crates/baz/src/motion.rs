@@ -417,12 +417,18 @@ pub enum Control {
     Next,
     /// The bottom bar's speaker.
     Mute,
-    /// The Library strip's gear — the door to the Settings place
-    /// (doc 10 §3.4), the one icon-only control outside the bottom bar.
+    /// The app bar's gear — the door to the Settings place (doc 10 §3.4),
+    /// resident in every place since ADR-0040 rather than only the Library.
     Settings,
     /// The bottom bar's crossed arrows — the player's shuffle property
     /// (2026-08-10, the owner).
     Shuffle,
+    /// The app bar's minimise button (ADR-0040 §3).
+    WindowMinimise,
+    /// The app bar's maximise/restore button — one control, two states.
+    WindowMaximise,
+    /// The app bar's close button.
+    WindowClose,
 }
 
 /// What every icon button needs to know to ink itself: which one the pointer is
@@ -775,6 +781,9 @@ mod tests {
             Control::Mute,
             Control::Settings,
             Control::Shuffle,
+            Control::WindowMinimise,
+            Control::WindowMaximise,
+            Control::WindowClose,
         ];
         for (index, control) in all.iter().enumerate() {
             for other in &all[index + 1..] {
