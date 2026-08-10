@@ -6,6 +6,10 @@
 //! - [`top_bar`] — the search well, the group-key row, and the quiet counts.
 //! - [`shelf`] — the wall: the shelved, virtualized album grid, its pinned
 //!   group headers, the index rail, its tiles and its empty states.
+//! - [`page`] — **one page, two subjects**: the composition [`album`] and
+//!   [`playlist`] both wear, and the leaf widgets their rows share. Not a
+//!   surface of its own — it draws whichever of the two is handed to it
+//!   (ADR-0024 §A2's arrangement, made literal).
 //! - [`album`] — the record's page: art, identity, `Play album`, the track
 //!   list and the condition report.
 //! - [`queue`] — the queue place: what baz handed the engine, and where it is
@@ -35,8 +39,8 @@
 //! replace each other ([`crate::place`]), and [`bottom_bar`] is in every one of
 //! them and never moves.
 //!
-//! That is why [`place_header`] is shared rather than copied: the places that
-//! wear one draw the same strip, in the same geometry as the Library's
+//! That is why [`place_header_with`] is shared rather than copied: the places
+//! that wear one draw the same strip, in the same geometry as the Library's
 //! [`top_bar`], because
 //! **the frame is the frame in every place** — navigating may not slide the
 //! content area by a pixel.
@@ -70,6 +74,7 @@ pub(crate) mod drag_ghost;
 pub(crate) mod home;
 pub(crate) mod lane;
 pub(crate) mod now_playing;
+pub(crate) mod page;
 pub(crate) mod playlist;
 pub(crate) mod playlist_panel;
 pub(crate) mod queue;
@@ -291,10 +296,10 @@ pub(crate) fn clear_mark(on: Color) -> Element<'static, Message> {
 /// It occupies the Library's top-bar geometry exactly — the same vertical
 /// padding, the same [`theme::HANG`] window gutter (law L1), the same hairline
 /// underneath — so that moving between places does not slide the content area
-/// by a pixel. **The frame is the frame in every place**, and with four places
-/// wearing it — Album, Queue, Playlist, and since doc 10 §7 step 8 Settings —
-/// it is one function in five places (the Library's own strip being
-/// [`top_bar`]) rather than copies that can drift.
+/// by a pixel. **The frame is the frame in every place**: Queue and — since doc
+/// 10 §7 step 8 — Settings wear this form, Artist and the two subject pages
+/// ([`page`]) wear [`place_header_led`]'s, and the Library's own strip is
+/// [`top_bar`]. One function rather than copies that can drift.
 ///
 /// **The header carries no way back, and that is not a missing affordance.**
 /// It held a `‹ Library` door and an `Esc returns to Library` hint until the
@@ -304,13 +309,12 @@ pub(crate) fn clear_mark(on: Color) -> Element<'static, Message> {
 /// keyboard is untouched — <kbd>Esc</kbd> still peels and still lands on the
 /// Library — and the visible-control rule holds through the lane's own row.
 /// **Do not restore a back door here**: its absence is the lane's presence.
-pub(crate) fn place_header(name: &'static str) -> Element<'static, Message> {
-    place_header_with(name, None)
-}
-
-/// [`place_header`], with one quiet statement at the strip's right edge.
 ///
-/// `note` is for a statement about the *place*, never a keyboard hint — the
+/// # `note`
+///
+/// One quiet statement at the strip's right edge.
+///
+/// It is for a statement about the *place*, never a keyboard hint — the
 /// Settings place's *"Kept in config.toml…"* is the only one today. The strip
 /// stays one function so the geometry cannot drift between the place that
 /// carries a note and the ones that do not.
@@ -340,8 +344,8 @@ pub(crate) fn place_name(name: &str) -> Element<'static, Message> {
         .into()
 }
 
-/// [`place_header`], with an arbitrary **lead** and an optional quiet statement
-/// at the strip's right edge.
+/// [`place_header_with`], with an arbitrary **lead** and an optional quiet
+/// statement at the strip's right edge.
 ///
 /// Four of the places lead with [`place_name`] and nothing else. Two do not,
 /// and they are the pair the owner's breadcrumb joins: the Album place leads

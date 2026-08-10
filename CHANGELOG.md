@@ -488,6 +488,54 @@ next commit.
     that, a variable-length label in the 440 px strip is the one measurement
     doc 14 §6.3 flagged as wanting a frame. Frames, measurements and the
     reasoning at `docs/design/impl/serif-titles/`.
+- **One page, two subjects: a record's page and a playlist's page are now one
+  composition** ([ADR-0024](docs/adr/0024-playlists.md) §A2 as amended, §A4.5).
+  The owner: *"can we reuse the basic layout and view of the playlist for the
+  album view and the playlist view accessed via clicking into info — right now
+  they are different but for no good reason."* §A2 had given the two pages one
+  arrangement; what shipped was a second **copy** of it, written weeks later,
+  and the copies had drifted. `crates/baz/src/views/page.rs` is the
+  arrangement written once — the gutter, the breakpoint, the 320 px aside and
+  its order, the 80 px identity block, the `TRACKS` rule, the row spacing, the
+  one scroll — and the two pages hand it only what is about their subject.
+  - **What is kept, because a record is not a list**: the breadcrumb against
+    the name; the cover against the collage; `Play album` against `Play`;
+    `Add to playlist…` against `Queue` · `Rename` · `Delete`; the edition
+    selector and `DETAILS` against the rename field; the serif italic hero
+    against the sans one; the artist against `Playlist · 12 records`; `Undo`
+    beside the counts; and the ▲▼ and ✕ that a durable artefact's rows earn.
+  - **What was drift and is gone**: the quiet act was a *centred, full-width*
+    `paper_dim` box on one page and *natural-width* `paper` words on the
+    other — measured at x = 115 against x = 12 and now one word on one lane;
+    a record's page had no empty state at all and ruled off an unreadable
+    edition in silence; its `Play album` was hidden where there is no engine
+    in the build while a playlist's `Play` stood there permanently dead; and
+    `DISC 1` took air under the `TRACKS` rule where a first record head does
+    not.
+  - **The strip names the subject on both.** A playlist's page led with the
+    word `Playlist` — `place_header_led`'s rule is that a place whose subject
+    changes leads with its subject, and the Album and Artist places both do.
+    It leads with the list's name now; the kind word is not removed but
+    stated once, in the byline at 19 px under the name rather than at 15 px
+    58 px above it. **The owner's second sentence needed nothing built**: the
+    frame of the two identity blocks at one crop — a serif italic title over
+    a person's name against a sans name over `Playlist · 12 records` — is
+    already unambiguous, so no eyebrow is drawn.
+  - **A playlist's whole page rode 12 px higher than a record's**, and three
+    studies had missed it. `TOP_BAR_H` is
+    `2 · TOP_BAR_PAD_V + TRANSPORT_HIT + 1` = 49, but the shared strip lays
+    out whatever lead it is handed: a record's breadcrumb is a *control* and
+    declares 32, a playlist's name was a bare 20, so that strip came to 37.
+    Sleeve top y = 88 against y = 77. Tiers 1 and 2 could not have caught it —
+    each cropped its two identity blocks out of *its own* page and compared
+    their shapes, which was true and still is. The composition boxes its lead
+    at the control height now. Queue, Settings and the Artist place still
+    carry that 12 px, which is a change to the frame and is logged rather
+    than taken here.
+  - Frames from **both builds**, at 1280 × 860 and 1920 × 1080, with a
+    measurement that prints `agree` / `DIFFER` per reading:
+    `docs/design/impl/one-page-two-subjects/`. Every `DIFFER` before is an
+    `agree` after.
 
 **Interface**
 

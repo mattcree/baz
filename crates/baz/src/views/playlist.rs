@@ -2,19 +2,24 @@
 //! (ADR-0024 §4) — the record page's sibling in arrangement, the queue
 //! place's sibling in row anatomy.
 //!
-//! # The record page's composition, the queue place's rows
+//! # The shared composition, the queue place's rows
 //!
 //! Since the sleeve amendment (ADR-0024 §A2) the page wears the album page's
 //! own two-column arrangement: **the object beside what is written about
 //! it** — the collage sleeve at [`theme::ALBUM_SLEEVE`] over `Play` and the
 //! quieter acts in the aside, the name at hero scale over the rows in the
-//! main column, stacking below [`theme::ALBUM_BREAKPOINT`] by the same
-//! arithmetic. The rows themselves stay the queue place's — one anatomy for
-//! every list in baz — plus the two reserved edit slots a durable artefact
-//! earns: the ✕ that takes an entry out and the ▲▼ steppers that reorder,
-//! the no-drag pointer route the visible-control rule requires, with
-//! drag-to-reorder deferred to the shared pointer-capture widget
-//! (ADR-0024 §6 layer 3).
+//! main column, stacking below the same breakpoint by the same arithmetic.
+//!
+//! Since *one page, two subjects* (2026-08-10) that is not a resemblance but
+//! an identity: the arrangement is [`views::page`](super::page) and this
+//! module hands it a playlist. Everything here is what a *made list* puts in
+//! the composition's slots, and nothing here lays out a page.
+//!
+//! The rows themselves stay the queue place's — one anatomy for every list in
+//! baz — plus the reserved edit slots a durable artefact earns: the ✕ that
+//! takes an entry out and the ▲▼ steppers that reorder, the no-drag pointer
+//! route the visible-control rule requires, with drag-to-reorder deferred to
+//! the shared pointer-capture widget (ADR-0024 §6 layer 3).
 //!
 //! **The arrangement is the album page's; the declared hierarchy is not**
 //! (ADR-0024 §A4.2). §A2 imported both, and the second does not transfer:
@@ -29,7 +34,7 @@
 //! *layout*: it stays at [`theme::ALBUM_SLEEVE`] in a 320 px aside, because
 //! that width is what lets the aside's blocks share one x-edge (law L5) and
 //! shrinking it would buy nothing. What the demotion buys is the byline line
-//! under the name — see [`identity_block`], which is where the owner's
+//! under the name — see [`identity`], which is where the owner's
 //! *"the playlist name isn't really prominent"* is actually answered.
 //!
 //! # The honesty on this surface
@@ -55,16 +60,14 @@
 //!   the file as it stood is one press — or <kbd>Ctrl</kbd>+<kbd>Z</kbd> —
 //!   away, through the same fingerprint guard as the edit it reverses.
 
-use iced::widget::{
-    Column, Space, button, column, container, image as iced_image, mouse_area, row, scrollable,
-    text, text_input, tooltip,
-};
+use iced::widget::{button, column, container, mouse_area, row, text, text_input};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
-use crate::player::PlayerState;
+use crate::player::{Availability, PlayerState};
 use crate::playlists::{Collecting, NameEntry, OpenPlaylist, PageRow};
-use crate::views::{place_header, place_pad, playlist_sleeve, section_rule};
+use crate::views::page::{self, Identity, Page};
+use crate::views::{place_name, playlist_sleeve};
 use crate::{icon, theme};
 
 /// The rename field's id, so the caret can land in it the moment `Rename` is
@@ -73,12 +76,18 @@ pub(crate) fn rename_id() -> text_input::Id {
     text_input::Id::new("baz-playlist-rename")
 }
 
-/// The playlist's page: the header strip, then **the object beside what is
-/// written about it** — the record page's own two-column arrangement, worn
-/// by its sibling (ADR-0024 §A2). The aside holds the sleeve, the page's one
-/// commitment and its quieter acts; the main column holds the name at hero
-/// scale, the counts and the rows. Below [`theme::ALBUM_BREAKPOINT`] the two
-/// columns stack, by the album page's own arithmetic and for its reason.
+/// The playlist's page: [`views::page`](crate::views::page)'s composition, with
+/// a made list in it.
+///
+/// The arrangement is the shared one and this module supplies what is *about a
+/// list*: the collage sleeve, `Play`, the three acts a durable artefact earns,
+/// the rename field while it stands, the sans name over the byline over the
+/// counts, and the rows with their edit slots.
+///
+/// **The strip leads with the list's name.** It led with the word `Playlist`
+/// until this change — see `views::page`'s own docs: the strip names the
+/// subject on every page whose subject changes, and the kind is stated in the
+/// byline 19 px under the name, where design 14 §3.5 argued it belongs.
 #[expect(
     clippy::too_many_arguments,
     reason = "each argument is one independent reading the page renders — \
@@ -96,24 +105,61 @@ pub(crate) fn view<'a>(
     drag: Option<&'a crate::drag::DragState>,
     can_undo: bool,
 ) -> Element<'a, Message> {
-    let room = theme::active();
-    let content = (window_width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).max(0.0);
-    let side_by_side = window_width >= theme::ALBUM_BREAKPOINT;
-    let measure = if side_by_side {
-        (content - theme::ALBUM_ASIDE_W - theme::GAP_XL).clamp(0.0, theme::LIST_MEASURE)
-    } else {
-        content.min(theme::LIST_MEASURE)
-    };
     let live = player.engine_ready();
+    let playable = !open.queue.is_empty();
+    let mut aside_tail: Vec<Element<'a, Message>> = Vec::new();
+    if let Some(renaming) = &open.renaming {
+        aside_tail.push(rename_field(renaming));
+    }
+    page::view(
+        Page {
+            lead: place_name(open.name()),
+            // The collage of quotations (§A1), at the record page's own sleeve
+            // edge.
+            sleeve: playlist_sleeve(shelf, &open.art, open.name(), theme::ALBUM_SLEEVE),
+            // Drawn only where there is an engine in the build to send it to —
+            // the record page's rule, which this page did not have: a `Play`
+            // that could never act in any state of any run is not a control.
+            commitment: (*player.availability() != Availability::NotBuilt)
+                .then(|| page::commitment("Play", live && playable, Message::PlaylistPlay)),
+            acts: vec![
+                page::act("Queue", live && playable, Message::PlaylistQueue),
+                page::act("Rename", true, Message::PlaylistRenameStart),
+                // One press, into the platform trash (doc 11 §5 P2): the
+                // confirm died when the act became reversible — the desktop's
+                // own Restore is the road back, so a warning would be the
+                // fallback posture shipped as the default.
+                page::act("Delete", true, Message::PlaylistDelete),
+            ],
+            aside_tail,
+            identity: identity(open, can_undo),
+            rows: entry_rows(open, player, hovered, collecting, drag, live),
+            // The words the armed mode left behind went with it (doc 09 §9):
+            // the route in is the transfer gesture — a row's `+`, or the
+            // record page's `Add to playlist…`, then this list in the picker.
+            empty: "Nothing here yet. Press + on any track row, or Add to playlist… on a record's page, and pick this list.",
+        },
+        window_width,
+    )
+}
+
+/// **Every entry**, with a record's name where its run begins.
+fn entry_rows<'a>(
+    open: &'a OpenPlaylist,
+    player: &'a PlayerState,
+    hovered: Option<usize>,
+    collecting: Collecting,
+    drag: Option<&'a crate::drag::DragState>,
+    live: bool,
+) -> Vec<Element<'a, Message>> {
     // Which display row carries the lamp: the engine's confirmed row in the
     // playable subset, mapped back through each row's own subset position —
     // and nothing at all unless the queue is exactly this list.
     let playing_playable = player.playing_row_in(&open.tracks);
-
     let mut rows: Vec<Element<'a, Message>> = Vec::new();
     for (index, page_row) in open.rows.iter().enumerate() {
         if let Some((album, artist)) = &page_row.head {
-            rows.push(record_head(album, artist, index == 0));
+            rows.push(record_head(album, artist, rows.is_empty()));
         }
         let playing =
             page_row.playable_position.is_some() && page_row.playable_position == playing_playable;
@@ -129,91 +175,15 @@ pub(crate) fn view<'a>(
             drag.is_some_and(|held| held.list == crate::drag::List::Playlist),
         ));
     }
-    let body: Element<'a, Message> = if open.rows.is_empty() {
-        // The words the armed mode left behind went with it (doc 09 §9):
-        // the route in is the transfer gesture — a row's `+`, or the
-        // record page's `Add to playlist…`, then this list in the picker.
-        text("Nothing here yet. Press + on any track row, or Add to playlist… on a record's page, and pick this list.")
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(room.paper_faint)
-            .into()
-    } else {
-        Column::with_children(rows).spacing(theme::GAP_XS).into()
-    };
-    let main = column![
-        identity_block(open, can_undo),
-        column![section_rule("Tracks"), body].spacing(theme::GAP_SM),
-    ]
-    .spacing(theme::GAP_XL);
-    let page: Element<'a, Message> = if side_by_side {
-        row![
-            container(aside(shelf, open, live)).width(Length::Fixed(theme::ALBUM_ASIDE_W)),
-            container(main).width(Length::Fixed(measure)),
-        ]
-        .spacing(theme::GAP_XL)
-        .align_y(iced::Alignment::Start)
-        .into()
-    } else {
-        column![
-            container(aside(shelf, open, live)).width(Length::Fixed(theme::ALBUM_ASIDE_W)),
-            container(main).width(Length::Fixed(measure)),
-        ]
-        .spacing(theme::GAP_XL)
-        .into()
-    };
-    column![
-        place_header("Playlist"),
-        scrollable(
-            container(page)
-                .width(Length::Fill)
-                .padding(place_pad())
-                .align_x(alignment::Horizontal::Center)
-        )
-        .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
-        .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
-        .width(Length::Fill)
-        .height(Length::Fill),
-    ]
-    .into()
+    rows
 }
 
-/// The left column: **the object, the one thing you can do to it, and its
-/// quieter acts** — the album page's aside, worn by the playlist. The sleeve
-/// is the collage of quotations at [`theme::ART_MAX`] (§A1), `Play` stands
-/// directly under it at the sleeve's whole width exactly as `Play album`
-/// does, and the acts that redefine or destroy the artefact sit below with
-/// whichever of their fields is standing.
-fn aside<'a>(shelf: &'a Shelf, open: &'a OpenPlaylist, live: bool) -> Element<'a, Message> {
-    let playable = !open.queue.is_empty();
-    let mut block = column![
-        playlist_sleeve(shelf, &open.art, open.name(), theme::ALBUM_SLEEVE),
-        play_control(live && playable),
-        row![
-            word_act("Queue", live && playable, Message::PlaylistQueue),
-            word_act("Rename", true, Message::PlaylistRenameStart),
-            // One press, into the platform trash (doc 11 §5 P2): the
-            // confirm died when the act became reversible — the desktop's
-            // own Restore is the road back, so a warning would be the
-            // fallback posture shipped as the default.
-            word_act("Delete", true, Message::PlaylistDelete),
-        ]
-        .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Center),
-    ]
-    .spacing(theme::GAP_MD);
-    if let Some(renaming) = &open.renaming {
-        block = block.push(rename_field(renaming));
-    }
-    block.into()
-}
-
-/// The main column's identity block: **the name at hero scale, the byline
-/// under it, then the counts** — `38 of 40 · 2 missing` when entries are
-/// missing — the album header's falling order with the fields a made thing
-/// has. Beside the counts, exactly while there is an edit to take back,
-/// stands the transient `Undo` (doc 11 §5 P2) — the queue place's word, on
-/// the page that is its sibling editor.
+/// What the shared identity block ([`Identity`]) says about a **made list**:
+/// the name at hero scale, the byline under it, then the counts —
+/// `38 of 40 · 2 missing` when entries are missing. Beside the counts, exactly
+/// while there is an edit to take back, stands the transient `Undo`
+/// (doc 11 §5 P2) — the queue place's word, on the page that is its sibling
+/// editor, and the one thing in this block a record's page has no use for.
 ///
 /// # The byline, and why it is the answer to *"the name isn't prominent"*
 ///
@@ -251,42 +221,16 @@ fn aside<'a>(shelf: &'a Shelf, open: &'a OpenPlaylist, live: bool) -> Element<'a
 /// one, and the folder path in `DETAILS`, every one of which is already sans.
 /// Flattening the two heroes back into one face would delete the distinction
 /// tier 1 spent three strings stating.
-fn identity_block(open: &OpenPlaylist, can_undo: bool) -> Element<'_, Message> {
-    let room = theme::active();
-    let mut summary = row![
-        text(open.counts_line())
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(room.paper_faint)
-            .wrapping(text::Wrapping::None),
-    ]
-    .spacing(theme::GAP_SM)
-    .align_y(iced::Alignment::Center);
-    if can_undo {
-        summary = summary.push(undo_control());
+fn identity(open: &OpenPlaylist, can_undo: bool) -> Identity<'static> {
+    Identity {
+        name: open.name().to_owned(),
+        // Sans, against the record page's serif italic. See this function's
+        // docs — it is the axis, not an omission.
+        face: theme::SEMIBOLD,
+        byline: byline(open.records),
+        facts: open.counts_line(),
+        beside_facts: can_undo.then(undo_control),
     }
-    column![
-        container(
-            text(open.name().to_owned())
-                .size(theme::SIZE_HERO)
-                .line_height(theme::LEADING_HERO)
-                .font(theme::SEMIBOLD)
-                .color(room.paper)
-        )
-        .max_height(2.0 * theme::LINE_HERO)
-        .clip(true),
-        // The byline, in the album page's artist slot at the album page's
-        // artist size — the one widget this change adds, and the whole of
-        // the 52 → 80 px correction.
-        text(byline(open.records))
-            .size(theme::SIZE_TITLE)
-            .line_height(theme::LEADING_TITLE)
-            .color(room.paper_dim)
-            .wrapping(text::Wrapping::None),
-        summary,
-    ]
-    .spacing(theme::GAP_XS)
-    .into()
 }
 
 /// The word in the byline slot: what this object **is**, in the one place a
@@ -348,68 +292,6 @@ fn undo_control() -> Element<'static, Message> {
     .padding(theme::pad(0.0, theme::GAP_SM))
     .style(move |_theme, status| theme::word_button(room, room.wall, status))
     .on_press(Message::Undo)
-    .into()
-}
-
-/// **Play** — the page's one commitment, in `Play album`'s clothes: the lamp
-/// outline, the paper triangle, and the only accent on the surface. It sends
-/// the playable subset (ADR-0024 §3); the counts line directly above it is
-/// where the page says so.
-fn play_control(live: bool) -> Element<'static, Message> {
-    let room = theme::active();
-    button(
-        container(
-            row![
-                iced_image(icon::handle(icon::Glyph::Play))
-                    .width(Length::Fixed(theme::ICON_PX))
-                    .height(Length::Fixed(theme::ICON_PX))
-                    .opacity(theme::glyph_opacity(live, false)),
-                text("Play")
-                    .size(theme::SIZE_BODY)
-                    .line_height(theme::LEADING_BODY)
-                    .font(theme::SEMIBOLD)
-                    .wrapping(text::Wrapping::None),
-            ]
-            .spacing(theme::GAP_SM)
-            .align_y(iced::Alignment::Center),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(alignment::Horizontal::Center)
-        .align_y(alignment::Vertical::Center),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_MD))
-    .style(move |_theme, status| theme::primary(room, status))
-    .on_press_maybe(live.then_some(Message::PlaylistPlay))
-    .into()
-}
-
-/// A quiet word act — `Queue`, `Rename`, `Delete` — at the product's one
-/// control height, no accent.
-fn word_act(label: &'static str, enabled: bool, message: Message) -> Element<'static, Message> {
-    let room = theme::active();
-    button(
-        container(
-            text(label)
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .font(theme::MEDIUM)
-                .color(if enabled {
-                    room.paper
-                } else {
-                    room.paper_muted
-                })
-                .wrapping(text::Wrapping::None),
-        )
-        .height(Length::Fill)
-        .align_y(alignment::Vertical::Center),
-    )
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_MD))
-    .style(move |_theme, status| theme::transport(room, room.wall, status))
-    .on_press_maybe(enabled.then_some(message))
     .into()
 }
 
@@ -518,7 +400,7 @@ fn entry_row(
         room.paper
     };
     let marker: Element<'_, Message> = if playing {
-        lamp_dot()
+        page::lamp_dot()
     } else {
         text(page_row.position.to_string())
             .size(theme::SIZE_META)
@@ -604,21 +486,30 @@ fn entry_row(
     let offered = hovered;
     let mut slots = row![
         body,
-        step_slot(
+        // The reorder pair and the removal cross — the three slots a durable
+        // artefact earns over a record's rows, in the composition's one slot
+        // anatomy ([`page::icon_slot`]).
+        page::icon_slot(
             icon::Glyph::ArrowUp,
             "Move up",
             index > 0,
             offered,
             Message::PlaylistShiftEntry(index, -1)
         ),
-        step_slot(
+        page::icon_slot(
             icon::Glyph::ArrowDown,
             "Move down",
             index + 1 < total,
             offered,
             Message::PlaylistShiftEntry(index, 1),
         ),
-        remove_slot(index, offered),
+        page::icon_slot(
+            icon::Glyph::Close,
+            "Remove from the playlist",
+            true,
+            offered,
+            Message::PlaylistRemoveEntry(index),
+        ),
     ]
     .spacing(theme::GAP_XS)
     .align_y(iced::Alignment::Center);
@@ -627,9 +518,9 @@ fn entry_row(
         // rule: no engine needed (a pick can land in a file), offered on
         // hover and at rest while the panel stands. A missing entry keeps
         // the reserved space and no control.
-        slots = slots.push(transfer_slot(
-            index,
+        slots = slots.push(page::transfer_slot(
             !page_row.missing && (collecting.panel_open || hovered),
+            Message::PlaylistAddEntry(index),
         ));
     }
     // The row's right press opens its mirror menu (doc 09 §5.2): play and
@@ -646,227 +537,9 @@ fn entry_row(
     )
 }
 
-/// The row's transfer `+` — the queue row's exact anatomy and tooltip, the
-/// drawn [`icon::Glyph::Plus`] since doc 10 §3.6, sending the page's own
-/// message ([`Message::PlaylistAddEntry`]): hold this row's track, open the
-/// panel as the picker (doc 09 §8.1's one gesture, reaching the page's rows
-/// at step 4 as §8.2's parity promised).
-fn transfer_slot(index: usize, offered: bool) -> Element<'static, Message> {
-    let room = theme::active();
-    if !offered {
-        return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
-    }
-    let mark = container(
-        iced_image(icon::handle(icon::Glyph::Plus))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::GLYPH_OPACITY_HOVER),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(alignment::Horizontal::Center)
-    .align_y(alignment::Vertical::Center);
-    tooltip(
-        button(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .padding(0)
-            .style(move |_theme, status| theme::transport(room, room.wall, status))
-            .on_press(Message::PlaylistAddEntry(index)),
-        text("Add to a playlist, or the queue")
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        tooltip::Position::Left,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
-}
-
-/// One reorder stepper's reserved slot: the drawn ↑ or ↓ while the pointer
-/// is on the row, and a space of exactly the same width when it is not —
-/// the settings steppers' size, the queue ✕'s reservation rule.
-///
-/// The arrows were U+2191/U+2193 borrowed from the face (IBM Plex Sans
-/// carries no triangles, so the docs' ▲▼ shorthand rasterised as tofu);
-/// they are [`icon::Glyph::ArrowUp`]/[`icon::Glyph::ArrowDown`] now
-/// (doc 10 §3.6): a control slot carries a drawn glyph or a word, never a
-/// borrowed character, and the drawn pair matches the ✕ beside it in
-/// stroke and ink. Icon-only, so the tooltip carries the name.
-fn step_slot(
-    glyph: icon::Glyph,
-    name: &'static str,
-    can: bool,
-    offered: bool,
-    message: Message,
-) -> Element<'static, Message> {
-    let room = theme::active();
-    if !offered {
-        return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
-    }
-    let mark = container(
-        iced_image(icon::handle(glyph))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(if can {
-                theme::GLYPH_OPACITY_HOVER
-            } else {
-                theme::GLYPH_OPACITY_DISABLED
-            }),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(alignment::Horizontal::Center)
-    .align_y(alignment::Vertical::Center);
-    tooltip(
-        button(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .padding(0)
-            .style(move |_theme, status| theme::transport(room, room.wall, status))
-            .on_press_maybe(can.then_some(message)),
-        text(name)
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        tooltip::Position::Left,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
-}
-
-/// The per-row removal target — the queue row's exact anatomy, sending the
-/// file's edit rather than the engine's.
-fn remove_slot(index: usize, offered: bool) -> Element<'static, Message> {
-    let room = theme::active();
-    if !offered {
-        return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
-    }
-    let mark = container(
-        iced_image(icon::handle(icon::Glyph::Close))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::GLYPH_OPACITY_HOVER),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(alignment::Horizontal::Center)
-    .align_y(alignment::Vertical::Center);
-    tooltip(
-        button(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .padding(0)
-            .style(move |_theme, status| theme::transport(room, room.wall, status))
-            .on_press(Message::PlaylistRemoveEntry(index)),
-        text("Remove from the playlist")
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        tooltip::Position::Left,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
-}
-
-/// The playing row's lamp dot — the same amber circle, the same token, as
-/// every other list surface's.
-fn lamp_dot() -> Element<'static, Message> {
-    let room = theme::active();
-    container(Space::new(
-        Length::Fixed(theme::DOT),
-        Length::Fixed(theme::DOT),
-    ))
-    .style(move |_theme| theme::lamp_dot(room))
-    .into()
-}
-
 #[cfg(test)]
 mod tests {
     use super::KIND;
-    use crate::theme;
-
-    /// **The two identity blocks are the same height** — 80 px, a record's —
-    /// and that is the whole of the answer to *"we do not have the playlist
-    /// name really prominent"* (ADR-0024 §A4.3).
-    ///
-    /// The name was never small: it is the album title's own `SIZE_HERO` 28 /
-    /// `SEMIBOLD` and always was. What made it read as a stub was that the
-    /// block *stopped* after 52 px — the record's byline line was missing, so
-    /// a 28 px name was followed straight by a 12 px count, where a record's
-    /// is given a 19 px line of support first. This page was the album page
-    /// with the byline deleted.
-    ///
-    /// Asserted as arithmetic over the two compositions' own tokens, with a
-    /// source sweep to keep the arithmetic describing what is drawn. Both are
-    /// three `column!` children at `GAP_XS`, and the sizes are read off the
-    /// files rather than assumed, because the failure this guards against is
-    /// somebody changing one page's ramp and not the other's.
-    #[test]
-    fn the_two_identity_blocks_are_the_same_height() {
-        let block =
-            theme::LINE_HERO + theme::GAP_XS + theme::LINE_TITLE + theme::GAP_XS + theme::LINE_META;
-        assert!(
-            (block - 80.0).abs() < f32::EPSILON,
-            "32 + 4 + 24 + 4 + 16 = 80, the record's block: {block}"
-        );
-
-        let read = |file: &str| {
-            std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(file))
-                .expect("a view's own source")
-                .replace("\r\n", "\n")
-        };
-        let made = read("src/views/playlist.rs");
-        let found = read("src/views/album.rs");
-
-        // Three lines, in one falling order, in both files: the hero clipped
-        // at two lines, the byline at SIZE_TITLE in `paper_dim`, the facts at
-        // SIZE_META in `paper_faint`.
-        for (page, source) in [("a playlist's", &made), ("a record's", &found)] {
-            for token in [
-                "theme::SIZE_HERO",
-                "theme::LEADING_HERO",
-                "theme::SIZE_TITLE",
-                "theme::LEADING_TITLE",
-                "room.paper_dim",
-                "theme::SIZE_META",
-                "theme::LEADING_META",
-                "theme::GAP_XS",
-            ] {
-                assert!(
-                    source.contains(token),
-                    "{page} identity block sets its {token}"
-                );
-            }
-            assert!(
-                source.contains("max_height(2.0 * theme::LINE_HERO)"),
-                "{page} hero clips at two lines rather than running to a paragraph"
-            );
-        }
-
-        // …and the middle line is the one place the two differ. A record
-        // names its artist there; a made list names what it is and what it is
-        // made of, because there is no author a `.m3u8` file records
-        // (ADR-0024 §A4.3).
-        assert!(
-            made.contains("text(byline(open.records))") && KIND == "Playlist",
-            "the playlist's byline slot holds the kind"
-        );
-        assert!(
-            found.contains("text(artist)"),
-            "the record's byline slot holds its artist"
-        );
-        // The byline is a statement about the object, not a control: no
-        // press, no message, nothing to learn. A door in this slot would be
-        // the badge §A3.3 refuses, wearing a word instead of a glyph.
-        assert!(
-            !made.contains("text(byline(open.records))\n            .on_press"),
-            "the byline states; it does not act"
-        );
-    }
 
     /// **The byline states a composition it can prove**, and the first token
     /// is the kind in every form it takes (ADR-0024 §A4.3).

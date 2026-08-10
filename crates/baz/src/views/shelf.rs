@@ -16,7 +16,6 @@ use crate::player::PlayerState;
 use crate::playlists::Collecting;
 use crate::shelf::{Density, Grid, Run, Shelves};
 use crate::spine::{Slot, Spine};
-use crate::views::album::add_slot;
 use crate::views::{gradient_block, section_rule};
 use crate::{icon, rail, theme, vm};
 
@@ -384,7 +383,9 @@ fn song_row<'a>(
     }
     let offered = collecting.panel_open || hovered;
     let slot: Element<'a, Message> = match resolved {
-        Some((id, row)) => add_slot(id, row, offered),
+        Some((id, row)) => {
+            crate::views::page::transfer_slot(offered, Message::AddTrackToPlaylist(id, row))
+        }
         None => Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into(),
     };
     with_menu(

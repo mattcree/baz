@@ -1,5 +1,17 @@
 //! **The record's page**: one album, at the width of the window.
 //!
+//! # The composition is [`views::page`](super::page)'s
+//!
+//! Since *one page, two subjects* (2026-08-10) this module lays out nothing.
+//! The gutter, the breakpoint, the 320 px aside, the identity block, the
+//! `TRACKS` rule and the one scroll are the composition a record's page and a
+//! playlist's page both wear; what is here is everything that is *about a
+//! record* — the breadcrumb, the cover, `Play album`, the edition selector,
+//! `DETAILS`, the serif title over the artist over the catalogue line, and the
+//! track rows. The sections below are the arguments for those, and they are
+//! unchanged: what moved is where the arrangement is written down, which is
+//! once.
+//!
 //! # It is a place now, and that is a re-lay rather than a re-parent
 //!
 //! This was `side_panel.rs`, a 340 px column beside the shelf. ADR-0022 removed
@@ -57,29 +69,25 @@
 
 use std::time::Duration;
 
-use iced::widget::{
-    Column, Space, button, column, container, image as iced_image, mouse_area, row, scrollable,
-    text,
-};
+use iced::widget::{button, column, container, image as iced_image, mouse_area, row, text};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
 use crate::player::{Availability, PlayerState};
 use crate::playlists::Collecting;
-use crate::views::{gradient_block, place_header_led, place_name, place_pad, section_rule};
-use crate::{icon, theme, vm};
+use crate::views::page::{self, Identity, Page};
+use crate::views::{gradient_block, place_name, section_rule};
+use crate::{theme, vm};
 
-/// The record's page: the header strip, then the object beside what is written
-/// about it, in one scroll.
+/// The record's page: [`views::page`](crate::views::page)'s composition, with a
+/// record in it.
 ///
-/// `window_width` decides the arrangement and nothing else. The page grows with
-/// the window until its track list reaches [`theme::LIST_MEASURE`] and then
-/// stops, centring in what is left — a measure has a comfortable range rather
-/// than a single right answer, and a track list set 1500 px wide is a row of
-/// two words at opposite ends of the screen. Below
-/// [`theme::ALBUM_BREAKPOINT`] the two columns stack, because at that point the
-/// list would be narrower than the sleeve beside it and two columns have
-/// stopped being two columns.
+/// The arrangement — the gutter, the breakpoint, the 320 px aside, the identity
+/// block, the `TRACKS` rule, the one scroll — is the shared one, and what this
+/// module supplies is everything the composition asks for that is *about a
+/// record*: the breadcrumb, the cover, `Play album`, the edition selector, the
+/// condition report, the serif title over the artist over the catalogue line,
+/// and the track rows.
 pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     album: &'a vm::AlbumVm,
@@ -89,58 +97,45 @@ pub(crate) fn view<'a>(
     collecting: Collecting,
     hovered_row: Option<usize>,
 ) -> Element<'a, Message> {
-    let room = theme::active();
-    // What the page's own block has to fit in: the window, less the one gutter
-    // on both sides and the scrollbar's declared lane on the right
-    // ([`place_pad`]).
-    let content = (window_width - 2.0 * theme::HANG - theme::SCROLLBAR_LANE).max(0.0);
-    let side_by_side = window_width >= theme::ALBUM_BREAKPOINT;
-    let tracks_w = if side_by_side {
-        (content - theme::ALBUM_ASIDE_W - theme::GAP_XL).clamp(0.0, theme::LIST_MEASURE)
-    } else {
-        content.min(theme::LIST_MEASURE)
-    };
-
-    let body: Element<'_, Message> = if side_by_side {
-        row![
-            container(aside(shelf, album, player, lamp, collecting))
-                .width(Length::Fixed(theme::ALBUM_ASIDE_W)),
-            container(main_column(shelf, album, player, collecting, hovered_row))
-                .width(Length::Fixed(tracks_w)),
-        ]
-        .spacing(theme::GAP_XL)
-        .align_y(iced::Alignment::Start)
-        .into()
-    } else {
-        column![
-            container(aside(shelf, album, player, lamp, collecting))
-                .width(Length::Fixed(theme::ALBUM_ASIDE_W)),
-            container(main_column(shelf, album, player, collecting, hovered_row))
-                .width(Length::Fixed(tracks_w)),
-        ]
-        .spacing(theme::GAP_XL)
-        .into()
-    };
-
-    column![
-        place_header_led(breadcrumb(album), None),
-        // **One scroll for the whole page.** The column had two (the panel and
-        // its track list) and the popover had one inside another; a page is one
-        // document and turning it over is one gesture. The gutter the bar needs
-        // is reserved whether or not the page overflows, so a fourteenth track
-        // arriving shunts no duration sideways.
-        scrollable(
-            container(body)
-                .width(Length::Fill)
-                .padding(place_pad())
-                .align_x(alignment::Horizontal::Center)
-        )
-        .direction(scrollable::Direction::Vertical(theme::list_scrollbar()))
-        .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
-        .width(Length::Fill)
-        .height(Length::Fill),
-    ]
-    .into()
+    let chosen = shelf.edition_choice.get(&album.id).copied();
+    let edition = vm::selected_edition(album, chosen);
+    page::view(
+        Page {
+            lead: breadcrumb(album),
+            sleeve: sleeve(shelf, album, player, lamp),
+            // Drawn only where there is an engine in the build to send it to.
+            commitment: (*player.availability() != Availability::NotBuilt).then(|| {
+                page::commitment(
+                    "Play album",
+                    player.engine_ready(),
+                    Message::PlayAlbum(album.id),
+                )
+            }),
+            // The transfer gesture (09 §8.1): the record, whole, toward a
+            // destination of the user's choosing. It reads the selected album —
+            // L8.1 puts it with the album — and stands under the page's one
+            // commitment, quiet, no accent: collecting is not playback truth.
+            // The press opens the panel as the picker; the ellipsis honestly
+            // promises the second press.
+            acts: if collecting.available {
+                vec![page::act(
+                    "Add to playlist…",
+                    true,
+                    Message::AddAlbumToPlaylist(album.id),
+                )]
+            } else {
+                Vec::new()
+            },
+            aside_tail: aside_tail(album, edition),
+            identity: identity(album, edition),
+            rows: track_rows(album, edition, player, collecting, hovered_row),
+            // A record with no readable edition ruled off its track list in
+            // silence before the composition was shared; the slot is not
+            // optional now.
+            empty: "No tracks here. The scan read no files for this record.",
+        },
+        window_width,
+    )
 }
 
 /// **`Artist › Album`** — the record's own context in the header, and the
@@ -205,18 +200,18 @@ fn breadcrumb(album: &vm::AlbumVm) -> Element<'static, Message> {
     .into()
 }
 
-/// The left column: **the object, the one thing you can do to it, and its
-/// condition report.**
+/// **The work**, at [`theme::ALBUM_SLEEVE`] — the one image of the record on
+/// screen, warmed while it is the record that is sounding.
 ///
-/// It is fixed at [`theme::ALBUM_ASIDE_W`] — the sleeve's own edge — so the
-/// three blocks in it share one lane and the page has two x-edges on this side
-/// rather than three (law L5).
-fn aside<'a>(
+/// **`ALBUM_SLEEVE == ART_MAX == THUMB_PX`**, which is the refusal *no artwork
+/// is ever drawn larger than its source* satisfied exactly rather than
+/// approached: the decoded thumbnail is 320 px on its long edge, and this draws
+/// it at 320.
+fn sleeve<'a>(
     shelf: &'a Shelf,
     album: &'a vm::AlbumVm,
     player: &'a PlayerState,
     lamp: f32,
-    collecting: Collecting,
 ) -> Element<'a, Message> {
     let room = theme::active();
     let playing = player.playing_album() == Some(album.id);
@@ -231,49 +226,43 @@ fn aside<'a>(
             .into(),
         None => gradient_block(album.id, edge, 1.0),
     };
-    // **`ALBUM_SLEEVE == ART_MAX == THUMB_PX`**, which is the refusal *no
-    // artwork is ever drawn larger than its source* satisfied exactly rather
-    // than approached: the decoded thumbnail is 320 px on its long edge, and
-    // this draws it at 320.
-    let sleeve = container(art)
+    container(art)
         .width(Length::Fixed(edge))
         .height(Length::Fixed(edge))
-        .style(move |_theme| theme::sleeve(room, warmth));
+        .style(move |_theme| theme::sleeve(room, warmth))
+        .into()
+}
 
-    let chosen = shelf.edition_choice.get(&album.id).copied();
-    let edition = vm::selected_edition(album, chosen);
-    let mut block = column![sleeve].spacing(theme::GAP_MD);
-    if *player.availability() != Availability::NotBuilt {
-        block = block.push(play_album(album.id, player.engine_ready()));
-    }
-    // The transfer gesture (09 §8.1): the record, whole, toward a
-    // destination of the user's choosing. It reads the selected album —
-    // L8.1 puts it with the album — and stands under the page's one
-    // commitment, quiet, no accent: collecting is not playback truth. The
-    // press opens the panel as the picker; the ellipsis honestly promises
-    // the second press.
-    if collecting.available {
-        block = block.push(add_to(album.id));
-    }
+/// What a *record's* aside carries below its acts: the edition selector, where
+/// there is a choice to make, and then the condition report.
+///
+/// This is the slot a playlist fills with its rename field, and the difference
+/// is not drift: a record is a found thing whose facts were read off its files,
+/// and a playlist is a made one whose name you can retype.
+fn aside_tail<'a>(
+    album: &'a vm::AlbumVm,
+    edition: Option<&'a vm::EditionVm>,
+) -> Vec<Element<'a, Message>> {
+    let mut tail: Vec<Element<'a, Message>> = Vec::new();
     // Only a genuinely multi-format album gets a control; a single-format
     // album must look exactly as it always did.
     if album.editions.len() > 1 {
-        block = block.push(edition_selector(album, edition));
+        tail.push(edition_selector(album, edition));
     }
-    block = block.push(details(album, edition));
-    block.into()
+    if let Some(block) = details(album, edition) {
+        tail.push(block);
+    }
+    tail
 }
 
-/// The right column: **who made this, what it is, and every track on it.**
-fn main_column<'a>(
-    shelf: &'a Shelf,
+/// **Every track on the record**, in the composition's row slot.
+fn track_rows<'a>(
     album: &'a vm::AlbumVm,
+    edition: Option<&'a vm::EditionVm>,
     player: &'a PlayerState,
     collecting: Collecting,
     hovered_row: Option<usize>,
-) -> Element<'a, Message> {
-    let chosen = shelf.edition_choice.get(&album.id).copied();
-    let edition = vm::selected_edition(album, chosen);
+) -> Vec<Element<'a, Message>> {
     // Where the music is in *this* list — `None` unless what is listed is
     // exactly the queue that is playing. An album page switched to a different
     // edition of the record that is sounding marks nothing rather than marking
@@ -283,7 +272,7 @@ fn main_column<'a>(
     // exactly as `Play album` is.
     let interactive = player.engine_ready();
     let per_track_artists = album.track_artists_vary;
-    let mut rows: Vec<Element<'_, Message>> = Vec::new();
+    let mut rows: Vec<Element<'a, Message>> = Vec::new();
     if let Some(edition) = edition {
         let multi_disc = vm::discs(edition).is_some_and(|discs| discs > 1);
         let mut current: Option<u32> = None;
@@ -291,7 +280,7 @@ fn main_column<'a>(
             if multi_disc && track.disc.is_some() && track.disc != current {
                 current = track.disc;
                 if let Some(disc) = current {
-                    rows.push(disc_header(disc));
+                    rows.push(disc_header(disc, rows.is_empty()));
                 }
             }
             rows.push(track_row(
@@ -306,93 +295,7 @@ fn main_column<'a>(
             ));
         }
     }
-    let mut block = column![album_header(album, edition)].spacing(theme::GAP_XL);
-    block = block.push(
-        column![
-            section_rule("Tracks"),
-            Column::with_children(rows).spacing(theme::GAP_XS),
-        ]
-        .spacing(theme::GAP_SM),
-    );
-    block.into()
-}
-
-/// The primary action: **Play album**, a lamp outline with a paper triangle
-/// and a paper label, and the only control in baz drawn in the accent.
-///
-/// It is the switch that turns the picture light on — the one control in the
-/// product that *creates* playback truth — which is why it is allowed the
-/// colour and why there is at most one of it on screen.
-///
-/// It is also, since ADR-0022, **the only pointer route from a record to its
-/// sound**: the wall's double-click died with the inspector, because the first
-/// press now navigates and there is no tile left for the second to land on. So
-/// it takes the sleeve's whole width and stands directly under it, which makes
-/// the press that replaced the double-click a 320 × 32 target in a fixed place
-/// rather than a 400 ms timing gesture.
-fn play_album(album: u64, live: bool) -> Element<'static, Message> {
-    let room = theme::active();
-    button(
-        // **The box centres the ink, in both axes** (law L3).
-        container(
-            row![
-                iced_image(icon::handle(icon::Glyph::Play))
-                    .width(Length::Fixed(theme::ICON_PX))
-                    .height(Length::Fixed(theme::ICON_PX))
-                    .opacity(theme::glyph_opacity(live, false)),
-                text("Play album")
-                    .size(theme::SIZE_BODY)
-                    .line_height(theme::LEADING_BODY)
-                    .font(theme::SEMIBOLD)
-                    .wrapping(text::Wrapping::None),
-            ]
-            .spacing(theme::GAP_SM)
-            .align_y(iced::Alignment::Center),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(alignment::Horizontal::Center)
-        .align_y(alignment::Vertical::Center),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_MD))
-    .style(move |_theme, status| theme::primary(room, status))
-    .on_press_maybe(live.then_some(Message::PlayAlbum(album)))
-    .into()
-}
-
-/// **Add to playlist…** — the record, whole, toward a destination of the
-/// user's choosing: the picker opens holding it, its first row the Queue,
-/// then the lists (09 §8.1). The verb carries its object (doc 11 §5 P4 —
-/// the button now predicts the picker, and it matches its own context-menu
-/// mirror's name); the picker's Queue row being first is then a discovery
-/// rather than a contradiction, because the menu item that queues is
-/// separately named `Queue album`. The ellipsis promises the second press.
-///
-/// The sleeve's width, like `Play album` above it, but a quiet word button
-/// rather than the accent: the lamp stays spent on playback truth alone.
-fn add_to(album: u64) -> Element<'static, Message> {
-    let room = theme::active();
-    button(
-        container(
-            text("Add to playlist…")
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .font(theme::MEDIUM)
-                .wrapping(text::Wrapping::None),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(alignment::Horizontal::Center)
-        .align_y(alignment::Vertical::Center),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_MD))
-    .style(move |_theme, status| theme::word_button(room, room.wall, status))
-    .on_press(Message::AddAlbumToPlaylist(album))
-    .into()
+    rows
 }
 
 /// A disc break in the track list — `DISC 2` in the room's quietest voice.
@@ -407,8 +310,16 @@ fn add_to(album: u64) -> Element<'static, Message> {
 /// sides: no tag baz reads distinguishes the two halves of a record, so sides
 /// would have to be inferred, which is exactly the faking the same sentence
 /// forbids. Sides arrive here unchanged the day the scanner reads one.
-fn disc_header(disc: u32) -> Element<'static, Message> {
+///
+/// `first` takes the air off the head that opens the list, which is the
+/// playlist page's own rule for its record heads (`views::playlist`'s
+/// `record_head`): a break needs air *above* it because it is a break, and
+/// `DISC 1` sitting directly under the `TRACKS` rule is not breaking anything.
+/// The two lists had two answers to one question, which is the drift this
+/// change is for.
+fn disc_header(disc: u32, first: bool) -> Element<'static, Message> {
     let room = theme::active();
+    let air = if first { 0.0 } else { theme::GAP_MD };
     container(
         text(format!("DISC {disc}"))
             .size(theme::SIZE_CAPTION)
@@ -417,7 +328,7 @@ fn disc_header(disc: u32) -> Element<'static, Message> {
             .color(room.heading())
             .wrapping(text::Wrapping::None),
     )
-    .padding(theme::pad(theme::GAP_SM, 0.0))
+    .padding(theme::pad(air, 0.0))
     .into()
 }
 
@@ -437,11 +348,17 @@ fn disc_header(disc: u32) -> Element<'static, Message> {
 /// in the same scroll, which was the honest arrangement for 340 px and made it
 /// a page you had to reach. Beside a 320 px sleeve it is simply *there*, at
 /// every shipped width, which is what the prior-art finding actually asked for.
-fn details<'a>(album: &'a vm::AlbumVm, edition: Option<&'a vm::EditionVm>) -> Element<'a, Message> {
+fn details<'a>(
+    album: &'a vm::AlbumVm,
+    edition: Option<&'a vm::EditionVm>,
+) -> Option<Element<'a, Message>> {
     let room = theme::active();
     let rows = vm::details(album, edition);
     if rows.is_empty() {
-        return Space::with_height(Length::Fixed(0.0)).into();
+        // A zero-height `Space` still takes the aside's `GAP_MD` above it; an
+        // absent block takes nothing, which is what "no rows the scan read"
+        // should cost.
+        return None;
     }
     // The rows carry their own pitch ([`theme::DETAIL_ROW_H`]) and take no
     // spacing from the column, or the table would read at 25 px a line — a
@@ -472,13 +389,16 @@ fn details<'a>(album: &'a vm::AlbumVm, edition: Option<&'a vm::EditionVm>) -> El
             .clip(true),
         );
     }
-    column![section_rule("Details"), table]
-        .spacing(theme::GAP_SM)
-        .into()
+    Some(
+        column![section_rule("Details"), table]
+            .spacing(theme::GAP_SM)
+            .into(),
+    )
 }
 
-/// The page's identity block: **the album's name, who made it, and what it is
-/// made of** — in one falling order, four voices, four sizes, four inks.
+/// What the shared identity block ([`Identity`]) says about a **record**: the
+/// album's name, who made it, and what it is made of — in one falling order,
+/// three voices, three sizes, three inks.
 ///
 /// The title is set at the hero size where the column set it at the title size
 /// — the top of the whole type scale, against what was one rung down. That is
@@ -514,11 +434,7 @@ fn details<'a>(album: &'a vm::AlbumVm, edition: Option<&'a vm::EditionVm>) -> El
 /// (`views::now_playing`'s `Ochre` under the sounding track's name). Two call
 /// sites, enumerated by `theme::the_serif_is_the_work_titles_and_nothing_else`,
 /// which fails the build on a third.
-fn album_header<'a>(
-    album: &'a vm::AlbumVm,
-    edition: Option<&'a vm::EditionVm>,
-) -> Element<'a, Message> {
-    let room = theme::active();
+fn identity<'a>(album: &'a vm::AlbumVm, edition: Option<&'a vm::EditionVm>) -> Identity<'a> {
     let title = album.title.as_deref().unwrap_or("Unknown Album");
     let artist = album.artist.label();
     let tracks = edition.map_or(0, |edition| edition.tracks.len());
@@ -544,33 +460,17 @@ fn album_header<'a>(
     if let Some(line) = edition.and_then(vm::EditionVm::encoding_line) {
         meta.push(line);
     }
-    column![
-        // The title clips at **two lines**. `Wrapping::None` does not stop iced
-        // 0.13 laying a long string over several lines, and a box-set title
-        // running to four lines pushes everything under it down the page. Two
-        // lines is a title; more is a paragraph.
-        container(
-            text(title)
-                .size(theme::SIZE_HERO)
-                .line_height(theme::LEADING_HERO)
-                // Serif italic: a *work's* title, against the sans name on the
-                // playlist page's hero. See this function's docs.
-                .font(theme::WORK_TITLE)
-                .color(room.paper)
-        )
-        .max_height(2.0 * theme::LINE_HERO)
-        .clip(true),
-        text(artist)
-            .size(theme::SIZE_TITLE)
-            .line_height(theme::LEADING_TITLE)
-            .color(room.paper_dim),
-        text(meta.join(" · "))
-            .size(theme::SIZE_META)
-            .line_height(theme::LEADING_META)
-            .color(room.paper_faint),
-    ]
-    .spacing(theme::GAP_XS)
-    .into()
+    Identity {
+        name: title.to_owned(),
+        // Serif italic: a *work's* title, against the sans name on the playlist
+        // page's hero. See this function's docs.
+        face: theme::WORK_TITLE,
+        byline: artist.to_owned(),
+        facts: meta.join(" · "),
+        // Nothing stands beside a record's facts. A playlist's `Undo` is in
+        // that slot because a playlist is a thing you edit; a record is not.
+        beside_facts: None,
+    }
 }
 
 /// The edition selector: a quiet segmented control, one segment per format
@@ -654,7 +554,7 @@ fn track_row(
     let room = theme::active();
     let duration = track.duration.map(vm::format_duration).unwrap_or_default();
     let marker: Element<'_, Message> = if playing {
-        lamp_dot()
+        page::lamp_dot()
     } else {
         text(track.number.map(|n| n.to_string()).unwrap_or_default())
             .size(theme::SIZE_META)
@@ -731,104 +631,15 @@ fn track_row(
     let offered = collecting.panel_open || hovered;
     crate::menu::area(
         mouse_area(
-            row![body, add_slot(album, index, offered)]
-                .spacing(theme::GAP_XS)
-                .align_y(iced::Alignment::Center),
+            row![
+                body,
+                page::transfer_slot(offered, Message::AddTrackToPlaylist(album, index))
+            ]
+            .spacing(theme::GAP_XS)
+            .align_y(iced::Alignment::Center),
         )
         .on_enter(Message::AlbumRowEntered(index))
         .on_exit(Message::AlbumRowLeft(index)),
         target,
     )
-}
-
-/// The track's `+` slot: the queue ✕'s exact anatomy — [`theme::STEPPER_HIT`]
-/// square, slot reserved whether shown, the drawn [`icon::Glyph::Plus`]
-/// since doc 10 §3.6 — sending one track toward the picker (09 §8.1): pick
-/// a destination, the Queue first among them. The drawn mark is what ends
-/// the accidental fourth vocabulary in this row: one stroke weight beside
-/// the ✕ it shares the slot column with.
-///
-/// Crate-visible because the wall's **Songs** rows carry the same reserved
-/// slot sending the same message (doc 09 §5's row anatomy): one transfer
-/// gesture, one control, wherever a track row is drawn.
-pub(crate) fn add_slot(album: u64, index: usize, offered: bool) -> Element<'static, Message> {
-    let room = theme::active();
-    if !offered {
-        return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
-    }
-    let mark = container(
-        iced_image(icon::handle(icon::Glyph::Plus))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::GLYPH_OPACITY_HOVER),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(alignment::Horizontal::Center)
-    .align_y(alignment::Vertical::Center);
-    iced::widget::tooltip(
-        button(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .padding(0)
-            .style(move |_theme, status| theme::transport(room, room.wall, status))
-            .on_press(Message::AddTrackToPlaylist(album, index)),
-        text("Add to a playlist, or the queue")
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        iced::widget::tooltip::Position::Left,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
-}
-
-/// The playing track's lamp dot — the same amber circle, and the same token,
-/// the shelf puts beside the playing album and the queue beside its row.
-fn lamp_dot() -> Element<'static, Message> {
-    let room = theme::active();
-    container(Space::new(
-        Length::Fixed(theme::DOT),
-        Length::Fixed(theme::DOT),
-    ))
-    .style(move |_theme| theme::lamp_dot(room))
-    .into()
-}
-
-#[cfg(test)]
-mod tests {
-    /// The page's two columns add up to the window at every width the two-column
-    /// arrangement is used at, and stop growing when the list reaches its
-    /// measure.
-    ///
-    /// This is the arithmetic `views::settings`'s `content_width` needed a
-    /// rendered frame to catch (the segmented control ran 998 px wide inside a
-    /// 640 px cap), asserted here instead — the widths are the view's own
-    /// arithmetic and nothing about them depends on the toolkit.
-    #[test]
-    fn the_page_fills_the_window_until_its_list_reaches_its_measure() {
-        use crate::theme;
-
-        let tracks = |w: f32| {
-            (w - 2.0 * theme::HANG - theme::SCROLLBAR_LANE - theme::ALBUM_ASIDE_W - theme::GAP_XL)
-                .clamp(0.0, theme::LIST_MEASURE)
-        };
-        let page = |w: f32| theme::ALBUM_ASIDE_W + theme::GAP_XL + tracks(w);
-
-        // At the shipped window the page hangs from both gutters exactly, the
-        // scrollbar's declared lane included.
-        let inner = |w: f32| w - 2.0 * theme::HANG - theme::SCROLLBAR_LANE;
-        assert!((page(1280.0) - inner(1280.0)).abs() < f32::EPSILON);
-        // At 1920 the list has reached its measure, so the page stops growing
-        // and centres in what is left rather than setting a track title and a
-        // duration 1500 px apart.
-        assert!((tracks(1920.0) - theme::LIST_MEASURE).abs() < f32::EPSILON);
-        assert!(page(1920.0) < inner(1920.0));
-        // And the breakpoint is where the list stops being wider than the
-        // sleeve beside it, which is the point at which two columns have
-        // stopped being two columns.
-        assert!(tracks(theme::ALBUM_BREAKPOINT) <= theme::ALBUM_ASIDE_W);
-        assert!(tracks(theme::ALBUM_BREAKPOINT + 4.0 * theme::HANG) > theme::ALBUM_ASIDE_W);
-    }
 }
