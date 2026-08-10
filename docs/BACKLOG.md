@@ -119,8 +119,8 @@
   word is not needed, and `A–Z` is the same traversal under coarser headers.
   All of it came out: `vm::WallSubject`, the parallel projection, the second
   search projection, the `wall_counts` / `wall_noun` split, the artist tile, the
-  `6` accelerator and the `wall_subject` config key. Net −1 200 lines against
-  the first form.
+  `6` accelerator and the `wall_subject` config key. Net −700 lines across
+  `crates/` against the first form, tests included.
 
   **The measurements, twice.** `KEYS_W` 314 → **368** for the six-word row,
   which the costing below got exactly right; every figure downstream of it did

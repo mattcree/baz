@@ -365,7 +365,7 @@ next commit.
     `views::SLEEVE_CELLS`, `top_bar::subject_word`, the `wall_counts` /
     `wall_noun` readout split in both wells, `WallSubjectSelected`, the
     <kbd>6</kbd> accelerator, the `wall_subject` config key, and the artists'
-    own art prefetch. Net −1 200 lines.
+    own art prefetch. Net −700 lines across `crates/`, tests included.
   - **The strip's budget goes back**: `KEYS_W` 368 → **314**, `LIBRARY_LINE`
     560 → **506**, `TOP_BAR_SPLIT` 832 → **778**, `SINGLE_LINE_NO_WELL` 608 →
     **554** against an unmoved `WIDEST_LANE_STRIP` 720. The window's own

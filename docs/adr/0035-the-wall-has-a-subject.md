@@ -217,7 +217,8 @@ carry could go:
 serve two subjects, `views::shelf::artist_tile`, `views::SLEEVE_CELLS`,
 `views::top_bar::subject_word`, the `wall_counts` / `wall_noun` readout split in
 both wells, `Message::WallSubjectSelected`, the `6` accelerator, the
-`wall_subject` config key, and the artists' art prefetch. Net −1 200 lines.
+`wall_subject` config key, and the artists' art prefetch. Net **−700 lines**
+across `crates/`, tests included.
 
 Two of its findings survive it and are worth stating as findings rather than as
 history. The **art-prefetch fix was correct and hard-won** — that collage-by-luck
