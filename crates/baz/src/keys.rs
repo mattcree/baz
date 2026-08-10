@@ -257,27 +257,19 @@
 //! is a toolkit limit rather than a design choice and it is recorded as one in
 //! `app.rs`'s `escape`.
 //!
-//! # The pull — <kbd>Ctrl</kbd>+<kbd>R</kbd>
+//! # <kbd>Ctrl</kbd>+<kbd>R</kbd> is free again
 //!
-//! The one binding ADR-0017 §1.2's key table spends on a *draw*, and it earns
-//! its modifier twice over. It is the letter every application spells *refresh*
-//! or *random* with, so the reflex is already there; and unlike `1`–`5` it is
-//! not a view key — it moves the wall, opens the column and replaces whatever
-//! suggestion was standing. A bare `r` is not available in any case: it is a
-//! letter, and under type-anywhere the letters are the query. It is also the
-//! first letter a listener types into the well when they mean *Radiohead*.
+//! It was **the pull** — the one binding ADR-0017 §1.2's key table spent on a
+//! *draw*. The owner removed the control on 2026-08-10 and the key went with
+//! it: baz does not keep an accelerator for an act it no longer has, and a
+//! chord left bound to nothing is a chord that does something surprising the
+//! next time somebody reaches for it.
 //!
-//! It resolves to [`Message::Pull`], which is the message the top bar's `Pull`
-//! word sends, so the visible-control rule holds. What it does **not** do is
-//! start anything: the pull selects a record and prints when it was last heard,
-//! and the control that accepts it is the inspector's own `Play album`. Pressing
-//! this key again pulls a different record; <kbd>Esc</kbd> puts the offer back.
-//!
-//! Shuffle gets **no** key at all, deliberately. The rule is one-directional —
-//! every action needs a visible control, not every control needs a key — and
-//! the shortcuts baz spends are for the things a hand does dozens of times a
-//! session. Starting a shuffle is a decision made once an evening, from a word
-//! that is already on screen.
+//! Shuffle gets **no** key either, still deliberately. The rule is
+//! one-directional — every action needs a visible control, not every control
+//! needs a key — and the shortcuts baz spends are for the things a hand does
+//! dozens of times a session. Turning shuffle on is a standing decision made
+//! once, from a control that is on screen in every place (`crate::views::bottom_bar`).
 //!
 //! # The arrangement — `1` … `5`
 //!
@@ -418,10 +410,6 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         // shifted spellings of both keys mean the same thing (module docs).
         Key::Character("-" | "_") if zoom => Some(Message::DensityStep(-1)),
         Key::Character("=" | "+") if zoom => Some(Message::DensityStep(1)),
-
-        // The pull: one record, weighted toward the long unplayed, offered
-        // rather than started (module docs).
-        Key::Character("r" | "R") if command => Some(Message::Pull),
 
         // Undo (doc 11 §5 P2): the universal chord, over the transient
         // `Undo` word the edited place carries — the visible twin that

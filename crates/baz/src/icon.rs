@@ -162,6 +162,25 @@ pub enum Glyph {
     /// band. Self-depicting as a pair — what changes between the two marks is
     /// what changes on screen.
     LaneCollapsed,
+    /// **Shuffle: the crossed arrows** — two paths that swap places, each
+    /// ending in a head.
+    ///
+    /// The one symbol in this sheet that is a **convention baz refused on
+    /// purpose and has now earned**. `docs/design/10-controls-and-iconography.md`
+    /// §3.2 ruled the crossed arrows out with a precise argument: the symbol
+    /// *"promises a mode with a lit state"* and baz's shuffle was an act, so
+    /// the glyph would have been a lie about the control's grammar and
+    /// `Shuffle` stayed a word. The owner made shuffle a mode on 2026-08-10
+    /// (*"can you make shuffle a property of the player i.e. toggle on/off"*),
+    /// which is exactly the condition the refusal named, so the symbol is now
+    /// honest and it is taken.
+    ///
+    /// Drawn as four outlines — two shafts, two heads — because the union rule
+    /// in [`Self::covers`] fills the crossing solid, which is what the symbol
+    /// wants: the two paths *meet*, they do not pass behind one another. A
+    /// notch at the crossing would need an even-odd hole and would be a pixel
+    /// wide at [`RASTER_PX`].
+    Shuffle,
 }
 
 /// Play — one triangle, sitting a touch right of the box's centre so the
@@ -818,6 +837,28 @@ const DENSITY_DENSE: &[Outline] = &[
     ],
 ];
 
+/// Shuffle — two shafts crossing, each ending in an arrowhead on the right.
+///
+/// Symmetric about the box's horizontal centre line (`y → 1 − y`): the
+/// falling shaft is the rising one reflected, vertex for vertex, and the two
+/// heads with them. That is the same discipline [`PREVIOUS`] keeps against
+/// [`NEXT`], and for the same reason — a pair drawn twice by hand reads as two
+/// glyphs from two different sets, and here the pair is *inside one mark*.
+///
+/// The shafts are quadrilaterals rather than strokes, because this rasterizer
+/// fills outlines and has no stroker; 0.10 of the box is the weight the rest of
+/// the sheet's bars carry.
+const SHUFFLE: &[Outline] = &[
+    // The rising shaft, lower-left to upper-right.
+    &[(0.06, 0.66), (0.12, 0.74), (0.62, 0.26), (0.56, 0.18)],
+    // Its head, pointing right.
+    &[(0.55, 0.10), (0.84, 0.24), (0.55, 0.38)],
+    // The falling shaft — the rising one reflected in the centre line.
+    &[(0.06, 0.34), (0.12, 0.26), (0.62, 0.74), (0.56, 0.82)],
+    // Its head, reflected with it.
+    &[(0.55, 0.90), (0.84, 0.76), (0.55, 0.62)],
+];
+
 impl Glyph {
     /// Every glyph, in sprite-sheet order.
     const ALL: [Self; Self::COUNT] = [
@@ -844,10 +885,11 @@ impl Glyph {
         Self::NowPlaying,
         Self::LaneExpanded,
         Self::LaneCollapsed,
+        Self::Shuffle,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 23;
+    const COUNT: usize = 24;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -876,6 +918,7 @@ impl Glyph {
             Self::NowPlaying => NOW_PLAYING,
             Self::LaneExpanded => LANE_EXPANDED,
             Self::LaneCollapsed => LANE_COLLAPSED,
+            Self::Shuffle => SHUFFLE,
         }
     }
 
@@ -905,6 +948,7 @@ impl Glyph {
             Self::NowPlaying => 20,
             Self::LaneExpanded => 21,
             Self::LaneCollapsed => 22,
+            Self::Shuffle => 23,
         }
     }
 
@@ -963,9 +1007,12 @@ pub fn handle(glyph: Glyph) -> image::Handle {
 
 /// The same sheet, inked in the room's **accent**.
 ///
-/// One consumer, and the accent discipline is what bounds it to one: the
+/// Two consumers, and the accent discipline is what bounds it to two: the
 /// wall's hover `Play`, which is the record page's `Play album` moved onto the
-/// sleeve and carries that control's licence (`theme::veil_option_ink`).
+/// sleeve and carries that control's licence (`theme::veil_option_ink`); and
+/// the bar's shuffle toggle **while it is on**, which creates playback truth
+/// about what sounds *next* in the way `Play album` creates it about what
+/// sounds now (`crate::views::bottom_bar`'s `shuffle_toggle`).
 /// Built lazily beside [`SHEET`] and by the same rules — the room is baked in,
 /// the ids live as long as the process, and the cost of the second sheet is
 /// 18 sprites of 32 × 32 × 4 bytes.
@@ -1229,6 +1276,70 @@ mod tests {
                     "previous is not symmetric at {column},{row}"
                 );
             }
+        }
+    }
+
+    /// **The shuffle mark is symmetric about its horizontal centre line**, and
+    /// it is a mark rather than a smudge.
+    ///
+    /// [`Self::previous_is_next_reflected`]'s discipline, turned ninety degrees
+    /// and applied *inside* one glyph: the falling shaft and its head are the
+    /// rising pair reflected, vertex for vertex, so a nudge to one that was not
+    /// made to the other fails here rather than in review. Exact equality is
+    /// available because the rasterizer samples symmetrically about that line.
+    #[test]
+    fn the_shuffle_mark_is_its_own_reflection() {
+        let pixels = rasterize(Glyph::Shuffle, [255, 255, 255]);
+        for row in 0..RASTER_PX {
+            for column in 0..RASTER_PX {
+                assert_eq!(
+                    alpha(&pixels, column, row),
+                    alpha(&pixels, column, RASTER_PX - 1 - row),
+                    "the crossed arrows are not symmetric at {column},{row}"
+                );
+            }
+        }
+
+        // **The two paths meet on the centre line.** The union rule fills the
+        // crossing solid, which is what the symbol wants — the shafts cross,
+        // they do not pass behind one another. The meeting point is where the
+        // shafts' own mid-lines intersect, left of the box's centre because the
+        // right of the box is the heads', so this asks the honest question:
+        // *is there ink on the centre line at all?*
+        let centre = RASTER_PX / 2;
+        let crossing = (0..RASTER_PX).any(|column| alpha(&pixels, column, centre) == 255);
+        assert!(
+            crossing,
+            "nothing is inked on the centre line: the shafts are not crossing"
+        );
+
+        // **The heads are on the right**, which is what makes this arrows
+        // rather than a saltire. The shafts are the wider mark by area, so
+        // comparing halves would prove nothing; what only a head can do is
+        // reach the top of the box. So: the topmost inked row is entirely in
+        // the right-hand half.
+        let top = (0..RASTER_PX)
+            .find(|&row| (0..RASTER_PX).any(|column| alpha(&pixels, column, row) > 0))
+            .expect("the glyph is inked at all");
+        for column in 0..RASTER_PX / 2 {
+            assert_eq!(
+                alpha(&pixels, column, top),
+                0,
+                "row {top} is inked at {column}, in the half the heads are not in"
+            );
+        }
+        assert!(
+            (RASTER_PX / 2..RASTER_PX).any(|column| alpha(&pixels, column, top) > 0),
+            "the topmost row is not the arrowhead's"
+        );
+
+        // And the corners are clear: a mark, not a filled box.
+        for (column, row) in [(0, 0), (RASTER_PX - 1, 0), (0, RASTER_PX - 1)] {
+            assert_eq!(
+                alpha(&pixels, column, row),
+                0,
+                "ink in the {column},{row} corner"
+            );
         }
     }
 

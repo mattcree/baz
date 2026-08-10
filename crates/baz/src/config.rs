@@ -112,6 +112,9 @@ const DENSITY: &str = "density";
 /// The key the returns lane's open/closed state is written under.
 const SIDEBAR_OPEN: &str = "sidebar_open";
 
+/// The key the player's shuffle property is written under.
+const SHUFFLE: &str = "shuffle";
+
 /// Application configuration. See the [module docs](self) for scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -170,6 +173,24 @@ pub struct Config {
     /// asked for, and a resident index that arrives collapsed would have to be
     /// discovered before it could be used.
     pub sidebar_open: bool,
+    /// **Whether shuffle is on** (the owner's decision, 2026-08-10:
+    /// *"can you make shuffle a property of the player i.e. toggle on/off"*).
+    ///
+    /// A **standing decision**, and this file is where standing decisions
+    /// live — the argument `replay_gain` makes above, exactly: unlike panel
+    /// visibility it has something to say on the first frame of every launch,
+    /// because it governs what the first `Play` of the session does. A shuffle
+    /// that forgot itself overnight would be a mode you had to re-assert every
+    /// morning, which is a preference wearing a toggle's clothes.
+    ///
+    /// **Deliberately not a Settings row**, on `density`'s footing (ADR-0017
+    /// §1.3): the control is the crossed arrows on the now-playing bar, in
+    /// every place, and this key is where the press's *result* is remembered.
+    ///
+    /// A fresh baz opens with it **off**. Silence is a feature and so is
+    /// order: the record plays in the order it was made in until somebody says
+    /// otherwise.
+    pub shuffle: bool,
 }
 
 impl Default for Config {
@@ -183,6 +204,7 @@ impl Default for Config {
             group_key: GroupKey::Artist,
             density: Density::Balanced,
             sidebar_open: true,
+            shuffle: false,
         }
     }
 }
@@ -234,6 +256,12 @@ impl Config {
             "# whether the returns lane stands open (Ctrl+B, or the two \
              marks at its foot)\n{SIDEBAR_OPEN} = {}",
             self.sidebar_open,
+        );
+        let _ = writeln!(
+            out,
+            "# whether shuffle is on — the crossed arrows on the \
+             now-playing bar\n{SHUFFLE} = {}",
+            self.shuffle,
         );
         let _ = write!(
             out,
@@ -288,12 +316,21 @@ impl Config {
             .get(SIDEBAR_OPEN)
             .and_then(toml::Value::as_bool)
             .unwrap_or(true);
+        // `sidebar_open`'s degradation, and it defaults the other way: a file
+        // that cannot say whether shuffle was on is a file baz plays in order
+        // from, because guessing *on* would re-order somebody's evening over a
+        // typo.
+        let shuffle = table
+            .get(SHUFFLE)
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(false);
         Self {
             music_dirs,
             replay_gain,
             group_key,
             density,
             sidebar_open,
+            shuffle,
         }
     }
 }
@@ -484,6 +521,7 @@ mod tests {
                 group_key: GroupKey::Year,
                 density: Density::Dense,
                 sidebar_open: true,
+                shuffle: false,
             };
             let back = Config::from_toml(&config.to_toml());
             assert_eq!(back, config, "round-trip failed for {replay_gain:?}");
@@ -752,6 +790,7 @@ mod tests {
             group_key: GroupKey::Genre,
             density: Density::Spacious,
             sidebar_open: true,
+            shuffle: false,
         };
         let text = config.to_toml();
         assert!(!text.contains(MUSIC_DIRS), "{text}");
@@ -770,6 +809,7 @@ mod tests {
             group_key: GroupKey::Played,
             density: Density::Spacious,
             sidebar_open: true,
+            shuffle: false,
         };
         store(&path, &config).expect("store creates parents and writes");
         assert_eq!(load(&path), config);
@@ -921,6 +961,7 @@ mod tests {
             group_key: GroupKey::Added,
             density: Density::Dense,
             sidebar_open: true,
+            shuffle: false,
         };
         let table: toml::Table = config.to_toml().parse().expect("baz writes valid TOML");
         assert!(table.contains_key(MUSIC_DIRS));

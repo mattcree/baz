@@ -574,13 +574,12 @@ mod tests {
             crate::views::top_bar::KEYS_W
         );
 
-        // The acts cluster: the triangle and its word, then two words, each
-        // in `GAP_SM` padding, with `GAP_XS` between the three.
+        // The act: the triangle, its word, and their `GAP_SM` padding.
+        // `Pull` and `Shuffle` were measured here beside it until 2026-08-10,
+        // when the owner removed the first and moved the second to the
+        // now-playing bar.
         let word = |label: &str| medium.width(label, theme::SIZE_META);
-        let acts = (2.0 * theme::GAP_SM + theme::ICON_PX + theme::GAP_SM + word("Play all"))
-            + (2.0 * theme::GAP_SM + word("Shuffle"))
-            + (2.0 * theme::GAP_SM + word("Pull"))
-            + 2.0 * theme::GAP_XS;
+        let acts = 2.0 * theme::GAP_SM + theme::ICON_PX + theme::GAP_SM + word("Play all");
         assert!(
             acts <= crate::views::top_bar::ACTS_W,
             "the acts cluster measures {acts:.2} px against a declared {}",

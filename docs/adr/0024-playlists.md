@@ -103,6 +103,28 @@ honesty requirement rules out.
 > **A named, ordered list of track references, made by a person, stored in a
 > file that person owns.**
 
+*Amended 2026-08-10 to record the owner's decision* — *"the 'all songs' should
+be an implicit playlist."* **All songs** is a named, ordered list of track
+references that no person made and no file stores, so it is not a playlist
+under this definition, and the definition is not widened to swallow it. It is
+the other kind of list this product has always had and only recently named:
+doc 09 §2's *implicit* playlist, of which the queue is the other resident
+example.
+
+The distinction is load-bearing rather than pedantic, and it is exactly the
+one that keeps §1's honesty clauses meaningful. **A playlist is a
+destination**; an implicit list is not, because there is no file to write to —
+which is why the picker offers every named list and never offers this one.
+**A playlist is frozen ground truth** (clause 3); an implicit list is a view of
+a live thing, and All songs says so in its own counts line rather than
+pretending otherwise. What the two share is everything about *being played*:
+both reify into the queue at the moment of the gesture, both decouple from it
+instantly, and both are one `Save as playlist` from becoming the other kind.
+
+So the surface word **Playlists** still means files a person owns, and the
+panel that carries it now has one row at its head that is not one — labelled,
+sleeved and legible as a list, with no `Add` beside it in any state.
+
 Distinct from the queue (transient, one run), from an album (derived from
 tags, not editable), and from any future saved query (visibly live, never
 wearing a playlist's name). The boundary with the queue is MPD's, adopted
@@ -113,7 +135,31 @@ sounding run, and editing the queue never writes back into the file.
 **The honesty clauses:**
 
 1. The playlist a user edits is exactly what plays — entries, order,
-   verbatim; no shuffle-on-play, no dedup, no silent skipping.
+   verbatim; no dedup, no silent skipping.
+
+   *Amended 2026-08-10 to record the owner's decision* — *"can you make
+   shuffle a property of the player i.e. toggle on/off."* This clause said
+   **no shuffle-on-play**, and it was the direct blocker: with shuffle on, a
+   playlist's `Play` sounds its tracks in a shuffled order.
+
+   **What the clause was protecting is untouched, and it is worth naming what
+   that was.** It was written against a *list* that quietly differed from the
+   list on screen — a player that reorders the file, or drops what it thinks
+   are duplicates, or skips what it cannot decode without saying so. None of
+   that changed: the file is still byte-verbatim, still exactly what the page
+   lists, still edited by nobody but the user (clause 2), and still what the
+   run is copied from at the moment of the gesture. What shuffle re-orders is
+   **the copy**, which the paragraph above already calls decoupled from the
+   file the instant it is made — and it re-orders it *visibly*, into a queue
+   the listener can open and read row by row.
+
+   The distinction the clause now draws is therefore sharper than the one it
+   drew before: **a list is not a play order.** The playlist is ground truth
+   about *what*; the run is a record of *what, in what order, this time*. Turn
+   shuffle off and the run goes back to the file's own order (ADR-0023's
+   amendment), which is the property that makes the two statements consistent
+   rather than merely coexisting. A mode a listener set, can see lit, and can
+   unset is not the silent divergence this clause exists to forbid.
 2. Nothing edits a playlist but the user. baz writes a playlist file only as
    the direct result of a user's edit to that playlist — never on play, never
    on scan.
@@ -300,7 +346,7 @@ edit, and any candidate pool the person cannot see."*
 - One new place member, one new panel, two new controls on the record's
   page; the engine is untouched, per ADR-0017 §5's amended cost honesty this
   is a product change in `baz-core` and is priced as one.
-- Two REFUSALS entries amended by this ADR's argument, none deleted; the
+- Two standing rules amended by this ADR's argument, none deleted; the
   panel's exception is named and closed to tenants.
 - Deliberately not done: `Queue next` (ADR-0023 fixes its future semantics),
   saved queries / smart lists (a different species, refused a playlist's

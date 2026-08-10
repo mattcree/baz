@@ -607,6 +607,38 @@ size *settles*, not on every configure — costs nothing and removes the burst.
 
 ## The strip demolition — four removals the owner asked for
 
+> **Three of the four shipped on 2026-08-10** (`feat/shuffle-and-all-songs`).
+> The map below is left as written, because it is what the work was scoped
+> from and its file:line references are the record of what the cost estimate
+> actually was. What changed against it:
+>
+> - **1. `Pull`** — done, and it cost what this said it would. It also took
+>   `baz-core`'s `History::pull_weight` and its two constants (ADR-0018 §6
+>   amended), and closed doc 11 P9 by answering it with removal.
+> - **2. `Shuffle` as a toggle** — done, and the three questions "only the
+>   owner can answer" were answered by him: it is a property of the *player*,
+>   not of a playlist. So question 2 dissolves — the toggle is not keyed to
+>   provenance and provenance stays a statement about origin. Question 1's
+>   answer is ADR-0023's amendment: an inert `Vec<PathBuf>` retained beside
+>   the run, invalidated by a new run and by a hand reorder. Question 3's
+>   answer is that there is no pool to keep visible — the mode re-orders the
+>   run, which is a list you can open and read.
+> - **3. `Play all` → an implicit playlist** — done as `crate::all_songs`.
+>   Both traps were live and both are closed: the picker never offers
+>   `Add to "All songs"` (asserted over every target, and at its source by the
+>   list carrying no provenance), and the order question is answered by
+>   *following the wall and saying so* rather than by snapshotting.
+> - **4. The `Queue` door leaving the bar** — **not done**, and the collisions
+>   this section names are why. Still open.
+>
+> **Cross-cutting, resolved:** `ACTS_W` went 182 → 88 rather than to zero,
+> because `Play all` stayed (redefined). The strip's split seam moved 872 →
+> 778; `TOP_BAR_FLOOR` did **not** follow, because it is also the window's
+> sensible minimum. The `impl/shuffle-and-pull/` harness now documents a
+> surface that does not exist; `impl/shuffle-and-all-songs/` replaces it.
+
+
+
 2026-08-09: *"I think the pull option will just disappear, and so will the
 shuffle. Shuffle is the sort of thing I expect to be at the playlist level. As
 in if we're currently playing a playlist, I can toggle it on or off. The play

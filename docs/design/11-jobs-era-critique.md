@@ -8,7 +8,7 @@
 > the standpoint of Jobs-era Apple design theory — the classic Macintosh Human
 > Interface Guidelines through the iPod / iTunes / early-iPhone era — and it
 > attacks the repo's own reasoning as evidence rather than authority: every
-> REFUSALS entry and ADR it challenges is steelmanned first, at full strength,
+> standing rule and ADR it challenges is steelmanned first, at full strength,
 > before the counter-argument is made. Where the existing design *wins* by
 > Jobs-era standards, that is said plainly, because an adversary who calls
 > everything wrong is as useless as one who calls everything right.
@@ -246,8 +246,8 @@ click is **not met from the wall** and this ADR does not pretend otherwise."*
 By iTunes' bedrock — double-click anything, hear it — this is a regression on
 the product's own home surface. Steelmanned (ADR-0022 "Deliberately not
 done"): the candidates it refused are genuinely refused elsewhere — a bare
-`Enter` is keyboard-only (REFUSALS, accessibility), a play glyph on hover is
-a mark on a sleeve (REFUSALS, artwork) — and the double-click died
+`Enter` is keyboard-only (the product's standing rules, accessibility), a play glyph on hover is
+a mark on a sleeve (the product's standing rules, artwork) — and the double-click died
 structurally, because the first press now navigates and no tile survives
 under the pointer for the second. All true. But the era offers a fourth
 candidate the ADR never lists, examined as §5 P7.
@@ -255,7 +255,7 @@ candidate the ADR never lists, examined as §5 P7.
 **[attack — their own visible-control rule / density]** Wall density is
 `Ctrl+scroll` / `Ctrl+-` / `Ctrl+=` with — `system.md` §7.1's own words —
 *"no density row, no grid-size picker and no zoom readout."* The corpus's
-governing rule is REFUSALS': *"Every action in baz has a visible,
+governing rule is the product's standing rules': *"Every action in baz has a visible,
 pointer-reachable control. No action is keyboard-only, and no control's only
 affordance is hover."* A modifier-scroll gesture is not a visible control; a
 first-timer will die never knowing the wall zooms. The prior-art study's own
@@ -484,7 +484,7 @@ the era's own hardest criterion: *nothing moves as the music moves*. Every
 slot reserved in every state, timestamps in fixed slots, the signal note
 appearing into space that was always its own, the continuation lane (`then 10
 more · 49:31 left`) as an ambient fact costing no gesture, and the slot
-ratchet in REFUSALS (a slot may be added, never removed for tidiness) built
+ratchet in the product's standing rules (a slot may be added, never removed for tidiness) built
 from R11's three-vendor reversal evidence. TIDAL, Spotify and YouTube Music
 each bought calm with removed facts and reversed within two years; baz wrote
 the lesson into a ledger. `bit-perfect` beside the one control that could
@@ -535,7 +535,7 @@ it? Every word that ships on screen:
 | `Where's your music?`, `Play album`, `Play all`, `Queue`, `Playlists`, `Settings`, `‹ Library`, `Back`, `Browse…`, `New playlist`, `Save as playlist`, `Rename`, `Delete`, `Open` | **pass** | Verbs and place names in user vocabulary; the `…` convention honestly promising a dialog (ADR-0025 §1) is itself classic-HIG. |
 | `ARTIST · YEAR · GENRE · ADDED · PLAYED` | pass | One row of words, no menus; self-revealing on press, reversible on press. |
 | `Shuffle` | **pass with a caveat** | The word is universal; baz's behaviour is a bounded draw of 8 that ends in silence. ADR-0026 refused the crossed-arrows icon *because the convention promises a mode* — the sharpest icon reasoning in the corpus — but the **word** carries the same promise at lower volume. A first press behaves as expected; the surprise is deferred to the 8th record's end, where the queue's empty state ("When a queue ends, baz stops.") catches it — but does not say a new press is a new draw. One sentence closes it (§5 P6). Renaming is examined and rejected (§5 P12). |
-| `Pull` | **fail** | No convention (ADR-0026: "the pull has no convention at all"), no tooltip (`top_bar.rs::draw_word`), no on-screen explanation until *after* the press. A first-timer cannot form any expectation. The name is crate-digger's vocabulary — pulling a record from the shelf — and the metaphor rule (REFUSALS, skeuomorphism: the record supplies *vocabulary*) genuinely licenses it; but the era licensed poetic names only with explanation at first contact. The offer's own note (*"The pull · Last played 3 years ago"*) is that explanation, one press too late. §5 P9. |
+| `Pull` (removed 2026-08-10, P9) | **fail** | No convention (ADR-0026: "the pull has no convention at all"), no tooltip (`top_bar.rs::draw_word`), no on-screen explanation until *after* the press. A first-timer cannot form any expectation. The name is crate-digger's vocabulary — pulling a record from the shelf — and the metaphor rule (the product's standing rules, skeuomorphism: the record supplies *vocabulary*) genuinely licenses it; but the era licensed poetic names only with explanation at first contact. The offer's own note (*"The pull · Last played 3 years ago"*) is that explanation, one press too late. §5 P9. |
 | *"Esc returns to the wall"* | **fail** | The one leak of internal poetry into shipping copy, inconsistent with `‹ Library` in the same strip. §5 P4. |
 | `Add to…` | marginal | The object is missing; the menu's own `Add to playlist…` is the better label. §5 P4. |
 | `bit-perfect`, `48 → 44.1 kHz`, `FLAC · 16-bit · 44.1 kHz` | pass | Audience vocabulary (Karl's), quiet, never a sales pitch. The era would have hidden it; baz's audience is why it must not. Credit. |
@@ -669,7 +669,7 @@ adjudicates.
 - **Cost**: small — the dependency shipped in ADR-0025; one view; copy.
 - **Refusals/ADR impact**: supersedes one clause of ADR-0025 §3
   ("deliberately not taken: the picker on the first-run screen") by that
-  ADR's own two-door argument. No REFUSALS entry touched.
+  ADR's own two-door argument. No the product's standing rules entry touched.
 
 > **Shipped** (2026-08-09). `Browse…` beside the field (the Settings door's
 > anatomy and message), the typed submission moved onto the blocking pool
@@ -834,7 +834,9 @@ adjudicates.
   separately named `Queue album`); (c) a sweep test in the spirit of the
   existing copy tests: no string from the room-vocabulary list (`wall`,
   `hang`, `pull's` internals, `stack`, `marquee`) ships in user-facing copy
-  outside its licensed uses (`Pull` the control pending P9).
+  outside its licensed uses (`Pull` the control pending P9 — and P9 was
+  answered on 2026-08-10 by removing the control, so the licence list is now
+  empty and the sweep is unconditional).
 - **Cost**: strings and one test.
 - **Refusals/ADR impact**: none.
 
@@ -893,7 +895,7 @@ adjudicates.
   in its real sense (disclosure *to* the user, not just below the fold —
   `02` §6.2's scroll-position reading of the term is the one place the corpus
   defines a principle down).
-- **Existing rationale, steelmanned**: REFUSALS bans view-options menus and
+- **Existing rationale, steelmanned**: the product's standing rules bans view-options menus and
   L9 bans overflow menus — neither bans teaching. The corpus already teaches
   beautifully in empty states and hints; the gap (§2.9) is that the
   *accelerator layer* is untaught, and tooltips exist only where ADR-0026's
@@ -961,14 +963,14 @@ adjudicates.
   hair of cleverness in a product that hates cleverness, which is exactly why
   this is presented rather than adopted.
 - **Alternatives if refused**: accept the two-press state permanently and
-  record it in REFUSALS (elevating ADR-0022's honest admission into a
+  record it in the product's standing rules (elevating ADR-0022's honest admission into a
   standing entry with its argument — the budget line then stops being "not
   met" and becomes "re-priced"); or spend the shift-click stack as the
   one-press *sound-later* and leave sound-now at two.
 - **Cost**: small mechanically; nonzero conceptually (a press whose meaning
   depends on arrival time is a micro-mode).
 - **Refusals/ADR impact**: touches ADR-0022's "Deliberately not done —
-  restoring one-click-to-sound"; contradicts no REFUSALS entry (nothing
+  restoring one-click-to-sound"; contradicts no the product's standing rules entry (nothing
   drawn on sleeves, nothing keyboard-only, no reflow).
 
 ### P8 — Density: give the zoom a visible handle, or refuse it properly · **present-to-owner**
@@ -976,7 +978,7 @@ adjudicates.
 - **Principle**: their own visible-control rule; see-and-point; R7's evidence
   (Steam, Google Photos). Era precedent: iPhoto's and iTunes grid view's size
   slider, both Jobs-era.
-- **Existing rationale, steelmanned**: REFUSALS — *"No view-options menus. No
+- **Existing rationale, steelmanned**: the product's standing rules — *"No view-options menus. No
   grid-size picker… density is a zoom gesture."* `02` §2.7: three named
   steps, not a free zoom, because a slider makes every screenshot different
   and every reserved-slot argument conditional; ADR-0017 §1.3: *"Settings
@@ -992,7 +994,7 @@ adjudicates.
   - **(a)** A three-detent control somewhere subject-correct. L8.1 says
     density reads *the viewport* → its home is "the place's body, or
     nowhere"; the index rail's lane or the wall's empty leading band could
-    carry three quiet marks. This **overturns the REFUSALS clause** ("no
+    carry three quiet marks. This **overturns the the product's standing rules clause** ("no
     grid-size picker") and must carry an ADR per the editing rule; the
     argument is the rule-contradiction above plus R7's CONTRADICTS finding —
     the ledger's own required form.
@@ -1006,7 +1008,7 @@ adjudicates.
   - **(c)** Status quo, refused: the contradiction stands unwritten. Not
     acceptable under the corpus's own standards regardless of era theory.
 - **Cost**: (a) one small control + ADR; (b) one ledger amendment + a string.
-- **Refusals/ADR impact**: (a) overturns a REFUSALS clause by ADR — stated
+- **Refusals/ADR impact**: (a) overturns a the product's standing rules clause by ADR — stated
   openly, argument supplied; (b) amends the accessibility entry's scope by
   ADR.
 
@@ -1022,7 +1024,7 @@ adjudicates.
 > the fact, while the other two are the controls — and a mark's press sends
 > `DensityStep` with the gesture's exact notch count
 > (`Density::steps_to`, mirror-tested), so `Ctrl+scroll` and `Ctrl+-`/`=`
-> are accelerators of a visible control now. The REFUSALS entry was
+> are accelerators of a visible control now. The the product's standing rules entry was
 > narrowed rather than deleted, its argument engaged in the ADR: menus,
 > choosers, sliders and Settings rows stay refused; only "no grid-size
 > picker" as applied to three quiet detents in the place's own body falls.
@@ -1052,6 +1054,23 @@ adjudicates.
   the explanation in the right voice one press late — acceptable once the
   tooltip closes the gap in front.
 - **Refusals/ADR impact**: none; ADR-0026's word-not-icon ruling untouched.
+
+> **Answered (2026-08-10) — option (d), which was not on the list: the control
+> is gone.** The owner: *"please can we remove pull since it doesn't make sense
+> here."* P9 asked for *explain it or rename it*; the third answer to a control
+> a first-timer cannot form an expectation about is to not have it, and that is
+> the one the owner gave. The tooltip option (a) had shipped in the meantime
+> and is moot; the rename candidates (b) are unspent.
+>
+> **What went with it**, so the answer is findable from the cost side: the
+> strip word and its tooltip, <kbd>Ctrl</kbd>+<kbd>R</kbd>, the record page's
+> `The pull · Last played 3 years ago` line, ~125 lines of `shuffle.rs`,
+> `baz-core`'s `History::pull_weight` and its two constants (ADR-0018's third
+> read surface, amended), and the copy sweep's entire licence list — `Pull` and
+> `The pull` were the only two entries in it, so **P4's one-vocabulary rule is
+> now total** rather than total-with-exceptions. `ACTS_W` fell 182 → 144 and
+> the strip's split seam 872 → 834. The pool `Pull` shared with `Shuffle`
+> (`shuffle::Pool::from_wall`) stayed; shuffle owns it.
 
 ### P10 — Restore persistent library visibility (the full iTunes three-pane) · **rejected-with-reasons**
 
@@ -1111,7 +1130,7 @@ adjudicates.
   state. ADR-0026's icon refusal already contains the correct analysis — the
   convention's *symbol* promises a mode and is refused; the *word* is the
   audience's name for "random records now", which is what the press
-  delivers. The bounded draw is a REFUSALS identity entry ("no invisible
+  delivers. The bounded draw is a the product's standing rules identity entry ("no invisible
   shuffle pools", "a thing you start") that this report has already credited
   as an era win; renaming the control to advertise the bound would spend
   clarity's coin on a distinction the empty state teaches for free.

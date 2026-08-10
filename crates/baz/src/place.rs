@@ -312,8 +312,15 @@ impl Place {
         self == Self::Library
     }
 
-    /// Which record's page is showing, if one is — the shell's one question
-    /// when it needs an album, and what replaces `Selection::inspecting`.
+    /// Which record's page is showing, if one is.
+    ///
+    /// **Test-only.** The shell asked this while the album stepper existed —
+    /// `‹ Prev` / `Next ›` needed to know which record it was stepping from.
+    /// The stepper was withdrawn (it walked the wall's arrangement, which is
+    /// not on screen from a record's page), and with it the last caller in
+    /// anger. It stays because the property sweeps below assert *one place at
+    /// a time* through it, and that property outlived the control.
+    #[cfg(test)]
     #[must_use]
     pub fn showing_album(self) -> Option<u64> {
         match self {

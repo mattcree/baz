@@ -348,7 +348,7 @@ know they need to learn it.
 | Add-to `+` | universal | exact — "put this somewhere" | **icon-only** — shipped as a font character; promoted to a drawn glyph (§3.6) |
 | Reorder ▲▼ | universal directional | exact | **icon-only** — promoted to drawn glyphs (§3.6) |
 | `Play all` | the triangle: universal for "press = sound now" | exact for the act, but the *scope* (the wall, as arranged) is baz's own | **icon + word** — the triangle says a press sounds; the words say what (§3.5) |
-| `Shuffle` | crossed arrows: universal — **as a mode toggle** with a lit state | **no** — baz's shuffle is a bounded draw of 8 from a visible pool, an act that ends (the product's standing rule); wearing the mode glyph claims a mode the product refuses | **word-only**, reaffirming `top_bar.rs:163–169` with the sharper reason |
+| `Shuffle` | crossed arrows: universal — **as a mode toggle** with a lit state | ~~**no** — baz's shuffle is a bounded draw of 8 from a visible pool, an act that ends; wearing the mode glyph claims a mode the product refuses~~ · **yes, from 2026-08-10**: the owner made shuffle a property of the player, so the glyph's promise is the control's meaning (§3.2) | **the glyph, lit in the accent**, on the now-playing bar |
 | `Pull` | none exists | — | **word-only** — the case the brief names: an invented icon is worse than a word |
 | Group keys | none (arrangement *names* are data) | — | **words** — caps-tracked states, unchanged |
 | `Queue` door, `Playlists` door, `‹ Library`, `Back` | no symbol distinguishes these three list-shaped destinations | — | **words** — L8.4 holds; the Sonos/Plexamp evidence (`03` §4.5, §5.2e) is about exactly this class |
@@ -401,15 +401,39 @@ glyph ink. The triangle also does the strip a compositional favour: it
 is the one non-type mark in the left cluster, and it anchors the seam
 where states (caps words) end and acts (sentence words) begin.
 
-**`Shuffle` stays a word, and the reason gets stronger.** The shipped
-argument was that a die is a recommendation engine's costume
-(`top_bar.rs:163–169`). The sharper argument this study adds: the
-crossed-arrows convention is a *mode with a lit state* — press it and
-every subsequent play is shuffled until you press it again. baz's
-shuffle is an act: one press, eight records, an end, silence
-(the product's standing rule). Convention's symbol over baz's semantics would
-be a promise the product is built to break. Rule 2 of §3.1 exists for
-exactly this case.
+**~~`Shuffle` stays a word~~ — `Shuffle` takes the crossed arrows
+(rewritten 2026-08-10).** The clause read: *the crossed-arrows
+convention is a mode with a lit state — press it and every subsequent
+play is shuffled until you press it again. baz's shuffle is an act: one
+press, eight records, an end, silence. Convention's symbol over baz's
+semantics would be a promise the product is built to break.*
+
+That argument was conditional, and it named its own condition exactly.
+**The owner made shuffle a mode** — *"can you make shuffle a property of
+the player i.e. toggle on/off"* — so the sentence the symbol promises is
+now the sentence the control means: press it and every subsequent play
+is shuffled until you press it again, and it carries the lit state to
+say which way it stands. Rule 2 of §3.1 admits a convention exactly
+where baz's semantics *are* the convention's, and this is that case
+arriving.
+
+The older half of the argument — *a die is a recommendation engine's
+costume* — still stands and is not what changed: crossed arrows are not
+a die. A die says *chance*, which is a promise about how a machine
+chose; crossed arrows say *these swap places*, which is a statement
+about order, and order is all baz's shuffle touches.
+
+Where the control lives changed with it. It was the strip's second act,
+beside `Play all`; a property of the player belongs on the player's
+surface, so it is a slot on the now-playing bar — an **addition**, with
+nothing traded away for it and the transport unmoved, which is the bar's
+standing concern (`03` R11: three vendors bought "visual calm" by
+removing control density and all three reversed). Lit is the
+**accent** — the one place beside `Play album` the accent-discipline
+note admits, because this control creates playback truth about what
+sounds *next* in the way `Play album` creates it about what sounds now.
+`ACTS_W` fell 144 → 88 with the word, and the strip's split seam
+872 → 778.
 
 ### 3.6 One mark technology, and the vocabulary extension
 

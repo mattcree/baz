@@ -295,8 +295,7 @@ pub(crate) enum Message {
     /// own business and this arm does nothing with it.
     Wheel(f32),
     /// Esc anywhere: peel one layer, top down — the place you are in, then the
-    /// pull's offer, then the search query, then the shuffle pool's marks (see
-    /// [`App::escape`]).
+    /// search query, then the shuffle pool's marks (see [`App::escape`]).
     EscapePressed,
     /// The bar's labelled `Queue` control, or `Q`: go to the queue place, or
     /// come back from it (see [`crate::place`]).
@@ -596,21 +595,25 @@ pub(crate) enum Message {
     /// the arrangement's own order — into the queue and plays from the top.
     /// The scope is always on screen: a query or a group key narrows it,
     /// "everything in the library" is the empty query, and an empty wall
-    /// means nothing happens and nothing is claimed. Shuffle's sibling,
-    /// never a mode: one draws the wall in order, the other draws
-    /// [`shuffle::SLEEVES`] from it by chance, and both end in silence.
+    /// means nothing happens and nothing is claimed. What **order** it plays
+    /// in is the player's shuffle property's answer, the same as every other
+    /// play gesture's ([`App::send_run`]).
     PlayAll,
-    /// **Shuffle what the wall shows** — the top bar's `Shuffle`.
+    /// **The playlist panel's `All songs` row**: go to the list.
     ///
-    /// Draws [`shuffle::SLEEVES`] whole records out of the pool the wall is
-    /// currently showing, queues them, and starts. The pool it drew from stays
-    /// on screen afterwards, marked (`crate::shuffle`).
-    Shuffle,
-    /// **The pull** — the top bar's `Pull`, and <kbd>Ctrl</kbd>+<kbd>R</kbd>.
+    /// The list is the wall (`crate::all_songs`), so this is the Library —
+    /// the same destination the lane's `Library` row names, reached from the
+    /// object that names the list rather than the frame.
+    ShowAllSongs,
+    /// **Turn the player's shuffle property on or off** — the now-playing
+    /// bar's crossed arrows.
     ///
-    /// Draws one record, weighted toward the long unplayed, and *offers* it.
-    /// **Nothing plays.** Pressing again re-pulls; Escape puts it back.
-    Pull,
+    /// A *mode*, not an act. It says what order things play in from here, and
+    /// it re-arranges the run in progress to match — forward of the needle
+    /// only, through [`Command::UpdateQueue`], so nothing stops. Turning it off
+    /// puts the run back into the order the gesture that started it built
+    /// ([`shuffle::restored`]). See [`App::toggle_shuffle`].
+    ToggleShuffle,
     /// The record's page: a different format of this album was picked.
     EditionSelected(u64, vm::EditionKey),
     /// Bottom bar, Space, or MPRIS `PlayPause`: play/pause toggle.
@@ -1088,6 +1091,11 @@ impl App {
             .as_ref()
             .map_or(shelf::Density::Balanced, |config| config.density);
         let lane_open = stored.as_ref().is_none_or(|config| config.sidebar_open);
+        // **The shuffle property, restored.** A standing decision
+        // (`config::Config::shuffle`), seeded rather than assumed for
+        // `seed_volume`'s reason: the control must be lit on the first frame,
+        // not on the first press.
+        player.seed_shuffle(stored.as_ref().is_some_and(|config| config.shuffle));
         let resume = read_snapshot();
         // The folders baz holds this run (ADR-0022): what the config remembers,
         // with a `baz DIR` argument **added to the front** rather than replacing
@@ -1287,15 +1295,21 @@ impl App {
                 self.play_track(id, row);
                 Task::none()
             }
-            Message::Shuffle => {
-                self.start_shuffle();
+            Message::ShowAllSongs => {
+                // The panel closes with the press, exactly as picking a
+                // destination closes it: a panel that stayed open over the
+                // place it just sent you to would be a float with no subject.
+                self.playlists.close_panel();
+                self.go(Place::back)
+            }
+            Message::ToggleShuffle => {
+                self.toggle_shuffle();
                 Task::none()
             }
             Message::PlayAll => {
                 self.play_all();
                 Task::none()
             }
-            Message::Pull => self.draw_pull(),
             Message::SeekBy(delta_ms) => {
                 let target = self.player.seek_by(delta_ms);
                 self.send_seek(target);
@@ -2013,10 +2027,11 @@ impl App {
         else {
             return;
         };
-        self.draws_are_over();
-        let paths = queue.paths();
-        if self.playback.send(Command::SetQueue { paths }) && self.playback.send(Command::Play) {
-            self.player.note_queue_sent(queue);
+        // Shuffle on shuffles the *copy*, and the file's own order is what
+        // turning it off returns to ([`Self::send_run`]). ADR-0024 §1's honesty
+        // clause is amended to say so: the file is still verbatim, and what the
+        // mode re-orders is the run, never the list.
+        if self.send_run(queue, None).is_some() && self.playback.send(Command::Play) {
             self.player.note_transport_sent();
         } else {
             self.player.engine_closed();
@@ -2121,26 +2136,20 @@ impl App {
             return;
         };
         let queue = open.queue.clone();
-        let replaced = matches!(decision, player::PlayFrom::Requeue { .. });
         let position = match decision {
             player::PlayFrom::Jump { position } => position,
             player::PlayFrom::Requeue { position } => {
-                let paths = queue.paths();
-                if !self.playback.send(Command::SetQueue { paths }) {
-                    self.player.engine_closed();
+                // [`Self::play_track`]'s rule, on the playlist page's own rows.
+                let Some(at) = self.send_run(queue, Some(position)) else {
                     return;
-                }
-                self.player.note_queue_sent(queue);
-                position
+                };
+                at
             }
         };
         if self.playback.send(Command::JumpTo { position }) {
             self.player.note_transport_sent();
         } else {
             self.player.engine_closed();
-        }
-        if replaced {
-            self.draws_are_over();
         }
         self.publish_mpris(false);
     }
@@ -2591,8 +2600,8 @@ impl App {
         Task::none()
     }
 
-    /// **Open a record's page** — a tile press, the bar's now-playing block, or
-    /// the pull's own draw.
+    /// **Open a record's page** — a tile press, or the bar's now-playing
+    /// block.
     ///
     /// Two things happen and they are deliberately separable: the *place*
     /// changes, and the wall remembers which record you left it for
@@ -2618,26 +2627,14 @@ impl App {
     /// **Go home** — every place's `‹ Library`, and the first thing
     /// <kbd>Esc</kbd> does.
     ///
-    /// Leaving a record's page also withdraws the pull's offer, when the offer
-    /// was about that record: the suggestion and the page it was made on are
-    /// one layer, and a note that outlived the page it was written on would
-    /// leave the wall marked as though the listener had chosen the record
-    /// themselves. `Ctrl+R` re-pulls; this is the *"Esc returns"* half of the
-    /// same sentence (`docs/design/critique/02-surfaces.md`).
     fn leave(&mut self) -> Task<Message> {
         // The place changes, so an open menu and any drag go with it
         // (`go`'s rule).
         self.menu = None;
         self.drag = None;
-        let leaving = self.place.showing_album();
         let from = self.place;
         self.place = self.place.back();
         self.note_place_left(from);
-        if let (Screen::Shelf(state), Some(id)) = (&mut self.screen, leaving)
-            && state.pull.as_ref().is_some_and(|pull| pull.album == id)
-        {
-            state.pull = None;
-        }
         // A place's transient fields do not outlive the place: a rename
         // field left standing behind a navigation would greet the next
         // visit mid-gesture.
@@ -2686,8 +2683,7 @@ impl App {
     /// 4. **The place**, when it is not the Library. Backing out is what
     ///    <kbd>Esc</kbd> means in a record's page, in the queue and in the
     ///    settings alike, and it is the same press as their `‹ Library`.
-    /// 5. Then the Library's own layers, in [`Shelf::peel`]'s order: the pull's
-    ///    offer, the search query, the shuffle pool's marks.
+    /// 5. Then the Library's own layer: the search query.
     ///
     /// (In the search field itself iced 0.13's `text_input` consumes
     /// <kbd>Esc</kbd> to blur before this is reached at all; that is the
@@ -3077,13 +3073,14 @@ impl App {
         if queue.is_empty() {
             return;
         }
-        self.draws_are_over();
-        // One construction, two uses: the payload the engine is sent and the
-        // list the queue panel shows come from the same value, so they cannot
-        // describe different music (see [`vm::QueueVm`]).
-        let paths = queue.paths();
-        if self.playback.send(Command::SetQueue { paths }) && self.playback.send(Command::Play) {
-            self.player.note_queue_sent(queue);
+        // **The shuffle property applies to a new play gesture**, and it is
+        // applied in exactly one place ([`Self::send_run`]): press `Play` on a
+        // record with shuffle on and the record plays shuffled, with its own
+        // sleeve order kept as the order to come back to. One construction,
+        // two uses — the payload the engine is sent and the list the queue
+        // panel shows come from the same value, so they cannot describe
+        // different music (see [`vm::QueueVm`]).
+        if self.send_run(queue, None).is_some() && self.playback.send(Command::Play) {
             self.player.note_transport_sent();
         } else {
             self.player.engine_closed();
@@ -3160,13 +3157,6 @@ impl App {
         let Some(decision) = self.player.play_from(&edition.tracks, row) else {
             return;
         };
-        // **A jump inside the shuffle's own queue is not the end of it.** Only
-        // a re-queue replaces what the shuffle built, so only a re-queue takes
-        // the pool's marks off the wall; clicking track 4 of a record the
-        // shuffle is playing leaves the run — and its rings — exactly as they
-        // were. Recorded here and spent below, because the shelf cannot be
-        // reached while the album borrowed out of it is still in use.
-        let replaced = matches!(decision, player::PlayFrom::Requeue { .. });
         let position = match decision {
             player::PlayFrom::Jump { position } => position,
             player::PlayFrom::Requeue { position } => {
@@ -3174,13 +3164,13 @@ impl App {
                 if queue.is_empty() {
                     return;
                 }
-                let paths = queue.paths();
-                if !self.playback.send(Command::SetQueue { paths }) {
-                    self.player.engine_closed();
+                // The row the click named, handed to the one arranger: with
+                // shuffle off it is the position to jump to; with shuffle on
+                // the track is hoisted to the front and the answer is 0.
+                let Some(at) = self.send_run(queue, Some(position)) else {
                     return;
-                }
-                self.player.note_queue_sent(queue);
-                position
+                };
+                at
             }
         };
         if self.playback.send(Command::JumpTo { position }) {
@@ -3188,85 +3178,131 @@ impl App {
         } else {
             self.player.engine_closed();
         }
-        if replaced {
-            self.draws_are_over();
-        }
         // A queue where there was none moves `CanPlay`, exactly as in
         // `play_album`, and that is the one MPRIS-visible change that arrives
         // without an engine event.
         self.publish_mpris(false);
     }
 
-    /// **Take the draws' marks off the wall**: no pool, no offer.
+    /// **Arrange a run for the player's shuffle property, and send it.**
     ///
-    /// Called wherever a queue is deliberately replaced by something that is not
-    /// a draw. The marks are a statement about the run in progress, and going on
-    /// dimming two hundred covers for a shuffle that was superseded a record ago
-    /// would be the interface saying something that is no longer true — which is
-    /// the one thing the honesty rule in [`crate::player`] never permits.
-    fn draws_are_over(&mut self) {
-        if let Screen::Shelf(state) = &mut self.screen {
-            state.pool = None;
-            state.pull = None;
+    /// The one place a `SetQueue` that *starts* something goes out, which is
+    /// what makes "`Play` on a record, `Play all`, a playlist's `Play` and a
+    /// track click all agree" a structural fact rather than four functions
+    /// keeping a convention. Each caller builds the queue its own gesture
+    /// means, in the order that gesture means, and hands it here; what happens
+    /// to that order is decided once.
+    ///
+    /// - **Shuffle off**: the queue goes out exactly as built. Nothing is
+    ///   retained, because there is nothing to come back from.
+    /// - **Shuffle on**: the source order is retained
+    ///   ([`shuffle::source_order`]), the run is permuted
+    ///   ([`shuffle::arranged`]), and the two are recorded **together**
+    ///   ([`PlayerState::note_shuffled_run`]) — so "a shuffled run the toggle
+    ///   cannot turn off" is not a state this shell can reach.
+    ///
+    /// `lead` is a row the gesture named — a track click — which plays first
+    /// and is not shuffled into the body ([`shuffle::leading`]). `None` is a
+    /// plain `Play`, where the whole run is still *next*.
+    ///
+    /// Answers **the position playback should start at**: the named row with
+    /// shuffle off, `0` with it on — the front of the run for a plain `Play`,
+    /// and the hoisted track for a click. `None` when the engine would not take
+    /// the queue, which is the caller's cue to stop rather than to send a
+    /// transport command into a run that does not exist.
+    fn send_run(&mut self, queue: vm::QueueVm, lead: Option<usize>) -> Option<usize> {
+        if !self.player.shuffle() {
+            let paths = queue.paths();
+            if !self.playback.send(Command::SetQueue { paths }) {
+                self.player.engine_closed();
+                return None;
+            }
+            self.player.note_queue_sent(queue);
+            return Some(lead.unwrap_or(0));
         }
+        let source = shuffle::source_order(&queue);
+        let arranged = match lead {
+            // The clicked track leads and the rest follows by chance — the one
+            // reading that honours both halves of "play this one" and "shuffle
+            // is on".
+            Some(row) => shuffle::arranged(&shuffle::leading(&queue, row), draw_seed(), 1),
+            None => shuffle::arranged(&queue, draw_seed(), 0),
+        };
+        let paths = arranged.paths();
+        if !self.playback.send(Command::SetQueue { paths }) {
+            self.player.engine_closed();
+            return None;
+        }
+        self.player.note_shuffled_run(arranged, source);
+        Some(0)
     }
 
-    /// **Shuffle what the wall shows** (ADR-0017 step 17).
+    /// **Turn shuffle on or off** — the now-playing bar's crossed arrows
+    /// (the owner, 2026-08-10: *"can you make shuffle a property of the player
+    /// i.e. toggle on/off"*).
     ///
-    /// The whole of the feature, and it has no options because there is nothing
-    /// to choose: the pool is [`shuffle::Pool::from_wall`]'s reading of the
-    /// group key, the query and the shelf, and the run is
-    /// [`shuffle::SLEEVES`] records drawn from it without replacement.
+    /// Three things, in this order: the property moves, the standing decision
+    /// is written to `config.toml`, and the run in progress is re-arranged to
+    /// match what the control now says.
     ///
-    /// What it sends is an ordinary [`SetQueue`](Command::SetQueue) — the same
-    /// command a double-clicked sleeve sends, carrying whole records in whole
-    /// order ([`vm::stacked_queue`]) — so the result is a queue you can open,
-    /// read, reorder and delete rows from, and one that **ends**. There is no
-    /// shuffle mode, no flag on the engine, and nothing to turn off.
+    /// **Nothing stops.** The re-arrangement goes out as
+    /// [`Command::UpdateQueue`], which ADR-0014 guarantees disturbs no
+    /// delivered sample when the playing track stays where it is — and it
+    /// always does, because both directions keep the needle put:
     ///
-    /// The pool is then held on the shelf, which is what makes it visible: see
-    /// [`Shelf::pool`], and [`crate::views::shelf`] for the two marks.
-    fn start_shuffle(&mut self) {
-        let seed = draw_seed();
-        let Screen::Shelf(state) = &mut self.screen else {
+    /// - **On**: what is behind the needle is history and does not re-order;
+    ///   what is in front of it is permuted ([`shuffle::arranged`], with
+    ///   `keep` = the playing row + 1). The order the run had is retained as
+    ///   the order to come back to.
+    /// - **Off**: the run goes back into its retained order
+    ///   ([`shuffle::restored`]), and the retained order is spent. A run with
+    ///   none — restored from a snapshot, or re-ordered by hand since — is
+    ///   left exactly as it stands and says so on stdout, which is the honest
+    ///   answer rather than an invented one.
+    ///
+    /// A press with nothing playing moves the property and writes it, and that
+    /// is the whole of what there is to do: the mode is about what plays
+    /// **next**.
+    fn toggle_shuffle(&mut self) {
+        let on = self.player.set_shuffle(!self.player.shuffle());
+        persist_shuffle(on);
+        let Some(queue) = self.player.queue().cloned() else {
+            println!("[shuffle] {}", if on { "on" } else { "off" });
             return;
         };
-        let mut pool = shuffle::Pool::from_wall(&state.albums, &state.visible, None);
-        if pool.is_empty() {
-            // The wall is showing nothing — an empty library, or a query that
-            // matched no record. Nothing to draw from, so nothing happens and
-            // nothing is claimed. Silence is the correct answer here too.
+        // `playing_queue_row` is the engine's answer reconciled against this
+        // record; `None` — queued but not started — means all of it is still
+        // to come.
+        let keep = self.player.playing_queue_row().map_or(0, |row| row + 1);
+        // **On** retains the order it is about to destroy; **off** spends the
+        // one it retained. A run with none to spend — restored from a snapshot,
+        // or re-ordered by hand since — is left exactly as it stands.
+        let arranged = if on {
+            Some(shuffle::arranged(&queue, draw_seed(), keep))
+        } else {
+            self.player
+                .source_order()
+                .map(|order| shuffle::restored(&queue, order))
+        };
+        let Some(arranged) = arranged else {
+            println!("[shuffle] off \u{2014} this run has no earlier order to return to");
+            return;
+        };
+        let source = on.then(|| shuffle::source_order(&queue));
+        let paths = arranged.paths();
+        if !self.playback.send(Command::UpdateQueue { paths }) {
+            self.player.engine_closed();
             return;
         }
-        let drawn = pool.draw(seed, shuffle::SLEEVES).to_vec();
-        let picks: Vec<(&vm::AlbumVm, Option<vm::EditionKey>)> = drawn
-            .iter()
-            .filter_map(|id| state.albums.iter().find(|album| album.id == *id))
-            .map(|album| (album, state.edition_choice.get(&album.id).copied()))
-            .collect();
-        let queue = vm::stacked_queue(&picks);
-        if queue.is_empty() {
-            return;
+        self.player.note_queue_edited(arranged);
+        match source {
+            Some(order) => self.player.retain_source_order(order),
+            None => self.player.forget_source_order(),
         }
         println!(
-            "[shuffle] {} sleeves drawn from {} on the wall",
-            drawn.len(),
-            pool.len()
+            "[shuffle] {} \u{2014} the run re-arranged from row {keep}",
+            if on { "on" } else { "off" }
         );
-        state.pool = Some(pool);
-        // The pull was a suggestion about one record; starting a shuffle
-        // answers a different question, so the offer is withdrawn rather than
-        // left standing beside a run it has nothing to do with.
-        state.pull = None;
-        let paths = queue.paths();
-        if self.playback.send(Command::SetQueue { paths }) && self.playback.send(Command::Play) {
-            self.player.note_queue_sent(queue);
-            self.player.note_transport_sent();
-        } else {
-            self.player.engine_closed();
-        }
-        // A queue where there was none moves `CanPlay`, exactly as in
-        // [`Self::play_album`].
         self.publish_mpris(false);
     }
 
@@ -3279,94 +3315,44 @@ impl App {
     /// from the top. **The scope is the wall, always**: a query or a group
     /// key narrows it, a YEAR-arranged wall plays the collection in
     /// chronological order, and "everything in the library" is the empty
-    /// query, one <kbd>Esc</kbd> away. Playing what you cannot see is
-    /// refused for the reason shuffle's invisible pool is
+    /// query, one <kbd>Esc</kbd> away. Playing what you cannot see is refused
     /// (a standing rule of the product) — which is why this reads `visible` and nothing
     /// wider, and why an empty wall means nothing happens and nothing is
-    /// claimed (shuffle's own empty-pool rule). No confirmation stands
-    /// between the press and the sound at any scale: the queue place is
-    /// virtualized (`crate::queue_window`, §7.1's named gate), so a
-    /// five-figure run is an ordinary queue — readable, jumpable, editable,
-    /// saveable, and it **ends**.
+    /// claimed. No confirmation stands between the press and the sound at any
+    /// scale: the queue place is virtualized (`crate::queue_window`, §7.1's
+    /// named gate), so a five-figure run is an ordinary queue — readable,
+    /// jumpable, editable, saveable, and it **ends**.
     ///
-    /// **Shuffle's sibling, never a mode.** No pool is claimed — the wall
-    /// keeps every cover at full ink, because nothing was drawn *from* it —
-    /// and the marks of a superseded draw come off ([`Self::draws_are_over`]),
-    /// exactly as any other deliberate queue replacement takes them.
+    /// **What order it plays in is not this function's business.** It was:
+    /// `Play all` was *"shuffle's sibling, never a mode"*, the plain half of a
+    /// pair whose other half drew eight records by chance. Shuffle became a
+    /// property of the player on 2026-08-10 and the pairing dissolved — this
+    /// builds the list the gesture means and [`Self::send_run`] decides the
+    /// order, exactly as it does for a record, a playlist and a track click.
     fn play_all(&mut self) {
         let Screen::Shelf(state) = &self.screen else {
             return;
         };
-        let picks: Vec<(&vm::AlbumVm, Option<vm::EditionKey>)> = state
-            .visible
-            .iter()
-            .filter_map(|&index| state.albums.get(index))
-            .map(|album| (album, state.edition_choice.get(&album.id).copied()))
-            .collect();
-        let queue = vm::stacked_queue(&picks);
-        if queue.is_empty() {
+        // **`Play all` is the All songs list's own `Play`.** It used to build
+        // its own queue out of `state.visible`; it now resolves the implicit
+        // playlist and plays that, which is what makes the two one concept
+        // rather than two that had to be kept agreeing.
+        let list = state.all_songs();
+        if list.is_empty() {
             // The wall is showing nothing — an empty library, or a query
             // that matched no record. Nothing to play, so nothing happens
             // and nothing is claimed. Silence is the correct answer here
             // too.
             return;
         }
-        println!(
-            "[play-all] {} records · {} tracks — the wall, in its arrangement",
-            picks.len(),
-            queue.len()
-        );
-        self.draws_are_over();
-        let paths = queue.paths();
-        if self.playback.send(Command::SetQueue { paths }) && self.playback.send(Command::Play) {
-            self.player.note_queue_sent(queue);
+        println!("[all-songs] play — {}", list.counts());
+        let queue = list.queue;
+        if self.send_run(queue, None).is_some() && self.playback.send(Command::Play) {
             self.player.note_transport_sent();
         } else {
             self.player.engine_closed();
         }
         self.publish_mpris(false);
-    }
-
-    /// **The pull** (ADR-0017 step 19): draw one record, and offer it.
-    ///
-    /// Weighted toward the long unplayed by [`shuffle::pull`], which weighs on
-    /// `baz_core`'s own [`History::pull_weight`] — one per day since the record
-    /// was last heard, capped at a year, heaviest for one never played, never
-    /// zero. Drawn from the same pool shuffle uses, because the pull may no more
-    /// suggest a record you cannot see than shuffle may play one.
-    ///
-    /// **No command is sent.** Not `SetQueue`, not `Play`, not `Stop`: this
-    /// function cannot start playback, and that is not a discipline it observes
-    /// but a fact about what it does — it writes one field and moves the wall.
-    /// Accepting the suggestion is pressing `Play album`, which is the ordinary
-    /// path every other record takes.
-    ///
-    /// Pressing again re-pulls, excluding the record already on offer.
-    fn draw_pull(&mut self) -> Task<Message> {
-        let seed = draw_seed();
-        let now = SystemTime::now();
-        let Screen::Shelf(state) = &mut self.screen else {
-            return Task::none();
-        };
-        let pool = shuffle::Pool::from_wall(&state.albums, &state.visible, None);
-        let showing = state.pull.as_ref().map(|pull| pull.album);
-        let Some(drawn) = shuffle::pull(
-            &state.albums,
-            &pool,
-            state.history.as_ref(),
-            now,
-            seed,
-            showing,
-        ) else {
-            return Task::none();
-        };
-        let Some(album) = state.albums.iter().find(|album| album.id == drawn) else {
-            return Task::none();
-        };
-        let note = shuffle::pull_note(shuffle::last_played(album, state.history.as_ref(), now));
-        println!("[pull] {} — {note}", album.title.as_deref().unwrap_or("—"));
-        state.pull = Some(Pull { album: drawn, note });
-        state.show_album(drawn)
     }
 
     /// Play the queue from `position` — a click on a row of **Queue**
@@ -3466,6 +3452,11 @@ impl App {
         let paths = edited.paths();
         if self.playback.send(Command::UpdateQueue { paths }) {
             self.player.note_queue_edited(edited);
+            // **A hand reorder restates the order**, so the order shuffle would
+            // return to is dropped with it (ADR-0023's amendment): the hand
+            // beats the machine's memory, and turning shuffle off after a
+            // stepper press leaves the run exactly as the press left it.
+            self.player.forget_source_order();
             // [`Self::remove_queued`]'s history rule, for the reorder.
             self.queue_undo.push(before);
         } else {
@@ -3604,6 +3595,8 @@ impl App {
         let paths = edited.paths();
         if self.playback.send(Command::UpdateQueue { paths }) {
             self.player.note_queue_edited(edited);
+            // [`Self::shift_queued`]'s rule, for the drag.
+            self.player.forget_source_order();
         } else {
             self.player.engine_closed();
         }
@@ -4110,7 +4103,10 @@ pub(crate) struct Shelf {
     /// no third way anywhere in the Settings place.
     pub(crate) density: shelf::Density,
     /// The play ledger, read once at open — what [`GroupKey::Played`] shelves
-    /// on and what the pull will weight on.
+    /// on, and the returns lane's order key for a record.
+    ///
+    /// It had a second consumer, the pull's weighting; that went with the pull
+    /// on 2026-08-10 (ADR-0018's amended third surface).
     ///
     /// A **snapshot**, not a live view: the file is append-only, so a snapshot
     /// can only ever be missing the last few minutes and can never be wrong
@@ -4245,23 +4241,6 @@ pub(crate) struct Shelf {
     /// question the strip's *own* width cannot: whether the returns lane can
     /// hold the search well ([`theme::strip_holds_the_well`]).
     pub(crate) window_w: f32,
-    /// **What the shuffle in progress is drawing from**, or `None` when no
-    /// shuffle is running (`crate::shuffle`).
-    ///
-    /// This is the state the refusals ledger's *"no invisible shuffle pools"*
-    /// is made of: while it is `Some`, every tile on the wall asks it whether it
-    /// is in the pool (and dims if not) and whether it is one of the next draws
-    /// (and carries a ring if so). A shuffle whose pool were held anywhere the
-    /// wall could not read would be exactly the invisible one.
-    ///
-    /// It is dropped the moment another record is played deliberately, and by
-    /// Escape — the marks describe *this* run, and a run that has been replaced
-    /// is not one to go on marking.
-    pub(crate) pool: Option<shuffle::Pool>,
-    /// **The record the pull is offering**, or `None`.
-    ///
-    /// A suggestion, holding no playback of its own: see [`Pull`].
-    pub(crate) pull: Option<Pull>,
     /// **Whether the returns lane stands open** (ADR-0030 §3), as the config
     /// remembers it.
     ///
@@ -4287,38 +4266,6 @@ pub(crate) struct Shelf {
     /// Bumped whenever [`Self::lane_recent`] is rebuilt — the shell's cue to
     /// re-merge, without comparing two vectors of strings.
     pub(crate) lane_stamp: u64,
-}
-
-/// **The record the pull drew, and when it was last heard.**
-///
-/// Deliberately two fields and no third. There is no "pending play", no timer,
-/// no accepted flag — because *nothing plays until the listener asks*
-/// (`docs/design/critique/02-surfaces.md`, and the product's *shuffle is
-/// a thing you start*). The pull selects a record and prints one line about it;
-/// accepting it is pressing the inspector's own **Play album**, which is the
-/// same control, sending the same commands, as it is for a record you found
-/// yourself.
-///
-/// # The surface this is drawn on is temporary
-///
-/// ADR-0017 step 18's **Marquee** lens is the pull's designed home — the sleeve
-/// at half-window, full-bleed, with the note as poster type. Marquee is not
-/// built, and inventing a lens to host one feature would be a worse mistake than
-/// borrowing a surface that already exists, so the pull currently opens the
-/// **album inspector** on the drawn record and prints its note there.
-///
-/// The seam is this struct. When Marquee lands it reads exactly these two fields
-/// and draws them larger; nothing about how the draw is made, when it is made,
-/// or what it is allowed to do changes. What must *not* be carried across is the
-/// inspector's framing — a lens hosting the pull states the note as its subject,
-/// not as a line above a button.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Pull {
-    /// The record drawn — an id into [`Shelf::albums`].
-    pub(crate) album: u64,
-    /// What the ledger says about it: `Last played 3 years ago`, or
-    /// `Never played` ([`shuffle::pull_note`]).
-    pub(crate) note: String,
 }
 
 impl Shelf {
@@ -4398,8 +4345,6 @@ impl Shelf {
             hovered_album: None,
             tile_hover: Keyed::new(),
             window_w: WINDOW.width,
-            pool: None,
-            pull: None,
             lane_open,
             lane_played: HashMap::new(),
             lane_recent: Vec::new(),
@@ -4704,35 +4649,19 @@ impl Shelf {
     /// in. Each press takes exactly one thing off, and each early return is one
     /// press.
     ///
-    /// 1. **The pull's offer.** `docs/design/critique/02-surfaces.md` names the
-    ///    gesture — *"`Ctrl+R` re-pulls; `Esc` returns"* — and an offer is the
-    ///    topmost thing on a wall that is showing one. (Escaping *out of the
-    ///    record's page* the pull opened already withdrew it; this is the
-    ///    press for an offer whose page you have left some other way.)
-    /// 2. **The query** — unchanged, and the one press that keeps focus where
-    ///    it is.
-    /// 3. **The shuffle pool's marks, last.** That is the point of the ordering
-    ///    rather than a leftover: clearing the query *widens* the wall while the
-    ///    pool stays what it was, which is the frame in which the dimming says
-    ///    the most — it is how a listener sees that the shuffle is drawing from
-    ///    four records out of twenty-five. Peeling the marks first would take
-    ///    the answer away at the exact press that asked the question.
-    ///
-    ///    It never stops the music. A shuffle's run is a queue like any other;
-    ///    what Escape takes off the wall is the *drawing*, and the record goes
-    ///    on playing.
+    /// The **query**, and since 2026-08-10 that is the whole of it. The layer
+    /// under it was the shuffle pool's marks, and it went when shuffle stopped
+    /// being a draw from the wall and became a property of the player: there is
+    /// no pool on the wall to peel. Escape never stopped the music before and
+    /// still does not.
     ///
     /// The query step **clears and blurs**, which is type-anywhere's doing
     /// (ADR-0017 step 11) — see [`Self::clear_query`] for why holding the caret
     /// stopped being right once any letter could reopen the query.
     fn peel(&mut self) -> Task<Message> {
-        if self.pull.take().is_some() {
-            return Task::none();
-        }
         if !self.query.is_empty() {
             return self.clear_query();
         }
-        self.pool = None;
         Task::none()
     }
 
@@ -4764,55 +4693,16 @@ impl Shelf {
         ])
     }
 
-    /// **Bring one record to the top of the wall** — what the pull does with
-    /// the sleeve it drew, so that the wall is standing on the record when the
-    /// listener comes back from its page.
+    /// **The All songs list, resolved from this wall** (`crate::implicit`).
     ///
-    /// A record the wall is not currently showing is not scrolled to, because
-    /// there is nowhere to scroll it to. The pull never draws one (its pool is
-    /// the wall), so in practice this is the guard rather than the case.
-    ///
-    /// The wall lands **at the record's row**, for [`Self::jump_to_shelf`]'s
-    /// reason: arriving somewhere means arriving above the thing you came for,
-    /// not with it clipped at the top edge. And it lands there **exactly**,
-    /// where it used to land approximately — the target used to be measured
-    /// against a width the opening inspector was still travelling to, and there
-    /// is no inspector and no travel, so the grid the scroll is computed
-    /// against is the grid that will be under it.
-    fn show_album(&mut self, id: u64) -> Task<Message> {
-        self.opened = Some(id);
-        let Some(place) = self.album_top(id, self.grid()) else {
-            return Task::none();
-        };
-        self.scroll_offset = place;
-        Task::batch([
-            scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: place }),
-            self.request_visible_thumbs(),
-        ])
-    }
-
-    /// Where the wall must be scrolled for `id`'s row to be at the top of the
-    /// viewport, in the scrollable's content coordinates.
-    ///
-    /// `None` when the query has filtered the record off the wall. The shelf's
-    /// header band is the answer when the record is on the shelf's first row,
-    /// so that landing on the first record of a shelf lands on the words that
-    /// name it.
-    fn album_top(&self, id: u64, grid: shelf::Grid) -> Option<f32> {
-        let at = self
-            .visible
-            .iter()
-            .position(|index| self.albums.get(*index).is_some_and(|a| a.id == id))?;
-        let shelves = shelf::Shelves::new(grid, &self.visible_counts);
-        let run = *shelves
-            .runs()
-            .iter()
-            .find(|run| at >= run.first && at < run.first + run.len)?;
-        let row = (at - run.first) / grid.columns.max(1);
-        Some(if row == 0 {
-            run.top
-        } else {
-            run.rows_top(grid) + grid.spacer_height(row)
+    /// Built on demand rather than held, because the list *is* the wall and the
+    /// wall is recomputed: an implicit playlist that cached itself would be a
+    /// snapshot claiming to be a view, and would go stale the moment a query
+    /// was typed. It costs one pass over `visible`, and is asked for only when
+    /// something is about to be played or drawn.
+    pub(crate) fn all_songs(&self) -> crate::implicit::ImplicitList {
+        crate::implicit::ImplicitList::all_songs(&self.albums, &self.visible, |id| {
+            self.edition_choice.get(&id).copied()
         })
     }
 
@@ -5858,6 +5748,15 @@ fn persist_density(density: shelf::Density) {
     persist(|config| config.density = density);
 }
 
+/// Remember whether shuffle is on — `persist_density`'s argument again, and
+/// the reason it is a *standing* decision rather than session state is in
+/// [`config::Config::shuffle`]: it governs what the first `Play` of the next
+/// session does, so a shuffle that forgot itself overnight would be a mode a
+/// listener had to re-assert every morning.
+fn persist_shuffle(on: bool) {
+    persist(|config| config.shuffle = on);
+}
+
 /// Remember whether the returns lane stands open — `persist_density`'s
 /// argument exactly (ADR-0030 §3: one bool in `config.toml`, beside the
 /// density step and the group key, and **no Settings row**).
@@ -6151,7 +6050,7 @@ mod tests {
     /// An absence has no return value to compare against, so it is asserted
     /// where the fact lives — over the source of the one function that answers
     /// it — exactly as
-    /// [`Self::the_pull_offers_a_record_and_sends_no_command_at_all`] is. A
+    /// [`Self::shuffle_starts_what_it_draws_and_queues_whole_records`] is. A
     /// future edit that reached for a panel width from here fails the build
     /// rather than the review.
     #[test]
@@ -6190,10 +6089,10 @@ mod tests {
         assert_eq!(place, Place::Library);
         // Out to a record's page, on to the queue, on to the settings, home.
         let place = place.album(7);
-        assert_eq!(place.showing_album(), Some(7));
+        assert_eq!(place, Place::Album(7));
         let place = place.queue();
         assert_eq!(place, Place::Queue);
-        assert_eq!(place.showing_album(), None, "one place at a time");
+        assert!(!matches!(place, Place::Album(_)), "one place at a time");
         let place = place.settings();
         assert_eq!(place, Place::Settings);
         let place = place.back();
@@ -6242,10 +6141,10 @@ mod tests {
 
         /// Message tag → the on-screen control that sends the same message,
         /// or the reason there is none.
-        const CONTROLS: [(&str, &str); 22] = [
+        const CONTROLS: [(&str, &str); 21] = [
             (
                 "ToggleLane",
-                "the two marks at the returns lane's foot (ADR-0030 §3) — \
+                "the `Collapse` control at the returns lane's foot (ADR-0030 §3) — \
                  the state you are in at full ink and inert, the other \
                  pressable, in the density detents' exact anatomy",
             ),
@@ -6282,7 +6181,6 @@ mod tests {
             ("ToggleQueue", "the bottom bar's labelled `Queue` control"),
             ("ToggleSettings", "the top bar's Settings control"),
             ("FocusSearch", "the top bar's search well"),
-            ("Pull", "the top bar's Pull word"),
             ("EscapePressed", "every place's `‹ Library`"),
             (
                 "QueryTyped",
@@ -6408,31 +6306,33 @@ mod tests {
         assert!(produced.len() > 20, "the sweep stopped covering the table");
     }
 
-    /// **The pull sends no command.** Not `SetQueue`, not `Play`, not `JumpTo`
-    /// — nothing at all.
+    /// **Every play gesture goes through one arranger, and the mode cannot be
+    /// half-applied.**
     ///
-    /// The refusal this pins is the product's loudest one:
-    /// *"Shuffle is a thing you **start**, never a thing that starts itself"*,
-    /// and the pull is a suggestion one step further from playback than that. It
-    /// draws a record, prints when it was last heard, and stops. Accepting it is
-    /// pressing `Play album`, which is the same act — the same message, the same
-    /// commands — as playing a record you found yourself.
+    /// This test has been rewritten twice by the owner's decisions and both
+    /// halves of what it used to say are worth keeping in view. It pinned
+    /// **the pull's silence** — a draw that sent no command at all — until the
+    /// pull was removed (2026-08-10). And it pinned *"shuffle is a thing you
+    /// **start**"* over `start_shuffle`, the wall's draw, until shuffle became
+    /// a property of the player on the same day and there stopped being an act
+    /// to start.
     ///
-    /// # Why it is asserted like this
+    /// What replaces both is the property the mode is actually judged on:
+    /// **one place decides what order a run plays in.** [`App::send_run`] is
+    /// that place, and every gesture that starts a run reaches it — press
+    /// `Play` on a record, `Play all`, a playlist's `Play`, a track click.
+    /// Four functions keeping a convention is how they would fall out of step;
+    /// one function they all call is how they cannot.
     ///
-    /// The claim is *the absence of a send*, and an absence has no return value
-    /// to compare against. Constructing an `App` to observe the silence is not
-    /// available either: `App::new` opens a real engine and a real library. So
-    /// the assertion is made where the fact lives — over the source of the one
-    /// function that answers [`Message::Pull`] — in exactly the way
-    /// `theme::every_surface_declares_the_edges_it_permits` pins the alignment
-    /// laws. It cannot be satisfied by accident, and a future edit that reached
-    /// for the engine from here fails the build rather than the review.
-    ///
-    /// Its counterpart is asserted too: shuffle *does* send, because a shuffle
-    /// that started nothing would be the other kind of lie.
+    /// Pinned over the **source** rather than over behaviour, and that is the
+    /// point of it: there is no `Shelf` to construct without a database and a
+    /// scan thread, so the property is asserted as a fact about the text — in
+    /// exactly the way `theme::every_surface_declares_the_edges_it_permits`
+    /// pins the alignment laws. It cannot be satisfied by accident, and a
+    /// future edit that sent its own `SetQueue` from a play gesture fails the
+    /// build rather than the review.
     #[test]
-    fn the_pull_offers_a_record_and_sends_no_command_at_all() {
+    fn every_play_gesture_arranges_its_run_through_one_function() {
         // Read the source with line endings normalised. `.gitattributes`
         // pins these files to LF, but a working tree can still be checked out
         // with CRLF, and every scan below matches on "\n    }\n" — which a
@@ -6452,45 +6352,111 @@ mod tests {
             rest[..end].to_owned()
         };
 
-        let pull = body("draw_pull");
-        for forbidden in ["playback.send", "Command::", "note_transport_sent"] {
+        // **Every gesture that starts a run.** Named individually rather than
+        // swept, because the list *is* the claim: these four are what the
+        // owner asked to agree.
+        for gesture in [
+            "play_album",
+            "play_all",
+            "play_playlist",
+            "play_track",
+            "play_playlist_track",
+        ] {
+            let body = body(gesture);
             assert!(
-                !pull.contains(forbidden),
-                "the pull reached for `{forbidden}` — nothing plays until the \
-                 listener asks (docs/the product's standing rules)"
+                body.contains("self.send_run("),
+                "`{gesture}` starts a run without going through the arranger — \
+                 shuffle would apply to some gestures and not others"
+            );
+            assert!(
+                !body.contains("Command::SetQueue"),
+                "`{gesture}` sends its own SetQueue past `send_run`"
             );
         }
-        // …and it does the two things it is for.
-        assert!(pull.contains("shuffle::pull"), "the pull draws a record");
-        assert!(pull.contains("state.pull = Some"), "and offers it");
 
-        // Shuffle is the opposite: it is *started*, so it starts.
-        let shuffle = body("start_shuffle");
-        assert!(shuffle.contains("Command::SetQueue"));
-        assert!(shuffle.contains("Command::Play"));
-        // And what it sends is a queue of whole records, never a flattened one.
-        assert!(shuffle.contains("vm::stacked_queue"));
+        // And the arranger does the two things the mode is made of: it retains
+        // the order it is about to destroy, and it records the pair together.
+        let arranger = body("send_run");
+        assert!(
+            arranger.contains("shuffle::source_order"),
+            "the order is kept"
+        );
+        assert!(
+            arranger.contains("shuffle::arranged"),
+            "and the run permuted"
+        );
+        assert!(
+            arranger.contains("note_shuffled_run"),
+            "the run and its source order are recorded together, so a shuffled \
+             run the toggle cannot turn off is unreachable"
+        );
+
+        // **Turning it off never stops the music.** ADR-0014's bargain: an
+        // edit that leaves the playing track alone disturbs no delivered
+        // sample, so the toggle is an `UpdateQueue` and never a `SetQueue`.
+        let toggle = body("toggle_shuffle");
+        assert!(toggle.contains("Command::UpdateQueue"));
+        assert!(
+            !toggle.contains("Command::SetQueue") && !toggle.contains("Command::Play"),
+            "the toggle restarted the music instead of re-ordering it"
+        );
+        assert!(
+            toggle.contains("shuffle::restored"),
+            "turning it off puts the run back into its retained order"
+        );
+        assert!(
+            toggle.contains("persist_shuffle"),
+            "a standing decision that is not written down is a session setting"
+        );
+
+        // **A hand reorder drops the retained order** — the hand beats the
+        // machine's memory (ADR-0023's amendment).
+        for reorder in ["shift_queued", "move_queued"] {
+            assert!(
+                body(reorder).contains("forget_source_order"),
+                "`{reorder}` re-stated the order by hand and kept the old one"
+            );
+        }
+
+        // **The pull and the wall's draw are gone, and nothing kept a stub of
+        // either.** Named here so that a re-introduction is a deliberate act
+        // with a test to move rather than a quiet reappearance. Spelled in two
+        // pieces so these assertions are not their own counter-examples.
+        for gone in ["draw_pull", "start_shuffle"] {
+            let (head, tail) = gone.split_once('_').expect("a two-word name");
+            assert!(
+                !source.contains(&format!("fn {head}_{tail}")),
+                "`{gone}` came back without its removal being reconsidered"
+            );
+        }
     }
 
-    /// **S6 — `Play all` reifies the wall's scope, plays from the top, and is
-    /// shuffle's sibling rather than a mode** (doc 09 §7.1).
+    /// **S6 — `Play all` reifies the wall's scope and plays from the top**
+    /// (doc 09 §7.1).
     ///
-    /// Pinned over the source for the pull test's reason — there is no
-    /// `Shelf` to construct without a database and a scan thread — with each
-    /// criterion named by the literal a reviewer would have to move:
+    /// Pinned over the source for
+    /// [`Self::every_play_gesture_arranges_its_run_through_one_function`]'s
+    /// reason — there is no `Shelf` to construct without a database and a scan
+    /// thread — with each criterion named by the literal a reviewer would have
+    /// to move:
     ///
-    /// - *the scope is the wall*: the queue is built from `state.visible`,
-    ///   in its order, as whole records (`vm::stacked_queue` — the shape
-    ///   whose order-preservation `vm`'s own tests pin);
-    /// - *the first track sounds*: `SetQueue` then `Play`, one press,
-    ///   no confirmation at any scale — §7.1's answer to the 10 000-track
-    ///   question is the virtual window, not a dialog;
-    /// - *an empty wall does nothing and claims nothing*;
-    /// - *sibling, not mode*: no pool is claimed, and the marks of a
-    ///   superseded draw come off exactly as any deliberate replacement
-    ///   takes them.
+    /// - *the scope is the wall*: the queue is the **All songs** list, which
+    ///   is `state.visible` in its order as whole records
+    ///   (`crate::all_songs`, whose own tests pin that and `vm`'s pin
+    ///   `stacked_queue`'s order-preservation under it);
+    /// - *the first track sounds*: the run goes out and `Play` follows, one
+    ///   press, no confirmation at any scale — §7.1's answer to the
+    ///   10 000-track question is the virtual window, not a dialog;
+    /// - *an empty wall does nothing and claims nothing*.
+    ///
+    /// It used to carry a fourth: *shuffle's sibling, never a mode* — no pool
+    /// claimed, the marks of a superseded draw taken off. Shuffle **is** a mode
+    /// now (2026-08-10, the owner), there is no pool and no draw to supersede,
+    /// and the relationship between the two is stated where it now lives: what
+    /// order this run plays in is [`App::send_run`]'s answer, the same as every
+    /// other gesture's.
     #[test]
-    fn play_all_reifies_the_wall_in_order_and_claims_no_pool() {
+    fn play_all_reifies_the_wall_in_order() {
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
         )
@@ -6503,30 +6469,20 @@ mod tests {
         let play_all = &rest[..rest.find("\n    }\n").expect("a function ends")];
 
         assert!(
-            // rustfmt sets the chain one call per line, so the receiver and
-            // the field arrive split.
-            play_all.contains(".visible"),
-            "the scope is the wall — the visible set, nothing wider"
+            play_all.contains("state.all_songs()"),
+            "`Play all` is the All songs list's own Play — one concept, not two"
         );
         assert!(
-            play_all.contains("vm::stacked_queue"),
-            "whole records, in the wall's arrangement order"
+            play_all.contains("list.queue"),
+            "and it plays that list, rather than building a second one beside it"
         );
         assert!(
-            play_all.contains("Command::SetQueue") && play_all.contains("Command::Play"),
+            play_all.contains("self.send_run(") && play_all.contains("Command::Play"),
             "one press, and the first track sounds"
         );
         assert!(
-            play_all.contains("if queue.is_empty()"),
+            play_all.contains("if list.is_empty()"),
             "an empty wall: nothing happens and nothing is claimed"
-        );
-        assert!(
-            !play_all.contains("pool = Some"),
-            "no pool is claimed — Play all is shuffle's sibling, never a mode"
-        );
-        assert!(
-            play_all.contains("self.draws_are_over()"),
-            "a superseded draw's marks come off the wall"
         );
     }
 
@@ -6634,25 +6590,23 @@ mod tests {
         );
     }
 
-    /// **Escape returns the pull before it touches anything else on the wall.**
+    /// **Escape clears the query, and on the wall that is now the whole of
+    /// it.**
     ///
-    /// `docs/design/critique/02-surfaces.md` gives the pull two keys and this is
-    /// the second of them — *"`Ctrl`+`R` re-pulls; `Esc` returns"*. Returning an
-    /// offer comes **first**, because an offer is the topmost thing on a wall
-    /// that is showing one and `escape()`'s whole contract is that each press
-    /// peels the top layer. The shuffle pool's marks come **last**, under the
-    /// query and under the column: clearing the query widens the wall while the
-    /// pool stays what it was, which is the frame in which the dimming actually
-    /// says something, and peeling it first would answer the question by
-    /// deleting it.
+    /// The peel was a triple: the pull's offer, then the query, then the
+    /// shuffle pool's marks. Both of the owner's decisions on 2026-08-10 took
+    /// a layer off — the pull was removed, and shuffle became a property of the
+    /// player, which left no pool on the wall to un-mark. The query keeps its
+    /// place and its behaviour: it is the one press that clears and blurs,
+    /// which is type-anywhere's doing.
     ///
     /// Pinned as an **order in the source** of the one arm that spends it, for
-    /// [`Self::the_pull_offers_a_record_and_sends_no_command_at_all`]'s reason:
-    /// the peel is four early returns in a `match` arm and there is no `Shelf`
+    /// [`Self::shuffle_starts_what_it_draws_and_queues_whole_records`]'s reason:
+    /// the peel is a pair of early returns in a `match` arm and there is no `Shelf`
     /// to build without a database and a scan thread. Each step is named by the
     /// literal a reviewer would have to move to break it.
     #[test]
-    fn escape_returns_the_pull_first_and_the_pools_marks_last() {
+    fn escape_clears_the_query_and_stops_there() {
         // Read the source with line endings normalised. `.gitattributes`
         // pins these files to LF, but a working tree can still be checked out
         // with CRLF, and every scan below matches on "\n    }\n" — which a
@@ -6668,7 +6622,11 @@ mod tests {
             .expect("the shelf's Escape peel")
             .1;
         let arm = &arm[..arm.find("\n    }\n").expect("a function ends")];
-        let peel = ["self.pull.take()", "self.clear_query()", "self.pool = None"];
+        // It was a triple, and both of 2026-08-10's decisions took a layer
+        // off it: the pull's offer peeled first until the pull was removed,
+        // and the shuffle pool's marks peeled last until shuffle stopped being
+        // a draw from the wall. What is left on the wall to peel is the query.
+        let peel = ["self.clear_query()"];
         let mut at = 0;
         for step in peel {
             let found = arm[at..]
@@ -6696,7 +6654,7 @@ mod tests {
 
     /// **The context menu's state machine, pinned in the source of the arms
     /// that spend it** (doc 09 §5.2) — for
-    /// [`Self::the_pull_offers_a_record_and_sends_no_command_at_all`]'s
+    /// [`Self::shuffle_starts_what_it_draws_and_queues_whole_records`]'s
     /// reason: there is no `Shelf` to build without a database and a scan
     /// thread, and the items themselves are `menu::items`' — a pure
     /// function, swept exhaustively in `menu.rs`. What must hold *here* is
@@ -6782,7 +6740,7 @@ mod tests {
     /// record page's own needle-drop path, never a new one.
     ///
     /// Pinned as an order in the source of the one arm that spends it, for
-    /// [`Self::the_pull_offers_a_record_and_sends_no_command_at_all`]'s
+    /// [`Self::shuffle_starts_what_it_draws_and_queues_whole_records`]'s
     /// reason: there is no `Shelf` to build without a database and a scan
     /// thread, and the decision itself — which song is top, which row it is
     /// on its record — is [`vm::song_hits`]/[`vm::song_row`]'s, tested as
@@ -6910,7 +6868,7 @@ mod tests {
     /// Library**, because the well searches the collection and the collection
     /// is what answers, and **open the lane**, because at `SIDEBAR_RAIL_W`
     /// there is no field to focus until it does. Source-pinned for
-    /// [`Self::the_pull_offers_a_record_and_sends_no_command_at_all`]'s
+    /// [`Self::shuffle_starts_what_it_draws_and_queues_whole_records`]'s
     /// reason — there is no `Shelf` to build without a database and a scan
     /// thread — and the pins are the two calls plus the guard that keeps the
     /// re-hang off the presses that do not deserve one.
@@ -7127,10 +7085,10 @@ mod tests {
         // back to the wall, which is the one gesture of the inspector's that
         // survived: pointing at the sleeve you are already reading puts it down.
         let place = Place::default().album(7);
-        assert_eq!(place.showing_album(), Some(7));
+        assert_eq!(place, Place::Album(7));
         assert_eq!(place.album(7), Place::Library);
         // …and a different sleeve swaps the page rather than stacking one.
-        assert_eq!(place.album(9).showing_album(), Some(9));
+        assert_eq!(place.album(9), Place::Album(9));
 
         // The hang is the same at a width whatever has been pressed, because
         // nothing that can be pressed is in the arithmetic any more. Swept over

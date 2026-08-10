@@ -106,12 +106,18 @@ use crate::{theme, vm};
 /// # `shown`
 ///
 /// How strongly the placeholder is drawn, 0…1 — the gradient's own answer to
-/// the opacity a real thumbnail is composited at when its record is **outside a
-/// running shuffle's pool** ([`theme::POOL_DIM`]). A gradient background is
+/// an opacity a real thumbnail could be composited at. A gradient background is
 /// painted rather than sampled, so there is nothing to set an opacity on; it is
 /// mixed toward the wall instead, which is what compositing it at that opacity
-/// against the wall would have produced. Ordinary tiles pass 1.0 and the mix is
-/// the identity.
+/// against the wall would have produced.
+///
+/// **Every caller now passes 1.0, and the mix is the identity.** The one that
+/// did not was the wall's shuffle pool, which drew every record the running
+/// draw could not play at `POOL_DIM` 35 %; shuffle became a property of the
+/// player on 2026-08-10 and there is no pool to dim. The parameter stays
+/// because the *question* it answers is a real one a placeholder must be able
+/// to answer — a gradient that could not be drawn faintly would be a
+/// placeholder that could not be treated like the artwork it stands in for.
 pub(crate) fn gradient_block(album_id: u64, size: f32, shown: f32) -> Element<'static, Message> {
     let room = theme::active();
     let (c1, c2) = vm::gradient_colors(album_id);
@@ -455,17 +461,22 @@ mod tests {
     }
 
     /// **One vocabulary** (doc 11 §5 P4): no word from the room-vocabulary
-    /// list ships in user-facing copy. "The wall", "the hang", "the stack",
-    /// "marquee" and the pull's internals are the corpus's own names for
-    /// its ideas — correctly internal, like a stage crew's slang — and the
-    /// one leak the critique found (*"Esc returns to the wall"* beside
-    /// `‹ Library`, two names for one destination in one strip) is exactly
-    /// what this pin keeps closed. Licensed uses stay licensed: `Pull` the
-    /// control and its offer line "The pull" (P9, the owner's call), and
-    /// `Save as playlist` / `Add to playlist…` are ordinary words.
+    /// list ships in user-facing copy. "The wall", "the hang", "the stack"
+    /// and "marquee" are the corpus's own names for its ideas — correctly
+    /// internal, like a stage crew's slang — and the one leak the critique
+    /// found (*"Esc returns to the wall"* beside `‹ Library`, two names for
+    /// one destination in one strip) is exactly what this pin keeps closed.
+    ///
+    /// **The licence list is now empty.** It held two entries, `Pull` and its
+    /// offer line `The pull` — the only shipped copy the room's vocabulary was
+    /// ever allowed into, on P9's *present-to-owner* footing. The owner
+    /// answered P9 on 2026-08-10 by removing the control, so the exception
+    /// went with the words it excepted and the rule is now total.
+    /// `Save as playlist` / `Add to playlist…` are ordinary words and were
+    /// never on it.
     #[test]
     fn no_room_vocabulary_ships_in_user_facing_copy() {
-        let licensed = ["The pull", "Pull"];
+        let licensed: [&str; 0] = [];
         for (file, literal) in shipped_strings() {
             if licensed.contains(&literal.as_str()) {
                 continue;
@@ -546,26 +557,5 @@ mod tests {
         // Not vacuous: the wall's rows, the panel's, the menu card's and the
         // returns lane's are all in the walk.
         assert!(sites >= 6, "only {sites} row call sites found");
-    }
-
-    /// The Shuffle tooltip's figure is [`crate::shuffle::SLEEVES`], not a
-    /// number that can drift from it: the tooltip teaches the bounded draw
-    /// (doc 11 §5 P6.2), and a bound taught wrong would be worse than one
-    /// untaught.
-    #[test]
-    fn the_shuffle_tooltip_states_the_real_bound() {
-        let source = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/top_bar.rs"),
-        )
-        .expect("the top bar's source")
-        .replace("\r\n", "\n");
-        let taught = format!(
-            "Play {} records drawn from what the Library shows",
-            crate::shuffle::SLEEVES
-        );
-        assert!(
-            source.contains(&taught),
-            "the Shuffle tooltip must state the draw's real bound: {taught:?}"
-        );
     }
 }

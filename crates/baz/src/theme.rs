@@ -1890,28 +1890,43 @@ pub const TOP_BAR_PAD_V: f32 = GAP_SM;
 pub const TOP_BAR_H: f32 = 2.0 * TOP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
 
 /// **Strip width** below which the Library strip splits into its two lines
-/// (logical px) — **872**, and it is now an exact sum rather than a rounded
-/// one.
+/// (logical px) — **778**, an exact sum rather than a rounded one.
 ///
 /// It was 960: the tenants summed to 958 with the well at its 200 px floor and
-/// the seam was declared on the next lattice step up. Two of those tenants have
-/// since left. The `Playlists` door went with the returns lane (ADR-0030 §5),
-/// giving back its 64 px and the [`GAP_XL`] beside it — 88 — and that is what
-/// took 960 to 872. **The well then left too** (ADR-0030's search amendment),
-/// but it left only where the lane can hold it, which is exactly the widths at
-/// which this seam cannot be reached: see [`strip_holds_the_well`]. So the
-/// split's own arithmetic still counts the well, and 872 is the sum with it in.
+/// the seam was declared on the next lattice step up. Three of those tenants
+/// have since left, and a fourth moved. The `Playlists` door went with the
+/// returns lane (ADR-0030 §5), giving back its 64 px and the [`GAP_XL`] beside
+/// it — 88 — which took 960 to 872. Then, on 2026-08-10 and both on the owner's
+/// decision, **`Pull` was removed** and **`Shuffle` moved to the now-playing
+/// bar** as a property of the player, taking
+/// [`crate::views::top_bar::ACTS_W`] from 182 to 88 and this seam from 872 to
+/// 778. A split declared where the line still fits would put the strip on two
+/// rows for controls it no longer draws.
+///
+/// **The well left too** (ADR-0030's search amendment), but it left only where
+/// the lane can hold it, which is exactly the widths at which this seam cannot
+/// be reached: see [`strip_holds_the_well`]. So the split's own arithmetic
+/// still counts the well, and 778 is the sum with it in.
 ///
 /// The number this is compared against is the **strip's** width — the window
 /// less the returns lane — never the window's. See [`top_bar_h`], which is the
 /// one place that resolution happens.
-pub const TOP_BAR_SPLIT: f32 = 872.0;
+pub const TOP_BAR_SPLIT: f32 = 778.0;
 
 /// The strip's floor, and the window's sensible minimum (logical px) —
 /// **600**, from the two-line regime's own arithmetic (doc 10 §4.3): the
-/// library line's tenants sum to 598. Below it nothing further collapses —
-/// there is no third regime, and a proposal that needs one has outgrown the
-/// strip (doc 10 §8).
+/// library line's tenants summed to exactly this. Below it nothing further
+/// collapses — there is no third regime, and a proposal that needs one has
+/// outgrown the strip (doc 10 §8).
+///
+/// **It no longer sits exactly on that sum, and it does not follow it down.**
+/// Both draw words left the acts cluster on 2026-08-10 and the library line
+/// came to 506. The floor stays at 600 because it is *also* the window's sensible
+/// minimum, and a window minimum that shrank every time a word left a strip
+/// would be a promise about the smallest usable baz that was really a
+/// statement about the strip's current population. The slack is recorded in
+/// `the_strip_holds_its_tenants_at_the_single_line_floor`, which asserts the
+/// line fits under the floor rather than meeting it.
 pub const TOP_BAR_FLOOR: f32 = 600.0;
 
 /// Height of the two-line Library strip, hairline included — **89**
@@ -3509,86 +3524,43 @@ pub const DETAIL_ROW_H: f32 = LINE_META;
 pub const PLACEHOLDER_MIX: f32 = 0.62;
 
 // ===========================================================================
-// The shuffle pool's two marks (ADR-0017 step 17)
+// The sleeve's mat
 // ===========================================================================
 
-/// **What a sleeve outside the shuffle's pool is drawn at**: 35 % opacity.
+/// Width of the mat around every sleeve on the wall (logical px).
 ///
-/// The number is `docs/design/critique/02-surfaces.md`'s — *"non-pool covers dim
-/// to 35 %"* — and it is applied to the **artwork itself**, through iced's own
-/// image opacity, rather than by putting anything over it. That distinction is
-/// the whole of why this mark is permitted at all:
+/// Two, the same as [`SELECTION_EDGE`], because it is the same measure of
+/// separation between a work and the wall it hangs on. There is no third mark
+/// thickness in the product.
 ///
-/// - the product's standing rules, *nothing is ever drawn on top of a sleeve* — nothing
-///   is. The image is composited against the wall at 35 %; there is no scrim,
-///   no tint, no veil widget, and the wall behind it is the wall.
-/// - the product's standing rules, *no scrim, ever* — that refusal is about *"dimming ten
-///   thousand covers to show twelve rows"*, a layer over the collection to
-///   privilege a panel. This is the opposite operation: it dims the records the
-///   running shuffle **cannot play**, and it exists so the pool is legible
-///   rather than to make room for something else. At rest — no shuffle running
-///   — nothing on the wall is dimmed at all, which is the test of the
-///   difference.
+/// # It was the shuffle pool's ring lane
 ///
-/// It is a **state, not a transition** (ADR-0020 permits five transitions and
-/// this is not one of them): the pool changes when a listener presses `Shuffle`,
-/// which is a decision, and a decision's mark arrives with it.
+/// ADR-0017 step 17 reserved this lane on every tile in every state, so that
+/// the faint ink ring the shuffle's next two draws carried cost no geometry and
+/// moved no cover when it arrived — beside `POOL_DIM`, which composited the
+/// artwork of every record outside the pool at 35 %. Both marks existed to
+/// answer one question about a draw whose source was only implied: *what can
+/// this shuffle play?*
 ///
-/// # What 35 % measures out at
-///
-/// The number is an **opacity**, and wgpu composites in linear light, so the
-/// step a viewer sees is smaller than the arithmetic suggests. Measured off the
-/// render harness (`docs/design/impl/shuffle-and-pull/`), a sleeve pixel of
-/// `#6A5C2D` on the wall draws at `#41381B` — 0.61 of its sRGB value, which is
-/// 0.35 of its **linear** one. Recorded rather than corrected: 0.35 is the
-/// number the design names, the mark reads plainly against the sleeves beside
-/// it in the captures, and the ledger requires a ring as well as the dimming
-/// precisely so that no state rests on one channel.
-pub const POOL_DIM: f32 = 0.35;
+/// **The owner made shuffle a property of the player on 2026-08-10** and there
+/// stopped being a draw to mark: what a mode re-orders is the run, which is an
+/// ordinary queue a listener can open and read. The ink went; the **geometry
+/// stays**, because it is the measure every grid constant, capacity sum and
+/// render capture in `docs/design/impl` is computed against, and re-deriving the
+/// whole wall to reclaim 4 px would be a change to the collection made to tidy
+/// away a mark. What is drawn in the lane now is the wall's own colour, which
+/// is what it was drawn in whenever no shuffle was running — the ordinary state,
+/// made the only one.
+pub const SLEEVE_MAT: f32 = 2.0;
 
-/// Width of the ring around one of the shuffle's **next draws** (logical px).
+/// The mat: the wall's own colour, in the lane [`SLEEVE_MAT`] reserves.
 ///
-/// Two, the same as [`SELECTION_EDGE`], because it is the same weight of
-/// statement about a record — *this one is spoken for* — made in the one place
-/// a rule under the label cannot make it. There is no third mark thickness in
-/// the product.
-///
-/// # Why this is not a border on artwork
-///
-/// the product's standing rules refuses borders on artwork, and refuses them specifically
-/// *"as the remedy for a sleeve that melts into its room"*. It also — in the
-/// same document, adopted from the same critique — requires that *"the next
-/// draws carry faint rings"*, and ADR-0017 §4 names dimming **and** rings as the
-/// pair that keeps the pool from being signalled by one channel alone. So the
-/// ring is permitted by name, and what is left is to draw it without drawing on
-/// the work:
-///
-/// **The lane is reserved on every tile, in every state.** A sleeve's box is the
-/// grid's art edge; the artwork inside it is that edge less two of these, always
-/// — ringed or not, playing or not, on a wall with no shuffle running at all.
-/// The lane is painted [`Palette::wall`] at rest, which is the wall, which is
-/// nothing; a ring is that same lane painted [`Palette::paper_faint`]. So the
-/// mark costs no geometry, moves no cover by a pixel when it arrives, and is
-/// **beside** the artwork rather than over or around it — the same reserved-slot
-/// rule the tile's state rule already follows, applied on the other axis.
-pub const POOL_RING: f32 = 2.0;
-
-/// The lane around a sleeve: the wall, or — for one of the shuffle's next draws
-/// — a faint ink ring ([`POOL_RING`]).
-///
-/// [`Palette::paper_faint`] is the ink the tile's *selected* rule is drawn in,
-/// deliberately: both say "this record, specifically", and a third ink for a
-/// third kind of pointing-at would be a third vocabulary. It is never the
-/// accent — what is *queued* is not what is *sounding*, and the accent
-/// discipline (§5) reserves amber for the second.
-#[must_use]
-pub fn pool_ring(p: &Palette, ringed: bool) -> container::Style {
+/// It took a `ringed: bool` and answered [`Palette::paper_faint`] for a record
+/// the shuffle would play next. There is no next draw to name any more, so
+/// there is no argument left and no parameter.
+pub fn sleeve_mat(p: &Palette) -> container::Style {
     container::Style {
-        background: Some(Background::Color(if ringed {
-            p.paper_faint
-        } else {
-            p.wall
-        })),
+        background: Some(Background::Color(p.wall)),
         ..container::Style::default()
     }
 }
@@ -6132,7 +6104,7 @@ mod tests {
         // Each mark is measured where it actually sits. The tightest sleeve
         // the wall draws is the worst case for both, because the same lead
         // and the same glyph are a larger fraction of a smaller work.
-        let work = 200.8 - 2.0 * POOL_RING;
+        let work = 200.8 - 2.0 * SLEEVE_MAT;
         // The label's far end: the ink lane's right edge, the thinnest veil
         // any type stands on.
         let label_x = VEIL_INK_X;
@@ -6194,8 +6166,8 @@ mod tests {
         }
         // The lead, and the room the ink lane has left after it, at the
         // tightest sleeve the wall draws (`shelf.rs`'s Dense column at 1172:
-        // art 200.8, work = art − 2 × POOL_RING).
-        let work = 200.8 - 2.0 * POOL_RING;
+        // art 200.8, work = art − 2 × SLEEVE_MAT).
+        let work = 200.8 - 2.0 * SLEEVE_MAT;
         assert!(
             work.mul_add(VEIL_INK_X, -VEIL_LEAD) >= 4.0 * GAP_XL,
             "the ink lane leaves less than 96 px for a glyph and a word"
@@ -7110,6 +7082,11 @@ mod tests {
         /// What the door gave back to the strip: its width and the `GAP_XL`
         /// seam beside it.
         const FREED: f32 = PLAYLISTS_DOOR_W + GAP_XL;
+        /// What the two words gave back on 2026-08-10, as the drop in the acts
+        /// cluster's declared width: `Pull` removed (182 → 144), then `Shuffle`
+        /// moved to the now-playing bar when it became a property of the player
+        /// (144 → 88).
+        const ACTS_FREED: f32 = 182.0 - top_bar::ACTS_W;
         /// The window a strip at its floor now needs, with the lane's rail
         /// always beside it.
         const STRIP_FLOOR_WINDOW: f32 = TOP_BAR_FLOOR + SIDEBAR_RAIL_W;
@@ -7147,22 +7124,32 @@ mod tests {
         const { assert!(FRAME_LINE <= TOP_BAR_FLOOR) }
         const { assert!(LIBRARY_LINE <= TOP_BAR_FLOOR) }
 
-        // **The split is now an exact sum, not a rounded one.** It was 960
-        // for a line of 958. The `Playlists` door's 64 px and the `GAP_XL`
-        // beside it went with ADR-0030 §5 — 88 px — and what is left comes to
-        // 872 exactly, which is what the seam is declared at.
+        // **The split is an exact sum, not a rounded one.** It was 960 for a
+        // line of 958. The `Playlists` door's 64 px and the `GAP_XL` beside it
+        // went with ADR-0030 §5 — 88 px — taking it to 872; then both draw
+        // words went on 2026-08-10 on the owner's decision, taking `ACTS_W`
+        // from 182 to 88 and this seam to 778. The seam follows the tenants
+        // down, because a split declared where the line still fits would put
+        // the strip on two rows for controls it no longer draws.
         const { assert!(FREED == 88.0) }
-        const { assert!(SINGLE_LINE == 872.0) }
-        const { assert!(SINGLE_LINE + FREED == 960.0) }
+        const { assert!(ACTS_FREED == 94.0) }
+        const { assert!(SINGLE_LINE == 778.0) }
+        const { assert!(SINGLE_LINE + FREED + ACTS_FREED == 960.0) }
         const { assert!(SINGLE_LINE == TOP_BAR_SPLIT) }
 
-        // **The two-line split still earns its keep, and neither removal
-        // bought it away.** The frame line is what the door and the well stood
-        // on, so both removals made *that* line cheaper — but the split exists
-        // for the **library** line, whose two tenants are untouched at 600 px.
-        // Between 600 and 872 there is no single line that fits and a two-line
-        // pair that does, which is exactly the band the split serves.
-        const { assert!(LIBRARY_LINE == TOP_BAR_FLOOR) }
+        // **The two-line split still earns its keep, and no removal bought it
+        // away.** The frame line is what the door and the well stood on, so
+        // those removals made *that* line cheaper — but the split exists for
+        // the **library** line, and both draw words were on it. The line now
+        // comes to 506 against a floor of 600, so it fits **under** the floor
+        // with 94 px to spare rather than meeting it exactly; the floor does
+        // not follow, because it is also the window's sensible minimum (see
+        // [`TOP_BAR_FLOOR`]). Between 600 and 778 there is still no single line
+        // that fits and a two-line pair that does, which is the band the split
+        // serves.
+        const { assert!(LIBRARY_LINE == 506.0) }
+        const { assert!(TOP_BAR_FLOOR - LIBRARY_LINE == ACTS_FREED) }
+        const { assert!(LIBRARY_LINE < TOP_BAR_FLOOR) }
         const { assert!(TOP_BAR_FLOOR < SINGLE_LINE) }
         // The strip's width is the *body's* — the window less the returns
         // lane — so the split's band is reached at a wider window than
@@ -7173,12 +7160,12 @@ mod tests {
 
         // **And the band the split serves is exactly the band the well is
         // still a tenant of.** Once the well is the lane's the strip wants
-        // 648 px, and the narrowest strip that can happen in is 720 — the
+        // 554 px, and the narrowest strip that can happen in is 720 — the
         // lane's own floor less the lane's own width. So the strip is one line
         // at every width above `SIDEBAR_FLOOR`, in either lane state, and
         // `top_bar_h`'s `strip_holds_the_well` branch is a fact rather than a
-        // hope.
-        const { assert!(SINGLE_LINE_NO_WELL == 648.0) }
+        // hope. It was 648 before the two draw words left.
+        const { assert!(SINGLE_LINE_NO_WELL == 554.0) }
         const { assert!(WIDEST_LANE_STRIP == 720.0) }
         const { assert!(SINGLE_LINE_NO_WELL < WIDEST_LANE_STRIP) }
         // The rail is wider still, so the collapsed lane cannot reach it either.

@@ -1,7 +1,7 @@
 # ADR-0027: Undo for list edits, and the trash for playlist deletion
 
 **Status**: accepted (2026-08-09) · ships doc 11 §5 P2 (adopt-modified) ·
-overturns no REFUSALS entry — forgiveness was absent, not refused · extends
+overturns no standing rule entry — forgiveness was absent, not refused · extends
 ADR-0014's and ADR-0024's edit surfaces without changing an engine command,
 a protocol message, or a play gesture · retires the playlist delete confirm
 of ADR-0024 §4 · adds one vetted crate (`trash`), priced below the way

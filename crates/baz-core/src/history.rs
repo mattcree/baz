@@ -206,8 +206,7 @@ pub(crate) mod format;
 mod read;
 
 pub use read::{
-    EVENING_SECS, History, MONTH_DAYS, PULL_DAY_CAP, PULL_NEVER_WEIGHT, Recency, TrackHistory,
-    WEEK_DAYS, YEAR_DAYS, bucket,
+    EVENING_SECS, History, MONTH_DAYS, Recency, TrackHistory, WEEK_DAYS, YEAR_DAYS, bucket,
 };
 
 /// The file the ledger lives in, inside baz's data directory — beside

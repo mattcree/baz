@@ -277,18 +277,29 @@ three questions `02-surfaces.md` names:
    hours, which is what a type holding UTC seconds and no timezone database can
    honestly promise. Buckets on the last **play**, never a skip: starting
    something and abandoning it is not having heard it.
-3. `History::pull_weight(path, now) -> u32` — **the pull's weighting**. One per
-   day since last played, capped at a year (366 at the cap), and 367 for a
-   record never played, so what nobody has ever put on is drawn in preference to
-   what was heard a year ago. Nothing is ever weighted to zero: the pull is a
-   bias, not a filter. It deliberately ignores skips — down-weighting what you
-   skipped would make the pull start having opinions about your taste, which is
-   the "performing" the design rules out. `TrackHistory` carries the skip count
-   for a caller that decides otherwise, in the open.
+3. ~~`History::pull_weight(path, now) -> u32` — **the pull's weighting**.~~
+   **Removed 2026-08-10, on the owner's decision** — *"please can we remove
+   pull since it doesn't make sense here."* This surface existed for one
+   caller, the strip's `Pull`, and it is recorded here rather than deleted
+   because what it did is worth being able to find: one per day since last
+   played, capped at a year (366 at the cap), and 367 for a record never
+   played, so what nobody has ever put on was drawn in preference to what was
+   heard a year ago; nothing was ever weighted to zero, and skips were
+   deliberately ignored, because down-weighting what you skipped would have
+   made the draw start having opinions about your taste. `PULL_DAY_CAP` and
+   `PULL_NEVER_WEIGHT` went with it. `TrackHistory` still carries the skip
+   count, in the open, for a caller that ever decides otherwise.
 
-There is no fourth. No totals-by-artist, no listening-time-per-month, no top-N.
-Those would be *built from this data*, so the way not to build them is not to
-provide the surface that makes them easy.
+   The two surfaces that remain are the ones something reads: the inspector
+   card, and the PLAYED group key — plus the returns lane's *when did I last
+   touch this* order, which is `recency`'s data read a second way (ADR-0030
+   §1) rather than a surface of its own.
+
+There are now **two**, and there was never going to be a fourth. No
+totals-by-artist, no listening-time-per-month, no top-N. Those would be *built
+from this data*, so the way not to build them is not to provide the surface
+that makes them easy — and the same reasoning is why the third came out when
+its one consumer did rather than being left standing as a convenience.
 
 ### 7. Privacy, and the scrobbling seam
 
