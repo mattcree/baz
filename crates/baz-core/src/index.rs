@@ -84,6 +84,14 @@
 //! decides which edition is the default is documented on
 //! [`Album::editions`] and in `docs/adr/0007-album-editions.md`.
 //!
+//! A **multi-disc set is one album** (`docs/adr/0038-the-record-and-its-discs.md`).
+//! Where the discs share one `ALBUM` tag that falls out of the grouping key for
+//! free; where the rip put the disc *in the title* — `… (Disc 2)`, `… CD2`,
+//! `… [Disc 2]` — [`split_disc_marker`] takes it off again, but only when
+//! there is a sibling to merge with. Discs are a different axis from editions:
+//! a two-disc set owned in FLAC and MP3 is one album, two editions, two discs
+//! each.
+//!
 //! # Group keys
 //!
 //! [`Library::shelves`] arranges those albums into the shelves the wall draws,
@@ -1216,6 +1224,36 @@ impl Library {
         self.index.in_order().map(|track| &track.meta)
     }
 
+    /// **The title of the record this track is filed under** — its `ALBUM` tag
+    /// verbatim, or that tag with its [disc marker](split_disc_marker) taken
+    /// off when the library merged it into a multi-disc set.
+    ///
+    /// This is [`Album::title`] reached from the other end, and it exists
+    /// because the two must agree: a front end that derives a record's identity
+    /// from a loose [`TrackMeta`] — a search hit, a playlist entry — would
+    /// otherwise compute one identity for `Sign o' the Times (Disc 2)` and
+    /// another for the tile that record actually lives in, and the door would
+    /// lead nowhere.
+    ///
+    /// Whether a marker was taken off is a fact about the *library* and not
+    /// about the track, which is why this is a method and not a free function:
+    /// the same tag merges in a collection that owns both discs and does not in
+    /// one that owns disc 1 alone.
+    ///
+    /// A path the library does not hold gets its tag verbatim — the honest
+    /// answer for a track nothing has filed.
+    #[must_use]
+    pub fn record_title<'m>(&self, meta: &'m TrackMeta) -> Option<&'m str> {
+        let album = meta.album.as_deref()?;
+        let base = self
+            .index
+            .by_path
+            .get(&meta.path)
+            .and_then(|&index| self.index.tracks.get(index))
+            .and_then(|track| track.record_base);
+        Some(base.and_then(|len| album.get(..len)).unwrap_or(album))
+    }
+
     /// Number of tracks in the library.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -1285,7 +1323,7 @@ impl Library {
         let first = tracks.first()?;
         let mut built = Album {
             artist: AlbumArtist::of(&first.meta),
-            title: first.meta.album.as_deref(),
+            title: first.record_title(),
             year: None,
             genre: None,
             first_seen_ns: None,
@@ -1866,6 +1904,110 @@ impl<'a> AlbumArtist<'a> {
     }
 }
 
+/// The disc markers [`split_disc_marker`] knows, ASCII case-insensitively.
+/// Three words and nothing else: this is a **closed list**, not a pattern.
+const DISC_WORDS: [&str; 3] = ["disc", "disk", "cd"];
+
+/// Characters that may sit between an album title and a disc marker and be
+/// taken off with it — a separator a ripper wrote, never part of a name.
+///
+/// Deliberately excludes `.` (it ends `Vol.`), `!` and `?` (they end titles),
+/// and every bracket (those are matched as a pair by [`split_disc_marker`]).
+const DISC_SEPARATORS: [char; 6] = ['-', '\u{2013}', '\u{2014}', ',', ':', '_'];
+
+/// Take a trailing **disc marker** off an album title: `("Sandinista!",
+/// Some(2))` for `"Sandinista! [Disc 2]"`, and `(title, None)` for everything
+/// else.
+///
+/// This is the one place baz guesses at a tag, and the guess is deliberately
+/// tiny (`docs/adr/0038-the-record-and-its-discs.md`). A marker is recognised
+/// only when **all** of these hold:
+///
+/// 1. It is at the very **end** of the title, ignoring trailing whitespace.
+/// 2. It is one of `DISC_WORDS` — `disc`, `disk`, `cd` — case-insensitively,
+///    and nothing else. No `part`, no `volume`, no `side`, no roman numerals.
+/// 3. It is followed by **one or two ASCII digits** naming a disc 1–99. A
+///    marker with no number is not a marker: `"Compact Disc"` is a title.
+/// 4. Either the whole marker is wrapped in one matched bracket pair —
+///    `(…)`, `[…]`, `{…}` — or the word begins on a **whitespace boundary**,
+///    so `"…soundtrackcd2"` is left alone.
+/// 5. Something is **left**: a record called exactly `"CD 1"` keeps its name,
+///    because the alternative is a record with no name at all.
+///
+/// The returned base is a subslice of `title`, so nothing is rewritten and
+/// nothing is allocated — which is also why this cannot become a fuzzy
+/// distance without changing its type.
+///
+/// Recognising a marker is **not** the same as acting on one. Stripping the
+/// title happens in `SearchIndex::merge_discs` and only when a sibling
+/// exists to merge with; the disc *number* is taken whenever the tags left
+/// [`TrackMeta::disc`] empty ([`disc_of`]), because that is an ordering fact
+/// about a track and not a claim about anybody else's.
+#[must_use]
+pub fn split_disc_marker(title: &str) -> (&str, Option<u32>) {
+    let none = (title, None);
+    let rest = title.trim_end();
+    // 1. Peel a closing bracket, remembering the opener it must be paired with.
+    let (body, opener) = match rest.as_bytes().last() {
+        Some(b')') => (&rest[..rest.len() - 1], Some('(')),
+        Some(b']') => (&rest[..rest.len() - 1], Some('[')),
+        Some(b'}') => (&rest[..rest.len() - 1], Some('{')),
+        _ => (rest, None),
+    };
+    // 2. The number. ASCII digits, so counting bytes back from the end can
+    //    never land inside a character.
+    let digits = body.len() - body.bytes().rev().take_while(u8::is_ascii_digit).count();
+    if body.len() - digits > 2 {
+        return none;
+    }
+    let Some(disc) = body[digits..].parse::<u32>().ok().filter(|&n| n != 0) else {
+        return none;
+    };
+    // 3. The word, with any space between it and the number taken off.
+    let head = body[..digits].trim_end();
+    let Some(before) = DISC_WORDS.iter().find_map(|word| {
+        head.get(head.len().checked_sub(word.len())?..)
+            .filter(|tail| tail.eq_ignore_ascii_case(word))
+            .map(|tail| &head[..head.len() - tail.len()])
+    }) else {
+        return none;
+    };
+    // 4. The boundary: a matching opener, or whitespace.
+    let base = match opener {
+        Some(open) => match before.strip_suffix(open) {
+            Some(base) => base,
+            None => return none,
+        },
+        None if before.ends_with(char::is_whitespace) => before,
+        None => return none,
+    };
+    // 5. Whatever separator the ripper left behind, and then: is there a title?
+    let base = base.trim_end_matches(|c: char| c.is_whitespace() || DISC_SEPARATORS.contains(&c));
+    if base.is_empty() {
+        return none;
+    }
+    (base, Some(disc))
+}
+
+/// Which disc of its record a track is on: the `DISCNUMBER` tag, else the
+/// number a [disc marker](split_disc_marker) in the track's *own* album title
+/// names.
+///
+/// Tags win, always — the fallback only ever fills a hole, exactly as folder
+/// inference does for artist and album ([`crate::library`]). This is what makes
+/// a `CD1`/`CD2` rip that never wrote `DISCNUMBER` play in the right order once
+/// its two halves are one record, and what puts the `DISC 2` break in the right
+/// place on its page.
+///
+/// `None` is still `None` for the overwhelmingly common single-disc record, so
+/// a UI that distinguishes "one disc" from "the tagger never said" keeps that
+/// distinction.
+#[must_use]
+pub fn disc_of(meta: &TrackMeta) -> Option<u32> {
+    meta.disc
+        .or_else(|| split_disc_marker(meta.album.as_deref()?).1)
+}
+
 /// One album on the shelf, as grouped by [`Library::albums`]. Borrows from
 /// the library; a snapshot to render, not a place to mutate.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1874,6 +2016,14 @@ pub struct Album<'a> {
     /// the album's first track (every track in the album shares this key).
     pub artist: AlbumArtist<'a>,
     /// Album title as first seen; `None` for the unknown-album group.
+    ///
+    /// With its **disc marker taken off** where the library merged a set that
+    /// had one — a `Sign o' the Times (Disc 1)` / `(Disc 2)` pair is one album
+    /// titled `Sign o' the Times`. Only ever when the merge actually happened:
+    /// a lone `Bitches Brew CD1` keeps every character of its tag, because
+    /// renaming a record nobody merged would be an invention that bought
+    /// nothing. See [`split_disc_marker`] and
+    /// `docs/adr/0038-the-record-and-its-discs.md`.
     pub title: Option<&'a str>,
     /// Release year: the first year any track on the album declares.
     pub year: Option<u32>,
@@ -2476,6 +2626,14 @@ struct SearchIndex {
     /// shelf, and both [`Library::albums`] and [`Library::search_albums`] build
     /// their [`Album`]s from it.
     album_starts: Vec<usize>,
+    /// Whether the last [`SearchIndex::rebuild_order`] merged any disc-marked
+    /// titles at all — i.e. whether any [`IndexedTrack::record_base`] is set.
+    ///
+    /// It exists to keep the overwhelmingly common library — the one where no
+    /// album title ends in `CD2` — out of the second pass entirely: with no
+    /// markers found and none in effect, the rewrite loop is skipped and a
+    /// rebuild costs exactly what it always did.
+    merged_records: bool,
 }
 
 impl SearchIndex {
@@ -2546,7 +2704,13 @@ impl SearchIndex {
     /// The album runs are derived in the same pass, on the same key
     /// [`Library::albums`] has always grouped on, so the shelf and the search's
     /// notion of "one album" cannot drift apart.
+    ///
+    /// Before the sort, [`SearchIndex::merge_discs`] may rewrite the album half
+    /// of some keys — that is where a `(Disc 1)` / `(Disc 2)` pair becomes one
+    /// run — so the disc merge and the grouping are one decision made once,
+    /// rather than a presentation layer folding two runs back together.
     fn rebuild_order(&mut self) {
+        self.merge_discs();
         self.tracks.sort_unstable_by(|a, b| {
             a.key
                 .cmp(&b.key)
@@ -2570,6 +2734,96 @@ impl SearchIndex {
             self.album_of
                 .push(self.album_starts.len().saturating_sub(1));
         }
+    }
+
+    /// **Make a multi-disc set one album**: where two album titles under one
+    /// album artist differ only by a trailing [disc
+    /// marker](split_disc_marker), give every one of their tracks the shared
+    /// base as its grouping key, so the runs that follow are one run
+    /// (`docs/adr/0038-the-record-and-its-discs.md`).
+    ///
+    /// **A marker alone is never enough.** Stripping `(Disc 1)` off a record
+    /// whose disc 2 the listener does not own would rename it for no gain, and
+    /// ADR-0008's posture is to decline where there is no signal. The signal
+    /// here is a *sibling*: two distinct spellings sharing one base under one
+    /// artist. That is why this runs over the whole library rather than per
+    /// track, and why nothing else in the module can answer the question.
+    ///
+    /// Two passes, and the first one costs nothing it does not have to. Pass
+    /// one asks only "is there a marker anywhere", which is a suffix parse per
+    /// track and no allocation; a library with none stops there and, unless a
+    /// merge was in effect before, so does the rewrite.
+    fn merge_discs(&mut self) {
+        let merged = self.disc_merge_groups();
+        if merged.is_empty() && !self.merged_records {
+            return;
+        }
+        self.merged_records = !merged.is_empty();
+        for track in &mut self.tracks {
+            let Some(album) = track.meta.album.as_deref() else {
+                track.record_base = None;
+                continue;
+            };
+            let (base, _) = split_disc_marker(album);
+            let key = (track.key.artist.clone(), base.to_lowercase());
+            if merged.contains(&key) {
+                track.record_base = Some(base.len());
+                track.key.album = Some(key.1);
+            } else {
+                // Recomputed rather than left alone: a set can *stop* being one
+                // when its second disc is removed, and the key has to go back.
+                track.record_base = None;
+                track.key.album = Some(album.to_lowercase());
+            }
+        }
+    }
+
+    /// The (album artist, folded base title) groups a disc marker merges —
+    /// [`SearchIndex::merge_discs`]'s decision, made before anything is
+    /// rewritten.
+    fn disc_merge_groups(&self) -> HashSet<(ArtistKey, String)> {
+        // Pass one: which bases even have a marker to take off? No marker
+        // anywhere means no candidates, no allocation and no second pass.
+        let mut candidates: HashSet<(ArtistKey, String)> = HashSet::new();
+        for track in &self.tracks {
+            if let Some(album) = track.meta.album.as_deref() {
+                let (base, disc) = split_disc_marker(album);
+                if disc.is_some() {
+                    candidates.insert((track.key.artist.clone(), base.to_lowercase()));
+                }
+            }
+        }
+        if candidates.is_empty() {
+            return candidates;
+        }
+        // Pass two: a candidate merges only if two spellings of it exist. The
+        // unmarked spelling counts — `Sign o' the Times` and `Sign o' the
+        // Times (Disc 2)` are one record, and that is the commonest shape of
+        // all: a tagger that marked the second disc and not the first.
+        let mut seen: HashMap<(ArtistKey, String), String> = HashMap::new();
+        let mut merged = HashSet::new();
+        for track in &self.tracks {
+            let Some(album) = track.meta.album.as_deref() else {
+                continue;
+            };
+            let (base, _) = split_disc_marker(album);
+            let key = (track.key.artist.clone(), base.to_lowercase());
+            if !candidates.contains(&key) {
+                continue;
+            }
+            let spelling = album.to_lowercase();
+            match seen.entry(key) {
+                Entry::Vacant(slot) => {
+                    slot.insert(spelling);
+                }
+                Entry::Occupied(slot) => {
+                    if *slot.get() != spelling {
+                        merged.insert(slot.key().clone());
+                    }
+                }
+            }
+        }
+        merged
     }
 
     /// One track's haystack, as a slice of the corpus.
@@ -2634,6 +2888,20 @@ struct IndexedTrack {
     /// searching "RODIK" finds the album whose tile says RODIK.
     haystack: String,
     key: SortKey,
+    /// How many bytes of `meta.album` are the **record's** title, when this
+    /// track's album was merged into a multi-disc set and its tag therefore
+    /// carries a [disc marker](split_disc_marker) the record does not.
+    ///
+    /// `None` — the ordinary state of every track in every single-disc library
+    /// — means the tag *is* the record's title, whole.
+    ///
+    /// A length rather than a `String` because the base is always a prefix of
+    /// the tag, so the record's title costs no allocation and stays borrowable
+    /// straight out of [`TrackMeta`] ([`Album::title`] is a `&str`).
+    ///
+    /// Set by [`SearchIndex::merge_discs`], which is the only thing that can:
+    /// whether a marker comes off depends on what *else* the library holds.
+    record_base: Option<usize>,
 }
 
 impl IndexedTrack {
@@ -2661,7 +2929,10 @@ impl IndexedTrack {
         let key = SortKey {
             artist: ArtistKey::of(&meta),
             album,
-            disc: meta.disc,
+            // `disc_of`, not `meta.disc`: a `CD1`/`CD2` rip that never wrote
+            // `DISCNUMBER` still has to play in disc order once its halves are
+            // one record, and ordering is the correctness half of this.
+            disc: disc_of(&meta),
             track: meta.track,
             title,
         };
@@ -2672,7 +2943,20 @@ impl IndexedTrack {
             root,
             haystack,
             key,
+            // Nothing is merged until `merge_discs` has seen the whole library.
+            record_base: None,
         }
+    }
+
+    /// The title of the record this track belongs to — [`Album::title`], asked
+    /// of one track. See [`IndexedTrack::record_base`].
+    fn record_title(&self) -> Option<&str> {
+        let album = self.meta.album.as_deref()?;
+        Some(
+            self.record_base
+                .and_then(|len| album.get(..len))
+                .unwrap_or(album),
+        )
     }
 }
 

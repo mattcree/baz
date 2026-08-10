@@ -726,6 +726,441 @@ fn album_year_comes_from_first_track_that_declares_one() {
 }
 
 // ---------------------------------------------------------------------------
+// Multi-disc sets (docs/adr/0038-the-record-and-its-discs.md)
+//
+// The four shapes a two-disc rip actually arrives in, built as real tagged
+// files by `docs/design/impl/multi-disc/mkfixture.sh` and asserted here at the
+// grouping layer the fixture exercises.
+// ---------------------------------------------------------------------------
+
+/// One record's worth of tracks: `(disc, track)` pairs under one album title.
+fn disc_set(artist: &str, album: &str, tracks: &[(Option<u32>, u32)]) -> Vec<TrackMeta> {
+    tracks
+        .iter()
+        .map(|&(disc, number)| {
+            let disc_part = disc.map_or_else(|| "x".to_owned(), |d| d.to_string());
+            TrackMeta {
+                disc,
+                ..track(
+                    &format!("/m/{artist}/{album}/{disc_part}-{number}.flac"),
+                    artist,
+                    album,
+                    &format!("{album} d{disc_part} t{number}"),
+                    number,
+                )
+            }
+        })
+        .collect()
+}
+
+/// Every `(disc, track)` of an album's default edition, in the order the page
+/// and the queue would take them.
+fn disc_order(album: &baz_core::index::Album<'_>) -> Vec<(Option<u32>, Option<u32>)> {
+    album
+        .default_edition()
+        .expect("an album has an edition")
+        .tracks
+        .iter()
+        .map(|meta| (baz_core::index::disc_of(meta), meta.track))
+        .collect()
+}
+
+/// **Shape 1 and shape 2**: one `ALBUM` tag, `DISCNUMBER` 1 and 2 — whether
+/// the files sit in one folder or in `Disc 1/` and `Disc 2/`.
+///
+/// This already worked before the disc-marker rule existed and must keep
+/// working: the grouping key is (album artist, album title) and reads no path
+/// at all, so the folder split is not a fact the shelf can even see.
+#[test]
+fn one_album_tag_with_disc_numbers_is_one_record_however_it_is_foldered() {
+    for (name, one, two) in [
+        ("one folder", "Sign o' the Times", "Sign o' the Times"),
+        (
+            "two folders",
+            "Sign o' the Times/Disc 1",
+            "Sign o' the Times/Disc 2",
+        ),
+    ] {
+        let mut tracks = Vec::new();
+        for (folder, disc) in [(one, 1u32), (two, 2u32)] {
+            for number in 1..=3 {
+                tracks.push(TrackMeta {
+                    disc: Some(disc),
+                    ..track(
+                        &format!("/m/Prince/{folder}/{disc}-{number}.flac"),
+                        "Prince",
+                        "Sign o' the Times",
+                        &format!("d{disc} t{number}"),
+                        number,
+                    )
+                });
+            }
+        }
+        let library = library_of(tracks);
+        let albums = library.albums();
+        assert_eq!(albums.len(), 1, "{name}: one record");
+        assert_eq!(albums[0].title, Some("Sign o' the Times"));
+        assert_eq!(
+            disc_order(&albums[0]),
+            [
+                (Some(1), Some(1)),
+                (Some(1), Some(2)),
+                (Some(1), Some(3)),
+                (Some(2), Some(1)),
+                (Some(2), Some(2)),
+                (Some(2), Some(3)),
+            ],
+            "{name}: disc before track, or two track-ones interleave"
+        );
+    }
+}
+
+/// **Shape 3**, in the three spellings rips actually use. The disc lives in
+/// the `ALBUM` tag itself, which before this rule shattered every such set
+/// into two shelf entries.
+#[test]
+fn album_titles_differing_only_by_a_disc_marker_are_one_record() {
+    for (artist, first, second, merged) in [
+        (
+            "Prince",
+            "Sign o' the Times (Disc 1)",
+            "Sign o' the Times (Disc 2)",
+            "Sign o' the Times",
+        ),
+        (
+            "Miles Davis",
+            "Bitches Brew CD1",
+            "Bitches Brew CD2",
+            "Bitches Brew",
+        ),
+        (
+            "The Clash",
+            "Sandinista! [Disc 1]",
+            "Sandinista! [Disc 2]",
+            "Sandinista!",
+        ),
+    ] {
+        let mut tracks = disc_set(artist, first, &[(None, 1), (None, 2)]);
+        tracks.extend(disc_set(artist, second, &[(None, 1), (None, 2)]));
+        let library = library_of(tracks);
+        let albums = library.albums();
+        assert_eq!(albums.len(), 1, "{first} + {second} are one record");
+        assert_eq!(albums[0].title, Some(merged));
+        // The marker also supplies the disc the tagger never wrote, so the
+        // merged list plays 1·1, 1·2, 2·1, 2·2 rather than interleaving.
+        assert_eq!(
+            disc_order(&albums[0]),
+            [
+                (Some(1), Some(1)),
+                (Some(1), Some(2)),
+                (Some(2), Some(1)),
+                (Some(2), Some(2)),
+            ],
+            "{merged}: the marker orders what it merged"
+        );
+    }
+}
+
+/// **The asymmetric rip**, and the one place the rule declines to fill in a
+/// number: a tagger that marked the second disc and left the first alone.
+///
+/// The two spellings merge — that is the whole point of the sibling rule — and
+/// the unmarked half sorts first, because an unknown disc sorts before a known
+/// one and an unnumbered disc is exactly where that belongs. What it is *not*
+/// given is the number 1: nothing in any file says so. The page counts it as a
+/// disc (`vm::discs`) and draws no header above it, which is the honest
+/// rendering of "these tracks, and then disc 2".
+#[test]
+fn an_unmarked_sibling_merges_and_is_not_told_which_disc_it_is() {
+    let mut tracks = disc_set("Talk Talk", "Spirit of Eden", &[(None, 1), (None, 2)]);
+    tracks.extend(disc_set(
+        "Talk Talk",
+        "Spirit of Eden - Disc 2",
+        &[(None, 1), (None, 2)],
+    ));
+    let library = library_of(tracks);
+    let albums = library.albums();
+    assert_eq!(albums.len(), 1);
+    assert_eq!(albums[0].title, Some("Spirit of Eden"));
+    assert_eq!(
+        disc_order(&albums[0]),
+        [
+            (None, Some(1)),
+            (None, Some(2)),
+            (Some(2), Some(1)),
+            (Some(2), Some(2)),
+        ],
+        "the unnumbered disc leads, and stays unnumbered"
+    );
+}
+
+/// **Shape 4**: no disc signal anywhere — no `DISCNUMBER`, no marker in the
+/// title, just two folders whose track numbers collide.
+///
+/// These already merged, because they always shared an `ALBUM` tag, and they
+/// still do. What they do *not* get is an invented disc: nothing in the files
+/// says which folder is disc 1, and the folder names are not evidence baz
+/// reads. The list interleaves 1, 1, 2, 2 and the page draws no disc breaks —
+/// which is the honest rendering of a rip that did not say.
+#[test]
+fn two_folders_with_no_disc_signal_merge_with_nothing_to_order_by() {
+    let mut tracks = Vec::new();
+    for (folder, mark) in [("Disc 1", "a"), ("Disc 2", "b")] {
+        for number in 1..=2 {
+            tracks.push(track(
+                &format!("/m/Prince/Sign o' the Times/{folder}/{number}.flac"),
+                "Prince",
+                "Sign o' the Times",
+                &format!("{mark}{number}"),
+                number,
+            ));
+        }
+    }
+    let library = library_of(tracks);
+    let albums = library.albums();
+    assert_eq!(albums.len(), 1);
+    assert_eq!(albums[0].title, Some("Sign o' the Times"));
+    assert_eq!(
+        disc_order(&albums[0]),
+        [
+            (None, Some(1)),
+            (None, Some(1)),
+            (None, Some(2)),
+            (None, Some(2)),
+        ],
+        "no disc is claimed, so track number is the only order there is"
+    );
+}
+
+/// **The declined guess.** A listener who owns only disc 1 has a record
+/// called `Bitches Brew CD1`, and baz leaves it called that: there is no
+/// sibling, so nothing merges, so renaming it would be an invention that buys
+/// nothing (ADR-0008's posture, ADR-0038 §3).
+#[test]
+fn a_disc_marker_with_no_sibling_is_left_alone() {
+    let library = library_of(disc_set("Miles Davis", "Bitches Brew CD1", &[(None, 1)]));
+    let albums = library.albums();
+    assert_eq!(albums.len(), 1);
+    assert_eq!(albums[0].title, Some("Bitches Brew CD1"));
+
+    // A record by the same artist that merely *contains* the base is not a
+    // sibling either — the base must match to the character.
+    let mut tracks = disc_set("Miles Davis", "Bitches Brew CD1", &[(None, 1)]);
+    tracks.extend(disc_set("Miles Davis", "Bitches Brew Live", &[(None, 1)]));
+    let library = library_of(tracks);
+    assert_eq!(
+        album_titles(&library.albums()),
+        ["Bitches Brew CD1", "Bitches Brew Live"]
+    );
+
+    // Nor is the same title under a different album artist.
+    let mut tracks = disc_set("Miles Davis", "Bitches Brew CD1", &[(None, 1)]);
+    tracks.extend(disc_set("Somebody Else", "Bitches Brew", &[(None, 1)]));
+    let library = library_of(tracks);
+    assert_eq!(library.albums().len(), 2);
+    assert!(
+        library
+            .albums()
+            .iter()
+            .any(|album| album.title == Some("Bitches Brew CD1")),
+        "the marked record keeps its name when the sibling is somebody else's"
+    );
+}
+
+/// A `DISCNUMBER` tag outranks a marker in the title, always — the marker is
+/// a fallback that fills a hole, exactly as folder inference is for artist and
+/// album. A set whose titles say `CD1`/`CD2` and whose tags say 3 and 4 plays
+/// in tag order.
+#[test]
+fn a_disc_tag_outranks_a_marker_in_the_title() {
+    let mut tracks = disc_set("Miles Davis", "Bitches Brew CD1", &[(Some(4), 1)]);
+    tracks.extend(disc_set("Miles Davis", "Bitches Brew CD2", &[(Some(3), 1)]));
+    let library = library_of(tracks);
+    let albums = library.albums();
+    assert_eq!(albums.len(), 1);
+    assert_eq!(albums[0].title, Some("Bitches Brew"));
+    assert_eq!(
+        disc_order(&albums[0]),
+        [(Some(3), Some(1)), (Some(4), Some(1))]
+    );
+}
+
+/// **Discs and editions are different axes** (ADR-0007 §"one album, several
+/// codecs"; ADR-0038 §5). A two-disc set owned in FLAC *and* in MP3 is one
+/// record, two editions, two discs in each — not four records, and not one
+/// edition with every track twice.
+#[test]
+fn a_two_disc_set_in_two_codecs_is_one_record_with_two_editions_of_two_discs() {
+    let mut tracks = Vec::new();
+    for (format, ext, bitrate) in [
+        (AudioFormat::Flac, "flac", 900),
+        (AudioFormat::Mp3, "mp3", 320),
+    ] {
+        for disc in 1..=2u32 {
+            for number in 1..=2u32 {
+                tracks.push(TrackMeta {
+                    format: Some(format),
+                    bitrate: Some(bitrate),
+                    bit_depth: format.is_lossless().then_some(16),
+                    sample_rate: Some(44_100),
+                    ..track(
+                        &format!("/m/{ext}/Prince/Sign o' the Times CD{disc}/{number}.{ext}"),
+                        "Prince",
+                        &format!("Sign o' the Times CD{disc}"),
+                        &format!("d{disc} t{number}"),
+                        number,
+                    )
+                });
+            }
+        }
+    }
+    let library = library_of(tracks);
+    let albums = library.albums();
+    assert_eq!(albums.len(), 1, "one record");
+    assert_eq!(albums[0].title, Some("Sign o' the Times"));
+    assert_eq!(albums[0].editions.len(), 2, "two editions");
+    // Lossless first, and each edition carries the whole set in disc order.
+    assert_eq!(albums[0].editions[0].format, Some(AudioFormat::Flac));
+    assert_eq!(albums[0].editions[1].format, Some(AudioFormat::Mp3));
+    for edition in &albums[0].editions {
+        let order: Vec<_> = edition
+            .tracks
+            .iter()
+            .map(|meta| (baz_core::index::disc_of(meta), meta.track))
+            .collect();
+        assert_eq!(
+            order,
+            [
+                (Some(1), Some(1)),
+                (Some(1), Some(2)),
+                (Some(2), Some(1)),
+                (Some(2), Some(2)),
+            ],
+            "{:?} spans both discs, in order",
+            edition.format
+        );
+    }
+}
+
+/// The library's answer for a *loose* track — what a search hit, a playlist
+/// entry and the wall's tile identity are all derived from — is the record's
+/// title, so the door a search result opens leads to the tile it named.
+#[test]
+fn a_tracks_record_title_agrees_with_the_shelf() {
+    let mut tracks = disc_set("Prince", "Sign o' the Times (Disc 1)", &[(None, 1)]);
+    tracks.extend(disc_set(
+        "Prince",
+        "Sign o' the Times (Disc 2)",
+        &[(None, 1)],
+    ));
+    tracks.extend(disc_set("Miles Davis", "Bitches Brew CD1", &[(None, 1)]));
+    let library = library_of(tracks);
+
+    for meta in library.tracks() {
+        let expected = if meta.artist.as_deref() == Some("Prince") {
+            "Sign o' the Times"
+        } else {
+            "Bitches Brew CD1"
+        };
+        assert_eq!(
+            library.record_title(meta),
+            Some(expected),
+            "{}",
+            meta.path.display()
+        );
+    }
+    // A path the library never held gets its tag back, verbatim.
+    let stranger = track("/elsewhere/x.flac", "Prince", "Anything (Disc 2)", "x", 1);
+    assert_eq!(
+        library.record_title(&stranger),
+        Some("Anything (Disc 2)"),
+        "an unfiled track is told what its own tag says and nothing more"
+    );
+}
+
+/// Searching still finds the record by what is **on disk** as well as by what
+/// the shelf calls it: the corpus keeps the tag verbatim, so `disc 2` is a
+/// query that works, and it returns the one merged record rather than two.
+#[test]
+fn a_merged_record_is_searchable_by_its_name_and_by_its_tag() {
+    let mut tracks = disc_set("Prince", "Sign o' the Times (Disc 1)", &[(None, 1)]);
+    tracks.extend(disc_set(
+        "Prince",
+        "Sign o' the Times (Disc 2)",
+        &[(None, 1)],
+    ));
+    let library = library_of(tracks);
+
+    assert_eq!(
+        album_titles(&library.search_albums("sign o' the times", 10)),
+        ["Sign o' the Times"]
+    );
+    assert_eq!(
+        album_titles(&library.search_albums("(disc 2)", 10)),
+        ["Sign o' the Times"],
+        "the tag is still in the corpus; it just is not the record's name"
+    );
+}
+
+/// The rule is a closed list, and this is the list — what it takes and, at
+/// least as importantly, what it refuses.
+#[test]
+fn the_disc_marker_rule_is_narrow_and_says_where_it_stops() {
+    use baz_core::index::split_disc_marker;
+
+    for (title, base, disc) in [
+        ("Sign o' the Times (Disc 1)", "Sign o' the Times", 1),
+        ("Sign o' the Times [Disc 2]", "Sign o' the Times", 2),
+        ("Sign o' the Times {Disc 2}", "Sign o' the Times", 2),
+        ("Bitches Brew CD1", "Bitches Brew", 1),
+        ("Bitches Brew cd 2", "Bitches Brew", 2),
+        ("Bitches Brew - Disc 2", "Bitches Brew", 2),
+        ("Bitches Brew, disk 2", "Bitches Brew", 2),
+        ("Bitches Brew (CD 12)", "Bitches Brew", 12),
+        ("Sandinista!  [Disc 2]  ", "Sandinista!", 2),
+        ("Vol. 2 CD2", "Vol. 2", 2),
+    ] {
+        assert_eq!(
+            split_disc_marker(title),
+            (base, Some(disc)),
+            "{title} carries a marker"
+        );
+    }
+
+    for title in [
+        // No number is no marker.
+        "Compact Disc",
+        "Bitches Brew CD",
+        // Not one of the three words. No `part`, no `volume`, no `side`.
+        "Sandinista! (Part 2)",
+        "Physical Graffiti (Volume 1)",
+        "Abbey Road (Side B 2)",
+        // A number alone is a title, not a disc.
+        "Sign o' the Times (2)",
+        "Led Zeppelin II",
+        "1999",
+        // No boundary before the word.
+        "Gamerip soundtrackcd2",
+        // Not at the end.
+        "Disc 2 of the Wall",
+        // Nothing would be left.
+        "CD 1",
+        "(Disc 2)",
+        // A bracket that does not close what it opened.
+        "Bitches Brew [CD 1)",
+        // Disc zero is not a disc, and three digits is not this rule's job.
+        "Bitches Brew CD0",
+        "Bitches Brew CD123",
+    ] {
+        assert_eq!(
+            split_disc_marker(title),
+            (title, None),
+            "{title} carries no marker this rule will act on"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Editions (docs/adr/0007-album-editions.md)
 // ---------------------------------------------------------------------------
 

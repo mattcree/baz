@@ -53,6 +53,21 @@ next commit.
   codec read from file headers rather than on folder names. The default edition
   is ranked lossless before lossy, then by track count, then by mean bitrate
   (ADR-0007, schema v2).
+- **A multi-CD album is one record** (ADR-0038). Most already were: the
+  grouping key reads no path, so discs that share an `ALBUM` tag have always
+  been one shelf entry whether they sit in one folder or two, ordered by
+  (disc, track). What shattered was the rip that puts the disc *in the title* —
+  `… (Disc 2)`, `… CD2`, `… [Disc 2]`. A closed-list marker rule takes it off:
+  three words (`disc`, `disk`, `cd`), one or two digits, at the end, on a
+  bracket or whitespace boundary, never a fuzzy distance. It fires **only when
+  a sibling exists** — two spellings of one base title under one album artist —
+  so a listener who owns only disc 1 sees `Bitches Brew CD1` unchanged. The
+  marker also supplies the disc number where `DISCNUMBER` is absent (tags win
+  where both exist), which is what makes a `CD1`/`CD2` rip play in disc order
+  and gives its page the `DISC 1` / `DISC 2` breaks. Discs compose with
+  editions rather than colliding: a two-disc set owned in FLAC and MP3 is one
+  record, two editions, two discs each. No file is written and the index keeps
+  every tag verbatim, so the merge is reversible by deleting the rule.
 - **Incremental scanning**: a file whose (mtime, size) stamp is unchanged is not
   reopened. Measured over 10 000 synthetic tagged files, scan 61.2 ms → 10.3 ms
   and a whole warm launch 83.4 ms → 11.6 ms (ADR-0010, schema v4).

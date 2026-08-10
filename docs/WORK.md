@@ -111,8 +111,11 @@
 
 - **One composition for a record's page and a list's page** — the owner's *"can
   we reuse the basic layout and view of the playlist for the album view"*.
-- **Multi-disc albums are one record** — the owner's *"it would be good if
-  multi CD albums were a single item"*.
+- **Density: a fourth step, and the control on every page** — the owner's *"we
+  should ensure the density options are available on all pages..."* and *"4
+  levels makes sense to me"*. Carries the `views/artist.rs` tile-width defect
+  with it (six columns where the wall draws five at 1920, lane collapsed),
+  since it is the same family: a page laying tiles by its own arithmetic.
 
 ## Waiting on the owner
 
@@ -219,6 +222,31 @@ Newest first. Fuller detail in `CHANGELOG.md`.
   *index* job is now labelled rather than merely complete), and ADR-0030 has
   **two amendments both headed "Fifth"**, noted in the new one rather than
   silently renumbered.
+- **A multi-CD album is one record** — the owner's *"it would be good if multi
+  CD albums were a single item"*. ADR-0038; fixture, before/after frames and
+  the shape table at `docs/design/impl/multi-disc/`.
+  - **Three of the four shapes already were one item**, and that was
+    established with a fixture of real tagged files before anything was
+    changed. The grouping key is (album artist, album title) and reads no path,
+    so discs sharing an `ALBUM` tag were always one record whether they sat in
+    one folder or two — and `disc` has always been the third field of the
+    library's sort key, so a merged set has never played its two track-ones
+    interleaved.
+  - **The shatter was the disc in the *title*** — `… (Disc 2)`, `… CD2`,
+    `… [Disc 2]`, which is how a great many rips arrive. `split_disc_marker`
+    takes it off: three words, one or two digits, at the end, on a bracket or
+    whitespace boundary. A closed list, never a distance.
+  - **It fires only when a sibling exists.** A lone `Bitches Brew CD1` keeps
+    its name; the rule can never rename a record it did not merge. That is the
+    ADR-0008 posture held as far as it can be held, and the ADR is explicit
+    about what it costs where it is let go.
+  - **The marker also supplies the missing disc number**, which is the
+    correctness half: a `CD1`/`CD2` rip that never wrote `DISCNUMBER` now plays
+    in disc order and its page draws the breaks. Tags still win where both
+    exist.
+  - **Left unmerged deliberately**: two folders with no disc signal at all
+    (shape 4) still interleave, because folder names are evidence about nothing
+    and inventing an order from them is the guess this project does not make.
 - **A shuffled run's continuation counts records, not visits** — the owner:
   *"the album count in the bottom bar when in shuffle mode is weird... way too
   many albums shown"*. `continuation` folded only *adjacent* items sharing an

@@ -32,7 +32,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use baz_core::history::{History, Recency};
-use baz_core::index::{Album, AlbumArtist, Edition, GroupHeader, GroupKey, Initial, Library};
+use baz_core::index::{
+    Album, AlbumArtist, Edition, GroupHeader, GroupKey, Initial, Library, disc_of,
+};
 use baz_core::library::{AudioFormat, TrackMeta};
 
 /// What the shelf calls an album whose artist is not known at all.
@@ -288,13 +290,22 @@ impl EditionVm {
 /// One row in the side panel's track list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackVm {
-    /// Which disc of the set this track is on, when the tags said.
+    /// Which disc of the set this track is on, when anything said.
     ///
-    /// From tags only — folder layouts rarely encode it reliably, and the
-    /// inspector's disc headers are drawn from this. **Never faked**: a
-    /// single-disc rip and a two-disc rip whose tagger forgot the field both
-    /// arrive here as `None`, and both are then drawn as one unbroken list
-    /// rather than as an invented `DISC 1`.
+    /// [`baz_core::index::disc_of`]: the `DISCNUMBER` tag, else the number a
+    /// disc marker in the track's own album title carries — the `CD2` in
+    /// `Bitches Brew CD2`, which is the one place a rip that never wrote the
+    /// field still states it. Folder layouts are *not* read: they encode it
+    /// far less reliably than a title does.
+    ///
+    /// The inspector's disc headers are drawn from this, which is why the
+    /// fallback matters: a merged `CD1`/`CD2` set with no headers would be a
+    /// flat `1, 2, 3, 1, 2, 3`, and that is worse than not merging it.
+    ///
+    /// **Still never faked**: a single-disc rip and a two-disc rip whose tagger
+    /// forgot the field *and* whose titles say nothing both arrive here as
+    /// `None`, and both are drawn as one unbroken list rather than as an
+    /// invented `DISC 1`.
     pub disc: Option<u32>,
     /// Track number within its disc, when known.
     pub number: Option<u32>,
@@ -317,7 +328,7 @@ pub struct TrackVm {
 impl TrackVm {
     fn from_meta(meta: &TrackMeta) -> Self {
         Self {
-            disc: meta.disc,
+            disc: disc_of(meta),
             number: meta.track,
             title: display_title(meta),
             artist: meta.artist.clone(),
@@ -393,10 +404,12 @@ pub fn song_hits(library: &Library, query: &str, cap: usize) -> Vec<SongVm> {
                     .artist
                     .clone()
                     .unwrap_or_else(|| filed_under.label().to_owned()),
-                album: track.album.clone(),
-                album_id: album_id(AlbumArtist::of(track), track.album.as_deref()),
+                // The record's title, not the file's tag: a hit on disc 2 of a
+                // merged set names — and doors to — the record it is part of.
+                album: library.record_title(track).map(str::to_owned),
+                album_id: album_id(AlbumArtist::of(track), library.record_title(track)),
                 number: track.track,
-                disc: track.disc,
+                disc: disc_of(track),
                 duration: track.duration,
                 path: track.path.clone(),
             }
@@ -762,7 +775,10 @@ pub fn matching_album_ids(library: &Library, query: &str) -> Option<HashSet<u64>
     for track in library.search(query, SEARCH_LIMIT) {
         // The same per-track resolution the grouping key uses, so a matched
         // track always maps onto the shelf entry it is actually filed under.
-        ids.insert(album_id(AlbumArtist::of(track), track.album.as_deref()));
+        ids.insert(album_id(
+            AlbumArtist::of(track),
+            library.record_title(track),
+        ));
     }
     Some(ids)
 }
@@ -1256,15 +1272,32 @@ pub fn details(album: &AlbumVm, edition: Option<&EditionVm>) -> Vec<(&'static st
 }
 
 /// How many discs an edition spans, when its tags say — the count of distinct
-/// disc numbers, or `None` when no track declared one.
+/// disc numbers, **plus one for a run of tracks that name no disc at all**, or
+/// `None` when no track names one.
 ///
 /// `None` and `Some(1)` are different answers and the inspector treats them
 /// differently: a record whose tagger never wrote the field is not a record
 /// baz knows to be a single disc.
+///
+/// The `+1` is the asymmetric multi-disc rip and nothing else. A set filed as
+/// `Spirit of Eden` and `Spirit of Eden - Disc 2` is one record
+/// (`docs/adr/0038-the-record-and-its-discs.md`), and exactly half of it names
+/// a disc — the tagger marked the second and left the first alone. Counting
+/// only the named ones would answer "1 disc" for a record that visibly has
+/// two, and the page would draw its two discs as one flat `1, 2, 1, 2` with no
+/// break, which is worse than not having merged them.
+///
+/// Nothing is invented by this: the unnamed run is *counted*, never
+/// *numbered*. No track is told it is on disc 1, the disc header above it is
+/// simply absent, and the only header drawn is the one the tags earn.
 #[must_use]
 pub fn discs(edition: &EditionVm) -> Option<usize> {
     let numbers: HashSet<u32> = edition.tracks.iter().filter_map(|t| t.disc).collect();
-    (!numbers.is_empty()).then_some(numbers.len())
+    if numbers.is_empty() {
+        return None;
+    }
+    let unnamed = edition.tracks.iter().any(|track| track.disc.is_none());
+    Some(numbers.len() + usize::from(unnamed))
 }
 
 /// An edition's total size on disk, in the unit that makes it readable.
@@ -1569,6 +1602,91 @@ mod tests {
         let mut library = Library::open_in_memory().expect("in-memory library");
         library.add_tracks(tracks).expect("add tracks");
         library
+    }
+
+    /// One two-disc set filed as `… CD1` / `… CD2` — the shape ADR-0038's
+    /// rule exists for — as the shell sees it: **one tile**, its disc breaks
+    /// drawable, and every route into it agreeing on the identity.
+    #[test]
+    fn a_marked_two_disc_set_is_one_tile_the_shell_can_break_into_discs() {
+        let mut tracks = Vec::new();
+        for disc in 1..=2u32 {
+            for number in 1..=2u32 {
+                tracks.push(meta(
+                    "Miles Davis",
+                    &format!("Bitches Brew CD{disc}"),
+                    &format!("d{disc} t{number}"),
+                    number,
+                ));
+            }
+        }
+        let library = library_with(tracks);
+        let albums = build_albums(&library);
+        assert_eq!(albums.len(), 1, "one tile, not one per disc");
+        assert_eq!(albums[0].title.as_deref(), Some("Bitches Brew"));
+
+        let edition = albums[0].editions.first().expect("an edition");
+        assert_eq!(
+            edition
+                .tracks
+                .iter()
+                .map(|t| (t.disc, t.number))
+                .collect::<Vec<_>>(),
+            [
+                (Some(1), Some(1)),
+                (Some(1), Some(2)),
+                (Some(2), Some(1)),
+                (Some(2), Some(2)),
+            ],
+            "the CD1/CD2 marker supplies the disc no tag wrote"
+        );
+        // Two discs named, so the page draws `DISC 1` / `DISC 2` breaks.
+        assert_eq!(discs(edition), Some(2));
+
+        // Every door into the record agrees with the tile it opens.
+        assert_eq!(top_match(&library, "bitches brew"), Some(albums[0].id));
+        assert_eq!(
+            matching_album_ids(&library, "bitches brew"),
+            Some(HashSet::from([albums[0].id]))
+        );
+        for hit in song_hits(&library, "d2 t1", 10) {
+            assert_eq!(hit.album.as_deref(), Some("Bitches Brew"));
+            assert_eq!(
+                hit.album_id, albums[0].id,
+                "the songs row doors to the tile"
+            );
+            assert_eq!(hit.disc, Some(2));
+        }
+    }
+
+    /// The asymmetric rip: one half marked, one half not. It is one tile, the
+    /// unmarked half leads, and `discs` counts it — so the page still breaks —
+    /// without any track being told a number nothing wrote.
+    #[test]
+    fn an_unnumbered_disc_is_counted_and_never_numbered() {
+        let library = library_with(vec![
+            meta("Talk Talk", "Spirit of Eden", "Eden", 1),
+            meta("Talk Talk", "Spirit of Eden - Disc 2", "Wealth", 1),
+        ]);
+        let albums = build_albums(&library);
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].title.as_deref(), Some("Spirit of Eden"));
+        let edition = albums[0].editions.first().expect("an edition");
+        assert_eq!(
+            edition.tracks.iter().map(|t| t.disc).collect::<Vec<_>>(),
+            [None, Some(2)]
+        );
+        assert_eq!(
+            discs(edition),
+            Some(2),
+            "one unnumbered run plus disc 2 is two discs"
+        );
+
+        // A record that names no disc at all still answers `None`, which is
+        // how a single-disc rip and an untagged one stay distinguishable.
+        let plain = library_with(vec![meta("Talk Talk", "Laughing Stock", "Myrrhman", 1)]);
+        let plain = build_albums(&plain);
+        assert_eq!(discs(plain[0].editions.first().expect("an edition")), None);
     }
 
     #[test]

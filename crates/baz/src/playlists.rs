@@ -445,7 +445,7 @@ impl Playlists {
                     .map(|meta| {
                         (
                             meta.path.as_path(),
-                            vm::album_id(AlbumArtist::of(meta), meta.album.as_deref()),
+                            vm::album_id(AlbumArtist::of(meta), library.record_title(meta)),
                         )
                     })
                     .collect()
@@ -1261,7 +1261,7 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
         };
         let meta = indexed.get(entry.path.as_path());
         if let Some(meta) = meta {
-            let record = vm::album_id(AlbumArtist::of(meta), meta.album.as_deref());
+            let record = vm::album_id(AlbumArtist::of(meta), library.record_title(meta));
             if art.len() < 4 && !art.contains(&record) {
                 art.push(record);
             }
@@ -1295,9 +1295,12 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
                 .map(Duration::from_secs)
         });
         let record = meta.and_then(|meta| {
-            meta.album.as_ref().map(|album| {
+            // The record's title, not the file's tag — the run headers on this
+            // page must name records the way the wall's tiles do, so a merged
+            // two-disc set is one run and not two named `… (Disc 1)`/`(Disc 2)`.
+            library.record_title(meta).map(|album| {
                 (
-                    album.clone(),
+                    album.to_owned(),
                     meta.album_artist
                         .clone()
                         .or_else(|| meta.artist.clone())
