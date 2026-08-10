@@ -26,16 +26,14 @@
 
 | Ask | State | Where |
 |---|---|---|
-| *"remove pull since it doesn't make sense here"* | **building** | closes design 11 P9 |
-| *"make shuffle a property of the player i.e. toggle on/off"* | **building** | amends ADR-0023 (the retained order) |
-| *"the 'all songs' should be an implicit playlist"* | **building** | design 09 §2 named it; no type existed |
 | The ambient Now playing — cover as the background, stylised VU over it, a feed of facts, all toggle-able; *"a spectrum analyzer or graphic thing with the bars going up and down"* | **designed, unbuilt** | ADR-0029, design 12 — 9 steps, or 1→2→6→8 for the bars |
 | Window chrome: buttons right, gear left, borderless | **blocked on a decision** | iced 0.13 exposes no edge-drag resize; needs a forked dependency |
 | Kiosk mode — full screen on a second monitor | **designed, unbuilt** | design 12; single window, iced has no monitor enumeration |
 | Vibe- or prompt-generated playlists | **designed, unmerged** | `design/dynamic-playlists`: a rule you can say out loud, drawn into the queue |
 | The `ARTIST` group key and the `Artist` place are both called artist | **open** | rename the key, or make Artists a lens |
 | *"the album and track count below the search bar doesn't look good... maybe this should go into the home as some basic stats?"* | **building** | resting counts to Home; match count into the field |
-| Integrate the queue with Now playing, so the bar's `Queue` door can go | **next** | `Place::Queue` and `Place::NowPlaying` become one surface |
+| Integrate the queue with Now playing, so the bar's `Queue` door can go | **designing** | `Place::Queue` and `Place::NowPlaying` become one surface |
+| *"every album has a playlist implicitly... which playlist and which track"* | **designing** | everything playing is a list and a cursor; reopens ADR-0018 for the ledger |
 
 ## Shipped
 
@@ -43,6 +41,9 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 | Ask | Landed as |
 |---|---|
+| *"remove pull since it doesn't make sense here"* | gone, with `History::pull_weight` — its only consumer |
+| *"make shuffle a property of the player i.e. toggle on/off"* | player state in the bar; off restores the retained order |
+| *"the 'all songs' should be an implicit playlist"* | `implicit::ImplicitList` with an `Origin` kind; `Play all` is its `Play` |
 | A breadcrumb instead of Prev/Next, and Artists alongside the group keys | `Place::Artist`, `Artist › Album`; the stepper withdrawn — it walked an order you cannot see |
 | *"the recent bit shows albums popping up even though it was the playlist which was played"* | a run reified from a list credits the **list** (across a quit still falls back — needs ADR-0018 reopened) |
 | *"search belongs at the top"* | the well leads the lane |
