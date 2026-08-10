@@ -120,7 +120,38 @@
      a pin, or a patch upstream — and *"which"* is the design, not the fix.
      Reproduce with `cargo fuzz run playback_decode` on the artifact the run
      wrote; nobody has run it locally yet.
-2. **A deleted folder's records never leave the library.** `rm -rf` an album
+2. **A library from a newer baz reads as no library at all.** The owner, on
+   2026-08-10, ran a two-day-old binary out of `target/release/` and reported
+   *"it shows me 'where's your music' which has no browse function and it also
+   tells me the schema version is version 8 if I pick any directory"*. Both
+   symptoms were that stale build — `Browse…` shipped with ADR-0025 after it,
+   and its `SCHEMA_VERSION` predates 8 — **so nothing in the current product
+   was broken. The failure *mode* is the defect.**
+   - `Index::open` correctly returns `IndexError::SchemaTooNew`, and the shell
+     answers it by drawing the **setup screen**: *"where's your music?"* To a
+     listener whose collection is exactly where they left it, the application
+     has just said their library does not exist. That is the most alarming
+     thing baz can say, and it says it in the one case where **nothing is
+     wrong with their data at all**.
+   - **It is a beta blocker under the bar he chose.** *"Nothing baz does loses
+     or corrupts anything"* is the promise, and a beta tester who installs a
+     build, then runs an older one — the exact shape of trying a release and
+     going back — hits this and reasonably concludes baz ate their library.
+     Nothing was eaten; a downgrade is *the* predictable beta-tester move.
+   - **The fix is a distinct state, not a better sentence.** The setup screen
+     asks a question the listener has already answered. What this case needs is
+     a statement — this library was made by a newer baz, here is the version it
+     wants, your music and your playlists are untouched — and **no path that
+     leads to overwriting the database**. Check what the setup screen's answer
+     would currently do to a `user_version` 8 file if a folder were typed into
+     it; if it would migrate or clobber, that is the real bug and it is worse
+     than the wording.
+   - Related and cheap: the two release binaries (`target/release/` from the
+     host, `target/tb/release/` from the toolbox) are indistinguishable to
+     anyone looking for an executable, and he went to the obvious one. Worth a
+     line in `docs/DEVELOPMENT.md` at least.
+
+3. **A deleted folder's records never leave the library.** `rm -rf` an album
    directory and its eight rows stay on the wall for good. This is
    **deliberate and the reasoning is sound**: from the filesystem's side a
    deleted folder and an unmounted NAS are the same `NotFound` for every path
@@ -131,7 +162,7 @@
    order, and it needs no guessing about mounts because a person is asserting
    the fact. Related: the owner's library is on a NAS by design (ADR-0025), so
    the unmount case is his real case and not a hypothetical.
-3. **Removing a music folder destroys `first_seen_ns`.** Remove a root and
+4. **Removing a music folder destroys `first_seen_ns`.** Remove a root and
    add it back and every album files under ADDED = *today* — a real loss of
    the one fact ADR-0019 built a column and a structural guarantee to protect,
    and it is unrecoverable, which puts it above the two items below it. The
@@ -139,13 +170,13 @@
    forgotten root's paths and restore it if the folder comes back. Called
    *"its own small design"* there, which is a design that has never been
    written rather than a line of code.
-4. **The seek bar says which thing it measures.** The owner: *"I think the seek
+5. **The seek bar says which thing it measures.** The owner: *"I think the seek
    bar at the bottom should have a toggle indicating for song or for whole
    playlist"*. Both are true readouts — the track's position and the run's — and
    he is asking to choose. Undesigned; the questions are where the toggle lives
    (the bar is already dense), whether the choice persists, and what the
    elapsed/remaining figures either side of the bar read in run mode.
-5. **An artist has an `All songs` of their own.** The owner: *"the artist page
+6. **An artist has an `All songs` of their own.** The owner: *"the artist page
    should have its own 'all songs' playlist I think"*. `implicit::ImplicitList`
    already gives the library one, with an `Origin` kind and a collage sleeve, so
    this is that list scoped to one artist rather than new machinery. Undecided:
@@ -156,7 +187,7 @@
    word may not need qualifying. It should credit the artist's list rather than
    the underlying records when played, which is the rule that just landed for
    playlists.
-6. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
+7. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
    2026-08-10: *"at full screen the now playing page looks odd because the
    playlist hugs right and the art hugs left"* — which is this item, reported
    from the frame rather than from the measurement, and worth recording as a
@@ -168,7 +199,7 @@
    too — A4 widening the run closes the gap from one side, and if the sleeve is
    also hanging hard left rather than sitting in its column, that is a second
    fault the widening would hide rather than fix.
-7. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+8. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -181,7 +212,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-8. **Rewrite the README as the project's public face**, with the icon and real
+9. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
    last, so it describes what actually ships. Two of those four now exist and
    are regenerable — `docs/screenshots/capture.sh` writes the wall and Now
@@ -191,7 +222,7 @@
    `Ctrl+B` exists. (The group-key row itself is current again — the six words
    and `1`–`6` were corrected when `A–Z` came back.)
 
-9. **Ship the public beta.** The last item by construction: it is the one
+10. **Ship the public beta.** The last item by construction: it is the one
    that makes the eight above reach anybody. `v0.1.0` is prepared up to the
    tag and `docs/RELEASING.md` holds the owner's three commands, but a *beta*
    asks two more things of the release than a private tag does. **Flathub** —
