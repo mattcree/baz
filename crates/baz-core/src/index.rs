@@ -112,6 +112,30 @@
 //! library when there is no ledger — which is the true answer, not a
 //! placeholder. ADDED and PLAYED share the ledger's [`Recency`] vocabulary
 //! rather than defining a second one.
+//!
+//! # What the index remembers about music it no longer holds
+//!
+//! Rows leave the library two ways, and only one of them leaves a trace
+//! (`docs/adr/0042-what-baz-remembers.md`).
+//!
+//! A **scan** removes a row after the filesystem confirmed the file's absence
+//! with its parent directory present ([`crate::library::is_confirmed_gone`],
+//! ADR-0010's four gates) — evidence, which needs no reversal, so
+//! [`Library::remove_tracks`] leaves nothing behind. A **listener** removes
+//! rows by asserting that music is gone: removing a music folder
+//! ([`Library::forget_root`]) or naming particular tracks
+//! ([`Library::forget_paths`]). An assertion is a decision rather than
+//! evidence, it can be wrong — an unmounted share answers `NotFound` for every
+//! path beneath it exactly as a deleted folder does — and so it leaves a
+//! **tombstone** in the `forgotten` table (v9): the path, and the moment the
+//! library first saw it.
+//!
+//! One fact, because it is the only one in the row that nothing can recompute:
+//! every other column comes back with the next read of the file. Bringing the
+//! music back is therefore an ordinary scan, and the tombstone hands the
+//! restored row the first-seen it really had. The memory is consumed by that
+//! restoration and by nothing else — it has no expiry, because a folder removed
+//! in one year and added back in another is the case it exists for.
 
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
@@ -128,7 +152,7 @@ use crate::library::{AudioFormat, FileStamp, KnownFile, KnownFiles, TrackMeta};
 use crate::replaygain::{ComputedGains, ComputedReplayGain, ReplayGainTags};
 
 /// The schema version this build reads and writes (`PRAGMA user_version`).
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 /// Rows per write transaction in [`Library::add_tracks`]. A scan yields tens
 /// of thousands of tracks; committing in batches keeps any single
@@ -322,6 +346,114 @@ const SCHEMA_V8: &str = "
     ) STRICT;
 ";
 
+/// Version 9: **what baz remembers about music it no longer holds**
+/// (`docs/adr/0042-what-baz-remembers.md`).
+///
+/// One table, two columns, and it is the whole of the answer.
+///
+/// # Why anything is remembered at all
+///
+/// Forgetting in baz is always the **listener's assertion** — removing a music
+/// folder in the Settings place, or naming a record and saying it is gone. An
+/// assertion is not evidence: the four gates of ADR-0010 are what the
+/// filesystem can prove, and a person saying *"this is gone"* is a decision
+/// instead. Decisions are wrong sometimes — the share was merely unmounted, the
+/// folder came back off a backup — so a decision has to be reversible, and this
+/// table is what makes it so.
+///
+/// Reversing it means an ordinary scan, which rebuilds every column in `tracks`
+/// from the files themselves — every column but one. `first_seen_ns` is the one
+/// fact in the whole row that **nothing on disk carries and no later pass can
+/// rediscover** (ADR-0019 §5 refused three backfills for it, each of which had
+/// to invent it). So that is exactly what is kept, and the rule that decides the
+/// table's contents is: **remember only what nothing can recompute.**
+///
+/// Everything else is deliberately absent. Tags, stamps and tagged ReplayGain
+/// come back with the next read of the file. A measured `rg_computed_*` figure
+/// is expensive to recompute but it *is* recomputable, which makes storing it a
+/// cache and not a memory — a different feature, with a different bound, and not
+/// this one.
+///
+/// # What bounds it
+///
+/// `path` is the primary key, so a path forgotten ten times leaves **one** row,
+/// not ten: the table can never grow past the number of distinct paths the
+/// library has ever held. On top of that it is emptied from two directions — a
+/// tombstone is consumed the moment its path comes back into `tracks`
+/// ([`Library::add_tracks_under`]), and any that survives a crash between those
+/// two writes is swept at the next open ([`Library::sweep_forgotten`]), so *no
+/// path is ever both held and tombstoned*.
+///
+/// **It never expires on a clock**, and that is the decision rather than the
+/// omission: the defect this exists to fix is a folder removed in one year and
+/// added back in another, so any age limit short enough to be a bound would
+/// reintroduce the bug at its own boundary.
+///
+/// `first_seen_ns` is `NOT NULL`, which is the one constraint that matters: a
+/// tombstone holding no first-seen would be a row that remembers nothing. A
+/// track whose own `first_seen_ns` is `NULL` (a pre-v7 row nothing has re-read)
+/// is therefore not tombstoned at all — there is nothing about it to remember,
+/// and it reads `Not recorded` before and after.
+///
+/// The blob is the same platform-native path encoding as `tracks.path` (module
+/// docs), for the same reason: paths are not UTF-8.
+///
+/// The `CREATE TABLE` and the `user_version` bump are applied by
+/// [`migrate_v8_to_v9`].
+const SCHEMA_V9: &str = "
+    CREATE TABLE forgotten (
+        path          BLOB PRIMARY KEY, -- OS-native bytes; see module docs
+        first_seen_ns INTEGER NOT NULL  -- ns since the epoch
+    ) STRICT;
+";
+
+/// Tombstone every row **recorded under a root** on the way to deleting them
+/// (schema v9) — the root-scale half of forgetting.
+///
+/// Keyed on the recorded `root` column and not on a path prefix, for exactly
+/// the reason [`DELETE_TRACKS_UNDER_ROOT`] is: the two statements must nominate
+/// the same rows or the tombstones would not describe what went.
+///
+/// `first_seen_ns IS NOT NULL` skips the rows there is nothing to remember
+/// about. `MIN` on conflict keeps the **earliest** first-seen anything has
+/// claimed for the path, which is the rule an album's own ADDED already follows
+/// (ADR-0019 §5: an album is dated by its earliest track).
+const REMEMBER_TRACKS_UNDER_ROOT: &str = "
+    INSERT INTO forgotten (path, first_seen_ns)
+    SELECT path, first_seen_ns FROM tracks
+     WHERE root = ?1 AND first_seen_ns IS NOT NULL
+    ON CONFLICT(path) DO UPDATE SET
+        first_seen_ns = MIN(forgotten.first_seen_ns, excluded.first_seen_ns)
+";
+
+/// Tombstone **one path** on the way to deleting its row (schema v9) — the
+/// record-scale half of forgetting, and the same statement as
+/// [`REMEMBER_TRACKS_UNDER_ROOT`] with its `WHERE` clause changed. That the two
+/// differ in nothing else is what stops the two scales of one act from drifting
+/// into two mechanisms that disagree.
+const REMEMBER_TRACK: &str = "
+    INSERT INTO forgotten (path, first_seen_ns)
+    SELECT path, first_seen_ns FROM tracks
+     WHERE path = ?1 AND first_seen_ns IS NOT NULL
+    ON CONFLICT(path) DO UPDATE SET
+        first_seen_ns = MIN(forgotten.first_seen_ns, excluded.first_seen_ns)
+";
+
+/// Every tombstone, for hydrating the in-RAM mirror at open.
+const SELECT_FORGOTTEN: &str = "SELECT path, first_seen_ns FROM forgotten";
+
+/// Consume one tombstone: its path is back in `tracks`, so the memory has done
+/// its work and the row that holds the fact is the fact now.
+const DELETE_FORGOTTEN: &str = "DELETE FROM forgotten WHERE path = ?1";
+
+/// Drop every tombstone whose path the library holds — the sweep that makes
+/// *"no path is ever both held and tombstoned"* true at every open, whatever a
+/// crash left behind between a track insert and its tombstone's deletion.
+///
+/// Set-based on purpose: it runs once per open over a table that is empty in
+/// the ordinary case, rather than per row on the scan's hot path.
+const SWEEP_FORGOTTEN: &str = "DELETE FROM forgotten WHERE path IN (SELECT path FROM tracks)";
+
 /// Write one track's measured ReplayGain (schema v6).
 ///
 /// An `UPDATE` rather than an upsert on purpose: a measurement belongs to a
@@ -352,6 +484,13 @@ const STORE_COMPUTED_REPLAY_GAIN: &str = "
 /// (schema v7), which is the whole of how ADDED survives a rescan: the value
 /// is written when the row is created and there is no statement anywhere that
 /// can move it afterwards. See [`SCHEMA_V7_COLUMNS`].
+///
+/// Schema v9 does not weaken that by one word. What it changes is what the
+/// *insert* is given: for a path the library once held and was told to forget,
+/// [`Library::add_tracks_under`] binds the first-seen the tombstone kept rather
+/// than the clock. A row's first-seen is still written exactly once, when the
+/// row is created, and a rescan still cannot reach it — the value is simply the
+/// true one instead of today's.
 ///
 /// **`root` is in both lists** (schema v8), which is the opposite decision and
 /// the right one for the opposite reason: where a first-seen is a fact about
@@ -482,6 +621,17 @@ pub struct Library {
     /// frame, and a per-frame query for four rows would be four queries too
     /// many.
     roots: HashMap<PathBuf, Option<i64>>,
+    /// The `forgotten` table, in RAM: path → the first-seen kept for it
+    /// (schema v9). Hydrated whole at open like [`Library::roots`], and for a
+    /// sharper reason: it is consulted **once per newly inserted track**, and a
+    /// database probe there would put a query on the scan's per-file path to
+    /// answer a question that is `None` for every row in the ordinary library.
+    ///
+    /// Empty is the ordinary state — it holds entries only between a listener
+    /// forgetting something and that thing coming back — and its worst case is
+    /// bounded by the rows that just left `tracks`, which is the population it
+    /// replaces rather than an addition to it.
+    forgotten: HashMap<PathBuf, i64>,
 }
 
 impl Library {
@@ -551,9 +701,25 @@ impl Library {
             conn,
             index: SearchIndex::default(),
             roots: HashMap::new(),
+            forgotten: HashMap::new(),
         };
+        library.sweep_forgotten()?;
         library.hydrate()?;
         Ok(library)
+    }
+
+    /// Drop every tombstone whose path the library holds, restoring the
+    /// invariant *no path is ever both held and tombstoned*.
+    ///
+    /// Run at **open** and nowhere else. A tombstone is normally consumed in
+    /// the same transaction that re-inserts its track; this is what answers the
+    /// crash in between, and it is why that consumption is allowed to be a
+    /// plain delete rather than a ceremony. One set-based statement over a
+    /// table that is empty in the ordinary case — deliberately not on the
+    /// scan's per-file path.
+    fn sweep_forgotten(&mut self) -> Result<(), IndexError> {
+        self.conn.execute(SWEEP_FORGOTTEN, [])?;
+        Ok(())
     }
 
     /// Load every stored track into the in-RAM index, replacing its contents.
@@ -580,6 +746,22 @@ impl Library {
         }
         self.index.rebuild_order();
         self.hydrate_roots()?;
+        self.hydrate_forgotten()?;
+        Ok(())
+    }
+
+    /// Load the `forgotten` table into RAM, replacing its contents.
+    fn hydrate_forgotten(&mut self) -> Result<(), IndexError> {
+        self.forgotten.clear();
+        let mut stmt = self.conn.prepare(SELECT_FORGOTTEN)?;
+        let rows = stmt.query_and_then([], |row| {
+            let path: Vec<u8> = row.get(0)?;
+            Ok::<_, IndexError>((path_from_blob(path)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (path, first_seen_ns) = row?;
+            self.forgotten.insert(path, first_seen_ns);
+        }
         Ok(())
     }
 
@@ -767,7 +949,8 @@ impl Library {
         // a scan batch arrived together, and giving them timestamps that differ
         // by the microseconds an insert takes would be precision the fact does
         // not have. Only rows the database has never held will use it (see
-        // [`UPSERT_TRACK`]).
+        // [`UPSERT_TRACK`]) — and of those, only the ones no tombstone
+        // remembers (schema v9).
         let now_ns = now_ns();
         let result = self.insert_batches(&mut iter, &mut added, now_ns, root.as_ref());
         // Re-sort exactly once whether or not a batch failed, so the index
@@ -789,10 +972,26 @@ impl Library {
         let root_blob = root.map(|root| path_to_blob(root));
         while iter.peek().is_some() {
             let chunk: Vec<TrackMeta> = iter.by_ref().take(TRANSACTION_BATCH).collect();
+            // The first-seen each row would take **if it is new**, resolved
+            // once for both halves of the store. A path a listener forgot and
+            // has brought back takes the moment it really arrived; everything
+            // else takes the clock. Resolving it here rather than inside the
+            // SQL is what keeps the database and the in-RAM index from being
+            // two writers agreeing to be careful — they are handed the same
+            // value.
+            let first_seen: Vec<i64> = chunk
+                .iter()
+                .map(|meta| {
+                    self.forgotten
+                        .get(&meta.path)
+                        .copied()
+                        .unwrap_or(now_ns)
+                })
+                .collect();
             let tx = self.conn.transaction()?;
             {
                 let mut stmt = tx.prepare_cached(UPSERT_TRACK)?;
-                for meta in &chunk {
+                for (meta, &first_seen_ns) in chunk.iter().zip(&first_seen) {
                     stmt.execute(params![
                         path_to_blob(&meta.path),
                         meta.artist,
@@ -815,17 +1014,31 @@ impl Library {
                         meta.replay_gain.album_gain_centidb,
                         meta.replay_gain.album_peak_micro,
                         meta.genre,
-                        now_ns,
+                        first_seen_ns,
                         root_blob,
                     ])?;
+                }
+                // A tombstone whose path is back in `tracks` has done its work,
+                // in the same transaction that brought the path back — so the
+                // memory and the row it restored land together or not at all.
+                // Only paths that actually carry one are touched; the ordinary
+                // scan executes this statement zero times.
+                if !self.forgotten.is_empty() {
+                    let mut stmt = tx.prepare_cached(DELETE_FORGOTTEN)?;
+                    for meta in &chunk {
+                        if self.forgotten.contains_key(&meta.path) {
+                            stmt.execute(params![path_to_blob(&meta.path)])?;
+                        }
+                    }
                 }
             }
             tx.commit()?;
             // Mirror into RAM only after the batch is durably committed, so
             // a failed batch never leaves ghost tracks in the index.
             *added += chunk.len();
-            for meta in chunk {
-                self.index.insert(meta, now_ns, root.map(Arc::clone));
+            for (meta, first_seen_ns) in chunk.into_iter().zip(first_seen) {
+                self.forgotten.remove(&meta.path);
+                self.index.insert(meta, first_seen_ns, root.map(Arc::clone));
             }
         }
         Ok(())
@@ -903,7 +1116,7 @@ impl Library {
     }
 
     /// Forget a library root: **delete every row recorded under it**, and the
-    /// root's own record.
+    /// root's own record, **keeping when each of those tracks first arrived**.
     ///
     /// Returns how many track rows went.
     ///
@@ -917,6 +1130,20 @@ impl Library {
     /// It is keyed on the **recorded root**, never on a path prefix, so a
     /// nested root the listener kept does not lose the tracks it holds.
     ///
+    /// # What survives it (schema v9)
+    ///
+    /// ADR-0022 §4 shipped this act with a stated price: the rows' first-seen
+    /// went with them, so a folder removed and added back filed every album
+    /// under ADDED = *today*. That price is **withdrawn**
+    /// (`docs/adr/0042-what-baz-remembers.md`). Every row this deletes leaves a
+    /// tombstone behind — its path and the moment it first arrived, and nothing
+    /// else — and adding the folder back restores the fact on the ordinary
+    /// scan that finds the files again. The reversal is now free in both
+    /// directions, which is what makes the act safe enough to offer at all.
+    ///
+    /// The tombstone is written in the **same transaction** as the delete, so a
+    /// crash cannot take the rows without leaving the memory.
+    ///
     /// # Errors
     ///
     /// [`IndexError::Sqlite`] if the delete fails; the in-RAM index is then
@@ -925,6 +1152,7 @@ impl Library {
         let root_blob = path_to_blob(root);
         let deleted = {
             let tx = self.conn.transaction()?;
+            tx.execute(REMEMBER_TRACKS_UNDER_ROOT, params![root_blob])?;
             let deleted = tx.execute(DELETE_TRACKS_UNDER_ROOT, params![root_blob])?;
             tx.execute(DELETE_ROOT, params![root_blob])?;
             tx.commit()?;
@@ -932,12 +1160,135 @@ impl Library {
         };
         self.roots.remove(root);
         if deleted > 0 {
-            self.index
-                .tracks
-                .retain(|track| track.root.as_deref() != Some(root));
+            let mut forgotten = std::mem::take(&mut self.forgotten);
+            self.index.tracks.retain(|track| {
+                if track.root.as_deref() == Some(root) {
+                    remember(&mut forgotten, track);
+                    false
+                } else {
+                    true
+                }
+            });
+            self.forgotten = forgotten;
             self.index.rebuild_order();
         }
         Ok(deleted)
+    }
+
+    /// Forget particular tracks: **delete exactly the rows for these paths**,
+    /// keeping when each of them first arrived.
+    ///
+    /// Returns how many rows went. Paths the library does not hold are ignored.
+    ///
+    /// This is [`Library::forget_root`] at the scale of a record instead of a
+    /// folder, and it is deliberately the *same act* rather than a second one:
+    /// both write the same tombstone with the same statement
+    /// ([`REMEMBER_TRACK`] and [`REMEMBER_TRACKS_UNDER_ROOT`] differ only in
+    /// their `WHERE` clause), so the two scales cannot drift apart.
+    ///
+    /// # Why this is not [`Library::remove_tracks`]
+    ///
+    /// They delete the same rows and they mean opposite things, which is why
+    /// they are two functions rather than a flag.
+    ///
+    /// - [`Library::remove_tracks`] is what a **scan** does after the
+    ///   filesystem confirmed a file is gone — ADR-0010's four gates, evidence
+    ///   baz gathered itself. Evidence needs no reversal, and that path runs
+    ///   constantly, so it leaves nothing behind.
+    /// - This is what a **listener** does when they assert that music is gone.
+    ///   An assertion is a decision, not evidence: it can be wrong — the share
+    ///   was merely unmounted, the folder came back off a backup — so it leaves
+    ///   the one fact a later scan could not rediscover, and bringing the music
+    ///   back costs nothing.
+    ///
+    /// Nothing on disk is touched. The files stay exactly where they are.
+    ///
+    /// # Errors
+    ///
+    /// [`IndexError::Sqlite`] if a write fails. Batches committed before the
+    /// failure stay forgotten; the failing batch is rolled back, and the in-RAM
+    /// index is left matching whatever the database now holds.
+    pub fn forget_paths<I, P>(&mut self, paths: I) -> Result<usize, IndexError>
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        let paths: Vec<PathBuf> = paths
+            .into_iter()
+            .map(|path| path.as_ref().to_path_buf())
+            .collect();
+        let mut deleted = 0;
+        let mut gone: HashSet<PathBuf> = HashSet::new();
+        let result = self.forget_batches(&paths, &mut deleted, &mut gone);
+        if !gone.is_empty() {
+            let mut forgotten = std::mem::take(&mut self.forgotten);
+            self.index.tracks.retain(|track| {
+                if gone.contains(&track.meta.path) {
+                    remember(&mut forgotten, track);
+                    false
+                } else {
+                    true
+                }
+            });
+            self.forgotten = forgotten;
+            self.index.rebuild_order();
+        }
+        result.map(|()| deleted)
+    }
+
+    fn forget_batches(
+        &mut self,
+        paths: &[PathBuf],
+        deleted: &mut usize,
+        gone: &mut HashSet<PathBuf>,
+    ) -> Result<(), IndexError> {
+        for chunk in paths.chunks(TRANSACTION_BATCH) {
+            let tx = self.conn.transaction()?;
+            let mut removed_here: Vec<&Path> = Vec::new();
+            {
+                let mut remember = tx.prepare_cached(REMEMBER_TRACK)?;
+                let mut delete = tx.prepare_cached(DELETE_TRACK)?;
+                for path in chunk {
+                    let blob = path_to_blob(path);
+                    // Remember first, delete second, one transaction: the
+                    // statement reads the row it is about to remove, so the
+                    // order is the whole of why the fact survives.
+                    remember.execute(params![blob])?;
+                    if delete.execute(params![blob])? > 0 {
+                        removed_here.push(path.as_path());
+                    }
+                }
+            }
+            tx.commit()?;
+            // Mirror into RAM only after the batch is durably committed, so a
+            // failed batch never drops a track the database still holds.
+            *deleted += removed_here.len();
+            gone.extend(removed_here.into_iter().map(Path::to_path_buf));
+        }
+        Ok(())
+    }
+
+    /// How many tombstones the library holds — paths it was told to forget and
+    /// has not been given back.
+    ///
+    /// Reported rather than hidden, for the same reason
+    /// [`Library::unrooted_tracks`] is: it is the one thing in the database
+    /// that is neither a track nor a root, and a store nobody can count is a
+    /// store nobody can bound.
+    #[must_use]
+    pub fn forgotten_paths(&self) -> usize {
+        self.forgotten.len()
+    }
+
+    /// When the library first saw a path it was told to forget, if it kept the
+    /// fact — the tombstone, read.
+    ///
+    /// `None` for a path baz never held, one it still holds, or one whose own
+    /// first-seen was never recorded (a pre-v7 row): in each case there is
+    /// nothing remembered, which is a different statement from a zero.
+    #[must_use]
+    pub fn forgotten_first_seen(&self, path: &Path) -> Option<i64> {
+        self.forgotten.get(path).copied()
     }
 
     /// Record that a scan of `root` finished at `at_ns` (nanoseconds since the
@@ -994,12 +1345,21 @@ impl Library {
     /// in-RAM index. Paths the library does not hold are ignored. Returns
     /// the number of rows actually deleted.
     ///
-    /// This is the only way anything leaves the library, and it is
+    /// This is the way a **scan** takes rows out of the library, and it is
     /// deliberately dumb: it deletes exactly the paths it is handed and
     /// decides nothing. Whether a file is *gone* — as opposed to merely
     /// unseen, unreadable, or on a drive that is not plugged in today — is
     /// [`crate::library::is_confirmed_gone`]'s question, answered against
     /// the filesystem before a path ever reaches here.
+    ///
+    /// **It leaves no tombstone, and that is the decision** (schema v9,
+    /// `docs/adr/0042-what-baz-remembers.md`). A path arrives here only after
+    /// the filesystem has confirmed its absence with its parent directory
+    /// present — evidence baz gathered, not a judgement it made — and evidence
+    /// needs no reversal. Remembering here instead would put a write on the
+    /// churn path every deleted file takes forever, to insure against a call
+    /// that was never a guess. [`Library::forget_paths`] is the other door, for
+    /// the case where a person is the one asserting it.
     ///
     /// # Errors
     ///
@@ -2648,21 +3008,26 @@ impl SearchIndex {
     /// simply stale, which [`ComputedReplayGain::figures_for`] already answers.
     ///
     /// It also keeps whatever **first-seen** timestamp that entry carried, and
-    /// takes `now_ns` only for a path it has never held. This mirrors, in RAM,
-    /// the property [`UPSERT_TRACK`] holds in the database by naming
-    /// `first_seen_ns` in its `INSERT` list and omitting it from its update
-    /// list: a row's first-seen is written once and a rescan cannot move it.
-    /// The two halves have to agree, or the shelf would disagree with itself
-    /// across a restart.
+    /// takes `first_seen_if_new` only for a path it has never held. This
+    /// mirrors, in RAM, the property [`UPSERT_TRACK`] holds in the database by
+    /// naming `first_seen_ns` in its `INSERT` list and omitting it from its
+    /// update list: a row's first-seen is written once and a rescan cannot move
+    /// it. The two halves have to agree, or the shelf would disagree with
+    /// itself across a restart.
+    ///
+    /// `first_seen_if_new` is the clock for an arrival and the tombstone's kept
+    /// value for a return ([`Library::add_tracks_under`] resolves it once and
+    /// hands the same value to both halves, so there is no second rule here to
+    /// keep in step).
     ///
     /// Callers must [`SearchIndex::rebuild_order`] afterwards (batched).
-    fn insert(&mut self, meta: TrackMeta, now_ns: i64, root: Option<Arc<Path>>) {
+    fn insert(&mut self, meta: TrackMeta, first_seen_if_new: i64, root: Option<Arc<Path>>) {
         let existing = self
             .by_path
             .get(&meta.path)
             .and_then(|&index| self.tracks.get(index));
         let computed = existing.map_or_else(ComputedReplayGain::default, |track| track.computed);
-        let first_seen = existing.map_or(Some(now_ns), |track| track.first_seen);
+        let first_seen = existing.map_or(Some(first_seen_if_new), |track| track.first_seen);
         // A caller that names no root leaves the row where it was, rather than
         // orphaning it — which mirrors the database, where `add_tracks` binds
         // NULL and the upsert's `root = excluded.root` would otherwise clear a
@@ -3068,6 +3433,7 @@ fn migrate(conn: &Connection) -> Result<(), IndexError> {
             5 => migrate_v5_to_v6(conn)?,
             6 => migrate_v6_to_v7(conn)?,
             7 => migrate_v7_to_v8(conn)?,
+            8 => migrate_v8_to_v9(conn)?,
             SCHEMA_VERSION => return Ok(()),
             found => return Err(IndexError::SchemaTooNew { found }),
         }
@@ -3301,6 +3667,32 @@ fn migrate_v7_to_v8(conn: &Connection) -> Result<(), IndexError> {
     Ok(())
 }
 
+/// v8 → v9: add the `forgotten` table
+/// (`docs/adr/0042-what-baz-remembers.md`).
+///
+/// The one migration in the ladder that touches **no existing row**. It adds a
+/// table and nothing else: there is no column to fill, no value to derive and
+/// no backfill to argue about, because the table records acts a listener has
+/// not performed yet. It starts empty, which says exactly the truth — baz has
+/// been told to forget nothing.
+///
+/// **What the upgrade cannot repair**, stated rather than hidden: a folder
+/// removed *before* this version took its tracks' `first_seen_ns` with them and
+/// left nothing behind. There is no evidence anywhere from which to reconstruct
+/// it, which is the same wall ADR-0019 §5 hit — so a pre-v9 loss stays lost,
+/// and the fix is prospective. It is the last such loss.
+///
+/// The `CREATE TABLE` and the `user_version` bump are one transaction (SQLite's
+/// DDL is transactional), so an interrupted upgrade leaves a v8 database that
+/// the next open migrates again.
+fn migrate_v8_to_v9(conn: &Connection) -> Result<(), IndexError> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(SCHEMA_V9)?;
+    tx.pragma_update(None, "user_version", 9)?;
+    tx.commit()?;
+    Ok(())
+}
+
 /// Fill `format` for existing rows from the file extension, where the
 /// extension settles the question by itself.
 ///
@@ -3408,6 +3800,23 @@ fn shared_root<'a>(roots: &'a mut HashMap<PathBuf, Arc<Path>>, root: &Path) -> &
     roots
         .entry(root.to_path_buf())
         .or_insert_with(|| Arc::from(root))
+}
+
+/// Mirror one tombstone into RAM, on a track leaving the in-RAM index.
+///
+/// The rule is [`REMEMBER_TRACK`]'s, restated in Rust because both halves of
+/// the store have to agree: a track with no recorded first-seen leaves nothing
+/// (there is nothing to remember), and a path that is somehow tombstoned twice
+/// keeps the **earliest** claim — which is how an album's own ADDED is already
+/// decided (ADR-0019 §5).
+fn remember(forgotten: &mut HashMap<PathBuf, i64>, track: &IndexedTrack) {
+    let Some(first_seen) = track.first_seen else {
+        return;
+    };
+    forgotten
+        .entry(track.meta.path.clone())
+        .and_modify(|kept| *kept = (*kept).min(first_seen))
+        .or_insert(first_seen);
 }
 
 /// The [`ReplayGainTags`] a row carries (schema v5), `None` per field for a

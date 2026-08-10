@@ -1,6 +1,10 @@
 # ADR-0010: Incremental scanning, and what proves a file is gone
 
-**Status**: accepted (2026-08-07)
+**Status**: accepted (2026-08-07) · **gate 2 replaced by
+[ADR-0022](0022-library-roots-and-refresh.md) §3** (2026-08-08) · **the first
+deferral below is answered by [ADR-0042](0042-what-baz-remembers.md)**
+(2026-08-10) — §3's four gates are **unchanged**, and what is added is a door
+they were right to refuse to open by themselves
 
 ## Context
 
@@ -123,6 +127,30 @@ nothing. Every judgement lives in `scan::vanished`, tested against real
 temporary directories, and the worker can only ever nominate paths the
 caller handed it in `Library::known_files`.
 
+> **Amended 2026-08-10 — [ADR-0042](0042-what-baz-remembers.md) adds the other
+> door, and does not touch these four gates.** Everything above stands: baz
+> still refuses to infer that an unreachable folder is a deleted one, still
+> requires a present parent directory, and still treats a permission error as
+> "the filesystem would not answer" rather than as an answer. The maintainer's
+> library is on a NAS, so the case this section protects is his everyday case.
+>
+> What is added is the *user-initiated* removal this section's own deferrals
+> named: `Library::forget_paths` (and `forget_root`, which ADR-0022 §4 already
+> shipped) delete rows because a **person** said the music is gone. That needs
+> no mount detection, because nobody is inferring anything.
+>
+> The distinction between the two doors is now written into the code rather than
+> implied: the gates are **evidence** baz gathered, and evidence needs no
+> reversal, so `remove_tracks` leaves nothing behind. A listener's word is a
+> **decision**, decisions can be wrong, and so forgetting leaves a tombstone —
+> the path and when the library first saw it — which an ordinary rescan spends
+> if the music comes back. That is what makes a wrong assertion about an
+> unmounted share cost a rescan instead of a fact nothing can rebuild.
+>
+> **`remove_tracks` is unchanged**, including in what it does not do: it writes
+> no tombstone, because it runs on every scan forever and would be insuring a
+> call that was never a guess.
+
 ### 4. Schema v4
 
 `SCHEMA_VERSION` moves 3 → 4, adding `mtime_ns INTEGER` and
@@ -174,7 +202,12 @@ before the upgrade.
 - **A user-facing prune.** "These 412 rows point at files I cannot find —
   remove them?" is the honest answer to everything §3 declines to do
   automatically, and it belongs to a library-maintenance surface that does
-  not exist yet.
+  not exist yet. — **half-answered (ADR-0042).** The *mechanism* is built and
+  it is reversible: `Library::forget_paths` takes exactly the rows a listener
+  names, and keeps their first-seen so being wrong costs a rescan. The
+  **surface** — the list of unreachable rows, grouped by root and counted, so
+  an unmounted share is visible as the shape it makes before anybody presses
+  anything — is still unbuilt.
 - **Watching the folder** (inotify/FSEvents/`ReadDirectoryChangesW`). A
   cheap rescan makes watch folders *less* urgent, not more; it is its own
   chapter in `VISION.md`.
