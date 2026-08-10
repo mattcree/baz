@@ -317,15 +317,16 @@ pub(crate) enum Message {
     /// single-display listener. Remembered across launches
     /// ([`config::Config::run_column`]).
     ToggleRun,
-    /// **The bar's now-playing block**: go to the page of the record that is
-    /// sounding.
+    /// **The bar's now-playing block**: go to `Now playing`.
     ///
     /// The prior-art study's R3 — *get back to what is playing* — which every
-    /// product it surveyed spends an affordance on and baz had none for. With
-    /// no persistent inspector there is nothing else on screen that knows which
-    /// record is under the lamp, so the text that names it is the control that
-    /// takes you to it.
-    ShowPlayingAlbum,
+    /// product it surveyed spends an affordance on and baz had none for. It
+    /// used to open the *record's page*, and that was right while the record's
+    /// page was the only surface that knew what was sounding. `Now playing`
+    /// exists now and is that surface, so the block leads there: the text
+    /// naming what is playing takes you to the place about what is playing.
+    /// The record is one step further on, which is the right way round.
+    ShowNowPlaying,
     /// A row of the **Queue** place was clicked: play the queue from that
     /// zero-based position ([`Command::JumpTo`], ADR-0014).
     ///
@@ -1325,13 +1326,11 @@ impl App {
             // the toggle, so pressing the artist you are already reading puts
             // the page down, exactly as a tile pressed twice does.
             Message::OpenArtist(id) => self.go(|place| place.artist(id)),
-            Message::ShowPlayingAlbum => match self.player.playing_album() {
-                // Nothing is sounding, so there is no record to be taken to.
-                // The control is not offered in that state (see
-                // `views::bottom_bar`), so this is the guard and not the case.
-                None => Task::none(),
-                Some(id) => self.open_album(id),
-            },
+            // The density it lands in is whatever was last chosen; only
+            // `Ctrl+U` asks for the run specifically.
+            Message::ShowNowPlaying => {
+                self.go(|place| place.go(crate::lane::Destination::NowPlaying))
+            }
             // The Settings place's spine. Session state and deliberately not
             // persisted: which section you were last reading is not a standing
             // decision.

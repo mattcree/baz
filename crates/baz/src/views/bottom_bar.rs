@@ -403,7 +403,7 @@ fn back_to_playing(
                 .width(Length::Fill)
                 .padding(0)
                 .style(move |_theme, status| theme::now_playing_text(room, status))
-                .on_press(Message::ShowPlayingAlbum),
+                .on_press(Message::ShowNowPlaying),
             text("Go to the record that is playing")
                 .size(theme::SIZE_CAPTION)
                 .line_height(theme::LEADING_CAPTION),

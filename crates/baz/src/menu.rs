@@ -143,8 +143,17 @@ pub(crate) struct Facts {
     /// still exists — `(panel row id, name)`. `None` withdraws the
     /// `Add to "{name}"` verb rather than letting it dangle.
     pub(crate) current: Option<(u64, String)>,
-    /// The record under the lamp, if any — the now-playing block's own
-    /// press condition.
+    /// The record under the lamp, if any.
+    ///
+    /// Read by no item today: the bar's block leads to `Now playing` rather
+    /// than to the record, so the menu's `Go to record` went with it. Kept
+    /// because it is the one fact about the sounding *record* the builder can
+    /// be asked for, and the surfaces above it change weekly — a sweep that
+    /// stops carrying it would have to relearn it.
+    #[expect(
+        dead_code,
+        reason = "the fact outlived the item that read it; see the note above"
+    )]
     pub(crate) playing_album: Option<u64>,
     /// The sounding row's queue position, if the engine has confirmed one —
     /// what the bar's transfer items spend, because the bar's subject is
@@ -300,13 +309,11 @@ pub(crate) fn items(target: Target, facts: &Facts) -> Vec<Item> {
             // `Go to record` · `Add to "{current}"` · `Add to playlist…` —
             // every item resolved against the *sounding* row, which is why
             // S4 is two gestures from anywhere: the bar is everywhere.
-            if facts.playing_album.is_some() {
-                push(
-                    "Go to record".to_owned(),
-                    vec![Message::ShowPlayingAlbum],
-                    None,
-                );
-            }
+            // No `Go to record` here. The block's own press now leads to
+            // `Now playing`, and the record is one step on from there — an
+            // item that jumped straight past the place about what is playing
+            // would be a second, quieter answer to the question the block
+            // already answers.
             if let Some(row) = facts.playing_queue_row
                 && facts.collecting
             {
@@ -583,7 +590,7 @@ mod tests {
         /// There is no "reason there is none" column here on purpose: the
         /// keyboard's table needed one for MPRIS, and a menu item with no
         /// visible twin is exactly the thing this test exists to refuse.
-        const CONTROLS: [(&str, &str); 11] = [
+        const CONTROLS: [(&str, &str); 10] = [
             (
                 "PlayTrack",
                 "a track row's own press (album page, Songs section)",
@@ -595,7 +602,6 @@ mod tests {
                 "an album tile's press (and the Songs section's record door)",
             ),
             ("PlayAlbum", "the record page's `Play album`"),
-            ("ShowPlayingAlbum", "the bar's now-playing block"),
             ("AddTrackToPlaylist", "the track row's reserved `+` slot"),
             ("AddQueuedToPlaylist", "the queue row's reserved `+` slot"),
             (
@@ -748,14 +754,12 @@ mod tests {
         let labels: Vec<&str> = listed.iter().map(|item| item.label.as_str()).collect();
         assert_eq!(
             labels,
-            vec![
-                "Go to record",
-                "Add to \u{201c}Road Trip\u{201d}",
-                "Add to playlist…"
-            ],
+            vec!["Add to \u{201c}Road Trip\u{201d}", "Add to playlist…"],
             "§5.2's bar row, in table order, the current playlist named"
         );
-        let add = &listed[1];
+        // Index 0 since `Go to record` left the bar's menu with the block's
+        // own press: `Add to "{current}"` now leads it.
+        let add = &listed[0];
         assert!(
             matches!(
                 add.presses.as_slice(),
