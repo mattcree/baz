@@ -219,6 +219,26 @@ call.
 
 ## Waiting on the owner
 
+- **Where does a listener find out *which* files were skipped?** The Zappa
+  album above was lost for as long as it was because the answer was
+  "nowhere" — `14 files skipped` in the status line is a statistic, and a
+  statistic cannot name a record. A scan now prints one
+  `[scan] skipped <path>: <reason>` line, which is enough for him at a
+  terminal and **nothing at all** for a listener running the Flatpak, so the
+  product question is still open. Three shapes, in increasing cost:
+  - **The log line alone** (what shipped). Free, honest, and invisible to the
+    people the beta is for.
+  - **A readout in Settings** — *"14 files could not be read"*, expanding to
+    the list with each file's reason, beside the *last scanned* line that is
+    already there. This is the recommendation: Settings is where a scan's
+    other facts live, the skipped set is small and already in hand at the end
+    of a pass, and it costs one `ScanUpdate` field carrying the paths instead
+    of a count. Nothing about it is a modal, which is the rule
+    `crates/baz/src/scan.rs` exists to keep.
+  - **Something on the wall.** Refused unless he asks: a record baz could not
+    read is not a record, and drawing a placeholder for one puts a thing you
+    cannot play in the one place everything is playable.
+  *Needs: Settings readout, or is the log line enough for the beta?*
 - **Should baz play Opus?** Promoted here rather than into `## Next`, because
   it is the largest *functional* gap in the product and the only one whose fix
   is a decision rather than work. `.opus` is out of `AUDIO_EXTENSIONS`
@@ -328,6 +348,51 @@ call.
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **Fourteen files skipped were one whole album, and one junk byte was the
+  whole cause.** The owner's launch scan on 2026-08-10 reported `14 files
+  skipped` under his `CDs/MP3` root. All fourteen were Frank Zappa's
+  *Unmitigated Audacity*, complete — an entire record absent from the wall,
+  with a number in a status line as the only evidence it had ever existed.
+  - **The files are fine and always were.** 320 kbit/s MPEG-1 Layer III,
+    ID3v2.3, ripped by dBpoweramp. Every one opens and decodes through
+    `AudioSource` — verified over all 3 735 MP3s under that root, zero
+    refusals.
+  - **The cause is `TYER`.** ID3v2.3's year frame, holding the single
+    character `0` where the specification says four digits. lofty returns that
+    as an error from the **whole-file** read rather than dropping the frame,
+    and the scanner turns a failed read into a skipped file — so one
+    unparseable byte in one optional frame cost the title, the artist, the
+    album, the track number and the row. The read is now retried in lofty's
+    `Relaxed` mode, which drops the frame instead of the file: 3 721 tracks
+    and 14 skipped became **3 735 and 0**, losing only the year the tag never
+    legibly held. Strict runs first and wins whenever it succeeds, so nothing
+    that reads today reads differently.
+  - **Not a regression from the format-registry change**, which was the first
+    suspicion and a reasonable one — `file(1)` calls these files *"MPEG ADTS,
+    layer III"*, exactly the shape the removed raw-ADTS reader could have
+    claimed. It was tested rather than argued: both `fbb0af7` (before
+    ADR-0040 §2.5) and `main` were built and run over the same folder, and
+    both skip the same fourteen with the same sentence. **The scanner never
+    touches Symphonia's probe** — it reads tags with lofty — so no change to
+    the registry can reach it. ADR-0040 carries the exoneration so the next
+    reader of that doc comment does not re-investigate.
+  - **The second defect is the one that let this last.** The scanner's count
+    was the *only* signal: `ScanEntry::Failed` carries a path and a reason,
+    and `crates/baz/src/scan.rs` discarded both and incremented an integer.
+    Nothing logged them, nothing stored them, and no surface in baz could name
+    a skipped file. A scan now prints one `[scan] skipped <path>: <reason>`
+    line per failure. **That is a floor, not the answer** — it is invisible to
+    anyone running the Flatpak — and the surface question is in *Waiting on the
+    owner* below.
+  - **Found on the way, and it is his to look at**: `CHANGELOG.md` on `main`
+    carried **committed merge-conflict markers** — `<<<<<<< HEAD`,
+    `=======`, `>>>>>>> feat/app-bar` — from the `da6a547` merge, which also
+    left the `Unreleased` section with two `### Changed` headings, two
+    `### Added`, and a *Fixed* bullet filed under *Added*. `git log -S` does
+    not traverse merges by default, which is why nothing found it. Resolved
+    here by keeping both sides and folding `Unreleased` back into one heading
+    per kind. **Nothing checks for this**; a `grep` for conflict markers in the
+    local gate and in CI is a two-line change and is queued in `BACKLOG.md`.
 - **The app bar — baz draws the window's chrome, and it is the same band in
   every place.** Three asks in one change (ADR-0040): `Play all` removed, the
   display options moved to the top bar, and a resident app bar carrying them

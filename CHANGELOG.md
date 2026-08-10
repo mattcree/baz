@@ -24,9 +24,119 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
-<<<<<<< HEAD
+### Added
+
+- **An app bar across the top of every place** — baz's own window chrome
+  (ADR-0040). It carries the window's name, the display options, the Settings
+  gear and the three window buttons (minimise, maximise, close, on the right),
+  and it is identical in all seven places. Dragging any part of it that is not
+  a control moves the window; pressing it twice maximises or restores it;
+  right-pressing it asks the desktop for its window menu.
+- Three glyphs on the icon sheet: minimise, maximise and restore, on the set's
+  own stroke band.
+- `BAZ_BORDERLESS=1` turns the platform's title bar off, so the app bar is the
+  window's only chrome. **Not the default**: iced 0.13 exposes no edge-drag
+  resize, so going borderless today loses the pointer resize edges — see
+  ADR-0040 §6 for the price of the iced 0.14 upgrade that would fix it.
+- `crates/baz-core/tests/hostile_media.rs` — every hostile input the fuzzer has
+  found, run on `push` through both `open_bytes` and a real file on disk under
+  every scanned extension. The fuzz job is not a gate a tag passes through, so
+  a reproducer that lives only in a corpus is not a gate at all (ADR-0040 §3).
+- `an_mp3s_replay_gain_comes_off_its_id3v2_block` — the first test to drive an
+  MP3's ID3v2 tags through the decoder, which nothing covered before and which
+  the probe change below made load-bearing.
+- **Every skipped file says its own name in the log.** A scan prints one
+  `[scan] skipped <path>: <reason>` line per failure, beside the count it
+  already reported. The count is a statistic and cannot tell a listener *which*
+  record is missing; until this line existed there was no way to find out at
+  all, which is how the album below went missing behind the words
+  `14 files skipped`. Deliberately not truncated — a skipped file is rare by
+  construction, and on the pass where it is not, the length of the list is the
+  finding. A readout inside baz is in `docs/BACKLOG.md`; this line is its
+  floor, not its answer.
+
+### Changed
+
+- **The display options moved from the wall to the app bar**, on the owner's
+  instruction — off the index rail's foot on the Library and off the section
+  rules on Home and an artist's page, into a slot that is reserved in every
+  place. They are drawn only where the place hangs works, and absent (never
+  present-and-inert) on the four that do not; the slot is held either way, so
+  the bar's other controls never move.
+- **The Settings gear moved from the Library strip into the app bar**, and so
+  is reachable from every place rather than only the Library. Same corner, same
+  message, same tooltip.
+- The Library strip is the arrangement row alone. Its split breakpoint falls
+  from 824 px to 680 with the two departures.
+- **The `Dense` step is tighter** — art 160 … 200 where it was 176 … 240, on
+  the owner's *"I think the dense should be a bit smaller"*. At 1280 the wall
+  hangs 6 × 162.7 px where it hung 5 × 200.8; at 1920, 9 × 170.2 where it hung
+  8 × 195. `Compact` is re-derived from it and is still exactly the
+  `Balanced`-to-`Dense` rung halved. The floor is `art::THUMB_PX` halved — the
+  wall never discards more than three quarters of the thumbnail it decoded —
+  and stands one hang above the smallest sleeve baz identifies a record by.
+- **The scheduled fuzz job measures residency rather than reservation, and one
+  red target no longer hides the rest.** `-rss_limit_mb` stays at 2048;
+  `-malloc_limit_mb` goes to 6144, above the largest buffer a 32-bit length
+  field can name, because Symphonia allocates metadata buffers from unchecked
+  32-bit lengths in at least four places across two containers and that bound
+  is upstream's (ADR-0040 §1, `docs/BACKLOG.md`). The loop now runs **every**
+  target and fails at the end with the list — a `run:` block is `bash -e`, so
+  the first failure used to abort the step, which matters because
+  `playback_decode` stays red on a Symphonia panic that no fix inside baz can
+  hide from libFuzzer (§4). Its **triggers are unchanged**: fuzzing is still
+  `schedule` and `workflow_dispatch` only.
+- **`symphonia-metadata` is now a direct dependency** — **zero net-new
+  crates**, since it was already in the graph as Symphonia's own. baz needs to
+  name it to register the ID3v2 reader on the probe it now builds itself.
+
+### Removed
+
+- **`Play all`**, at the owner's request — the control and the action together.
+  Home's `All songs` tile is unaffected; it plays the collection rather than
+  the wall as arranged, and always did.
+
 ### Fixed
 
+- **One junk byte in a year tag no longer costs a whole album.** Fourteen
+  MP3s — every track of Frank Zappa's *Unmitigated Audacity*, ripped by
+  dBpoweramp — were missing from a 3 735-file library, and the only evidence
+  was `14 files skipped` in a status line. They are not corrupt: all fourteen
+  open and decode through `AudioSource` without a complaint, at 320 kbit/s
+  MPEG-1 Layer III. Each carries `TYER`, ID3v2.3's year frame, holding the
+  single character `0`. ID3v2.3 says a year is four digits, and lofty's default
+  parsing mode returns that as an error from the **whole-file** read — so the
+  scanner lost the title, the artist, the album, the track number and the row.
+  A tag is a description of the music, not a condition on it: a read that fails
+  is now retried under lofty's `Relaxed` mode, which drops the frame it cannot
+  parse instead of the file. Verified against the library that found it —
+  3 721 tracks and 14 skipped becomes **3 735 tracks and 0 skipped**, and the
+  only field lost is the year the frame never legibly held. Ordering is
+  deliberate: the strict read runs first and wins whenever it succeeds, so no
+  file that reads today reads any differently. `a_malformed_year_frame_costs_-
+  the_year_and_nothing_else` builds the byte sequence from the ID3v2.3
+  specification and fails without the fix.
+  - **Not a regression from the format-registry change** (ADR-0040 §2.5),
+    which was the first suspect: the scanner reads tags with lofty and never
+    touches Symphonia's probe. Both commits were built and run over the same
+    folder, and both skip the same fourteen files with the same sentence.
+- **A tighter density step could draw *larger* covers than a looser one.** Each
+  step carries its own hang, and the wall's art rises as the hang falls, so
+  wherever two steps landed on the same column count the tighter one drew the
+  bigger work: at the shipped 1280 px window `Balanced` hung 4 × 243 px and
+  `Compact` hung 4 × 253. Swept every whole pixel from 300 to 2560, the ladder
+  inverted at 30 of the 96 widths on a 20 px grid — and at 11 of them before
+  the fourth step existed, so this was true from the day the wall gained a
+  zoom. The step table's own test asserted **column count**, which was correct
+  throughout, so nothing ever checked the size a listener sees.
+
+  A step's largest work is now **derived**: it is the next-looser step's
+  smallest, so the four art ranges abut and cannot overlap, and a tighter step
+  can meet a looser one but never cross it. Monotonic at every width, swept to
+  quarter-pixel resolution. **This moves the default wall**: `Balanced` caps at
+  288 px rather than 320, so at the tops of each column band the covers are
+  smaller and the gutters wider — 744 of 2261 widths, none of them below
+  `Balanced`'s own 240 px floor. ADR-0028's second amendment.
 - **A corrupt file in a scanned folder can no longer stop the music.** Three
   panics in Symphonia's AAC reader were reachable from `AudioSource::open` —
   `assertion failed: step != 0` and `attempt to subtract with overflow` while
@@ -64,97 +174,6 @@ Every release is built from a tag by CI, gated on the full test suite — see
   - an `#EXTINF` title ending in a vertical tab or a non-breaking space was
     shortened by the writer but not by the reader, so the first save silently
     changed it.
-
-### Changed
-
-- **The scheduled fuzz job measures residency rather than reservation, and one
-  red target no longer hides the rest.** `-rss_limit_mb` stays at 2048;
-  `-malloc_limit_mb` goes to 6144, above the largest buffer a 32-bit length
-  field can name, because Symphonia allocates metadata buffers from unchecked
-  32-bit lengths in at least four places across two containers and that bound
-  is upstream's (ADR-0040 §1, `docs/BACKLOG.md`). The loop now runs **every**
-  target and fails at the end with the list — a `run:` block is `bash -e`, so
-  the first failure used to abort the step, which matters because
-  `playback_decode` stays red on a Symphonia panic that no fix inside baz can
-  hide from libFuzzer (§4). Its **triggers are unchanged**: fuzzing is still
-  `schedule` and `workflow_dispatch` only.
-- **`symphonia-metadata` is now a direct dependency** — **zero net-new
-  crates**, since it was already in the graph as Symphonia's own. baz needs to
-  name it to register the ID3v2 reader on the probe it now builds itself.
-
-### Added
-
-- `crates/baz-core/tests/hostile_media.rs` — every hostile input the fuzzer has
-  found, run on `push` through both `open_bytes` and a real file on disk under
-  every scanned extension. The fuzz job is not a gate a tag passes through, so
-  a reproducer that lives only in a corpus is not a gate at all (ADR-0040 §3).
-- `an_mp3s_replay_gain_comes_off_its_id3v2_block` — the first test to drive an
-  MP3's ID3v2 tags through the decoder, which nothing covered before and which
-  the probe change above made load-bearing.
-
-- **A tighter density step could draw *larger* covers than a looser one.** Each
-  step carries its own hang, and the wall's art rises as the hang falls, so
-  wherever two steps landed on the same column count the tighter one drew the
-  bigger work: at the shipped 1280 px window `Balanced` hung 4 × 243 px and
-  `Compact` hung 4 × 253. Swept every whole pixel from 300 to 2560, the ladder
-  inverted at 30 of the 96 widths on a 20 px grid — and at 11 of them before
-  the fourth step existed, so this was true from the day the wall gained a
-  zoom. The step table's own test asserted **column count**, which was correct
-  throughout, so nothing ever checked the size a listener sees.
-
-  A step's largest work is now **derived**: it is the next-looser step's
-  smallest, so the four art ranges abut and cannot overlap, and a tighter step
-  can meet a looser one but never cross it. Monotonic at every width, swept to
-  quarter-pixel resolution. **This moves the default wall**: `Balanced` caps at
-  288 px rather than 320, so at the tops of each column band the covers are
-  smaller and the gutters wider — 744 of 2261 widths, none of them below
-  `Balanced`'s own 240 px floor. ADR-0028's second amendment.
-
-### Changed
-
-- **The `Dense` step is tighter** — art 160 … 200 where it was 176 … 240, on
-  the owner's *"I think the dense should be a bit smaller"*. At 1280 the wall
-  hangs 6 × 162.7 px where it hung 5 × 200.8; at 1920, 9 × 170.2 where it hung
-  8 × 195. `Compact` is re-derived from it and is still exactly the
-  `Balanced`-to-`Dense` rung halved. The floor is `art::THUMB_PX` halved — the
-  wall never discards more than three quarters of the thumbnail it decoded —
-  and stands one hang above the smallest sleeve baz identifies a record by.
-=======
-### Added
-
-- **An app bar across the top of every place** — baz's own window chrome
-  (ADR-0040). It carries the window's name, the display options, the Settings
-  gear and the three window buttons (minimise, maximise, close, on the right),
-  and it is identical in all seven places. Dragging any part of it that is not
-  a control moves the window; pressing it twice maximises or restores it;
-  right-pressing it asks the desktop for its window menu.
-- Three glyphs on the icon sheet: minimise, maximise and restore, on the set's
-  own stroke band.
-- `BAZ_BORDERLESS=1` turns the platform's title bar off, so the app bar is the
-  window's only chrome. **Not the default**: iced 0.13 exposes no edge-drag
-  resize, so going borderless today loses the pointer resize edges — see
-  ADR-0040 §6 for the price of the iced 0.14 upgrade that would fix it.
-
-### Changed
-
-- **The display options moved from the wall to the app bar**, on the owner's
-  instruction — off the index rail's foot on the Library and off the section
-  rules on Home and an artist's page, into a slot that is reserved in every
-  place. They are drawn only where the place hangs works, and absent (never
-  present-and-inert) on the four that do not; the slot is held either way, so
-  the bar's other controls never move.
-- **The Settings gear moved from the Library strip into the app bar**, and so
-  is reachable from every place rather than only the Library. Same corner, same
-  message, same tooltip.
-- The Library strip is the arrangement row alone. Its split breakpoint falls
-  from 824 px to 680 with the two departures.
-
-### Removed
-
-- **`Play all`**, at the owner's request — the control and the action together.
-  Home's `All songs` tile is unaffected; it plays the collection rather than
-  the wall as arranged, and always did.
->>>>>>> feat/app-bar
 
 ## [0.1.0] - 2026-08-10
 

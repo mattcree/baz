@@ -1597,3 +1597,121 @@ fn a_multichannel_file_is_listed_like_any_other() {
     assert_eq!(t.sample_rate, Some(48_000));
     assert_eq!(t.duration, Some(std::time::Duration::from_secs(1)));
 }
+
+/// An `ID3v2.3` text frame: four-character ID, a big-endian size (v2.3 sizes
+/// are *not* synchsafe — only v2.4's are), two zero flag bytes, and the body
+/// **verbatim**.
+///
+/// Verbatim is the point. Every other tag in these tests is written with
+/// lofty, which makes them round-trip tests; this one has to emit a body
+/// lofty would refuse to write, so it is assembled from the specification
+/// instead.
+fn id3v2_3_frame(id: [u8; 4], body: &[u8]) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(10 + body.len());
+    frame.extend_from_slice(&id);
+    frame.extend_from_slice(
+        &u32::try_from(body.len())
+            .expect("frame body fits")
+            .to_be_bytes(),
+    );
+    frame.extend_from_slice(&[0x00, 0x00]);
+    frame.extend_from_slice(body);
+    frame
+}
+
+/// An `ID3v2.3` text frame body: the ISO-8859-1 encoding byte, the text, and
+/// the terminating null real taggers write.
+fn id3v2_3_text(text: &str) -> Vec<u8> {
+    let mut body = vec![0x00];
+    body.extend_from_slice(text.as_bytes());
+    body.push(0x00);
+    body
+}
+
+/// [`write_mp3`]'s frames behind a hand-assembled `ID3v2.3` tag.
+///
+/// The tag's own size is synchsafe (seven bits per byte) in every ID3v2
+/// version, unlike the per-frame sizes above.
+fn write_mp3_with_id3v2_3(root: &Path, relative: &str, frames: &[Vec<u8>]) -> PathBuf {
+    let path = write_mp3(root, relative);
+    let audio = fs::read(&path).expect("read mp3 fixture back");
+
+    let body: Vec<u8> = frames.concat();
+    let size = u32::try_from(body.len()).expect("tag fits");
+    let mut file = Vec::with_capacity(10 + body.len() + audio.len());
+    file.extend_from_slice(b"ID3");
+    file.extend_from_slice(&[0x03, 0x00, 0x00]);
+    file.extend_from_slice(&[
+        ((size >> 21) & 0x7F) as u8,
+        ((size >> 14) & 0x7F) as u8,
+        ((size >> 7) & 0x7F) as u8,
+        (size & 0x7F) as u8,
+    ]);
+    file.extend_from_slice(&body);
+    file.extend_from_slice(&audio);
+    fs::write(&path, file).expect("write tagged mp3 fixture");
+    path
+}
+
+/// **A malformed year frame costs the year, and nothing else.**
+///
+/// The case is a listener's, and it cost him a whole album. Fourteen MP3s
+/// ripped by dBpoweramp carry `TYER` — ID3v2.3's year frame — with the body
+/// `"0"`. ID3v2.3 says a year is four digits, so lofty's default parsing mode
+/// returns an error from the *whole-file* read, and the scanner turned that
+/// into a [`ScanEntry::Failed`]: no title, no artist, no album, no row. All
+/// fourteen files open and decode through `AudioSource` without complaint,
+/// and every scan reported the loss as one number in a status line.
+///
+/// The fixture reproduces the byte sequence exactly (`0x00 '0' 0x00`, three
+/// bytes) rather than approximating it, and the file is filed under a folder
+/// that disagrees with its tags on every field — so this asserts the tags
+/// were genuinely *recovered*, not that path inference papered over their
+/// absence.
+///
+/// The first assertion is the test's own guard: it fails if lofty's default
+/// mode ever stops rejecting this tag, which would leave the rest of the test
+/// passing while proving nothing.
+#[test]
+fn a_malformed_year_frame_costs_the_year_and_nothing_else() {
+    // dBpoweramp's TYER, byte for byte: ISO-8859-1, the single digit zero,
+    // and a terminating null.
+    const BAD_TYER: [u8; 3] = [0x00, b'0', 0x00];
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_mp3_with_id3v2_3(
+        dir.path(),
+        "Wrong Artist/Wrong Album/09 - Wrong Title.mp3",
+        &[
+            id3v2_3_frame(*b"TYER", &BAD_TYER),
+            id3v2_3_frame(*b"TIT2", &id3v2_3_text("Dupree's Paradise")),
+            id3v2_3_frame(*b"TPE1", &id3v2_3_text("Frank Zappa")),
+            id3v2_3_frame(*b"TALB", &id3v2_3_text("Unmitigated Audacity")),
+            id3v2_3_frame(*b"TRCK", &id3v2_3_text("1/14")),
+        ],
+    );
+
+    assert!(
+        lofty::probe::Probe::open(&path)
+            .expect("open fixture")
+            .guess_file_type()
+            .expect("guess type")
+            .options(lofty::config::ParseOptions::new())
+            .read()
+            .is_err(),
+        "the fixture must still be one lofty's default mode rejects, \
+         or this test proves nothing"
+    );
+
+    let track = only_track(dir.path());
+    assert_eq!(track.path, path, "the file is on the shelf");
+    assert_eq!(track.title.as_deref(), Some("Dupree's Paradise"));
+    assert_eq!(track.artist.as_deref(), Some("Frank Zappa"));
+    assert_eq!(track.album.as_deref(), Some("Unmitigated Audacity"));
+    assert_eq!(track.track, Some(1));
+    assert_eq!(
+        track.year, None,
+        "the frame never legibly held a year, so no year is reported — \
+         and none is invented"
+    );
+}
