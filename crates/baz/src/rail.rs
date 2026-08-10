@@ -446,6 +446,50 @@ mod tests {
             .collect()
     }
 
+    /// **The artists wall costs the rail nothing at all** (ADR-0035).
+    ///
+    /// This module is a pure function of the shelf headers, and an artists
+    /// wall's headers are [`Initial`]s exactly as the first group key's are —
+    /// so the *same call* indexes both walls, with no branch, no new
+    /// vocabulary and no state. The claim is asserted as an identity rather
+    /// than described: the rail for a set of headers is the rail for those
+    /// headers, whichever wall produced them.
+    ///
+    /// It is the rail's whole design being cashed in. Had the entries been
+    /// derived from the albums rather than from the headers, an artists wall
+    /// would have needed a second derivation here and a second chance to
+    /// disagree with the shelves it indexes.
+    #[test]
+    fn an_artists_wall_is_indexed_by_the_alphabet_rail_verbatim() {
+        // The headers `vm::build_artists` produces, in the order it produces
+        // them: both anonymous ends and three letters.
+        let headers = [
+            GroupHeaderVm::Initial(Initial::Other),
+            initial('A'),
+            initial('B'),
+            initial('Z'),
+            GroupHeaderVm::Initial(Initial::Various),
+        ];
+        let rail = entries(GroupKey::Artist, &headers);
+        // 27 slots plus the occupied `Various` end — the records wall's own
+        // answer for the same headers, because it *is* the same answer.
+        assert_eq!(rail.len(), 28);
+        assert_eq!(rail[0].label, "#");
+        assert_eq!(labels(&rail)[1..4], ["A", "B", "C"]);
+        assert_eq!(rail[27].label, "Various");
+        assert!(rail[27].present());
+        // Present values jump to the shelf they came from, in wall order.
+        assert_eq!(rail[0].shelf, Some(0));
+        assert_eq!(rail[1].shelf, Some(1));
+        assert_eq!(rail[2].shelf, Some(2));
+        assert_eq!(rail[3].shelf, None, "no C on this wall");
+        assert_eq!(rail[26].shelf, Some(3), "Z");
+        // And an empty artists wall indexes nothing, exactly as an empty
+        // records wall does: 27 absent letters beside a zero-result search
+        // would be an index of nothing.
+        assert!(entries(GroupKey::Artist, &[]).is_empty());
+    }
+
     /// **ARTIST draws the whole alphabet**, and the letters the collection has
     /// nothing under are drawn rather than skipped (§7.2).
     #[test]

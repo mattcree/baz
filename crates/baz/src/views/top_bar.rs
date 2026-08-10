@@ -14,8 +14,8 @@
 //! and the frame's resident surface is the lane.
 //!
 //! What is left is one subject, stated in the two vocabularies doc 10 §0.3
-//! separates: **the states** — ARTIST · YEAR · GENRE · ADDED · PLAYED, caps
-//! and tracked, one of them current — and **the act** — `Play all`, one
+//! separates: **the states** — A–Z · YEAR · GENRE · ADDED · PLAYED · ARTISTS,
+//! caps and tracked, one of them current — and **the act** — `Play all`, one
 //! sentence-case word behind the play triangle. Narrow-then-arrange used to read
 //! left to right across this strip; the narrowing is in the lane now and the
 //! strip begins at the arrangement. The gear stays in the corner because it is
@@ -40,6 +40,7 @@ use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf, search_id};
 use crate::motion::{Control, Ink};
+use crate::vm::WallSubject;
 
 use crate::{icon, theme};
 
@@ -57,12 +58,18 @@ use crate::{icon, theme};
 /// split is now the whole of the collapse order**.
 pub(crate) const WELL_W: f32 = 200.0;
 
-/// The group-key row's reserved width (logical px): five tracked caps words
-/// in their `GAP_XS`-padded buttons with `GAP_MD` between them, measured in
-/// `font.rs` against this declaration — L9's arithmetic needs every tenant
+/// The arrangement row's reserved width (logical px): **six** tracked caps
+/// words in their `GAP_XS`-padded buttons with `GAP_MD` between them, measured
+/// in `font.rs` against this declaration — L9's arithmetic needs every tenant
 /// to *declare*, and the declaration is only worth asserting if the face is
 /// measured against it.
-pub(crate) const KEYS_W: f32 = 314.0;
+///
+/// **314 → 368**, and both halves of ADR-0035 are in the figure. The first key
+/// gave 24 px back when its word became `A–Z` (`ARTIST` measured 56.90 px in
+/// its box, `A–Z` measures 32.92), and `ARTISTS` cost 65.49 plus the `GAP_MD`
+/// beside it — 77.49 spent against 23.98 returned. The six words measure
+/// 366.50 px; 368 is the next step on the 4 px lattice.
+pub(crate) const KEYS_W: f32 = 368.0;
 
 /// The act's reserved width (logical px): the triangle, its word, and their
 /// padding.
@@ -90,7 +97,7 @@ pub(crate) const ACTS_W: f32 = 88.0;
 /// stays on the window line, and the library's verbs and states take a line of
 /// their own. Nothing hides, nothing overflows, no menu appears; every control
 /// keeps its exact form. It can only be reached where the well is a tenant:
-/// once the well is in the lane the strip's tenants sum to 648 against a
+/// once the well is in the lane the strip's tenants sum to 608 against a
 /// narrowest possible strip of 720, asserted in `theme.rs`. Below
 /// [`theme::TOP_BAR_FLOOR`] nothing further collapses: 600 is the strip's
 /// declared floor.
@@ -101,12 +108,19 @@ pub(crate) const ACTS_W: f32 = 88.0;
 pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Message> {
     let room = theme::active();
     let holds_well = theme::strip_holds_the_well(shelf.window_w);
+    let records = shelf.subject == WallSubject::Records;
     let mut keys_row = row![]
         .spacing(theme::GAP_MD)
         .align_y(iced::Alignment::Center);
     for key in GroupKey::ALL {
-        keys_row = keys_row.push(group_key(key, key == shelf.group_key));
+        keys_row = keys_row.push(group_key(key, records && key == shelf.group_key));
     }
+    // **The sixth word, in the same row and in the same voice** (ADR-0035).
+    // It is a *state* like the five beside it — one of six is current — so it
+    // takes the same type, the same box and the same treatment, and the row
+    // reads as one closed set rather than as five states with a control after
+    // them.
+    keys_row = keys_row.push(subject_word(WallSubject::Artists, !records));
     // **Every tenant stands in its reserved width** (L9): the clusters are
     // fixed-width slots — `font.rs` measures the words against the
     // reservations — so the budget the law adds up is the geometry actually
@@ -157,7 +171,7 @@ pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Mes
         // **The two-line regime** (doc 10 §4.3), and it is reachable only in
         // this branch's own condition: the split exists to give the *library*
         // line its 600 px, and the frame line it splits away is the well's.
-        // With the well in the lane the strip's remaining tenants sum to 648
+        // With the well in the lane the strip's remaining tenants sum to 608
         // against a strip that is never narrower than 720, so there is nothing
         // to split — asserted in `theme.rs`, not assumed here.
         //
@@ -492,6 +506,45 @@ fn settings_gear(ink: Ink) -> Element<'static, Message> {
         .into()
 }
 
+/// **`ARTISTS`** — the sixth word, and the wall's other subject (ADR-0035).
+///
+/// # Why it is a word in this row and not something else
+///
+/// It is not a sixth [`GroupKey`]: ADR-0019 §1 promises every key is a
+/// projection in which every album appears exactly once, and `baz-core` sweeps
+/// `GroupKey::ALL` to assert it — a key that shelved *artists* would falsify
+/// that sweep rather than extend it (see [`WallSubject`]). It is not a lens
+/// either: the lens switcher is two words and both are spoken for.
+///
+/// What it *is* is the same kind of statement the five beside it make — one of
+/// a closed set of six, one of them current — so it takes their exact anatomy:
+/// the tracked caps at the metadata size, the `GAP_XS`-padded box at
+/// [`theme::TRANSPORT_HIT`], [`theme::group_key`]'s two-axis active treatment.
+/// A different treatment would have made it a control standing next to a set
+/// of states, which is a distinction the row does not have room to explain.
+///
+/// Its accelerator is `6` — the digit the number row had left over, and the
+/// one [`crate::keys`] already kept out of the query for exactly this.
+fn subject_word(subject: WallSubject, active: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    button(
+        container(
+            text(theme::tracked(&subject.label().to_uppercase()))
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .font(if active { theme::MEDIUM } else { theme::SANS })
+                .wrapping(text::Wrapping::None),
+        )
+        .height(Length::Fill)
+        .align_y(alignment::Vertical::Center),
+    )
+    .height(Length::Fixed(theme::TRANSPORT_HIT))
+    .padding(theme::pad(0.0, theme::GAP_XS))
+    .style(move |_theme, status| theme::group_key(room, room.wall, status, active))
+    .on_press(Message::WallSubjectSelected(subject))
+    .into()
+}
+
 /// Width of the well's reserved match-count slot (logical px): room for
 /// `40000 / 40000` — a library far larger than the owner's — at the meta
 /// size, measured in `font.rs`'s reserved-slot test. Fixed for the reason
@@ -504,9 +557,14 @@ pub(crate) const MATCH_W: f32 = 88.0;
 /// corpus size sits behind the glyph that says "search this", which is the
 /// fact landing where it is consulted (L8.3).
 fn resting_counts(shelf: &Shelf) -> String {
+    // **The noun follows the wall's subject** (ADR-0035): under an artists
+    // wall this figure counts the tiles the query is about to narrow, and a
+    // placeholder saying *albums* over a wall of people would be the readout
+    // describing a surface that is not on screen.
+    let (_, total) = shelf.wall_counts();
     format!(
-        "{} albums · {} tracks",
-        shelf.albums.len(),
+        "{total} {} · {} tracks",
+        shelf.wall_noun(),
         shelf.library.len()
     )
 }
@@ -515,10 +573,11 @@ fn resting_counts(shelf: &Shelf) -> String {
 /// It was `7 of 1 284 albums`, ≈ 1 100 px from the keys producing it; inside
 /// the control being typed into, the figures need no caption.
 fn match_count(shelf: &Shelf) -> String {
-    format!("{} / {}", shelf.visible.len(), shelf.albums.len())
+    let (narrowed, total) = shelf.wall_counts();
+    format!("{narrowed} / {total}")
 }
 
-/// One of the five words the wall is arranged by.
+/// One of the five words the **records** are arranged by.
 ///
 /// # The seam this closes
 ///
@@ -549,6 +608,11 @@ fn match_count(shelf: &Shelf) -> String {
 ///
 /// The word is a `button`, so the keyboard's `1`–`5` ([`crate::keys`]) and
 /// this control send the identical message and the visible-control rule holds.
+///
+/// **None of the five is current while the artists are on the wall**, and that
+/// is the honest reading rather than a missing state: the keys arrange records,
+/// and no record is being arranged. Pressing one asks for records again, in
+/// the arrangement it names — see [`crate::app::Shelf::arrange_by`].
 fn group_key(key: GroupKey, active: bool) -> Element<'static, Message> {
     let room = theme::active();
     button(
@@ -576,4 +640,106 @@ fn group_key(key: GroupKey, active: bool) -> Element<'static, Message> {
     .style(move |_theme, status| theme::group_key(room, room.wall, status, active))
     .on_press(Message::GroupKeySelected(key))
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    /// This file's own source — the only way to assert a claim about what is
+    /// *drawn* in a toolkit whose widget tree cannot be walked, and the idiom
+    /// `views::lane` and `app.rs` already use for exactly this.
+    fn source() -> String {
+        include_str!("top_bar.rs").replace("\r\n", "\n")
+    }
+
+    /// One function's body, by name.
+    fn body(source: &str, signature: &str) -> String {
+        let rest = source
+            .split_once(signature)
+            .unwrap_or_else(|| panic!("`{signature}` exists"))
+            .1;
+        rest[..rest.find("\n}\n").expect("a function ends")].to_owned()
+    }
+
+    /// **The strip's readouts count whatever the wall is a wall of**
+    /// (ADR-0035).
+    ///
+    /// Both figures the strip's own well draws — the resting placeholder and
+    /// the match count — go through
+    /// [`crate::app::Shelf::wall_counts`], and the placeholder's *noun* goes
+    /// through `wall_noun`. Under an artists wall a figure counting albums, or
+    /// a placeholder reading `210 albums` over a wall of people, would be the
+    /// readout describing a surface that is not on screen; that is the whole
+    /// defect this pins shut, and it is pinned in both wells (the lane's own
+    /// is pinned in `views::lane`).
+    #[test]
+    fn the_strips_readouts_count_what_the_wall_is_a_wall_of() {
+        let source = source();
+        let resting = body(&source, "fn resting_counts(shelf: &Shelf)");
+        assert!(
+            resting.contains("shelf.wall_counts()") && resting.contains("shelf.wall_noun()"),
+            "the placeholder's figure or its noun is not the wall's"
+        );
+        assert!(
+            !resting.contains("shelf.albums.len()"),
+            "the placeholder counts albums whatever the wall is showing"
+        );
+        let count = body(&source, "fn match_count(shelf: &Shelf)");
+        assert!(
+            count.contains("shelf.wall_counts()"),
+            "the strip's match count is not the wall's"
+        );
+        assert!(
+            !count.contains("shelf.visible.len()") && !count.contains("shelf.albums.len()"),
+            "the strip's match count reaches past the wall for its figures"
+        );
+    }
+
+    /// **The sixth word is a word in the same row, in the same voice**
+    /// (ADR-0035).
+    ///
+    /// It is a *state* — one of a closed set of six, one of them current — so
+    /// it takes the group keys' exact anatomy: the same box height, the same
+    /// `GAP_XS` padding, the same [`theme::group_key`] two-axis treatment, and
+    /// it is pushed into the same row. Anything else would have made it a
+    /// control standing beside a set of states, which is a distinction a row
+    /// of six words has no room to explain.
+    #[test]
+    fn the_sixth_word_is_drawn_as_the_five_beside_it_are() {
+        let source = source();
+        let key = body(&source, "fn group_key(key: GroupKey, active: bool)");
+        let subject = body(
+            &source,
+            "fn subject_word(subject: WallSubject, active: bool)",
+        );
+        for shared in [
+            "Length::Fixed(theme::TRANSPORT_HIT)",
+            "theme::pad(0.0, theme::GAP_XS)",
+            "theme::group_key(room, room.wall, status, active)",
+            // Its size and leading together, which is also how
+            // `theme`'s own source scan wants to find them.
+            "theme::SIZE_META)\n                .line_height(theme::LEADING_META)",
+            "if active { theme::MEDIUM } else { theme::SANS }",
+        ] {
+            assert!(
+                key.contains(shared) && subject.contains(shared),
+                "the sixth word and the five keys disagree about {shared:?}"
+            );
+        }
+        // And it stands in the same row, so the strip draws one set of six
+        // rather than five and a neighbour.
+        let view = body(
+            &source,
+            "pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink)",
+        );
+        assert!(
+            view.contains("keys_row.push(subject_word(WallSubject::Artists"),
+            "the sixth word is not in the group-key row"
+        );
+        // No key is current while the artists are up: the keys arrange
+        // records, and no record is being arranged.
+        assert!(
+            view.contains("records && key == shelf.group_key"),
+            "a group key stays lit while the wall is showing artists"
+        );
+    }
 }
