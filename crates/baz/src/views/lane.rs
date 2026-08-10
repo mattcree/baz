@@ -114,7 +114,7 @@ pub(crate) fn view<'a>(
     place: Place,
     rows: &'a [Touched],
     sounding: bool,
-    playing: Option<u64>,
+    sounding_row: Option<Subject>,
     window_w: f32,
 ) -> Element<'a, Message> {
     let room = theme::active();
@@ -142,12 +142,26 @@ pub(crate) fn view<'a>(
 
     let mut list = column![];
     for entry in rows {
-        // **Which row is sounding** — doc 13 §2.6's claim, delivered. A list is
-        // never "the sounding record" however many of its tracks are in the
-        // run: the fact is about a record, and a list that lit because one of
-        // its members was playing would be the invisible-pool posture in a
-        // sleeve.
-        let sounds = matches!(entry.subject, Subject::Record(id) if Some(id) == playing);
+        // **Which row is sounding** — doc 13 §2.6's claim, delivered.
+        //
+        // A list is never "the sounding record" however many of its tracks are
+        // in the run: the fact is about a record, and a list that lit because
+        // one of its members was playing would be the invisible-pool posture
+        // in a sleeve. **That argument is kept and it is still true — but it
+        // is about a list lighting *incidentally*, and it does not reach the
+        // case where the list is what the listener put on.** The owner: *"I
+        // still see albums specifically appearing as if they are playing
+        // rather than the playlist … in a sense we need to track which
+        // playlist + track is playing"*.
+        //
+        // So the mark follows the **run's origin** ([`lane::sounding_subject`],
+        // which is the same call the recency ordering makes, so the two cannot
+        // disagree): a run reified from a list marks the list and none of its
+        // records; every other run marks the record, as before. Nothing lights
+        // incidentally either way — a list only ever marked because it *is* the
+        // run, which is the most direct fact available rather than a guess from
+        // membership.
+        let sounds = sounding_row.is_some() && sounding_row == Some(entry.subject);
         list = list.push(lane_row(shelf, playlists, entry, open, sounds));
     }
     // **The rows carry the lane's gutter, not the scrollable**, so the bar
@@ -1107,16 +1121,39 @@ mod tests {
     /// The dot before the name and the row's card, which is the **row's**
     /// vocabulary — what the queue and a playlist's page already draw — rather
     /// than the tile's halo, which would want the lamp's clock in a surface
-    /// ADR-0030 §4 costs at zero idle CPU. And a **record** only: a list is
-    /// never "the sounding record" however many of its tracks are in the run.
+    /// ADR-0030 §4 costs at zero idle CPU.
+    ///
+    /// **Which row, though, is not asserted here**, and the split is the
+    /// point. *A playlist's run marks the list and not the records it quotes*
+    /// is a **behavioural** claim, and it is pinned as one, over real values,
+    /// in `lane.rs`'s `the_sounding_row_is_the_list_when_a_list_is_what_was_put_on`
+    /// and `only_one_row_is_ever_marked`. A source scan cannot tell a correct
+    /// rewrite from a broken one, so it must not be what guards a rule.
+    ///
+    /// What a source scan *can* say, and what is load-bearing enough to keep:
+    /// **the view does not re-derive the answer.** The rule lives in
+    /// `lane::sounding_subject` — the same call the recency ordering makes —
+    /// and a view that went back to matching on the sounding file's record
+    /// would be correct-looking, would pass every behavioural test in
+    /// `lane.rs`, and would put the dot and the order back to reading two
+    /// separate answers to one question. That is a fact about *where the code
+    /// is*, which is the only kind of fact this form is good for. The
+    /// remaining assertions are the row's own drawing, which builds iced
+    /// widgets and so has nothing else to be asserted against.
     #[test]
     fn the_sounding_record_is_the_marked_row() {
         let source = source();
         let view = body(&source, "pub(crate) fn view<'a>(");
         assert!(
-            view.contains("Subject::Record(id) if Some(id) == playing"),
-            "the lane no longer asks which of its rows is sounding, or asks it \
-             of lists as well as records"
+            !view.contains("Subject::Record(id) if Some(id) =="),
+            "the lane derived the sounding row from the sounding file's record \
+             again, instead of taking `lane::sounding_subject`'s answer — the \
+             dot and the recency order are now free to disagree"
+        );
+        assert!(
+            !view.contains("Subject::Playlist(") && !view.contains("played_list"),
+            "the lane re-derived which row is sounding rather than being handed \
+             it; the rule belongs in `lane::sounding_subject`"
         );
         let row = body(&source, "fn lane_row<'a>(");
         assert!(

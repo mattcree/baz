@@ -636,7 +636,7 @@ fn all_songs_tile<'a>(
     let hover = if hovered { 1.0 } else { 0.0 };
     let caption_block = column![
         caption_lane(
-            text(list.name())
+            text(list.name().to_owned())
                 .size(theme::SIZE_BODY)
                 .line_height(theme::LEADING_BODY)
                 .font(theme::MEDIUM)

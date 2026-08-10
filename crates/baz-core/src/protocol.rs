@@ -96,6 +96,36 @@ pub enum Command {
     SetQueue {
         /// The new queue, in play order.
         paths: Vec<PathBuf>,
+        /// **The list this run is a reification of** — `kind:key:name`, or
+        /// `None` for a run whose origin the sender does not state (ADR-0034
+        /// §2–§3).
+        ///
+        /// The engine holds no opinion about it. It carries the string to the
+        /// ledger writer, which opens a run with it, and **reads nothing in
+        /// it** — one field, one consumer. What a `kind` word means belongs to
+        /// the front end that wrote it and to the front end that reads the
+        /// ledger back; putting the grammar in here would make the engine hold
+        /// an opinion about what is queued, which is the thing ADR-0023 §1
+        /// refuses.
+        ///
+        /// It exists because the ledger cannot record what the engine was
+        /// never told. Before it, `SetQueue { paths }` was the whole of what
+        /// the engine learned about a run, so a list played in one session
+        /// came back as its records in the next — the owner's defect, and the
+        /// structural reason for it.
+        ///
+        /// **Not one pinned wire byte moves.** `skip_serializing_if` omits the
+        /// key when there is nothing to say, and `default` accepts its
+        /// absence, so a sender that predates this field and a sender with no
+        /// origin produce the bytes they always produced —
+        /// `command_wire_format_is_stable` is unchanged rather than rewritten.
+        ///
+        /// [`Command::UpdateQueue`] deliberately does **not** gain it:
+        /// `SetQueue` is a new choice and `UpdateQueue` is an edit to the
+        /// choice you made (ADR-0014 §2), and an edit that could restate the
+        /// origin would make provenance something an edit can lie about.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<String>,
     },
     /// Edit the play queue **without interrupting the music**: remove, insert,
     /// append or reorder by sending the queue as it should now be (ADR-0014).
@@ -1165,6 +1195,7 @@ mod tests {
                     PathBuf::from("/music/a.flac"),
                     PathBuf::from("/music/b.wav"),
                 ],
+                origin: None,
             },
             Command::UpdateQueue {
                 paths: vec![
@@ -1655,6 +1686,66 @@ mod tests {
         }
     }
 
+    /// **A run's origin adds one key and moves no other byte** (ADR-0034 §2).
+    ///
+    /// Its own test rather than a sixth case inside
+    /// [`command_wire_format_is_stable`], and deliberately so: that test is
+    /// the pin, and the claim here is precisely that **it did not have to
+    /// change**. `skip_serializing_if` omits the key when there is nothing to
+    /// say, so a sender that predates this field and a sender with no origin
+    /// produce the bytes it already pins.
+    #[test]
+    fn a_run_with_an_origin_adds_one_key_and_moves_no_other_byte() {
+        let bare = serde_json::to_string(&Command::SetQueue {
+            paths: vec![PathBuf::from("/music/a.flac")],
+            origin: None,
+        })
+        .expect("serialize");
+        assert_eq!(bare, r#"{"cmd":"set_queue","paths":["/music/a.flac"]}"#);
+
+        let stated = serde_json::to_string(&Command::SetQueue {
+            paths: vec![PathBuf::from("/music/a.flac")],
+            origin: Some("playlist:3b1f00c2a49d7e60:Road Trip".to_owned()),
+        })
+        .expect("serialize");
+        assert_eq!(
+            stated,
+            r#"{"cmd":"set_queue","paths":["/music/a.flac"],"origin":"playlist:3b1f00c2a49d7e60:Road Trip"}"#
+        );
+        // The one key is appended: the bytes above are a prefix of these, less
+        // the closing brace.
+        assert!(
+            stated.starts_with(bare.trim_end_matches('}')),
+            "{stated}\n{bare}"
+        );
+    }
+
+    /// **A `set_queue` written before ADR-0034 still reads**, and reads as
+    /// *we do not know* rather than as an error.
+    ///
+    /// The other half of the compatibility claim: the bytes pinned above are
+    /// what an older front end sends, and this is the engine accepting them.
+    #[test]
+    fn a_set_queue_with_no_origin_is_a_run_whose_list_is_not_stated() {
+        let old = r#"{"cmd":"set_queue","paths":["/music/a.flac"]}"#;
+        assert_eq!(
+            serde_json::from_str::<Command>(old).expect("deserialize"),
+            Command::SetQueue {
+                paths: vec![PathBuf::from("/music/a.flac")],
+                origin: None,
+            }
+        );
+        // And an origin this engine will never look inside travels whole.
+        let new = r#"{"cmd":"set_queue","paths":["/music/a.flac"],"origin":"moodboard:ff:Rainy Tuesday"}"#;
+        assert_eq!(
+            serde_json::from_str::<Command>(new).expect("deserialize"),
+            Command::SetQueue {
+                paths: vec![PathBuf::from("/music/a.flac")],
+                origin: Some("moodboard:ff:Rainy Tuesday".to_owned()),
+            }
+        );
+    }
+
     /// Every [`Command`] variant's bytes, pinned. The wire format is a public
     /// contract; a change here is a protocol break and must be a deliberate,
     /// versioned decision.
@@ -1664,6 +1755,7 @@ mod tests {
             (
                 serde_json::to_string(&Command::SetQueue {
                     paths: vec![PathBuf::from("/music/a.flac")],
+                    origin: None,
                 })
                 .expect("serialize"),
                 r#"{"cmd":"set_queue","paths":["/music/a.flac"]}"#,

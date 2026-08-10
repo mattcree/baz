@@ -1455,14 +1455,33 @@ impl<S: Sink> Control<S> {
         ) else {
             return; // nothing was heard: nothing happened
         };
-        let ledger = self
-            .history
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
-        if let Some(ledger) = ledger {
+        if let Some(ledger) = self.ledger() {
             ledger.record(record, Some(self.events.clone()));
         }
+    }
+
+    /// Tell the ledger a new run has begun, reified from `origin` (ADR-0034).
+    ///
+    /// The engine's whole involvement with the string: it arrived on
+    /// [`Command::SetQueue`], it goes to the ledger, and nothing here looks
+    /// inside it. A run opened while no ledger is attached is simply not
+    /// recorded — the same silence an engine with no ledger keeps about
+    /// everything else.
+    fn open_run(&self, origin: Option<String>) {
+        if let Some(ledger) = self.ledger() {
+            ledger.open_run(origin);
+        }
+    }
+
+    /// The ledger, if a front end has handed the engine one.
+    ///
+    /// One mutex read, on this thread, never on the pump — the terms
+    /// [`Self::history`] states.
+    fn ledger(&self) -> Option<Arc<HistoryLedger>> {
+        self.history
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Bank and close in one go — the ordinary "delivery has ended" path, for
@@ -1625,10 +1644,15 @@ impl<S: Sink> Control<S> {
 
     fn handle(&mut self, command: Command) {
         match command {
-            Command::SetQueue { paths } => {
+            Command::SetQueue { paths, origin } => {
                 let before = self.playing_index();
                 let changed = paths != self.queue;
+                // Before the queue moves: `stop_session` ends the play in
+                // progress, and that play belongs to the run that is being
+                // replaced. Opening the new run after it is what keeps the
+                // ledger's runs in the order they happened.
                 self.stop_session();
+                self.open_run(origin);
                 self.queue = paths;
                 self.replan();
                 self.position = self.top();
@@ -3703,6 +3727,7 @@ mod tests {
         fn play_until_audio_flows(&self) {
             self.send(Command::SetQueue {
                 paths: vec![self.track.clone()],
+                origin: None,
             });
             self.send(Command::Play);
             loop {
@@ -3829,7 +3854,10 @@ mod tests {
         let harness = Harness::start();
         harness.play_until_audio_flows();
         let mark = harness.mark();
-        harness.send(Command::SetQueue { paths: Vec::new() });
+        harness.send(Command::SetQueue {
+            paths: Vec::new(),
+            origin: None,
+        });
         assert!(
             discarded(&wait_until(&harness, mark, discarded)),
             "SetQueue while playing must discard the sink's buffered audio"
@@ -3984,7 +4012,10 @@ mod tests {
             drop(control.run());
         });
         cmd_tx
-            .send(Command::SetQueue { paths: queue })
+            .send(Command::SetQueue {
+                paths: queue,
+                origin: None,
+            })
             .expect("engine accepts commands");
         cmd_tx.send(Command::Play).expect("engine accepts commands");
 
@@ -4453,7 +4484,10 @@ mod tests {
             drop(control.run());
         });
         cmd_tx
-            .send(Command::SetQueue { paths: queue })
+            .send(Command::SetQueue {
+                paths: queue,
+                origin: None,
+            })
             .expect("engine accepts commands");
         for command in before_play {
             cmd_tx

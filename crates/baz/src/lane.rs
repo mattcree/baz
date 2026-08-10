@@ -119,6 +119,92 @@ pub(crate) fn played_list(provenance: Option<&str>) -> Option<u64> {
     provenance.map(crate::playlists::playlist_id)
 }
 
+/// **Which lane row a run touched** — [`played_list`]'s general form, over the
+/// [`Origin`](crate::origin::Origin) a *ledger* carries rather than the
+/// playlist name a live queue does.
+///
+/// The finding ADR-0034 records is that the mapping already existed and nobody
+/// had called it one: **[`Subject::Record`] *is* the album's implicit list.**
+/// The lane's two subjects were list identities before there was a type for
+/// them, which is why this is a `match` and not a new concept.
+///
+/// `None` is *nothing in the lane moves*, and it is a real answer for four
+/// kinds:
+///
+/// - **An artist's run.** The lane has no artist row. ADR-0030 §1's subject is
+///   records and lists, and a third would be the second subject that killed
+///   the last resident column.
+/// - **`All songs`, and a draw.** *"A draw is not somewhere you return to"* —
+///   there is nothing to go back to, so there is no row to raise.
+/// - **A run made by hand.** There was no list.
+///
+/// # The rule this places on the *writer*
+///
+/// Marking a run in the ledger excludes its plays from the records they
+/// quoted, so **a kind this returns `None` for must not be written as a
+/// marker** until the lane can credit it — otherwise the touch is lost rather
+/// than moved. Today the product writes exactly one kind, and
+/// [`crate::origin`]'s own sweep is where that is asserted.
+pub(crate) fn subject_of(origin: &crate::origin::Origin) -> Option<Subject> {
+    use crate::origin::Origin;
+    match origin {
+        Origin::Playlist { id, .. } => Some(Subject::Playlist(*id)),
+        Origin::Album { id, .. } => Some(Subject::Record(*id)),
+        Origin::Artist { .. } | Origin::AllSongs | Origin::Draw | Origin::Hand { .. } => None,
+    }
+}
+
+/// **Which lane row is sounding** — the row the lamp dot belongs on.
+///
+/// The owner, on the shipped lane: *"I still see albums specifically appearing
+/// as if they are playing rather than the playlist. in a sense we need to track
+/// which playlist + track is playing to actually understand what is happening
+/// … it is showing next to the album rather than the playlist"*. He had
+/// isolated it exactly: the **order** was already right, and the **mark** was
+/// not.
+///
+/// The rule is [`played_list`]'s, and deliberately the same call rather than a
+/// second one that agrees today: **the dot follows the run's origin.** A run
+/// reified from a list marks the *list*, and none of the records it quotes,
+/// however many of their tracks are sounding; every other run marks the record,
+/// exactly as before. Order and mark now come out of one function, so they
+/// cannot drift into saying different things about the same run — which is the
+/// failure mode a second reading of "the same" fact always has.
+///
+/// # `sounding` is the liveness, and it is not optional
+///
+/// **A run's origin outlives the run.** `QueueVm::provenance` is a fact about
+/// the list that *remains* after `QueueEnded` — deliberately, since ADR-0023 §4
+/// keeps it until a replacing `SetQueue` — whereas the record this used to read
+/// (`PlayerState::playing_album`) went to `None` the moment nothing sounded, and
+/// was silently carrying the liveness for the whole mark. Reading the origin
+/// without `sounding` therefore leaves the lamp lit on a list that finished an
+/// hour ago. So the liveness is taken as its own argument and answered first:
+/// **the dot says *this is on*, and only then *which row*.**
+///
+/// `record` is the sounding file's record, `None` for a file the library does
+/// not hold — which still marks nothing for a record's run (the head's own dot
+/// answers instead) but does **not** cost a list's run its mark, because a
+/// list's identity does not depend on the library resolving the file.
+///
+/// **At most one row is ever marked**, because a run has one origin —
+/// `only_one_row_is_ever_marked` is that as a test, since two dots would mean
+/// the model had been broken upstream rather than that the lane had drawn
+/// something odd.
+pub(crate) fn sounding_subject(
+    sounding: bool,
+    provenance: Option<&str>,
+    record: Option<u64>,
+) -> Option<Subject> {
+    if !sounding {
+        return None;
+    }
+    match played_list(provenance) {
+        Some(id) => Some(Subject::Playlist(id)),
+        None => record.map(Subject::Record),
+    }
+}
+
 /// One thing the listener has touched, as the shell reports it.
 ///
 /// `at` is seconds since the Unix epoch — the ledger's own unit
@@ -377,6 +463,292 @@ mod tests {
             matches!(rows[0].subject, Subject::Playlist(_)),
             "the thing that was played is at the head of the lane"
         );
+    }
+
+    /// **The lane's two subjects are list identities**, and a run's origin
+    /// maps onto them — the general form of the rule above, over what a
+    /// *ledger* carries rather than what a live queue does.
+    #[test]
+    fn a_runs_origin_names_the_lane_row_it_touched() {
+        use crate::origin::Origin;
+
+        // A list's run touches the list …
+        assert_eq!(
+            subject_of(&Origin::playlist("Road Trip")),
+            Some(Subject::Playlist(crate::playlists::playlist_id(
+                "Road Trip"
+            )))
+        );
+        // … and a record's run touches the record, because `Subject::Record`
+        // *is* the album's implicit list. An album is not a playlist, and its
+        // run is still credited to the thing that played.
+        assert_eq!(
+            subject_of(&Origin::Album {
+                id: 42,
+                name: "Ochre".to_owned()
+            }),
+            Some(Subject::Record(42))
+        );
+        // The kinds that are not somewhere you return to move nothing.
+        for origin in [
+            Origin::Artist {
+                id: 7,
+                name: "Talk Talk".to_owned(),
+            },
+            Origin::AllSongs,
+            Origin::Draw,
+            Origin::Hand { was: None },
+        ] {
+            assert_eq!(subject_of(&origin), None, "{origin:?}");
+        }
+    }
+
+    /// The two readings of a playlist's run — the live one and the ledger's —
+    /// name the same row. If they ever disagreed, a list would move on being
+    /// played and move somewhere else on the next launch.
+    #[test]
+    fn the_live_reading_and_the_ledgers_agree_about_a_list() {
+        let live = played_list(Some("Road Trip")).expect("a list's run");
+        let filed = subject_of(&crate::origin::Origin::playlist("Road Trip"));
+        assert_eq!(filed, Some(Subject::Playlist(live)));
+    }
+
+    /// **The whole launch-time fold, over a ledger written a week ago** — the
+    /// cross-quit half of the owner's defect, end to end (ADR-0034).
+    ///
+    /// The situation, exactly as he meets it: `Road Trip` was played on Friday
+    /// and quoted tracks from two records he last put on in June. He quits. He
+    /// launches baz. Before this, `Playlists::played` was gone with the process
+    /// and the lane re-derived Friday from the play lines — so both records
+    /// jumped to the head and the list sat back at its file's mtime. After it,
+    /// the ledger's run marker survives the quit and the list does.
+    ///
+    /// Written against a real `baz_core::history::History` folded out of real
+    /// ledger bytes, because the claim is about what a *file* says a week
+    /// later, not about what a value holds.
+    #[test]
+    fn a_list_played_last_week_comes_back_as_the_list_and_not_its_records() {
+        use std::fmt::Write as _;
+        use std::path::Path;
+
+        // The four instants the ledger below spells, in the ledger's own
+        // unit — so the assertions are about the file rather than about a
+        // second calendar this test would otherwise have to keep.
+        const JUNE: u64 = 1_780_033_600; // 2026-05-29T05:46:40Z
+        const JUNE_LATER: u64 = 1_780_033_800; // 2026-05-29T05:50:00Z
+        const FRIDAY_LAST: u64 = 1_785_043_440; // 2026-07-26T05:24:00Z
+
+        let ochre = "/music/Ochre/01.flac";
+        let violet = "/music/Violet Ledger/03.flac";
+        let list = crate::origin::Origin::playlist("Road Trip");
+
+        // The file, byte for byte, as two sessions would have left it: a run
+        // in June that named no list, and Friday's run that named one.
+        let mut ledger = String::new();
+        let _ = writeln!(ledger, "# baz play history.");
+        let _ = writeln!(ledger, "# baz run 2026-05-29T05:46:40Z -");
+        let _ = writeln!(
+            ledger,
+            "2026-05-29T05:46:40Z\tplayed\t231480\t245013\t{ochre}"
+        );
+        let _ = writeln!(
+            ledger,
+            "2026-05-29T05:50:00Z\tplayed\t231480\t245013\t{violet}"
+        );
+        let _ = writeln!(ledger, "# baz run 2026-07-26T05:20:00Z {}", list.encode());
+        let _ = writeln!(
+            ledger,
+            "2026-07-26T05:20:00Z\tplayed\t231480\t245013\t{ochre}"
+        );
+        let _ = writeln!(
+            ledger,
+            "2026-07-26T05:24:00Z\tplayed\t231480\t245013\t{violet}"
+        );
+
+        let history = baz_core::history::History::from_reader(ledger.as_bytes());
+        assert_eq!(history.records(), 4);
+        assert_eq!(history.malformed(), 0, "the markers were read as damage");
+
+        // **The records half.** Both tracks were played on Friday and the
+        // ledger still says so — but neither is a *record the listener put
+        // on* since June, which is what the lane folds.
+        for path in [ochre, violet] {
+            assert_eq!(history.track(Path::new(path)).plays, 2);
+        }
+        let records = by_record([(10_u64, ochre), (11, violet)], |path| {
+            history.last_played_unlisted(Path::new(path))
+        });
+        assert_eq!(records.get(&10), Some(&JUNE));
+        assert_eq!(records.get(&11), Some(&JUNE_LATER));
+
+        // **The lists half.** The run credits the list, at the moment of its
+        // last play — Friday.
+        let credited: Vec<(Subject, u64)> = history
+            .runs()
+            .iter()
+            .filter_map(|run| {
+                let at = run.last_played_unix_s?;
+                let origin = crate::origin::Origin::decode(run.origin.as_deref()?)?;
+                Some((subject_of(&origin)?, at))
+            })
+            .collect();
+        let list_id = crate::playlists::playlist_id("Road Trip");
+        assert_eq!(credited, vec![(Subject::Playlist(list_id), FRIDAY_LAST)]);
+
+        // **And the lane the owner sees.** The list is at the head, and the
+        // records it quoted are where June left them.
+        let rows = resolve(
+            vec![touched(
+                Subject::Playlist(list_id),
+                "Road Trip",
+                Some(credited[0].1),
+            )],
+            vec![
+                touched(Subject::Record(10), "Ochre", records.get(&10).copied()),
+                touched(
+                    Subject::Record(11),
+                    "Violet Ledger",
+                    records.get(&11).copied(),
+                ),
+            ],
+        );
+        assert_eq!(names(&rows), ["Road Trip", "Violet Ledger", "Ochre"]);
+        assert!(
+            matches!(rows[0].subject, Subject::Playlist(_)),
+            "the thing that was played is not at the head of the lane"
+        );
+    }
+
+    /// **An album's run still credits the album.** A fixed list is not a
+    /// playlist: the marker's job is to stop a *playlist's* run crediting its
+    /// albums, not to stop albums being credited when an album is what played.
+    #[test]
+    fn a_ledger_with_no_marked_list_folds_exactly_as_it_always_did() {
+        use std::fmt::Write as _;
+        use std::path::Path;
+
+        let track = "/music/Ochre/01.flac";
+        let mut unmarked = String::from("# baz play history.\n");
+        let _ = writeln!(
+            unmarked,
+            "2026-07-26T05:20:00Z\tplayed\t231480\t245013\t{track}"
+        );
+        // The same plays, under a marker that names no list — an album's run,
+        // `Play all`, a draw. Both must fold to the record.
+        let mut marked = String::from("# baz play history.\n# baz run 2026-07-26T05:20:00Z -\n");
+        let _ = writeln!(
+            marked,
+            "2026-07-26T05:20:00Z\tplayed\t231480\t245013\t{track}"
+        );
+
+        for text in [unmarked, marked] {
+            let history = baz_core::history::History::from_reader(text.as_bytes());
+            assert_eq!(history.malformed(), 0, "{text}");
+            assert_eq!(
+                history.last_played_unlisted(Path::new(track)),
+                history.track(Path::new(track)).last_played_unix_s,
+                "the record lost its own play\n{text}"
+            );
+            assert!(history.last_played_unlisted(Path::new(track)).is_some());
+        }
+    }
+
+    /// **The dot follows the run's origin, not the sounding file's record.**
+    ///
+    /// The owner, on the shipped lane: *"I still see albums specifically
+    /// appearing as if they are playing rather than the playlist … it is
+    /// showing next to the album rather than the playlist"*. Recency was
+    /// already right; this is the mark.
+    #[test]
+    fn the_sounding_row_is_the_list_when_a_list_is_what_was_put_on() {
+        let list = crate::playlists::playlist_id("Road Trip");
+
+        // A run reified from a list marks the **list**, even though the track
+        // sounding belongs to a record the lane also holds.
+        assert_eq!(
+            sounding_subject(true, Some("Road Trip"), Some(10)),
+            Some(Subject::Playlist(list))
+        );
+        // Every other run marks the record, exactly as before.
+        assert_eq!(
+            sounding_subject(true, None, Some(10)),
+            Some(Subject::Record(10))
+        );
+        // A *record's* run over a file the library does not hold marks nothing
+        // — the head's own dot still answers, and the list has nothing to
+        // point at. A **list's** run is not so limited: its identity is the
+        // file's name, not the library's opinion of the track.
+        assert_eq!(sounding_subject(true, None, None), None);
+        assert_eq!(
+            sounding_subject(true, Some("Road Trip"), None),
+            Some(Subject::Playlist(list))
+        );
+    }
+
+    /// **Nothing sounding, nothing marked** — its own test rather than a line
+    /// in the one above, because this is the case that made `sounding` a
+    /// separate argument. A run's origin **outlives the run**: ADR-0023 §4
+    /// keeps it until a replacing `SetQueue`, so a lane that read the origin
+    /// alone would leave the lamp lit on a list that finished an hour ago. The
+    /// record this mark used to read was carrying the liveness by accident,
+    /// because it went to `None` the moment the music stopped.
+    #[test]
+    fn a_finished_run_leaves_no_lamp_behind() {
+        // The run ended: the queue still knows which list it came from, and
+        // there is no sounding record any more.
+        assert_eq!(sounding_subject(false, Some("Road Trip"), None), None);
+        // …and silence marks nothing even where a record is still resolvable.
+        assert_eq!(sounding_subject(false, Some("Road Trip"), Some(10)), None);
+        assert_eq!(sounding_subject(false, None, Some(10)), None);
+    }
+
+    /// **At most one row is ever marked.** A run has one origin, so two dots
+    /// would mean the model had been broken upstream rather than that the lane
+    /// had drawn something odd — which is why this is asserted over the whole
+    /// resolved lane rather than trusted to the row loop.
+    #[test]
+    fn only_one_row_is_ever_marked() {
+        let list = crate::playlists::playlist_id("Road Trip");
+        let rows = resolve(
+            vec![
+                touched(Subject::Playlist(list), "Road Trip", Some(300)),
+                touched(Subject::Playlist(2), "Sunday", Some(100)),
+            ],
+            vec![
+                touched(Subject::Record(10), "Ochre", Some(400)),
+                touched(Subject::Record(11), "Violet Ledger", Some(200)),
+            ],
+        );
+        for (provenance, record) in [
+            (Some("Road Trip"), Some(10)),
+            (Some("Road Trip"), None),
+            (None, Some(10)),
+            (None, Some(11)),
+            (None, None),
+            // A list the lane does not hold, and a record it does not hold:
+            // nothing is marked rather than something arbitrary.
+            (Some("Late Shift"), None),
+            (None, Some(999)),
+        ] {
+            let sounding = sounding_subject(true, provenance, record);
+            let marked = rows
+                .iter()
+                .filter(|row| sounding.is_some() && sounding == Some(row.subject))
+                .count();
+            assert!(
+                marked <= 1,
+                "{provenance:?}/{record:?} marked {marked} rows"
+            );
+        }
+        // And the list's run marks the list itself — not nothing, and not one
+        // of the records it quotes.
+        let sounding = sounding_subject(true, Some("Road Trip"), Some(10));
+        let marked: Vec<&str> = rows
+            .iter()
+            .filter(|row| sounding == Some(row.subject))
+            .map(|row| row.name.as_str())
+            .collect();
+        assert_eq!(marked, ["Road Trip"]);
     }
 
     /// The head is a closed set of three, in the owner's order. A fourth

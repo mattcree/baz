@@ -49,6 +49,7 @@ mod menu;
 mod motion;
 mod mpris;
 mod needle;
+mod origin;
 mod place;
 mod playback;
 mod player;

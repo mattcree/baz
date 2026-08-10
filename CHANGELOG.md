@@ -167,6 +167,44 @@ next commit.
   least-recently-played weighting. Nothing else — history records, it never
   performs. Scrobbling is out of scope and attaches downstream, as a consumer
   of the event, never as a dependency of the ledger.
+- **The ledger is a list of runs, each holding its plays** (ADR-0034, amending
+  ADR-0018). A comment line — `# baz run <started_utc> <kind:key:name>`, or `-`
+  for a run that came from no list — opens a run, and `Command::SetQueue`
+  carries the origin that fills it in. The owner: *"when I play a song from a
+  playlist it should only bump the recency of that playlist, not the underlying
+  albums please"*. Playing a list already credited the list *within* a session;
+  the ledger was per **path** and the engine was never told a run's provenance,
+  so a relaunch re-derived the albums and put them back at the head of the
+  lane. It does not any more.
+  - **The line format did not change.** Five fields, four tabs, every
+    byte-exact test unmodified — because `decode` rejects a six-column line
+    outright and the file is never rewritten, so the sixth field this was
+    first specified as would have left a permanently mixed file that every
+    older baz read as partly corrupt. A `#` line was already skipped and
+    already not damage. **No migration, no downgrade hazard**: an older baz
+    reads a new ledger whole, and this baz reads an old one exactly as it did.
+  - **No pinned wire byte moved either.** The command's `origin` field is
+    omitted when there is nothing to say, so a sender with no origin produces
+    the bytes it always produced.
+  - **An album's run still credits the album.** A fixed list is not a
+    playlist; what stops crediting the records is a run that named a *list*.
+    A track heard only inside a list is not a record you put on, and the lane
+    says nothing about it — while the play counts, the inspector card and the
+    `PLAYED` group key still see every one of those plays. *When did I last
+    play this track* and *when did I last put this record on* are different
+    questions.
+  - **The lamp dot follows the run's origin too.** The owner, on the same
+    surface: *"I still see albums specifically appearing as if they are playing
+    rather than the playlist … it is showing next to the album rather than the
+    playlist"*. Order and mark now come out of one function
+    (`lane::sounding_subject`), so they cannot drift; a list's run marks the
+    list and none of the records it quotes, and at most one row is ever marked
+    because a run has one origin. A **finished** run marks nothing, which took
+    saying out loud: a run's origin outlives the run, where the sounding record
+    the mark used to read went to `None` when the music stopped and was
+    carrying the liveness by accident.
+  - `docs/design/impl/ledger-remembers-the-list/` has the owner's own check —
+    play a list, quit, relaunch — in frames.
 
 **Playlists**
 

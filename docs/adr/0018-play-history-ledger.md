@@ -10,6 +10,43 @@
 > returns it. `Recency::label()` is the group header's text. Nothing about the
 > file format, the writer, the reader or the three read surfaces changed.
 
+> **Amended by [ADR-0034](0034-the-run-and-its-list.md) (shipped 2026-08-10).
+> The ledger is a list of runs, each holding its plays.** A comment line —
+> `# baz run <started_utc> <kind:key:name>`, or `-` for a run that named no
+> list — opens a run, and the plays after it belong to it. **§2's line format
+> is untouched**: five fields, four tabs, and every byte-exact test in this
+> repository passes unmodified. That is the whole reason it is a comment and
+> not the sixth field `docs/BACKLOG.md` anticipated — `format::decode` rejects
+> a six-column line outright, and §3's *never rewritten* guarantee means a v2
+> writer would leave a permanently mixed file that every older baz reads as
+> partly corrupt. A `#` line is already skipped before `decode` is reached and
+> already **not** counted as damage, so a v1 baz reads a v1.1 ledger with
+> `malformed()` still 0 and a v1.1 baz reads a v1 ledger with every run
+> unknown, which is precisely the behaviour it had before. No migration, no
+> downgrade hazard.
+>
+> §3's *never rewritten* guarantee stands: the marker is an **append**, written
+> by the same writer on the same handle, in the same `write_all` as the run's
+> first play line. §5's header gains three lines documenting the marker, on
+> the terms §5 already set — written once, when the file is created.
+>
+> **§6's refusal is inherited whole and restated rather than assumed.** The
+> reader gains `History::runs()` and `History::last_played_unlisted()` — a
+> second *fold*, not a third question about a track; `TrackHistory` gains
+> nothing, because *how many times did I play this track* must not become a
+> question about a list. A run marker makes an engagement statistic **easier**
+> to build, which is exactly why: still no totals by list, no most-played list,
+> no charts. History records; it never performs.
+>
+> **What did not ship**: ADR-0034 §4's fourth rule, a second header block
+> appended to an *older* file the first time a v1.1 writer opens it. Detecting
+> "already appended" in an append-only file needs either an unbounded scan at
+> every open — which grows with a listening lifetime, at launch — or a second
+> store of a fact the ledger should hold, which §3 and `docs/BACKLOG.md` both
+> refuse. A new file's header documents the marker; an older file's does not,
+> and the marker line is legible without it. Recorded here rather than done
+> quietly.
+
 ## Context
 
 `docs/design/critique/03-build-guide.md` opens its build order with a single
