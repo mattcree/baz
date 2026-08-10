@@ -349,7 +349,8 @@
 > never wanted would make the design read as an accident being corrected. His
 > brief, at the top of this file and unedited: *"the side bar will have recent
 > albums and playlists mixed based on some order"*. §1 built exactly that, §2
-> gave it its one anatomy, and the fifth amendment defended the mixing on
+> gave it its one anatomy, and the first of the two amendments headed *Fifth*
+> — *"§2's reason for marking nothing was false"* — defended the mixing on
 > purpose — *"`RECENT` still mixes the two kinds in one touch-ordered list
 > rather than segregating them"*. He has now looked at the built thing and
 > asked for the segregation. He is the authority, so it is built; both
