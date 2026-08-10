@@ -49,9 +49,8 @@ DISP=${DISP:-:196}
 S=${S:-/tmp/baz-forget-scratch}
 W=1600; H=900
 
-# Four years, one year and three months, in nanoseconds — the three ADDED
-# shelves the wall must still draw after the round trip.
-NS_DAY=86400000000000
+# Four years, one year and three months, in days — the three ADDED shelves the
+# wall must still draw after the round trip.
 AGES=(1460 365 90)
 
 mkdir -p "$OUT"
@@ -84,8 +83,18 @@ DB="$S/data/baz/library.db"
 # ------------------------------------------------------------------- display
 Xvfb "$DISP" -screen 0 ${W}x${H}x24 -nolisten tcp >/dev/null 2>&1 &
 XPID=$!
-sleep 2
 export DISPLAY=$DISP
+# Wait for the server rather than sleeping at it. A fixed sleep is why this
+# script once photographed nothing: a previous run's Xvfb had not released the
+# display number yet, the new one exited, and the app died on `XOpenDisplay`
+# twenty seconds later with its frames already named. `xdotool` rather than
+# `xdpyinfo`, which the toolbox image does not carry.
+for _ in $(seq 1 40); do
+  DISPLAY="$DISP" xdotool getdisplaygeometry >/dev/null 2>&1 && break
+  sleep 0.5
+done
+DISPLAY="$DISP" xdotool getdisplaygeometry >/dev/null 2>&1 \
+  || { echo "no X server on $DISP"; exit 1; }
 # Both the app and the display, on every exit path. Anchored on the full path,
 # never a bare name: a bare `baz` also matches the owner's own running copy.
 cleanup() {
@@ -185,7 +194,7 @@ shot 01-added-before
 
 # ------------------------------------------ 3 · Settings, and the two presses
 echo "== the Settings place, and the folder's own Remove"
-click 1424 20      # the gear in the app bar
+click 1528 20      # the gear in the app bar, at its trailing edge
 click 352 180      # the Settings place's spine: Library
 park
 shot 02-settings-library
@@ -206,7 +215,7 @@ shot 05-wall-empty
 
 # --------------------------------------------------- 5 · adding the folder back
 echo "== adding the folder back, by the well and its word"
-click 1424 20      # the gear again
+click 1528 20      # the gear again
 click 352 180      # Library
 click 798 216      # the add-a-folder well, one row higher with no folder above it
 xdotool type --delay 12 "$FIX"
@@ -236,7 +245,7 @@ echo "== the same press at 960 wide"
 W=960 H=760
 launch 30
 xdotool windowsize "$WID" $W $H; sleep 2
-click 784 20       # the gear, where 960 puts it
+click 888 20       # the gear, where 960 puts it
 click 249 146      # the spine, which lies down when the place is narrow
 click 731 237      # Remove
 park

@@ -39,7 +39,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use baz_core::history::{History, HistoryLedger};
-use baz_core::index::{GroupKey, Library};
+use baz_core::index::{GroupKey, IndexError, Library};
 use baz_core::protocol::{self as protocol, Command, Event, SignalChain};
 use baz_core::replaygain::ReplayGainSettings;
 use baz_core::traversal::Traversal;
@@ -147,6 +147,25 @@ pub fn run(started: Instant, cli_dir: Option<PathBuf>) -> iced::Result {
     app.run_with(move || App::new(started, cli_dir))
 }
 
+/// **Whether baz draws the window's chrome itself.**
+///
+/// One answer, read here and nowhere else: `app.rs` turns the platform's
+/// decorations off with it, and the app bar asks it whether to draw the window
+/// buttons. The owner, 2026-08-10, looking at the shipped state: *"until we
+/// have no window chrome, remove the window controls..."* — with the system
+/// title bar above baz's own band, minimise, maximise and close appeared
+/// twice, four pixels apart, and one pair did nothing the other did not.
+///
+/// So the buttons are not *removed*; they are **conditional on baz owning the
+/// chrome**, which is the honest rule and the one that needs no second edit
+/// when `BAZ_BORDERLESS` becomes the default. The bar keeps its drag and its
+/// double-press to maximise either way: those *add* a way to move a window
+/// that already had one, where a second close button subtracts clarity from a
+/// window that already had one of those too.
+fn owns_chrome() -> bool {
+    std::env::var_os("BAZ_BORDERLESS").is_some()
+}
+
 /// The window's settings: its size, on Linux the application id, and — behind
 /// an environment switch — whether the platform draws its title bar.
 ///
@@ -190,7 +209,7 @@ fn window_settings() -> window::Settings {
     )]
     let mut settings = window::Settings {
         size: WINDOW,
-        decorations: std::env::var_os("BAZ_BORDERLESS").is_none(),
+        decorations: !owns_chrome(),
         // The strip's floor **plus the returns lane's rail** is the window's
         // declared minimum width. At 600 the two-line strip holds every
         // tenant (doc 10 §4.3), and below it nothing further collapses —
@@ -294,6 +313,17 @@ pub(crate) enum Message {
     SetupInput(String),
     /// Setup screen: folder submitted (Enter).
     SetupSubmit,
+    /// Blocked screen: open the library again, with everything unchanged —
+    /// for the failures something outside baz can fix while the screen is up
+    /// ([`Blocked::can_retry`]).
+    LibraryRetry,
+    /// Blocked screen: show (`true`) or put away (`false`) what starting a new
+    /// index would cost. **This message never moves a file** — that is the
+    /// point of it; see [`Blocked::setting_aside`].
+    LibrarySetAsideAsked(bool),
+    /// Blocked screen: confirmed. Rename the library out of the way and build
+    /// a new index over the same folders.
+    LibrarySetAside,
     /// Shelf: search text changed.
     SearchChanged(String),
     /// **The well's clear mark** — the `×` the owner asked for (2026-08-10:
@@ -1163,6 +1193,11 @@ struct App {
 
 enum Screen {
     Setup(Setup),
+    /// **The library is there and baz will not open it** (ADR-0041): the
+    /// downgrade, the corrupt file, the machine with nowhere to keep an index.
+    /// Distinct from [`Screen::Setup`] because it answers a different
+    /// question — see [`Blocked`].
+    Blocked(Blocked),
     Shelf(Box<Shelf>),
 }
 
@@ -1176,6 +1211,148 @@ pub(crate) struct Setup {
     /// ([`Message::FileHovered`] — X11 only; see [`Message::FileDropped`]).
     /// The screen answers with one quiet line saying the drop will be taken.
     pub(crate) hovering_drop: bool,
+}
+
+/// **The blocked-library screen's state** — the one baz draws when the library
+/// exists and this build will not open it (ADR-0041).
+///
+/// It exists because the shell used to answer *every* failure to open the
+/// library by drawing [`Setup`], and the owner met the worst case of that on
+/// 2026-08-10: he ran an older binary against his current library and baz
+/// asked him *"where's your music?"*. His music was where he left it. baz had
+/// correctly refused a database from a newer build
+/// ([`IndexError::SchemaTooNew`]) and had then said the most alarming thing it
+/// is capable of saying — *you have no library* — in the one case where
+/// **nothing is wrong with the listener's data at all**.
+///
+/// The two screens answer two different questions, which is why one is not a
+/// better sentence on the other:
+///
+/// | [`Setup`] | [`Blocked`] |
+/// |---|---|
+/// | *Where's your music?* — a **question** | *Here is what happened* — a **statement** |
+/// | The listener has not answered yet | The listener answered; the answer is fine |
+/// | Naming a folder is the fix | Naming a folder cannot help |
+///
+/// **One screen, three reasons** ([`Blockage`]), rather than three screens.
+/// The shape is identical in all three — say what happened, say what is safe,
+/// say what to do — and only the words and the available controls differ,
+/// which is what "a different sentence" properly means. What the reasons do
+/// *not* share is disposition: for [`Blockage::Unreadable`] a new index is the
+/// repair, and for [`Blockage::NewerBaz`] it is the wrong move offered only
+/// because refusing to offer anything would leave a listener with no way to
+/// use baz at all.
+pub(crate) struct Blocked {
+    /// What happened, as a kind rather than as a sentence.
+    pub(crate) why: Blockage,
+    /// Where the library file is, when there is one to name — so the listener
+    /// can find it with a file manager, and so the set-aside has something to
+    /// move. `None` only when the system offered no data directory.
+    pub(crate) db_path: Option<PathBuf>,
+    /// The folders the shelf would have opened over. Kept so that `Try again`
+    /// and the set-aside **finish the launch** rather than dropping the
+    /// listener back at a first-run screen they have already been past.
+    roots: Vec<PathBuf>,
+    /// Whether the second door's statement of what a new index costs is
+    /// showing.
+    ///
+    /// **The two-step is the whole safeguard.** The quiet word does not act;
+    /// it reveals a paragraph naming what is lost and a second word that does.
+    /// Nothing on this screen may rewrite the database on one press, and the
+    /// press that does it is never the primary one.
+    pub(crate) setting_aside: bool,
+    /// What the last attempt to act said, when it failed — a retry that failed
+    /// the same way, or a set-aside the filesystem refused.
+    pub(crate) trouble: Option<String>,
+}
+
+/// **Why the library could not be opened**, in the three shapes the shell can
+/// say something useful about.
+///
+/// Everything [`Library::open`] can fail with folds into these. The fold is
+/// deliberately lossy in one direction only: the underlying words are always
+/// carried through to the screen, so a case nobody anticipated is still
+/// *reported* even though it is grouped under [`Self::Unreadable`].
+pub(crate) enum Blockage {
+    /// **The database was written by a newer baz.** The downgrade — a beta
+    /// tester installing a release and then running an older build, which is
+    /// the shape of trying something and going back.
+    ///
+    /// Nothing is wrong with the listener's data and nothing has been touched:
+    /// `baz_core::index::Library::open` reads `user_version` before it sets a
+    /// single pragma, and `a_too_new_database_is_refused_without_a_byte_being_written`
+    /// asserts the file is unchanged across three refused opens.
+    NewerBaz {
+        /// The schema version the database declares. This build reads
+        /// `baz_core::index::SCHEMA_VERSION`.
+        found: i64,
+    },
+    /// **The file is there and this build cannot read it** — permissions, a
+    /// corrupt page, a truncated write, a full disk. `detail` is the
+    /// underlying error's own words, shown verbatim rather than paraphrased.
+    Unreadable {
+        /// What SQLite, or the index, actually said.
+        detail: String,
+    },
+    /// **There is nowhere on this system to keep a library** — no data
+    /// directory, or one that cannot be created. The only reason with no
+    /// database behind it, and so the only one that offers no set-aside.
+    Nowhere {
+        /// What the platform said, or which directory could not be made.
+        detail: String,
+    },
+}
+
+impl Blockage {
+    /// Read a `Library::open` failure. The newer-baz case is the one the shell
+    /// has distinct words for; everything else is reported as itself.
+    fn of(error: &IndexError) -> Self {
+        match error {
+            IndexError::SchemaTooNew { found } => Self::NewerBaz { found: *found },
+            other => Self::Unreadable {
+                detail: other.to_string(),
+            },
+        }
+    }
+}
+
+impl Blocked {
+    /// The screen, from a blockage and the folders the launch was carrying.
+    ///
+    /// Crate-visible so that `views::blocked`'s tests can build one, and
+    /// deliberately **not** a test-only constructor. Several tests in
+    /// `views` read this file's source and stop at its first test attribute —
+    /// `every_place_that_hangs_works_hangs_them_on_one_grid` is one — so a
+    /// gated helper up here would silently truncate what they can see. (That
+    /// is not a hypothetical: adding one blinded that test, and it failed
+    /// rather than passing vacuously, which is the design working.)
+    pub(crate) fn new(why: Blockage, db_path: Option<PathBuf>, roots: Vec<PathBuf>) -> Self {
+        Self {
+            why,
+            db_path,
+            roots,
+            setting_aside: false,
+            trouble: None,
+        }
+    }
+
+    /// **Whether there is a file to move out of the way.** The set-aside door
+    /// is absent, not disabled, where there is nothing behind it (ADR-0028's
+    /// rule, which this screen keeps): a machine with no data directory has no
+    /// library to set aside, and neither has a `Nowhere`.
+    pub(crate) fn can_set_aside(&self) -> bool {
+        !matches!(self.why, Blockage::Nowhere { .. })
+            && self.db_path.as_ref().is_some_and(|path| path.exists())
+    }
+
+    /// **Whether trying again could give a different answer.** A refusal on
+    /// the schema version is deterministic — the same file, the same build,
+    /// the same number — so `Try again` does not appear on it. A permission,
+    /// a lock or a missing directory can all be fixed from outside baz while
+    /// this screen is up, so there it does.
+    pub(crate) fn can_retry(&self) -> bool {
+        !matches!(self.why, Blockage::NewerBaz { .. })
+    }
 }
 
 impl App {
@@ -1293,9 +1470,16 @@ impl App {
         let (screen, task) = if dirs.is_empty() {
             (Screen::Setup(Setup::fresh(None)), Task::none())
         } else {
-            match Shelf::open(dirs, group_key, density, lane_open) {
+            // **A library that will not open is no longer a first run**
+            // (ADR-0041). This line used to read `Setup::fresh(Some(error))`,
+            // which answered *"this library is from a newer baz"* by asking
+            // *"where's your music?"* — the defect the owner reported.
+            match Shelf::open(dirs.clone(), group_key, density, lane_open) {
                 Ok((shelf, task)) => (Screen::Shelf(Box::new(shelf)), task),
-                Err(error) => (Screen::Setup(Setup::fresh(Some(error))), Task::none()),
+                Err(why) => (
+                    Screen::Blocked(Blocked::new(why, config::library_db_file(), dirs)),
+                    Task::none(),
+                ),
             }
         };
         let mut app = Self {
@@ -1494,7 +1678,7 @@ impl App {
                 self.window = size;
                 let laid_out = match &mut self.screen {
                     Screen::Shelf(state) => state.update(Message::WindowResized(size)),
-                    Screen::Setup(_) => Task::none(),
+                    Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
                 };
                 // A maximise and an unmaximise are both resizes, and iced 0.13
                 // publishes no event for either — so the state the app bar's
@@ -1610,9 +1794,10 @@ impl App {
             Message::Raise => window::get_latest().and_then(window::gain_focus),
             Message::Undo => self.undo_edit(),
             message if matches!(self.screen, Screen::Setup(_)) => self.update_setup(message),
+            message if matches!(self.screen, Screen::Blocked(_)) => self.update_blocked(&message),
             message => match &mut self.screen {
                 Screen::Shelf(state) => state.update(message),
-                Screen::Setup(_) => Task::none(),
+                Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
             },
         }
     }
@@ -1673,20 +1858,123 @@ impl App {
         }
     }
 
-    /// Setup → Shelf: open the very first shelf over `dir`, or say in place
-    /// why not. The one seam all three first-run doors — typed, picked,
-    /// dropped — converge on.
+    /// Setup → Shelf: open the very first shelf over `dir`. The one seam all
+    /// three first-run doors — typed, picked, dropped — converge on.
+    ///
+    /// **A folder named here cannot fix a library that will not open**, so a
+    /// failure leaves this screen rather than annotating it (ADR-0041). The
+    /// first-run screen keeps its error line for the one thing it *can* fix —
+    /// a path that is not a folder ([`Message::MusicFolderChecked`]) — and
+    /// hands everything else to [`Screen::Blocked`].
+    ///
+    /// This is the exact loop the owner was in: the screen told him the schema
+    /// version *"if I pick any directory"*, because every directory he picked
+    /// went straight back into the same refusal.
     fn open_first_shelf(&mut self, dir: PathBuf) -> Task<Message> {
-        let Screen::Setup(setup) = &mut self.screen else {
+        if !matches!(self.screen, Screen::Setup(_)) {
             return Task::none();
-        };
-        match Shelf::open(vec![dir], self.group_key, self.density, self.lane_open) {
+        }
+        match Shelf::open(
+            vec![dir.clone()],
+            self.group_key,
+            self.density,
+            self.lane_open,
+        ) {
             Ok((state, task)) => {
                 self.screen = Screen::Shelf(Box::new(state));
                 task
             }
+            Err(why) => {
+                self.screen =
+                    Screen::Blocked(Blocked::new(why, config::library_db_file(), vec![dir]));
+                Task::none()
+            }
+        }
+    }
+
+    /// **The blocked screen's own messages**, and nothing else reaches it.
+    ///
+    /// `Try again` re-runs the identical launch — same folders, same
+    /// everything — so a permission fixed in another window, or a lock that
+    /// has gone, finishes the launch instead of restarting the application.
+    /// The set-aside is two presses by construction: the first only *reveals*
+    /// what a new index costs.
+    fn update_blocked(&mut self, message: &Message) -> Task<Message> {
+        let Screen::Blocked(blocked) = &mut self.screen else {
+            return Task::none();
+        };
+        match message {
+            Message::LibraryRetry => {
+                blocked.trouble = None;
+                let roots = blocked.roots.clone();
+                match Shelf::open(roots, self.group_key, self.density, self.lane_open) {
+                    Ok((state, task)) => {
+                        println!("[library] retry opened the library");
+                        self.screen = Screen::Shelf(Box::new(state));
+                        task
+                    }
+                    Err(why) => {
+                        // The **reason** is replaced too, not only the words:
+                        // a disk that came back and a database that turned out
+                        // to be from a newer baz are different screens, and a
+                        // retry is exactly when that can change.
+                        let roots = std::mem::take(&mut blocked.roots);
+                        let mut again = Blocked::new(why, config::library_db_file(), roots);
+                        again.trouble = Some("Still the same answer.".to_owned());
+                        self.screen = Screen::Blocked(again);
+                        Task::none()
+                    }
+                }
+            }
+            Message::LibrarySetAsideAsked(showing) => {
+                blocked.setting_aside = *showing;
+                blocked.trouble = None;
+                Task::none()
+            }
+            Message::LibrarySetAside => self.set_the_library_aside(),
+            _ => Task::none(),
+        }
+    }
+
+    /// **Move the library out of the way and finish the launch.**
+    ///
+    /// The second press of the two-step, and the only thing in baz that
+    /// touches a database this build has refused to read. It **renames**;
+    /// it does not delete and it does not rewrite (`baz_core::index::set_aside`
+    /// and its round-trip test), so the sentence the screen shows above this
+    /// press — *nothing is deleted, renaming it back restores it exactly* —
+    /// is a property of the code rather than a reassurance.
+    fn set_the_library_aside(&mut self) -> Task<Message> {
+        let Screen::Blocked(blocked) = &mut self.screen else {
+            return Task::none();
+        };
+        let Some(db_path) = blocked.db_path.clone() else {
+            return Task::none();
+        };
+        let aside = match baz_core::index::set_aside(&db_path) {
+            Ok(aside) => aside,
             Err(error) => {
-                setup.error = Some(error);
+                blocked.trouble = Some(format!("Could not move the library: {error}"));
+                return Task::none();
+            }
+        };
+        println!("[library] set aside to {}", aside.display());
+        let roots = std::mem::take(&mut blocked.roots);
+        match Shelf::open(roots.clone(), self.group_key, self.density, self.lane_open) {
+            Ok((state, task)) => {
+                self.screen = Screen::Shelf(Box::new(state));
+                task
+            }
+            // The file moved and the new index still would not open. Say so
+            // with the fresh reason and name where the old library went, so
+            // nobody has to guess whether it survived.
+            Err(why) => {
+                let mut again = Blocked::new(why, config::library_db_file(), roots);
+                again.trouble = Some(format!(
+                    "The old library is safe at {} — but the new one would not open either.",
+                    aside.display()
+                ));
+                self.screen = Screen::Blocked(again);
                 Task::none()
             }
         }
@@ -1779,7 +2067,7 @@ impl App {
         self.density = self.density.step(delta);
         Some(match &mut self.screen {
             Screen::Shelf(state) => state.set_density(self.density),
-            Screen::Setup(_) => Task::none(),
+            Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
         })
     }
 
@@ -1841,7 +2129,7 @@ impl App {
         self.ink.tick(now);
         self.warmth.tick(now);
         match &mut self.screen {
-            Screen::Setup(_) => Task::none(),
+            Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
             Screen::Shelf(state) => state.tick_motion(now),
         }
     }
@@ -1857,7 +2145,7 @@ impl App {
         self.ink.live()
             || self.warmth.live()
             || match &self.screen {
-                Screen::Setup(_) => false,
+                Screen::Setup(_) | Screen::Blocked(_) => false,
                 Screen::Shelf(state) => state.moving(),
             }
     }
@@ -2119,7 +2407,7 @@ impl App {
             Message::PlaylistDelete => {
                 let library = match &self.screen {
                     Screen::Shelf(state) => Some(&state.library),
-                    Screen::Setup(_) => None,
+                    Screen::Setup(_) | Screen::Blocked(_) => None,
                 };
                 if self.playlists.delete_open(library) && matches!(self.place, Place::Playlist(_)) {
                     // The page's subject is in the trash; the Library is the
@@ -2149,7 +2437,7 @@ impl App {
                     let queue = queue.clone();
                     let library = match &self.screen {
                         Screen::Shelf(state) => Some(&state.library),
-                        Screen::Setup(_) => None,
+                        Screen::Setup(_) | Screen::Blocked(_) => None,
                     };
                     self.playlists.submit_queue_save(&queue, library);
                 }
@@ -2197,7 +2485,7 @@ impl App {
         wanted.dedup();
         match &mut self.screen {
             Screen::Shelf(state) => state.request_thumbs(&wanted),
-            Screen::Setup(_) => Task::none(),
+            Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
         }
     }
 
@@ -2785,7 +3073,7 @@ impl App {
     fn sync_lane(&mut self) {
         let shelf_stamp = match &self.screen {
             Screen::Shelf(state) => state.lane_stamp,
-            Screen::Setup(_) => 0,
+            Screen::Setup(_) | Screen::Blocked(_) => 0,
         };
         let mark = (shelf_stamp, self.playlists.stamp());
         if mark == self.lane_mark {
@@ -2807,7 +3095,7 @@ impl App {
             .collect();
         let records = match &self.screen {
             Screen::Shelf(state) => state.lane_recent.clone(),
-            Screen::Setup(_) => Vec::new(),
+            Screen::Setup(_) | Screen::Blocked(_) => Vec::new(),
         };
         self.lane = crate::lane::resolve(lists, records);
     }
@@ -2953,7 +3241,7 @@ impl App {
         let reach = self.reach_the_well();
         let typed = match &mut self.screen {
             Screen::Shelf(state) => state.type_into_query(text),
-            Screen::Setup(_) => Task::none(),
+            Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
         };
         Task::batch([reach, typed])
     }
@@ -3120,7 +3408,7 @@ impl App {
             return self.leave();
         }
         match &mut self.screen {
-            Screen::Setup(_) => Task::none(),
+            Screen::Setup(_) | Screen::Blocked(_) => Task::none(),
             Screen::Shelf(state) => state.update(Message::EscapePressed),
         }
     }
@@ -3243,7 +3531,7 @@ impl App {
                 }
                 let albums: &[vm::AlbumVm] = match &self.screen {
                     Screen::Shelf(state) => &state.albums,
-                    Screen::Setup(_) => &[],
+                    Screen::Setup(_) | Screen::Blocked(_) => &[],
                 };
                 self.player.apply(&event, albums);
                 seek_confirmed = seek_pending && matches!(event, Event::Progress { .. });
@@ -4176,7 +4464,13 @@ impl App {
         let lamp = self.warmth.value();
         let collecting = self.playlists.collecting();
         let screen: Element<'_, Message> = match (&self.screen, self.place) {
+            // **The two pre-library screens return early**, before the lane,
+            // the app bar and the bottom bar are composed. Neither is a place:
+            // the bar's display options need a wall and its gear opens a place
+            // inside a library that has not opened, and a bar with two dead
+            // zones states less than no bar (`views::blocked`'s own docs).
             (Screen::Setup(setup), _) => return views::setup::view(setup),
+            (Screen::Blocked(blocked), _) => return views::blocked::view(blocked),
             (Screen::Shelf(state), Place::Library) => state.view(&self.player, lamp, collecting),
             (Screen::Shelf(state), Place::Album(id)) => match state.album(id) {
                 Some(album) => views::album::view(
@@ -4363,7 +4657,13 @@ impl App {
             _ => None,
         };
         let screen: Element<'_, Message> = column![
-            views::app_bar::view(self.window.width, hangs_works, self.window_maximized, ink),
+            views::app_bar::view(
+                self.window.width,
+                hangs_works,
+                self.window_maximized,
+                owns_chrome(),
+                ink,
+            ),
             screen
         ]
         .into();
@@ -4948,22 +5248,36 @@ pub(crate) struct Shelf {
 
 impl Shelf {
     /// Open the library DB, hydrate the shelf, persist the chosen folders, and
-    /// kick off the scan worker. Errors are user-presentable strings.
+    /// kick off the scan worker.
+    ///
+    /// **The error is a [`Blockage`] and not a sentence**, which is the whole
+    /// of ADR-0041 at this seam: every failure here used to arrive at the
+    /// first-run screen as a string, and a string cannot be routed. A caller
+    /// that knows *which* failure it has can draw the newer-baz statement, and
+    /// can decide that `Try again` means something here and nothing there.
+    ///
+    /// **Nothing on the failing path writes.** The directory is created —
+    /// which a genuine first run needs and which costs an empty folder at
+    /// worst — and then `Library::open` reads `user_version` before it sets a
+    /// pragma. `adopt_roots`, `persist_roots` and the scan all sit *after* the
+    /// open, so a refused library leaves the config file, the database and the
+    /// listener's folders exactly as they were.
     fn open(
         roots: Vec<PathBuf>,
         group_key: GroupKey,
         density: shelf::Density,
         lane_open: bool,
-    ) -> Result<(Self, Task<Message>), String> {
+    ) -> Result<(Self, Task<Message>), Blockage> {
         let t0 = Instant::now();
-        let db_path = config::library_db_file()
-            .ok_or_else(|| "no usable data directory on this system".to_owned())?;
+        let db_path = config::library_db_file().ok_or_else(|| Blockage::Nowhere {
+            detail: "this system offers no data directory for baz to keep an index in".to_owned(),
+        })?;
         if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+            std::fs::create_dir_all(parent).map_err(|e| Blockage::Nowhere {
+                detail: format!("cannot create {}: {e}", parent.display()),
+            })?;
         }
-        let mut library = Library::open(&db_path)
-            .map_err(|e| format!("cannot open library at {}: {e}", db_path.display()))?;
+        let mut library = Library::open(&db_path).map_err(|e| Blockage::of(&e))?;
         // Schema v8's backfill, and the one place that can make it (ADR-0022):
         // `baz-core` cannot know which folder a pre-v8 row came from, and this
         // is the code that reads the config file that does. Rows already naming

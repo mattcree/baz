@@ -152,7 +152,21 @@ use crate::library::{AudioFormat, FileStamp, KnownFile, KnownFiles, TrackMeta};
 use crate::replaygain::{ComputedGains, ComputedReplayGain, ReplayGainTags};
 
 /// The schema version this build reads and writes (`PRAGMA user_version`).
-const SCHEMA_VERSION: i64 = 9;
+///
+/// **Public because a front end has to be able to say it.** A database written
+/// by a newer baz is refused ([`IndexError::SchemaTooNew`]), and the only
+/// useful thing to tell the listener at that moment is *which* version their
+/// library wants against *which* one this build speaks — two numbers, and this
+/// is the second of them. Reading it out of the error's `Display` string would
+/// be a front end parsing prose.
+///
+/// **v9 is the first bump since that surface existed**
+/// (`docs/adr/0042-what-baz-remembers.md`), and so the first one a listener who
+/// runs two builds either side of it will actually meet. That is the whole
+/// reason ADR-0041's `Newer baz` state had to land first: this number moving is
+/// not a defect, and the state that says so is what keeps it from reading like
+/// one.
+pub const SCHEMA_VERSION: i64 = 9;
 
 /// Rows per write transaction in [`Library::add_tracks`]. A scan yields tens
 /// of thousands of tracks; committing in batches keeps any single
@@ -586,7 +600,17 @@ pub enum IndexError {
     Sqlite(#[from] rusqlite::Error),
     /// The database was written by a newer baz than this one. Refusing to
     /// read or "migrate" it is what protects the newer install's data.
-    #[error("library database schema version {found} is newer than this build supports")]
+    ///
+    /// **Nothing has been read or written when this is returned.**
+    /// [`Library::open`] reads `user_version` before it sets so much as a
+    /// pragma, so a caller that retries — a listener typing folders at a
+    /// first-run screen, say — gets the identical refusal and an unchanged
+    /// file. The guarantee is asserted in
+    /// `a_too_new_database_is_refused_without_a_byte_being_written`.
+    #[error(
+        "library database schema version {found} is newer than this build supports (version {})",
+        SCHEMA_VERSION
+    )]
     SchemaTooNew {
         /// The `PRAGMA user_version` found in the database.
         found: i64,
@@ -677,6 +701,15 @@ impl Library {
     /// if a stored path cannot be decoded on this platform.
     pub fn open(db_path: impl AsRef<Path>) -> Result<Self, IndexError> {
         let conn = Connection::open(db_path)?;
+        // **The version is read before anything is set.** [`migrate`] would
+        // refuse a too-new database a moment later anyway, but `journal_mode`
+        // is a *persistent* pragma — on a database in some other mode it
+        // rewrites the file header — and a build that has decided it must not
+        // touch a newer baz's library should not have changed it on the way to
+        // saying so. The front end's `Newer baz` state says *your music and
+        // your playlists are untouched*; this is the line that makes the word
+        // "untouched" exact rather than nearly true.
+        refuse_newer(&conn)?;
         // WAL keeps scan-time writers from blocking any future readers and
         // batches fsyncs; NORMAL sync is durable-enough for a rebuildable
         // cache of what is on disk anyway.
@@ -981,12 +1014,7 @@ impl Library {
             // value.
             let first_seen: Vec<i64> = chunk
                 .iter()
-                .map(|meta| {
-                    self.forgotten
-                        .get(&meta.path)
-                        .copied()
-                        .unwrap_or(now_ns)
-                })
+                .map(|meta| self.forgotten.get(&meta.path).copied().unwrap_or(now_ns))
                 .collect();
             let tx = self.conn.transaction()?;
             {
@@ -1183,8 +1211,8 @@ impl Library {
     /// This is [`Library::forget_root`] at the scale of a record instead of a
     /// folder, and it is deliberately the *same act* rather than a second one:
     /// both write the same tombstone with the same statement
-    /// ([`REMEMBER_TRACK`] and [`REMEMBER_TRACKS_UNDER_ROOT`] differ only in
-    /// their `WHERE` clause), so the two scales cannot drift apart.
+    /// (`REMEMBER_TRACK` and `REMEMBER_TRACKS_UNDER_ROOT` differ only in their
+    /// `WHERE` clause), so the two scales cannot drift apart.
     ///
     /// # Why this is not [`Library::remove_tracks`]
     ///
@@ -3421,6 +3449,117 @@ impl ArtistKey {
 /// and an upgraded one are byte-identical in shape — no class of "works on a
 /// new install, breaks on an old library" bug can hide between the two
 /// paths, and every release exercises its own migration code.
+/// The suffixes SQLite hangs off a database file's name, and the database
+/// itself — the whole of what "the library file" means on disk.
+///
+/// **Order matters and is the reverse of the obvious one.** The database is
+/// moved *first* and its sidecars after, because the hazard being avoided is a
+/// stale write-ahead log left lying beside a *new* `library.db`: SQLite would
+/// try to recover from it, against a database it does not belong to. Moving
+/// the database first means the worst interruption leaves no `library.db` at
+/// all — which is a first run, the state this whole operation is trying to
+/// reach — rather than a fresh one wearing another library's log.
+const DATABASE_PARTS: [&str; 3] = ["", "-wal", "-shm"];
+
+/// How many set-aside libraries may accumulate beside the live one before
+/// [`set_aside`] refuses. A listener who has done this a thousand times has a
+/// problem that another rename will not fix, and an unbounded search here
+/// would be a loop with no stopping condition.
+const SET_ASIDE_LIMIT: u32 = 1_000;
+
+/// **Move the library database out of the way, losing nothing**, and answer
+/// where it went.
+///
+/// The escape hatch behind the front end's blocked-library state: a database
+/// this build cannot open — because it is corrupt, or because a newer baz
+/// wrote it — is renamed to `library.db.set-aside-1` (`-2`, `-3`, … for the
+/// next one), so that the next [`Library::open`] finds nothing and makes a
+/// first-run library. **Nothing is deleted and nothing is rewritten**, which
+/// is the only reason this is offerable at all: renaming the file back
+/// restores it exactly, and a newer baz pointed at the restored name opens
+/// the library it wrote.
+///
+/// What it costs the listener is real and belongs in the words on the screen
+/// rather than only here: the new index is built by re-reading their folders,
+/// so `first_seen_ns` — the ADDED column, the one fact in the schema that
+/// cannot be recovered from the files (`docs/BACKLOG.md`) — restarts at today
+/// for every record. Their music, their tags and their `.m3u8` playlists are
+/// not touched by this function at all; it renames one file and at most two
+/// sidecars.
+///
+/// # Errors
+///
+/// [`std::io::Error`] if the database cannot be renamed, or
+/// [`std::io::ErrorKind::AlreadyExists`] if `SET_ASIDE_LIMIT` set-aside
+/// libraries are already sitting beside it. A failure part-way through moves
+/// the sidecars back beside the database on a best-effort basis; a rename
+/// within one directory is the operation least able to fail there is, and the
+/// caller is told either way.
+pub fn set_aside(db_path: &Path) -> std::io::Result<PathBuf> {
+    let name = db_path.as_os_str();
+    let target = (1..=SET_ASIDE_LIMIT)
+        .map(|n| {
+            let mut candidate = name.to_os_string();
+            candidate.push(format!(".set-aside-{n}"));
+            PathBuf::from(candidate)
+        })
+        .find(|candidate| {
+            DATABASE_PARTS
+                .iter()
+                .all(|part| !with_suffix(candidate, part).exists())
+        })
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("{SET_ASIDE_LIMIT} set-aside libraries already sit beside this one"),
+            )
+        })?;
+    let mut moved: Vec<&str> = Vec::new();
+    for part in DATABASE_PARTS {
+        let from = with_suffix(db_path, part);
+        if !from.exists() {
+            continue;
+        }
+        if let Err(error) = std::fs::rename(&from, with_suffix(&target, part)) {
+            // Put back what was already moved, so a half-done set-aside is a
+            // no-op rather than a database missing its log.
+            for done in moved {
+                let _ = std::fs::rename(with_suffix(&target, done), with_suffix(db_path, done));
+            }
+            return Err(error);
+        }
+        moved.push(part);
+    }
+    Ok(target)
+}
+
+/// `path` with one of [`DATABASE_PARTS`] appended — byte-wise, so a path that
+/// is not valid UTF-8 survives.
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    if suffix.is_empty() {
+        return path.to_path_buf();
+    }
+    let mut name = path.as_os_str().to_os_string();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+/// Refuse, before anything else happens on this connection, a database whose
+/// `user_version` is ahead of [`SCHEMA_VERSION`].
+///
+/// Called by [`Library::open`] ahead of the persistent pragmas, and implied
+/// again by [`migrate`]'s own fall-through arm — the two are not redundant.
+/// This one is about *not writing*; the arm in [`migrate`] is what makes the
+/// migration ladder total, and it is the one an in-memory or already-configured
+/// connection reaches.
+fn refuse_newer(conn: &Connection) -> Result<(), IndexError> {
+    let found: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if found > SCHEMA_VERSION {
+        return Err(IndexError::SchemaTooNew { found });
+    }
+    Ok(())
+}
+
 fn migrate(conn: &Connection) -> Result<(), IndexError> {
     loop {
         let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;

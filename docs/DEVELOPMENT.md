@@ -137,6 +137,34 @@ messages come from six subscriptions, a scrollable that republishes on every
 layout change and a window that reconfigures on every drag step, which is not a
 thing to reason about from the source.
 
+## The local gate is not CI, and twice today that mattered
+
+Run the whole gate after your **last** edit, not your last interesting one:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo doc --workspace --no-deps          # warnings are errors
+cargo deny check
+python3 packaging/flatpak/check-cargo-sources.py
+```
+
+`main` went red on 2026-08-10 from running everything in that list except the
+first, after a `clippy` fix shortened a line enough for `rustfmt` to want it
+joined.
+
+**Then watch CI, because two of the three platforms exist only there.** The
+same day, two merges went red on `macos-latest` while every one of the commands
+above was green locally, and the cause was not portability trivia — a timing
+assertion held on Linux and failed at **5× the budget** on macOS, because a
+giant allocation is a lazy mapping on one and real pages on the other. That is
+a *finding*, and it was sitting in a job nobody had looked at.
+
+Windows has taught this project three of these the hard way — drive-less
+fixture paths, UTF-16LE stored paths, FILETIME stamps — and macOS has now
+taught it one. A green local gate is necessary and is not sufficient.
+
 ## Headless UI verification
 
 Agents (and you) can render the real binary without touching your desktop
@@ -209,9 +237,39 @@ through `env`, as `toolbox run -c baz-dev env OUT=… SCEN=… bash …`. A run 
 variables were silently dropped renders the default scenario at the default
 size, which looks like a successful capture of the wrong thing.
 
+### Two `baz` binaries, and how to tell which one you are running
+
+The consequence of the paragraph above is that this checkout usually holds
+**two release binaries with the same name**:
+
+| path | built by | runs on |
+|---|---|---|
+| `target/release/baz` | the host toolchain | the host only |
+| `target/tb/release/baz` | `CARGO_TARGET_DIR=target/tb` inside the toolbox | the toolbox, and the host |
+
+They are indistinguishable to anyone looking for an executable, and the
+**obvious** one — `target/release/` — is the one that goes stale, because
+day-to-day work builds through the toolbox. That has cost real time twice:
+
+- a capture measured the wrong build, because a script found the wrong file;
+- the owner launched `target/release/baz` for a look at the product, got a
+  two-day-old build, and reported two defects that had both been fixed. (One
+  of them turned out to be a real failure *mode* underneath — see ADR-0041 —
+  but the report started with a stale binary.)
+
+So: **check the timestamps before you conclude anything from a binary's
+behaviour.** `ls -l target/release/baz target/tb/release/baz`, and prefer
+`sha256sum` when two builds are being compared — `baz --version` prints the
+crate version, which does not move between commits and cannot tell them apart.
+A capture script comparing two builds must copy each to its **own filename**
+before running either.
+
 Screenshot and diff with ImageMagick (`magick compare -metric AE`). Use the
 wgpu renderer, not tiny-skia: tiny-skia does damage-based partial repaints and
 is not run-to-run deterministic, so it cannot prove a refactor changed nothing.
+Read the count **in parentheses** and parse it with `awk`, not `sed`: the
+leading figure is formatted with `%g`, so a large difference arrives as
+`1.86447e+08 (2845)` and a shell integer comparison on it reads *one*.
 
 > The Phase 1 spikes referenced here previously were deleted when Phase 1
 > closed; they remain recoverable at `git show dc13d7e`.

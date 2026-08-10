@@ -142,10 +142,21 @@ use crate::{icon, theme};
 /// from the window rather than assumed, because a maximise button that still
 /// says `Maximise` on a maximised window is the "stable in every state" clause
 /// of the icon-only law (doc 10 §3.1) failing in the one state anybody checks.
+///
+/// `owns_chrome` is the shell's answer to *does baz draw this window's title
+/// bar*. When it does not — which is what ships today — **the three window
+/// buttons are absent**, because the platform is already drawing a set four
+/// pixels above them. The owner, looking at exactly that: *"until we have no
+/// window chrome, remove the window controls..."*. Their slot is not held
+/// open: an empty reservation for a control that cannot exist in this state is
+/// the "present and inert" failure this bar's own admission rule refuses, and
+/// nothing to the left of them moves when they appear, because they sit at the
+/// trailing edge.
 pub(crate) fn view(
     window_w: f32,
     density: Option<crate::shelf::Density>,
     maximized: bool,
+    owns_chrome: bool,
     ink: Ink,
 ) -> Element<'static, Message> {
     let room = theme::active();
@@ -169,7 +180,13 @@ pub(crate) fn view(
     let furniture = row![marks(density), gear(ink),]
         .spacing(theme::GAP_LG)
         .align_y(iced::Alignment::Center);
-    let buttons = window_controls(maximized, ink);
+    // Absent rather than disabled, and absent rather than a held slot: see the
+    // note on `owns_chrome` above.
+    let buttons: Element<'static, Message> = if owns_chrome {
+        window_controls(maximized, ink)
+    } else {
+        Space::with_width(Length::Shrink).into()
+    };
     // The bar's one flexible region. It is a plain `Space` and **not** a
     // handle of its own: the whole bar is the handle (see below), so a second
     // one here would be two answers to one gesture.
@@ -424,6 +441,47 @@ mod tests {
     /// cannot be walked.
     fn source() -> String {
         include_str!("app_bar.rs").replace("\r\n", "\n")
+    }
+
+    /// **The window buttons exist exactly when baz owns the window's chrome.**
+    ///
+    /// The owner, 2026-08-10, looking at the shipped state: *"until we have no
+    /// window chrome, remove the window controls..."*. With the platform's
+    /// title bar above baz's own band, minimise/maximise/close were drawn
+    /// twice, and one pair did nothing the other did not.
+    ///
+    /// **Not removed — conditional**, which is why this is worth a test rather
+    /// than a deletion: the same rule that hides them today draws them the day
+    /// `decorations` goes off, with no second edit and no chance of a build
+    /// that owns its chrome and has no way to close.
+    ///
+    /// Asserted on the source because iced's widget tree cannot be walked (see
+    /// [`source`]): the call must be *inside* the condition, so a refactor that
+    /// hoists it out fails here rather than in somebody's window.
+    #[test]
+    fn the_window_buttons_are_conditional_on_owning_the_chrome() {
+        // Only the code: this module's own prose names the call too, and a
+        // test that counted itself would be counting the wrong thing.
+        let src = source();
+        let src = src
+            .split_once("\nmod tests {")
+            .expect("the test module")
+            .0
+            .to_owned();
+        let at = src
+            .find("let buttons: Element<'static, Message> = if owns_chrome {")
+            .expect("the buttons are drawn behind the chrome question");
+        let arm = &src[at..src[at..].find("};").expect("the arm ends") + at];
+        assert!(
+            arm.contains("window_controls(maximized, ink)"),
+            "the buttons are no longer drawn in the owns-chrome arm"
+        );
+        assert_eq!(
+            src.matches("window_controls(maximized, ink)").count(),
+            1,
+            "the buttons are drawn from more than one place, so one of them \
+             can escape the condition"
+        );
     }
 
     /// **The bar's admission rule, asserted rather than merely written.**

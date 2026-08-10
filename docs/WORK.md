@@ -98,38 +98,7 @@
 
 ## Next
 
-1. **A library from a newer baz reads as no library at all.** The owner, on
-   2026-08-10, ran a two-day-old binary out of `target/release/` and reported
-   *"it shows me 'where's your music' which has no browse function and it also
-   tells me the schema version is version 8 if I pick any directory"*. Both
-   symptoms were that stale build — `Browse…` shipped with ADR-0025 after it,
-   and its `SCHEMA_VERSION` predates 8 — **so nothing in the current product
-   was broken. The failure *mode* is the defect.**
-   - `Index::open` correctly returns `IndexError::SchemaTooNew`, and the shell
-     answers it by drawing the **setup screen**: *"where's your music?"* To a
-     listener whose collection is exactly where they left it, the application
-     has just said their library does not exist. That is the most alarming
-     thing baz can say, and it says it in the one case where **nothing is
-     wrong with their data at all**.
-   - **It is a beta blocker under the bar he chose.** *"Nothing baz does loses
-     or corrupts anything"* is the promise, and a beta tester who installs a
-     build, then runs an older one — the exact shape of trying a release and
-     going back — hits this and reasonably concludes baz ate their library.
-     Nothing was eaten; a downgrade is *the* predictable beta-tester move.
-   - **The fix is a distinct state, not a better sentence.** The setup screen
-     asks a question the listener has already answered. What this case needs is
-     a statement — this library was made by a newer baz, here is the version it
-     wants, your music and your playlists are untouched — and **no path that
-     leads to overwriting the database**. Check what the setup screen's answer
-     would currently do to a `user_version` 8 file if a folder were typed into
-     it; if it would migrate or clobber, that is the real bug and it is worse
-     than the wording.
-   - Related and cheap: the two release binaries (`target/release/` from the
-     host, `target/tb/release/` from the toolbox) are indistinguishable to
-     anyone looking for an executable, and he went to the obvious one. Worth a
-     line in `docs/DEVELOPMENT.md` at least.
-
-2. **A deleted folder's records never leave the library — and the last thing
+1. **A deleted folder's records never leave the library — and the last thing
    missing is one press.** `rm -rf` an album directory and its eight rows stay
    on the wall for good. This is **deliberate and the reasoning is sound**: from
    the filesystem's side a deleted folder and an unmounted NAS are the same
@@ -150,15 +119,15 @@
      page's strip, pressing `forget_paths` over the album's tracks — one
      `Message` variant and one update arm in `crates/baz/src/app.rs`. ADR-0042
      §8 draws all of it, including the words. It did not land only because that
-     file was held by the `SchemaTooNew` branch (item 1) while this work ran;
-     **the two must not be merged blind of each other.**
-3. **The seek bar says which thing it measures.** The owner: *"I think the seek
+     file was held by the `SchemaTooNew` branch, which has since landed
+     (ADR-0041) — so the file is free and this is now the whole of the item.
+2. **The seek bar says which thing it measures.** The owner: *"I think the seek
    bar at the bottom should have a toggle indicating for song or for whole
    playlist"*. Both are true readouts — the track's position and the run's — and
    he is asking to choose. Undesigned; the questions are where the toggle lives
    (the bar is already dense), whether the choice persists, and what the
    elapsed/remaining figures either side of the bar read in run mode.
-4. **An artist has an `All songs` of their own.** The owner: *"the artist page
+3. **An artist has an `All songs` of their own.** The owner: *"the artist page
    should have its own 'all songs' playlist I think"*. `implicit::ImplicitList`
    already gives the library one, with an `Origin` kind and a collage sleeve, so
    this is that list scoped to one artist rather than new machinery. Undecided:
@@ -169,7 +138,7 @@
    word may not need qualifying. It should credit the artist's list rather than
    the underlying records when played, which is the rule that just landed for
    playlists.
-5. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
+4. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
    2026-08-10: *"at full screen the now playing page looks odd because the
    playlist hugs right and the art hugs left"* — which is this item, reported
    from the frame rather than from the measurement, and worth recording as a
@@ -181,7 +150,7 @@
    too — A4 widening the run closes the gap from one side, and if the sleeve is
    also hanging hard left rather than sitting in its column, that is a second
    fault the widening would hide rather than fix.
-6. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+5. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -194,7 +163,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-7. **Rewrite the README as the project's public face**, with the icon and real
+6. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
    last, so it describes what actually ships. Two of those four now exist and
    are regenerable — `docs/screenshots/capture.sh` writes the wall and Now
@@ -204,8 +173,8 @@
    `Ctrl+B` exists. (The group-key row itself is current again — the six words
    and `1`–`6` were corrected when `A–Z` came back.)
 
-8. **Ship the public beta.** The last item by construction: it is the one
-   that makes the seven above reach anybody. `v0.1.0` is prepared up to the
+7. **Ship the public beta.** The last item by construction: it is the one
+   that makes the six above reach anybody. `v0.1.0` is prepared up to the
    tag and `docs/RELEASING.md` holds the owner's three commands, but a *beta*
    asks two more things of the release than a private tag does. **Flathub** —
    an account and a PR to `flathub/flathub`, which is the owner's and has
@@ -369,10 +338,51 @@ Newest first. Fuller detail in `CHANGELOG.md`.
     on either assertion. `scan/launch_cold_10k` is 81.0 ms against ADR-0010's
     recorded 83.4 ms — the addition does not appear.
   - **Blocker 2 is not closed**: its control is one `Message` in `app.rs`,
-    specified in ADR-0042 §8, and it stayed unwritten because that file was held
-    by item 1's branch. It is item 2 of `## Next`, narrowed to that.
+    specified in ADR-0042 §8, and it stayed unwritten because `app.rs` was held by
+    the `SchemaTooNew` branch while this work ran. It is item 1 of `## Next`,
+    narrowed to that, and the file is free now that both have landed.
   - **Found on the way**: `WORK.md` and `BACKLOG.md` both credited the removal
     policy to ADR-0011, which is the volume ADR. It is ADR-0010. Both fixed.
+- **A library from a newer baz is a statement now, not a first run.** The
+  owner's *"it shows me 'where's your music' … it also tells me the schema
+  version is version 8 if I pick any directory"*, answered with a distinct
+  state (ADR-0041, `docs/design/impl/blocked-library/`). One line in `app.rs`
+  turned **every** failure to open the library into the first-run screen, so a
+  correctly-refused database from a newer build was reported as *you have no
+  library* — and every door on that screen led straight back into the same
+  refusal, which is the loop he was in.
+  - **The data was checked before the words were chosen**, because that is the
+    difference between a presentation defect and a data-loss one. It is safe,
+    and it is now safe *by construction*: `Library::open` reads `user_version`
+    before it sets a pragma (`journal_mode` is persistent, so the old order
+    could have rewritten a header on the way to refusing to touch the file),
+    and a test opens a stamped database **three times** — the retry a listener
+    performs by typing folders — and compares the bytes each time. The capture
+    script prints the same fact as a SHA-256, unchanged after both builds have
+    been run against it.
+  - **One screen, three reasons, not three screens**: a newer baz, an index
+    that cannot be read, and a machine with nowhere to keep one. All three say
+    *"Your music and your playlists are untouched"* in the same place, because
+    in all three it is true. What differs is the rest of the words and **which
+    controls exist** — `Try again` only where trying again could change the
+    answer, which is not the case for a schema version.
+  - **The escape hatch renames and never deletes.** `set_aside` moves
+    `library.db` (and its write-ahead log) to `library.db.set-aside-1`, so
+    *"nothing is deleted, renaming it back restores it exactly"* is a round
+    trip a test performs. It is never the default, never the only control, and
+    the first press only **reveals** what a new index costs — the ADDED dates,
+    which is `first_seen_ns` and is the one thing in the schema a rescan cannot
+    recover. On a downgrade the revealed paragraph opens by saying *this is not
+    the fix*.
+  - **Checked and left alone**: a music folder that has gone away never reaches
+    either screen. The library opens, the scan reports it unavailable, and the
+    strip says *"1 folder is not reachable"* with every record still on the
+    wall (ADR-0022). That case was already answered.
+  - **Found on the way**: a `cfg(test)` helper added to `app.rs` silently
+    truncated the source that several `views` tests read, because they split
+    that file at its first test attribute. It failed loudly rather than passing
+    vacuously, which is the design working — but a test-only constructor in
+    `app.rs`'s head is now a thing not to add.
 - **The app bar — baz draws the window's chrome, and it is the same band in
   every place.** Three asks in one change (ADR-0040): `Play all` removed, the
   display options moved to the top bar, and a resident app bar carrying them

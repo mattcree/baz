@@ -513,10 +513,7 @@ fn folder_block(
         word_control("Remove", true, Message::ConfirmRemoveMusicFolder(index))
     };
     let note = if pending {
-        (
-            forget_phrase(folder.tracks),
-            room.paper,
-        )
+        (forget_phrase(folder.tracks), room.paper)
     } else if folder.unavailable {
         (
             format!(
@@ -981,7 +978,10 @@ mod tests {
             "Forget 412 tracks? The files stay on disk; baz stops holding them \
              but remembers when they arrived."
         );
-        assert!(phrase.starts_with("Forget 412 tracks?"), "the count is named");
+        assert!(
+            phrase.starts_with("Forget 412 tracks?"),
+            "the count is named"
+        );
         assert!(phrase.contains("files stay on disk"));
         assert!(phrase.contains("remembers when they arrived"));
         assert_eq!(

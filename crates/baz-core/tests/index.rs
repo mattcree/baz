@@ -2226,6 +2226,180 @@ fn newer_schema_versions_are_refused() {
     }
 }
 
+/// **The load-bearing fact behind the `Newer baz` screen**: a refused open
+/// does not write a byte, so *"your music and your playlists are untouched"*
+/// is a statement about this code and not a hope.
+///
+/// The shell used to answer this error by drawing the first-run screen
+/// (*"where's your music?"*), whose one control invites the listener to name a
+/// folder — which calls straight back into [`Library::open`] against the same
+/// file. That is the retry this asserts: **three** opens, each refused, and
+/// afterwards the database still holds every row and still declares the
+/// version the newer baz stamped on it. A migration that ran before the
+/// version check, or a `CREATE TABLE IF NOT EXISTS` on the way past, would
+/// change these bytes and turn a presentation defect into a data-loss one.
+///
+/// The bytes of `library.db` itself are compared, not a row count: a count
+/// would miss a rewritten header, a bumped `user_version`, or a table added
+/// beside the ones being counted.
+#[test]
+fn a_too_new_database_is_refused_without_a_byte_being_written() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let originals = vec![
+        track(
+            "/m/a/01.flac",
+            "Stan Rogers",
+            "Fogarty's Cove",
+            "Watching",
+            1,
+        ),
+        track(
+            "/m/a/02.flac",
+            "Stan Rogers",
+            "Fogarty's Cove",
+            "Barrett's",
+            2,
+        ),
+    ];
+    {
+        let mut library = Library::open(&db).expect("create");
+        library.add_tracks(originals.clone()).expect("add");
+    }
+    // A database from a baz two schema versions ahead of this build. The
+    // `PRAGMA` is the only difference from a library this build wrote, which
+    // is deliberate: the *rows* are ones this build can read, so anything that
+    // touched them would be reading and writing them happily, and the version
+    // check is the only thing standing between them and a downgrade.
+    let conn = rusqlite::Connection::open(&db).expect("raw open");
+    conn.pragma_update(None, "user_version", baz_core::index::SCHEMA_VERSION + 2)
+        .expect("bump");
+    drop(conn);
+
+    let before = std::fs::read(&db).expect("read the refused database");
+    for attempt in 1..=3 {
+        let err = Library::open(&db).err().expect("open must fail");
+        assert!(
+            matches!(err, IndexError::SchemaTooNew { found }
+                     if found == baz_core::index::SCHEMA_VERSION + 2),
+            "attempt {attempt} gave {err:?}"
+        );
+        assert_eq!(
+            std::fs::read(&db).expect("re-read"),
+            before,
+            "attempt {attempt} changed the database this build refused to read"
+        );
+    }
+
+    // …and the rows are readable the moment a build that speaks the version
+    // opens it, which is what the screen promises the listener happens when
+    // they put the newer baz back.
+    let conn = rusqlite::Connection::open(&db).expect("raw open");
+    conn.pragma_update(None, "user_version", baz_core::index::SCHEMA_VERSION)
+        .expect("restore");
+    drop(conn);
+    let recovered = Library::open(&db).expect("open at the supported version");
+    let mut titles: Vec<String> = recovered
+        .tracks()
+        .filter_map(|meta| meta.title.clone())
+        .collect();
+    titles.sort();
+    assert_eq!(titles, vec!["Barrett's".to_owned(), "Watching".to_owned()]);
+}
+
+/// **Setting a library aside loses nothing**, which is the only reason the
+/// blocked-library screen is allowed to offer it.
+///
+/// The round trip is the whole assertion: a too-new database is moved out of
+/// the way, the original name opens as a first-run library, and renaming the
+/// file back reproduces the original refusal byte for byte. If that holds,
+/// *"nothing is deleted; renaming it back restores it exactly"* is a fact
+/// about this code.
+#[test]
+fn setting_a_library_aside_moves_it_whole_and_is_reversible() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    {
+        let mut library = Library::open(&db).expect("create");
+        library
+            .add_tracks(vec![track("/m/a/01.flac", "Stan", "Cove", "Watching", 1)])
+            .expect("add");
+    }
+    let conn = rusqlite::Connection::open(&db).expect("raw open");
+    conn.pragma_update(None, "user_version", 99).expect("bump");
+    drop(conn);
+    let original = std::fs::read(&db).expect("read");
+
+    let aside = baz_core::index::set_aside(&db).expect("set aside");
+    assert_eq!(aside, dir.path().join("library.db.set-aside-1"));
+    assert!(
+        !db.exists(),
+        "the database was left where baz could open it"
+    );
+    assert_eq!(
+        std::fs::read(&aside).expect("read the set-aside file"),
+        original,
+        "setting aside rewrote the file it was supposed to preserve"
+    );
+
+    // The original name is now a first run — which is the point.
+    let fresh = Library::open(&db).expect("a first-run library");
+    assert_eq!(fresh.len(), 0);
+    drop(fresh);
+
+    // …and the set-aside file is still exactly the library a newer baz wrote:
+    // put it back and this build refuses it again, as it did at the start.
+    std::fs::remove_file(&db).expect("clear the fresh index");
+    for sidecar in ["-wal", "-shm"] {
+        let _ = std::fs::remove_file(dir.path().join(format!("library.db{sidecar}")));
+    }
+    std::fs::rename(&aside, &db).expect("rename back");
+    assert!(matches!(
+        Library::open(&db).err().expect("still refused"),
+        IndexError::SchemaTooNew { found: 99 }
+    ));
+}
+
+/// The write-ahead log and the shared-memory file travel with the database.
+///
+/// A `library.db-wal` left behind would be recovered *into the new database*
+/// by SQLite the next time one appeared under that name — a stale log applied
+/// to a library it does not belong to, which is the one way this operation
+/// could corrupt anything. It is asserted rather than reasoned about because
+/// the sidecars are usually absent (SQLite removes them on a clean close), so
+/// the failure would never show up in ordinary use.
+#[test]
+fn setting_aside_takes_the_write_ahead_log_with_it() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    drop(Library::open(&db).expect("create"));
+    // Stand in for a newer baz that was killed mid-write: a database with
+    // both sidecars beside it.
+    for sidecar in ["-wal", "-shm"] {
+        std::fs::write(dir.path().join(format!("library.db{sidecar}")), b"stale")
+            .expect("write sidecar");
+    }
+
+    let aside = baz_core::index::set_aside(&db).expect("set aside");
+    for sidecar in ["-wal", "-shm"] {
+        assert!(
+            !dir.path().join(format!("library.db{sidecar}")).exists(),
+            "library.db{sidecar} was left beside a name a new database will take"
+        );
+        let moved = PathBuf::from(format!("{}{sidecar}", aside.display()));
+        assert_eq!(std::fs::read(&moved).expect("read moved sidecar"), b"stale");
+    }
+
+    // A second set-aside does not overwrite the first.
+    drop(Library::open(&db).expect("second library"));
+    let second = baz_core::index::set_aside(&db).expect("set aside again");
+    assert_eq!(second, dir.path().join("library.db.set-aside-2"));
+    assert!(
+        aside.exists(),
+        "the first set-aside library was overwritten"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Schema v4: the file stamps incremental scanning compares, and removal.
 // ---------------------------------------------------------------------------
@@ -4870,8 +5044,20 @@ fn forgetting_a_record_keeps_when_it_arrived_and_the_files_coming_back_restores_
         .add_tracks_under(
             Some(Path::new("/m")),
             vec![
-                track("/m/Gone/01.flac", "Talk Talk", "Laughing Stock", "Myrrhman", 1),
-                track("/m/Gone/02.flac", "Talk Talk", "Laughing Stock", "Ascension Day", 2),
+                track(
+                    "/m/Gone/01.flac",
+                    "Talk Talk",
+                    "Laughing Stock",
+                    "Myrrhman",
+                    1,
+                ),
+                track(
+                    "/m/Gone/02.flac",
+                    "Talk Talk",
+                    "Laughing Stock",
+                    "Ascension Day",
+                    2,
+                ),
                 track("/m/Kept/01.flac", "Bark Psychosis", "Hex", "The Loom", 1),
             ],
         )
@@ -4896,8 +5082,20 @@ fn forgetting_a_record_keeps_when_it_arrived_and_the_files_coming_back_restores_
         .add_tracks_under(
             Some(Path::new("/m")),
             vec![
-                track("/m/Gone/01.flac", "Talk Talk", "Laughing Stock", "Myrrhman", 1),
-                track("/m/Gone/02.flac", "Talk Talk", "Laughing Stock", "Ascension Day", 2),
+                track(
+                    "/m/Gone/01.flac",
+                    "Talk Talk",
+                    "Laughing Stock",
+                    "Myrrhman",
+                    1,
+                ),
+                track(
+                    "/m/Gone/02.flac",
+                    "Talk Talk",
+                    "Laughing Stock",
+                    "Ascension Day",
+                    2,
+                ),
             ],
         )
         .expect("rescan");
@@ -4919,13 +5117,7 @@ fn forgetting_a_record_keeps_when_it_arrived_and_the_files_coming_back_restores_
 /// two halves of this design drifting into two mechanisms that disagree.
 #[test]
 fn forgetting_a_root_and_forgetting_its_paths_leave_the_same_memory() {
-    let rows = || {
-        vec![
-            bare("/m/a.flac"),
-            bare("/m/b.flac"),
-            bare("/m/sub/c.flac"),
-        ]
-    };
+    let rows = || vec![bare("/m/a.flac"), bare("/m/b.flac"), bare("/m/sub/c.flac")];
     let paths = ["/m/a.flac", "/m/b.flac", "/m/sub/c.flac"];
 
     let mut by_root = Library::open_in_memory().expect("open");
@@ -4981,11 +5173,17 @@ fn a_scan_confirmed_removal_remembers_nothing_and_a_listeners_does() {
         .expect("add");
 
     // What a scan does after `is_confirmed_gone` said yes.
-    assert_eq!(library.remove_tracks(["/m/deleted.flac"]).expect("remove"), 1);
+    assert_eq!(
+        library.remove_tracks(["/m/deleted.flac"]).expect("remove"),
+        1
+    );
     assert_eq!(library.forgotten_paths(), 0, "evidence needs no reversal");
 
     // What a listener does.
-    assert_eq!(library.forget_paths(["/m/asserted.flac"]).expect("forget"), 1);
+    assert_eq!(
+        library.forget_paths(["/m/asserted.flac"]).expect("forget"),
+        1
+    );
     assert_eq!(library.forgotten_paths(), 1);
 
     // So a file the scan removed and the listener later restores is a genuine
@@ -4999,7 +5197,7 @@ fn a_scan_confirmed_removal_remembers_nothing_and_a_listeners_does() {
         .iter()
         .flat_map(|album| album.editions.iter())
         .flat_map(|edition| edition.tracks.iter())
-        .find(|meta| meta.path == PathBuf::from("/m/deleted.flac"))
+        .find(|meta| meta.path == Path::new("/m/deleted.flac"))
         .map(|_| library.albums()[0].first_seen_ns.expect("stamped"))
         .expect("back");
     assert!(restored >= before, "a rediscovered deletion is an arrival");
@@ -5021,8 +5219,15 @@ fn a_path_forgotten_many_times_is_remembered_once_and_never_while_held() {
 
     for _ in 0..5 {
         library.forget_paths(["/m/a.flac"]).expect("forget");
-        assert_eq!(library.forgotten_paths(), 1, "one row per path, not one per act");
-        assert_eq!(library.forgotten_first_seen(Path::new("/m/a.flac")), Some(arrived));
+        assert_eq!(
+            library.forgotten_paths(),
+            1,
+            "one row per path, not one per act"
+        );
+        assert_eq!(
+            library.forgotten_first_seen(Path::new("/m/a.flac")),
+            Some(arrived)
+        );
         library
             .add_tracks_under(Some(Path::new("/m")), vec![bare("/m/a.flac")])
             .expect("re-add");
@@ -5106,6 +5311,12 @@ const V8_LAST_SCAN_NS: i64 = 1_755_000_000_000_000_000;
 /// timestamps, the recorded root on every row, and a populated `roots` table.
 fn write_v8_database(db: &std::path::Path) {
     let conn = rusqlite::Connection::open(db).expect("create v8 db");
+    write_v8_schema(&conn);
+    write_v8_rows(&conn);
+}
+
+/// The v8 schema, exactly as v8 wrote it.
+fn write_v8_schema(conn: &rusqlite::Connection) {
     conn.execute_batch(
         "
         BEGIN;
@@ -5150,7 +5361,10 @@ fn write_v8_database(db: &std::path::Path) {
         ",
     )
     .expect("v8 schema");
+}
 
+/// The v8 fixture's rows, and its one root.
+fn write_v8_rows(conn: &rusqlite::Connection) {
     for (n, row) in v3_rows().into_iter().enumerate() {
         let tagged = row.format == "flac";
         let mtime = 1_700_000_000_000_000_000_i64 + i64::try_from(n).expect("five rows");
@@ -5391,7 +5605,10 @@ fn forgetting_a_record_that_was_only_unmounted_costs_nothing_when_it_returns() {
     // exactly why baz does not decide this for itself.
     let parked = dir.path().join("parked");
     std::fs::rename(&root, &parked).expect("unmount");
-    assert!(scan(&root).is_err(), "an absent folder refuses to be walked");
+    assert!(
+        scan(&root).is_err(),
+        "an absent folder refuses to be walked"
+    );
 
     // The listener asserts it anyway, at record scale. baz obeys: the rows go
     // and the wall is empty.
