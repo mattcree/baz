@@ -411,6 +411,19 @@ Newest first. Each was asked for in conversation and is now in the product.
   tables from a `u32` entry count in five more places (`stsz`, `stts`, `stsc`,
   `stco`, `co64`).
 
+  **macOS finds the pages, and that is the exposure list being wrong.** The
+  paragraph below prices this as a small machine, a container limit, strict
+  overcommit or 32-bit, on the strength of a Linux measurement. On
+  `macos-latest` the same three reproducers cost **5.02 s**, and that is how it
+  surfaced: `no_hostile_input_is_slow` asserted one second over the whole set
+  and took `main` red on the merge that added it. Not a regression and not slow
+  code — the platform actually finding the pages where Linux hands back a lazy
+  mapping. So the list was short by one entry, the entry is **a platform baz
+  ships to**, and this moves from theoretical to something a beta tester on a
+  Mac can feel with one corrupt file. The test now budgets what baz controls
+  and times these three separately, so the number is printed on every run and
+  cannot quietly grow.
+
   **What it costs, measured rather than assumed.** On a 64-bit machine with
   ordinary overcommit — the platform baz ships to — the reservation is a lazy
   zero mapping that is never written: `open` returns `decode error: out of
