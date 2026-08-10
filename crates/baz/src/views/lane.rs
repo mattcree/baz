@@ -15,12 +15,36 @@
 //!    `paper_dim`. **`Now playing` carries the lamp dot when something is
 //!    sounding** — the accent's one reserved meaning, spent so the lane can
 //!    answer *is anything on?* without being read.
-//! 2. **`RECENT`** — every playlist and the last
-//!    [`crate::lane::RECENT_ALBUMS`] records, one list, last touched first
-//!    ([`crate::lane`] owns the order and is tested without a window).
+//! 2. **`PLAYLISTS`**, then **`RECENT`** — every list, then the last
+//!    [`crate::lane::RECENT_ALBUMS`] records, each section last touched first
+//!    ([`crate::lane`] owns the membership and the order, and is tested
+//!    without a window). **One scroller over both**, for the reason in
+//!    [`sections`].
 //! 3. **`Collapse`** at the foot — one control, a chevron and its word, the
 //!    chevron pointing the way the lane will move. Collapsed it is the
 //!    chevron alone under its tooltip, like the destinations above it.
+//!
+//! # Why the lists have a section, when they used to be mixed in
+//!
+//! The owner, 2026-08-10: *"I guess we need to add playlists into their own
+//! section under library"*. This **reverses his own brief** for this surface —
+//! *"the side bar will have recent albums and playlists mixed based on some
+//! order"* — and the reversal is recorded rather than smoothed over
+//! (ADR-0030's sixth amendment). What it changes is **membership**: `RECENT`
+//! is records now, `PLAYLISTS` is lists, and nothing is in both, because a
+//! list drawn in two sections would be one door drawn twice.
+//!
+//! What it does **not** change is the key: both sections are last touched
+//! first, which is the one total order [`crate::lane`] has always had. A list
+//! you played this morning is still the top row of the lists; it moved
+//! section, not rank — so the recency the mixed list gave him is not spent to
+//! buy the heading.
+//!
+//! *"Under library"* is read as **under the head**, not literally between
+//! `Library` and `Now playing`: the three destinations are a closed set
+//! *always all three and always in that order* (§1 above, ADR-0030's first
+//! amendment), and a section between two of them would split the one triple
+//! this surface is not allowed to grow.
 //!
 //! # Why the well is a field here and not a `Search` destination
 //!
@@ -105,14 +129,14 @@ pub(crate) const SCOPE: &str = "Search library";
 
 /// The lane, at the width its state says.
 ///
-/// `rows` is already resolved and ordered by [`crate::lane::resolve`] — this
-/// function decides nothing about membership, which is what keeps the
+/// `lane` is already resolved, split and ordered by [`crate::lane::resolve`] —
+/// this function decides nothing about membership, which is what keeps the
 /// ordering testable without a window.
 pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     playlists: &'a Playlists,
     place: Place,
-    rows: &'a [Touched],
+    lane: &'a crate::lane::Lane,
     sounding: bool,
     sounding_row: Option<Subject>,
     window_w: f32,
@@ -140,36 +164,13 @@ pub(crate) fn view<'a>(
         head = head.push(destination_row(to, place, open, sounding));
     }
 
-    let mut list = column![];
-    for entry in rows {
-        // **Which row is sounding** — doc 13 §2.6's claim, delivered.
-        //
-        // A list is never "the sounding record" however many of its tracks are
-        // in the run: the fact is about a record, and a list that lit because
-        // one of its members was playing would be the invisible-pool posture
-        // in a sleeve. **That argument is kept and it is still true — but it
-        // is about a list lighting *incidentally*, and it does not reach the
-        // case where the list is what the listener put on.** The owner: *"I
-        // still see albums specifically appearing as if they are playing
-        // rather than the playlist … in a sense we need to track which
-        // playlist + track is playing"*.
-        //
-        // So the mark follows the **run's origin** ([`lane::sounding_subject`],
-        // which is the same call the recency ordering makes, so the two cannot
-        // disagree): a run reified from a list marks the list and none of its
-        // records; every other run marks the record, as before. Nothing lights
-        // incidentally either way — a list only ever marked because it *is* the
-        // run, which is the most direct fact available rather than a guess from
-        // membership.
-        let sounds = sounding_row.is_some() && sounding_row == Some(entry.subject);
-        list = list.push(lane_row(shelf, playlists, entry, open, sounds));
-    }
+    let body_rows = sections(shelf, playlists, lane, open, sounding_row);
     // **The rows carry the lane's gutter, not the scrollable**, so the bar
     // rides the lane's own right edge — the owner's *"the scrollbar should be
     // at the edge of it"*. A scrollbar inset by the gutter reads as belonging
     // to the list rather than to the surface, and leaves a dead strip between
     // it and the seam. The rows keep the inset; only the bar reaches the edge.
-    let list = scrollable(list.padding(theme::pad(0.0, theme::GAP_XL)))
+    let list = scrollable(body_rows.padding(theme::pad(0.0, theme::GAP_XL)))
         .direction(scrollable::Direction::Vertical(theme::wall_scrollbar()))
         .style(move |_theme, status| theme::scrollbar(room, room.recess, status))
         .width(Length::Fill)
@@ -183,11 +184,13 @@ pub(crate) fn view<'a>(
     let body = column![
         flanked(head.into()),
         // The head's one rule: three destinations above it, the things you
-        // have touched below. The lane has exactly one seam because it has
-        // exactly two parts.
+        // have touched below. **The lane still has exactly one seam**, and
+        // that is the point of drawing the sections' headings rather than a
+        // second rule: a heading names a section, a rule cuts the surface, and
+        // there is one cut here because there are two parts — the frame's
+        // concerns, and yours.
         container(horizontal_rule(1).style(move |_theme| theme::hairline(room, room.recess)))
             .padding(theme::pad(theme::GAP_MD, theme::GAP_XL)),
-        flanked(heading(open)),
         list,
         flanked(marks(shelf.lane_open, theme::sidebar_can_expand(window_w))),
     ]
@@ -597,18 +600,108 @@ fn lamp_dot() -> Element<'static, Message> {
     .into()
 }
 
-/// `RECENT` — the lane's one word, in the room's quietest voice.
+/// **The lane's body: `PLAYLISTS`, then `RECENT`, inside one scroller.**
+///
+/// The owner's *"I guess we need to add playlists into their own section under
+/// library"*, and the whole of what it costs — a heading each, a `GAP_MD`
+/// between them, and one predicate for a section that has nothing in it.
+///
+/// # One scroller over both, and this is the load-bearing decision
+///
+/// `PLAYLISTS` has **no cap**: [`crate::lane::RECENT_ALBUMS`] trims the
+/// records and nothing trims the lists, because the lane is the complete index
+/// of them (ADR-0030 §1). So a listener with forty lists has a first section
+/// taller than the lane, and the arrangement has to answer *where does `RECENT`
+/// go?*
+///
+/// Two scrollers — one per section, each taking half the height — is the
+/// obvious answer and it is wrong: it would give the surface two scroll
+/// positions to arbitrate between, which is the failure mode ADR-0030 §1 wrote
+/// the whole one-order rule against, and it would cap the lists after all, at
+/// half a lane. A fixed-height `PLAYLISTS` block above a scrolling `RECENT` is
+/// worse still: past a dozen lists it pushes `RECENT` off the bottom entirely
+/// and the records become unreachable.
+///
+/// **So both sections and both headings are inside the one scroller the lane
+/// has always had.** The headings scroll away with their rows, which is what a
+/// heading in a scrolling column does everywhere else in the product; every row
+/// of both sections is reachable at any list count; and the lane still has one
+/// scroll position, one bar, and nothing to arbitrate.
+///
+/// # A section with nothing in it is absent, not empty
+///
+/// ADR-0030 §6's rule for the home band, applied here for the same reason: a
+/// heading over no rows names nothing. On a first run both are absent and the
+/// lane below the hairline is bare, which is the truth about a library nobody
+/// has played yet — a permanent `PLAYLISTS` word over a permanent gap would be
+/// chrome that never becomes content.
+fn sections<'a>(
+    shelf: &'a Shelf,
+    playlists: &'a Playlists,
+    lane: &'a crate::lane::Lane,
+    open: bool,
+    sounding_row: Option<Subject>,
+) -> iced::widget::Column<'a, Message> {
+    let mut body = column![];
+    let mut drawn = 0;
+    for (word, rows) in [("PLAYLISTS", &lane.lists), ("RECENT", &lane.records)] {
+        if rows.is_empty() {
+            continue;
+        }
+        if drawn > 0 {
+            body = body.push(Space::with_height(Length::Fixed(theme::GAP_MD)));
+        }
+        drawn += 1;
+        body = body.push(heading(word, open));
+        for entry in rows {
+            // **Which row is sounding** — doc 13 §2.6's claim, delivered.
+            //
+            // A list is never "the sounding record" however many of its tracks
+            // are in the run: the fact is about a record, and a list that lit
+            // because one of its members was playing would be the
+            // invisible-pool posture in a sleeve. **That argument is kept and
+            // it is still true — but it is about a list lighting
+            // *incidentally*, and it does not reach the case where the list is
+            // what the listener put on.** The owner: *"I still see albums
+            // specifically appearing as if they are playing rather than the
+            // playlist … in a sense we need to track which playlist + track is
+            // playing"*.
+            //
+            // So the mark follows the **run's origin**
+            // ([`crate::lane::sounding_subject`], which is the same call the
+            // recency ordering makes, so the two cannot disagree): a run
+            // reified from a list marks the list and none of its records; every
+            // other run marks the record, as before. Nothing lights
+            // incidentally either way — a list only ever marked because it *is*
+            // the run, which is the most direct fact available rather than a
+            // guess from membership.
+            //
+            // The sections do not change this and cannot: the two are disjoint
+            // (`crate::lane::Lane`), so one origin still marks one row.
+            let sounds = sounding_row.is_some() && sounding_row == Some(entry.subject);
+            body = body.push(lane_row(shelf, playlists, entry, open, sounds));
+        }
+    }
+    body
+}
+
+/// A section's word, in the room's quietest voice.
 ///
 /// Absent when the lane is collapsed: at 96 px there is no measure for a
 /// tracked word, and a heading over an unlabelled column of sleeves would be
-/// naming nothing the eye can use.
-fn heading(open: bool) -> Element<'static, Message> {
+/// naming nothing the eye can use. **That answer is `RECENT`'s and
+/// `PLAYLISTS` takes it rather than inventing a second one** — a rail that
+/// grew a mark where the expanded lane has a word would be two answers to one
+/// question, and 96 px is exactly where there is no room for the second. What
+/// separates the two runs of sleeves on the rail is the `GAP_MD` the sections
+/// carry either way, and the tooltips, which name every row collapsed.
+fn heading(word: &'static str, open: bool) -> Element<'static, Message> {
     let room = theme::active();
     if !open {
         return Space::with_height(Length::Fixed(theme::GAP_SM)).into();
     }
     container(
-        text(theme::tracked("RECENT"))
+        text(theme::tracked(word))
             .size(theme::SIZE_HEADING)
             .line_height(theme::LEADING_HEADING)
             .font(theme::MEDIUM)
@@ -885,7 +978,7 @@ mod tests {
             .split_once("let mut head")
             .expect("the head is built")
             .1;
-        let (head, _) = head.split_once("let mut list").expect("the head ends");
+        let (head, _) = head.split_once("let body_rows").expect("the head ends");
         assert!(
             head.contains("theme::sidebar_can_expand(window_w)"),
             "the head's well is not conditioned on the lane being able to open"
@@ -1112,6 +1205,73 @@ mod tests {
         );
     }
 
+    /// **The lists have a section, it stands above `RECENT`, and both are
+    /// inside one scroller.**
+    ///
+    /// The owner, 2026-08-10: *"I guess we need to add playlists into their own
+    /// section under library"*. Three things are load-bearing and all three are
+    /// facts about *where the code is*, which is what a source scan is good
+    /// for; the membership and the order are behavioural and are pinned over
+    /// real values in [`crate::lane`]'s own tests.
+    ///
+    /// 1. **`PLAYLISTS` before `RECENT`**, under the head rather than inside
+    ///    it — *"under library"* read as under the closed triple, because a
+    ///    section between two destinations would split the one thing ADR-0030's
+    ///    first amendment says is always all three in that order.
+    /// 2. **One scroller over both.** `PLAYLISTS` has no cap, so a second
+    ///    scroller or a fixed-height first section is how `RECENT` becomes
+    ///    unreachable at forty lists. This is the defect the split is most
+    ///    likely to introduce, so it is the assertion with the most weight.
+    /// 3. **A section with nothing in it is absent**, not an empty heading.
+    #[test]
+    fn the_lists_have_their_own_section_above_recent_in_one_scroller() {
+        let source = source();
+        let shipped = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a source has a head");
+        let sections = body(&source, "fn sections<'a>(");
+        let lists_at = sections.find("\"PLAYLISTS\"").expect("the lists' section");
+        let recent_at = sections.find("\"RECENT\"").expect("the records' section");
+        assert!(
+            lists_at < recent_at,
+            "`RECENT` is drawn above the lists; the owner asked for the \
+             playlists' section under the head, ahead of the records"
+        );
+        assert!(
+            sections.contains("if rows.is_empty() {\n            continue;"),
+            "a section with no rows still draws its heading — a word naming \
+             nothing, which ADR-0030 §6's absent-not-empty rule refuses"
+        );
+        // **One scroller**, and the sections are inside it. Two would be two
+        // scroll positions to arbitrate between — the failure ADR-0030 §1's
+        // one-order rule exists to prevent — and a fixed first section would
+        // push `RECENT` off the bottom once the lists outgrew it.
+        assert_eq!(
+            shipped.matches("scrollable(").count(),
+            1,
+            "the lane grew a second scroller, so it has two scroll positions \
+             and `RECENT` is reachable only at some list counts"
+        );
+        let view = body(&source, "pub(crate) fn view<'a>(");
+        assert!(
+            view.contains("scrollable(body_rows.padding("),
+            "the sections are no longer the scroller's content"
+        );
+        assert!(
+            !view.contains("flanked(heading"),
+            "a heading is drawn outside the scroller again, so it stands \
+             while its rows scroll under it"
+        );
+        // Collapsed, a section's word is the same nothing `RECENT` has always
+        // been at 96 px — one answer to that question, not two.
+        let heading = body(&source, "fn heading(word: &'static str, open: bool)");
+        assert!(
+            heading.contains("if !open {\n        return Space::with_height"),
+            "the collapsed rail grew a section mark of its own"
+        );
+    }
+
     /// **The sounding record is marked in the lane** — doc 13 §2.6's claim,
     /// which the shipped lane did not keep: every row drew
     /// [`theme::track_row`] with `playing` hard-coded `false`, so the surface
@@ -1143,15 +1303,22 @@ mod tests {
     #[test]
     fn the_sounding_record_is_the_marked_row() {
         let source = source();
-        let view = body(&source, "pub(crate) fn view<'a>(");
+        // The marking moved into `sections` when the lists got a section of
+        // their own, so that is what this scans — a test still reading `view`
+        // would pass by looking at a function the rule left.
+        let sections = body(&source, "fn sections<'a>(");
         assert!(
-            !view.contains("Subject::Record(id) if Some(id) =="),
+            sections.contains("sounding_row == Some(entry.subject)"),
+            "the lane no longer marks the row `lane::sounding_subject` named"
+        );
+        assert!(
+            !sections.contains("Subject::Record(id) if Some(id) =="),
             "the lane derived the sounding row from the sounding file's record \
              again, instead of taking `lane::sounding_subject`'s answer — the \
              dot and the recency order are now free to disagree"
         );
         assert!(
-            !view.contains("Subject::Playlist(") && !view.contains("played_list"),
+            !sections.contains("Subject::Playlist(") && !sections.contains("played_list"),
             "the lane re-derived which row is sounding rather than being handed \
              it; the rule belongs in `lane::sounding_subject`"
         );

@@ -133,9 +133,6 @@
   levels makes sense to me"*. Carries the `views/artist.rs` tile-width defect
   with it (six columns where the wall draws five at 1920, lane collapsed),
   since it is the same family: a page laying tiles by its own arithmetic.
-- **Playlists get their own section in the lane** — the owner's *"I guess we
-  need to add playlists into their own section under library"*. A split of
-  `RECENT`, which mixes every list with the last records today.
 
 ## Waiting on the owner
 
@@ -240,6 +237,28 @@ Newest first. Fuller detail in `CHANGELOG.md`.
   - **Found in a frame, and it is the reason the harness shoots two builds:**
     the quiet act hung from two lanes (x = 115 against x = 12), and **a
     playlist's whole page rode 12 px higher than a record's**.
+- **The lists have a section of their own in the lane** — the owner: *"I guess
+  we need to add playlists into their own section under library"*. A **split,
+  not an addition**: `RECENT` already held every playlist mixed with the last 24
+  records, so what shipped is `PLAYLISTS` (every list) above `RECENT` (records
+  only), under the head rather than inside it — the three destinations are a
+  closed triple and a section between two of them would split it. It reverses
+  his own *"recent albums and playlists mixed based on some order"*, so ADR-0030
+  is **amended (sixth), not rewritten**, and both sentences stay on the record.
+  The one order is untouched — last touched first in each section, so a list
+  played this morning moved section and not rank; alphabetical was considered,
+  declined, and named as the reopen if the section ever outgrows an eye. The
+  real risk was the unbounded section: `PLAYLISTS` has no cap, and two
+  scrollers or a fixed first section would have put `RECENT` off the bottom of
+  the window at about a dozen lists, so **both sections live inside the one
+  scroller the lane already had** — proved at thirty lists, expanded and
+  collapsed, at 1280 and 1920 (`docs/design/impl/playlists-section/`). Two
+  things found on the way and left alone deliberately, both needing the owner's
+  eye: the **playlist panel is not made redundant** by this (it exists for
+  simultaneity while collecting, which no resident section provides — only its
+  *index* job is now labelled rather than merely complete), and ADR-0030 has
+  **two amendments both headed "Fifth"**, noted in the new one rather than
+  silently renumbered.
 - **A multi-CD album is one record** — the owner's *"it would be good if multi
   CD albums were a single item"*. ADR-0038; fixture, before/after frames and
   the shape table at `docs/design/impl/multi-disc/`.

@@ -339,6 +339,115 @@
 > nothing left the strip, so the acts lane's budget does not move a third time
 > today.
 
+> ## Sixth amendment (2026-08-10) — the lists get a section, and this reverses his own brief
+>
+> The owner: *"I guess we need to add playlists into their own section under
+> library"*.
+>
+> **This reverses the sentence this record was written from**, and the reversal
+> is recorded rather than smoothed over, because pretending the mixing was
+> never wanted would make the design read as an accident being corrected. His
+> brief, at the top of this file and unedited: *"the side bar will have recent
+> albums and playlists mixed based on some order"*. §1 built exactly that, §2
+> gave it its one anatomy, and the fifth amendment defended the mixing on
+> purpose — *"`RECENT` still mixes the two kinds in one touch-ordered list
+> rather than segregating them"*. He has now looked at the built thing and
+> asked for the segregation. He is the authority, so it is built; both
+> sentences stay on the record.
+>
+> **§1's membership rule splits in two. Its order does not.**
+>
+> > **`PLAYLISTS`** — every list, always, never trimmed.
+> > **`RECENT`** — the last `RECENT_ALBUMS` = 24 records played, **and no
+> > lists**.
+> > Both last touched first, ties by name ascending: the one total key, applied
+> > twice rather than replaced.
+>
+> **1. `RECENT` loses the lists outright**, rather than keeping recently-played
+> ones as a head. A list in both sections is one door drawn twice, which is
+> L8.6's test and the rule this product applies to every control. It costs
+> nothing to obey here: `PLAYLISTS` is *every* list, so the row a
+> both-sections arrangement would have carried is the row that is already
+> there, one section up.
+>
+> **2. The order is untouched, and that is a refusal.** Alphabetical is the
+> other honest answer for a section that holds *all* of them rather than the
+> recent ones, and it was considered and declined: the ask is for a **section**,
+> not for a second ordering, and §1's whole argument against arbitration is that
+> a surface with two orderings decides between them invisibly, every frame. It
+> would also spend something he already had — under the mixed list a list played
+> this morning stood near the top, and under last-touched-first it still does.
+> It has moved **section, not rank**. If the section ever outgrows what a
+> listener can scan by eye, alphabetical is the reopen, and it is named here so
+> the next reader does not have to rediscover it.
+>
+> **3. *"Under library"* is read as under the head**, not literally between
+> `Library` and `Now playing`. The first amendment's concession was a **closed
+> set of exactly three, always in that order**; a section header between two of
+> them would split the one triple this surface is not allowed to grow, and
+> would put a list-shaped thing inside the block whose whole defence is that it
+> is destinations only. So: the well, the three destinations, the hairline,
+> `PLAYLISTS`, `RECENT`, `Collapse`.
+>
+> **4. The lane still has exactly one seam.** The sections are named by
+> headings, not divided by a second rule. §1's shape holds: one cut, because
+> there are two parts — the frame's concerns above it and yours below it — and
+> a second rule would say the lane had three.
+>
+> **5. Collapsed, a section heading is nothing**, which is the answer `RECENT`
+> has given since it shipped: at `SIDEBAR_RAIL_W` 96 there is no measure for a
+> tracked word, and a heading over an unlabelled column of sleeves names
+> nothing the eye can use. `PLAYLISTS` takes that answer rather than inventing
+> a second one — a rail that grew a mark where the expanded lane has a word
+> would be two answers to one question at exactly the width with no room for
+> the second. What separates the two runs of sleeves on the rail is the
+> sections' own `GAP_MD`, and every row keeps the tooltip that names it.
+>
+> **6. A section with nothing in it is absent, not empty** — §6's own rule for
+> the home band, applied here for its own reason and applied to **both**
+> sections, so they stay symmetric. A first run has no lists and no plays, and
+> a permanent `PLAYLISTS` over a permanent gap would be chrome that never
+> becomes content. `RECENT` drew its word over nothing before this and no
+> longer does.
+>
+> **7. The unbounded section is where the defect would have been, and the
+> answer is one scroller.** §1 trims the records at 24 and deliberately does
+> not trim the lists, so `PLAYLISTS` can be four times the lane's height. Two
+> scrollers — one per section — would give the surface two scroll positions to
+> arbitrate between, which is §1's own failure mode, and would cap the lists
+> after all at half a lane; a fixed-height `PLAYLISTS` above a scrolling
+> `RECENT` would push the records off the bottom of the window at about a dozen
+> lists. **Both sections and both headings are inside the one scroller the lane
+> has always had**, so the headings scroll with their rows, every row of both
+> sections is reachable at any list count, and there is still one scroll
+> position and one bar at the lane's own edge. Proved at thirty lists, expanded
+> and collapsed, at both widths.
+>
+> **What this does *not* change**: §2's widths, row height and one-anatomy rule;
+> §3's hard cut and `Ctrl+B`; §4's responsiveness contract — the split is a
+> partition of a list already built once per event, so it costs no per-frame
+> work and no new state; ADR-0034's rule that the lamp follows the run's origin
+> (the sections are disjoint, so one origin still marks exactly one row); and
+> §6's home band, which still refuses a `YOUR LISTS` band because the lane is
+> the index and now says so in a word.
+>
+> **The playlist panel is not touched, and is not made redundant by this.**
+> §5 removed it, the first amendment put it back, and the reason it is still
+> here is **simultaneity** — collecting needs the source and the destination on
+> screen at once, which a resident lane section does not provide any more than
+> a resident mixed list did. What the section *does* settle is the panel's
+> third job: the lane was already the complete index and is now a **labelled**
+> one. Removing the panel is a separate decision on a separate argument and is
+> not taken here.
+>
+> Frames — both sections, collapsed, a list sounding, and thirty lists with
+> `RECENT` still reachable:
+> [`docs/design/impl/playlists-section/`](../design/impl/playlists-section/README.md).
+>
+> *(Numbering note: the two amendments above are both headed "Fifth". They are
+> left as they were written — this record's rule is that history is amended,
+> not rewritten — so this one is the sixth by sequence and the seventh block.)*
+
 **Status**: accepted and shipped, as amended above (2026-08-09, 2026-08-10) · extracts the decisions of
 [`docs/design/13-everyday-flow.md`](../design/13-everyday-flow.md) §2, §3,
 §5 and §7 · **supersedes the product's no-resident-side-surfaces

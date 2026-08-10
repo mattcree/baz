@@ -998,15 +998,16 @@ struct App {
     /// Whether the returns lane opens open, read from the config for
     /// `group_key`'s reason and handed to the shelf the same way.
     lane_open: bool,
-    /// **The lane, merged**: the shelf's recent records and every playlist,
-    /// in [`crate::lane::resolve`]'s one order.
+    /// **The lane, merged**: every playlist in one section and the shelf's
+    /// recent records in the other, both in [`crate::lane::resolve`]'s one
+    /// order (ADR-0030 §1 as its sixth amendment splits it).
     ///
     /// Cached rather than rebuilt per frame, and re-merged only when one of
     /// its two halves says it moved ([`Self::lane_mark`]) — the merge is
     /// O(playlists), so this is thrift rather than necessity, but the
     /// contract is *no work per frame* and a cache that is only rebuilt on
     /// events is how that is kept true as the two halves grow.
-    lane: Vec<crate::lane::Touched>,
+    lane: crate::lane::Lane,
     /// The two stamps [`Self::lane`] was built from: the shelf's and the
     /// playlists'.
     lane_mark: (u64, u64),
@@ -1200,7 +1201,7 @@ impl App {
             settings_section: 0,
             density,
             lane_open,
-            lane: Vec::new(),
+            lane: crate::lane::Lane::default(),
             lane_mark: (u64::MAX, u64::MAX),
             art_mark: ((u64::MAX, u64::MAX), Place::Settings),
             was_scanning: true,
@@ -5374,7 +5375,7 @@ impl Shelf {
                 })
             })
             .collect();
-        self.lane_recent = crate::lane::resolve(Vec::new(), touched);
+        self.lane_recent = crate::lane::recent(touched);
         self.lane_stamp = self.lane_stamp.wrapping_add(1);
     }
 
