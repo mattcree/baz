@@ -73,6 +73,12 @@ resequencing, doc 09 §13 step 8), and §3's repair surface (`Locate…`) not
 yet built;
 §7 remains ground rules for a feature that does not exist ·
 **amended 2026-08-09** — the playlist's sleeve, §A1–§A2 ·
+**amended 2026-08-10** — telling a found thing from a made one, §A3–§A6
+(design 14), on the owner's *"the information heirarchy isn't great to be
+able to tell the difference between an album and a playlist"* and
+*"'save as playlist' really makes no sense on the playlist page for a CD"*:
+the kind stated in words, the page's hierarchy restated per kind, the
+byline line restored, and the run's own control made to say what it saves ·
 extracts the decisions of
 [`docs/design/08-playback-and-playlists.md`](../design/08-playback-and-playlists.md)
 §4–§6 · changes no engine command — playing a playlist is `SetQueue` ·
@@ -379,6 +385,13 @@ inherited:
    opinion, drawn differently at 40 px and 320 px, where "the first record's
    face" is one rule at every size — and it is what Spotify itself shipped
    for years below four.
+   *Amended 2026-08-10 (§A3)*: this rule **stands**, and its argument still
+   holds — but it is the reason the sleeve **cannot be the kind signal**.
+   For one to three records `views/mod.rs:221-223` returns
+   `sleeve_cell(first, edge)`, which is byte-for-byte the widget a record's
+   own row builds (`views/lane.rs:574-579`): not *similar to* a record's
+   cover but the same cover, from the same cache, at the same size. Read
+   §A3 before citing this rule as a distinction.
 3. **No resolvable records** (an empty list, or nothing the library knows):
    a designed rest tile — the room's [`plinth`] surface step with a hairline
    edge, carrying the playlist's name in the display face (the name whole at
@@ -417,6 +430,14 @@ rows.
   in the aside, the name and the rows in the main column. The page was
   already the album page's sibling; now it holds the same declared hierarchy
   — **the work ≫ `Play` → the name → the rows** (law L6).
+  *Amended 2026-08-10 (§A4)*: **the arrangement stands; the declared
+  hierarchy does not.** A record's cover is about the record, so it is the
+  work and the title captions it. A playlist's collage is about its
+  *contents* — four quotations from things further down the same page — so
+  it is evidence rather than subject, and the only stable fact about a made
+  list is its name. A playlist's page declares **the name ≫ `Play` → the
+  collage → the rows**. The two columns, the 320 px aside and the
+  `ALBUM_BREAKPOINT` stack are unchanged.
 - **Whether playlists join the wall is deliberately not decided here.** The
   owner has opened the deeper information-hierarchy question — *"I am really
   struggling to come up with a simple and satisfying information hierarchy
@@ -426,7 +447,13 @@ rows.
   sorting, and search-corpus membership are all **deferred to that study**.
   What ships here is the vocabulary every outcome needs: a playlist that
   looks like a record wherever a playlist appears, which today is the panel
-  and the page. Recorded as *input* to the study, not as a decision: a
+  and the page.
+  *Amended 2026-08-10 (§A3)*: **that sentence is the one this ADR now
+  qualifies.** A playlist should carry a record's *vocabulary* — the sleeve,
+  the tile, the page's arrangement — and must not be *indistinguishable*
+  from one. The family stays; what it costs is now paid explicitly, by §A3's
+  kind token rather than by a badge.
+  Recorded as *input* to the study, not as a decision: a
   pinned wall shelf strains ADR-0019's arrangement-as-projection grammar
   (under YEAR a playlist has no year, under ARTIST no artist; the rail would
   carry a foreign entry; `Library::search` does not hold made things), and
@@ -439,3 +466,200 @@ rows.
   *append its tracks, resolved at that moment* — noted so the semantics are
   on record before any widget, per ADR-0023 §3's precedent, and subject to
   the same deep dive.
+
+## Amendment — telling a found thing from a made one (2026-08-10)
+
+The owner, after living with the family §A1–§A2 built: *"we do not have the
+playlist name really prominent. basically the information heirarchy isn't
+great to be able to tell the difference between an album and a playlist"* —
+and, in the same breath, *"'save as playlist' really makes no sense on the
+playlist page for a CD"*.
+
+From [`docs/design/14-records-and-lists.md`](../design/14-records-and-lists.md).
+**Both of his sentences are one defect**, and naming the loop is what makes
+this an amendment rather than a badge: `Save as playlist` over a CD writes a
+playlist whose only member is that record; a one-record playlist's sleeve is
+that record's cover full-bleed (§A1 rule 2); and the result lands in the
+returns lane above the record it was made from, wearing its face, in the
+same type at the same size. The control makes the confusion the other
+sentence reports.
+
+Nothing here is a prohibition and nothing is removed. §A1 stands whole; §A2's
+arrangement stands whole.
+
+### A3. The kind is stated in words, because the sleeve cannot state it
+
+**The axis is *found* against *made*, and the only honest signals are the
+ones that express it.** A record is derived from files someone else authored;
+its order is the artist's, its cover is one authored image, its name is a
+**work's title**. A playlist is made by you; its order is yours, its cover is
+generated from quotations, and its name is a **label you typed**. A signal
+that expresses *made by you* is honest; a signal that only means *different*
+is decoration, and this ADR is in a product whose artwork is radius 0 always.
+
+1. **The line under a name declares its kind in its first token.** An
+   artist's name for a found thing (unchanged); the word **`Playlist`** for
+   a made one — `14` becomes `Playlist · 14 · 42:10`; a scale statement for
+   an implicit one, which `All songs` already gives
+   (`1284 records · 9902 songs · 84:12:07`). One rule, spent in the slot
+   that already exists at every confused surface — the returns lane's rows,
+   the panel's rows, and any tile a playlist ever reaches. **No new widget
+   and no geometry change**: the same `SIZE_META` text, a different string.
+
+2. **The collage is demoted from *the* signal to *a* signal.** §A1 is
+   unchanged in every rule, including the full-bleed single and its
+   argument. What changes is the load: ADR-0030 §2 and the comment at
+   `views/lane.rs:550-556` state that *"nothing marks which kind a row is,
+   because the sleeve already does"*, and that premise is **false for every
+   playlist of one to three distinct records** — which includes every
+   playlist `Save as playlist` creates from a record, and every list on its
+   way to four. Those two prose sites are corrected in the same change; a
+   comment that survives its own reason is how the next reader re-derives a
+   retired argument.
+
+3. **No badge, no glyph, no corner.** A mark over a sleeve breaches
+   *"nothing is ever drawn on top of a sleeve"*, which §A1 went out of its
+   way to preserve by building the collage *out of* quotations rather than
+   *over* them. A rounded or matted playlist sleeve contradicts *"artwork is
+   radius 0 always"*. Both were weighed and declined; recorded so they read
+   as considered rather than missed.
+
+**Deliberately left to the owner** (design 14 §9, tier 3): whether a
+one-to-three-record playlist should draw the rest tile instead of borrowing
+a record's face. It is the only change that makes the sleeve honest at every
+count, and it costs a two-record list the best sleeve available to it at
+320 px. A genuine aesthetic trade, and aesthetics is his rule.
+
+### A4. A made thing's page: the same arrangement, its own hierarchy
+
+§A2 gave the playlist page the record page's arrangement **and** its declared
+hierarchy. The first was right; the second was an import that does not
+transfer, and it is why the name does not read as prominent.
+
+1. **The arrangement stands**: two columns, the aside fixed at
+   `ALBUM_ASIDE_W` 320 so its blocks share one x-edge (law L5), `Play` under
+   the object at the sleeve's whole width, stacking below
+   `ALBUM_BREAKPOINT` 744. Two arrangements for two nearly identical jobs
+   would be two vocabularies, which is the family being thrown away rather
+   than paid for.
+
+2. **The hierarchy is restated per kind.** A record's page keeps **the work
+   ≫ `Play` → the title → the rows**. A playlist's page declares **the name
+   ≫ `Play` → the collage → the rows**, because the collage is about the
+   contents and the name is the only stable fact about the list.
+
+3. **The byline line is restored, and it is what fixes *"not prominent"*.**
+   The record's identity block is three lines — title `SIZE_HERO` 28, artist
+   `SIZE_TITLE` 19, catalogue `SIZE_META` 12, **80 px**. The playlist's is
+   two: name, then counts, **52 px**. The playlist page is the album page
+   *with the byline deleted*, and the byline slot is exactly where *made by
+   you* belongs. It gains a line in that slot at that size:
+
+   ```
+   Road Trip                 ← SIZE_HERO 28 / SEMIBOLD
+   Playlist · 4 records      ← SIZE_TITLE 19 / paper_dim     ★ restored
+   14 tracks · 52:31         ← SIZE_META 12 / paper_faint
+   ```
+
+   The two identity blocks become **geometrically identical at 80 px**, and
+   the difference moves into what the middle line says — which is where a
+   difference between two kinds of thing belongs. The name is not made
+   larger: `SIZE_HERO` is the top of the ramp, and the prominence problem
+   was a missing line, not a small number.
+
+   **Not *"Made by you"***: §4 admits `.m3u8` files dropped into the
+   playlists folder, which this product did not author and whose author no
+   file records. `Playlist · 4 records` claims only what can be proved, and
+   it explains the collage above it at the moment you are looking at it.
+
+4. **Typography is the axis with no pixel cost, and it is half-built.**
+   `theme::WORK_TITLE` — IBM Plex Serif Italic, the museum-placard
+   convention, the owner's approved risk of 2026-08-09 — is spent on one
+   string, Home's `CONTINUE` placard, and locked there by an equality
+   assertion. The distinction print has drawn for two centuries is ours
+   exactly: **a work's title is italic; a label is not.** Extending the
+   token to a record's page hero, and only there, makes the two page heroes
+   different *kinds of string* at the same size for nothing.
+   The rule, if it is taken, is enumerable and must stay so: **the serif
+   sets an album's title and only an album's title** — not a track's, not an
+   artist's, not a playlist's — or the run column's rows take it and the
+   axis is gone. Whether it should also reach the wall's captions and the
+   lane's rows is **the owner's call** (design 14 §9, tier 3): it is the
+   strongest possible answer to his question and it is also sixty italic
+   serif captions on a wall of covers.
+
+### A5. `Save as playlist` belongs to the run, and must say so
+
+The control is drawn in exactly one place — `views/queue.rs:337-353`, in the
+run column's summary strip — and reaches the screen through
+`Place::NowPlaying`, which absorbed the queue place. It is **not** on
+`Place::Playlist`. The owner called that surface *"the playlist page"* and he
+is reading it correctly: `views/queue.rs:49-56` says the queue place and the
+playlist page are *the same editor*. What the surface never says is that the
+thing being edited is a **run** and not a file — so the word sits 57 px above
+the record's own title with nothing between them
+(`docs/design/impl/queue-merged/01a-run-on-1280x860.png`).
+
+Two category errors follow, and the second is the sharper: `queue_summary`
+prints the run's provenance at the **head of the very strip the word sits
+in**, so a run reified from `Road Trip` reads
+`Road Trip · 1 of 14 · 52:31 left … Save as playlist` — an offer to save a
+thing whose name is printed two inches to the left. `save_control` is
+conditioned on nothing but whether its own name field is open.
+
+**The act is real and it stays.** Freezing a transient into a file is §4's
+creation act and is genuinely wanted for a shuffle, a `Play all`, or an
+edited run. Three changes, all answerable from state the shell already
+holds:
+
+1. **The strip names its subject.** The no-provenance branch of
+   `queue_summary` gains the noun the provenance branch already supplies:
+   `1 of 24 · 1:56:19 left` → **`Run · 1 of 24 · 1:56:19 left`**. One word,
+   in a string that is already built, in a branch that already exists — and
+   it is what makes the word beside it unambiguous.
+
+2. **A control that cannot usefully act says so instead of offering.**
+   Provenance standing and no edit since the run was reified ⇒ the word
+   becomes an inert readout in the same slot, **`Saved as "Road Trip"`** —
+   which is what the panel's `Queue` row already is at rest. The moment the
+   run is edited it has diverged from the file, and the live word returns as
+   **`Save as new playlist`**. The precedent is eleven lines up in the same
+   file: `undo_control` is drawn only while there is an edit to take back,
+   because *"a standing `Undo` over a list nobody has edited would be a
+   control that cannot act pretending it can"*. This is that defect, and
+   that cure.
+
+3. **What this must never become.** `Save changes to "Road Trip"` — writing
+   the run back into the file it came from — is **refused**, and not on
+   taste: the 2026-08-09 amendment's item 6 keeps the run tonight's snapshot
+   and holds §1's decoupling *in both directions*, and ADR-0023 §3 makes
+   provenance an origin rather than a link. A run that wrote itself back is
+   the two-structure confusion returning.
+
+`every_queue_affordance_survives_the_merge` still requires
+`Message::SaveQueueStart` to be spent by the run column, so it passes
+unchanged under these three and **would fail on a removal** — which is the
+guard that makes this the right shape of fix.
+
+### A6. Prior art, since all three of the obvious references face this
+
+- **Spotify** is where §A1's collage came from, and baz took the picture
+  without the sentence under it: Spotify's detail page runs a kicker, the
+  name, and then a byline that **names a person** behind a circular avatar —
+  the one shape in its vocabulary that is never a sleeve. baz takes the
+  byline slot (§A4.3) and not the avatar: there are no accounts here, so a
+  circle would be decoration with nothing behind it.
+- **Apple Music** is the one that solves it badly, and it is worth showing
+  because it is baz's exact disease: library grids interleave albums and
+  playlists as identical squares whose only difference is what the second
+  caption line happens to hold, with mosaic playlist art that collapses to a
+  single cover when the list is small. That is `views/lane.rs:557-671` plus
+  `views/mod.rs:221-223`, arrived at independently — which is what happens
+  when a good tile design is reused for a second kind of thing without
+  anyone deciding to.
+- **Plexamp** segregates: kind-labelled shelves, so a playlist is never
+  adjacent to an album without a heading between them. **baz has already
+  declined this** — ADR-0030's lane mixes the two kinds because its subject
+  is *what you touched*, and sorting by kind would make it two lists sharing
+  a column. Declining it is what puts the work on the per-row signal, which
+  is §A3.1.

@@ -37,7 +37,8 @@
 | *"shuffle... is more about going to an unknown next track rather than actually mutating the track list"* | **building** | traversal, not permutation; gapless is the constraint |
 | *"I wanted the Play all to be more like a tile on the home screen, a special 'playlist'"* | **building** | asked twice before it was built |
 | *"fullscreen the now playing looks weird"* | **building** | the art is clamped at 720; step A2 deletes the cap |
-| *"the information heirarchy isn't great to be able to tell the difference between an album and a playlist"* | **designing** | the family was made deliberately; the cost is now visible |
+| *"the information heirarchy isn't great to be able to tell the difference between an album and a playlist"* | **designed, unbuilt** | design 14, ADR-0024 §A3–§A6 — the kind stated in words, the byline line restored; the serif and the sleeve-below-four are his call |
+| *"'save as playlist' really makes no sense on the playlist page for a CD"* | **designed, unbuilt** | design 14 §1, ADR-0024 §A5 — it is drawn on the merged Now playing, not the playlist page, and never says it is saving *the run*; nothing is removed |
 | *"the album and track count below the search bar doesn't look good... maybe this should go into the home as some basic stats?"* | **building** | resting counts to Home; match count into the field |
 | *"every album has a playlist implicitly... which playlist and which track"* | **designing** | everything playing is a list and a cursor; reopens ADR-0018 for the ledger |
 
