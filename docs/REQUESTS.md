@@ -30,7 +30,11 @@
 | Window chrome: buttons right, gear left, borderless | **blocked on a decision** | iced 0.13 exposes no edge-drag resize; needs a forked dependency |
 | Kiosk mode — full screen on a second monitor | **designed, unbuilt** | design 12; single window, iced has no monitor enumeration |
 | Vibe- or prompt-generated playlists | **designed, unmerged** | `design/dynamic-playlists`: a rule you can say out loud, drawn into the queue |
-| The `ARTIST` group key and the `Artist` place are both called artist | **open** | rename the key, or make Artists a lens |
+| *"artists should be grouping stuff by artist not just alphabetically"* | **building** | may delete `WallSubject` and `A–Z` with it |
+| *"shuffle... is more about going to an unknown next track rather than actually mutating the track list"* | **building** | traversal, not permutation; gapless is the constraint |
+| *"I wanted the Play all to be more like a tile on the home screen, a special 'playlist'"* | **building** | asked twice before it was built |
+| *"fullscreen the now playing looks weird"* | **building** | the art is clamped at 720; step A2 deletes the cap |
+| *"the information heirarchy isn't great to be able to tell the difference between an album and a playlist"* | **designing** | the family was made deliberately; the cost is now visible |
 | *"the album and track count below the search bar doesn't look good... maybe this should go into the home as some basic stats?"* | **building** | resting counts to Home; match count into the field |
 | *"every album has a playlist implicitly... which playlist and which track"* | **designing** | everything playing is a list and a cursor; reopens ADR-0018 for the ledger |
 
