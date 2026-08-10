@@ -2,6 +2,10 @@
 //!
 //! One module per surface of the interface:
 //!
+//! - [`app_bar`] — **the app bar**: the band across the top of the window, in
+//!   every place, identical — the window's own chrome, drawn by baz
+//!   (ADR-0040). The display options, the gear, the window controls, and the
+//!   window's name.
 //! - [`setup`] — the first-run "Where's your music?" screen.
 //! - [`top_bar`] — the search well, the group-key row, and the quiet counts.
 //! - [`shelf`] — the wall: the shelved, virtualized album grid, its pinned
@@ -67,6 +71,7 @@
 //! imported as `geometry` so the two never read as the same thing.
 
 pub(crate) mod album;
+pub(crate) mod app_bar;
 pub(crate) mod artist;
 pub(crate) mod bottom_bar;
 pub(crate) mod context_menu;
@@ -451,83 +456,29 @@ pub(crate) fn section_rule(name: &'static str) -> Element<'static, Message> {
     .into()
 }
 
-/// [`section_rule`], with **the density detents at the rule's right edge** —
-/// the form the control takes on a page whose block of works is a *section*
-/// rather than the whole place (ADR-0028's fourth-step amendment, §3).
-///
-/// The marks stand at the trailing edge of the block they hang, and on Home
-/// and an artist's page that edge is the block's own rule. It is the same
-/// relationship the Library has — there the block is the place, so its
-/// trailing edge is the index rail's lane — expressed on a surface that has
-/// no rail. Nothing here is a second control: [`density_marks`] is one
-/// function and the press is one message.
-///
-/// Why not the returns lane, and why not the strip: density reads **the
-/// viewport** (doc 07 L8.1), so it is a fact about the block of works on
-/// screen, not about the window. A mark in the frame would be on screen on
-/// the four places that hang no works, where it would be present and inert —
-/// which is the one outcome the owner's ask rules out.
-pub(crate) fn section_rule_hung(
-    name: &'static str,
-    current: crate::shelf::Density,
-) -> Element<'static, Message> {
-    let room = theme::active();
-    column![
-        horizontal_rule(1).style(move |_theme| theme::hairline(room, room.wall)),
-        row![
-            text(theme::tracked(&name.to_uppercase()))
-                .size(theme::SIZE_HEADING)
-                .line_height(theme::LEADING_HEADING)
-                .font(theme::MEDIUM)
-                .color(room.paper_faint),
-            Space::with_width(Length::Fill),
-            density_marks(current, DetentAxis::Row),
-        ]
-        .align_y(iced::Alignment::Center),
-    ]
-    .spacing(theme::GAP_SM)
-    .into()
-}
-
-/// Which way a run of [`density_marks`] is laid: down the index rail's lane,
-/// or along a section rule.
-///
-/// Two axes, one control. The lane is a vertical strip and the rule is a
-/// horizontal one, and a control that had been copied into each would be two
-/// controls that could drift — which is exactly the defect this whole change
-/// is fixing on the grid arithmetic. Loosest-first either way: down the lane
-/// it is top-first, along a rule it is left-first, and both are the direction
-/// <kbd>Ctrl</kbd>+<kbd>=</kbd> walks in the reading order of their axis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DetentAxis {
-    /// Down the index rail's lane — the Library's form (ADR-0028 §1).
-    Column,
-    /// Along a section rule — the form for a place whose works are a block
-    /// inside it ([`section_rule_hung`]).
-    Row,
-}
-
-/// The lane inset that stands a mark's ink on the lane's own edge: the
-/// sprite is centred in its [`theme::STEPPER_HIT`] box, so the box overhangs
-/// the window gutter by this much and the sprite's right edge lands on
-/// `W − HANG` — the same line the rail's letters hang from. The wall's
-/// permitted-edge list (law L5) gains nothing.
-pub(crate) const MARK_INSET: f32 = (theme::STEPPER_HIT - theme::ICON_PX) / 2.0;
-
 /// **The density detents** (ADR-0028, doc 11 §5 P8 — the owner's choice; the
 /// fourth-step amendment of 2026-08-10): one mark per [`crate::shelf::Density`]
 /// step, loosest first — the direction <kbd>Ctrl</kbd>+<kbd>=</kbd> walks.
 ///
 /// # Where they stand
 ///
-/// Density reads *the viewport, and nothing else* (doc 07 L8.1), so its home
-/// is the place's body — and specifically **the trailing edge of the block of
-/// works it hangs**. On the Library that block is the whole place, and its
-/// trailing edge is the index rail's lane, already the body's one resident
-/// view-subject strip (`shelf::density_control`). On Home and an artist's
-/// page the block is a named section, and its trailing edge is that section's
-/// rule ([`section_rule_hung`]). Four places hang no works at all, and the
-/// marks are absent there rather than inert.
+/// **In the app bar's display-options slot, in every place that hangs works**
+/// (ADR-0040 §5), on the owner's instruction of 2026-08-10: *"and please put
+/// the display options at the top bar"*.
+///
+/// That reverses ADR-0028's fourth-step amendment §3, which had them at the
+/// trailing edge of the block of works they hang — the index rail's lane on
+/// the Library, a section rule on Home and an artist's page — and which
+/// refused the top bar in so many words. ADR-0040 §5 records the reversal and,
+/// more importantly, the **one condition it keeps**: the marks are still
+/// *absent* on the four places that hang no works, rather than present and
+/// inert. What is resident is the bar and its reserved slot
+/// ([`theme::APP_BAR_MARKS_W`]), not the control.
+///
+/// There is still exactly **one** of them. They are drawn once, in one place,
+/// from one function, and they send one message — which is doc 07 L8.6's whole
+/// requirement, and the reason the rail's foot and the two section rules gave
+/// them up rather than keeping a copy.
 ///
 /// # What each mark is
 ///
@@ -550,15 +501,13 @@ pub(crate) const MARK_INSET: f32 = (theme::STEPPER_HIT - theme::ICON_PX) / 2.0;
 /// would do nothing, and a control that does nothing when pressed is the lie
 /// the rail's absent letters already refuse. It is the fact; the others are
 /// the controls (L8.3's split).
-pub(crate) fn density_marks(
-    current: crate::shelf::Density,
-    axis: DetentAxis,
-) -> Element<'static, Message> {
-    let marks = crate::shelf::Density::ALL.map(|step| density_mark(step, current));
-    match axis {
-        DetentAxis::Column => column(marks).into(),
-        DetentAxis::Row => row(marks).into(),
-    }
+pub(crate) fn density_marks(current: crate::shelf::Density) -> Element<'static, Message> {
+    // One axis now, and that is a simplification the move paid for: the run
+    // used to be laid down the index rail's lane in one place and along a
+    // section rule in two others, so it carried a `DetentAxis` to say which.
+    // A bar is horizontal in every place there is, so the parameter went with
+    // the placements that needed it.
+    row(crate::shelf::Density::ALL.map(|step| density_mark(step, current))).into()
 }
 
 /// One detent of [`density_marks`]: the step's glyph in a
@@ -606,7 +555,9 @@ fn density_mark(
             .width(Length::Fixed(theme::STEPPER_HIT))
             .height(Length::Fixed(theme::STEPPER_HIT))
             .padding(0)
-            .style(move |_theme, status| theme::transport(room, room.wall, status))
+            // The bar's ground, not the wall's — every control names the
+            // surface it stands on, and this run moved surfaces.
+            .style(move |_theme, status| theme::transport(room, room.recess, status))
             .on_press(Message::DensityStep(current.steps_to(step)))
             .into()
     };
@@ -615,9 +566,10 @@ fn density_mark(
         text(step.label())
             .size(theme::SIZE_CAPTION)
             .line_height(theme::LEADING_CAPTION),
-        // Leftwards: on the lane the marks stand on the window's right edge,
-        // and on a section rule they stand on the block's.
-        iced::widget::tooltip::Position::Left,
+        // Below: the marks stand in the app bar, on the window's own top
+        // edge, and a tip above any of them would clip off the screen — the
+        // same reason the gear beside them tips downward.
+        iced::widget::tooltip::Position::Bottom,
     )
     .gap(theme::GAP_XS)
     .padding(theme::GAP_XS)

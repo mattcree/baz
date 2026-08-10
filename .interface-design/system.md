@@ -394,13 +394,15 @@ the critique's better argument: *Settings must never be the answer to a
 the way the group key does, not as a preference somebody goes somewhere to
 set, and there is still no density row and no zoom readout.
 
-The visible control is **one detent mark per step, standing at the trailing
-edge of the block of works it hangs** (ADR-0028, closing doc 11 §5 P8's
-law-contradiction — a gesture-only action broke the visible-control rule; the
-fourth-step amendment §3 generalised the placement). On the Library that block
-is the whole place, so the marks close the index rail's lane; on Home and an
-artist's page it is a named section, so they stand on that section's rule.
-Each mark is the wall at its step (one, four, nine, sixteen works in one
+The visible control is **one detent mark per step, standing in the app bar's
+display-options slot** (ADR-0028, closing doc 11 §5 P8's law-contradiction — a
+gesture-only action broke the visible-control rule; **ADR-0040 §5** moved them,
+on the owner's *"and please put the display options at the top bar"*). They
+stood at the trailing edge of the block of works they hang — the index rail's
+lane on the Library, a section rule on Home and an artist's page — for one day.
+There is exactly **one** run of them, in one place, from one function, which is
+doc 07 L8.6's requirement and the reason the rail's foot and both section rules
+gave them up rather than keeping a copy. Each mark is the wall at its step (one, four, nine, sixteen works in one
 shared glyph field), the current step reads at full glyph ink and is inert,
 and a mark's press sends the gesture's exact `DensityStep` delta, so `Ctrl+-`
 / `Ctrl+=` and `Ctrl+scroll` are the marks' accelerators. No menu, no slider,
@@ -408,7 +410,13 @@ no readout row — the wall itself is the readout.
 
 **The marks are absent from the four places that hang no works** (a record's
 page, a playlist's, Now playing, Settings), and that is the decision rather
-than an omission. Those pages are rows, a row's height is `TRANSPORT_HIT` 32
+than an omission — **including now that they live in a bar that is resident in
+all seven**. What is resident is the bar and its reserved slot
+(`APP_BAR_MARKS_W`), not the control: the slot holds its width everywhere, so
+the gear and the window buttons beside it never move, and the marks are drawn
+into it only where there are works to hang. That is how one bar can be the same
+bar in every place without a control ever being present and inert (ADR-0040
+§5). Those pages are rows, a row's height is `TRANSPORT_HIT` 32
 — the pointer-target floor, not a spacing choice — so a tighter step could not
 shrink one without breaking the very rule the visible-control mitigation
 exists to serve, and a looser step could only pad text. Density's subject is
@@ -419,7 +427,8 @@ control that is present and inert is worse than one that is absent.
 shared placement by its 2026-08-10 amendment). `crates/baz/src/shelf.rs`'s
 `Density` supplies the grid's four numbers and `Grid::new(width, density)` is
 the same arithmetic around them; `views/mod.rs`'s `density_marks` is the
-control, in either axis, and every place that hangs works reads **one** grid —
+control — one axis now, since a bar is horizontal in every place there is — and
+every place that hangs works reads **one** grid —
 `App::Shelf::grid` — so a record is the same size wherever it is drawn.
 
 | Step | `HANG` | `ART_MIN` | `ART_TARGET` | `ART_MAX` |
@@ -773,9 +782,10 @@ that prove the habit works.
 baz drew its chrome on 16, its panels on 24 and its collection on 40, so nothing
 in either bar was aligned with anything on the wall, at either width, by exactly
 24 px. Six of the wall's sixteen x-edges were singletons because of it. There
-are four window-edge surfaces — the top strip (in both places), the now-playing
-bar, the Settings place and the index rail — and the test names all four by the
-literal a reviewer would have to change to break it.
+are five window-edge surfaces — **the app bar** (ADR-0040, and the only one
+that touches three of the window's edges), the top strip in both places, the
+now-playing bar, the Settings place and the index rail — and the test names all
+five by the literal a reviewer would have to change to break it.
 
 ### L2 — The vertical unit is 4, and the type is inside it
 

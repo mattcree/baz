@@ -36,10 +36,13 @@
 | Ask | State | Where |
 |---|---|---|
 | *"why is balanced smaller than compact... I think the dense should be a bit smaller"* | **building** | **A real defect, measured**: each step carries its own `hang`, so when two steps land on the same column count the *tighter* one draws **larger** works — `Balanced` 240.0 against `Compact` 250.7 at 880 px, 266.7 against 277.3 at 960. Non-monotonic at **30 of 95** widths swept 700–2600. The step's own test asserted *column count*, which stayed correct, so it never checked the size a listener sees. Second half of the ask — `Dense` tighter — is his taste and a table row |
-| *"please remove the 'Play all' button at the top of the library"* | **building** | taken with the app-bar work below, since both are the strip's tenancy |
-| *"please put the display options at the top bar"* / *"we should have replaced the top window chrome with an app bar which has this + settings + the window controls, the same on all screens"* | **building** | this is the borderless-chrome question, answered by instruction rather than left waiting. The density marks move off the wall's index rail (a wall-only surface) into a bar that exists in every place. **The known cost**: iced 0.13 exposes no edge-drag resize in `window::Action`, so going borderless loses pointer resizing unless the dependency is forked — priced at ~30 lines, and it is his call whether to pay it |
+| *"please remove the 'Play all' button at the top of the library"* | **shipped** | ADR-0040. The control **and the action**: `Message::PlayAll` and `App::play_all` went with the button, because a message no control sends is the visible-control rule failing in the direction nobody checks for. Home's `All songs` tile is untouched — different scope (the collection, not the wall as arranged) |
+| *"please put the display options at the top bar"* / *"we should have replaced the top window chrome with an app bar which has this + settings + the window controls, the same on all screens"* / *"I am wanting it to function as the window chrome mixed with controls similar to stuff like spotify"* | **shipped, less one field** | ADR-0040. The app bar is resident and identical in all seven places: the window's name, the display options, the gear, and minimise/maximise/close. It drags the window, maximises on a double press, and right-presses to the desktop's window menu. The marks left the index rail's foot and both section rules entirely (doc 07 L8.6 — no two controls may send one message) and are drawn only where the place hangs works, in a slot that is reserved everywhere. **What is not done is `decorations: false`**, so the platform still draws its bar above ours; `BAZ_BORDERLESS=1` flips it today. See the row below |
 | The ambient Now playing — cover as the background, stylised VU over it, a feed of facts, all toggle-able; *"a spectrum analyzer or graphic thing with the bars going up and down"* | **designed, unbuilt** | ADR-0029, design 12 — the merge (M1, M2) shipped; A2 · A3 · A4 · A5 · A6 · A7 · A8 · A9 remain, or A2→A6→A8 for the bars |
-| Window chrome: buttons right, gear left, borderless | **blocked on a decision** | iced 0.13 exposes no edge-drag resize; needs a forked dependency |
+| *"adding controls that apply to all windows makes sense in the top bar"* | **shipped as law** | ADR-0040 §1 takes this as the app bar's admission rule verbatim, and asserts it in both directions: what is in, and — the half that matters, because a resident bar accretes — the closed list of what may not migrate in (the well is the lane's, a place's identity is the place's, the transport is the bottom bar's, the arrangement keys are the wall's) |
+| *"I don't mind if we have the controls on the right hand side as long as we have a sensible consistent pattern"* | **shipped** | buttons right, always. A `chrome` module that read GNOME's `button-layout` and KDE's `kwinrc` and mirrored the bar was built and then deleted against this sentence. The *pattern* half is ADR-0040 §2's five zones and its one rule — **scope widens rightward** — which answers where a future control goes without an argument. Known cost: macOS puts its buttons left and will look foreign; one-line reversal recorded |
+| *"the way they appear for the library is nice"* | **shipped, one thing to look at** | the marks moved into the bar unchanged — same sprites, same boxes, same resting ink with the current step lifted, same tooltips. But `Dense` is a 4 × 4 whose cells minify to 2.25 px at 1× and reads visibly softer than its three neighbours at the bar's real size. `docs/design/impl/app-bar/12-marks-4x-*.png` has all four magnified with a point filter. A larger sprite for that one mark is small work |
+| Window chrome: borderless | **blocked on a decision, and the decision changed** | it was *"fork iced for a ~30-line patch?"*. It is not: **iced 0.14.0 ships `window::drag_resize` upstream** (`iced_runtime-0.14.0/src/window.rs:304`). The question is now *"do we take 0.13 → 0.14?"* — ~130–170 edited lines, all five hand-built `Widget`s, wgpu 0.19 → 27, ~15–25 new Flatpak pins, and **both `deny.toml` RUSTSEC ignores deletable** because cosmic-text 0.15 completes the fontations migration they wait on. Priced in full in ADR-0040 |
 | Kiosk mode — full screen on a second monitor | **designed, unbuilt** | design 12; single window, iced has no monitor enumeration |
 | Vibe- or prompt-generated playlists | **designed, unmerged** | `design/dynamic-playlists`: a rule you can say out loud, drawn into the queue |
 | *"every album has a playlist implicitly... which playlist and which track"* | **building** | everything playing is a list and a cursor. The run knows its origin today (`RunSource`, three kinds); what remains is the ledger remembering it across a quit — ADR-0018 reopened |
@@ -1083,77 +1086,69 @@ that would no longer exist.
 
 ## The window's own chrome
 
-**Drawing baz's own title bar — researched, not built.** The owner
-(2026-08-09): *"get rid of the bar at the top, you know, the native chrome, and
-just… implement those buttons in our app to be in the same sort of position. I
-think that would look a lot cleaner."*
+**Built, less one field** — ADR-0040. The app bar is resident in every place
+and does everything a title bar does: `window::drag` moves the window from any
+part of the band no control captured, a double press is `toggle_maximize`,
+`window::minimize` and `Message::Quit` are the other two buttons, and a right
+press is `window::show_system_menu`. What has **not** happened is
+`window::Settings { decorations: false }`, so on the owner's GNOME the platform
+still draws its own bar above baz's. `BAZ_BORDERLESS=1` turns it off today.
 
-The good news first: **on Wayland that bar is already drawn inside baz's own
-process.** GNOME expects applications to decorate themselves, so winit 0.30
-pulls in `sctk-adwaita` (in `Cargo.lock`, via winit's
-`wayland-csd-adwaita` feature) and draws the title bar itself. Turning it off
-is one field — `window::Settings { decorations: false }`
-(`iced_core-0.13.2/src/window/settings.rs:53`) — and the three buttons are all
-available as tasks: `window::minimize`, `window::toggle_maximize`,
-`window::close`. Dragging the window by our own strip is `window::drag`
-(`iced_runtime-0.13.0/src/window.rs:40`), which is the same "start an
-interactive move" the compositor gives a real title bar. Double-click to
-maximise is `toggle_maximize`; the right-click system menu is
-`window::show_system_menu`. All of it exists.
+**Why the flip is still a decision, re-verified against the pinned sources
+rather than inherited from this note's earlier draft:**
 
-**The blocker is resize.** iced 0.13 exposes no `drag_resize_window`: the whole
-`window::Action` enum is `iced_runtime-0.13.0/src/window.rs:24–161` and there
-is no resize-direction variant anywhere in `iced_runtime`, `iced_winit` or
-`iced_core`. winit 0.30 *has* `Window::drag_resize_window(ResizeDirection)`;
-iced simply does not surface it. So `decorations: false` today buys the clean
-strip and **loses the pointer resize edges**, on both Wayland and X11. That is
-not a trade worth making silently for a window whose whole job is to be resized
-to the wall you want.
+- iced 0.13 exposes no edge-drag resize. The whole `window::Action` enum is
+  `iced_runtime-0.13.2/src/window.rs:24–161` and there is no resize-direction
+  variant anywhere in `iced_runtime`, `iced_winit`, `iced_core` or `iced`.
+- **And the platform does not cover for it.** winit's `set_decorate(false)`
+  calls `frame.set_hidden(true)`
+  (`winit-0.30.13/src/platform_impl/linux/wayland/window/state.rs:1000`), and
+  sctk-adwaita's hidden frame drops its decoration subsurfaces — after which
+  `click_point_moved` returns `None` before it inspects anything
+  (`sctk-adwaita-0.10.1/src/lib.rs:400,512`). So under CSD-off there are no
+  resize edges at all, on Wayland or X11, and no compositor fallback. What
+  survives on GNOME is `Super`+right-drag and the system menu's keyboard
+  `Resize`, which this bar's own right press reaches.
 
-Three ways out, in the order they should be considered:
+**This note used to price the fix as a ~30-line fork of iced. That is now
+wrong, in the owner's favour: the change landed upstream.** iced **0.14.0**
+ships `window::drag_resize(id, Direction)`
+(`iced_runtime-0.14.0/src/window.rs:304`), `window::Direction`'s eight variants
+(`iced_core-0.14.0/src/window/direction.rs`) and the winit arm that services it
+(`iced_winit-0.14.0/src/lib.rs:1438`). **There is nothing to fork.** The
+standing question is now the upgrade, priced in ADR-0040's closing section:
+~130–170 edited lines across 12–14 files, all five hand-built `Widget` impls
+(`on_event` → `update`, capture moving onto `Shell`, `Overlay::is_over`
+deleted), `iced::application`'s boot inversion, wgpu 0.19 → 27 and cosmic-text
+0.12 → 0.15 in the graph, ~15–25 new Flatpak pins — and, on the credit side,
+**both RUSTSEC ignores in `deny.toml` become deletable** (cosmic-text 0.15
+completes the fontations migration they are explicitly waiting on) and the
+duplicate `lru` resolves. One recorded rationale also stops being true:
+`Cargo.toml` justifies `zbus 4` on `iced_core → dark-light` already linking it,
+and 0.14 drops `dark-light`.
 
-1. **Expose the winit call.** One `Action::DragResize(Id, ResizeDirection)`
-   variant, one arm in `iced_winit`'s runner, one `window::drag_resize` helper
-   — perhaps thirty lines, upstreamable. It needs a patched iced, which under
-   this project's rules is a reviewed dependency decision rather than a
-   detail: a `[patch.crates-io]` on a fork pins baz to a tree the owner
-   maintains until the change lands upstream.
-2. **Hand-roll it** — an 8 px hit band at the window's edges that on drag
-   computes a new size and origin and spends `window::resize` + `window::move_to`
-   each frame. It works, and it will visibly lag under Wayland because every
-   step is a round trip the compositor would otherwise have done itself. It
-   also re-implements, badly, the one thing the platform is definitely better
-   at.
-3. **Keep `decorations: true` and restyle nothing** — the honest null option,
-   and the one to take if 1 is not wanted, because 2 buys a cleaner top edge at
-   the cost of the gesture people use most.
+**Two things this note predicted that did not happen, recorded because the
+predictions were reasonable and wrong:**
 
-**The owner's placement, 2026-08-09**: *"I want the top bar with the search etc
-to become the chrome… we have the close, resize, minimise on that bar with the
-settings on the left."* So: the three window buttons take the strip's right
-corner, and the gear moves to the left. Each in the [`theme::TRANSPORT_HIT`] 32
-box every other icon control uses. `Glyph::Close` is already drawn; minimise
-and maximise are two more on the sheet in the same 0.14–0.15 stroke band. The
-"resize" button is `window::toggle_maximize`, which iced has — it is only
-*edge-drag* resize that is missing.
+- *"the gear moves to the left"*, and with it *"the gear loses half its
+  licence"* — doc 10 §3.4's *"universal, **and top-right is its universal
+  position**"*. The gear did **not** move: ADR-0040 §2's scope-widens-rightward
+  pattern puts it in the top-right corner, so the licence survives intact and
+  the amendment this note anticipated is not needed.
+- *"the strip's width budget works out… net −78 px"*, computed against an
+  `ACTS_W` of 182 and a 960 seam. Both were stale by the time it was built:
+  `Play all` was the whole cluster by then and the gear left as well, so the
+  seam fell 824 → **680**, which is 144 rather than 78.
 
-Two consequences worth naming before it is built:
-
-- **The gear loses half its licence.** Doc 10 §3.4 admits the gear as one of
-  exactly two symbols allowed to stand without a word, and the argument is
-  *"universal, **and top-right is its universal position**"*. Moved to the
-  left, the symbol is still universal but the position argument is gone. Either
-  the amendment is rewritten to drop the position clause, or the gear takes its
-  word back on the left where there is room for it.
-- **The strip's width budget works out**, and it works out *because* of the
-  other brief. Three buttons plus their gaps is ~104 px on the right; the four
-  removals above free `ACTS_W` 182. Net −78 px, so the two-line split at 960
-  (`theme.rs:6500-6517`) gets easier rather than harder. The two briefs should
-  land in that order.
-
-The drag region is **the strip's empty space**, which needs stating carefully:
-every control in the strip keeps its own press, so dragging is what the *gaps*
-do, not what the bar does.
+**The drag region rule** stated here — *"every control in the strip keeps its
+own press, so dragging is what the gaps do, not what the bar does"* — is kept,
+and it is worth recording how it is delivered, because the obvious reading
+would have been wrong. It is **capture**, not a hole cut in the band: iced
+0.13's `mouse_area` runs its content's handler first and returns if the content
+took the press (`iced_widget-0.13.4/src/mouse_area.rs:211`), so the whole band
+is the handle and every button in it still takes its own press. A bar whose
+handle was only the literal gap would have left the window's name and the empty
+display-options slot dead, which on four of seven places is most of the band.
 
 ## The wall's hover options
 

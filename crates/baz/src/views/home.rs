@@ -724,12 +724,9 @@ fn recently_added<'a>(
         ));
     }
     Some(
-        column![
-            crate::views::section_rule_hung("Recently added", hang.density),
-            tiles
-        ]
-        .spacing(theme::GAP_LG)
-        .into(),
+        column![crate::views::section_rule("Recently added"), tiles]
+            .spacing(theme::GAP_LG)
+            .into(),
     )
 }
 

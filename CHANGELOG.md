@@ -24,7 +24,40 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
-*Nothing yet.*
+### Added
+
+- **An app bar across the top of every place** — baz's own window chrome
+  (ADR-0040). It carries the window's name, the display options, the Settings
+  gear and the three window buttons (minimise, maximise, close, on the right),
+  and it is identical in all seven places. Dragging any part of it that is not
+  a control moves the window; pressing it twice maximises or restores it;
+  right-pressing it asks the desktop for its window menu.
+- Three glyphs on the icon sheet: minimise, maximise and restore, on the set's
+  own stroke band.
+- `BAZ_BORDERLESS=1` turns the platform's title bar off, so the app bar is the
+  window's only chrome. **Not the default**: iced 0.13 exposes no edge-drag
+  resize, so going borderless today loses the pointer resize edges — see
+  ADR-0040 §6 for the price of the iced 0.14 upgrade that would fix it.
+
+### Changed
+
+- **The display options moved from the wall to the app bar**, on the owner's
+  instruction — off the index rail's foot on the Library and off the section
+  rules on Home and an artist's page, into a slot that is reserved in every
+  place. They are drawn only where the place hangs works, and absent (never
+  present-and-inert) on the four that do not; the slot is held either way, so
+  the bar's other controls never move.
+- **The Settings gear moved from the Library strip into the app bar**, and so
+  is reachable from every place rather than only the Library. Same corner, same
+  message, same tooltip.
+- The Library strip is the arrangement row alone. Its split breakpoint falls
+  from 824 px to 680 with the two departures.
+
+### Removed
+
+- **`Play all`**, at the owner's request — the control and the action together.
+  Home's `All songs` tile is unaffected; it plays the collection rather than
+  the wall as arranged, and always did.
 
 ## [0.1.0] - 2026-08-10
 

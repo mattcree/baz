@@ -14,9 +14,9 @@ use iced::{Element, Length, alignment};
 use crate::app::{Message, Shelf, scroll_id};
 use crate::player::PlayerState;
 use crate::playlists::Collecting;
-use crate::shelf::{Density, Grid, Run, Shelves};
+use crate::shelf::{Grid, Run, Shelves};
 use crate::spine::{Slot, Spine};
-use crate::views::{DetentAxis, MARK_INSET, gradient_block, section_rule};
+use crate::views::{gradient_block, section_rule};
 use crate::{icon, rail, theme, vm};
 
 /// **The wall**: the shelved, virtualized grid, its pinned group header, and
@@ -661,15 +661,14 @@ fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
 /// [`Spine`]'s docs). This function owns everything the rail *says*: what the
 /// entries are, and which one the wall is standing on.
 ///
-/// # The lane's foot carries the density detents
+/// # The lane's foot no longer carries anything
 ///
-/// Below the spine's strip, the density marks ([`density_control`], ADR-0028)
-/// close the lane — one per [`Density::ALL`] step, four since the owner's
-/// fourth. The spine's height is what the marks leave it,
-/// and its per-frame elision absorbs the shorter lane exactly as it absorbs
-/// a short window — the fisheye never sees the marks because they are
-/// outside its bounds, and the lane's *width* is [`theme::INDEX_LANE_W`] at
-/// every step, so the wall beside it cannot reflow by a pixel.
+/// It closed with the density detents from ADR-0028 until the owner moved the
+/// display options into the app bar on 2026-08-10 (ADR-0040 §5). The lane is
+/// the spine and nothing else again, so the spine gets the whole height back —
+/// its per-frame elision absorbs the taller lane exactly as it absorbed the
+/// shorter one — and the lane's *width* is [`theme::INDEX_LANE_W`] either way,
+/// so the wall beside it never reflowed by a pixel in either direction.
 fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
     let runs = shelves.runs();
     let headers: Vec<vm::GroupHeaderVm> = runs
@@ -701,35 +700,14 @@ fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
             current: Some(index) == current,
         })
         .collect();
-    column![
-        Spine::new(slots, current, theme::active(), Message::RailJumped),
-        density_control(shelf.grid().density),
-    ]
+    container(Spine::new(
+        slots,
+        current,
+        theme::active(),
+        Message::RailJumped,
+    ))
     .width(Length::Fixed(theme::INDEX_LANE_W))
     .into()
-}
-
-/// **The density detents, in the lane's own geometry** (ADR-0028 §1): the
-/// marks that close the index rail's lane, right-aligned onto the lane's one
-/// declared ink edge with one un-zoomed hang of air above the bar.
-///
-/// The marks themselves are [`crate::views::density_marks`] — one function
-/// for every place that hangs works, so the Library, Home and an artist's
-/// page cannot drift into three controls that look alike. What is local to
-/// the wall is this placement, and only this placement.
-fn density_control(current: Density) -> Element<'static, Message> {
-    container(crate::views::density_marks(current, DetentAxis::Column))
-        .width(Length::Fixed(theme::INDEX_LANE_W))
-        .align_x(alignment::Horizontal::Right)
-        .padding(iced::Padding {
-            // The sprite's ink on `W − HANG`, the lane's one declared edge.
-            right: theme::HANG - MARK_INSET,
-            // One hang of air above the bar — the wall's own trailing unit,
-            // and the room's gutter does not zoom (law L1).
-            bottom: theme::HANG,
-            ..iced::Padding::ZERO
-        })
-        .into()
 }
 
 /// The shelf with nothing to show: a zero-result search, the first moments of
@@ -1368,77 +1346,58 @@ mod tests {
         );
     }
 
-    /// **The density marks stand in the lane's own geometry** (ADR-0028) —
-    /// the placement half of the control, in the lane the owner's choice
-    /// named, without disturbing an edge, a height or a width the laws
-    /// already pin.
+    /// **The density marks left the lane, and left nothing behind** —
+    /// ADR-0040 §5, on the owner's *"and please put the display options at
+    /// the top bar"*.
+    ///
+    /// The placement half of ADR-0028 used to be asserted here, against the
+    /// lane's own numbers. It is asserted in `views::app_bar` now, against the
+    /// bar's. What this test keeps is the half that is still the wall's, and
+    /// it is the half that would actually break something: **the rail's lane
+    /// is the spine and nothing else**, and the marks are not drawn twice.
+    ///
+    /// Doc 07 L8.6 is the rule behind the second clause — *"no two controls
+    /// may send the same message"* — and the way a move like this goes wrong
+    /// is that the new home lands and the old one is left standing, so both
+    /// are pinned rather than only the new one.
     #[test]
-    fn the_density_marks_stand_in_the_lanes_own_geometry() {
-        // Law L7: each mark is the named secondary square, and the band of
-        // them sits on the lattice (law L2) — at every count `ALL` can have.
-        const { assert!(crate::views::MARK_INSET == (theme::STEPPER_HIT - theme::ICON_PX) / 2.0) }
-        const { assert!(theme::STEPPER_HIT % 4.0 == 0.0) }
-        // Law L5/L1: the box overhangs the gutter by exactly the sprite's
-        // centring inset, so the ink lands on `W − HANG` — the lane's one
-        // declared edge — and the inset padding is itself on the lattice.
-        const { assert!((theme::HANG - crate::views::MARK_INSET) % 4.0 == 0.0) }
-        // The lane's width is untouched at every step: the marks live inside
-        // `INDEX_LANE_W`, which is what keeps every wall-width test true
-        // without a character changing.
-        const {
-            assert!(
-                theme::STEPPER_HIT + (theme::HANG - crate::views::MARK_INSET) < theme::INDEX_LANE_W
-            );
-        }
-
+    fn the_rails_lane_is_the_spine_and_the_marks_are_not_drawn_twice() {
         let source = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/shelf.rs"),
         )
         .expect("this module's own source")
         .replace("\r\n", "\n");
-        // The lane is the spine over the marks, at the lane's width…
-        let lane = source
+        let code = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a source has a head");
+        assert!(
+            !code.contains("density_marks") && !code.contains("density_control"),
+            "the wall is drawing the display options again — they are the app \
+             bar's, and two controls sending `DensityStep` is L8.6's defect"
+        );
+        let lane = code
             .split_once("fn index_rail")
             .expect("the index rail exists")
             .1;
         let lane = &lane[..lane.find("\n}\n").expect("a function ends")];
         assert!(
-            lane.contains("density_control(shelf.grid().density)"),
-            "the lane's foot carries the detents, fed by the grid that hung \
-             the frame"
+            lane.contains("Spine::new(")
+                && lane.contains(".width(Length::Fixed(theme::INDEX_LANE_W))"),
+            "the lane is no longer the spine at the lane's declared width"
         );
-        assert!(
-            lane.contains(".width(Length::Fixed(theme::INDEX_LANE_W))"),
-            "the lane keeps its declared width"
-        );
-        // …and the control spends the lane's own numbers: right-aligned onto
-        // the ink edge, one un-zoomed hang of air above the bar, the steps
-        // in `ALL`'s loosest-first order — the direction Ctrl+= walks.
-        let control = source
-            .split_once("fn density_control")
-            .expect("the density control exists")
-            .1;
-        let control = &control[..control.find("\n}\n").expect("a function ends")];
-        assert!(control.contains("right: theme::HANG - MARK_INSET"));
-        assert!(control.contains("bottom: theme::HANG"));
-        assert!(control.contains("DetentAxis::Column"));
-        assert!(control.contains("alignment::Horizontal::Right"));
-        // The run itself is `ALL`'s own order, in the shared control — so a
-        // step added to the enum is a mark here without an edit, which is
-        // the promise `Density::ALL`'s doc has been making all along.
-        let shared = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/mod.rs"),
+        // …and there is exactly one run of marks in the product, in the bar.
+        let bar = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/app_bar.rs"),
         )
-        .expect("the shared control's source")
+        .expect("the app bar's source")
         .replace("\r\n", "\n");
-        let marks = shared
-            .split_once("pub(crate) fn density_marks")
-            .expect("the shared marks exist")
-            .1;
-        let marks = &marks[..marks.find("\n}\n").expect("a function ends")];
         assert!(
-            marks.contains("crate::shelf::Density::ALL.map("),
-            "the marks are `ALL`'s own run, not a written-out list"
+            bar.split("#[cfg(test)]")
+                .next()
+                .expect("a head")
+                .contains("crate::views::density_marks(current)"),
+            "the app bar does not draw the marks it took"
         );
     }
 
