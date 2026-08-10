@@ -50,6 +50,10 @@ const BOM: &[u8] = b"\xef\xbb\xbf";
 pub(crate) fn parse(bytes: &[u8], directory: &Path, home: Option<&Path>) -> Vec<Item> {
     let mut items = Vec::new();
     let mut pending: Option<ExtInf> = None;
+    // `#EXTINF` lines demoted to notes because a nearer one superseded them,
+    // held until the entry they sit above rather than pushed where they were
+    // read. Why they are held is on the `pending.replace` below.
+    let mut superseded: Vec<Note> = Vec::new();
     let mut header_consumed = false;
     for (index, raw) in bytes.split(|byte| *byte == b'\n').enumerate() {
         let raw = if index == 0 {
@@ -57,7 +61,25 @@ pub(crate) fn parse(bytes: &[u8], directory: &Path, home: Option<&Path>) -> Vec<
         } else {
             raw
         };
-        let raw = raw.strip_suffix(b"\r").unwrap_or(raw);
+        // *Every* trailing carriage return, not one. A note is kept as `raw`
+        // rather than as the trimmed line, so that a comment's leading
+        // whitespace survives a rewrite — which means whatever `raw` still
+        // ends with is what `render` will write, and `render` terminates its
+        // lines with a bare `\n`. Strip one CR and `#\r\r\n` parses to a note
+        // of `#\r`, renders as `#\r\n`, and parses back to a note of `#`: the
+        // module's round-trip law broken by a rewrite that silently edits a
+        // user's comment. Found by `fuzz/fuzz_targets/playlist_m3u.rs` in
+        // three bytes; pinned by `a_note_ending_in_carriage_returns_survives
+        // _a_rewrite`.
+        //
+        // Nothing is lost that a line-oriented format could have carried: a
+        // run of CRs immediately before the line break is terminator noise in
+        // every dialect of M3U, and a CR *inside* a line still travels
+        // verbatim (`the_round_trip_law_holds_on_awkward_input`).
+        let mut raw = raw;
+        while let Some(shorter) = raw.strip_suffix(b"\r") {
+            raw = shorter;
+        }
         let line = raw.trim_ascii();
         if line.is_empty() {
             continue;
@@ -77,11 +99,26 @@ pub(crate) fn parse(bytes: &[u8], directory: &Path, home: Option<&Path>) -> Vec<
                 continue;
             }
             if let Some(extinf) = parse_extinf(line) {
-                if let Some(superseded) = pending.replace(extinf) {
-                    // Two #EXTINF lines before one path: the nearer one
-                    // wins the entry; the earlier one is kept as a note
-                    // rather than stripped.
-                    items.push(Item::Note(Note(extinf_line(&superseded).into_bytes())));
+                if let Some(loser) = pending.replace(extinf) {
+                    // Two #EXTINF lines before one path: the nearer one wins
+                    // the entry; the earlier one is kept as a note rather
+                    // than stripped.
+                    //
+                    // **Held until the entry, not pushed here**, and the
+                    // reason is the round-trip law. A demoted `#EXTINF` is
+                    // still a canonical `#EXTINF` line, so `render` writes it
+                    // as one and the next `parse` reads it as one — it goes
+                    // back into `pending` and is demoted a second time, at
+                    // the position of the *winner*, which `render` has moved
+                    // down to sit immediately above its path. Pushed where it
+                    // was read, it therefore hops over any comment between
+                    // the two on every rewrite: `parse(render(parse(f)))`
+                    // returned the same items in a different order. Holding
+                    // it puts it where the rewrite will put it anyway, which
+                    // makes the first parse already a fixed point. Found by
+                    // `fuzz/fuzz_targets/playlist_m3u.rs`; pinned by
+                    // `a_superseded_extinf_does_not_hop_over_a_comment`.
+                    superseded.push(Note(extinf_line(&loser).into_bytes()));
                 }
                 continue;
             }
@@ -91,11 +128,15 @@ pub(crate) fn parse(bytes: &[u8], directory: &Path, home: Option<&Path>) -> Vec<
             items.push(Item::Note(Note(raw.to_vec())));
             continue;
         }
+        items.extend(superseded.drain(..).map(Item::Note));
         items.push(Item::Entry(Entry {
             path: resolve(line, directory, home),
             extinf: pending.take(),
         }));
     }
+    // Anything still held describes an entry that never arrived; it is still
+    // the user's line, and it keeps its order relative to the dangling one.
+    items.extend(superseded.into_iter().map(Item::Note));
     if let Some(dangling) = pending.take() {
         // An #EXTINF with no path after it describes nothing, but it is
         // still the user's line: kept as a note, not stripped.
@@ -154,7 +195,18 @@ fn parse_extinf(line: &[u8]) -> Option<ExtInf> {
     let (duration, title) = payload.split_once(',').unwrap_or((payload, ""));
     Some(ExtInf {
         seconds: parse_seconds(duration)?,
-        title: title.to_string(),
+        // `trim_end`, because [`extinf_line`] trims the end when it writes the
+        // title back and this has to be the same shape or the round-trip law
+        // fails. It is `str::trim_end` on both sides rather than
+        // `trim_ascii_end` on either: the line has already had *ASCII*
+        // trailing whitespace taken off by the caller, so what is left to
+        // disagree about is exactly the characters the two functions treat
+        // differently — a vertical tab is Unicode whitespace and is not ASCII
+        // whitespace, and a title ending in one used to be shortened by the
+        // first save and no other. Found by
+        // `fuzz/fuzz_targets/playlist_m3u.rs`; pinned by
+        // `a_title_ending_in_odd_whitespace_is_already_trimmed`.
+        title: title.trim_end().to_string(),
     })
 }
 
@@ -361,6 +413,115 @@ mod tests {
         ] {
             law(source);
         }
+    }
+
+    /// A title ending in whitespace the writer would trim is trimmed on the
+    /// way in, so the first save changes nothing.
+    ///
+    /// The third thing `playlist_m3u`'s fuzz target found, and the narrowest:
+    /// `extinf_line` trims the title's end with `str::trim_end` (Unicode),
+    /// while the reader kept whatever `trim_ascii` had left — and a **vertical
+    /// tab** is Unicode whitespace but not ASCII whitespace, so it survived
+    /// the read and died on the write.
+    #[test]
+    fn a_title_ending_in_odd_whitespace_is_already_trimmed() {
+        for source in [
+            b"#EXTINF:8,Title\x0b\n/a.flac\n".as_slice(),
+            b"#EXTINF:8,Title\x0b\x0b\x0b\n/a.flac\n",
+            b"#EXTINF:8,Title\xc2\xa0\n/a.flac\n", // U+00A0, also not ASCII
+            b"#EXTINF:8,\x0b\n/a.flac\n",
+        ] {
+            law(source);
+        }
+        let items = read(b"#EXTINF:8,Title\x0b\n/a.flac\n");
+        let Some(Item::Entry(entry)) = items.first() else {
+            panic!("expected an entry, got {items:?}");
+        };
+        assert_eq!(
+            entry.extinf.as_ref().map(|e| e.title.as_str()),
+            Some("Title")
+        );
+        // A title with interior odd whitespace keeps all of it.
+        let items = read(b"#EXTINF:8,Ti\x0btle\n/a.flac\n");
+        let Some(Item::Entry(entry)) = items.first() else {
+            panic!("expected an entry, got {items:?}");
+        };
+        assert_eq!(
+            entry.extinf.as_ref().map(|e| e.title.as_str()),
+            Some("Ti\x0btle")
+        );
+    }
+
+    /// A superseded `#EXTINF` keeps its place relative to the comments around
+    /// it, however many times the file is rewritten.
+    ///
+    /// The second thing `playlist_m3u`'s fuzz target found. A demoted
+    /// `#EXTINF` is written back as an `#EXTINF`, so the next read demotes it
+    /// again — at the winner's position, which `render` has moved down beside
+    /// its path. Pushed where it was read, it hopped over the comment between
+    /// them on every save.
+    #[test]
+    fn a_superseded_extinf_does_not_hop_over_a_comment() {
+        for source in [
+            b"#EXTINF:100,First\n# a comment\n#EXTINF:200,Second\n/a.flac\n".as_slice(),
+            b"#EXTINF:100,First\n#EXTINF:200,Second\n# a comment\n/a.flac\n",
+            b"#EXTINF:1,A\n# x\n#EXTINF:2,B\n# y\n#EXTINF:3,C\n/a.flac\n",
+            // Superseded with no path at all: held to the end, still ahead of
+            // the dangling one.
+            b"#EXTINF:100,First\n# a comment\n#EXTINF:200,Dangling\n",
+        ] {
+            law(source);
+        }
+        // The winner is still the nearest one, which is the rule the holding
+        // must not have changed.
+        let items = read(b"#EXTINF:100,First\n# a comment\n#EXTINF:200,Second\n/a.flac\n");
+        let Some(Item::Entry(entry)) = items.last() else {
+            panic!("expected an entry last, got {items:?}");
+        };
+        assert_eq!(
+            entry.extinf.as_ref().map(|e| e.title.as_str()),
+            Some("Second")
+        );
+        // And the comment still leads the demoted line, in the file's order.
+        assert!(
+            matches!(&items[0], Item::Note(note) if note.bytes() == b"# a comment"),
+            "{items:?}"
+        );
+    }
+
+    /// A comment ending in carriage returns, in every arrangement — the class
+    /// `playlist_m3u`'s fuzz target found, in three bytes (`#\r\r`).
+    ///
+    /// The note branch keeps `raw` rather than the trimmed line, so that a
+    /// comment's leading whitespace survives; that made whatever trailing CRs
+    /// the reader left behind part of the note's own bytes, and `render`
+    /// terminates with a bare `\n`, so the next read ate one more of them.
+    /// The rewrite silently shortened the user's comment, and did it again on
+    /// every save until the CRs ran out.
+    #[test]
+    fn a_note_ending_in_carriage_returns_survives_a_rewrite() {
+        for source in [
+            b"#\r\r".as_slice(),
+            b"#\r\r\n",
+            b"#\r\r\r\r\r\n/a.flac\n",
+            b"# comment\r\r\n/a.flac\n",
+            b"   # indented\r\r\n",
+            // Not a comment: an entry line, which is trimmed rather than kept
+            // raw and so was never exposed to this — asserted, not assumed.
+            b"/music/a.flac\r\r\n",
+            // A CR run in the middle still travels; only the trailing run is
+            // terminator noise.
+            b"# before\r\rafter\r\r\n",
+        ] {
+            law(source);
+        }
+        // And the note that comes back says what it should: the interior run
+        // intact, the trailing run gone.
+        let items = read(b"# before\r\rafter\r\r\n");
+        let Some(Item::Note(note)) = items.first() else {
+            panic!("expected one note, got {items:?}");
+        };
+        assert_eq!(note.bytes(), b"# before\r\rafter");
     }
 
     #[cfg(unix)]

@@ -365,6 +365,7 @@ dependencies = [
  "serde",
  "serde_json",
  "symphonia",
+ "symphonia-metadata",
  "tempfile",
  "thiserror 2.0.19",
  "trash",

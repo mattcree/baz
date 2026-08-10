@@ -164,7 +164,50 @@ jobs:
       - run: rustup toolchain install nightly --profile minimal && rustup override set nightly
       - uses: Swatinem/rust-cache@v2
       - run: cargo install --locked cargo-fuzz
+      # Both limits are set on purpose, and the pair is the point (ADR-0040
+      # §4): **residency is baz's, a reservation is symphonia's.**
+      #
+      # `-rss_limit_mb=2048` is the real guard and keeps libFuzzer's default:
+      # memory the decode path actually *touches* is baz's business, and a
+      # target that grows resident is a defect wherever it lives.
+      #
+      # `-malloc_limit_mb=6144` raises only the single-allocation trip wire,
+      # above the largest reservation a 32-bit length field can name (4.28 GB).
+      # Symphonia allocates metadata buffers from unchecked `u32` lengths in at
+      # least four places across two containers; that bound is upstream's, baz
+      # declines to shadow four container parsers to take it, and the
+      # reservation is a lazy zero mapping that is never written — measured at
+      # 3.4 MB of peak RSS for a request of 4,278,208,769 bytes, and confirmed
+      # under this exact pair of flags on all three known inputs. Left at the
+      # default this job is permanently red for one written-down condition, and
+      # a permanently red job is a job nobody reads, which would cost the other
+      # five targets their audience.
+      #
+      # Note it is not `-malloc_limit_mb=0`: zero means *"use rss_limit_mb"*,
+      # not *"off"*.
+      #
+      # The reproducers are gated on `push` by
+      # `crates/baz-core/tests/hostile_media.rs`, which is where a release
+      # actually meets them.
+      #
+      # **Every target runs, even after one fails.** A `run:` block is
+      # `bash -e`, so the first non-zero `cargo fuzz run` used to abort the
+      # step and the targets after it were never exercised at all. That
+      # mattered the moment one target became reliably red: `playback_decode`
+      # reports panics inside Symphonia's own parsers (ADR-0040 §4 — a
+      # contained panic is still a panic to libFuzzer, whose hook aborts before
+      # `catch_unwind` runs), and hiding the other five behind it would cost
+      # far more than it saves. The step still fails, with the list.
       - run: |
+          failed=""
           for target in $(cargo fuzz list); do
-            cargo fuzz run "$target" -- -max_total_time=300
+            echo "::group::fuzz $target"
+            cargo fuzz run "$target" -- \
+              -max_total_time=300 -rss_limit_mb=2048 -malloc_limit_mb=6144 \
+              || failed="$failed $target"
+            echo "::endgroup::"
           done
+          if [ -n "$failed" ]; then
+            echo "fuzz targets with findings:$failed"
+            exit 1
+          fi

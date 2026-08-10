@@ -215,8 +215,16 @@ pub fn parse_gain(value: &str) -> Option<i16> {
     let text = value.trim();
     // A trailing `dB`, with or without a space before it. Stripped rather than
     // required: both spellings are common and neither is wrong.
+    // `text.len()` is a count of *bytes*, so `cut` can land inside a character
+    // — and a tag is arbitrary text out of a file nobody here wrote, so it
+    // does. `is_char_boundary` first, or `"…ª"` panics on the slice rather
+    // than declining to be a gain. Found by
+    // `fuzz/fuzz_targets/replaygain_tags.rs`; pinned by
+    // `a_multibyte_tail_is_not_a_unit_suffix`.
     let number = match text.len().checked_sub(2) {
-        Some(cut) if text[cut..].eq_ignore_ascii_case("db") => text[..cut].trim_end(),
+        Some(cut) if text.is_char_boundary(cut) && text[cut..].eq_ignore_ascii_case("db") => {
+            text[..cut].trim_end()
+        }
         _ => text,
     };
     let db: f64 = number.parse().ok()?;
@@ -1139,6 +1147,43 @@ mod tests {
         };
         shared.publish(settings, applied);
         assert_eq!(shared.snapshot(), ReplayGainState { settings, applied });
+    }
+
+    /// A tag whose last two *bytes* sit inside one character is not a gain —
+    /// and finding that out must not be a panic.
+    ///
+    /// `parse_gain` looked for a `dB` suffix by slicing at `len() - 2`, which
+    /// is a byte offset, on text that comes out of a media file and is under
+    /// nobody's control. `fuzz/fuzz_targets/replaygain_tags.rs` found it in
+    /// seconds and in three thousand shapes; the ones below are one per
+    /// character width, plus the cases where the suffix is real and must still
+    /// be honoured.
+    ///
+    /// It mattered beyond the parser: these tags are read during
+    /// `AudioSource::open`, so a single mis-encoded `REPLAYGAIN_TRACK_GAIN` in
+    /// one file's metadata was a panic on the decode thread.
+    #[test]
+    fn a_multibyte_tail_is_not_a_unit_suffix() {
+        for value in [
+            "ª",         // two bytes, and the cut lands inside it
+            "ԋ",         // two bytes
+            "岠",        // three bytes
+            "\u{baeb5}", // four bytes
+            "-7.75dԋ",
+            "ԋԋԋ",
+            "\u{a0}\u{a0}",
+        ] {
+            assert_eq!(parse_gain(value), None, "{value:?}");
+            // The sibling parsers take the same text and must be as total.
+            assert_eq!(parse_peak(value), None, "{value:?}");
+            assert_eq!(parse_r128_gain(value), None, "{value:?}");
+            let _ = field_of_key(value);
+        }
+        // And the suffix still works where it is really a suffix — the fix is
+        // a boundary check, not a removal.
+        assert_eq!(parse_gain("-7.75 dB"), Some(-775));
+        assert_eq!(parse_gain("-7.75dB"), Some(-775));
+        assert_eq!(parse_gain("-7.75"), Some(-775));
     }
 
     #[test]

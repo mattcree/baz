@@ -128,7 +128,9 @@
 
 use std::fs::File;
 use std::io::Cursor;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
+use std::sync::OnceLock;
 
 use symphonia::core::audio::{Channels, SampleBuffer};
 use symphonia::core::codecs::{Decoder, DecoderOptions};
@@ -136,12 +138,106 @@ use symphonia::core::errors::{Error as SymphoniaError, SeekErrorKind};
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
 use symphonia::core::io::{MediaSource, MediaSourceStream, MediaSourceStreamOptions};
 use symphonia::core::meta::{MetadataOptions, MetadataRevision};
-use symphonia::core::probe::Hint;
+use symphonia::core::probe::{Hint, Probe};
 use symphonia::core::units::Time;
+use symphonia::default::formats::{FlacReader, IsoMp4Reader, MpaReader, OggReader, WavReader};
+use symphonia_metadata::id3v2::Id3v2Reader;
 
 use super::downmix::Downmix;
 use super::{CHANNELS, PlaybackError};
 use crate::replaygain::{ReplayGainReader, ReplayGainTags, field_of_key};
+
+/// The formats baz probes for — **exactly the ones `AUDIO_EXTENSIONS` names**,
+/// and not one more.
+///
+/// This is `symphonia::default::register_enabled_formats` with a single
+/// omission: **`AdtsReader`, the raw-ADTS demuxer.** The reasoning is
+/// ADR-0040 §2.5, and it starts from what a probe *is*. `Probe::format`
+/// identifies a stream by searching its bytes for a registered marker, not by
+/// trusting the extension — so every registered reader is a parser that
+/// arbitrary bytes can reach, whatever the file is called. ADTS's marker is a
+/// twelve-bit sync word, which random data carries constantly.
+///
+/// baz has no use for the reader that marker selects. `.aac` is not an
+/// [`AUDIO_EXTENSIONS`](crate::library::AUDIO_EXTENSIONS) member, so no raw
+/// ADTS stream is ever *listed*, so none is ever played; every AAC baz decodes
+/// arrives inside an MP4, through `IsoMp4Reader` and the AAC **decoder**,
+/// which stays registered. In production the ADTS *reader* could therefore
+/// only ever fire on a file that is not what its name says — and that is
+/// precisely where it fired: a seven-minute fuzz sweep produced 650 crash
+/// artifacts and **every one of them** was this reader, panicking on bytes
+/// handed to it under a `.flac`, `.wav` or `.mp3` name
+/// (`assertion failed: step != 0`, `attempt to subtract with overflow`).
+///
+/// **It was also competing for baz's own bytes.** MPEG audio's frame sync is
+/// eleven set bits and ADTS's is twelve, so the two markers overlap and both
+/// readers claimed the same corrupt `.mp3`. Removing the one baz cannot use
+/// leaves such a file to `MpaReader`, which is the reader that should have had
+/// it: of the three artifacts in `tests/hostile_media.rs`, two now come back
+/// as `end of stream` from it and one as *no suitable format reader*. That
+/// split is why the second phrase is asserted nowhere — which of the two a
+/// given corrupt file gets is a property of symphonia's marker table, not a
+/// promise baz makes.
+///
+/// What it costs is stated rather than hidden: a raw ADTS stream misnamed
+/// `.m4a` used to play and now does not. It was never listed by the scanner,
+/// so reaching it meant opening it by another route.
+///
+/// `Id3v2Reader` is registered because the default registry registers it and
+/// baz depends on it — ReplayGain tags on an MP3 live in the ID3v2 block, and
+/// `absorb_replay_gain` reads them off this probe's `metadata`.
+fn probe() -> &'static Probe {
+    static PROBE: OnceLock<Probe> = OnceLock::new();
+    PROBE.get_or_init(|| {
+        let mut probe = Probe::default();
+        probe.register_all::<FlacReader>();
+        probe.register_all::<MpaReader>();
+        probe.register_all::<IsoMp4Reader>();
+        probe.register_all::<OggReader>();
+        probe.register_all::<WavReader>();
+        probe.register_all::<Id3v2Reader>();
+        probe
+    })
+}
+
+/// Run one call into Symphonia, turning a **panic** inside it into
+/// [`PlaybackError::DecoderPanicked`].
+///
+/// This is the boundary ADR-0040 draws. A file on a listener's disk is
+/// arbitrary bytes, the parsers that read it are third-party, and a panic in
+/// one of them is not a file that will not play — it is the decode thread
+/// dying, which stops the music and leaves the engine with a track it can
+/// neither finish nor abandon. Turning it into an error puts a hostile file
+/// exactly where a merely unreadable one already is.
+///
+/// **What it does not cover, and cannot.** An oversized *allocation* is not an
+/// unwind: `vec![0u8; n]` for an `n` the allocator refuses calls
+/// `handle_alloc_error`, which aborts the process outright. That failure is
+/// symphonia's to bound and ADR-0040 says why baz does not shadow it here.
+///
+/// **`panic = "abort"` defeats this**, so no profile in `Cargo.toml` may set
+/// it; `unwinding_is_what_makes_the_containment_work` fails if one does.
+///
+/// The closure is asserted unwind-safe because nothing that a caught panic
+/// leaves behind is ever read: [`AudioSource::open`] returns the error instead
+/// of a source, and every caller of [`AudioSource::next_block`] and
+/// [`AudioSource::seek`] abandons the source on an error — which
+/// `seek`'s own documentation already required of them, for the ordinary
+/// failure.
+fn contain_panics<T>(
+    doing: &'static str,
+    call: impl FnOnce() -> Result<T, PlaybackError>,
+) -> Result<T, PlaybackError> {
+    match catch_unwind(AssertUnwindSafe(call)) {
+        Ok(result) => result,
+        // The payload is deliberately dropped rather than rendered into the
+        // error: the panic's own message has already gone to stderr through
+        // the standard hook, where a bug report can find it, and a decoder's
+        // internal assertion text is not something to put in front of a
+        // listener.
+        Err(_) => Err(PlaybackError::DecoderPanicked { doing }),
+    }
+}
 
 /// A fully decoded track: interleaved stereo f32 samples plus its native
 /// sample rate. Produced by [`AudioSource::decode_all`], consumed by the
@@ -270,6 +366,17 @@ impl AudioSource {
     }
 
     fn from_media_source(source: Box<dyn MediaSource>, hint: &Hint) -> Result<Self, PlaybackError> {
+        contain_panics("opening", || Self::probe_media_source(source, hint))
+    }
+
+    /// The body of [`Self::from_media_source`], which wraps this in
+    /// [`contain_panics`]. Everything a hostile header can reach at open time
+    /// — the format probe, the demuxer's own metadata parsing, the codec
+    /// registry and (for MP4) the first decoded packet — is inside here.
+    fn probe_media_source(
+        source: Box<dyn MediaSource>,
+        hint: &Hint,
+    ) -> Result<Self, PlaybackError> {
         let mss = MediaSourceStream::new(source, MediaSourceStreamOptions::default());
         // `enable_gapless` makes gapless-capable readers (MP3) shift packet
         // timestamps and stamp per-packet trim counts, which the decoder
@@ -279,12 +386,7 @@ impl AudioSource {
             enable_gapless: true,
             ..FormatOptions::default()
         };
-        let mut probed = symphonia::default::get_probe().format(
-            hint,
-            mss,
-            &format_opts,
-            &MetadataOptions::default(),
-        )?;
+        let mut probed = probe().format(hint, mss, &format_opts, &MetadataOptions::default())?;
         // ReplayGain, from the metadata the probe has already parsed — no
         // extra open, no extra read, no second tag library. Two sources,
         // because containers put tags in two places: `probed.metadata` holds
@@ -546,8 +648,15 @@ impl AudioSource {
     /// declared length — checked here first so the answer does not depend on
     /// which format reader happens to range-check its input — and
     /// [`PlaybackError::Decode`] for a stream that cannot be seeked at all
-    /// (an unseekable media source, a container without the index it needs).
+    /// (an unseekable media source, a container without the index it needs) —
+    /// and [`PlaybackError::DecoderPanicked`] when a format reader's own seek
+    /// arithmetic panics on a lying header (`contain_panics`).
     pub fn seek(&mut self, position_ms: u64) -> Result<(), PlaybackError> {
+        contain_panics("seeking", || self.seek_inner(position_ms))
+    }
+
+    /// The body of [`Self::seek`], which wraps this in [`contain_panics`].
+    fn seek_inner(&mut self, position_ms: u64) -> Result<(), PlaybackError> {
         let target = ms_to_frames(position_ms, self.sample_rate);
         if let Some(total) = self.emit_cap
             && target >= total
@@ -637,8 +746,16 @@ impl AudioSource {
     /// # Errors
     ///
     /// [`PlaybackError::Decode`] on any mid-stream demux or decode failure
-    /// other than a clean end of stream.
+    /// other than a clean end of stream, and
+    /// [`PlaybackError::DecoderPanicked`] when the failure was a panic inside
+    /// the decoder rather than an error it returned (`contain_panics`).
     pub fn next_block(&mut self) -> Result<Option<&[f32]>, PlaybackError> {
+        contain_panics("decoding", || self.next_block_inner())
+    }
+
+    /// The body of [`Self::next_block`], which wraps this in
+    /// [`contain_panics`].
+    fn next_block_inner(&mut self) -> Result<Option<&[f32]>, PlaybackError> {
         loop {
             if let Some(cap) = self.emit_cap
                 && self.frames_seen >= cap
@@ -786,6 +903,41 @@ fn ms_to_secs(ms: u64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The containment does what ADR-0040 §2 says: a panic out of a decoder
+    /// becomes an error, and an ordinary error is left alone.
+    ///
+    /// The mechanism is tested here rather than through a file, and the reason
+    /// is worth writing down: **there is no longer an input that reaches a
+    /// panic.** All three the fuzz sweep found were in the raw-ADTS reader,
+    /// and [`probe`] no longer registers it, so the demonstrated triggers are
+    /// gone. The guard stays for the parsers baz *does* register — a crafted
+    /// MP4 still reaches symphonia's AAC decoder, where the third of those
+    /// three panics lived — and this test is what keeps it honest in the
+    /// meantime. `crates/baz-core/tests/hostile_media.rs` drives the files.
+    #[test]
+    fn a_panic_out_of_a_decoder_becomes_an_error() {
+        let contained: Result<(), PlaybackError> =
+            contain_panics("opening", || panic!("a decoder came apart"));
+        let Err(error) = contained else {
+            panic!("a panic must not come back as success");
+        };
+        assert!(
+            matches!(error, PlaybackError::DecoderPanicked { doing: "opening" }),
+            "{error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "the decoder panicked while opening this file"
+        );
+        // An error the decoder *returned* travels unchanged — the variant is a
+        // statement about how the failure happened, not a catch-all.
+        let returned: Result<(), PlaybackError> =
+            contain_panics("decoding", || Err(PlaybackError::NoDefaultTrack));
+        assert!(matches!(returned, Err(PlaybackError::NoDefaultTrack)));
+        // And a success is a success.
+        assert_eq!(contain_panics("decoding", || Ok(7)).ok(), Some(7));
+    }
 
     #[test]
     fn frame_millisecond_conversions_round_trip() {

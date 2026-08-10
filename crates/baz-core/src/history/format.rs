@@ -299,7 +299,18 @@ fn civil_from_days(days: u64) -> (u64, u64, u64) {
 }
 
 /// The inverse of [`civil_from_days`]. `None` for a date before the epoch,
-/// which this ledger cannot hold.
+/// which this ledger cannot hold — and `None`, rather than a panic or a
+/// wrapped answer, for a year too large to be a number of days.
+///
+/// **The year arrives from the file and is not bounded before it gets here.**
+/// [`parse_timestamp`] reads everything before `MM-DDTHH:MM:SSZ` as the year,
+/// so a hand-edited or concatenated ledger can hand this function a
+/// twenty-digit one. Every step below `era` is bounded by construction —
+/// `year_of_era` is under 400, `day` is under 32 — so `era`'s multiplication
+/// is the only one that can leave `u64`, and it is checked. Found by
+/// `fuzz/fuzz_targets/history_line.rs`, which reached it with the year
+/// `1120120120176761`; the pin is `a_year_too_large_for_a_day_count_is_not_a
+/// _timestamp`.
 fn days_from_civil(year: u64, month: u64, day: u64) -> Option<u64> {
     let year = if month <= 2 {
         year.checked_sub(1)?
@@ -311,7 +322,9 @@ fn days_from_civil(year: u64, month: u64, day: u64) -> Option<u64> {
     let shifted_month = if month > 2 { month - 3 } else { month + 9 };
     let day_of_year = (153 * shifted_month + 2) / 5 + day - 1;
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    (era * 146_097 + day_of_era).checked_sub(719_468)
+    era.checked_mul(146_097)?
+        .checked_add(day_of_era)?
+        .checked_sub(719_468)
 }
 
 /// Append `path`, escaped, to `out`.
@@ -635,6 +648,48 @@ mod tests {
             let unix_s = start + day * DAY + 12 * HOUR + 34 * MINUTE + 56;
             let text = format_timestamp(unix_s);
             assert_eq!(parse_timestamp(&text), Some(unix_s), "{text}");
+        }
+    }
+
+    /// A year with more digits than a day count can hold is refused, not
+    /// panicked on.
+    ///
+    /// `parse_timestamp` takes everything before the last fifteen characters
+    /// as the year, so the ledger — a file ADR-0018 invites a person to read,
+    /// edit and concatenate — can hand `days_from_civil` a number that leaves
+    /// `u64` when it is multiplied into days. It used to: the fuzz target
+    /// `history_line` found `1120120120176761-02-15T10:44:44Z` in under a
+    /// minute, and `era * 146_097` panicked under overflow checks (and wrapped
+    /// silently without them, which is the worse half — a wrapped product is a
+    /// timestamp that is merely wrong).
+    ///
+    /// The first case below is that input; the others are the widest years a
+    /// `u64` can spell at all.
+    ///
+    /// Note what is *not* asserted: that a large year is refused. A year of
+    /// twelve digits is a real instant this format can hold and does hold —
+    /// `126247922821-01-01T00:00:00Z` parses, because it is exactly what
+    /// `format_timestamp` would have written for those seconds. The rule is
+    /// only that arithmetic which leaves `u64` yields `None`.
+    #[test]
+    fn a_year_too_large_for_a_day_count_is_not_a_timestamp() {
+        for text in [
+            "1120120120176761-02-15T10:44:44Z",
+            "99999999999999999999-01-01T00:00:00Z",
+            "18446744073709551615-12-31T23:59:59Z",
+        ] {
+            assert_eq!(parse_timestamp(text), None, "{text}");
+        }
+        // A twelve-digit year is not the failure case: it is a real instant.
+        assert_eq!(
+            parse_timestamp("126247922821-01-01T00:00:00Z"),
+            Some(3_983_999_578_394_860_800)
+        );
+        // And the arithmetic itself is total: every year `u64` can hold either
+        // names a day or names none, and never aborts on the way.
+        for year in [0, 1, 1969, 1970, 9999, 100_000, u64::MAX / 2, u64::MAX] {
+            let _ = days_from_civil(year, 1, 1);
+            let _ = days_from_civil(year, 3, 1);
         }
     }
 
