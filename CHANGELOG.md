@@ -818,6 +818,36 @@ next commit.
 - [`docs/INSTALL.md`](docs/INSTALL.md) and
   [`docs/RELEASING.md`](docs/RELEASING.md).
 
+**Design records, not yet built**
+
+- **The queue and Now playing are one surface** — the owner: *"the queue and
+  the now playing need integrated in some way so we can remove the queue option
+  from the bottom bar"*. `Place::Queue` is deleted and its every affordance
+  moves into a run column beside the record, in the margin the surface is
+  already leaving empty: measured off rendered frames, the merge costs the
+  artwork **nothing at 1920 × 1080, nothing at 4K, and 53 px at 1280 with the
+  lane expanded**. The bar's `Queue` door comes off and the transport does not
+  move a pixel; the 160 px it held goes to the track title. Whether the run is
+  shown is a stated, remembered `Run` word — deliberately **not** a function of
+  full-screen, because iced 0.13 exposes no monitor enumeration and so cannot
+  tell a second-display kiosk from an only-display one.
+  [ADR-0029 §8](docs/adr/0029-the-ambient-surface.md),
+  [doc 12 §3.4/§5.5a/§6.4](docs/design/12-now-playing-and-kiosk.md), frames at
+  [`docs/design/impl/queue-in-now-playing/`](docs/design/impl/queue-in-now-playing/README.md).
+- **Every run carries the identity of the list it came from** — the owner:
+  *"probably the basic model is that every album has a playlist implicitly… it
+  should be basically which playlist and which track"*. `Origin` names the list
+  for six kinds where today only a playlist file is named, so
+  `Road Trip · 3 of 12` and `Ochre · 2 of 9` become one sentence; a destination
+  bit keeps `Add to "{name}"` unrepresentable for a list with no file. Two
+  findings changed the shape: `SetQueue` can carry it **without moving one
+  pinned wire byte**, and the sixth ledger column the backlog anticipated turns
+  out to be actively harmful — the reader rejects a six-field line outright, so
+  the ledger gains a **`# baz run` comment marker** instead and no older baz
+  reads a newer file as damaged. Closes the owner's attribution defect at
+  `docs/BACKLOG.md:9–25`.
+  [ADR-0034](docs/adr/0034-the-run-and-its-list.md).
+
 ### Changed
 
 - **Home's `CONTINUE` band is the question you ask in the silence** (ADR-0030's

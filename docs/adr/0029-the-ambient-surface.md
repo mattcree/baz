@@ -1,4 +1,30 @@
-# ADR-0029: The ambient surface — the field, the spectrum, the meter, the feed, and the class that admits them
+# ADR-0029: The ambient surface — the field, the spectrum, the meter, the feed, the run, and the class that admits them
+
+> ## Amendment (2026-08-10) — the queue is this surface's other half
+>
+> The owner: *"we need to work on the now playing since I think the queue and
+> the now playing need integrated in some way so we can remove the queue option
+> from the bottom bar"*.
+>
+> **`Place::Queue` is deleted and `Place::NowPlaying` absorbs it whole**, and
+> the bar's `Queue` door goes with it. §8 below is the decision; doc 12 §3.4 is
+> the argument, §5.5a the measured composition, §6.4 the fate of every affordance
+> and of the bar.
+>
+> **This does not supersede anything in §1–§7.** The ambient surface is
+> unchanged in kind; what changes is that it now has a second column, so §2's
+> field, §3a's spectrum and §5's toggles acquire one new constraint each — all
+> three collected in §8.4 rather than scattered. The one thing that *is*
+> superseded is **§Consequences' "nine shippable steps"**, which becomes twelve
+> and is re-ordered: doc 12 §12.0 is the new table, and it names the disposition
+> of all nine.
+>
+> **A separate record carries the model this surface now reads from.** The owner,
+> in the same conversation: *"probably the basic model is that every album has a
+> playlist implicitly… it should be basically which playlist and which track"*.
+> That reaches the protocol and the play ledger, which this record does not, so
+> it is [ADR-0034](0034-the-run-and-its-list.md) and is cited from here rather
+> than folded in.
 
 > ## Amendment (2026-08-09) — the spectrum analyser, promoted
 >
@@ -17,7 +43,7 @@
 > held together. §3a is the new decision; §3 is unchanged except that its
 > instrument register now defaults to off.
 
-**Status**: proposed (2026-08-09), **amended 2026-08-09 (§3a: the spectrum analyser, promoted)** · extracts the decisions of `docs/design/12-now-playing-and-kiosk.md` · **amends [ADR-0020](0020-motion.md)** (adds §7, user-started ambient content) · **amends [ADR-0015](0015-replaygain-analysis.md) §3** (its reversal clause is triggered and re-decided) · rewrites four the product's standing rules entries on the owner's decision
+**Status**: proposed (2026-08-09), **amended 2026-08-09 (§3a: the spectrum analyser, promoted)**, **amended 2026-08-10 (§8: the queue merged in, and the bar's door removed)** · extracts the decisions of `docs/design/12-now-playing-and-kiosk.md` · **amends [ADR-0020](0020-motion.md)** (adds §7, user-started ambient content) · **amends [ADR-0015](0015-replaygain-analysis.md) §3** (its reversal clause is triggered and re-decided) · **amends [ADR-0022](0022-places-and-nothing-else.md)** (`Place::Queue` is deleted; the model loses a member and gains nothing) · **spends [ADR-0034](0034-the-run-and-its-list.md)** (the merged surface's head is that record's `Origin`) · rewrites four the product's standing rules entries on the owner's decision
 
 ## Context
 
@@ -355,8 +381,135 @@ cleared. **`tiny-skia` renders no shader at all**, so T1 has a third state,
 `unavailable`, which falls back to the static field — a still field, never a
 hole.
 
+### 8. `Place::Queue` is deleted, and this surface holds the run
+
+> **A run is a list and a cursor. This place was the cursor; `Place::Queue` was
+> the list. They are two readings of one object and they become one surface.**
+
+That sentence, and not adjacency, is why the merge is right — the two places
+were each drawing half of a thing, and each one's own module doc admits it
+(`queue.rs:30–38` calls the queue *"one list with a cursor"* and draws the
+cursor as a 6 px dot; `bottom_bar.rs:16–22` records that the queue place's
+reading half was delegated to the bar). Doc 12 §3.4 carries the full argument
+and three independent confirmations.
+
+#### 8.1 One place, two columns, one stated control
+
+The record and the run stand **side by side** at a body ≥ **784 px**
+(`SPLIT_FLOOR`), and re-stack into one scrolling column below it with the record
+as the run's head. The run's column is `RUN_MEASURE` = `LIST_MEASURE / 2` =
+**440**, scaled by `kiosk_scale`. Doc 12 §5.5a is the arithmetic and its table.
+
+**The measurement that decides it**: at 1920 × 1080 the artwork is bound by
+*height*, not width — 720 today because `NOW_PLAYING_MAX` clamps it, 729 after
+§2 deletes the clamp — with **1104 px of body width unused**, measured off a
+rendered frame (`docs/design/impl/queue-in-now-playing/`). The run column asks
+for 464. **The merge costs the artwork nothing at 1920, nothing at 4K, and 53 px
+at 1280 with the lane expanded**, where `Ctrl+B` is the remedy already on screen.
+
+**Whether the run is shown is a stated, remembered control** — a `Run` word-door
+beside `Ambient` in the place's top-right, on by default — **and not a function
+of full-screen.** The shape offered was *full-screen stands the list down*, and
+the drawing broke it on a toolkit fact this record already established in §6:
+**iced 0.13 exposes no monitor enumeration**, so baz cannot tell a second-display
+full-screen from an only-display one, and the single-display listener would lose
+the editor to a window act. It would also make `F11` decide a place's contents,
+which is the micro-mode doc 12 §3.2 refuses by name.
+
+#### 8.2 The bar loses its door and does not move
+
+`queue_button` (`bottom_bar.rs:348–389`), `Message::ToggleQueue`,
+`theme::UP_NEXT_W` and `theme::POSITION_W` are deleted. The bar's three zones
+are `Fill · TRANSPORT_W · Fill` (`bottom_bar.rs:106–117`), so **the transport
+column does not move a pixel** and the now-playing block gains the 160 px the
+door was holding — 288 → 448 at a 1280 window.
+
+**The ratchet, both halves, answered separately**: the door's *readout* (the
+queue's size) is replaced by a better statement of the same fact, the merged
+head's `2 of 24` — the permitted move, and the one `bottom_bar.rs:328–338`
+already made once. The door's *route* is removed because the owner asked, and
+what is traded is recorded rather than smoothed: the press count to an editable
+run is unchanged at one, the muscle memory is not.
+
+**The continuation line stays**, and earns its place harder than before: with the
+door gone it is the only reading of the run outside this place. It does **not**
+gain the list's name — doc 12 §3.5 ③ refuses that on a width measurement.
+
+#### 8.3 The doors in
+
+`Ctrl+U` re-aims at `Place::go(Destination::NowPlaying)` **with `Run` on** — two
+presses of visible controls, made for you, which is the accelerator construction
+ADR-0023's amendment already blessed for the context menu's `Queue` item. **It
+stops toggling**, because it is now the accelerator of a *destination* and
+`place.rs:248–257` settles that a destination does not close itself. `Esc` is the
+way out and always was.
+
+**`Q` was not bound to the queue**, contrary to the brief that commissioned this
+amendment: `keys.rs:820` asserts bare `q` is query text, because ADR-0017 §1.2
+took every bare letter. Two doc comments still claim otherwise — `place.rs:158`
+and `bottom_bar.rs:347` — and die with the code they document.
+
+**`Resume` is re-checked and reads better, not worse** (`app.rs:2242–2253`). Its
+subject is a run — a list and a position in it — and it has always navigated to
+a surface that could draw only the position. Nothing about the gesture changes;
+the destination can finally show what was resumed.
+
+#### 8.4 What §2, §3a and §5 owe the second column
+
+Three new constraints, and all three are shader arithmetic or a boolean — none
+is a layout, a pass, or a scrim:
+
+1. **The spectrum's mask widens from one centred column to the *type box***
+   (the placard column ∪ the run column). Same uniform, two edges instead of
+   one. §3a's *"masked to zero over the centred column, softly, so type is never
+   read over moving light"* is unchanged in intent and wider in domain.
+2. **Under the run column the field is clamped to `room.wall`'s lightness.**
+   This introduces no new contrast number: `room.wall` is the ground every other
+   list in the product is read over, so every pairing on a run row is the pairing
+   that ships today, and the test is one sentence.
+3. **Under the run column the field does not drift.** Clamping lightness alone
+   leaves a hue drift under scrolling type. The ambient owns the rest of the
+   surface and stops at the run's edge.
+
+Stated once so it is not mistaken for §5.3's refused scrim: **the field is one
+object with one ceiling function, and the ceiling is lower where type is.** A
+scrim is a second object interposed; this is the same object's own value,
+reduced.
+
+**§7's gate gains one condition**: the frame-time thresholds are measured **with
+a five-figure run on screen**, not with a twelve-track album. The spectrum's cost
+is per frame and the run's is per visible row, and a gate over the easy half of
+the composition is not a gate. `queue_window`'s virtualization
+(`queue.rs:130–196`) is what makes that affordable and is now load-bearing at
+kiosk scale.
+
+**§5's four toggles stay four.** `Run` is not a fifth: T1–T4 decide how the
+surface looks, `Run` decides what it is about, and a list that is not drawn
+costs a `Vec` that is not built rather than a subsystem's *off*.
+
 ## Consequences
 
+- **`Place::Queue` is the first member this product has deleted.** The enum goes
+  from eight to seven, `Place::queue()` and its toggle test go with it, and the
+  exhaustive walk (`place.rs:446–520`) keeps its property with one fewer arm.
+  Adding a member is cheap and adding a *kind* is not; removing one is cheapest
+  of all, which is the surface model working rather than bending.
+- **Two empty states become one.** *"Nothing playing."*
+  (`now_playing.rs:111–118`) is deleted in favour of the queue's *"Nothing
+  queued"* block (`queue.rs:382–414`), which names the gestures that fill it and
+  carries the silence-is-a-feature sentence. The `transport_pending` branch above
+  it survives untouched — a start in flight is still not silence.
+- **Every other queue affordance survives**, fourteen of fifteen, each named with
+  its fate in doc 12 §6.4.4. The only casualty is `place_header("Queue")`, which
+  had nothing left to head.
+- **`Undo`'s scope follows the word.** `note_place_left`'s `Place::Queue` becomes
+  `Place::NowPlaying`, **and turning `Run` off clears the history too**, because
+  an accelerator whose visible twin is off screen is not legal.
+- **The plan is twelve steps, not nine.** Doc 12 §12.0 carries the table and the
+  disposition of all nine; the short version is that the merge goes first because
+  every later step lays out against the composition it changes, and that **step 1
+  is half shipped** — the duplicate widget is gone but its 32 px is still in
+  `art_edge`'s `below` (`now_playing.rs:62–67`).
 - **Four the product's standing rules entries are rewritten** — artwork-vs-source, the scrim,
   skeuomorphism's VU ban, and the motion clause — each in the ledger's own
   amendment form, quoting the old text and naming the constraint that replaced
@@ -380,11 +533,11 @@ hole.
   record's own colours, inside the field's shader, masked away from type. What
   remains deferred is a 4096-point transform for the lowest octave, if the bass
   ever reads as visibly ganged.
-- **The plan is nine shippable steps**, ordered highest-relief-first: delete the
-  duplicate transport · the hero decode · the static field · the kiosk type
-  scale · the feed · the toggles · the drift (gated) · **the tap and the
-  spectrum** (gated) · the meter. A release may stop after any of them, and doc
-  12 §12 gives the shorter path — 1 → 2 → 6 → 8 — if the bars are wanted first.
+- ~~**The plan is nine shippable steps**, ordered highest-relief-first~~ —
+  **superseded by §8**. Twelve, in doc 12 §12.0's order:
+  **M1 · M2 · A2 · M3 · A3 · A4 · A5 · M4 · A6 · A7 · A8 · A9**. A release may
+  stop after any of them, and the shorter path to the bars is
+  **M1 → M2 → A2 → A6 → A8**.
 
 ## What would reverse this
 
@@ -398,3 +551,11 @@ hole.
 - **Evidence of OLED ghosting on a drifting field**, which would revive the
   periodic pixel nudge (priced at one frame per 60 s, exactly `REFRESH_TICK`'s
   existing bill).
+- **The run column proving unreadable over the field on real hardware.** §8.4
+  answers it with an argument — the ground under the run is `room.wall`, which is
+  what every other list is read over — and that argument is checkable in one
+  capture. If it fails, the honest fix is that the field stops behind the run
+  entirely (the room, `#0C0D0E`, as the ground) rather than a scrim over it.
+- **Listeners finding the merged surface's editor where they wanted a kiosk**,
+  which would not restore `Place::Queue` — it would make `Run` default *off* at
+  first run above some body width, and that is a one-line default, deliberately.
