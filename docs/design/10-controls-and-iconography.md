@@ -425,8 +425,10 @@ about order, and order is all baz's shuffle touches.
 
 Where the control lives changed with it. It was the strip's second act,
 beside `Play all`; a property of the player belongs on the player's
-surface, so it is a slot on the now-playing bar (`REFUSALS.md`'s slot
-ratchet permits the addition, and is amended to record it). Lit is the
+surface, so it is a slot on the now-playing bar — an **addition**, with
+nothing traded away for it and the transport unmoved, which is the bar's
+standing concern (`03` R11: three vendors bought "visual calm" by
+removing control density and all three reversed). Lit is the
 **accent** — the one place beside `Play album` the accent-discipline
 note admits, because this control creates playback truth about what
 sounds *next* in the way `Play album` creates it about what sounds now.

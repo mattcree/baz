@@ -290,6 +290,11 @@ three questions `02-surfaces.md` names:
    `PULL_NEVER_WEIGHT` went with it. `TrackHistory` still carries the skip
    count, in the open, for a caller that ever decides otherwise.
 
+   The two surfaces that remain are the ones something reads: the inspector
+   card, and the PLAYED group key — plus the returns lane's *when did I last
+   touch this* order, which is `recency`'s data read a second way (ADR-0030
+   §1) rather than a surface of its own.
+
 There are now **two**, and there was never going to be a fourth. No
 totals-by-artist, no listening-time-per-month, no top-N. Those would be *built
 from this data*, so the way not to build them is not to provide the surface

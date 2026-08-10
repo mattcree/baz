@@ -532,6 +532,13 @@ next commit.
   `docs/REFUSALS.md` rules out. There is no shuffle *mode*, nothing to turn off,
   and no "vibe shuffle": a mood is a group key or a query, so a future `MOOD`
   key needs no new code here and no new control.
+
+  *Superseded 2026-08-10 — see "Shuffle is a property of the player" under
+  Changed.* There **is** a mode now, on the owner's decision, and the draw and
+  its pool are gone; the "no vibe shuffle" half is untouched. Left standing
+  here because this section records what shipped, and a changelog that edited
+  its own history would be the one document in the repo you could not use to
+  reconstruct one.
 - **The pull** (ADR-0017 step 19) — `Ctrl+R`, or the word in the top bar. One
   record from the same pool, weighted by the ledger's own
   `History::pull_weight` (one per day since it was last heard, capped at a
@@ -912,19 +919,18 @@ next commit.
 
   **What went with the act**: the wall's shuffle pool and its two marks — the
   35 % dimming of every record outside the draw, and the ring on the next two.
-  `REFUSALS.md`'s *no invisible shuffle pools* was written for a draw, and is
-  rewritten for the mode: a mode has no source of its own, so **the pool is the
-  run** — the queue, which is a place you can open and read row by row. The
-  ring's reserved lane stays as the sleeve's mat; only the ink went.
+  Both existed to answer one question about a draw whose source was only
+  implied: *what can this shuffle play?* A mode has no source of its own, so
+  **the pool is the run** — the queue, a place you can open and read row by
+  row — and the question answers itself. The design line the marks served still
+  holds and holds more strongly: a listener can see everything shuffle can
+  play. The ring's reserved lane stays as the sleeve's mat; only the ink went.
 
-  Recorded in ADR-0023's amendment (which refused *"a live context object that
-  keeps acting after the gesture"* and now says precisely what is retained and
-  what invalidates it), ADR-0024 §1's first honesty clause (which said *no
-  shuffle-on-play*), doc 10 §3.2, and three entries in `docs/REFUSALS.md` — the
-  shuffle entry, the visible-pool entry, and the colour-alone entry whose third
-  example was the pool's two marks. The bar's slot ratchet permits *additions*,
-  and this is one; it is logged there, because a ratchet is only worth anything
-  if its permitted moves are recorded as well as its forbidden ones.
+  Recorded in ADR-0023's amendment — which had said there is *"no live context
+  object that keeps acting after the gesture"* and now states precisely what is
+  retained, why an inert list of paths is not that object, and what invalidates
+  it — in ADR-0024 §1's first honesty clause (which said *no shuffle-on-play*),
+  and in doc 10 §3.2, where the crossed-arrows clause lives.
 
 ### Removed
 
@@ -941,13 +947,11 @@ next commit.
   This is also the third answer to `docs/design/11-jobs-era-critique.md` **P9**
   (*"`Pull`: explain it or rename it"*), which was an open question addressed
   to the owner: he removed the control instead. Recorded there, in
-  `docs/REFUSALS.md`'s history entry (whose list of permitted surfaces named
-  the pull's weighting) and in ADR-0018 §6, whose third read surface is struck
-  with its behaviour preserved in the text so it stays findable. Two knock-ons
-  worth naming: the copy sweep's licence list held `Pull` and `The pull` and
-  nothing else, so **P4's one-vocabulary rule is now total**; and the strip's
-  acts cluster fell from 182 px to 144, taking the two-line split seam from
-  872 to 834.
+  ADR-0018 §6, whose third read surface is struck with its behaviour preserved
+  in the text so it stays findable. Two knock-ons worth naming: the copy
+  sweep's licence list held `Pull` and `The pull` and nothing else, so **P4's
+  one-vocabulary rule is now total**; and the strip's acts cluster fell from
+  182 px to 144, taking the two-line split seam from 872 to 834.
 - **The playlist delete confirmation.** *"Delete "{name}"? The file goes;
   your music stays."* was the correct fallback while deletion was
   irreversible; the trash makes it reversible, and the 1992 HIG's ranking —

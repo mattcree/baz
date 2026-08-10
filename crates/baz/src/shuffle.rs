@@ -22,14 +22,20 @@
 //! the next two draws. It is now *what order does a run play in?* — answered by
 //! [`arranged`] and [`restored`], over a queue somebody has already asked for.
 //!
-//! **The pool went with the draw, and the refusal it existed to satisfy is
-//! satisfied better without it.** `docs/REFUSALS.md`'s *no invisible shuffle
-//! pools* was written against a shuffle whose source you could not see; a mode
-//! has no source of its own at all. What it re-orders is **the run** — the
+//! **The pool went with the draw, and what it was for is better served
+//! without it.** The dimming and the rings existed to answer one question — *what
+//! can this shuffle play?* — about a draw whose source was only *implied*. A
+//! mode has no source of its own at all: what it re-orders is **the run**, the
 //! queue, which is a place you can open, read row by row, edit and save. The
-//! wall's dimming and rings were a mitigation for a pool that was only
-//! *implied*; a pool that is an ordinary list needs no mitigation, and the
-//! entry is rewritten to say so.
+//! marks were a mitigation for an invisible pool; the pool is now literally the
+//! list on screen, so there is nothing left to mitigate.
+//!
+//! The design line that still holds, and that this module is built to keep: **a
+//! listener can see everything shuffle can play.** It holds more strongly than
+//! before rather than less. What would break it — and what nothing here can do
+//! — is reaching past the run into the library for "something similar", or
+//! refilling an emptying queue: neither is expressible, because permuting a
+//! list is the only operation in this module.
 //!
 //! # The pull is gone
 //!

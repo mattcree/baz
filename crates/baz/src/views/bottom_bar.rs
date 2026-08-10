@@ -795,9 +795,11 @@ fn glyph_button(
 /// playlist's `Play` cannot live on a control a listener cannot see from the
 /// playlist page.
 ///
-/// `docs/REFUSALS.md`'s slot ratchet is engaged rather than snuck past: it
-/// permits **adding** a slot to this bar and forbids removing one for
-/// tidiness. This is an addition, and the entry is amended to record it.
+/// It is an **addition** to this bar, and nothing was removed to make room —
+/// which matters because this bar's slots have a history: the prior-art study
+/// (R11) found three vendors buy "visual calm" by removing control density and
+/// all three reverse, and what they lose is always position, provenance and
+/// skip. The transport did not move and no readout was traded away.
 ///
 /// # Why the right-hand zone rather than the transport
 ///

@@ -12,12 +12,11 @@
 //! There is deliberately no third. **There was one** — `pull_weight`, the
 //! weighting behind the strip's `Pull` — and it went with the control on
 //! 2026-08-10 (the owner: *"please can we remove pull since it doesn't make
-//! sense here"*). ADR-0018's third surface is amended to record that; a
-//! weighting nothing spends is a recommendation engine's foundations left in
-//! the ground, and the design's constraint is that history *records* and never
-//! *performs*: no charts, no streaks, no year in review. Those would be built
-//! from this data, so the way to not build them is to not provide the surface
-//! that makes them easy.
+//! sense here"*). ADR-0018 §6 is amended to record that. It came out with its
+//! one consumer rather than being left standing as a convenience, because the
+//! design's constraint is that history *records* and never *performs* — no
+//! charts, no streaks, no year in review — and the way to not build those is to
+//! not leave the surface that makes them easy lying around.
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;

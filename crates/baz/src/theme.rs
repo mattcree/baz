@@ -3538,9 +3538,9 @@ pub const PLACEHOLDER_MIX: f32 = 0.62;
 /// ADR-0017 step 17 reserved this lane on every tile in every state, so that
 /// the faint ink ring the shuffle's next two draws carried cost no geometry and
 /// moved no cover when it arrived — beside `POOL_DIM`, which composited the
-/// artwork of every record outside the pool at 35 %. Both marks existed for one
-/// reason: `docs/REFUSALS.md`'s *no invisible shuffle pools*, applied to a draw
-/// whose source was only implied.
+/// artwork of every record outside the pool at 35 %. Both marks existed to
+/// answer one question about a draw whose source was only implied: *what can
+/// this shuffle play?*
 ///
 /// **The owner made shuffle a property of the player on 2026-08-10** and there
 /// stopped being a draw to mark: what a mode re-orders is the run, which is an
