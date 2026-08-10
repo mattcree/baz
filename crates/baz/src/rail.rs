@@ -29,7 +29,7 @@
 //!
 //! | Key | Universe | Why |
 //! |---|---|---|
-//! | ARTIST | `#` and `A`–`Z`, always | The alphabet exists whether or not the collection uses it. Non-Latin initials ([`Initial::Letter`] is not ASCII-only) join it where they sort. |
+//! | ARTIST | `#` and `A`–`Z`, always | The alphabet exists whether or not the collection uses it. Non-Latin initials ([`Initial::Letter`] is not ASCII-only) join it where they sort. The key's *headers* are the artists themselves, one shelf each; the rail indexes their initials, because a letter is what a reader can aim at. |
 //! | YEAR | Every decade from the earliest to the latest present | A run of decades with a hole in it is a fact about the collection. |
 //! | GENRE | The **initials** of the genres present, on the `A`–`Z` frame | **There is still no universe of genres** (ADR-0019 §4), and the rail does not draw one — it indexes their *spellings*, which live in an alphabet the reader already knows. The names themselves were the vocabulary at first, and failed as an index; see [`genre`]. |
 //! | ADDED / PLAYED | Every [`Recency`] bucket between the newest and the oldest present | The buckets are an ordered, enumerable scale, so a gap in it is real. |
@@ -122,20 +122,41 @@ fn present_only(headers: &[GroupHeaderVm]) -> Vec<RailEntry> {
         .collect()
 }
 
-/// ARTIST: the alphabet, always, with the collection's own initials merged in.
+/// ARTIST: the alphabet, always, with the collection's own initials merged in
+/// — **a letter per run of artists, not a letter per shelf**.
 ///
-/// Ordered by [`Initial`]'s own `Ord`, which *is* the wall's shelf order
+/// The key shelves one artist per shelf (ADR-0035), so there are far more
+/// headers than letters and the rail cannot be one entry per header: a rail
+/// with four hundred names in it is a list, and a list is the thing the wall
+/// already is. The alphabet is what a reader can guess and aim at without
+/// reading it, which is §7.2's own premise for an index — so a letter is
+/// **the first artist filed under it**, and pressing `C` lands you on Corvin.
+/// This is the same shape [`genre`] arrived at from the other direction, and
+/// for the same reason.
+///
+/// It costs the rail nothing that the headers got finer: [`Initial::of`] is
+/// still the whole mapping, and it is `baz-core`'s answer rather than a letter
+/// re-derived here from a display string — which is what keeps `Various` and
+/// `Unknown` at the ends where the wall shelves them instead of in the middle
+/// of the alphabet under `V` and `U`.
+///
+/// Ordered by [`Initial`]'s own `Ord`, which *is* the wall's own order
 /// (ADR-0019 §2: "variant order is shelf order"), so the rail cannot disagree
 /// with the shelves it indexes.
 fn artist(headers: &[GroupHeaderVm]) -> Vec<RailEntry> {
-    let mut slots: Vec<(Initial, Option<usize>)> = headers
-        .iter()
-        .enumerate()
-        .filter_map(|(shelf, header)| match header {
-            GroupHeaderVm::Initial(initial) => Some((*initial, Some(shelf))),
-            _ => None,
-        })
-        .collect();
+    // The first shelf of each initial's run, in wall order — deduplicated
+    // rather than run-collapsed, exactly as `genre` does it, so a fold quirk
+    // that separated two same-initial artists could not mint the letter twice.
+    let mut slots: Vec<(Initial, Option<usize>)> = Vec::new();
+    for (shelf, header) in headers.iter().enumerate() {
+        let GroupHeaderVm::Artist(artist) = header else {
+            continue;
+        };
+        let initial = Initial::of(artist.as_core());
+        if !slots.iter().any(|(seen, _)| *seen == initial) {
+            slots.push((initial, Some(shelf)));
+        }
+    }
     let alphabet = std::iter::once(Initial::Other).chain(('A'..='Z').map(Initial::Letter));
     for value in alphabet {
         if !slots.iter().any(|(present, _)| *present == value) {
@@ -430,8 +451,10 @@ pub fn elide(count: usize, capacity: usize, focus: Option<usize>) -> Vec<RailSlo
 mod tests {
     use super::*;
 
-    fn initial(letter: char) -> GroupHeaderVm {
-        GroupHeaderVm::Initial(Initial::Letter(letter))
+    /// One artist shelf, headed by the name — what [`GroupKey::Artist`]
+    /// produces since ADR-0035.
+    fn artist(name: &str) -> GroupHeaderVm {
+        GroupHeaderVm::Artist(crate::vm::AlbumArtistVm::Named(name.to_owned()))
     }
 
     fn labels(entries: &[RailEntry]) -> Vec<&str> {
@@ -446,47 +469,46 @@ mod tests {
             .collect()
     }
 
-    /// **The artists wall costs the rail nothing at all** (ADR-0035).
+    /// **The rail is still the alphabet, over a wall with far more headers
+    /// than letters** (ADR-0035).
     ///
-    /// This module is a pure function of the shelf headers, and an artists
-    /// wall's headers are [`Initial`]s exactly as the first group key's are —
-    /// so the *same call* indexes both walls, with no branch, no new
-    /// vocabulary and no state. The claim is asserted as an identity rather
-    /// than described: the rail for a set of headers is the rail for those
-    /// headers, whichever wall produced them.
+    /// The wall shelves one artist per shelf, so a rail that were one entry
+    /// per header would be a list of every artist — which is the wall again,
+    /// in a 36 px lane. A letter is what a reader can guess and aim at, so the
+    /// rail stays 27 entries however many artists there are, and a letter
+    /// jumps to **the first artist filed under it**.
     ///
-    /// It is the rail's whole design being cashed in. Had the entries been
-    /// derived from the albums rather than from the headers, an artists wall
-    /// would have needed a second derivation here and a second chance to
-    /// disagree with the shelves it indexes.
+    /// This is the rail's whole design being cashed in: it is a pure function
+    /// of the headers, so finer headers changed the mapping and nothing else
+    /// — no branch, no state, no second derivation to disagree with the
+    /// shelves it indexes.
     #[test]
-    fn an_artists_wall_is_indexed_by_the_alphabet_rail_verbatim() {
-        // The headers `vm::build_artists` produces, in the order it produces
-        // them: both anonymous ends and three letters.
+    fn the_artist_rail_is_the_alphabet_over_a_shelf_per_artist() {
         let headers = [
-            GroupHeaderVm::Initial(Initial::Other),
-            initial('A'),
-            initial('B'),
-            initial('Z'),
-            GroupHeaderVm::Initial(Initial::Various),
+            artist("10cc"),
+            artist("Anne-Marie Puig"),
+            artist("Aphex Twin"),
+            artist("Autechre"),
+            artist("Bell"),
+            artist("Corvin"),
+            artist("Cornelius"),
+            artist("Zed"),
         ];
         let rail = entries(GroupKey::Artist, &headers);
-        // 27 slots plus the occupied `Various` end — the records wall's own
-        // answer for the same headers, because it *is* the same answer.
-        assert_eq!(rail.len(), 28);
+        // 27 slots — `#` and A–Z — for eight shelves.
+        assert_eq!(rail.len(), 27, "{:?}", labels(&rail));
         assert_eq!(rail[0].label, "#");
-        assert_eq!(labels(&rail)[1..4], ["A", "B", "C"]);
-        assert_eq!(rail[27].label, "Various");
-        assert!(rail[27].present());
-        // Present values jump to the shelf they came from, in wall order.
-        assert_eq!(rail[0].shelf, Some(0));
-        assert_eq!(rail[1].shelf, Some(1));
-        assert_eq!(rail[2].shelf, Some(2));
-        assert_eq!(rail[3].shelf, None, "no C on this wall");
-        assert_eq!(rail[26].shelf, Some(3), "Z");
-        // And an empty artists wall indexes nothing, exactly as an empty
-        // records wall does: 27 absent letters beside a zero-result search
-        // would be an index of nothing.
+        assert_eq!(labels(&rail)[1..5], ["A", "B", "C", "D"]);
+        // **A letter lands on the first artist under it**, not on the last and
+        // not on a shelf of its own: `A` is Anne-Marie Puig, `C` is Corvin.
+        assert_eq!(rail[0].shelf, Some(0), "# is 10cc");
+        assert_eq!(rail[1].shelf, Some(1), "A is the first of three");
+        assert_eq!(rail[2].shelf, Some(4), "B is Bell");
+        assert_eq!(rail[3].shelf, Some(5), "C is the first of two");
+        assert_eq!(rail[4].shelf, None, "no D on this wall");
+        assert_eq!(rail[26].shelf, Some(7), "Z is Zed");
+        // And an empty wall indexes nothing: 27 absent letters beside a
+        // zero-result search would be an index of nothing.
         assert!(entries(GroupKey::Artist, &[]).is_empty());
     }
 
@@ -494,7 +516,7 @@ mod tests {
     /// nothing under are drawn rather than skipped (§7.2).
     #[test]
     fn the_artist_rail_draws_the_letters_the_collection_lacks() {
-        let headers = [initial('A'), initial('C'), initial('Z')];
+        let headers = [artist("Alpha"), artist("Corvin"), artist("Zed")];
         let rail = entries(GroupKey::Artist, &headers);
         // `#` first, then A–Z: 27 entries whatever the library holds.
         assert_eq!(rail.len(), 27);
@@ -521,7 +543,7 @@ mod tests {
     /// (ADR-0019 §2).
     #[test]
     fn a_non_latin_initial_joins_the_alphabet_where_it_sorts() {
-        let headers = [initial('A'), initial('Ø'), initial('曲')];
+        let headers = [artist("Alpha"), artist("Øyvind"), artist("曲人")];
         let rail = entries(GroupKey::Artist, &headers);
         assert_eq!(rail.len(), 29);
         // Both sort after Z (their code points do), which is where the wall
@@ -531,18 +553,23 @@ mod tests {
 
     /// The two anonymous ARTIST buckets are drawn only when occupied: they are
     /// not letters, and an `Unknown` that can never be filled is not a gap.
+    ///
+    /// They are also the reason the rail asks [`Initial::of`] rather than
+    /// taking the first character of the header's text — `Various Artists` and
+    /// `Unknown Artist` would file under `V` and `U`, in the middle of the
+    /// letters, instead of at the two ends where the wall shelves them.
     #[test]
     fn the_anonymous_artist_buckets_appear_only_when_they_hold_something() {
-        let plain = entries(GroupKey::Artist, &[initial('A')]);
+        let plain = entries(GroupKey::Artist, &[artist("Alpha")]);
         assert!(!labels(&plain).contains(&"Unknown"));
         assert!(!labels(&plain).contains(&"Various"));
 
         let messy = entries(
             GroupKey::Artist,
             &[
-                GroupHeaderVm::Initial(Initial::Unknown),
-                initial('A'),
-                GroupHeaderVm::Initial(Initial::Various),
+                GroupHeaderVm::Artist(crate::vm::AlbumArtistVm::Unknown),
+                artist("Alpha"),
+                GroupHeaderVm::Artist(crate::vm::AlbumArtistVm::Various),
             ],
         );
         assert_eq!(messy.first().map(|e| e.label.as_str()), Some("Unknown"));

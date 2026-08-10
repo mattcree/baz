@@ -489,15 +489,15 @@ mod tests {
         assert!(keys > 200.0 && keys < 420.0, "the key row is {keys:.1} px");
     }
 
-    /// **The arrangement row, measured**: the five group keys and the wall's
-    /// sixth word, each tracked, upper-cased and boxed the way
-    /// `views::top_bar` boxes them, with the row's own gaps between.
+    /// **The arrangement row, measured**: the five group keys, each tracked,
+    /// upper-cased and boxed the way `views::top_bar` boxes them, with the
+    /// row's own gaps between.
     ///
     /// One function because two tests measure it and they must measure the
     /// same row — the shipped-window fit above, and the declaration check
-    /// below. It walks `GroupKey::ALL` and `WallSubject::Artists` rather than
-    /// spelling six words out, so a key added, removed or relabelled in
-    /// `baz-core` moves the measurement without an edit here.
+    /// below. It walks `GroupKey::ALL` rather than spelling the words out, so
+    /// a key added, removed or relabelled in `baz-core` moves the measurement
+    /// without an edit here.
     fn arrangement_row(medium: &Face<'_>) -> f32 {
         use baz_core::index::GroupKey;
 
@@ -505,10 +505,7 @@ mod tests {
             medium.width(&theme::tracked(&word.to_uppercase()), theme::SIZE_META)
                 + 2.0 * theme::GAP_XS
         };
-        let words = GroupKey::ALL
-            .iter()
-            .map(|key| key.label())
-            .chain(std::iter::once(crate::vm::WallSubject::Artists.label()));
+        let words = GroupKey::ALL.iter().map(|key| key.label());
         // The gap is counted *between* the words rather than from a length —
         // one `GAP_MD` for every word after the first, which is the row iced
         // actually lays out.

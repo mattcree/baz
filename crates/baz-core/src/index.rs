@@ -87,7 +87,7 @@
 //! # Group keys
 //!
 //! [`Library::shelves`] arranges those albums into the shelves the wall draws,
-//! under one [`GroupKey`] — A–Z, YEAR, GENRE, ADDED or PLAYED
+//! under one [`GroupKey`] — ARTIST, YEAR, GENRE, ADDED or PLAYED
 //! (`docs/adr/0019-group-keys.md`, which amends ADR-0008). Each key is a
 //! *projection* of the same albums and never a filter: every album appears
 //! under every key, once, including the albums whose files declare nothing.
@@ -1250,8 +1250,9 @@ impl Library {
     /// This is the flat shelf, which is also exactly what
     /// [`GroupKey::Artist`] arranges: `albums()` and
     /// `shelves(GroupKey::Artist)` contain the same albums in the same order,
-    /// and the difference is only whether the A–Z breaks between them are
-    /// stated (`the_artist_key_is_the_flat_shelf_with_its_breaks_named`).
+    /// and the difference is only whether the breaks between them — one per
+    /// artist — are stated
+    /// (`the_artist_key_is_the_flat_shelf_with_its_breaks_named`).
     #[must_use]
     pub fn albums(&self) -> Vec<Album<'_>> {
         (0..self.index.album_starts.len())
@@ -1361,10 +1362,32 @@ impl Library {
             };
             shelves[index].albums.push(album);
         }
+        // **The artist header is the spelling that sorts first**, not the
+        // first one found. Identity is case-folded, so `Alpha` and `alpha` are
+        // one artist with two spellings on disk and the shelf's *first* album
+        // is an order — album title's — that a retag can change. Taking the
+        // minimum makes the name a property of the set rather than of the
+        // walk, which is the same rule, and therefore the same answer, as the
+        // front end's `views::artist::label`; it also happens to prefer the
+        // capitalised form a tagger meant, since upper case sorts ahead.
+        for shelf in &mut shelves {
+            if let GroupHeader::Artist(named @ AlbumArtist::Named(_)) = shelf.header {
+                shelf.header = GroupHeader::Artist(
+                    shelf
+                        .albums
+                        .iter()
+                        .map(|album| album.artist)
+                        .filter(|artist| matches!(artist, AlbumArtist::Named(_)))
+                        .min_by_key(|artist| artist.name())
+                        .unwrap_or(named),
+                );
+            }
+        }
         // Sort the shelves, carrying their albums with them. `albums()` yields
         // library order, so each shelf's contents are already in it and stay
-        // there — within a decade or a genre the wall reads alphabetically,
-        // which is the order every other view of this library uses.
+        // there — within a decade, a genre or an artist the wall reads
+        // alphabetically, which is the order every other view of this library
+        // uses.
         let mut order: Vec<usize> = (0..shelves.len()).collect();
         order.sort_by(|&a, &b| sorts[a].cmp(&sorts[b]));
         let mut sorted: Vec<Option<Shelf<'_>>> = shelves.into_iter().map(Some).collect();
@@ -1400,15 +1423,18 @@ pub struct RootStats {
 /// the active key with no state of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum GroupKey {
-    /// **The album artist's initial** — the grouping ADR-0008 decided, now one
-    /// key among several. Headers are A–Z (see [`Initial`]), with the two
-    /// anonymous ends at either edge.
+    /// **The album artist** — the grouping ADR-0008 decided, now one key among
+    /// several. One shelf per artist, headed by their name (see
+    /// [`GroupHeader::Artist`]), unknowns first and unnamed compilations last.
     ///
-    /// Its *word* is `A–Z` rather than `Artist` (ADR-0035): the front end also
-    /// has an Artist **place**, and a key that broke records on an initial
-    /// while wearing a subject's name was two different things spelled the same
-    /// on one screen. The variant, and [`GroupKey::code`]'s `"artist"`, are
-    /// unchanged — the code is on-disk data.
+    /// It broke records on the artist's *initial* until ADR-0035: `A`, `C`,
+    /// `S`, with everyone whose name begins with an S sharing a shelf. That
+    /// was a key called `Artist` that grouped by something else, which is what
+    /// made its word collide with the front end's Artist **place** — the
+    /// owner's finding, *"artists should be grouping stuff by artist not just
+    /// alphabetically"*. Grouping by the artist makes the word true, and the
+    /// alphabet survives where it was always the useful thing: the index rail
+    /// (see [`Initial`]).
     Artist,
     /// Release year, shelved by decade (see [`GroupHeader::Decade`]).
     Year,
@@ -1438,15 +1464,15 @@ impl GroupKey {
     /// **A label may be renamed; a [`code`](GroupKey::code) may not.** The word
     /// is copy on a screen and answers to the design; the code is on-disk
     /// config. [`Self::Artist`] is the case that made the difference matter:
-    /// its word became `A–Z` in ADR-0035 while its code stayed `"artist"`, so
-    /// every `config.toml` written by an older baz still resolves.
+    /// its word was briefly `A–Z`, for the release in which the key grouped by
+    /// initial while wearing an artist's name, and came back to `Artist` when
+    /// the key started grouping by artist (ADR-0035). Its code was `"artist"`
+    /// throughout, so every `config.toml` baz has ever written still resolves
+    /// — and now resolves to the arrangement its word always claimed.
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
-            // What it produces, not what it is about: this key breaks records
-            // on the album artist's *initial*, and the front end's Artist
-            // place is the surface whose subject is an artist (ADR-0035).
-            Self::Artist => "A–Z",
+            Self::Artist => "Artist",
             Self::Year => "Year",
             Self::Genre => "Genre",
             Self::Added => "Added",
@@ -1498,9 +1524,15 @@ pub struct Shelf<'a> {
 /// `shelves(key).iter().map(|s| s.header.label())`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GroupHeader<'a> {
-    /// [`GroupKey::Artist`] — the album artist's first letter, or one of the
-    /// two anonymous buckets. See [`Initial`].
-    Initial(Initial),
+    /// [`GroupKey::Artist`] — **the artist the shelf holds the records of**.
+    ///
+    /// [`AlbumArtist::Named`] carries the spelling that sorts first among the
+    /// shelf's records, not the first one found: identity is case-folded, so
+    /// `Alpha` and `alpha` are one artist with two spellings on disk, and a
+    /// minimum is a property of the set where *first found* is a property of
+    /// the walk. The two anonymous states keep the words the initial buckets
+    /// used, `Unknown` and `Various`, and stay at the two ends of the wall.
+    Artist(AlbumArtist<'a>),
     /// [`GroupKey::Year`] — the decade a release year falls in, as its first
     /// year (`1994` shelves under `Some(1990)`). `None` is the shelf for
     /// albums whose files declare no year.
@@ -1528,7 +1560,9 @@ impl<'a> GroupHeader<'a> {
     #[must_use]
     pub fn label(&self) -> String {
         match self {
-            Self::Initial(initial) => initial.label(),
+            Self::Artist(AlbumArtist::Named(name)) => (*name).to_owned(),
+            Self::Artist(AlbumArtist::Various) => "Various".to_owned(),
+            Self::Artist(AlbumArtist::Unknown) => "Unknown".to_owned(),
             Self::Decade(Some(decade)) => format!("{decade}s"),
             Self::Decade(None) => "No year".to_owned(),
             Self::Genre(Some(genre)) => (*genre).to_owned(),
@@ -1540,7 +1574,7 @@ impl<'a> GroupHeader<'a> {
     /// The header one album lands under, for `key`.
     fn of(key: GroupKey, album: &Album<'a>, now: SystemTime, history: Option<&History>) -> Self {
         match key {
-            GroupKey::Artist => Self::Initial(Initial::of(album.artist)),
+            GroupKey::Artist => Self::Artist(album.artist),
             GroupKey::Year => Self::Decade(album.year.map(|year| year - year % 10)),
             GroupKey::Genre => Self::Genre(album.genre),
             GroupKey::Added => Self::Recency(added_recency(album.first_seen_ns, now)),
@@ -1549,15 +1583,22 @@ impl<'a> GroupHeader<'a> {
     }
 }
 
-/// The A–Z shelf an album's artist lands on, plus the two ends of the shelf
-/// that are not letters.
+/// **The index rail's letter for an album artist** — the alphabet, plus the
+/// two ends of it that are not letters.
 ///
-/// Variant order *is* shelf order, and it is the order
-/// [`Library::albums`] already sorts in (see `ArtistKey`): the unknowns first,
-/// then everything whose name starts with something that is not a letter, then
-/// the alphabet, then unnamed compilations. Both anonymous buckets sit at an
-/// end rather than in the middle of the alphabet where a sentinel string's
-/// letters would have landed them by accident.
+/// It was the wall's own header until ADR-0035, when [`GroupKey::Artist`]
+/// started breaking on the artist rather than on their initial. The alphabet
+/// did not stop being useful when it stopped being a header: it is what the
+/// index rail speaks, and a rail is the one place a coarse bucket earns its
+/// keep, because you aim at a letter and land on the first artist under it.
+/// So this type stayed exactly as it was and only its consumer moved.
+///
+/// Variant order *is* wall order, and it is the order [`Library::albums`]
+/// already sorts in (see `ArtistKey`): the unknowns first, then everything
+/// whose name starts with something that is not a letter, then the alphabet,
+/// then unnamed compilations. Both anonymous buckets sit at an end rather than
+/// in the middle of the alphabet where a sentinel string's letters would have
+/// landed them by accident.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Initial {
     /// Albums with no artist of any kind — [`AlbumArtist::Unknown`].
@@ -1576,7 +1617,7 @@ pub enum Initial {
 }
 
 impl Initial {
-    /// The shelf a resolved album artist lands on.
+    /// The rail entry a resolved album artist files under.
     #[must_use]
     pub fn of(artist: AlbumArtist<'_>) -> Self {
         match artist {
@@ -1657,8 +1698,12 @@ const NANOS_PER_SECOND: i64 = 1_000_000_000;
 /// sort case-folded while its header keeps the tag's own spelling.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum ShelfSort {
-    /// [`GroupKey::Artist`]: variant order is shelf order.
-    Initial(Initial),
+    /// [`GroupKey::Artist`]: the album artist, case-folded — which is
+    /// `ArtistKey`, the key [`Library::albums`] already sorts by. Reused
+    /// rather than restated, because "the order the artist shelves go in" and
+    /// "the order the library's albums go in" are the same sentence, and that
+    /// is exactly why this key is `albums()` with its breaks named.
+    Artist(ArtistKey),
     /// [`GroupKey::Year`]: `None` (no year declared) first, then ascending
     /// decades. Unknowns at the front is the rule the whole index follows.
     Decade(Option<u32>),
@@ -1673,7 +1718,7 @@ enum ShelfSort {
 impl ShelfSort {
     fn of(key: GroupKey, album: &Album<'_>, now: SystemTime, history: Option<&History>) -> Self {
         match key {
-            GroupKey::Artist => Self::Initial(Initial::of(album.artist)),
+            GroupKey::Artist => Self::Artist(ArtistKey::of_album_artist(album.artist)),
             GroupKey::Year => Self::Decade(album.year.map(|year| year - year % 10)),
             GroupKey::Genre => Self::Genre(album.genre.map(str::to_lowercase)),
             GroupKey::Added => Self::Recency(added_recency(album.first_seen_ns, now)),
@@ -2621,7 +2666,11 @@ struct SortKey {
 /// alphabetically, then unnamed compilations. Both anonymous buckets sit at
 /// an end of the shelf rather than somewhere in the middle of the alphabet
 /// where their names would have landed by accident.
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+///
+/// It is also `ShelfSort::Artist`, and deliberately the same type: the order
+/// the [`GroupKey::Artist`] shelves go in *is* the order the library's albums
+/// go in, which is what makes that key `albums()` with its breaks named.
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum ArtistKey {
     /// Nothing known — [`AlbumArtist::Unknown`].
     Unknown,
@@ -2633,7 +2682,13 @@ enum ArtistKey {
 
 impl ArtistKey {
     fn of(meta: &TrackMeta) -> Self {
-        match AlbumArtist::of(meta) {
+        Self::of_album_artist(AlbumArtist::of(meta))
+    }
+
+    /// The same key from an already-resolved album artist — what the shelves
+    /// sort on, where the fallback chain has run once for the whole album.
+    fn of_album_artist(artist: AlbumArtist<'_>) -> Self {
+        match artist {
             AlbumArtist::Named(name) => Self::Named(name.to_lowercase()),
             AlbumArtist::Various => Self::Various,
             AlbumArtist::Unknown => Self::Unknown,

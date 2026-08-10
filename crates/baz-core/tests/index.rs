@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use baz_core::history::{History, HistoryLedger, PlayRecord, Recency};
-use baz_core::index::{AlbumArtist, GroupHeader, GroupKey, IndexError, Library};
+use baz_core::index::{AlbumArtist, GroupHeader, GroupKey, IndexError, Initial, Library};
 use baz_core::library::{AudioFormat, FileStamp, TrackMeta};
 use baz_core::replaygain::{ComputedReplayGain, ReplayGainTags};
 
@@ -3230,9 +3230,11 @@ fn a_track_added_later_carries_a_later_first_seen() {
     assert_eq!(grown.first_seen_ns, Some(first));
 }
 
-/// ARTIST is the shelf ADR-0008 built, with its A–Z breaks stated. The albums
-/// and their order must be identical to `albums()`, or two views of one
-/// library would disagree.
+/// ARTIST is the shelf ADR-0008 built, with **one break per artist** stated
+/// (ADR-0035). The albums and their order must be identical to `albums()`, or
+/// two views of one library would disagree — which is also the whole argument
+/// that grouping by the artist replaced grouping by their initial rather than
+/// joining it: the finer headers name breaks that were already there.
 #[test]
 fn the_artist_key_is_the_flat_shelf_with_its_breaks_named() {
     let mut library = Library::open_in_memory().expect("open");
@@ -3265,15 +3267,29 @@ fn the_artist_key_is_the_flat_shelf_with_its_breaks_named() {
     let headers: Vec<String> = shelves.iter().map(|s| s.header.label()).collect();
     assert_eq!(
         headers,
-        ["Unknown", "#", "S", "Various"],
-        "unknowns first, then the non-letters, then the alphabet, then the \
-         unnamed compilations — the ends of the shelf ADR-0008 chose"
+        ["Unknown", "10cc", "Sibylle Baier", "Stan Rogers", "Various"],
+        "unknowns first, then the artists case-folded alphabetically, then \
+         the unnamed compilations — the ends of the shelf ADR-0008 chose, \
+         with every artist between them named"
     );
-    // Both Stan Rogers and Sibylle Baier are on the S shelf, alphabetically.
-    let letter_s = &shelves[2];
-    assert_eq!(letter_s.albums.len(), 2);
-    assert_eq!(letter_s.albums[0].title, Some("Colour Green"));
-    assert_eq!(letter_s.albums[1].title, Some("Fogarty's Cove"));
+    // Stan Rogers and Sibylle Baier shared the `S` shelf before ADR-0035;
+    // now they have one each, and each holds only their own records.
+    assert_eq!(
+        shelves[2]
+            .albums
+            .iter()
+            .map(|a| a.title)
+            .collect::<Vec<_>>(),
+        [Some("Colour Green")]
+    );
+    assert_eq!(
+        shelves[3]
+            .albums
+            .iter()
+            .map(|a| a.title)
+            .collect::<Vec<_>>(),
+        [Some("Fogarty's Cove")]
+    );
 
     let flat: Vec<Option<&str>> = library.albums().iter().map(|a| a.title).collect();
     let from_shelves: Vec<Option<&str>> = shelves
@@ -3283,9 +3299,78 @@ fn the_artist_key_is_the_flat_shelf_with_its_breaks_named() {
     assert_eq!(flat, from_shelves, "same albums, same order, breaks named");
 }
 
+/// **The shelves are the artists, in the library's own order, and each holds
+/// its records alphabetically** — the three orderings ADR-0035 fixed, in one
+/// library that exercises all of them.
+///
+/// The shelf order is `ArtistKey`'s: unknowns first, then names case-folded,
+/// then unnamed compilations. Within a shelf it is library order, which is
+/// album title — the rule ADR-0019 §1 set for every key, kept here rather than
+/// swapped for release year, because a second ordering *within* a shelf would
+/// be a second arrangement control that nothing on screen explains.
+#[test]
+fn the_artist_shelves_order_their_artists_and_their_records() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks([
+            track("/m/1.flac", "Corvin", "Zenith", "T", 1),
+            track("/m/2.flac", "Corvin", "Aurora", "T", 1),
+            track("/m/3.flac", "anne-marie puig", "Solo", "T", 1),
+            TrackMeta {
+                compilation: Some(true),
+                ..track("/m/4.flac", "Someone", "A Compilation", "T", 1)
+            },
+            bare("/m/5.flac"),
+        ])
+        .expect("add");
+
+    let shelves = library.shelves(GroupKey::Artist);
+    assert_eq!(
+        shelves.iter().map(|s| s.header.label()).collect::<Vec<_>>(),
+        ["Unknown", "anne-marie puig", "Corvin", "Various"],
+        "case-folded, so a lower-case tag sorts among the names rather than \
+         after them"
+    );
+    assert_eq!(
+        shelves[2]
+            .albums
+            .iter()
+            .map(|a| a.title)
+            .collect::<Vec<_>>(),
+        [Some("Aurora"), Some("Zenith")],
+        "an artist's records read alphabetically, not by year"
+    );
+}
+
+/// **A shelf is headed by the spelling that sorts first**, not by the first
+/// one found: identity is case-folded, so one artist with two spellings on
+/// disk must not be named by whichever of their records happens to sort first
+/// by title. This is the same rule the front end's `views::artist::label`
+/// applies, which is what stops a header and the page it opens from naming one
+/// artist two ways.
+#[test]
+fn an_artist_shelf_is_headed_by_the_spelling_that_sorts_first() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks([
+            // The lower-case spelling is on the album that sorts *first* by
+            // title, so "first found" and "sorts first" disagree here.
+            track("/m/1.flac", "aphex twin", "Ambient Works", "T", 1),
+            track("/m/2.flac", "Aphex Twin", "Drukqs", "T", 1),
+        ])
+        .expect("add");
+
+    let shelves = library.shelves(GroupKey::Artist);
+    assert_eq!(shelves.len(), 1, "two spellings, one artist");
+    assert_eq!(shelves[0].header.label(), "Aphex Twin");
+    assert_eq!(shelves[0].albums.len(), 2);
+}
+
 /// Non-ASCII names get their own letter rather than being swept onto `#`: a
 /// rail that folded every script together would fail the library that needs
-/// it most.
+/// it most. [`Initial`] is the rail's vocabulary since ADR-0035 — the wall's
+/// own headers are the artists — and this is the property that made it worth
+/// keeping when it stopped being a header.
 #[test]
 fn the_artist_rail_keeps_every_script_it_is_given() {
     let mut library = Library::open_in_memory().expect("open");
@@ -3303,12 +3388,19 @@ fn the_artist_rail_keeps_every_script_it_is_given() {
         ])
         .expect("add");
 
-    let headers: Vec<String> = library
-        .shelves(GroupKey::Artist)
+    let shelves = library.shelves(GroupKey::Artist);
+    let headers: Vec<String> = shelves.iter().map(|s| s.header.label()).collect();
+    assert_eq!(headers, ["!!!", "Ólafur Arnalds", "曲人"]);
+
+    // …and the rail's letters for those same shelves, in the same order.
+    let rail: Vec<String> = shelves
         .iter()
-        .map(|s| s.header.label())
+        .map(|shelf| match shelf.header {
+            GroupHeader::Artist(artist) => Initial::of(artist).label(),
+            ref other => panic!("the artist key headers artists, not {other:?}"),
+        })
         .collect();
-    assert_eq!(headers, ["#", "Ó", "曲"]);
+    assert_eq!(rail, ["#", "Ó", "曲"]);
 }
 
 /// YEAR shelves by decade, oldest first, with the albums that declare no year
@@ -3628,19 +3720,19 @@ fn group_key_codes_round_trip() {
     assert_eq!(GroupKey::from_code("crates"), None);
     assert_eq!(GroupKey::from_code(""), None);
 
-    // **The word moved and the code did not** (ADR-0035). The first key breaks
-    // records on the album artist's initial, and it used to be labelled
-    // `Artist` — the same word the front end's Artist *place* wears. The label
-    // now names what the key produces; the code is on-disk data in every
-    // `config.toml` baz has ever written, so it is exactly what it was.
-    assert_eq!(GroupKey::ALL[0].label(), "A–Z");
+    // **The key's word is true, and its code never moved** (ADR-0035). The
+    // first key was labelled `Artist` while it grouped by the album artist's
+    // *initial*, which is what collided with the front end's Artist place; for
+    // one release the label was `A–Z` and the grouping was unchanged. It now
+    // groups by the artist, so the word is `Artist` again and says what the
+    // key does.
+    assert_eq!(GroupKey::ALL[0].label(), "Artist");
     assert_eq!(GroupKey::ALL[0].code(), "artist");
+    // **The migration path for a config written by any baz ever released**:
+    // the code is unchanged, so every `group_key = "artist"` on disk still
+    // resolves — and resolves to the arrangement that word always claimed.
+    // Nothing was retired and nothing needs rewriting.
     assert_eq!(GroupKey::from_code("artist"), Some(GroupKey::Artist));
-    // And no key's word is a subject the product has a place for, which is
-    // the defect the rename closed rather than merely moved.
-    for key in GroupKey::ALL {
-        assert_ne!(key.label(), "Artist", "{key:?} names a place, not a break");
-    }
 }
 
 // ---------------------------------------------------------------------------

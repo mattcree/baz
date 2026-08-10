@@ -92,7 +92,6 @@ use baz_core::protocol::ReplayGainMode;
 use baz_core::replaygain::ReplayGainSettings;
 
 use crate::shelf::Density;
-use crate::vm::WallSubject;
 
 /// The `[replaygain]` table's name in the document.
 const REPLAY_GAIN_TABLE: &str = "replaygain";
@@ -106,9 +105,6 @@ const MUSIC_DIRS: &str = "music_dirs";
 /// The key baz wrote its single music folder under before ADR-0022. Read, never
 /// written: a file carrying it is migrated to [`MUSIC_DIRS`] on the next save.
 const LEGACY_MUSIC_DIR: &str = "music_dir";
-
-/// The key the wall's subject is written under (ADR-0035).
-const WALL_SUBJECT: &str = "wall_subject";
 
 /// The key the density step is written under.
 const DENSITY: &str = "density";
@@ -151,17 +147,6 @@ pub struct Config {
     /// so the file stays legible and a key added or reordered in `baz-core`
     /// cannot silently re-arrange somebody's wall.
     pub group_key: GroupKey,
-    /// **What the wall is a wall of** — records, or artists (ADR-0035).
-    ///
-    /// View state, persisted, on `group_key`'s exact terms: the control is the
-    /// sixth word in the strip's row, `6` is its accelerator, and there is no
-    /// Settings row for it. It is a *separate* key rather than a sixth spelling
-    /// of `group_key` because the two are independent state — a listener who
-    /// left the wall on the artists comes back to the artists, still arranged
-    /// by whichever key they had chosen for the records.
-    ///
-    /// Written as [`WallSubject::code`], for `group_key`'s reason.
-    pub wall_subject: WallSubject,
     /// How closely the wall hangs its works — Spacious / Balanced / Dense
     /// (ADR-0017 step 6, `.interface-design/system.md` §7.1).
     ///
@@ -241,7 +226,6 @@ impl Default for Config {
             music_dirs: Vec::new(),
             replay_gain: ReplayGainSettings::default(),
             group_key: GroupKey::Artist,
-            wall_subject: WallSubject::default(),
             density: Density::Balanced,
             sidebar_open: true,
             shuffle: false,
@@ -285,11 +269,6 @@ impl Config {
             "# how the wall is arranged: \"artist\", \"year\", \"genre\", \
              \"added\" or \"played\"\n{GROUP_KEY} = {}",
             toml_string(self.group_key.code()),
-        );
-        let _ = writeln!(
-            out,
-            "# what the wall is a wall of: \"records\" or \"artists\"\n{WALL_SUBJECT} = {}",
-            toml_string(self.wall_subject.code()),
         );
         let _ = writeln!(
             out,
@@ -353,15 +332,6 @@ impl Config {
             .and_then(toml::Value::as_str)
             .and_then(GroupKey::from_code)
             .unwrap_or(GroupKey::Artist);
-        // `group_key`'s degradation exactly: a subject this build cannot name
-        // costs the wall its subject and nothing around it, and the fallback
-        // is the records — the wall ADR-0017 built, and the one a listener who
-        // has never pressed the sixth word expects.
-        let wall_subject = table
-            .get(WALL_SUBJECT)
-            .and_then(toml::Value::as_str)
-            .and_then(WallSubject::from_code)
-            .unwrap_or_default();
         // The same per-key degradation, for the same reason: a step this build
         // cannot name must cost the wall its zoom and nothing else. It
         // degrades to Balanced rather than to the nearest step, because there
@@ -398,7 +368,6 @@ impl Config {
             music_dirs,
             replay_gain,
             group_key,
-            wall_subject,
             density,
             sidebar_open,
             shuffle,
@@ -591,7 +560,6 @@ mod tests {
                 music_dirs: vec![PathBuf::from("/m")],
                 replay_gain,
                 group_key: GroupKey::Year,
-                wall_subject: WallSubject::Artists,
                 density: Density::Dense,
                 sidebar_open: true,
                 shuffle: false,
@@ -648,58 +616,38 @@ mod tests {
         }
     }
 
-    /// **The wall's subject survives a restart**, and it survives it
-    /// *independently of the arrangement* (ADR-0035).
+    /// **A `wall_subject` key from the release that had one is ignored, and
+    /// nothing around it is lost** (ADR-0035).
     ///
-    /// The independence is the point of the key existing at all: a listener
-    /// who left the wall on the artists comes back to the artists, still
-    /// arranged by whichever key they had chosen for the records. A sixth
-    /// group key could not have expressed that — it would have had to forget
-    /// the arrangement to show the artists and guess one to come back.
+    /// The subject was a second persisted word beside `group_key` for one
+    /// release, while `ARTISTS` was a sixth word in the strip. It stopped
+    /// existing when the first key started grouping by artist, and this is the
+    /// whole of its migration: every value in this file is read by name, so a
+    /// key nothing reads is simply not read — the arrangement beside it still
+    /// resolves, and the next save writes the document without it.
+    ///
+    /// **`group_key = "artist"` needs no migration at all**, which is the
+    /// reason the key was never retired: the code is unchanged and it names
+    /// the same key, now grouping by the artist its word always claimed.
     #[test]
-    fn round_trips_every_wall_subject_beside_every_arrangement() {
-        for subject in WallSubject::ALL {
-            for key in GroupKey::ALL {
-                let config = Config {
-                    music_dirs: vec![PathBuf::from("/m")],
-                    group_key: key,
-                    wall_subject: subject,
-                    ..Config::default()
-                };
-                let text = config.to_toml();
-                assert!(
-                    text.contains(&format!("wall_subject = \"{}\"", subject.code())),
-                    "{subject:?} was not written as its code:\n{text}"
-                );
-                let back = Config::from_toml(&text);
-                assert_eq!(back, config, "{subject:?} beside {key:?} did not survive");
-                // Stated separately as well as jointly, because it is the pair
-                // that is the claim: the subject did not eat the arrangement.
-                assert_eq!(back.group_key, key);
-                assert_eq!(back.wall_subject, subject);
-            }
-        }
-    }
-
-    /// **A subject baz cannot read costs the wall its subject and nothing
-    /// else** — `group_key`'s degradation, and it falls back to the records:
-    /// the wall ADR-0017 built, and the one a listener who has never pressed
-    /// the sixth word expects.
-    #[test]
-    fn an_unreadable_wall_subject_degrades_to_records_alone() {
-        for spelling in ["\"crates\"", "\"\"", "7", "true", "[\"artists\"]"] {
+    fn a_wall_subject_from_the_older_release_is_ignored_and_costs_nothing() {
+        for subject in ["\"records\"", "\"artists\"", "\"crates\"", "7"] {
             let config = Config::from_toml(&format!(
-                "music_dir = \"/m\"\ngroup_key = \"year\"\nwall_subject = {spelling}\n"
+                "music_dirs = [\"/m\"]\ngroup_key = \"artist\"\n\
+                 wall_subject = {subject}\ndensity = \"dense\"\n"
             ));
-            assert_eq!(config.wall_subject, WallSubject::Records, "{spelling}");
-            assert_eq!(config.group_key, GroupKey::Year, "{spelling}");
+            assert_eq!(config.group_key, GroupKey::Artist, "{subject}");
+            assert_eq!(config.density, Density::Dense, "{subject}");
+            assert_eq!(config.music_dirs, vec![PathBuf::from("/m")]);
+            // And the word is gone from the document the next save writes,
+            // rather than being carried forward as a setting nothing honours.
+            let rewritten = config.to_toml();
+            assert!(
+                !rewritten.contains("wall_subject"),
+                "the retired key was written back:\n{rewritten}"
+            );
+            assert_eq!(Config::from_toml(&rewritten), config);
         }
-        // A file written before the subject existed is a records wall, which
-        // is what every such file has always drawn.
-        assert_eq!(
-            Config::from_toml("music_dir = \"/m\"\n").wall_subject,
-            WallSubject::Records
-        );
     }
 
     /// **The density step survives a restart**, in every step, written as the
@@ -916,7 +864,6 @@ mod tests {
             music_dirs: vec![PathBuf::from(raw)],
             replay_gain: settings(ReplayGainMode::Album, -300, 0, false),
             group_key: GroupKey::Genre,
-            wall_subject: WallSubject::Records,
             density: Density::Spacious,
             sidebar_open: true,
             shuffle: false,
@@ -937,7 +884,6 @@ mod tests {
             music_dirs: vec![PathBuf::from("/home/user/Music")],
             replay_gain: settings(ReplayGainMode::Album, -350, 250, false),
             group_key: GroupKey::Played,
-            wall_subject: WallSubject::Artists,
             density: Density::Spacious,
             sidebar_open: true,
             shuffle: false,
@@ -1091,7 +1037,6 @@ mod tests {
             music_dirs: vec![PathBuf::from("/home/user/My \"Music\"")],
             replay_gain: settings(ReplayGainMode::Track, -1234, 567, false),
             group_key: GroupKey::Added,
-            wall_subject: WallSubject::Records,
             density: Density::Dense,
             sidebar_open: true,
             shuffle: false,

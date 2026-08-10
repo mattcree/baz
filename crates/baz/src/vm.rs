@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use baz_core::history::{History, Recency};
-use baz_core::index::{Album, AlbumArtist, Edition, GroupHeader, GroupKey, Initial, Library};
+use baz_core::index::{Album, AlbumArtist, Edition, GroupHeader, GroupKey, Library};
 use baz_core::library::{AudioFormat, TrackMeta};
 
 /// What the shelf calls an album whose artist is not known at all.
@@ -153,223 +153,21 @@ impl AlbumArtistVm {
     }
 
     /// Back to the borrowed core form, so `baz-core`'s own answers about an
-    /// album artist — [`Initial::of`] above all — are asked of the core type
-    /// rather than re-derived here from a display string.
+    /// album artist — [`baz_core::index::Initial::of`] above all — are asked
+    /// of the core type rather than re-derived here from a display string.
     ///
     /// The two anonymous states are the reason this exists: `Various` and
-    /// `Unknown` shelve at the two ends of the alphabet and their *labels*
-    /// begin with `V` and `U`, so an initial taken from [`Self::label`] would
-    /// file both of them in the middle of the letters.
-    fn as_core(&self) -> AlbumArtist<'_> {
+    /// `Unknown` sit at the two ends of the alphabet and their *labels* begin
+    /// with `V` and `U`, so an initial taken from [`Self::label`] would file
+    /// both of them in the middle of the letters. [`crate::rail`] is the
+    /// caller: it turns the wall's artist headers into the rail's letters.
+    pub(crate) fn as_core(&self) -> AlbumArtist<'_> {
         match self {
             Self::Named(name) => AlbumArtist::Named(name),
             Self::Various => AlbumArtist::Various,
             Self::Unknown => AlbumArtist::Unknown,
         }
     }
-}
-
-/// **What the wall is a wall of**: the records, or the people who made them.
-///
-/// # Why it is not a sixth [`GroupKey`]
-///
-/// ADR-0019 §1 promises that every group key is a *projection* in which every
-/// album appears exactly once, and `baz-core` sweeps [`GroupKey::ALL`] to
-/// assert it. A key that shelved **artists** would falsify that sweep rather
-/// than extend it: it does not re-arrange the albums, it changes what a tile
-/// *is*. So the subject stands beside the key instead of among it, and the two
-/// are independent state.
-///
-/// That independence is visible, and it is the point: press `ARTISTS` from a
-/// wall arranged by `YEAR`, then press `YEAR` again, and the decades are
-/// exactly where they were left. A sixth key would have had to forget the
-/// arrangement to show the artists and guess one to come back.
-///
-/// # And it is not a lens
-///
-/// The lens switcher is fixed at two words (`WALL` · `MARQUEE`) by the
-/// product's standing rules, and both are spoken for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
-pub enum WallSubject {
-    /// Records — the wall ADR-0017 built, arranged by the active
-    /// [`GroupKey`].
-    #[default]
-    Records,
-    /// Artists — one tile per person the collection is filed under, shelved
-    /// by [`Initial`] whatever the active key is.
-    Artists,
-}
-
-impl WallSubject {
-    /// Both subjects, in the order the strip's row of words states them: the
-    /// five keys speak for `Records`, and `ARTISTS` is the sixth word.
-    pub const ALL: [Self; 2] = [Self::Records, Self::Artists];
-
-    /// The word the strip shows for this subject. Only `Artists` is drawn —
-    /// the five group keys are `Records`' own words — but `Records` has one so
-    /// that a subject can always name itself in a test or a log line.
-    #[must_use]
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Records => "Records",
-            Self::Artists => "Artists",
-        }
-    }
-
-    /// The stable lowercase code this subject persists as, on
-    /// [`GroupKey::code`]'s terms: never change an existing one, because it is
-    /// on-disk config data.
-    #[must_use]
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Records => "records",
-            Self::Artists => "artists",
-        }
-    }
-
-    /// Parse a [`WallSubject::code`] back; an unrecognized code yields `None`
-    /// so a config written by a newer baz falls back rather than failing a
-    /// launch.
-    #[must_use]
-    pub fn from_code(code: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|subject| subject.code() == code)
-    }
-}
-
-/// One artist as the wall draws them: who they are, what they are called, and
-/// the records whose sleeves their collage quotes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ArtistVm {
-    /// Stable identity — [`artist_id`], the same hash the Artist place
-    /// carries, so a tile press and a record page's breadcrumb name one
-    /// artist.
-    pub id: u64,
-    /// **The spelling that sorts first**, not the first one found.
-    ///
-    /// Identity is case-folded, so `Alpha` and `alpha` are one artist with two
-    /// spellings on disk, and *first found* is an order a rescan can change.
-    /// This is the same rule and the same answer as
-    /// [`crate::views::artist::label`], which is what stops a tile and the
-    /// page it opens from naming one artist two ways.
-    pub name: String,
-    /// Their records, by [`album_id`], **in the records' own alphabetical
-    /// order** — not the wall's.
-    ///
-    /// The wall's order would make a collage depend on the active group key,
-    /// so re-arranging the records would reshuffle every artist's tile;
-    /// alphabetical by record name is a property of the artist rather than of
-    /// the frame around them.
-    pub records: Vec<u64>,
-}
-
-/// One shelf of the **artists** wall: the initial it breaks on, and the
-/// artists under it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ArtistShelfVm {
-    /// The header, always a [`GroupHeaderVm::Initial`] — which is exactly why
-    /// `crate::rail::artist` indexes this wall with no new branch.
-    pub header: GroupHeaderVm,
-    /// The artists on it, by their sorting spelling, case-folded. Never empty.
-    pub artists: Vec<ArtistVm>,
-}
-
-/// **The artists wall**, built from the records wall (ADR-0035).
-///
-/// Shelved by [`Initial`] whatever the active [`GroupKey`] is: an artists wall
-/// arranged by decade would have to pick one of an artist's decades, and there
-/// is no honest pick. The initial is the one break that is a property of the
-/// artist alone, and it is the break the index rail already speaks.
-///
-/// Built from the already-projected [`AlbumVm`]s rather than from the library,
-/// so an artist exists here exactly when a record of theirs is on the wall —
-/// a record with no readable track never reaches [`AlbumVm`] and must not mint
-/// a person.
-#[must_use]
-pub fn build_artists(albums: &[AlbumVm]) -> Vec<ArtistShelfVm> {
-    use std::collections::HashMap;
-
-    struct Gathered {
-        artist: AlbumArtistVm,
-        records: Vec<(String, u64)>,
-    }
-    let mut by_id: HashMap<u64, Gathered> = HashMap::new();
-    for album in albums {
-        let id = artist_id(&album.artist);
-        let entry = by_id.entry(id).or_insert_with(|| Gathered {
-            artist: album.artist.clone(),
-            records: Vec::new(),
-        });
-        // The spelling that sorts first wins, so the answer is a property of
-        // the set and not of the walk (see [`ArtistVm::name`]).
-        if album.artist.label() < entry.artist.label() {
-            entry.artist = album.artist.clone();
-        }
-        entry.records.push((
-            album.title.clone().unwrap_or_default().to_lowercase(),
-            album.id,
-        ));
-    }
-    let mut buckets: HashMap<Initial, Vec<ArtistVm>> = HashMap::new();
-    for (id, mut gathered) in by_id {
-        gathered.records.sort_unstable();
-        let initial = Initial::of(gathered.artist.as_core());
-        buckets.entry(initial).or_default().push(ArtistVm {
-            id,
-            name: gathered.artist.label().to_owned(),
-            records: gathered
-                .records
-                .into_iter()
-                .map(|(_, album)| album)
-                .collect(),
-        });
-    }
-    let mut shelves: Vec<ArtistShelfVm> = buckets
-        .into_iter()
-        .map(|(initial, mut artists)| {
-            // Case-folded, exactly as the library orders its own album
-            // artists; the id breaks a tie no library can actually produce,
-            // because two artists with one folded name are one artist.
-            artists.sort_by(|a, b| {
-                a.name
-                    .to_lowercase()
-                    .cmp(&b.name.to_lowercase())
-                    .then(a.id.cmp(&b.id))
-            });
-            ArtistShelfVm {
-                header: GroupHeaderVm::Initial(initial),
-                artists,
-            }
-        })
-        .collect();
-    // [`Initial`]'s own `Ord` is shelf order (ADR-0019 §2), which is what lets
-    // the rail be the same pure function it is for the records wall.
-    shelves.sort_by_key(|shelf| match shelf.header {
-        GroupHeaderVm::Initial(initial) => initial,
-        // Unreachable by construction; a shelf with no initial sorts last
-        // rather than panicking on a wall the listener is looking at.
-        _ => Initial::Various,
-    });
-    shelves
-}
-
-/// **The artists the query leaves standing**, given the album ids that
-/// survived it: indices into `artists`, in wall order.
-///
-/// *One query projected twice, never two queries.* The caller has already
-/// spent [`matching_album_ids`] once for the records wall; this projects that
-/// same answer onto the people, so the two walls cannot disagree about what a
-/// query means and a keystroke costs one search rather than two.
-///
-/// The property, asserted in this module's tests: **an artist survives exactly
-/// when one of their records does.**
-#[must_use]
-pub fn visible_artists(artists: &[ArtistVm], surviving: &HashSet<u64>) -> Vec<usize> {
-    artists
-        .iter()
-        .enumerate()
-        .filter(|(_, artist)| artist.records.iter().any(|album| surviving.contains(album)))
-        .map(|(index, _)| index)
-        .collect()
 }
 
 impl AlbumVm {
@@ -643,8 +441,10 @@ pub fn song_row(album: &AlbumVm, chosen: Option<EditionKey>, song: &SongVm) -> O
 /// shelves that exist and nothing else.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GroupHeaderVm {
-    /// [`GroupKey::Artist`] — an A–Z shelf, or one of the two anonymous ends.
-    Initial(Initial),
+    /// [`GroupKey::Artist`] — the artist whose records the shelf holds, in the
+    /// spelling that sorts first among them (see
+    /// [`baz_core::index::GroupHeader::Artist`]).
+    Artist(AlbumArtistVm),
     /// [`GroupKey::Year`] — a decade by its first year; `None` is "No year".
     Decade(Option<u32>),
     /// [`GroupKey::Genre`] — the genre verbatim; `None` is "No genre".
@@ -656,7 +456,7 @@ pub enum GroupHeaderVm {
 impl GroupHeaderVm {
     fn from_core(header: &GroupHeader<'_>) -> Self {
         match header {
-            GroupHeader::Initial(initial) => Self::Initial(*initial),
+            GroupHeader::Artist(artist) => Self::Artist(AlbumArtistVm::from_core(*artist)),
             GroupHeader::Decade(decade) => Self::Decade(*decade),
             GroupHeader::Genre(genre) => Self::Genre(genre.map(str::to_owned)),
             GroupHeader::Recency(recency) => Self::Recency(*recency),
@@ -676,7 +476,12 @@ impl GroupHeaderVm {
     #[must_use]
     pub fn label(&self) -> String {
         match self {
-            Self::Initial(initial) => initial.label(),
+            // The front end's own words for the two anonymous states —
+            // `Various Artists`, `Unknown Artist` — rather than `baz-core`'s
+            // bare `Various` and `Unknown`, because this header is drawn
+            // beside tile captions and an artist page that already say them
+            // that way, and one artist must not be named twice on one screen.
+            Self::Artist(artist) => artist.label().to_owned(),
             Self::Decade(Some(decade)) => format!("{decade}s"),
             Self::Decade(None) => "No year".to_owned(),
             Self::Genre(Some(genre)) => genre.clone(),
@@ -788,10 +593,26 @@ pub fn build_shelves(library: &Library, key: GroupKey, history: Option<&History>
         .into_iter()
         .filter_map(|shelf| {
             let albums: Vec<AlbumVm> = shelf.albums.iter().filter_map(build_album).collect();
-            (!albums.is_empty()).then(|| ShelfVm {
-                header: GroupHeaderVm::from_core(&shelf.header),
-                albums,
-            })
+            let header = match GroupHeaderVm::from_core(&shelf.header) {
+                // **The name is the minimum over the records that are
+                // actually drawn**, not over the ones the library holds.
+                // `baz-core` takes the same minimum over its own set, and the
+                // two sets differ by exactly the albums with no readable
+                // track, which this filter has just dropped. Re-taking it here
+                // is what makes the header and `views::artist::label` — which
+                // walks the drawn albums — the same answer rather than two
+                // answers that usually agree.
+                GroupHeaderVm::Artist(core) => GroupHeaderVm::Artist(
+                    albums
+                        .iter()
+                        .map(|album| &album.artist)
+                        .min_by(|a, b| a.label().cmp(b.label()))
+                        .cloned()
+                        .unwrap_or(core),
+                ),
+                other => other,
+            };
+            (!albums.is_empty()).then_some(ShelfVm { header, albums })
         })
         .collect()
 }
@@ -1751,20 +1572,22 @@ mod tests {
         for (shelved, direct) in flat.iter().zip(&direct) {
             assert_eq!(**shelved, *direct);
         }
-        // And the breaks are now *stated*: `10cc` starts with a digit, so it
-        // is the `#` shelf; the rest are their initials, `Ó` included, and the
-        // two B's are one shelf holding two records.
+        // And the breaks are now *stated*, one per artist: the same albums in
+        // the same order, with every name between them said out loud (the two
+        // B's are two shelves, where the initial gave them one).
         assert_eq!(
             shelved
                 .iter()
                 .map(|shelf| shelf.header.label())
                 .collect::<Vec<_>>(),
-            ["#", "A", "B", "T", "Ó"]
-        );
-        assert_eq!(
-            shelved[2].albums.len(),
-            2,
-            "Bark Psychosis and Boards of Canada"
+            [
+                "10cc",
+                "Aphex Twin",
+                "Bark Psychosis",
+                "Boards of Canada",
+                "Talk Talk",
+                "Ólafur Arnalds"
+            ]
         );
     }
 
@@ -2876,54 +2699,45 @@ mod tests {
         assert_eq!(format_duration(Duration::from_secs(3723)), "1:02:03");
     }
     // -----------------------------------------------------------------------
-    // The artists wall (ADR-0035)
+    // The artist key (ADR-0035)
     // -----------------------------------------------------------------------
 
     /// A library holding four named artists across the two ends of the
     /// alphabet, one of them spelled two ways on disk, plus a nameless
-    /// compilation — the shapes an artists wall has to shelve.
-    fn artist_library() -> Vec<AlbumVm> {
-        let mut albums = build_albums(&library_with(vec![
+    /// compilation — the shapes the artist key has to shelve.
+    fn artist_library() -> Library {
+        library_with(vec![
             meta("Zed", "Last", "One", 1),
             meta("alpha", "Bravo", "Two", 1),
             meta("Alpha", "Alpha's Own", "One", 1),
             meta("10cc", "Deceptive Bends", "One", 1),
             meta("Bell", "Chime", "One", 1),
-        ]));
-        // The nameless compilation, which no tag can produce here — built by
-        // hand so the wall's two anonymous ends are both under test.
-        albums.push(AlbumVm {
-            id: album_id(AlbumArtist::Various, Some("A Compilation")),
-            title: Some("A Compilation".to_owned()),
-            track_artists_vary: true,
-            artist: AlbumArtistVm::Various,
-            year: None,
-            genre: None,
-            first_seen_ns: None,
-            first_track: PathBuf::from("/m/various/01.flac"),
-            editions: Vec::new(),
-        });
-        albums
+            TrackMeta {
+                compilation: Some(true),
+                ..meta("Someone", "A Compilation", "One", 1)
+            },
+        ])
     }
 
-    /// **The artists wall shelves people the way the records wall shelves
-    /// records** — by [`Initial`], in `Initial`'s own order, with both
-    /// anonymous ends where the alphabet puts them.
+    /// **One shelf per artist, headed by their name**, in the library's own
+    /// order — the owner's finding, *"artists should be grouping stuff by
+    /// artist not just alphabetically"* (ADR-0035).
     ///
-    /// That order is not decoration: it is what lets `rail::artist` index this
-    /// wall verbatim, with no branch of its own.
+    /// The two anonymous ends keep the places `Initial` put them, because they
+    /// are `ArtistKey`'s ends and always were: an unnamed compilation is not a
+    /// `V` and an unreadable artist is not a `U`.
     #[test]
-    fn the_artists_wall_shelves_by_initial_in_the_walls_own_order() {
-        let shelves = build_artists(&artist_library());
+    fn the_artist_key_shelves_one_artist_per_shelf() {
+        let shelves = build_shelves(&artist_library(), GroupKey::Artist, None);
         let headers: Vec<String> = shelves.iter().map(|s| s.header.label()).collect();
-        assert_eq!(headers, ["#", "A", "B", "Z", "Various"]);
-        // Every shelf is an `Initial`, which is the whole of what the rail
-        // needs to be told nothing new.
+        assert_eq!(headers, ["10cc", "Alpha", "Bell", "Zed", VARIOUS_ARTISTS]);
+        // Every shelf is an artist, which is what makes the header a door to
+        // their place and the rail a projection of their initials.
         for shelf in &shelves {
-            assert!(matches!(shelf.header, GroupHeaderVm::Initial(_)));
+            assert!(matches!(shelf.header, GroupHeaderVm::Artist(_)));
             assert!(
-                !shelf.artists.is_empty(),
-                "a shelf exists because someone is on it"
+                !shelf.albums.is_empty(),
+                "a shelf exists because a record landed on it"
             );
         }
     }
@@ -2932,169 +2746,61 @@ mod tests {
     /// sorts first.**
     ///
     /// Identity is case-folded, so `Alpha` and `alpha` are one person; *first
-    /// found* would be an order a rescan can change, and the minimum is a
+    /// found* would be an order a retag can change, and the minimum is a
     /// property of the set. It also happens to prefer the capitalised form a
     /// tagger meant, since upper-case sorts ahead of lower.
     ///
     /// The same rule and the same answer as [`crate::views::artist::label`],
-    /// which is what stops a tile and the page it opens from naming one
-    /// artist two ways.
+    /// which is what stops a shelf header and the page it opens from naming
+    /// one artist two ways — asserted here as the two answers, not as two
+    /// descriptions of one rule.
     #[test]
-    fn an_artists_spelling_is_the_one_that_sorts_first() {
-        let albums = artist_library();
-        let shelves = build_artists(&albums);
-        let alpha: Vec<&ArtistVm> = shelves
+    fn an_artist_shelfs_spelling_is_the_one_that_sorts_first() {
+        let shelves = build_shelves(&artist_library(), GroupKey::Artist, None);
+        let alpha = shelves
             .iter()
-            .flat_map(|shelf| shelf.artists.iter())
-            .filter(|artist| artist.name.eq_ignore_ascii_case("alpha"))
-            .collect();
-        assert_eq!(alpha.len(), 1, "two spellings are one artist");
-        assert_eq!(alpha[0].name, "Alpha", "the spelling that sorts first");
-        assert_eq!(alpha[0].records.len(), 2, "both spellings' records");
+            .find(|shelf| shelf.header.label().eq_ignore_ascii_case("alpha"))
+            .expect("the two-spelling artist has one shelf");
         assert_eq!(
-            alpha[0].id,
-            artist_id(&AlbumArtistVm::Named("ALPHA".to_owned()))
+            alpha.header.label(),
+            "Alpha",
+            "the spelling that sorts first"
         );
-        // And the id is the one the Artist place carries, so the tile and the
-        // breadcrumb open the same page.
-        let page: Vec<&AlbumVm> = albums
+        assert_eq!(alpha.albums.len(), 2, "both spellings' records");
+
+        // …and it is the answer `views::artist::label` reaches by its own
+        // route: the minimum over every record filed under that id.
+        let id = artist_id(&AlbumArtistVm::Named("ALPHA".to_owned()));
+        let page: Vec<&AlbumVm> = shelves
             .iter()
-            .filter(|album| artist_id(&album.artist) == alpha[0].id)
+            .flat_map(|shelf| shelf.albums.iter())
+            .filter(|album| artist_id(&album.artist) == id)
             .collect();
         assert_eq!(page.len(), 2);
+        assert_eq!(
+            page.iter().map(|album| album.artist.label()).min(),
+            Some(alpha.header.label().as_str())
+        );
     }
 
-    /// **The two anonymous ends are artists too**, and they are not each
-    /// other: a nameless compilation and an unreadable artist are different
-    /// answers ([`AlbumArtistVm`]), so they get different tiles at different
-    /// ends of the wall.
+    /// **The records under an artist read alphabetically**, which is library
+    /// order and therefore the order every other view of this library uses
+    /// (ADR-0019 §1). Not by year: a second ordering *within* a shelf would be
+    /// a second arrangement control that nothing on screen explains.
     #[test]
-    fn the_anonymous_ends_are_their_own_artists() {
-        let shelves = build_artists(&artist_library());
-        let named: Vec<(String, String)> = shelves
-            .iter()
-            .flat_map(|shelf| {
-                shelf
-                    .artists
-                    .iter()
-                    .map(move |artist| (shelf.header.label(), artist.name.clone()))
-            })
-            .collect();
-        assert!(named.contains(&("Various".to_owned(), VARIOUS_ARTISTS.to_owned())));
-        assert!(named.contains(&("#".to_owned(), "10cc".to_owned())));
-    }
-
-    /// **A collage does not reshuffle when the wall is re-arranged.**
-    ///
-    /// An artist's quotations are their records in the *records'* own
-    /// alphabetical order — a property of the artist — rather than in the
-    /// wall's, which is a property of the frame. The wall's order would make
-    /// pressing `YEAR` redraw every artist tile's artwork.
-    #[test]
-    fn an_artists_quotations_do_not_follow_the_arrangement() {
+    fn an_artists_records_read_in_the_librarys_own_order() {
         let library = library_with(vec![
             meta("Solo", "Zebra", "One", 1),
             meta("Solo", "Apple", "One", 1),
             meta("Solo", "Mango", "One", 1),
         ]);
-        let by_artist = build_shelves(&library, GroupKey::Artist, None);
-        let by_year = build_shelves(&library, GroupKey::Year, None);
-        let flatten = |shelves: Vec<ShelfVm>| -> Vec<AlbumVm> {
-            shelves.into_iter().flat_map(|shelf| shelf.albums).collect()
-        };
-        let one = build_artists(&flatten(by_artist));
-        let other = build_artists(&flatten(by_year));
-        assert_eq!(one, other, "the artists wall is the same wall either way");
-        let quotes = &one[0].artists[0].records;
-        let titles: Vec<&str> = quotes
+        let shelves = build_shelves(&library, GroupKey::Artist, None);
+        assert_eq!(shelves.len(), 1);
+        let titles: Vec<&str> = shelves[0]
+            .albums
             .iter()
-            .map(|id| {
-                if *id == album_id(AlbumArtist::Named("Solo"), Some("Apple")) {
-                    "Apple"
-                } else if *id == album_id(AlbumArtist::Named("Solo"), Some("Mango")) {
-                    "Mango"
-                } else {
-                    "Zebra"
-                }
-            })
+            .filter_map(|album| album.title.as_deref())
             .collect();
         assert_eq!(titles, ["Apple", "Mango", "Zebra"]);
-    }
-
-    /// **The property the search projection is judged on: an artist survives
-    /// exactly when one of their records does.**
-    ///
-    /// Swept over every subset of the collection's records, so it is the
-    /// property rather than three examples of it. This is what *one query
-    /// projected twice* buys — the two walls cannot disagree about what a
-    /// query means, because there is one answer and the second wall is a
-    /// projection of it.
-    #[test]
-    fn an_artist_survives_exactly_when_one_of_their_records_does() {
-        let albums = artist_library();
-        let artists: Vec<ArtistVm> = build_artists(&albums)
-            .into_iter()
-            .flat_map(|shelf| shelf.artists)
-            .collect();
-        let ids: Vec<u64> = albums.iter().map(|album| album.id).collect();
-        assert!(
-            ids.len() <= 16,
-            "the sweep is over subsets of {}",
-            ids.len()
-        );
-        for mask in 0..(1_u32 << ids.len()) {
-            let surviving: HashSet<u64> = ids
-                .iter()
-                .enumerate()
-                .filter(|(bit, _)| mask & (1 << bit) != 0)
-                .map(|(_, id)| *id)
-                .collect();
-            let standing = visible_artists(&artists, &surviving);
-            for (index, artist) in artists.iter().enumerate() {
-                let has_one = artist.records.iter().any(|id| surviving.contains(id));
-                assert_eq!(
-                    standing.contains(&index),
-                    has_one,
-                    "{} under mask {mask:#b}",
-                    artist.name
-                );
-            }
-            // …and in wall order, so the shelves' per-shelf counts can be one
-            // walk of the two lists together.
-            assert!(standing.windows(2).all(|pair| pair[0] < pair[1]));
-        }
-    }
-
-    /// **The empty query leaves everyone standing**, which is the boundary the
-    /// projection shares with the records wall: a blank query is not a filter
-    /// that happens to match everything, it is no filter at all.
-    #[test]
-    fn a_blank_query_leaves_every_artist_standing() {
-        let albums = artist_library();
-        let artists: Vec<ArtistVm> = build_artists(&albums)
-            .into_iter()
-            .flat_map(|shelf| shelf.artists)
-            .collect();
-        let all: HashSet<u64> = albums.iter().map(|album| album.id).collect();
-        assert_eq!(visible_artists(&artists, &all).len(), artists.len());
-        assert!(visible_artists(&artists, &HashSet::new()).is_empty());
-    }
-
-    /// **The subject's code round-trips and is not a group key's.**
-    ///
-    /// It is on-disk config data on [`GroupKey::code`]'s exact terms, and the
-    /// two vocabularies share a file — a subject that spelled itself `artist`
-    /// would be one hand-edit away from an unreadable arrangement.
-    #[test]
-    fn the_wall_subjects_code_round_trips() {
-        for subject in WallSubject::ALL {
-            assert_eq!(WallSubject::from_code(subject.code()), Some(subject));
-        }
-        assert_eq!(WallSubject::default(), WallSubject::Records);
-        assert_eq!(WallSubject::from_code("artist"), None);
-        assert_eq!(WallSubject::from_code(""), None);
-        for key in GroupKey::ALL {
-            assert_eq!(WallSubject::from_code(key.code()), None, "{key:?}");
-        }
     }
 }
