@@ -229,6 +229,34 @@ This is not a retreat from §2. §2 is the guard for the parsers baz *does*
 register — a crafted MP4 still reaches the AAC decoder where the third panic
 lived. What §2.5 removes is a parser baz was exposed to and never wanted.
 
+#### Amendment, 2026-08-10 — §2.5 was suspected of losing an album, and is cleared
+
+Hours after this section landed, fourteen of the owner's MP3s were found
+missing from his library, and §2.5 was the first suspect for a good reason:
+`file(1)` describes every one of them as *"MPEG ADTS, layer III"*, which is
+precisely the shape of file the reader removed here could have claimed, and
+this section itself records that MPEG audio's sync word and ADTS's overlap.
+
+**It is not §2.5, and this was established by running it rather than by
+reasoning about it.** `fbb0af7` — the commit immediately before the registry
+change — and `main` were both built and both run over the same folder. Both
+skipped the same fourteen files with the same sentence, and under both, all
+fourteen opened and decoded through `AudioSource` without error. The cause was
+a malformed ID3v2.3 `TYER` frame failing lofty's whole-file read
+(`CHANGELOG.md`; the fix is `crates/baz-core/src/library.rs`).
+
+The reason no registry change *could* have caused it is worth stating here,
+because it is not obvious from this file: **the scanner and the player do not
+share a parser.** `baz_core::library` reads tags with **lofty** and never
+constructs a `Probe`, so what a file's row on the shelf says — and whether it
+gets a row at all — is decided without Symphonia being consulted. This
+section's registry is reached only when something is *played*. A file can
+therefore be unlistable and perfectly playable, which is exactly what those
+fourteen were, and the two halves have to be diagnosed separately.
+
+The cost §2.5 states above stands unchanged and unrelated: a raw ADTS stream
+misnamed `.m4a`, which was never listed by the scanner either.
+
 ### 3. A reproducer is a gate, not a corpus entry
 
 The fuzz job runs on `schedule` and `workflow_dispatch`; a tag arrives as

@@ -65,6 +65,15 @@ Every release is built from a tag by CI, gated on the full test suite — see
 - `an_mp3s_replay_gain_comes_off_its_id3v2_block` — the first test to drive an
   MP3's ID3v2 tags through the decoder, which nothing covered before and which
   the probe change above made load-bearing.
+- **Every skipped file says its own name in the log.** A scan prints one
+  `[scan] skipped <path>: <reason>` line per failure, beside the count it
+  already reported. The count is a statistic and cannot tell a listener *which*
+  record is missing; until this line existed there was no way to find out at
+  all, which is how the album below went missing behind the words
+  `14 files skipped`. Deliberately not truncated — a skipped file is rare by
+  construction, and on the pass where it is not, the length of the list is the
+  finding. A readout inside baz is in `docs/BACKLOG.md`; this line is its
+  floor, not its answer.
 
 ### Changed
 
@@ -103,6 +112,28 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Fixed
 
+- **One junk byte in a year tag no longer costs a whole album.** Fourteen
+  MP3s — every track of Frank Zappa's *Unmitigated Audacity*, ripped by
+  dBpoweramp — were missing from a 3 735-file library, and the only evidence
+  was `14 files skipped` in a status line. They are not corrupt: all fourteen
+  open and decode through `AudioSource` without a complaint, at 320 kbit/s
+  MPEG-1 Layer III. Each carries `TYER`, ID3v2.3's year frame, holding the
+  single character `0`. ID3v2.3 says a year is four digits, and lofty's default
+  parsing mode returns that as an error from the **whole-file** read — so the
+  scanner lost the title, the artist, the album, the track number and the row.
+  A tag is a description of the music, not a condition on it: a read that fails
+  is now retried under lofty's `Relaxed` mode, which drops the frame it cannot
+  parse instead of the file. Verified against the library that found it —
+  3 721 tracks and 14 skipped becomes **3 735 tracks and 0 skipped**, and the
+  only field lost is the year the frame never legibly held. Ordering is
+  deliberate: the strict read runs first and wins whenever it succeeds, so no
+  file that reads today reads any differently.
+  `a_malformed_year_frame_costs_the_year_and_nothing_else` builds the byte
+  sequence from the ID3v2.3 specification and fails without the fix.
+  - **Not a regression from the format-registry change** (ADR-0040 §2.5),
+    which was the first suspect: the scanner reads tags with lofty and never
+    touches Symphonia's probe. Both commits were built and run over the same
+    folder, and both skip the same fourteen files with the same sentence.
 - **The `[Unreleased]` section carried unresolved merge-conflict markers.**
   `Merge branch 'feat/app-bar'` committed `<<<<<<<`, `=======` and `>>>>>>>`
   into this file. Both sides are kept, merged into one set of headings, and one

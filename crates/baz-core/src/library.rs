@@ -58,6 +58,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use lofty::config::{ParseOptions, ParsingMode};
 use lofty::file::{FileType, TaggedFile};
 use lofty::prelude::*;
 use lofty::tag::{ItemKey, Tag};
@@ -733,13 +734,62 @@ fn read_track(root: &Path, path: PathBuf, stamp: Option<FileStamp>) -> Option<Sc
 /// when the content is conclusive; when it is not, the extension guess stands,
 /// so nothing that used to work stops working. The cost is 36 bytes of a read
 /// that was going to happen anyway.
+///
+/// # One bad frame does not cost the file
+///
+/// The read is attempted twice, under two of lofty's parsing modes, and the
+/// second attempt is the whole point.
+///
+/// lofty's default is [`ParsingMode::BestAttempt`], and "best attempt" is
+/// narrower than it sounds: it forgives a malformed frame *header* (the frame
+/// is skipped and the tag read continues) but **not** a malformed frame
+/// *body*. A body it cannot parse is an error returned from the whole-file
+/// read — so a single junk value in one optional frame discards the title,
+/// the artist, the album, the track number and the file itself.
+///
+/// That is not hypothetical, and the case that found it is a listener's:
+/// fourteen MP3s ripped by dBpoweramp carry `TYER` (ID3v2.3's year frame)
+/// with the body `"0"`. ID3v2.3 says a year is four digits, so lofty rejects
+/// it — `Encountered an invalid year length (should be 4 digits)` — and baz
+/// dropped a whole album that symphonia opens and decodes without a
+/// complaint. Every scan reported it as one number in a status line.
+///
+/// The judgement is that **a tag is a description of the music, not a
+/// condition on it**. A file whose bytes decode is a file a music player must
+/// list; the worst an unreadable frame may cost is the field it holds. So a
+/// read that fails is retried under [`ParsingMode::Relaxed`], which drops the
+/// frame it cannot parse instead of the file — on those fourteen it recovers
+/// every field except the year the frame never legibly held.
+///
+/// Ordering matters and is deliberate. `BestAttempt` runs **first** and its
+/// result is used whenever it succeeds, so no file that reads today reads any
+/// differently; `Relaxed` is reached only where the alternative was nothing
+/// at all. The cost is a second read of a file that was otherwise about to be
+/// discarded.
+///
+/// A file that fails *both* is a [`ScanEntry::Failed`] as before, and its
+/// error is `BestAttempt`'s — the stricter, more descriptive one, and the one
+/// that names the real defect rather than whatever `Relaxed` tripped over
+/// after forgiving it.
+///
+/// [`ParsingMode::BestAttempt`]: lofty::config::ParsingMode::BestAttempt
+/// [`ParsingMode::Relaxed`]: lofty::config::ParsingMode::Relaxed
 fn read_tagged_file(path: &Path) -> Result<TaggedFile, String> {
-    lofty::probe::Probe::open(path)
-        .map_err(|e| e.to_string())?
-        .guess_file_type()
-        .map_err(|e| e.to_string())?
-        .read()
-        .map_err(|e| e.to_string())
+    let read_with = |mode| {
+        lofty::probe::Probe::open(path)
+            .map_err(|e| e.to_string())?
+            .guess_file_type()
+            .map_err(|e| e.to_string())?
+            .options(ParseOptions::new().parsing_mode(mode))
+            .read()
+            .map_err(|e| e.to_string())
+    };
+    match read_with(ParsingMode::BestAttempt) {
+        Ok(file) => Ok(file),
+        // The strict error is kept, not the relaxed one: it is the sentence
+        // that says what is actually wrong with the file.
+        Err(strict) => read_with(ParsingMode::Relaxed).map_err(|_| strict),
+    }
 }
 
 /// Merge tag data with folder-structure inference. Tags win field by field;

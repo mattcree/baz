@@ -13,6 +13,13 @@
 //! data ("N files skipped" in the status line), never a modal; only a scan
 //! that cannot start at all surfaces as [`ScanUpdate::Error`].
 //!
+//! The count is not the whole record. [`walk_root`] also prints one
+//! `[scan] skipped <path>: <reason>` line per failure, because a number on
+//! its own cannot tell a listener *which* album is missing — and a library
+//! that loses one silently has broken the promise the rest of this file
+//! exists to keep. That line is a floor, not a surface; `docs/BACKLOG.md`
+//! carries the readout inside baz that should eventually replace it.
+//!
 //! # Incremental by default
 //!
 //! [`spawn`] takes the [`KnownFiles`] snapshot the index already holds and
@@ -460,6 +467,25 @@ fn walk_root<'a>(
     let mut counts = Counts::default();
     for entry in scan {
         walked.productive.insert(root.to_path_buf());
+        // Every skipped file says its own name, once, here.
+        //
+        // The count in the status line is a statistic; it is not a way to
+        // find out *which* record is missing, and until this line existed
+        // there was no way at all. A listener who notices an album is not on
+        // the wall had nothing to look at and nothing to report — which is
+        // how fourteen Frank Zappa MP3s sat outside a 3 735-file library
+        // behind the words `14 files skipped`.
+        //
+        // Deliberately not truncated after some number of lines. A skipped
+        // file is by construction rare — it is a file baz could not read at
+        // all — so the ordinary output of this line is nothing whatsoever;
+        // and on the pass where that is *not* true, the size of the list is
+        // the finding, and a cap would hide precisely the entry worth
+        // seeing. See `docs/BACKLOG.md` for the surface inside baz that this
+        // line is the floor of, not the answer to.
+        if let ScanEntry::Failed { path, reason } = &entry {
+            println!("[scan] skipped {}: {reason}", path.display());
+        }
         record(&entry, known, walked, &mut counts);
         if let Some(update) = batcher.push(entry, Instant::now())
             && tx.send(update).is_err()

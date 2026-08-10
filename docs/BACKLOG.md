@@ -391,6 +391,18 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 ## Known gaps in shipped features
 
+- **A skipped file has no name anywhere a listener can see it.** *(Half-fixed
+  2026-08-10; the rest is a decision, and it is in `WORK.md`'s* Waiting on the
+  owner *with the recommendation.)* `ScanEntry::Failed` carries a path **and a
+  reason**, and `crates/baz/src/scan.rs` discarded both to increment a counter;
+  `N files skipped` in the status line was the whole of what baz would say. It
+  cost an album: fourteen Frank Zappa MP3s sat outside a 3 735-file library and
+  the number was the only trace. A scan now prints one
+  `[scan] skipped <path>: <reason>` line per failure, which makes the next one
+  diagnosable in a terminal and **still invisible** to anyone running the
+  Flatpak. The settled preference is a readout in Settings, beside the *last
+  scanned* line — one `ScanUpdate` field carrying the paths rather than a
+  count, no modal.
 - **A corrupt file can still make Symphonia reserve gigabytes, and that is
   upstream's bound to take.** *(Decided 2026-08-10, ADR-0040 §1. The **panics**
   the same sweep found are fixed — baz stopped registering the raw-ADTS
