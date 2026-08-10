@@ -4,7 +4,7 @@ members = ["crates/baz-core", "crates/baz"]
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.92"
 license = "GPL-3.0-or-later"
@@ -12,7 +12,7 @@ repository = "https://github.com/mattcree/baz"
 authors = ["baz contributors"]
 
 [workspace.dependencies]
-baz-core = { path = "crates/baz-core", version = "0.0.0" }
+baz-core = { path = "crates/baz-core", version = "0.1.0" }
 dirs = "6"          # XDG config/data dir lookup for config + library DB (MIT OR Apache-2.0)
 # GUI toolkit (ADR-0005, chosen by the Spike A head-to-head). Pure Rust, zero
 # system deps on Linux. `image` for album-art widgets; `tokio` supplies the

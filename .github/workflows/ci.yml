@@ -120,8 +120,11 @@ jobs:
           sudo apt-get install -y desktop-file-utils appstream python3-yaml
       - name: Desktop entry
         run: desktop-file-validate packaging/io.github.mattcree.baz.desktop
-      # Offline: the screenshot URL is a placeholder until the first Flathub
-      # submission, and a validator that fetched it would fail on that alone.
+      # Offline, deliberately. The screenshot URLs point at `docs/screenshots/`
+      # on `main`, so on a pull request they name a branch's files at a URL
+      # that only resolves once the branch has landed — a fetching validator
+      # would fail every PR that re-shot a frame. The networked check belongs
+      # to the release, and docs/RELEASING.md schedules it there.
       - name: AppStream metainfo
         run: |
           appstreamcli validate --no-net \

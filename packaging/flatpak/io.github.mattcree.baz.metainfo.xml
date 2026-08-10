@@ -88,32 +88,53 @@
   </requires>
 
   <!--
-    PLACEHOLDER. Flathub requires at least one screenshot and rejects a
-    submission whose image URL does not resolve. Nothing is published at this
-    URL yet: the file must be committed and the caption checked in the same
-    change that first submits to Flathub. The offline validate that CI runs
-    does not fetch it; a networked validate will report it.
+    The images are committed in `docs/screenshots/` and served from `main`, so
+    the URLs resolve as soon as the release commit is pushed — they are not
+    pinned to a tag, because a tag that does not exist yet is a URL Flathub
+    would reject at submission. `docs/screenshots/capture.sh` regenerates both
+    from the real binary; re-run it when the interface changes, or the store
+    listing shows a baz nobody can install any more.
+
+    The offline validate CI runs does not fetch these URLs. Check them after
+    pushing with `appstreamcli validate` and no offline flag.
   -->
   <screenshots>
     <screenshot type="default">
-      <image type="source">https://raw.githubusercontent.com/mattcree/baz/main/docs/screenshots/shelf.png</image>
-      <caption>The album shelf, with an album open</caption>
+      <image type="source">https://raw.githubusercontent.com/mattcree/baz/main/docs/screenshots/library.png</image>
+      <caption>Every record you own on one wall, grouped here by decade</caption>
+    </screenshot>
+    <screenshot>
+      <image type="source">https://raw.githubusercontent.com/mattcree/baz/main/docs/screenshots/now-playing.png</image>
+      <caption>Now playing, with the rest of the record beside it</caption>
     </screenshot>
   </screenshots>
 
   <content_rating type="oars-1.1"/>
 
   <!--
-    The release list is machinery, not history: baz has never been tagged.
-    Cutting a release means adding the entry here with its real date, in the
-    same commit as the CHANGELOG section and the Cargo.toml version bump —
-    docs/RELEASING.md is the checklist, and the release workflow refuses a tag
-    whose version does not match Cargo.toml.
+    Every release gets an entry here with its real date, in the same commit as
+    the CHANGELOG section and the Cargo.toml version bump — docs/RELEASING.md
+    is the checklist, and the release workflow refuses a tag whose version does
+    not match Cargo.toml.
+
+    `type` is the release *channel*, not a maturity claim: this is the build a
+    listener installs, so it is `stable`, and a `development` entry is one
+    AppStream clients are entitled to hide — which for a project with exactly
+    one release would mean a store page with no release at all. That baz is
+    pre-alpha is said in the description above, where a reader will see it.
   -->
   <releases>
-    <release version="0.1.0" date="2026-01-01" type="development">
+    <release version="0.1.0" date="2026-08-10" type="stable">
       <description>
-        <p>First tagged pre-alpha. Not yet released — placeholder entry.</p>
+        <p>
+          The first release. baz scans a folder of music, shows the albums as
+          the home screen, and plays them front to back with the gaps between
+          tracks measured away. FLAC, WAV, MP3, M4A and Ogg Vorbis; search as
+          you type; playlists; and MPRIS2 for the desktop's own media keys.
+        </p>
+        <p>
+          Pre-alpha. It reads your files and never writes to them.
+        </p>
       </description>
     </release>
   </releases>

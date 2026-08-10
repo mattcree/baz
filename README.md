@@ -5,10 +5,11 @@ foo, bar… baz — a spiritual successor to foobar2000: instant, correct, no
 commercial agenda; with the beauty and convenience of the paid players (Roon,
 Plexamp, Audirvana) and none of their clouds, accounts, or subscriptions.
 
-> **Status: pre-alpha, and nothing has been released.** It scans a music
-> folder, shows your albums and plays them gaplessly; it is not a finished
-> player, and there is nothing to download yet — build it from source
-> ([`docs/INSTALL.md`](docs/INSTALL.md)). What has actually landed is in
+> **Status: pre-alpha.** It scans a music folder, shows your albums and plays
+> them gaplessly; it is not a finished player. **v0.1.0 is the first release**
+> — see the [releases page](https://github.com/mattcree/baz/releases), or
+> build it from source ([`docs/INSTALL.md`](docs/INSTALL.md)). What has
+> actually landed is in
 > [`CHANGELOG.md`](CHANGELOG.md); what is deliberately deferred is in
 > [`docs/BACKLOG.md`](docs/BACKLOG.md); where things stand is in
 > `docs/NEXT-STEPS.md`.
@@ -147,9 +148,9 @@ thin client over its command/event protocol. Decisions are recorded in
 
 ## Installing
 
-**There is no released version yet** — nothing has been tagged, so the releases
-page is empty. Building from source is the only way to run baz today, and it is
-one command plus (on Linux) one system package:
+**v0.1.0 is the first release**, on the
+[releases page](https://github.com/mattcree/baz/releases). Building from source
+is the other way, and it is one command plus (on Linux) one system package:
 
 ```sh
 cargo build --release --locked -p baz --features device-output
@@ -161,10 +162,10 @@ building it needs the platform's audio headers (`libasound2-dev` /
 `alsa-lib-devel` on Linux, nothing on macOS or Windows). Without it baz builds
 and runs everywhere and hides the playback controls.
 
-When releases do exist there will be three ways in — **Flatpak** (the intended
-one on Linux), **signed-by-nobody release binaries** for Linux, Windows and
-macOS, and source. All three, the checksum step, where baz keeps its config and
-library, and the honest state of each platform:
+There are three ways in — **Flatpak** (the intended one on Linux, once the
+Flathub submission lands), **signed-by-nobody release binaries** for Linux,
+Windows and macOS, and source. All three, the checksum step, where baz keeps
+its config and library, and the honest state of each platform:
 [`docs/INSTALL.md`](docs/INSTALL.md).
 
 The short version of "honest state": baz is pre-alpha, Linux is the platform it

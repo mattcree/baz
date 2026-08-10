@@ -20,12 +20,16 @@ what that means here is specific rather than decorative:
   worth promising, not on a date.
 
 Every release is built from a tag by CI, gated on the full test suite — see
-[`docs/RELEASING.md`](docs/RELEASING.md). Nothing below has been tagged yet.
+[`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## [Unreleased]
 
-Everything so far. baz has never been released; this section is the state of
-`main`, and it becomes the first version's section when a tag is cut.
+*Nothing yet.*
+
+## [0.1.0] - 2026-08-10
+
+The first release. Everything below is everything baz does; there is no
+earlier version to have changed from.
 
 **Status: pre-alpha.** It scans a music folder, shows the albums and plays
 them. It is not a finished player, and nothing here is a promise about the
@@ -1325,6 +1329,11 @@ next commit.
   checksums.
 - Flatpak manifest and AppStream metadata under `packaging/flatpak/`, and
   packaging metadata validated on every pull request.
+- **Store screenshots taken from the real binary**, in `docs/screenshots/`,
+  which is what the AppStream metainfo points Flathub at. They are produced by
+  `docs/screenshots/capture.sh` — headless on a private Xvfb with all six XDG
+  redirections, reaching each state by the presses a listener makes — so they
+  can be re-shot rather than re-staged when the interface moves.
 - [`docs/INSTALL.md`](docs/INSTALL.md) and
   [`docs/RELEASING.md`](docs/RELEASING.md).
 
@@ -2134,8 +2143,16 @@ next commit.
   there (the groove's own documented price); on Wayland the compositor holds
   the implicit grab and the drag survives the crossing. The missing-entry
   repair surface (`Locate…`, ADR-0024 §3) is designed and not yet built.
-- No cue sheets, no watch folders, no tag editing, no application
-  icon, and no exclusive-mode output (which is also what puts hardware volume
-  out of reach). `docs/BACKLOG.md` is the honest list.
+- **A malformed FLAC can ask for an allocation the machine cannot serve.** A
+  29-byte input whose PICTURE metadata block declares a 4.28 GB MIME-type
+  length inside a 2.6 MB block is not rejected before the allocation is
+  attempted; `playback_decode`'s first-ever fuzz run found it in forty seconds
+  and it is item 1 of `docs/WORK.md`. It needs a corrupt or hostile file to
+  reach — an ordinary damaged rip does not — and the same probe path serves a
+  file on disk, so it is a real defect and not a harness artefact.
+- No cue sheets, no watch folders, no tag editing, and no exclusive-mode
+  output (which is also what puts hardware volume out of reach).
+  `docs/BACKLOG.md` is the honest list.
 
-[Unreleased]: https://github.com/mattcree/baz/commits/main
+[Unreleased]: https://github.com/mattcree/baz/compare/v0.1.0...main
+[0.1.0]: https://github.com/mattcree/baz/releases/tag/v0.1.0

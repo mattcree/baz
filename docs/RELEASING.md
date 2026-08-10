@@ -1,7 +1,8 @@
 # Releasing baz
 
-> Nothing has been released. This is the machinery and the checklist; the
-> maintainer decides when the first tag happens.
+> This is the machinery and the checklist. Everything v0.1.0 needs is done
+> except the tag — see §"What is left for the owner"; **the maintainer decides
+> when the first tag happens** and no agent cuts one.
 
 `docs/ENGINEERING.md`: *"Releases are built, signed, and
 reproducible-where-possible from CI only — no artifacts from developer
@@ -160,10 +161,11 @@ of scratch space, and keep it off a tmpfs.
 
 ## Cutting a release
 
-1. `main` is green, and the tree is the tree you mean to ship. The workspace
-   version is `0.0.0` today, so the first release is a real edit, not a bump.
+1. `main` is green, and the tree is the tree you mean to ship.
 2. Move `CHANGELOG.md`'s `[Unreleased]` content into a `## [X.Y.Z] - YYYY-MM-DD`
-   section; leave `[Unreleased]` empty above it.
+   section; leave `[Unreleased]` empty above it, and add the two link
+   references at the foot of the file (`[Unreleased]` becomes a `compare/`
+   link against the new tag).
 3. Set `version` in `[workspace.package]` in `Cargo.toml`, and the
    `baz-core` entry in `[workspace.dependencies]` to match. Run `cargo check`
    so `Cargo.lock` picks it up. **This does not touch
@@ -173,32 +175,115 @@ of scratch space, and keep it off a tmpfs.
    second and it is the only thing standing between a lockfile change and a
    broken Flathub build.
 4. Add the release to `packaging/flatpak/io.github.mattcree.baz.metainfo.xml`
-   with its real date, replacing the placeholder entry (which currently claims
-   `0.1.0` on `2026-01-01`, `type="development"`).
-5. Commit the four together — `Cargo.toml`, `Cargo.lock`, `CHANGELOG.md`,
-   the metainfo. That commit is the release commit.
-6. Run the release workflow by hand (`workflow_dispatch`) first. It builds
+   with its real date. `type` there is the release *channel* and not a maturity
+   claim — see the comment above the `<releases>` block.
+5. Re-run `docs/screenshots/capture.sh` if the interface has moved since the
+   last release, and check the frames. Flathub's page is whatever is committed
+   in `docs/screenshots/`, served from `main`; a store listing showing a baz
+   nobody can install any more is worse than an old version number.
+6. Commit them together — `Cargo.toml`, `Cargo.lock`, `CHANGELOG.md`, the
+   metainfo, and any re-shot screenshots. That commit is the release commit.
+7. Run the release workflow by hand (`workflow_dispatch`) first. It builds
    every platform and produces the checksums without publishing anything — the
    cheapest way to find out that a runner image has changed. **`workflow_dispatch`
    runs against a branch, not an arbitrary SHA**, so the release commit has to
    be the tip of one; in practice that means push it to `main` and dispatch
    from `main`.
-7. Tag it: `git tag -a vX.Y.Z -m "baz X.Y.Z"` and push the tag. The version job
+8. Tag it: `git tag -a vX.Y.Z -m "baz X.Y.Z"` and push the tag. The version job
    will reject it if step 3 was missed.
-8. Review the draft release, then publish it.
-9. Update the Flathub manifest's `tag` and `commit` — `commit` must be the full
-   SHA the tag resolves to (`git rev-parse vX.Y.Z`), because Flathub requires
-   both so a moved tag cannot change what is built. Regenerate
-   `cargo-sources.json` if `Cargo.lock` gained or dropped a dependency;
-   `packaging/flatpak/README.md` has the commands.
+9. Review the draft release, then publish it.
+10. Update the Flathub manifest's `tag` and `commit` — `commit` must be the full
+    SHA the tag resolves to (`git rev-parse vX.Y.Z`), because Flathub requires
+    both so a moved tag cannot change what is built. Regenerate
+    `cargo-sources.json` if `Cargo.lock` gained or dropped a dependency;
+    `packaging/flatpak/README.md` has the commands.
+
+## What is left for the owner, for v0.1.0, in order
+
+Steps 2 to 6 above are **done and on the `release/v0.1.0` branch**: the
+workspace is at `0.1.0` in `Cargo.toml`, `Cargo.lock` and the `baz-core`
+dependency entry; `CHANGELOG.md` has a dated `[0.1.0]` section with an empty
+`[Unreleased]` above it; the metainfo carries the real release entry and two
+screenshots; and `docs/screenshots/` holds the frames those URLs point at.
+Nothing has been tagged, pushed or published, and nothing below can be done by
+an agent — every line needs either a push, your eye, or an account.
+
+```sh
+# 1 · land it. The branch is local; it has never been pushed.
+git checkout main && git merge --ff-only release/v0.1.0
+git push origin main
+
+# 2 · the dry run, on the release commit this time. Read the note below
+#     before you judge the result — it is expected to go red in one job.
+#     The sleep is for the run to be listed at all; a dispatch returns
+#     before the run exists.
+gh workflow run release.yml --ref main
+sleep 10 && gh run watch "$(gh run list --workflow=release.yml -L1 \
+  --json databaseId -q '.[0].databaseId')"
+
+# 3 · the screenshot URLs, which only resolve once step 1 has happened.
+#     No offline flag: the point is the fetch.
+appstreamcli validate packaging/flatpak/io.github.mattcree.baz.metainfo.xml
+
+# 4 · the tag. This is the whole of cutting the release.
+git tag -a v0.1.0 -m "baz 0.1.0" && git push origin v0.1.0
+```
+
+Then, by hand and in a browser:
+
+5. **Review the draft release and press publish.** The workflow creates it as a
+   draft on purpose; look at the three archives and `SHA256SUMS` first.
+6. **Flathub.** `packaging/flatpak/README.md` has the submission; it needs a
+   Flathub account and a PR to `flathub/flathub`, so it was never an agent's to
+   do. Set the manifest's `tag` to `v0.1.0` and its `commit` to
+   `git rev-parse v0.1.0` — Flathub wants both, so that a moved tag cannot
+   change what is built.
+
+**On step 2, and read this before you run it: the dry run goes red today, and
+the red is real.**
+
+It has now happened once —
+[run 31399606796](https://github.com/mattcree/baz/actions/runs/31399606796),
+against `main` at `e8dd2a2`, the first time `.github/workflows/release.yml`
+has ever run. What it proved: the `version` job's dry-run branch (`publish` came
+out `false`, the version `0.0.0+dry.<sha>`), and every job of the CI gate under
+`workflow_call` — fmt, clippy, tests on all three operating systems, rustdoc,
+`cargo-deny`, MSRV, coverage and the packaging metadata — all green.
+
+What it did **not** prove is the half everyone assumes a dry run is for. **The
+CI gate failed on its fuzz job**, and `build` has `needs: [version, gate]`, so
+the three platform builds and the checksum self-check never started. They
+remain unexercised in CI, exactly as they were before.
+
+**The failure is a defect in baz, not in the workflow.** `playback_decode`
+found an out-of-memory in 40 seconds on a 29-byte input, which is now item 1 of
+`docs/WORK.md`. **It does not block the tag**: CI's fuzz job is
+`if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'`,
+a called workflow sees the *caller's* event, and a tag arrives as `push` — so
+the gate a tag is held to is the one that just went green. That asymmetry is
+worth knowing rather than discovering: **the dry run is a stricter gate than
+the tag**, and until the OOM is fixed a red dry run whose only red is
+`CI gate / fuzz` is the expected result and not a reason to stop.
+
+It also does not prove the release commit, which it predates. Re-running it
+after the push is the only way to see the version job resolve `0.1.0` — and,
+once the fuzz defect is fixed, the only way to reach the build matrix at all.
+
+**Budget an hour for it, and know why.** Six fuzz targets at five minutes each,
+after a `cargo install cargo-fuzz` from source, is half an hour on its own, and
+the three platform builds follow it. A tag push does not pay this. The dry run
+is slow because it is doing strictly more, which is the right way round.
 
 ## What a tag will prove that nothing else can
 
-This workflow has never run in CI. The dry run in step 6 exercises everything
-except the four things that only a real tag reaches: the tag-versus-manifest
-check's success path, `gh release create --verify-tag`, the release-notes
-generation, and the upload of assets to a release. Expect to fix something the
-first time.
+The dry run in step 7 exercises everything except the four things that only a
+real tag reaches: the tag-versus-manifest check's success path, `gh release
+create --verify-tag`, the release-notes generation, and the upload of assets to
+a release. Expect to fix something the first time.
+
+The dry run itself has now been run once (see the previous section), so the
+build matrix and the checksum step are no longer unexercised — which leaves
+those four, and only those four, standing between the dry run and a tag.
 
 The local rehearsal above has now been done once, end to end, and found two
 things — both fixed in the change that added this section. The first was

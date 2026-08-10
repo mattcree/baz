@@ -50,14 +50,28 @@
 
 ## Next
 
-1. **Cut v0.1.** Nothing is installable, so **every other item on this list
-   reaches nobody until this one lands** — which is why it leads a
-   functional-first ordering rather than sitting where a release chore usually
-   sits. The icon, the release rehearsal and the Flatpak build are all done;
-   what is left is a screenshot for the metainfo, the version edit from
-   `0.0.0`, a `workflow_dispatch` dry run, then the tag. **The tag is the
-   owner's to cut** — the workflow produces a draft, and an agent may take
-   every step before it.
+1. **A 29-byte malformed FLAC asks baz for 4 GB.** The first run of the fuzz
+   job that has ever happened anywhere — it goes on `schedule` and
+   `workflow_dispatch` only, and neither had fired until v0.1.0's release dry
+   run — found an out-of-memory in `playback_decode` in forty seconds.
+   [Run 31399606796](https://github.com/mattcree/baz/actions/runs/31399606796);
+   the input is `ZkxhQwYn///7/1IA/wBJAQAAABMAAAAAAAAA/z0=`, and reading it by
+   hand says what it is: `fLaC`, then a metadata block header declaring
+   **type 6 (PICTURE), length 0x27FFFF**, then a PICTURE body whose 32-bit
+   **MIME-type length is 0xFF004901 — about 4.28 GB**, inside a block that says
+   it is 2.6 MB long. The allocation is not checked against the block that
+   contains it. **This is the product and not the harness**: `open_bytes` is
+   the same probe path a file on disk takes, so one corrupt FLAC in a scanned
+   folder is an allocation the machine cannot serve.
+   - **It does not block the tag** and it is not a regression — the fuzz job is
+     skipped on `push`, so the release gate never sees it. It is item 1 because
+     the ordering rule is functional-first and this is a file that takes the
+     player down, not a file that will not play.
+   - **Undecided, and it is the whole of the work**: whose bound. If the
+     unchecked read is symphonia's, baz's choices are a guard before the probe,
+     a pin, or a patch upstream — and *"which"* is the design, not the fix.
+     Reproduce with `cargo fuzz run playback_decode` on the artifact the run
+     wrote; nobody has run it locally yet.
 2. **Multichannel files do not play at all.** Anything over two channels is
    refused with a typed error rather than downmixed, so a 5.1 record is not a
    record baz has. The error is honest — silently wrong output would be worse
@@ -127,7 +141,10 @@
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
 9. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
-   last, so it describes what actually ships. Its keyboard table is still
+   last, so it describes what actually ships. Two of those four now exist and
+   are regenerable — `docs/screenshots/capture.sh` writes the wall and Now
+   playing for the store listing, and Home and a playlist are two more calls
+   in the same script. Its keyboard table is still
    stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode,
    `Ctrl+B` exists. (The group-key row itself is current again — the six words
    and `1`–`6` were corrected when `A–Z` came back.)
@@ -221,6 +238,50 @@
 ## Recently done
 
 Newest first. Fuller detail in `CHANGELOG.md`.
+
+- **v0.1.0 is cut up to the tag, and the tag is still the owner's.** Everything
+  `docs/RELEASING.md` §"Cutting a release" asks for before step 7 is on this
+  branch: the workspace at `0.1.0` in `Cargo.toml`, `Cargo.lock` and the
+  `baz-core` dependency entry; `CHANGELOG.md`'s `[Unreleased]` moved into a
+  dated `[0.1.0]` section with an empty `[Unreleased]` above it; the metainfo's
+  placeholder release entry replaced with the real one; and **two screenshots
+  Flathub can actually show**, which was the one deliverable that did not
+  exist. `docs/RELEASING.md` §"What is left for the owner" is now the whole
+  remaining list, in order, and it is four commands long.
+  - **The screenshots come from the real binary**, headless on Xvfb with all
+    six XDG redirections, driven the way a listener drives it: rest on a
+    record, press its own `Play`, then the lane's `Now playing` row. Nothing is
+    deep-linked. `docs/screenshots/capture.sh` is the harness and re-running it
+    is how they stay true.
+  - **The fixture is retagged before it is photographed**, because a test
+    fixture is allowed to say things a store page is not: the deliberately
+    clipping album title, the track titles carrying their own index, and the
+    four sleeves drawn with the first two letters of the album's name. One
+    generator still, with a pass over it.
+  - **The wall is hung by decade at `dense`**, chosen by photographing the
+    alternatives rather than by taste: the wall breaks a row at every group
+    boundary, and this fixture has two or three records per band, so the
+    default `artist` grouping photographs as a column of pairs with two thirds
+    of the window empty. The frames of the rejected arrangements are not
+    committed; the reasoning is, in `capture.sh`.
+  - **The `workflow_dispatch` dry run has now happened** — the first time
+    `.github/workflows/release.yml` has ever run at all. It ran against `main`
+    and not against the release commit, because `workflow_dispatch` takes a
+    branch and an agent may not push one; the owner re-runs it on the pushed
+    release commit as step 2 of his list.
+  - **It went red, and the red is item 1 above.** The `version` job and every
+    CI job but one came out green; the fuzz job — which had never run anywhere,
+    because it goes on `schedule` and `workflow_dispatch` and neither had
+    fired — found an OOM in forty seconds. `build` `needs` the gate, so **the
+    three platform builds and the checksum step still have not run in CI**.
+    They are the last unexercised thing in the release path, and only a green
+    dry run reaches them.
+  - **The tag is not blocked by it**: the fuzz job is skipped on `push`, so the
+    gate a tag is held to is the one that went green. `docs/RELEASING.md` says
+    this where he will be standing when he needs it, because a red dry run
+    looks like a reason to stop and this one is not.
+  - **Nothing was tagged, pushed or published**, which is the standing rule and
+    not an omission.
 
 - **The artwork crosses when the record changes** — the owner's *"when
   changing track there isn't any kind of nice visual transition for album art

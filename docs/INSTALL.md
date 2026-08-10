@@ -11,8 +11,9 @@
 > or macOS. They are honest builds, not a supported experience. Reports
 > welcome; surprises likely.
 >
-> There is no released version yet. Nothing has been tagged, so there are no
-> downloads on the releases page. Until then, **build from source**.
+> **v0.1.0 is the first release.** Its downloads are on the
+> [releases page](https://github.com/mattcree/baz/releases); building from
+> source works on every platform and is described below.
 
 ## Flatpak (Linux, the intended way)
 
