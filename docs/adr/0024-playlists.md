@@ -82,9 +82,11 @@ byline line restored, and the run's own control made to say what it saves.
 **§A3.1, §A3.2, §A4.2, §A4.3 and §A5.1–§A5.3 are shipped** (2026-08-10, doc
 14 tier 1; captures at
 [`docs/design/impl/records-and-lists/`](../design/impl/records-and-lists/README.md)).
-§A4.4 — the serif on the record page's hero — is **queued** rather than
-shipped, held only because `views/now_playing.rs` argues in prose against it
-and must be amended in the same change (`docs/WORK.md`). §A3's closing
+**§A4.4 — the serif on the record page's hero — is shipped** (2026-08-10, doc
+14 tier 2; captures at
+[`docs/design/impl/serif-titles/`](../design/impl/serif-titles/README.md)),
+with `views/now_playing.rs`'s prose amended in the same change and §A4.3's
+byline extended to state its composition. §A3's closing
 paragraph and §A4.4's last sentence are the two questions **left to the
 owner** ·
 extracts the decisions of
@@ -584,6 +586,16 @@ transfer, and it is why the name does not read as prominent.
    file records. `Playlist · 4 records` claims only what can be proved, and
    it explains the collage above it at the moment you are looking at it.
 
+   *Shipped in two steps* — `Playlist` alone with tier 1, the composition
+   with tier 2. **The count is not the sleeve's.** Design 14 §5.4 costed it
+   as free from the quotation list `playlists.rs` already builds; that list
+   stops at four, because four is all a 2 × 2 can quote, so a fourteen-record
+   list would have carried `Playlist · 4 records` over a page listing
+   fourteen — a false statement in the slot this section exists to make
+   honest. The distinct set is walked to its end
+   (`playlists::OpenPlaylist::records`). A list nothing in the library
+   resolves states `Playlist` and claims no count, which is all it can prove.
+
 4. **Typography is the axis with no pixel cost, and it is half-built.**
    `theme::WORK_TITLE` — IBM Plex Serif Italic, the museum-placard
    convention, the owner's approved risk of 2026-08-09 — is spent on one
@@ -599,6 +611,49 @@ transfer, and it is why the name does not read as prominent.
    lane's rows is **the owner's call** (design 14 §9, tier 3): it is the
    strongest possible answer to his question and it is also sixty italic
    serif captions on a wall of covers.
+
+   *Taken, 2026-08-10* (doc 14 tier 2), with three things settled in the
+   building:
+
+   a. **The rule needed one more clause, and `views/now_playing.rs` is why.**
+      *"An album's title and only an album's title"* does not by itself
+      exclude the `Ochre` printed under the sounding track on Now playing,
+      which is an album's title. The clause: **on the surface whose subject
+      that album is.** A record's page and Home's `CONTINUE` placard label
+      the album; Now playing labels a moment in a **track**, with the album
+      under it as a *fact about it* — and the placard convention this whole
+      idea comes from sets the title in italic and every fact around it in
+      roman. Italicising that line would leave the smallest string on the
+      surface the only italic one, inverting the convention rather than
+      applying it.
+
+   b. **`views/now_playing.rs`'s prose argued against the serif, and its
+      argument survived — as a concern, not as a boundary.** It said the
+      serif must not become a display face arriving one surface at a time.
+      That is right and is kept verbatim in the amended text. What did not
+      survive is the boundary it drew, *"there is one placard in the
+      product"*: a **quantity** cannot say whether the next string may have
+      the face, which is exactly how a face arrives one surface at a time. A
+      rule can. The guard that carries the concern is mechanical —
+      `the_serif_is_the_work_titles_and_nothing_else` is an **enumeration**
+      of two views and stays one, and nothing may name the serif family
+      directly, so the revert is still one token.
+
+   c. **A frame cannot prove the bundled face rendered, so tests do.**
+      `Font::with_name` is a string match against a face's `name` table; a
+      spelling that drifts resolves silently against the *host's* fonts and
+      looks correct on the machine that shipped it. Closed by
+      `font::the_family_names_baz_asks_for_are_the_names_the_faces_spell`
+      (the family strings against what the bundled bytes spell, plus the
+      italic style bit) and
+      `font::the_serif_face_carries_every_letter_an_album_title_arrives_with`
+      (a title is other people's text, and a missing codepoint falls back per
+      glyph). *Found writing the first*: the family a matcher reads is `name`
+      record **16** — record 1 is the legacy family and holds four styles, so
+      Plex Sans Medium's record 1 reads `IBM Plex Sans Medm`.
+
+   The wall and the lane are untouched and the question above stays the
+   owner's.
 
 ### A5. `Save as playlist` belongs to the run, and must say so
 

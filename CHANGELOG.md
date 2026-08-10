@@ -381,6 +381,60 @@ next commit.
     *"nothing is ever drawn on top of a sleeve"*, and a rounded one means
     *different* rather than *made*. Frames at
     `docs/design/impl/records-and-lists/`.
+- **…and the two pages now say it in the type**
+  ([ADR-0024](docs/adr/0024-playlists.md) §A4.4, design doc 14 tier 2). Tier 1
+  stated the distinction in words; this states it in the face, which is the
+  axis that costs no pixels and holds at every size.
+  - **A record's page sets its title in IBM Plex Serif Italic**
+    (`theme::WORK_TITLE`), joining Home's `CONTINUE` placard — and **a
+    playlist's page deliberately does not**. Same `SIZE_HERO` 28, same ink,
+    same slot, same composition to the pixel: three ink bands, 71 px of ink, a
+    35 px pitch to the byline and 27 px to the facts, identical on both pages
+    at 1280 and at 1920. Only the face differs, and it differs because a
+    record's title is a **work's** — published by someone else, set the way a
+    museum placard sets one — while a playlist's name is a **label the owner
+    typed**, like the search query, the rename field and the folder path, all
+    of which are already sans.
+  - **The serif's boundary stopped being a count and became a rule.** It used
+    to be *"there is one placard in the product"*, which cannot say whether the
+    next string may have the face. It is now: **the serif italic sets an
+    album's title, on the surface whose subject that album is** — not a
+    track's, not an artist's, not a playlist's name, and not an album's title
+    standing as a fact about something else, which is why `Now playing` stays
+    wholly in the sans and now has a sharper reason to than it had.
+  - **The test stays an enumeration**, never a `contains`:
+    `the_serif_is_the_work_titles_and_nothing_else` names two views and fails
+    the build on a third, and nothing may name the serif family directly — so
+    reverting the whole experiment is still one token. Whether the face should
+    reach the wall's tile captions and the returns lane's rows is the owner's
+    open question and is untouched.
+  - **The silent-fallback hole is closed mechanically.** `Font::with_name` is a
+    string match: a family spelling that drifts by one character resolves
+    against whatever the *host* owns, which looks right on the machine that
+    shipped it and wrong on a fresh one. Two new assertions compare the family
+    strings baz asks for against the names the bundled bytes spell for
+    themselves, check the serif declares the italic style the token requests,
+    and require the face to carry every Latin-1 letter and every punctuation
+    mark an album title arrives with — a codepoint it lacked would fall back
+    *per glyph*, setting half a title in a host font. **Found writing them**:
+    the family a matcher reads is `name` record 16, not record 1; record 1 is
+    the legacy family, which holds four styles at most, so Plex Sans Medium's
+    reads `IBM Plex Sans Medm`.
+  - **The playlist's byline states its composition**: `Playlist` →
+    `Playlist · 12 records`, which also explains the collage beside it. **Not**
+    from the sleeve's quotation list, as design 14 costed it — that list stops
+    at four, so a fourteen-record playlist would have read `Playlist · 4
+    records` over a page listing fourteen. The distinct set is walked to its
+    end instead, and a list nothing in the library resolves says `Playlist` and
+    claims no count.
+  - **Tier 2's third item is declined on a frame rather than adopted.** The
+    save label naming its subject — `Save these 24 as a playlist` — was
+    conditioned on tier 1's `Run · ` prefix proving insufficient. It did not:
+    the strip reads `Run · 2 of 12 · 55:00 left … Save as playlist`, subject
+    first, with the run's own cursor between the noun and the word. Against
+    that, a variable-length label in the 440 px strip is the one measurement
+    doc 14 §6.3 flagged as wanting a frame. Frames, measurements and the
+    reasoning at `docs/design/impl/serif-titles/`.
 
 **Interface**
 
@@ -609,11 +663,12 @@ next commit.
     sleeve — under 2 % of its pixels carrying chroma — has nothing to derive
     from, and the honest answer is `#0C0D0E`, measured exactly.
 - **A work's own title is set in IBM Plex Serif Italic** — the museum-placard
-  convention, on the one string in the product that is a work's name standing
-  beside its own facts (the Home placard). The owner saw the typographic risk
-  and approved it; it is one token, pinned by test to one consumer, so
-  reverting is one line. The face is bundled complete under OFL-1.1 (the same
-  licence file, byte for byte, as the bundled sans).
+  convention, on the strings in the product that are a work's name standing
+  beside its own facts. It shipped on one, the Home placard, and doc 14 tier 2
+  added the second, the record page's hero. The owner saw the typographic risk
+  and approved it; it is one token, pinned by test to an **enumerated** list of
+  consumers, so reverting is one line. The face is bundled complete under
+  OFL-1.1 (the same licence file, byte for byte, as the bundled sans).
 - **Every row-shaped control answers the pointer on the ground it actually
   stands on.** A hover is now one surface step up from the row's own ground
   (`Palette::step_up`) rather than the fixed `plinth`, which was right for

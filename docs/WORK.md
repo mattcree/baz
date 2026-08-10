@@ -27,27 +27,16 @@
 
 ## Next
 
-1. **Doc 14's Tier 2 — the serif on the two pages.** Unblocked now:
-   `views/now_playing.rs` is free, and it argues in prose *against* the serif,
-   so amend that prose in the same commit or the code contradicts the ADR.
-   Three things go with it: `the_serif_is_the_work_titles_and_nothing_else`
-   (`theme.rs`) changes from `assert_eq!(users, ["views/home.rs"])` to an
-   enumerated list of two; the album page's hero takes `theme::WORK_TITLE`;
-   and the playlist page's hero deliberately does **not** — that is the axis.
-   Two smaller items can ride with it: the byline stating its composition
-   (`Playlist` → `Playlist · 4 records`, from the distinct-record list
-   `playlists.rs` already computes for the sleeve), and — only if a frame says
-   `Run · ` was not enough — the save label naming its subject.
-2. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** Visible in a
+1. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** Visible in a
    committed frame: at 2560 with the run standing, ~700 px of field sits
    between the sleeve and the run column, because the record column hangs left
    and the run stays 440 wide. A4 takes it to ~1100 at that size.
-3. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
+2. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
    the Flatpak build are all done; what is left is a screenshot for the
    metainfo, the version edit from `0.0.0`, a `workflow_dispatch` dry run,
    then the tag. **The tag is the owner's to cut** — the workflow produces a
    draft.
-4. **Rewrite the README as the project's public face**, with the icon and real
+3. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
    last, so it describes what actually ships. Its keyboard table is badly
    stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode, the
@@ -64,8 +53,13 @@ Nothing. The queue above is the next thing.
   no edge-drag resize anywhere in `window::Action`**, so going borderless today
   loses pointer resizing. The route is a ~30-line upstream-shaped iced patch,
   which means a forked dependency. *Needs: yes or no to the fork.*
-- **Doc 14's Tier 3**, three questions rather than tasks. Tier 1 shipped
-  without touching any of them, and each needs one sentence from him:
+- **Doc 14's Tier 3**, three questions rather than tasks. Tiers 1 and 2 both
+  shipped without touching any of them, and each needs one sentence from him.
+  The first has got **sharper** rather than softer now that tier 2 has landed:
+  the serif is on a record's page, so he can see the face at 28 px in the
+  product before answering whether it should also be on sixty tile captions at
+  13 px — `docs/design/impl/serif-titles/` has it magnified. Nothing in tier 2
+  presumes an answer; the wall and the lane are untouched.
   - **Should a record's title be set in serif italic everywhere it is named —
     the wall's tile captions and the lane's rows included?** *Needs: his eye on
     a frame, not an argument.* It is the strongest possible answer to his own
@@ -102,6 +96,37 @@ Nothing. The queue above is the next thing.
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- Doc 14 Tier 2 — **the distinction moves into the type**. A record's page sets
+  its title in the serif italic; a playlist's page deliberately keeps the sans,
+  and that asymmetry *is* the design. The two identity blocks did not move a
+  pixel: three ink bands, 71 px of ink, a 35 px pitch to the byline and 27 px
+  to the facts, identical on both pages at 1280 and 1920
+  (`docs/design/impl/serif-titles/measure.py`). The byline also gained its
+  composition, `Playlist · 12 records`. Frames at
+  `docs/design/impl/serif-titles/`.
+  - **`now_playing.rs`'s prose argued against the serif, and it was half
+    right.** Its concern — *a display face arriving one surface at a time* — is
+    kept verbatim and is exactly why the test stays an **enumeration** rather
+    than becoming a `contains`. Its **boundary** was wrong: *"there is one
+    placard in the product"* is a quantity, and a quantity cannot say whether
+    the next string may have the face. The rule that replaced it is *the serif
+    sets an album's title, on the surface whose subject that album is* — under
+    which Now playing stays sans **more firmly** than before, since its hero is
+    a **track's** title and the album under it is a fact about that track.
+  - **Found on the way, twice.** (a) Doc 14 costed the byline's count as free
+    from the sleeve's quotation list; that list stops at four, so `Road Trip` —
+    fourteen tracks, twelve records — would have read `Playlist · 4 records`
+    over a page listing twelve. The distinct set is walked to its end now. (b)
+    A frame cannot prove the *bundled* serif rendered rather than a host serif
+    iced silently fell back to, so two `font.rs` tests do: the family strings
+    against what the bytes spell, and every Latin-1 letter an album title can
+    arrive with. Writing the first turned up that the family a matcher reads is
+    `name` record **16** — record 1 is the legacy family, and Plex Sans
+    Medium's reads `IBM Plex Sans Medm`.
+  - **Tier 2 #8 was declined from its own frame**, not skipped: the strip reads
+    `Run · 2 of 12 · 55:00 left … Save as playlist`, subject first, and a
+    variable-length `Save these N as a playlist` in the 440 px strip is the one
+    measurement doc 14 §6.3 flagged as wanting a frame before it ships.
 - **The artwork stops at the file, and the room takes the record's colour**
   (doc 12 A2 **and A3** — A2 alone did not answer the complaint: at 1920 the
   record is height-bound, so deleting the 720 px clamp bought 53 px and left

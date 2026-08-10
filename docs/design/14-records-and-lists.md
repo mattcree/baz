@@ -11,8 +11,9 @@
 > Logged in `docs/REQUESTS.md` as **designing** — *"the family was made
 > deliberately; the cost is now visible"*.
 
-**Status**: design study · **tier 1 shipped 2026-08-10** (§9) · tier 2 queued
-(`docs/WORK.md`) · tier 3 is three questions waiting on the owner. Proposes an
+**Status**: design study · **tier 1 shipped 2026-08-10** (§9) · **tier 2
+shipped 2026-08-10** — #6 and #7 adopted, **#8 declined on a frame** (§9) ·
+tier 3 is three questions waiting on the owner. Proposes an
 amendment to
 [ADR-0024](../adr/0024-playlists.md) §A1–§A2, which is where the sleeve and
 the shared page arrangement were decided, and touches
@@ -548,6 +549,14 @@ assert_eq!(users, ["views/home.rs"], …);
 so adding the token to any other view fails the build today. `views/now_playing.rs:64-70`
 argues in prose that the serif stays on the placard.
 
+> *Shipped 2026-08-10 (tier 2 #6).* The assertion is now an enumeration of
+> **two** — `views/album.rs` and `views/home.rs`, sorted — and it stays an
+> enumeration: the risk the token carries is not that the serif is used, it is
+> that it *spreads*, one surface at a time, with no single change big enough to
+> argue about. `now_playing.rs`'s prose was amended with it; what its argument
+> got right is §5.2's own worry, and what it got wrong was drawing the boundary
+> as a **count of placards** rather than as a rule about strings.
+
 **Why this is the honest axis and not decoration.** The distinction print
 has drawn for two centuries is exactly ours:
 
@@ -570,6 +579,15 @@ axis is destroyed. The defensible rule, and the one this study proposes:
 > a track's, not an artist's, not a playlist's, not a place's. baz is an
 > album-oriented product (`VISION.md`) — the album is the work here; a track
 > is a part of one, an artist is a person, a playlist is a label.
+
+*Amended in the building (tier 2 #6).* That is not quite enough on its own:
+`views/now_playing.rs` prints the sounding track's album under it, and that is
+an album's title. The clause the code needed, and the rule as shipped:
+
+> **…on the surface whose subject that album is.** Where an album's title
+> appears as a *fact about something else* — the line under the sounding
+> track, a group header in a run — it stays roman, because a placard sets the
+> title in italic and every fact around it in roman.
 
 Enumerable, and it stays one token. Three risks, named:
 
@@ -645,8 +663,15 @@ Three consequences, all good:
    the ramp does not have and which would be a real ramp change
    (`theme.rs:845-849`).
 3. `Playlist · 4 records` also **explains the collage above it** — it tells
-   you the picture is made of four things, at the moment you are looking at
-   four things.
+   you the picture is quotations from the things below.
+
+   *Corrected in the building (tier 2 #7).* This paragraph originally read
+   *"the picture is made of four things, at the moment you are looking at four
+   things"*, which is where the mistake in §9's costing came from: it treats
+   the byline's number as **the collage's** count. It is not — it is the
+   list's. The two coincide only for a playlist of exactly four distinct
+   records; for `Road Trip` (fourteen tracks, twelve records) the collage
+   quotes four of twelve, and the byline says twelve.
 
 **Wording, and why not *"Made by you"*.** ADR-0024 §4 and the panel's own
 empty state admit `.m3u8` files *dropped into the playlists folder*, which
@@ -969,13 +994,48 @@ amendment.
 | **4** | **`Save as playlist` F2** — provenance standing and no edit ⇒ the control is the readout `Saved as "Road Trip"`; after an edit ⇒ live, as `Save as new playlist`. | `views/queue.rs:337-353` + one argument from `queue.rs:246` | Kills the *"offering to save a thing whose name you are printing"* case. Follows `undo_control`'s own precedent (`queue.rs:311-318`). |
 | **5** | **Record in ADR-0024 that the collage is no longer the sole signal**, and correct ADR-0030 §2 / `views/lane.rs:550-556`, whose stated premise is false for one-to-three-record playlists. | the amendment; `views/lane.rs:550-556` prose | Stops the next agent re-deriving *"the sleeve already says it"* from a comment. |
 
-### Tier 2 — adopt with modification
+### Tier 2 — adopt with modification · **#6 and #7 shipped 2026-08-10; #8 declined**
+
+Frames, the harness and the measured blocks at
+[`docs/design/impl/serif-titles/`](impl/serif-titles/README.md); recorded in
+[ADR-0024](../adr/0024-playlists.md) §A4.4 and §A4.3.
 
 | # | change | modification, and why |
 |---|---|---|
 | **6** | **The serif italic on the pages**: the album page's hero title takes `theme::WORK_TITLE`, joining Home's placard. | Restrict to **pages and placards** — two call sites, `views/home.rs:337` and `views/album.rs:526-534`. Not the wall, not the lane (tier 3). The test `the_serif_is_the_work_titles_and_nothing_else` (`theme.rs:4223-4231`) changes from `assert_eq!(users, ["views/home.rs"])` to an enumerated list, and `views/now_playing.rs:64-70`'s prose must be amended in the same commit or the code argues with the ADR. |
 | **7** | **The byline states the composition**: `Playlist` → `Playlist · 4 records`. | Needs the distinct-record count, which `playlists.rs:1208-1222` already computes for the sleeve — the same list, published. Ship after #2 so the added line is proven at both window sizes first. |
 | **8** | **`Save as playlist` F3** — the label names its subject: `Save these 24 as a playlist`. | Only in the no-provenance case, and only if #3's `Run · ` prefix proves insufficient in a frame. A variable-length label in a 440 px strip is the risk (§6.3); measure before adopting. |
+
+**Three things this study got wrong, found in the building:**
+
+1. **#6's rule needed one more clause.** *"The serif sets an album's title and
+   only an album's title"* (§5.2) does not exclude the `Ochre` that
+   `views/now_playing.rs` prints under the sounding track — that *is* an
+   album's title. The rule shipped as **the serif italic sets an album's
+   title, on the surface whose subject that album is**. Now playing's subject
+   is a moment in a **track**; the album under it is a *fact about it*, and
+   the placard convention this whole idea comes from sets the title in italic
+   and the facts around it in roman.
+
+2. **#7's count cannot come from the sleeve's list.** §5.4 costed it as free
+   from *"the distinct-record list `playlists.rs` already computes"*. That
+   list stops at four, because four is all a 2 × 2 can quote — so the shipped
+   frame's `Road Trip`, fourteen tracks from **twelve** distinct records,
+   would have read `Playlist · 4 records` over a page listing twelve. A false
+   byline in the slot this study exists to make honest. The distinct set is
+   walked to its end instead (`OpenPlaylist::records`), and a list nothing
+   resolves states `Playlist` and claims no count.
+
+3. **#8 is declined, from the frame it was conditioned on.**
+   `docs/design/impl/serif-titles/0d-strip-unfiled-1280x860.png` reads
+   `Run · 2 of 12 · 55:00 left … Save as playlist`: the strip leads with the
+   noun, and the run's own cursor — a reading no file has — sits between the
+   subject and the word. Tier 2 also adds a second, independent statement that
+   the record below is a different sort of thing, since its title is now set
+   in a face no label can wear. Against that, §6.3 named the 440 px strip as
+   *"the one measurement in this study that wants a frame before it ships"*,
+   and `Save these 12 as a playlist` is **variable-length** — a label that fits
+   at twelve tracks and elides at 1284. Weighed and declined, not missed.
 
 ### Tier 3 — present to the owner
 
@@ -1006,7 +1066,7 @@ amendment.
 
 | test | file | what changes |
 |---|---|---|
-| `the_serif_is_the_work_titles_and_nothing_else` | `theme.rs:4182-4238` | `assert_eq!(users, ["views/home.rs"])` → an enumerated list. Tier 2/3 only. The second assertion — that nothing names `font::SERIF` directly — **stands unchanged**, which is what keeps the revert to one token. |
+| `the_serif_is_the_work_titles_and_nothing_else` | `theme.rs:4182-4238` | `assert_eq!(users, ["views/home.rs"])` → an enumerated list. Tier 2/3 only. The second assertion — that nothing names `font::SERIF` directly — **stands unchanged**, which is what keeps the revert to one token. *Shipped as `["views/album.rs", "views/home.rs"]`, sorted, since the source walk is in filesystem order.* |
 | `the_sounding_record_is_the_marked_row` | `views/lane.rs:961-979` | unaffected — the lamp is playback truth, not kind. |
 | `the_lane_is_last_touched_first_and_mixes_the_two_kinds` | `lane.rs:219-235` | unaffected — the mixing stays; only the row's second line changes. |
 | `the_summary_leads_with_provenance_until_a_new_run_replaces_it` | `player.rs:5183` | gains the `Run · ` prefix in its no-provenance assertions (tier 1 #3). |
@@ -1027,6 +1087,21 @@ New tests the changes want:
   `now_playing.rs`'s own `art_edge` tests are swept.
 - **`Save as playlist` does not offer over a run that is a saved file** —
   the §1 defect, as a unit test over the predicate rather than the widget.
+
+And two that tier 2 turned out to want, neither of them foreseen here, both
+about the thing a frame **cannot** check — that the face in the frame is the
+bundled one. `Font::with_name` is a string match, so a family spelling that
+drifts by one character resolves silently against the host's fonts and looks
+correct on the machine that shipped it:
+
+- **the family names baz asks for are the names the faces spell** —
+  `font.rs`, comparing `SANS` and `SERIF` against `name` record 16 of the
+  bundled bytes, plus the serif's italic style bit. (Record 16, not record 1:
+  record 1 is the legacy family and holds four styles, so Plex Sans Medium's
+  reads `IBM Plex Sans Medm`.)
+- **the serif face carries every letter an album title arrives with** — a
+  title is other people's text, and a codepoint the face lacks falls back
+  *per glyph*, setting half a title in a host font.
 
 ---
 
