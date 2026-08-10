@@ -221,7 +221,32 @@ pub(crate) fn view<'a>(page: Page<'a>, window_width: f32) -> Element<'a, Message
     };
 
     column![
-        place_header_led(lead, None),
+        // **The lead stands in a [`theme::TRANSPORT_HIT`] box**, which is what
+        // makes the two strips one strip.
+        //
+        // Found in a frame rather than in the source: a record's page put its
+        // sleeve at y = 88 and a playlist's at y = 77. `theme::TOP_BAR_H` is
+        // `2 · TOP_BAR_PAD_V + TRANSPORT_HIT + 1` = 49, but
+        // [`place_header_led`] does not hold its lead to it — it lays out
+        // whatever it is handed. A record's breadcrumb is a *control* and so
+        // declares 32 of its own; a playlist's name was a bare `LINE_EMPHASIS`
+        // 20, so its strip came to 37 and the whole page rode 12 px higher.
+        // Two pages of one composition, 12 px apart, from a difference in what
+        // the lead happened to be made of.
+        //
+        // Stated here rather than in the shared strip because **the rest of
+        // the product has the same 12 px** — Queue, Settings and the Artist
+        // place all lead with a bare name — and moving every place at once is
+        // a change to the frame, which is `views::mod`'s to make and is logged
+        // in `docs/WORK.md` with this measurement. What is fixed here is what
+        // this change is about: the two subject pages agreeing.
+        place_header_led(
+            container(lead)
+                .height(Length::Fixed(theme::TRANSPORT_HIT))
+                .align_y(alignment::Vertical::Center)
+                .into(),
+            None,
+        ),
         // **One scroll for the whole page.** A page is one document and
         // turning it over is one gesture. The gutter the bar needs is
         // reserved whether or not the page overflows, so a fourteenth track
@@ -629,6 +654,36 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// **The two strips are one strip**, because the composition holds its
+    /// lead at the height the frame's own token is built from.
+    ///
+    /// The defect this pins was found in a frame and is invisible in the
+    /// source: `theme::TOP_BAR_H` is `2 · TOP_BAR_PAD_V + TRANSPORT_HIT + 1`,
+    /// but `views::place_header_led` lays out whatever lead it is handed, so a
+    /// strip led by a *control* came to 49 px and a strip led by a bare name
+    /// to 37. A record's breadcrumb is a control and a playlist's name is not,
+    /// so the two pages of one composition sat 12 px apart — measured at
+    /// `docs/design/impl/one-page-two-subjects/`, sleeve top y = 88 against
+    /// y = 77.
+    #[test]
+    fn the_lead_stands_at_the_height_the_frame_declares() {
+        assert!(
+            (theme::TOP_BAR_H - 2.0f32.mul_add(theme::TOP_BAR_PAD_V, theme::TRANSPORT_HIT + 1.0))
+                .abs()
+                < f32::EPSILON,
+            "the strip's declared height is not built from the control height"
+        );
+        let source = this_module();
+        let at = source
+            .find("container(lead)")
+            .expect("the composition boxes its lead");
+        assert!(
+            source[at..source.len().min(at + 200)].contains("theme::TRANSPORT_HIT"),
+            "the lead's box is not the control height, so a page led by a word \
+             and a page led by a control are two different strips"
+        );
     }
 
     /// **Both pages state what an empty list looks like.**
