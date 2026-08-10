@@ -454,9 +454,9 @@ mod tests {
     #[test]
     fn playing_the_list_gives_the_run_no_provenance_to_offer() {
         let albums = wall();
-        assert_eq!(all(&albums).queue.provenance, None);
-        assert_eq!(of(&albums, &[1, 2]).queue.provenance, None);
-        assert_eq!(of(&albums, &[]).queue.provenance, None);
+        assert_eq!(all(&albums).queue.provenance(), None);
+        assert_eq!(of(&albums, &[1, 2]).queue.provenance(), None);
+        assert_eq!(of(&albums, &[]).queue.provenance(), None);
     }
 
     /// **Every origin answers "which file?" with `None`**, which is the
@@ -505,7 +505,7 @@ mod tests {
         assert_eq!(whole.origin, Origin::AllSongs);
         assert_eq!(whole.name(), "All songs");
         assert_eq!(whole.origin.file(), None);
-        assert_eq!(whole.queue.provenance, None);
+        assert_eq!(whole.queue.provenance(), None);
 
         // An empty library is an empty list, not a panic.
         assert!(ImplicitList::everything(&[], |_| None).is_empty());

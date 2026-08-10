@@ -109,6 +109,32 @@ fn unit_pitch(row: RowShape) -> f32 {
     row.head.map_or(0.0, header_pitch) + row_pitch(row.two_line)
 }
 
+/// **Where row `index` sits in the rows column** — `(top, height)` of its own
+/// row box, with any header that opens above it already passed over.
+///
+/// The counterpart of [`window`], and deliberately the same walk over the same
+/// pitches: the surface that scrolls *to* a row and the surface that decides
+/// which rows to *build* must not have two ideas of where a row is, or a
+/// follow would land in a spacer.
+///
+/// The header is excluded from the box on purpose. A record's name opening
+/// above the sounding row belongs to the record, not to the row, and a follow
+/// that treated it as part of the target would push the row a header's height
+/// further down the screen on exactly the tracks that open a new album —
+/// which is the one place the movement would be most noticeable.
+///
+/// `None` when `index` is past the end, which a queue shrinking under a
+/// confirmed position can produce for a frame.
+#[must_use]
+pub fn row_box(rows: &[RowShape], index: usize) -> Option<(f32, f32)> {
+    let row = *rows.get(index)?;
+    let above: f32 = rows[..index].iter().map(|&row| unit_pitch(row)).sum();
+    Some((
+        above + row.head.map_or(0.0, header_pitch),
+        row_pitch(row.two_line),
+    ))
+}
+
 /// The window over `rows` for a viewport `viewport_h` tall whose top edge
 /// is `offset` px into the rows column ([`MARGIN`] slack both ways; the
 /// caller may pass an estimate that is off by less than it).
@@ -270,5 +296,76 @@ mod tests {
         let win = window(&[], 0.0, 800.0);
         assert_eq!((win.first, win.end), (0, 0));
         assert!(win.top.abs() < f32::EPSILON && win.bottom.abs() < f32::EPSILON);
+    }
+
+    /// **A follow lands on its row, inside the built slice** — the one
+    /// invariant that makes `views::now_playing::follow` safe at kiosk scale.
+    ///
+    /// The owner asked for the sounding row to be visible when the track
+    /// changes. In a five-figure run the target is routinely **outside** the
+    /// slice currently built, so the follow has to work in one step: it
+    /// computes an offset from [`row_box`], the widget scrolls there, and the
+    /// next view recomputes [`window`] from the same offset. If those two
+    /// walks ever disagreed the surface would scroll into a spacer — a blank
+    /// column with the row nowhere on it.
+    ///
+    /// So this sweeps the whole list: for every row, the offset a follow would
+    /// choose puts that row inside `first..end` **and** inside the viewport it
+    /// was computed for.
+    #[test]
+    fn a_follow_lands_on_its_row_inside_the_built_slice() {
+        // Two rows' lead, exactly as `now_playing::FOLLOW_LEAD` spends it.
+        let lead = 2.0 * row_pitch(false);
+        let rows: Vec<RowShape> = (0..4_000)
+            .map(|index| RowShape {
+                head: (index % 13 == 0 && index > 0).then_some(index % 26 == 0),
+                two_line: index % 3 == 0,
+            })
+            .collect();
+        for viewport_h in [400.0_f32, 779.0, 2079.0] {
+            for index in (0..rows.len()).step_by(7) {
+                let (top, height) = row_box(&rows, index).expect("a row in range");
+                let offset = (top - lead).max(0.0);
+                let win = window(&rows, offset, viewport_h);
+                assert!(
+                    (win.first..win.end).contains(&index),
+                    "row {index} at viewport {viewport_h} is outside the built \
+                     slice {}..{} — a follow would scroll into a spacer",
+                    win.first,
+                    win.end
+                );
+                // …and it is genuinely on screen, not merely built: the slice
+                // is padded by `MARGIN` either way, so being inside it is a
+                // weaker claim than being inside the viewport.
+                assert!(
+                    top >= offset && top + height <= offset + viewport_h,
+                    "row {index} is built but off screen at viewport {viewport_h}"
+                );
+            }
+        }
+    }
+
+    /// **`row_box` walks the same pitches `window` does.** Stated over the
+    /// whole list rather than at a sample, because the two functions are two
+    /// walks over one geometry and the only thing keeping them honest is that
+    /// they agree at every index.
+    #[test]
+    fn a_rows_box_agrees_with_the_columns_own_height() {
+        let rows = shapes(200);
+        let mut y = 0.0_f32;
+        for (index, row) in rows.iter().enumerate() {
+            let (top, height) = row_box(&rows, index).expect("in range");
+            let header = row.head.map_or(0.0, header_pitch);
+            assert!((top - (y + header)).abs() < f32::EPSILON, "row {index}");
+            assert!((height - row_pitch(row.two_line)).abs() < f32::EPSILON);
+            y += unit_pitch(*row);
+        }
+        assert!((y - total(&rows)).abs() < 0.01, "the walk left the column");
+        // Past the end is `None` rather than a clamp: a queue shrinking under
+        // a confirmed position can ask for a row that is no longer there, and
+        // a follow to a clamped last row would move the surface for a reason
+        // the listener cannot see.
+        assert_eq!(row_box(&rows, rows.len()), None);
+        assert_eq!(row_box(&[], 0), None);
     }
 }

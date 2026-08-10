@@ -226,6 +226,64 @@ fn sleeve_cell(shelf: &Shelf, album: u64, size: f32) -> Element<'static, Message
     }
 }
 
+/// **The well's clear mark** — the `×` the owner asked for, in whichever of the
+/// two wells is on screen (ADR-0036 §4).
+///
+/// One function because there are two wells and they must not drift: the lane's
+/// ([`lane`]) above [`theme::SIDEBAR_FLOOR`], the strip's ([`top_bar`]) below
+/// it. Both lay it over the field's left padding in the box the magnifier
+/// otherwise holds, so it is the same mark in the same place at every width,
+/// and both are handed their own ground — the well is a [`theme::Palette::recess`]
+/// in the lane and a recess in the strip, and a wash is a function of what it
+/// is drawn on.
+///
+/// **It is a control, so it wears a control's anatomy**: [`theme::STEPPER_HIT`]
+/// 24 square — the same box the playlist row's own removal cross takes — which
+/// is exactly [`theme::SIDEBAR_GLYPH_BOX`], the destinations' glyph box, so it
+/// lands on the head's glyph vertical without a constant of its own.
+///
+/// **At [`theme::glyph_opacity`]'s resting reading**, which is the same 0.57 the
+/// magnifier it replaces is drawn at, and the same every live icon button in the
+/// product wears at rest. It was tried at [`theme::GLYPH_OPACITY_HOVER`] — the
+/// weight the playlist row's cross takes — and the frame settled it: that cross
+/// is *revealed* by a hover and is on screen for as long as the pointer is,
+/// whereas this one stands for the whole life of a query, and at full ink it was
+/// the loudest object in the lane, louder than the query it offers to delete.
+/// The pointer's answer is the button's own wash ([`theme::transport`]), which
+/// is what a wash is for.
+///
+/// The icon-only law (doc 10 §3.1) wants a word for it, and the word says what
+/// the key says — the two roads are one function in `app.rs`.
+pub(crate) fn clear_mark(on: Color) -> Element<'static, Message> {
+    let room = theme::active();
+    let mark = container(
+        iced_image(crate::icon::handle(crate::icon::Glyph::Close))
+            .width(Length::Fixed(theme::ICON_PX))
+            .height(Length::Fixed(theme::ICON_PX))
+            .opacity(theme::glyph_opacity(true, false)),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    iced::widget::tooltip(
+        iced::widget::button(mark)
+            .width(Length::Fixed(theme::STEPPER_HIT))
+            .height(Length::Fixed(theme::STEPPER_HIT))
+            .padding(0)
+            .style(move |_theme, status| theme::transport(room, on, status))
+            .on_press(Message::ClearSearch),
+        text("Clear the search (Esc)")
+            .size(theme::SIZE_CAPTION)
+            .line_height(theme::LEADING_CAPTION),
+        iced::widget::tooltip::Position::Bottom,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
+    .into()
+}
+
 /// **The strip every place that is not the Library wears**: the way back, the
 /// place's name, and one quiet line saying what the place is or how to leave
 /// it.

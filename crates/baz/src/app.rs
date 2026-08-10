@@ -254,6 +254,17 @@ pub(crate) enum Message {
     SetupSubmit,
     /// Shelf: search text changed.
     SearchChanged(String),
+    /// **The well's clear mark** — the `×` the owner asked for (2026-08-10:
+    /// *"maybe a little x or esc to clear would make sense too"*).
+    ///
+    /// It is <kbd>Esc</kbd>'s pointer route and nothing more: both land in
+    /// [`Shelf::clear_query`], so the query goes, the caret leaves the field
+    /// and the transport gets the keyboard back. Present exactly while a query
+    /// stands, which is exactly when <kbd>Esc</kbd> has that layer to peel —
+    /// the rule ADR-0036 §4 states, that no pointer route may exist for a
+    /// state the keyboard cannot reach and none may act where the key would
+    /// not.
+    ClearSearch,
     /// **Type anywhere**: a bare printable character was pressed with nothing
     /// focused, so it is the query's (ADR-0017 §1.2, [`crate::keys`]).
     ///
@@ -297,27 +308,8 @@ pub(crate) enum Message {
     /// Esc anywhere: peel one layer, top down — the place you are in, then the
     /// search query, then the shuffle pool's marks (see [`App::escape`]).
     EscapePressed,
-    /// <kbd>Ctrl</kbd>+<kbd>U</kbd> — *up next*: go to **Now playing** with
-    /// the run standing.
-    ///
-    /// The accelerator of two visible controls at once, which is what makes it
-    /// legal (ADR-0023's amendment): the lane's `Now playing` row, and the
-    /// place's own `Run` word. It does **not** toggle — it is a destination's
-    /// accelerator, and a destination never closes itself
-    /// ([`crate::place::Place::go`]). <kbd>Esc</kbd> is the way out.
-    ShowTheRun,
-    /// **The `Run` word**, in the now-playing place's own top-right corner:
-    /// show the run beside the record, or stand it down
-    /// (`docs/design/12-now-playing-and-kiosk.md` §3.4.3).
-    ///
-    /// The merged surface's two densities, as a **stated control** rather than
-    /// as a consequence of the window manager: `F11` changes nothing about it,
-    /// because iced 0.13 cannot tell baz which display it is filling and a
-    /// full-screen that decided what a place *contained* would strand a
-    /// single-display listener. Remembered across launches
-    /// ([`config::Config::run_column`]).
-    ToggleRun,
-    /// **The bar's now-playing block**: go to `Now playing`.
+    /// **The bar's now-playing block, and <kbd>Ctrl</kbd>+<kbd>U</kbd>**: go
+    /// to `Now playing`.
     ///
     /// The prior-art study's R3 — *get back to what is playing* — which every
     /// product it surveyed spends an affordance on and baz had none for. It
@@ -326,6 +318,15 @@ pub(crate) enum Message {
     /// exists now and is that surface, so the block leads there: the text
     /// naming what is playing takes you to the place about what is playing.
     /// The record is one step further on, which is the right way round.
+    ///
+    /// **`Message::ShowTheRun` folded into this one** when the `Run` word was
+    /// removed. That message was this message plus *turn the density on*, and
+    /// with one density left it was this message with a longer name. So
+    /// <kbd>Ctrl</kbd>+<kbd>U</kbd> sends this, and stays legal on the twin it
+    /// always had: the returns lane's `Now playing` row, which is the same
+    /// destination and is visible at rest. It does **not** toggle — a
+    /// destination never closes itself ([`crate::place::Place::go`]) — and
+    /// <kbd>Esc</kbd> is the way out.
     ShowNowPlaying,
     /// A row of the **Queue** place was clicked: play the queue from that
     /// zero-based position ([`Command::JumpTo`], ADR-0014).
@@ -548,11 +549,8 @@ pub(crate) enum Message {
     Scrolled(Viewport),
     /// Window resized (approximate grid geometry until the next scroll).
     WindowResized(Size),
-    /// A word in the top bar's group-key row, or `1`–`5`: arrange the wall by
+    /// A word in the top bar's group-key row, or `1`–`6`: arrange the wall by
     /// this key (ADR-0019). Persisted — a listener sets it once.
-    ///
-    /// It also puts the wall back on the **records** (ADR-0035): the five keys
-    /// are how records are arranged, so pressing one is asking for records.
     GroupKeySelected(baz_core::index::GroupKey),
     /// An entry in the index rail was clicked: put that shelf at the top of
     /// the wall. Carries the run's index, not a pixel — the rail knows which
@@ -856,14 +854,11 @@ pub(crate) enum Message {
     FileHoverLeft,
 }
 
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "the shell holds one flag per remembered *view* decision — the \
-              lane's width, the run column's density — beside two facts about \
-              the launch itself. They are independent standing answers with \
-              independent controls and independent config keys; bundling them \
-              into a state enum would name a mode nobody can be in"
-)]
+// The `clippy::struct_excessive_bools` expectation that stood here is gone with
+// the run column's density: the shell held one flag per remembered *view*
+// decision, and removing the `Run` word took the count back under the lint's
+// threshold on its own. A silenced lint that falls silent by itself is the
+// tidiest evidence a reduction was real.
 struct App {
     started: Instant,
     first_frame_logged: bool,
@@ -1003,10 +998,6 @@ struct App {
     /// Whether the returns lane opens open, read from the config for
     /// `group_key`'s reason and handed to the shelf the same way.
     lane_open: bool,
-    /// **Whether the now-playing place stands its run beside the record** —
-    /// the `Run` word's state, read from the config on the first frame for
-    /// `lane_open`'s reason exactly ([`config::Config::run_column`]).
-    run_column: bool,
     /// **The lane, merged**: the shelf's recent records and every playlist,
     /// in [`crate::lane::resolve`]'s one order.
     ///
@@ -1162,8 +1153,6 @@ impl App {
             .as_ref()
             .map_or(shelf::Density::Balanced, |config| config.density);
         let lane_open = stored.as_ref().is_none_or(|config| config.sidebar_open);
-        // The merged now-playing place's density, restored on the same terms.
-        let run_column = stored.as_ref().is_none_or(|config| config.run_column);
         // **The shuffle property, restored.** A standing decision
         // (`config::Config::shuffle`), seeded rather than assumed for
         // `seed_volume`'s reason: the control must be lit on the first frame,
@@ -1211,7 +1200,6 @@ impl App {
             settings_section: 0,
             density,
             lane_open,
-            run_column,
             lane: Vec::new(),
             lane_mark: (u64::MAX, u64::MAX),
             art_mark: ((u64::MAX, u64::MAX), Place::Settings),
@@ -1335,17 +1323,6 @@ impl App {
             // and the Library's own state — scroll, query, arrangement — is
             // untouched by all of them, which is what makes coming back free.
             Message::ToggleSettings => self.go(Place::settings),
-            Message::ShowTheRun => {
-                // The place's scrollable starts at the top the next time it
-                // exists (see `queue_scroll`).
-                self.queue_scroll = 0.0;
-                let task = self.set_run(true);
-                Task::batch([
-                    task,
-                    self.go(|place| place.go(crate::lane::Destination::NowPlaying)),
-                ])
-            }
-            Message::ToggleRun => self.toggle_run(),
             // **Shift-click a sleeve queues the record** — the one-press
             // accelerator over the picker's Queue row (ADR-0023 §3's stack;
             // doc 09 §13 step 7). A plain press navigates, exactly as
@@ -1364,8 +1341,6 @@ impl App {
             // the toggle, so pressing the artist you are already reading puts
             // the page down, exactly as a tile pressed twice does.
             Message::OpenArtist(id) => self.go(|place| place.artist(id)),
-            // The density it lands in is whatever was last chosen; only
-            // `Ctrl+U` asks for the run specifically.
             Message::ShowNowPlaying => {
                 self.go(|place| place.go(crate::lane::Destination::NowPlaying))
             }
@@ -1386,8 +1361,20 @@ impl App {
             Message::FirstFrame => self.log_first_frame(),
             Message::SetupSubmit => self.submit_setup(),
             Message::Playback(event) => {
+                // **The track's own identity, before and after.**
+                // `track_seq` is documented as a count that changes exactly
+                // when the playing track changes — and, because it is bumped
+                // only on a genuinely different path, a *seek* does not move
+                // it. That is precisely the trigger the run's follow wants:
+                // the engine's own confirmation of a new track, never a clock
+                // and never a request.
+                let before = self.player.track_seq();
                 self.apply_player_event(event);
-                Task::none()
+                if self.player.track_seq() == before {
+                    Task::none()
+                } else {
+                    self.follow_the_run()
+                }
             }
             Message::PlayAlbum(id) => {
                 self.play_album(id);
@@ -1846,7 +1833,12 @@ impl App {
                     self.menu = None;
                     let from = self.place;
                     self.place = self.place.playlist(*id);
-                    self.note_place_left(from);
+                    // A playlist door, or the Library after a delete —
+                    // never `Now playing`, so the only task this can answer
+                    // with is `Task::none()`, and the machine this arm lives
+                    // in answers `bool`. Discarded deliberately rather than
+                    // by omission.
+                    let _ = self.note_place_left(from);
                 } else if let Screen::Shelf(state) = &self.screen
                     && self.playlists.open_page(*id, &state.library)
                 {
@@ -1855,7 +1847,12 @@ impl App {
                     self.menu = None;
                     let from = self.place;
                     self.place = self.place.playlist(*id);
-                    self.note_place_left(from);
+                    // A playlist door, or the Library after a delete —
+                    // never `Now playing`, so the only task this can answer
+                    // with is `Task::none()`, and the machine this arm lives
+                    // in answers `bool`. Discarded deliberately rather than
+                    // by omission.
+                    let _ = self.note_place_left(from);
                 }
             }
             Message::PickPlaylist(id) => {
@@ -1930,7 +1927,12 @@ impl App {
                     // hashed, so a rename mints a new one.
                     let from = self.place;
                     self.place = Place::Playlist(renamed);
-                    self.note_place_left(from);
+                    // A playlist door, or the Library after a delete —
+                    // never `Now playing`, so the only task this can answer
+                    // with is `Task::none()`, and the machine this arm lives
+                    // in answers `bool`. Discarded deliberately rather than
+                    // by omission.
+                    let _ = self.note_place_left(from);
                 }
             }
             Message::PlaylistDelete => {
@@ -1943,7 +1945,12 @@ impl App {
                     // honest answer, by the same route Esc takes.
                     let from = self.place;
                     self.place = self.place.back();
-                    self.note_place_left(from);
+                    // A playlist door, or the Library after a delete —
+                    // never `Now playing`, so the only task this can answer
+                    // with is `Task::none()`, and the machine this arm lives
+                    // in answers `bool`. Discarded deliberately rather than
+                    // by omission.
+                    let _ = self.note_place_left(from);
                 }
             }
             Message::SaveQueueStart => {
@@ -2188,7 +2195,9 @@ impl App {
             album,
             artist,
             items,
-            provenance: None,
+            // **Assembled**: this is the listener building a run by hand, one
+            // pick at a time, and it is the one kind the save word is for.
+            source: vm::RunSource::Assembled,
         });
     }
 
@@ -2206,7 +2215,7 @@ impl App {
             album: None,
             artist: String::new(),
             items: Vec::new(),
-            provenance: None,
+            source: vm::RunSource::Assembled,
         });
         let edited = if let Some(held) = self.player.queue() {
             let mut edited = held.clone();
@@ -2218,8 +2227,11 @@ impl App {
             // unasked. An append is not a play gesture, so whatever built
             // `addition` — a playlist page's `Queue` included — the loaded
             // run carries **no provenance** (09 §6: provenance is set by
-            // reifying a file through a play gesture, and by nothing else).
-            addition.provenance = None;
+            // reifying a file through a play gesture, and by nothing else) —
+            // and it is **assembled**, whatever it was built from, because a
+            // run that exists only because somebody appended to nothing is a
+            // run somebody assembled.
+            addition.source = vm::RunSource::Assembled;
             addition
         };
         let paths = edited.paths();
@@ -2414,11 +2426,21 @@ impl App {
         let Screen::Shelf(state) = &self.screen else {
             return;
         };
+        // **The two keys, read in one fixed order** (`session::Snapshot`'s
+        // own note): a file's name wins, because a run reified from a playlist
+        // is that kind whatever else the file says; otherwise the remembered
+        // `assembled` flag decides, and its absence is `Fixed` — the reading
+        // that offers nothing.
+        let source = match self.resume.provenance.clone() {
+            Some(name) => vm::RunSource::Playlist(name),
+            None if self.resume.assembled => vm::RunSource::Assembled,
+            None => vm::RunSource::Fixed,
+        };
         let (queue, _) = vm::restored_queue(
             &state.albums,
             &self.resume.paths,
             self.resume.cursor,
-            self.resume.provenance.clone(),
+            source,
         );
         if queue.is_empty() {
             return;
@@ -2677,35 +2699,6 @@ impl App {
         self.set_lane(!self.lane_open)
     }
 
-    /// **The `Run` word**: put the run on the now-playing surface, or stand it
-    /// down (doc 12 §3.4.3), and remember which.
-    ///
-    /// **Turning it off clears the run's undo history**, and that is the same
-    /// rule leaving the place obeys rather than a new one: `Undo` is a word in
-    /// the run's own summary strip, and an accelerator whose visible twin is
-    /// off screen is not legal (doc 11 §5 P2, doc 12 §6.4.4).
-    fn toggle_run(&mut self) -> Task<Message> {
-        self.set_run(!self.run_column)
-    }
-
-    /// Put the run column in `on` — the `Run` word, and
-    /// <kbd>Ctrl</kbd>+<kbd>U</kbd>, which asks for the surface *and* its list.
-    fn set_run(&mut self, on: bool) -> Task<Message> {
-        if self.run_column == on {
-            return Task::none();
-        }
-        self.run_column = on;
-        if !on {
-            self.queue_undo.clear();
-        }
-        // The column's scrollable is unmounted and re-created with the density,
-        // so the remembered offset would window rows the widget is not showing
-        // (`queue_scroll`'s own note).
-        self.queue_scroll = 0.0;
-        persist_run_column(on);
-        Task::none()
-    }
-
     /// Put the lane in `open` — the marks at its foot,
     /// <kbd>Ctrl</kbd>+<kbd>B</kbd>, and every road to the well
     /// ([`Self::reach_the_well`]) — persisting the state and re-hanging the
@@ -2820,7 +2813,7 @@ impl App {
             state.hovered_all_songs = false;
             let from = self.place;
             self.place = door(self.place);
-            self.note_place_left(from);
+            return self.note_place_left(from);
         }
         Task::none()
     }
@@ -2845,8 +2838,10 @@ impl App {
         self.drag = None;
         let from = self.place;
         self.place = self.place.album(id);
-        self.note_place_left(from);
-        Task::none()
+        // A record's page, never `Now playing` — the task is `Task::none()`
+        // by construction, and returning it keeps that true if the door ever
+        // changes where it lands.
+        self.note_place_left(from)
     }
 
     /// **Go home** — every place's `‹ Library`, and the first thing
@@ -2858,8 +2853,10 @@ impl App {
         self.menu = None;
         self.drag = None;
         let from = self.place;
-        self.place = self.place.back();
-        self.note_place_left(from);
+        // `back()` can reach `Now playing` from a record's page opened out of
+        // the run, so this one genuinely has a follow to answer with — it is
+        // batched at the end of the function with the rest of `leave`'s work.
+        let entering = self.note_place_left(from);
         // A place's transient fields do not outlive the place: a rename
         // field left standing behind a navigation would greet the next
         // visit mid-gesture.
@@ -2867,7 +2864,7 @@ impl App {
             open.renaming = None;
         }
         self.playlists.saving_queue = None;
-        Task::none()
+        entering
     }
 
     /// <kbd>Esc</kbd>'s place-level share of the peel: the transient fields
@@ -3880,13 +3877,82 @@ impl App {
         self.publish_mpris(false);
     }
 
+    /// **Bring the sounding row into view in the run column**, or leave the
+    /// column exactly where it is.
+    ///
+    /// The owner, 2026-08-10: *"ideally the currently playing item in the
+    /// playlist is where our scroll goes to i.e. it should be visible when we
+    /// change track"*.
+    ///
+    /// Everything about *whether* to move is
+    /// [`views::now_playing::follow`]'s — it answers `None` for a row that is
+    /// already on screen, which is most track changes inside one record. What
+    /// is here is the two halves the view cannot do: the place check, and the
+    /// widget operation.
+    ///
+    /// **Only while the place is on screen.** A follow computed for a surface
+    /// nobody is looking at would be spent on a scrollable that iced has not
+    /// built, and the offset would be stale by the time it was. Arriving at the
+    /// place computes its own ([`Self::note_place_left`]), which is the same
+    /// call with the same function.
+    ///
+    /// `queue_scroll` is written here as well as driven, so the **virtual
+    /// window** and the widget agree on the same frame: the window is computed
+    /// from this field, and a widget that had scrolled while the field had not
+    /// would draw the slice for the old offset.
+    fn follow_the_run(&mut self) -> Task<Message> {
+        if self.place != Place::NowPlaying {
+            return Task::none();
+        }
+        let Screen::Shelf(state) = &self.screen else {
+            return Task::none();
+        };
+        let Some(target) = views::now_playing::follow(
+            state,
+            &self.player,
+            self.body_width(),
+            self.body_height(),
+            self.queue_scroll,
+        ) else {
+            return Task::none();
+        };
+        self.queue_scroll = target;
+        scrollable::scroll_to(
+            views::queue::run_scroll_id(),
+            AbsoluteOffset { x: 0.0, y: target },
+        )
+    }
+
     /// Bookkeeping for a place change: an edit history belongs to the
     /// surface that shows its `Undo` word, and leaving that surface is one
     /// of the three things that end it (P2: "until the next edit, a
     /// navigation, or the run ending").
-    fn note_place_left(&mut self, from: Place) {
+    ///
+    /// # …and the run's scroll, on the way *in*
+    ///
+    /// [`Self::queue_scroll`]'s own note says the offset must be re-established
+    /// when the place is entered, because iced 0.13 keys widget state by tree
+    /// position: leaving unmounts the run's scrollable and coming back
+    /// re-creates it at the top, so a remembered offset windows rows the widget
+    /// is not showing.
+    ///
+    /// **It was written on one route in and not on the others.**
+    /// `Message::ShowTheRun` reset it to zero; the lane's `Now playing` row and
+    /// the bar's now-playing block did not, so those two reached the place with
+    /// a stale offset and the virtual window drew the wrong slice. That message
+    /// has gone with the `Run` word, which is what forced the question — and
+    /// the answer is that this belongs to *entering the place*, not to one
+    /// press. So it is here, where every route already passes.
+    ///
+    /// **And it is no longer zero.** The owner asked for the sounding row to be
+    /// where the scroll goes, and *arriving* is the first moment that is true
+    /// of: opening the place on the top of a run you are forty tracks into is
+    /// the same defect as not following a track change, reached by a different
+    /// door. So the entry offset is [`Self::follow_the_run`]'s answer, and zero
+    /// only when there is nothing to follow.
+    fn note_place_left(&mut self, from: Place) -> Task<Message> {
         if from == self.place {
-            return;
+            return Task::none();
         }
         if from == Place::NowPlaying {
             self.queue_undo.clear();
@@ -3894,6 +3960,14 @@ impl App {
         if matches!(from, Place::Playlist(_)) {
             self.playlists.clear_undo();
         }
+        if self.place != Place::NowPlaying {
+            return Task::none();
+        }
+        // The widget is about to be built fresh at zero, so the follow is
+        // computed against zero rather than against what the *last* visit left
+        // in `queue_scroll` — the field is stale by definition on this path.
+        self.queue_scroll = 0.0;
+        self.follow_the_run()
     }
 
     /// Send a transport command, marking it pending on acceptance and
@@ -4022,7 +4096,6 @@ impl App {
                 &self.player,
                 self.body_width(),
                 self.body_height(),
-                self.run_column,
                 // The hover slots go quiet while a row is in the hand: the
                 // gesture's own statements — the ghost and the line — are
                 // the surface's voice mid-drag.
@@ -4065,10 +4138,11 @@ impl App {
                     &self.lane,
                     self.player.now_playing_path().is_some(),
                     // Two facts, not one: *anything* is sounding lights the
-                    // head's `Now playing` dot, and *this record* is sounding
-                    // lights its own row. They differ for a file the library
+                    // head's `Now playing` dot, and *the row the run came
+                    // from* lights its own. They differ for a file the library
                     // does not hold — the head still answers, the list has
                     // nothing to mark.
+                    //
                     self.player.playing_album(),
                     self.window.width,
                 ),
@@ -4375,7 +4449,7 @@ pub(crate) struct Shelf {
     /// The open library: the search index the counts and the query run over.
     pub(crate) library: Library,
     /// How the wall is arranged (ADR-0019). Persisted in `config.toml`; the
-    /// top bar's row of words and `1`–`5` are the two ways to change it.
+    /// top bar's row of words and `1`–`6` are the two ways to change it.
     pub(crate) group_key: GroupKey,
     /// How closely the wall hangs (ADR-0017 step 6). Persisted in
     /// `config.toml`; <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd>
@@ -4722,6 +4796,9 @@ impl Shelf {
                     self.request_visible_thumbs(),
                 ])
             }
+            // **The `×`, which is `Esc`'s pointer route** — the identical
+            // function, so the two cannot drift (ADR-0036 §4).
+            Message::ClearSearch => self.clear_query(),
             // **Type anywhere** has no arm here any more. Its message is
             // answered by the shell (`App::type_anywhere`), which reaches the
             // well — the Library, and the lane opened if the well is in it —
@@ -5015,7 +5092,7 @@ impl Shelf {
         Task::none()
     }
 
-    /// **Arrange the wall by `key`** — the top bar's row of words and `1`–`5`
+    /// **Arrange the wall by `key`** — the top bar's row of words and `1`–`6`
     /// both land here.
     ///
     /// Re-arranging is a *projection*, never a filter: every album is still
@@ -6227,13 +6304,6 @@ fn persist_lane(open: bool) {
     persist(|config| config.sidebar_open = open);
 }
 
-/// Remember whether the now-playing place stands its run beside the record —
-/// `persist_lane`'s argument exactly (doc 12 §3.4.3: one bool in
-/// `config.toml`, the `Run` word as its only control, and **no Settings row**).
-fn persist_run_column(on: bool) {
-    persist(|config| config.run_column = on);
-}
-
 /// **What `session.toml` should say about the run** — or `None` for *leave the
 /// file exactly as it is*.
 ///
@@ -6290,7 +6360,14 @@ fn next_snapshot(player: &PlayerState, position_ms: u64) -> Option<crate::sessio
                 paths: queue.paths(),
                 cursor,
                 position_ms,
-                provenance: queue.provenance.clone(),
+                provenance: queue.provenance().map(str::to_owned),
+                // The *kind* survives the quit, so the strip offers the same
+                // word tomorrow that it offers tonight. The **edit flag does
+                // not** and deliberately: `queue_edited` is a fact about this
+                // session, so a fixed run edited tonight comes back fixed,
+                // which is the same rule every other session-scoped reading
+                // here already follows.
+                assembled: matches!(queue.source, vm::RunSource::Assembled),
             }),
             None if player.phase() == player::Phase::Stopped => {
                 Some(crate::session::Snapshot::default())
@@ -6384,13 +6461,22 @@ fn draw_seed() -> u64 {
 /// names no list, and its plays fold onto their records exactly as they always
 /// did.
 ///
-/// When ADR-0034 §1 lands and `QueueVm` carries an `Origin` of its own, this
-/// becomes `queue.origin.as_ref().map(Origin::encode)` and nothing else in the
-/// file changes.
+/// # Why not `RunSource`, which is right here
+///
+/// [`vm::RunSource`] is the same question answered on the queue's side, and its
+/// `Assembled` is [`Origin::Hand`](crate::origin::Origin::Hand) under another
+/// name. It is deliberately **not** spent here, because writing a marker
+/// *excludes* that run's plays from the records they quoted — and
+/// [`crate::lane::subject_of`] has no row to credit a run made by hand, so a
+/// `hand::` marker would lose the touch rather than move it. The rule is stated
+/// once, in `crate::origin`, and asserted there.
+///
+/// When ADR-0034 §1 lands, `RunSource` and `Origin` become one type, this
+/// becomes `queue.origin.as_ref().map(Origin::encode)`, and the lane grows the
+/// rows that make the other kinds safe to write.
 fn run_origin(queue: &vm::QueueVm) -> Option<String> {
     queue
-        .provenance
-        .as_deref()
+        .provenance()
         .map(|name| crate::origin::Origin::playlist(name).encode())
 }
 
@@ -6691,14 +6777,19 @@ mod tests {
             ("VolumeStep", "the bottom bar's volume fader"),
             ("ToggleMute", "the bottom bar's speaker button"),
             (
-                "ShowTheRun",
-                "the returns lane's `Now playing` row, plus the place's own \
-                 `Run` word — two visible controls, which is what makes the \
-                 one chord legal (doc 12 §3.4.4)",
+                "ShowNowPlaying",
+                "the returns lane's `Now playing` row, and the bar's own \
+                 now-playing block — two visible controls sending this exact \
+                 message, which is what makes the one chord legal",
             ),
             ("ToggleSettings", "the top bar's Settings control"),
             ("FocusSearch", "the top bar's search well"),
-            ("EscapePressed", "every place's `‹ Library`"),
+            (
+                "EscapePressed",
+                "every place's `‹ Library`, and — for the query layer the peel \
+                 ends on — the well's own clear mark, which is this key's \
+                 pointer route into the identical function (ADR-0036 §4)",
+            ),
             (
                 "QueryTyped",
                 "the top bar's search well — the field ADR-0017 §1.2 kept, \
@@ -6720,9 +6811,10 @@ mod tests {
             ),
             (
                 "GroupKeySelected",
-                "the top bar's row of five words (ADR-0019); the first of \
-                 them, ARTIST, shelves the wall one artist at a time \
-                 (ADR-0035)",
+                "the top bar's row of six words (ADR-0019); the first two, \
+                 A–Z and ARTIST, are the same order broken into letter \
+                 shelves and into a shelf per artist (ADR-0035, as thrice \
+                 amended)",
             ),
             (
                 "SetVolume",
@@ -7372,8 +7464,14 @@ mod tests {
     }
 
     /// The two place keys, spelled out: Ctrl+`U` is the same press as the
-    /// lane's `Now playing` row *and* the place's `Run` word, and Ctrl+`,` the
-    /// same press as the top bar's `Settings` word.
+    /// lane's `Now playing` row and the bar's now-playing block, and Ctrl+`,`
+    /// the same press as the top bar's `Settings` word.
+    ///
+    /// Ctrl+`U` used to be that row **plus the place's `Run` word**, which is
+    /// the construction ADR-0023's amendment blesses for an accelerator that
+    /// sends two messages. The word is gone (the owner, 2026-08-10) and so is
+    /// the second message: the chord is now literally the message two visible
+    /// controls send, which is the simpler legality.
     ///
     /// Both are modified, and that is the shape of the modifier layer ADR-0017
     /// §1.2 asks for: bare `q` and bare `u` are letters of the query.
@@ -7388,7 +7486,7 @@ mod tests {
         );
         assert_eq!(
             format!("{from_key:?}"),
-            format!("{:?}", Some(Message::ShowTheRun))
+            format!("{:?}", Some(Message::ShowNowPlaying))
         );
 
         let from_key = keys::binding_for(
@@ -7493,6 +7591,57 @@ mod tests {
             set.contains("theme::sidebar_can_expand(state.window_w)"),
             "`set_lane` can expand the lane at a width that cannot hold it"
         );
+    }
+
+    /// **The `×` is <kbd>Esc</kbd>'s pointer route, and it is the same
+    /// function** — ADR-0036 §4, the owner's *"maybe a little x or esc to clear
+    /// would make sense too"*.
+    ///
+    /// He named both roads in one sentence, which is the requirement stated:
+    /// they must not merely agree, they must be one act. So both arms call
+    /// [`Shelf::clear_query`] — the query goes, the caret leaves the field and
+    /// the transport gets the keyboard back — and neither has a body of its
+    /// own to drift in.
+    ///
+    /// The other half of the rule is *when*: the mark is drawn exactly while a
+    /// query stands, which is exactly the condition under which the key has
+    /// that layer to peel. A cross over an empty field would be a control that
+    /// does nothing, and a key that clears with no query is the same defect
+    /// from the other side.
+    #[test]
+    fn the_wells_clear_mark_and_escape_are_one_act() {
+        let source = include_str!("app.rs").replace("\r\n", "\n");
+        assert!(
+            source.contains("Message::ClearSearch => self.clear_query(),"),
+            "the well's `×` no longer resolves to the query's one clear"
+        );
+        let rest = source
+            .split_once("fn peel(&mut self) -> Task<Message> {")
+            .expect("the shelf's Escape peel")
+            .1;
+        let peel = &rest[..rest.find("\n    }\n").expect("a function ends")];
+        assert!(
+            peel.contains("self.clear_query()"),
+            "Escape's query layer and the `×` have stopped being one function"
+        );
+        assert!(
+            peel.contains("!self.query.is_empty()"),
+            "Escape clears a query that is not there, so the `×` it mirrors \
+             would be a control with nothing to act on"
+        );
+        // And the mark itself is drawn under the same predicate, in both
+        // wells — the lane's above `SIDEBAR_FLOOR` and the strip's below it.
+        for well in [
+            include_str!("views/lane.rs"),
+            include_str!("views/top_bar.rs"),
+        ] {
+            assert!(
+                well.contains("let mark: Element<'_, Message> = if filtering {")
+                    && well.contains("clear_mark(room.recess)"),
+                "a well draws its clear mark on something other than a live \
+                 query, or not at all"
+            );
+        }
     }
 
     /// **The blur is a different id, and that is the whole mechanism.**
@@ -7757,7 +7906,7 @@ mod tests {
                 item("Anhydrous 2", "/m/2.flac"),
                 item("Anhydrous 3", "/m/3.flac"),
             ],
-            provenance: Some("Road Trip".to_owned()),
+            source: vm::RunSource::Playlist("Road Trip".to_owned()),
         }
     }
 

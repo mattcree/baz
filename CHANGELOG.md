@@ -466,6 +466,41 @@ next commit.
 
 **Interface**
 
+- **`A–Z` is a group key again, first in the row**
+  ([ADR-0035](docs/adr/0035-the-wall-has-a-subject.md), third amendment). The
+  owner, on the wall that shipped an hour earlier: *"also, we have removed the
+  a-z option from grouping? that feels like it should go back and honestly it's
+  the first option, followed by artist"*. The strip reads **A–Z · ARTIST ·
+  YEAR · GENRE · ADDED · PLAYED**, and <kbd>1</kbd>…<kbd>6</kbd> select them in
+  that order.
+  - **Two densities of one order, on purpose.** `A–Z` breaks the wall into 27
+    letter shelves; `ARTIST` breaks the same traversal finer, one shelf per
+    person. The entry below deleted `A–Z` on the ground that the two are the
+    same traversal, which is true and is now the reason both exist: the owner
+    uses them differently, and the coarser wall is not a caption for the finer
+    one at the sizes a real library reaches.
+  - **A new code, `"alphabet"`.** `GroupKey::code` is on-disk config and a code
+    is never repurposed — so the restored key does **not** take `"artist"`
+    back. That word already changed meaning once without saying so (it named
+    the initial grouping before ADR-0035 and the artist grouping after), which
+    is now recorded on `GroupKey::code` itself; giving it away again would make
+    one code name three arrangements. Every `config.toml` on disk keeps the
+    arrangement it currently resolves to.
+  - **The rail gained no branch.** One function serves both keys: the first
+    shelf of each initial's run, which is a letter per artist-run under
+    `ARTIST` and the identity under `A–Z`. `Initial` is unchanged and is now
+    both a wall header and a rail letter, one mapping asked of `baz-core` in
+    both places. `A–Z`'s headers are inert text — a letter is not a place —
+    while `ARTIST`'s header is still the door to the artist's page.
+  - **The strip's budget, re-derived rather than reused.** The row has carried
+    a sixth word before and it was `ARTISTS`, at 77.49 px; `A–Z` costs
+    **44.92**, so the figures are not the earlier costing's. Measured row
+    357.91, `KEYS_W` 314 → **360**, `LIBRARY_LINE` 506 → **552**,
+    `TOP_BAR_SPLIT` 778 → **824**, `SINGLE_LINE_NO_WELL` 554 → **600** against
+    an unmoved `WIDEST_LANE_STRIP` 720. **The window's own minimum did not have
+    to move** — the library line sits 48 px under the 600 floor — and the
+    single-line-with-well band survives at 824…904.
+
 - **`ARTIST` groups the wall by artist**
   ([ADR-0035](docs/adr/0035-the-wall-has-a-subject.md)). The owner, on the
   artists wall that shipped earlier the same day: *"artists should be grouping
@@ -631,15 +666,11 @@ next commit.
     none, because the lane is the route and the run's head states the list.
     The two empty states become one: the run's wins, because it names the
     gestures that fill the list.
-  - **Two densities, chosen and remembered.** The `Run` word in the place's
-    top-right decides whether the list is on screen, persisted as
-    `run_column` in `config.toml`. It is **not** bound to full-screen: iced
-    0.13 publishes no monitor enumeration, so baz cannot tell a
-    second-display full-screen from an only-display one, and `F11` stays a
-    *window* act that works in every place. The run column is
-    `RUN_MEASURE` 440 — half the measure a list that owns its surface gets —
-    and below a `SPLIT_FLOOR` 784 body the two columns re-stack into one with
-    the record as the run's head block.
+  - ~~**Two densities, chosen and remembered.**~~ **Reversed by the owner the
+    same day** — see *The `Run` word is gone* under Removed. The run column
+    stands whenever there is a run. It is `RUN_MEASURE` 440 — half the measure
+    a list that owns its surface gets — and below a `SPLIT_FLOOR` 784 body the
+    two columns re-stack into one with the record as the run's head block.
   - **The run costs the record nothing** wherever the record is height-bound,
     which is every window above the tightest one this product draws. At
     1280 × 860 with the returns lane open it costs 113 px, and the remedy is
@@ -1151,6 +1182,45 @@ next commit.
 
 ### Changed
 
+- **The well has one meaning and now says so, and it has an `×`**
+  ([ADR-0036](docs/adr/0036-the-wells-one-meaning.md)). The owner: *"how the
+  search works when we're not on the library needs to be decided… maybe a
+  little x or esc to clear would make sense too"*.
+  - **It searches the collection, from every place** — unchanged behaviour,
+    now a decision. Every road to the query already went to the Library first
+    (`App::reach_the_well`): a printable key from anywhere, `/`, `Ctrl`+`F`,
+    the collapsed magnifier. What was missing is that the field never said so.
+  - **The placeholder names the scope: `Search library`**, permanently, in
+    every place — the noun on the destination row two below it, which is where
+    the query lands. It costs nothing, because a placeholder is drawn exactly
+    when the query is empty and the count's 72 px slot is reserved exactly when
+    it is not: the word sets in the field's resting **176 px**, not in the 104
+    a query gets. Swept past two longer candidates so a later edit cannot clip.
+  - **Contextual search is refused, and type-anywhere is the reason.** A well
+    scoped to the page would make the collection unreachable *by typing* on
+    exactly the pages a scope applies to — the distinctive gesture revoked
+    where the feature is most wanted. It would also mean two live queries or a
+    field that empties as you navigate, an `Esc` peel whose length depends on
+    where you stand, and — for the honest version, a separate per-page filter —
+    a second key, since `/` and `Ctrl`+`F` are spoken for. Exactly one surface
+    would have earned one (a long playlist's rows; a record's tracks and an
+    artist's records are short enough that a filter is noise, and the run is
+    the one list you reorder by dragging). Recorded in `docs/BACKLOG.md` with
+    its shape.
+  - **The `×` is in the mark's own box, on the left**, because the field's
+    right edge is full: `GAP_MD` + `SIDEBAR_MATCH_W` 72 is sized for
+    `1284 / 1284`, and a glyph box beside it would take the query's room from
+    104 px to 80 — below the 88 the design measured and rejected. The mark's
+    box is already `SIDEBAR_GLYPH_BOX` 24 (which is `STEPPER_HIT`) on the
+    destinations' glyph vertical, so the swap moves nothing on either edge:
+    **the magnifier at rest, the cross while a query stands.** A field with
+    text and a count in it does not need to be told it is a search field.
+  - **The `×` is `Esc`'s pointer route** — the identical function
+    (`Shelf::clear_query`), so the query goes, the caret leaves the field and
+    the transport gets the keyboard back. Drawn exactly while a query stands,
+    which is exactly when the key has that layer to peel; tooltipped
+    `Clear the search (Esc)`. Both wells draw it from one function, so the
+    pointer route exists at every width the keyboard route does.
 - **The search well's second line is gone; its two figures went to two
   different places** (ADR-0030's fourth amendment). The owner, reading the
   shipped lane: *"the album and track count below the search bar doesn't look
@@ -1421,6 +1491,44 @@ next commit.
 
 ### Removed
 
+- **The `Run` word, and the two densities it chose between.** The owner:
+  *"remove the run button from the now playing"*, and, when asked to be sure
+  which control was meant, *"run button is what I'm referring to; just to be
+  clear"*.
+
+  **The run column is not what went — it is what stands.** The list, the rows,
+  the steppers, the ✕, the transfer `+`, drag-to-reorder, `Undo`, the
+  provenance-led summary and the virtual window are all untouched
+  (`every_queue_affordance_survives_the_merge` is unchanged and still green).
+  What went is the *word* in the place's top-right and everything that existed
+  only to remember which reading it had last chosen: `Message::ToggleRun`,
+  `App::run_column`, `App::toggle_run`, `App::set_run`, `persist_run_column`,
+  the `run_column` key in `config.toml`, the `run: bool` parameter of the
+  place's `view`, `theme::now_playing` (its last consumer was that word), and
+  the `clippy::struct_excessive_bools` expectation on `App`, which fell silent
+  by itself once the flag went.
+
+  **The run column now stands whenever there is a run, and nothing else decides
+  it.** That is a reversal of M1's *"the density is a stated control"*,
+  recorded as the owner's decision rather than argued with: a surface whose own
+  argument is *a run is a list and a cursor* was offering a control that hid
+  the list. It also removed a lie — with the density off and a stopped run
+  loaded, the place printed *"Nothing queued"* over a queue it was holding.
+
+  Two consequences worth naming. `Message::ShowTheRun` folded into
+  `Message::ShowNowPlaying`, because with no density to set it was that message
+  with a longer name; <kbd>Ctrl</kbd>+<kbd>U</kbd> now sends the message two
+  visible controls already send — the lane's `Now playing` row and the bar's
+  now-playing block — which is a simpler legality than the two-message
+  construction it replaces. And the run column lost its 48 px `clearance`
+  strip, which was air reserved for the word; step A6's `Ambient` door brings
+  its own back if it claims that corner.
+
+  A `config.toml` carrying `run_column = false` is read without harm and the
+  key is not written back — a listener who had the density off upgrades into
+  the surface with *more* on it, never into a blank half
+  (`the_retired_density_key_is_neither_written_nor_honoured`).
+
 - **`Pull`, and everything that existed only for it.** The owner: *"please can
   we remove pull since it doesn't make sense here."* Gone: the Library strip's
   `Pull` word and its tooltip, <kbd>Ctrl</kbd>+<kbd>R</kbd>, the record page's
@@ -1479,6 +1587,134 @@ next commit.
   things that would reverse this are recorded in `docs/BACKLOG.md`.
 
 ### Fixed
+
+- **`Now playing` shows what the bar names, whether or not it is sounding.**
+  The owner: *"it should probably just show whatever the now playing is
+  indicating, just not playing"*. The two halves are now read from the two
+  questions the bar under the place already answers and from nothing else — the
+  record column draws when `PlayerState::now_playing` answers, the run column
+  when `queue_list` does — so the place cannot contradict the bar beneath it. A
+  paused run, and a run restored from `session.toml` at launch, both draw.
+  The empty state is reachable in exactly one case: no record and no run.
+
+  **The record's column is now drawn even when there is no record**, which
+  fixed a composition that disagreed with itself: with a run standing and
+  nothing sounding, the body dropped to the re-stacked single column while the
+  field still painted `Ground::Split`, so a scrolling list sat under ambient
+  light at a full-width window. The field was right and the layout was the half
+  that was wrong. It also means a loaded run becoming a sounding one moves not
+  one pixel of the list.
+
+- **The `Nothing queued` state is inset like the rows it replaces.** The owner:
+  *"the nothing queued thing is hugging the left with no padding"*. It was
+  handed to a centring container at `width(Fill)`, which defeats the centring
+  and lands the block flush against the window's edge; it is now drawn in the
+  run column's own frame — the place's gutter, and the measure the rows are set
+  at. The other two empty states were checked and are correct: the wall's is a
+  shrink-width block genuinely centred, and the playlist page's sits inside
+  `place_pad()` on the same heading lane as the `Tracks` rule above it.
+
+- **The ambient field runs under the run column, continuously.** The owner:
+  *"the background fade behind the album art seems to abruptly end beside the
+  track list which looks bad -- the fade should continue under the playlist
+  area too"*.
+
+  It was two washes drawn side by side — the ambient one, and a second clamped
+  flat to `wall`'s lightness under the rows (doc 12 §5.4 term 2, ADR-0029 §8.4)
+  — and that is worse than the lightness step it was designed as: **two
+  gradients do not step at their join, the second restarts the ramp**, so the
+  seam was a hard vertical edge announcing the layout. `field::Reach` and
+  `now_playing::Ground` are both deleted; there is one wash over the whole
+  body.
+
+  **The clamp existed for a real reason and the answer to it is a
+  measurement**, not nerve. `every_run_row_is_legible_over_the_brightest_field`
+  sweeps every room × every hue × every ink the run column draws against the
+  field's own brightest stop, at the floors each ink's use implies. The field
+  costs every ink about an eighth of its ratio and no ink its floor — in
+  Closing Time, `paper` 15.33 → 13.54, `paper_dim` 8.20 → 7.24, `paper_faint`
+  5.34 → **4.71** against a 4.5 floor, `paper_muted` 3.61 → 3.19 against 3.0,
+  `alert` 6.30 → 5.57; Reading Room within 0.02 at the binding inks. The
+  binding case is `paper_faint` at 4.7 % of margin, and it is the number to
+  re-check before `field::CEILING_L` is ever raised.
+
+  `the_composition_holds_across_the_restack` lost a third of its subject and is
+  better for it: it existed to prove the field's domain and the columns' split
+  turned at the same width, and there is now one number where there were two.
+
+- **The run column follows the music.** The owner: *"ideally the currently
+  playing item in the playlist is where our scroll goes to i.e. it should be
+  visible when we change track"*.
+
+  Three rules make it bearable rather than annoying, and all three are in
+  `views::now_playing::follow`. It moves **only on the engine's own
+  confirmation** — `track_seq` changing, which is a new track and never a seek
+  and never a clock. It moves **only when the sounding row is not already
+  visible**, which is most track changes inside one record, so the ordinary
+  experience of a twelve-track album is no movement at all. And it **does not
+  fight a manual scroll**: nothing notices that the listener has scrolled away,
+  because the next track change is the only boundary at which they are not
+  mid-gesture. The row lands two rows' worth of list down rather than flush at
+  the top, so what you have already heard stays visible behind the cursor.
+
+  **Arriving at the place is the same computation**, which supersedes the
+  merge's `queue_scroll = 0.0`: opening the place on the top of a run you are
+  forty tracks into is the same defect reached by a different door.
+
+  `queue_window::row_box` is the new arithmetic, and it is deliberately the
+  same walk over the same pitches `queue_window::window` makes — otherwise a
+  follow to a row outside the built slice would scroll into a spacer.
+  `a_follow_lands_on_its_row_inside_the_built_slice` sweeps a 4 000-row run at
+  three viewports and asserts the target is both built *and* on screen.
+
+  **The playlist page and the record's page deliberately do not do this.** They
+  mark the sounding row with the same lamp dot, so the argument nearly carries
+  — but they are documents you are reading, where the lamp is an annotation,
+  and the run column is the list you are hearing, where the cursor is the
+  subject. Moving a document under its reader is the defect, not the fix.
+
+- **The run column's scroll offset is reset on every route into the place.**
+  `queue_scroll`'s own note says it must be zero when the place is entered,
+  because iced 0.13 keys widget state by tree position and a remembered offset
+  windows rows the widget is not showing. Only `Message::ShowTheRun` wrote it;
+  the lane's `Now playing` row and the bar's now-playing block did not, so
+  those two arrived with a stale offset. Deleting that message forced the
+  question, and the reset moved to `note_place_left`, where every route passes.
+
+- **`Save as playlist` is offered only for a run the listener assembled.** The
+  owner: *"I still see save as playlist on the queue when playing a CD... we
+  should only be showing that in a situation where there isn't an existing
+  playlist"*, and then, narrowing it: *"nah I think adding more stuff to an
+  existing playlist is fine, that does not need a save -- it's a low bar to
+  edit a playlist"*.
+
+  `QueueVm::provenance: Option<String>` — the playlist file's name, or nothing
+  — becomes `QueueVm::source: RunSource`, the **three kinds of list** he named:
+  `Fixed` (a record's track listing, `All songs`, `Play all`), `Playlist(name)`
+  (reified from a file), `Assembled` (built by hand). The old reading could not
+  tell *a list that exists without a file* from *a list that does not exist at
+  all*, so a CD's run and a hand-built queue were the same `Unfiled` and both
+  were offered the creation act. The predicate wanted was never *has a file*
+  but **did the listener assemble this**, so it is spelled as a kind: a later
+  origin lands on `Fixed` and inherits *offer nothing*, which is the safe
+  direction.
+
+  The strip, in four states: `Fixed` says nothing (in a reserved slot of the
+  strip's own height, so `rows_top` stays true); `Saved as "Road Trip"`
+  unedited; **`From "Road Trip"`** once edited — it may not keep claiming to
+  *be* the file, which is the lie ADR-0024 §A5.2 removed, and it may not offer
+  a new one either; `Save as playlist`, live, for an assembled run **and for a
+  fixed run that has been edited**, because that has become something that
+  exists nowhere else and there is no file to go and edit instead.
+
+  **Nothing writes back.** ADR-0024 §1's decoupling and ADR-0023 §3's
+  origin-never-a-link are untouched: *"a low bar to edit a playlist"* is an
+  argument about how easy the playlist's page is to reach, not licence for the
+  queue to edit files somebody owns. The run's kind survives a quit
+  (`session.toml` gains `assembled`), so the strip offers the same word
+  tomorrow that it offers tonight; the *edit* flag is session state and
+  deliberately does not.
+
 
 - **The decode was enlarging covers smaller than its own tier.**
   `image::DynamicImage::thumbnail` scales **to fit**, in both directions, and

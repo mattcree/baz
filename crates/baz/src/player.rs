@@ -998,27 +998,64 @@ pub struct PlayerState {
     queue_edited: bool,
 }
 
-/// **What the run standing is, with respect to a playlist file** — the three
-/// states the summary strip's save word has to tell apart (ADR-0024 §A5.2).
+/// **What the run standing is** — the four states the summary strip has to
+/// tell apart, and the reading its save word is drawn from.
 ///
-/// Derived, never stored: provenance is the queue record's own
-/// ([`PlayerState::queue_provenance`]) and divergence is
+/// Derived, never stored: the kind is the queue record's own
+/// ([`crate::vm::RunSource`]) and divergence is
 /// [`PlayerState::note_queue_edited`]'s. Nothing here is a *link* — ADR-0023
-/// §3 makes provenance an origin, and [`Self::Diverged`] exists precisely so
-/// that a diverged run offers a **new** file rather than a write-back, which
-/// ADR-0024's 2026-08-09 amendment item 6 refuses.
+/// §3 makes provenance an origin, ADR-0024 §1 decouples the run from the file
+/// in **both** directions, and no variant below ever writes one.
+///
+/// # The rule, in one sentence
+///
+/// > **The save word appears only for a run the listener assembled from
+/// > nothing.**
+///
+/// The owner, 2026-08-10, in two passes. First the three kinds:
+/// *"we should have playlists which are like 'fixed' i.e. a CD's track
+/// listing and some which are unnamed i.e. when we just 'add to queue' and
+/// some which are named i.e. we saved it already. the only one which has any
+/// kind of indicator to save is the 2nd case."* Then the narrowing:
+/// *"nah I think adding more stuff to an existing playlist is fine, that does
+/// not need a save -- it's a low bar to edit a playlist"*.
+///
+/// | the run | the strip |
+/// |---|---|
+/// | [`Self::Fixed`] — a record, `All songs`, `Play all` | nothing |
+/// | [`Self::Saved`] — reified from a file, unedited | `Saved as “Road Trip”` |
+/// | [`Self::Diverged`] — reified from a file, since edited | `From “Road Trip”` |
+/// | [`Self::Assembled`] — built by hand, or a fixed run since edited | `Save as playlist`, live |
+///
+/// **[`Self::Diverged`] stopped offering a new file**, which is the whole of
+/// the second quote: a run that came from a playlist never needs a second
+/// route to change one, because the playlist's own page is a cheap route to
+/// the first. What it must **not** do is keep claiming to *be* that file — the
+/// lie ADR-0024 §A5.2 removed — so it names its origin without asserting
+/// identity, and that is why it carries a name where the variant it replaced
+/// carried none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunOrigin<'a> {
-    /// No file behind it: a record's run, a shuffle, a `Play all`, a
-    /// needle-drop. Freezing it into a playlist is a genuine creation act
-    /// (ADR-0024 §4) and the word is live.
-    Unfiled,
+    /// **A list that already exists and is not the listener's to name** — a
+    /// record's track listing, `All songs`, a `Play all`, a shuffle draw.
+    ///
+    /// No word at all. There is no creation act here: the list exists, and
+    /// freezing it would make a second copy of something nobody assembled.
+    Fixed,
     /// Reified from the named playlist file and unedited since — the run
     /// **is** that file, so the word is a readout rather than an offer.
     Saved(&'a str),
-    /// Reified from a file and edited since: the run has diverged from it, so
-    /// the honest offer is a new playlist.
-    Diverged,
+    /// Reified from the named file and edited since. A readout that names
+    /// where the run came from and claims nothing about what it is now.
+    Diverged(&'a str),
+    /// **Assembled by the listener out of nothing** — the picker's `Queue`
+    /// row, a track's `+`, or a fixed run they have since edited into
+    /// something that exists nowhere else.
+    ///
+    /// The one state where freezing the run into a playlist is a genuine
+    /// creation act (ADR-0024 §4), and therefore the one state with a live
+    /// save word.
+    Assembled,
 }
 
 impl PlayerState {
@@ -1930,30 +1967,39 @@ impl PlayerState {
     /// origin, so this is a read, not a bookkeeping site.
     #[must_use]
     pub fn queue_provenance(&self) -> Option<&str> {
-        self.queue.as_ref()?.provenance.as_deref()
+        self.queue.as_ref()?.provenance()
     }
 
-    /// **What the run is with respect to a playlist file** — the reading the
-    /// run column's save word is drawn from (ADR-0024 §A5.2).
+    /// **What the run is** — the reading the run column's summary strip is
+    /// drawn from ([`RunOrigin`] carries the rule and the owner's words).
     ///
-    /// [`Self::queue_provenance`] and the edit flag, put together in one
-    /// place so that no view has to re-derive the rule: provenance standing
-    /// and no edit since ⇒ [`RunOrigin::Saved`], the run *is* that file and
-    /// the word states it; an edit since ⇒ [`RunOrigin::Diverged`], and the
-    /// only honest offer is a new file; no provenance at all ⇒
-    /// [`RunOrigin::Unfiled`], which is a record's run, a shuffle or a
-    /// `Play all` and where the creation act genuinely belongs.
+    /// The record's own kind ([`crate::vm::RunSource`]) and the edit flag, put
+    /// together in one place so that no view has to re-derive it.
     ///
-    /// This is the predicate the defect was missing: `save_control` was
-    /// conditioned on **nothing** but whether its own name field was already
-    /// open, so a run reified from `Road Trip` offered to save a thing whose
-    /// name the same strip was printing two inches to the left.
+    /// **The kind is what this used to be missing.** The reading was
+    /// `queue_provenance()` — the playlist file's name, or nothing — and it
+    /// could not tell a list that exists without a file from a list that does
+    /// not exist at all, so a record's run and a hand-built queue were the
+    /// same `Unfiled` and both were offered the creation act. That is the
+    /// owner's *"I still see save as playlist on the queue when playing a
+    /// CD"*, and the fix is upstream of every view.
+    ///
+    /// **A fixed run that has been edited is assembled.** An album's listing
+    /// with two tracks pulled out of it is no longer the album's listing and
+    /// there is no file to go and edit instead, so the creation act is the
+    /// only route left and it is offered. That asymmetry with
+    /// [`RunOrigin::Diverged`] is the owner's own: a named run has a cheap
+    /// route to the file, and a fixed one has none.
     #[must_use]
     pub fn run_origin(&self) -> RunOrigin<'_> {
-        match self.queue_provenance() {
-            None => RunOrigin::Unfiled,
-            Some(_) if self.queue_edited => RunOrigin::Diverged,
-            Some(name) => RunOrigin::Saved(name),
+        let Some(queue) = self.queue.as_ref() else {
+            return RunOrigin::Fixed;
+        };
+        match (&queue.source, self.queue_edited) {
+            (vm::RunSource::Playlist(name), false) => RunOrigin::Saved(name),
+            (vm::RunSource::Playlist(name), true) => RunOrigin::Diverged(name),
+            (vm::RunSource::Assembled, _) | (vm::RunSource::Fixed, true) => RunOrigin::Assembled,
+            (vm::RunSource::Fixed, false) => RunOrigin::Fixed,
         }
     }
 
@@ -2435,7 +2481,7 @@ fn queue_summary(
             format!("{count} · {}", vm::format_duration(total))
         }
     };
-    match &queue.provenance {
+    match queue.provenance() {
         Some(name) => format!("{name} · {reading}"),
         // **The strip names its subject** (ADR-0024 §A5.1). Without the noun
         // the left end read `1 of 24 · 1:56:19 left` — a reading with no
@@ -2992,7 +3038,7 @@ mod tests {
             album: Some("Geogaddi".to_owned()),
             artist: "Boards of Canada".to_owned(),
             items,
-            provenance: None,
+            source: vm::RunSource::Fixed,
         }
     }
 
@@ -5426,7 +5472,7 @@ mod tests {
         let albums = albums();
         let mut player = PlayerState::new(Availability::Ready);
         let mut from_file = geogaddi_queue();
-        from_file.provenance = Some("Road Trip".to_owned());
+        from_file.source = vm::RunSource::Playlist("Road Trip".to_owned());
         player.note_queue_sent(from_file);
         assert_eq!(player.queue_provenance(), Some("Road Trip"));
         assert_eq!(
@@ -5486,68 +5532,87 @@ mod tests {
         // it: a list's name is a better answer to "what is this?" than the
         // word `Run`, and printing both would be the strip saying it twice.
         let mut from_file = geogaddi_queue();
-        from_file.provenance = Some("Road Trip".to_owned());
+        from_file.source = vm::RunSource::Playlist("Road Trip".to_owned());
         player.note_queue_sent(from_file);
         let summary = player.queue_list().expect("a queue").summary;
         assert!(summary.starts_with("Road Trip · "), "{summary}");
         assert!(!summary.contains("Run · "), "{summary}");
     }
 
-    /// **`Save as playlist` does not offer over a run that is already a saved
-    /// file** — the defect the owner reported, as a test over the predicate
-    /// rather than over the widget (ADR-0024 §A5.2).
+    /// **The save word appears only for a run the listener assembled from
+    /// nothing** — the owner's rule of 2026-08-10, as a test over the
+    /// predicate rather than over the widget.
     ///
-    /// Three states, and the third is the one that makes this a fix rather
-    /// than a prohibition: a run reified from `Road Trip` and then **edited**
-    /// has diverged from that file, so the live word comes back — as
-    /// `Save as new playlist`, never as a write-back, which ADR-0024's
-    /// 2026-08-09 amendment item 6 and ADR-0023 §3 both refuse.
+    /// *"I still see save as playlist on the queue when playing a CD"*, and
+    /// then *"nah I think adding more stuff to an existing playlist is fine,
+    /// that does not need a save"*. Five states, and the two that carry the
+    /// argument are C and E: a **named** run offers nothing however much it is
+    /// edited, because its file has a cheap page of its own; a **fixed** run
+    /// that has been edited offers everything, because what it has become
+    /// exists nowhere else.
+    ///
+    /// Nothing here writes back in any state — ADR-0024 §1's decoupling and
+    /// ADR-0023 §3's origin-not-a-link are both untouched by the narrowing.
     #[test]
-    fn the_save_word_offers_only_over_a_run_that_is_not_already_a_file() {
+    fn the_save_word_offers_only_over_a_run_the_listener_assembled() {
         let mut player = PlayerState::new(Availability::Ready);
         assert_eq!(
             player.run_origin(),
-            RunOrigin::Unfiled,
-            "no run at all is nobody's file"
+            RunOrigin::Fixed,
+            "no run at all offers no creation act"
         );
 
-        // A · a record's run. No file behind it, so freezing it is a genuine
-        // creation act and the word is live — correctly, and this is the case
-        // the owner was looking at. What changed for it is the strip's noun,
-        // not the control.
+        // A · a record's run — **fixed**. The list exists, it is not the
+        // listener's to name, and this is the exact case the owner was
+        // looking at when he reported the defect.
         player.note_queue_sent(geogaddi_queue());
-        assert_eq!(player.run_origin(), RunOrigin::Unfiled);
+        assert_eq!(player.run_origin(), RunOrigin::Fixed);
 
-        // B · reified from a file, untouched. The run *is* that file, and its
-        // name is already printed at the head of the very strip the word sits
-        // in — so the word states it instead of offering it.
+        // B · reified from a file, untouched — **named**. The run *is* that
+        // file, and its name is already printed at the head of the very strip
+        // the word sits in, so the strip states it instead of offering it.
         let mut from_file = geogaddi_queue();
-        from_file.provenance = Some("Road Trip".to_owned());
+        from_file.source = vm::RunSource::Playlist("Road Trip".to_owned());
         player.note_queue_sent(from_file);
         assert_eq!(player.run_origin(), RunOrigin::Saved("Road Trip"));
 
-        // C · the same run, after one edit. Live again, and a *new* file is
-        // the only thing it may offer.
+        // C · the same run, after one edit. **Still no save word** — the
+        // narrowing — but it stops claiming to *be* the file, because it is
+        // not one any more.
         let mut edited = geogaddi_queue();
-        edited.provenance = Some("Road Trip".to_owned());
+        edited.source = vm::RunSource::Playlist("Road Trip".to_owned());
         player.note_queue_edited(edited);
-        assert_eq!(player.run_origin(), RunOrigin::Diverged);
+        assert_eq!(player.run_origin(), RunOrigin::Diverged("Road Trip"));
         assert_eq!(
             player.queue_provenance(),
             Some("Road Trip"),
             "the origin still leads the strip: an edit diverges the run, it \
              does not erase where the run came from"
         );
-
         // …and divergence is a fact about the run, not about the surface
-        // showing it. `App::queue_undo` is cleared by leaving the place, by
-        // standing the run column down and by the run ending — none of which
-        // un-edits anything — which is why this is not read off `can_undo`.
-        assert_eq!(player.run_origin(), RunOrigin::Diverged);
+        // showing it. `App::queue_undo` is cleared by leaving the place and by
+        // the run ending — neither of which un-edits anything — which is why
+        // this is not read off `can_undo`.
+        assert_eq!(player.run_origin(), RunOrigin::Diverged("Road Trip"));
+
+        // D · a run built by hand — **unnamed**, and the one live word.
+        let mut assembled = geogaddi_queue();
+        assembled.source = vm::RunSource::Assembled;
+        player.note_queue_sent(assembled);
+        assert_eq!(player.run_origin(), RunOrigin::Assembled);
+
+        // E · a record's run, edited. There is no file to go and edit
+        // instead, so what is on screen exists nowhere else and the creation
+        // act is the only route left. This is the asymmetry with C, and it is
+        // the owner's own reasoning applied where his reason does not reach.
+        player.note_queue_sent(geogaddi_queue());
+        assert_eq!(player.run_origin(), RunOrigin::Fixed);
+        player.note_queue_edited(geogaddi_queue());
+        assert_eq!(player.run_origin(), RunOrigin::Assembled);
 
         // A new run is a new answer, in both directions.
         player.note_queue_sent(geogaddi_queue());
-        assert_eq!(player.run_origin(), RunOrigin::Unfiled);
+        assert_eq!(player.run_origin(), RunOrigin::Fixed);
     }
 
     /// **A queue holding several records lists them as records** — one name
@@ -5569,7 +5634,7 @@ mod tests {
                 item("Music Is Math", "Geogaddi", "Boards of Canada"),
                 item("Sundown", "Sundown", "Gordon Lightfoot"),
             ],
-            provenance: None,
+            source: vm::RunSource::Fixed,
         };
         let mut player = PlayerState::new(Availability::Ready);
         player.note_queue_sent(queue);
@@ -5752,7 +5817,7 @@ mod tests {
                     path: PathBuf::from(format!("/m/stack/{index}.flac")),
                 })
                 .collect(),
-            provenance: None,
+            source: vm::RunSource::Fixed,
         }
     }
 
@@ -5938,7 +6003,7 @@ mod tests {
             album: None,
             artist: vm::UNKNOWN_ARTIST.to_owned(),
             items: Vec::new(),
-            provenance: None,
+            source: vm::RunSource::Fixed,
         });
         assert_eq!(player.continuation_note(), None);
         // Even if the engine reports a position into it — which it cannot, but
@@ -6057,7 +6122,7 @@ mod tests {
                     path: PathBuf::from("/m/stack/1.flac"),
                 },
             ],
-            provenance: None,
+            source: vm::RunSource::Fixed,
         });
         player.apply(&started("/m/stack/0.flac", 0), &[]);
         assert_eq!(player.continuation_note().as_deref(), Some("then Kid A"));
@@ -6398,7 +6463,7 @@ mod tests {
                 duration: None,
                 path: PathBuf::from("/m/stream.mp3"),
             }],
-            provenance: None,
+            source: vm::RunSource::Fixed,
         });
         let list = player.queue_list().expect("a queue");
         assert_eq!(list.summary, "Run · 1 track");

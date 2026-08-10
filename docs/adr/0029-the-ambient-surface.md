@@ -492,6 +492,130 @@ kiosk scale.
 surface looks, `Run` decides what it is about, and a list that is not drawn
 costs a `Vec` that is not built rather than a subsystem's *off*.
 
+### 8.5 Amendment, 2026-08-10: the `Run` word is removed, and the density with it
+
+**The owner's decision, recorded as a decision rather than argued with.**
+*"remove the run button from the now playing"*, confirmed when asked which
+control he meant: *"run button is what I'm referring to; just to be clear"*.
+
+§8.1's *"whether the run is shown is a stated, remembered control"* is
+**reversed**. The run column stands whenever there is a run, and nothing else
+decides it. §8.1's other half — that the density must **not** be a function of
+full-screen — is not reversed and did not need a word to be true: `F11` is a
+window act, iced 0.13 still publishes no monitor enumeration, and there is now
+no mode left to bind.
+
+What went: the word, `Message::ToggleRun`, `App::run_column`, `set_run`, the
+`run_column` config key, the place's `run: bool` parameter, `theme::now_playing`
+and the run column's 48 px clearance strip. What stayed: the run column and
+every one of §6.4.4's fifteen affordances.
+
+§8.3's `Ctrl+U` construction simplifies. It was *the lane's row plus the place's
+`Run` word, made for you* — legal under ADR-0023's amendment as an accelerator
+sending the two messages its visible controls send. With the word gone the chord
+resolves to `Message::ShowNowPlaying`, which is the message the lane's row **and**
+the bar's now-playing block both send: one message, two visible twins, and no
+construction needed.
+
+#### What this costs step A6, and it is not nothing
+
+**A6 must design its own control from scratch.** §5 and doc 12 §7.2 both place
+the `Ambient` word-door *beside* `Run` in the place's top-right, and §3.4.3
+argues the pair as a pair: *"it is a peer of `Ambient`, not a fifth row inside
+it"*. That argument is now one-sided — there is no peer, and the top-right
+corner is empty.
+
+Three things follow, and they are recorded here so A6 does not arrive expecting
+a partner that has gone:
+
+1. **The corner is unclaimed, not reserved.** The clearance the run column left
+   for the word is deleted, because height held for a control that does not
+   exist is the defect this surface's arithmetic refuses everywhere else. A6
+   brings its own clearance back with it and measures it against what it draws.
+2. **`Ambient` can no longer justify its placement by symmetry.** *A second word
+   beside the first* was half the argument for putting a door there at all; A6
+   must make the whole argument on its own, and the alternative it should
+   consider first is that the four toggles live in Settings and nowhere else —
+   which §5's *"both, and they are different controls"* rejected partly because
+   the surface already had a word-door to sit beside.
+3. **The precedent the removal sets is about *the surface's subject*, not about
+   ambience.** `Run` governed what the place *is about*; T1–T4 govern how it
+   *looks*. The owner removed a control of the first kind. That says nothing
+   either way about a control of the second kind, and A6 should not read it as
+   a verdict it is not.
+
+#### What it does not change
+
+`Save as playlist`'s narrowing (below) and §8.4's three shader constraints are
+independent of this and stand. §5's structural zero is untouched: the ambient
+subscription's condition was `self.place == Place::NowPlaying && …` and never
+mentioned the density.
+
+### 8.6 Amendment, 2026-08-10: three kinds of list, and one save word
+
+**The owner:** *"I still see save as playlist on the queue when playing a CD...
+we should only be showing that in a situation where there isn't an existing
+playlist. it seems to me underlying we should have playlists which are like
+'fixed' i.e. a CD's track listing and some which are unnamed i.e. when we just
+'add to queue' and some which are named i.e. we saved it already. the only one
+which has any kind of indicator to save is the 2nd case."* And, the same
+afternoon, narrowing it: *"nah I think adding more stuff to an existing playlist
+is fine, that does not need a save -- it's a low bar to edit a playlist"*.
+
+> **The save word appears only for a run the listener assembled from nothing.**
+
+`QueueVm::provenance: Option<String>` becomes `QueueVm::source: RunSource` with
+his three kinds — `Fixed`, `Playlist(name)`, `Assembled`. ADR-0024 §A5.2's
+`RunOrigin` gains the distinction it was missing: *has a file* and *did the
+listener assemble this* are different questions, and only the second one decides
+a creation act. `Diverged` keeps the file's name and becomes a readout —
+`From "Road Trip"` — because it may neither claim to *be* a file it has diverged
+from nor offer a second route to a thing whose own page is a cheap route.
+
+**A fixed run that has been edited is `Assembled`.** That asymmetry with
+`Diverged` is the owner's own reasoning applied where his reason does not reach:
+a named run has a cheap page to go and edit, and a fixed one has none, so what
+the edit produced exists nowhere else and the creation act is the only route
+left.
+
+**ADR-0024 §1 and ADR-0023 §3 are untouched.** Nothing writes back, in any of
+the four states. *"A low bar to edit a playlist"* is an argument about the
+playlist page's reachability, not licence for a queue edit made for tonight to
+rewrite a file somebody owns.
+
+### 8.7 Amendment, 2026-08-10: the field is continuous, and §8.4's terms 2 and 3 go with the boundary
+
+**The owner:** *"the background fade behind the album art seems to abruptly end
+beside the track list which looks bad -- the fade should continue under the
+playlist area too"*.
+
+§8.4 term 2 — *"under the run column the field is clamped to `room.wall`'s
+lightness"* — is **withdrawn**, and so is `field::Reach`, the type that
+expressed it. §5.4's *"the ceiling is lower where type is"* was drawn as **two
+washes in a row**, and that is a worse object than the lightness step it was
+specified as: two gradients do not step at their join, the second restarts the
+ramp, so the boundary was a hard vertical edge that announced the layout.
+
+**The constraint was real and the answer is a measurement.** Term 2's argument
+was that a run row must carry no contrast claim that is not already shipped.
+That is checkable rather than arguable, so it is now checked:
+`every_run_row_is_legible_over_the_brightest_field` sweeps every room × every
+hue × every ink the run column draws against the field's own brightest stop, at
+the floors ADR-0017 §1.6's contrast suite already uses. The field costs every
+ink about an eighth of its ratio and no ink its floor; the binding case is
+`paper_faint` at **4.71 : 1** against 4.5.
+
+**What this owes step A7.** §8.4 term 3 — *"under the run column the field does
+not drift"* — is a claim about **motion under type**, and the measurement above
+is about a static ground. It is therefore **neither kept nor withdrawn here**:
+it is A7's to make, and A7 no longer has a mechanism to make it with, because
+the domain it would have used is gone.
+
+The direction A7 should take if drift under the rows proves distracting is
+recorded now so it is not rediscovered as a boundary: **slow or still the whole
+field**, do not re-introduce a region. The seam is the thing the owner
+rejected, and a moving seam would be worse than the static one he saw.
+
 ## Consequences
 
 - **`Place::Queue` is the first member this product has deleted.** The enum goes

@@ -14,7 +14,7 @@
 //! and the frame's resident surface is the lane.
 //!
 //! What is left is one subject, stated in the two vocabularies doc 10 §0.3
-//! separates: **the states** — ARTIST · YEAR · GENRE · ADDED · PLAYED,
+//! separates: **the states** — A–Z · ARTIST · YEAR · GENRE · ADDED · PLAYED,
 //! caps and tracked, one of them current — and **the act** — `Play all`, one
 //! sentence-case word behind the play triangle. Narrow-then-arrange used to read
 //! left to right across this strip; the narrowing is in the lane now and the
@@ -57,20 +57,21 @@ use crate::{icon, theme};
 /// split is now the whole of the collapse order**.
 pub(crate) const WELL_W: f32 = 200.0;
 
-/// The arrangement row's reserved width (logical px): **five** tracked caps
+/// The arrangement row's reserved width (logical px): **six** tracked caps
 /// words in their `GAP_XS`-padded buttons with `GAP_MD` between them, measured
 /// in `font.rs` against this declaration — L9's arithmetic needs every tenant
 /// to *declare*, and the declaration is only worth asserting if the face is
 /// measured against it.
 ///
-/// **368 → 314, back to what it was.** For one release the row was six words:
-/// the first key relabelled `A–Z` (32.92 px in its box against `ARTIST`'s
-/// 56.90) with `ARTISTS` added after `PLAYED` (65.49 plus a `GAP_MD`), which
-/// came to 366.50 and a declaration of 368. The sixth word became the first
-/// key's own grouping (ADR-0035), so the row is five words again with the
-/// first one spelled `ARTIST` again, and the 54 px it had spent come back to
-/// the strip's budget rather than being kept as slack.
-pub(crate) const KEYS_W: f32 = 314.0;
+/// **314 → 360**, and the number was measured rather than reused. The row has
+/// been six words before: `ARTISTS` after `PLAYED` came to 366.50 and a
+/// declaration of 368. This sixth word is `A–Z` and it goes **first**
+/// (ADR-0035's third amendment), so the price is different — `A–Z` is 32.92 px
+/// in its box against `ARTISTS`'s 65.49 — and the row measures 357.91. The
+/// declaration is the next 4 px lattice step above it, which leaves 2.09 px of
+/// slack; the earlier costing's 368 would have been 10 px of reservation for a
+/// word that is not there.
+pub(crate) const KEYS_W: f32 = 360.0;
 
 /// The act's reserved width (logical px): the triangle, its word, and their
 /// padding.
@@ -347,16 +348,21 @@ fn play_all() -> Element<'static, Message> {
 /// product — which is what puts the bar's left and right clusters on one
 /// vertical grid instead of merely on one centre line.
 ///
-/// # The magnifier is the well's label, not a control
+/// # The mark's box holds the label at rest and the clear control under a query
 ///
 /// The universal mark, in the universal corner — the second of the two
 /// symbols L8.4's amendment admits as door labels (doc 10 §3.4) — drawn as a
 /// **layer** over the input (the mechanism the bar's tip layers already use;
-/// iced 0.13's `text_input::Icon` is font-based and therefore not it). The
-/// well remains the only focusable widget (ADR-0017 §1.2), the glyph takes
-/// the resting glyph ink and answers nothing, and the input's own left
-/// padding reserves the lane the glyph sits in, so the caret and the mark
+/// iced 0.13's `text_input::Icon` is font-based and therefore not it). At rest
+/// it answers nothing: the well remains the only focusable widget
+/// (ADR-0017 §1.2), the glyph takes the resting glyph ink, and the input's own
+/// left padding reserves the lane the glyph sits in, so the caret and the mark
 /// cannot collide.
+///
+/// **While a query stands the box holds the `×` instead** (ADR-0036 §4) — one
+/// box, two meanings, no reflow, and the right-hand furniture untouched because
+/// the count's [`MATCH_W`] slot is already the whole of what the field's right
+/// edge can spend. `crate::views::clear_mark` draws it for both wells.
 ///
 /// # `on_submit` is what makes Enter mean one thing
 ///
@@ -395,16 +401,34 @@ fn well(shelf: &Shelf, width: f32) -> Element<'_, Message> {
         .line_height(theme::LEADING_BODY)
         .width(Length::Fixed(width))
         .style(move |_theme, status| theme::input(room, status));
-    let magnifier = container(
-        iced_image(icon::handle(icon::Glyph::Magnifier))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::GLYPH_OPACITY),
-    )
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_MD))
-    .align_y(alignment::Vertical::Center);
-    let mut layers = stack![input, magnifier];
+    // The mark's box, in one of its two states — the label at rest, the clear
+    // control while a query stands (ADR-0036 §4). The lane's well makes the
+    // identical swap in the identical box, so the `×` is in the same place at
+    // every width; `crate::views::clear_mark` is the one function.
+    //
+    // The left padding differs by 4 px from the lane's and the centre does not:
+    // the glyph sits at `GAP_MD` 12 + `ICON_PX` / 2 = 20 here and at
+    // `SIDEBAR_HEAD_GLYPH_X` = 20 there, so a `STEPPER_HIT` 24 box centred on
+    // the same 20 is inset `GAP_SM` in both.
+    let mark: Element<'_, Message> = if filtering {
+        container(crate::views::clear_mark(room.recess))
+            .height(Length::Fixed(theme::TRANSPORT_HIT))
+            .padding(theme::pad(0.0, theme::GAP_SM))
+            .align_y(alignment::Vertical::Center)
+            .into()
+    } else {
+        container(
+            iced_image(icon::handle(icon::Glyph::Magnifier))
+                .width(Length::Fixed(theme::ICON_PX))
+                .height(Length::Fixed(theme::ICON_PX))
+                .opacity(theme::GLYPH_OPACITY),
+        )
+        .height(Length::Fixed(theme::TRANSPORT_HIT))
+        .padding(theme::pad(0.0, theme::GAP_MD))
+        .align_y(alignment::Vertical::Center)
+        .into()
+    };
+    let mut layers = stack![input, mark];
     if filtering {
         // **The match count, inside the control being typed into** — the
         // in-well slot doc 07 §3.1 prescribed, delivered (doc 10 §4.1).
@@ -526,7 +550,7 @@ fn match_count(shelf: &Shelf) -> String {
     format!("{} / {}", shelf.visible.len(), shelf.albums.len())
 }
 
-/// One of the five words the **records** are arranged by.
+/// One of the six words the **records** are arranged by.
 ///
 /// # The seam this closes
 ///
@@ -555,20 +579,20 @@ fn match_count(shelf: &Shelf) -> String {
 /// one voice: **the key names the arrangement, the header names a break in
 /// it.** A third size, or a second face, would make them two systems.
 ///
-/// The word is a `button`, so the keyboard's `1`–`5` ([`crate::keys`]) and
+/// The word is a `button`, so the keyboard's `1`–`6` ([`crate::keys`]) and
 /// this control send the identical message and the visible-control rule holds.
 ///
-/// **None of the five is current while the artists are on the wall**, and that
-/// is the honest reading rather than a missing state: the keys arrange records,
-/// and no record is being arranged. Pressing one asks for records again, in
-/// the arrangement it names — see [`crate::app::Shelf::arrange_by`].
+/// **Exactly one of the six is current, always** — the wall is arranged some
+/// way or it is not drawn. The first two name the same order at two densities
+/// (ADR-0035's third amendment), which is a difference the row states by
+/// putting them side by side rather than by explaining it.
 fn group_key(key: GroupKey, active: bool) -> Element<'static, Message> {
     let room = theme::active();
     button(
         // Centred in the box by the box, like every other word that is a
         // control (law L3) — a fixed height with top-aligned content is what put
-        // `Settings` 6.4 px above its own centre, and five keys doing it beside
-        // the well would have been five more.
+        // `Settings` 6.4 px above its own centre, and six keys doing it beside
+        // the well would have been six more.
         container(
             text(theme::tracked(&key.label().to_uppercase()))
                 .size(theme::SIZE_META)
@@ -634,13 +658,17 @@ mod tests {
         );
     }
 
-    /// **The arrangement row is five words and every one of them is a key.**
+    /// **The arrangement row is six words and every one of them is a key.**
     ///
-    /// It carried a sixth for one release — `ARTISTS`, the wall's other
+    /// It carried a sixth word once before — `ARTISTS`, the wall's other
     /// subject — drawn in the keys' exact voice so the row read as one closed
-    /// set. ADR-0035 made that word the first key's own grouping, so the row
-    /// is `GroupKey::ALL` and nothing else: there is no word here that is not
-    /// a key, and therefore nothing that has to be argued into the keys' voice.
+    /// set, and that word was not a key. `A–Z` is (ADR-0035's third
+    /// amendment), so the row is `GroupKey::ALL` and nothing else: there is no
+    /// word here that is not a key, and therefore nothing that has to be
+    /// argued into the keys' voice. **The count is not asserted** — the row is
+    /// a walk of the library's own array, so a seventh key would join it here
+    /// without an edit, and pinning the number would be pinning `baz-core`'s
+    /// list from the wrong side.
     #[test]
     fn the_arrangement_row_is_the_group_keys_and_nothing_else() {
         let source = source();

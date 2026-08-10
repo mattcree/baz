@@ -6,6 +6,27 @@
 
 ## Product decisions to honour later
 
+- **A long playlist has no filter of its own.**
+  [ADR-0036](adr/0036-the-wells-one-meaning.md) decided that the search well
+  keeps one meaning — it searches the collection — and refused a well scoped to
+  the page you are standing in, because type-anywhere is a promise *about the
+  collection* and a scoped well would revoke it on exactly the pages a scope
+  applies to. The owner's underlying observation is still right: *"both makes
+  sense to me"*, and filtering 200 rows of `Road Trip` is a real want.
+  **The honest shape is a second control, not a second meaning for the well**:
+  a filter field on the playlist page's own header, with its own state on
+  `Playlists::open` (beside `renaming`), peeled by `App::peel_place_states` —
+  which already exists for exactly this class of transient — before the place
+  itself leaves. It costs a key: `/` and `Ctrl`+`F` reach the well from
+  everywhere and must keep doing so, so the page filter needs its own binding
+  or it becomes the first pointer-only control in the product.
+  **It is one surface.** §3 of the ADR walks the others: a record's tracks are
+  1–20 and an artist's records 1–30, where a filter is noise; the run column is
+  long but is the one list you reorder by dragging, and a drop index into a
+  filtered list is not honest; Home is fixed; the wall has the well. One
+  surface did not buy a control class — but it is the owner's call, and this is
+  what it would take. **Owner decision.**
+
 - ~~**A list played in a *previous* session still shows as its records in the
   lane.**~~ **Closed 2026-08-10** — ADR-0034 §2–§5 shipped. `SetQueue` carries
   the run's origin, the ledger opens each run with a `# baz run` marker, and

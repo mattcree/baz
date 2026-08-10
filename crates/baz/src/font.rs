@@ -612,7 +612,9 @@ mod tests {
 
     /// **The arrangement row fits the shipped window**, tracked caps and all.
     ///
-    /// The row is six words (ADR-0035), each in a button with
+    /// The row is six words (ADR-0035's third amendment: `A–Z` first, then
+    /// `ARTIST`, then the four that were never in question), each in a button
+    /// with
     /// [`theme::GAP_XS`] of padding on both sides and [`theme::GAP_MD`]
     /// between them, sitting after the search well and the gap that separates
     /// the two clusters. The right of the bar holds the gear alone at rest.
@@ -645,12 +647,12 @@ mod tests {
              (keys {keys:.1}) and {right:.1} right",
             left + theme::GAP_LG + right
         );
-        // And the six words really are the bulk of the cluster, so this is
+        // And the words really are the bulk of the cluster, so this is
         // measuring the row rather than the acts beside it.
         assert!(keys > 200.0 && keys < 420.0, "the key row is {keys:.1} px");
     }
 
-    /// **The arrangement row, measured**: the five group keys, each tracked,
+    /// **The arrangement row, measured**: the six group keys, each tracked,
     /// upper-cased and boxed the way `views::top_bar` boxes them, with the
     /// row's own gaps between.
     ///
@@ -658,7 +660,8 @@ mod tests {
     /// same row — the shipped-window fit above, and the declaration check
     /// below. It walks `GroupKey::ALL` rather than spelling the words out, so
     /// a key added, removed or relabelled in `baz-core` moves the measurement
-    /// without an edit here.
+    /// without an edit here — which is what made `A–Z`'s restoration a
+    /// declaration to re-derive rather than a list to keep in step.
     fn arrangement_row(medium: &Face<'_>) -> f32 {
         use baz_core::index::GroupKey;
 
@@ -740,6 +743,49 @@ mod tests {
         );
     }
 
+    /// **The well's placeholder names its scope inside the field** — ADR-0036
+    /// §2, and the arithmetic that made it free.
+    ///
+    /// `Search library` is longer than the `Search` it replaces, and the
+    /// question a longer placeholder always raises is what it costs. Nothing,
+    /// and the reason is a coincidence the design can rely on: **a placeholder
+    /// is drawn exactly when the query is empty, and the count's slot is
+    /// reserved exactly when it is not.** So the placeholder's lane is the
+    /// field's resting width — 232 − 44 − 12 = 176 px — not the 104 px a query
+    /// gets while the count stands beside it.
+    ///
+    /// Swept past the word actually shipped, because the next reasonable
+    /// candidate for it is longer still and the slot should be known to hold
+    /// that too.
+    #[test]
+    fn the_lanes_well_names_the_scope_it_searches() {
+        let sans = sans();
+        let resting = theme::SIDEBAR_MEASURE - theme::SIDEBAR_HEAD_TEXT_X - theme::GAP_MD;
+        assert!(
+            (resting - 176.0).abs() < f32::EPSILON,
+            "the placeholder's lane is {resting} px, not the 176 the design \
+             records"
+        );
+        fits(
+            &sans,
+            crate::views::lane::SCOPE,
+            theme::SIZE_BODY,
+            resting,
+            "the well's resting width",
+        );
+        // The longer candidates the word was chosen from, so a later edit to
+        // `SCOPE` cannot silently clip.
+        for candidate in ["Search the library", "Search collection"] {
+            fits(
+                &sans,
+                candidate,
+                theme::SIZE_BODY,
+                resting,
+                "the well's resting width",
+            );
+        }
+    }
+
     /// **Every cell of Home's `COLLECTION` footer holds both its lines** at
     /// [`theme::STAT_W`] — the figure and the tracked word under it.
     ///
@@ -787,8 +833,9 @@ mod tests {
     fn the_strips_declared_tenant_widths_hold_their_measured_words() {
         let medium = Face::parse(SANS_MEDIUM);
 
-        // The arrangement row: six tracked caps words, `GAP_XS` padding each
-        // side, `GAP_MD` between (ADR-0035).
+        // The arrangement row: six tracked caps words — `A–Z` first, then the
+        // five that were there — with `GAP_XS` padding each side and `GAP_MD`
+        // between (ADR-0035's third amendment).
         let keys = arrangement_row(&medium);
         assert!(
             keys <= crate::views::top_bar::KEYS_W,
@@ -796,16 +843,36 @@ mod tests {
             crate::views::top_bar::KEYS_W
         );
         // **The declaration is the next lattice step above the measurement.**
-        // The five words come to 312.99 against a declared 314 — 1.01 px of
-        // margin, which is the tightest reservation in the strip and the
-        // number a sixth word would have to beat. It was measured: the row
-        // carried `ARTISTS` for one release, and that word in its box plus the
-        // `GAP_MD` beside it cost 77.49 px (ADR-0035).
+        // The six words come to 357.91 against a declared 360 — 2.09 px of
+        // margin. It is the tightest reservation in the strip and the number a
+        // seventh word would have to beat, and **the sixth word's own price is
+        // measured here rather than inherited**: `A–Z` in its box plus the
+        // `GAP_MD` beside it is 44.92 px, where `ARTISTS` — the last word to
+        // make this row six — cost 77.49 (ADR-0035, and its third amendment).
+        // Reusing the earlier 368 would have reserved 10 px for a word that is
+        // not in the row.
         let slack = crate::views::top_bar::KEYS_W - keys;
         assert!(
             (1.0..8.0).contains(&slack),
             "the key row's reservation now carries {slack:.2} px of slack: it \
              is either overflowing or reserving room for a word that left"
+        );
+        // **The sixth word's price, measured rather than inherited.** The two
+        // words that have made this row six are different lengths, so the
+        // costing is redone each time; this is the claim that `theme.rs`'s
+        // `KEYS_SPENT` of 46 rests on.
+        let boxed = |word: &str| {
+            medium.width(&theme::tracked(&word.to_uppercase()), theme::SIZE_META)
+                + 2.0 * theme::GAP_XS
+        };
+        let sixth = boxed(baz_core::index::GroupKey::Alphabet.label()) + theme::GAP_MD;
+        assert!(
+            (sixth - 44.92).abs() < 0.01,
+            "`A–Z` costs the row {sixth:.2} px"
+        );
+        assert!(
+            sixth < 77.49,
+            "and it is the cheaper of the two sixth words this row has carried"
         );
 
         // The act: the triangle, its word, and their `GAP_SM` padding.
@@ -862,10 +929,12 @@ mod tests {
     /// amends it — and the labels are `baz-core`'s own. What the widening bought
     /// is measured here rather than asserted:
     ///
-    /// - **Every label the five keys can *produce* fits.** Letters, `#`,
+    /// - **Every label the six keys can *produce* fits.** Letters, `#`,
     ///   `Various`, `No year`, every decade, `Unknown` (42.4 px, which is why 36
     ///   was wrong), and every recency bucket down to `Never played`. At 36 the
-    ///   rail worked for one of the five arrangements and clipped in three.
+    ///   rail worked for one arrangement and clipped in three. A–Z's return
+    ///   costs the rail no new label: its headers are the letters the ARTIST
+    ///   rail was already drawing.
     /// - **Arbitrary genre names still elide**, and they always will: a genre
     ///   tag is free text. They clip at the lane's right edge with their heads
     ///   intact, and the full value is set in the shelf header one `HANG` to the

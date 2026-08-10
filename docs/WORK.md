@@ -27,20 +27,60 @@
 
 ## Next
 
-1. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** Visible in a
+1. **A crossfade on the artwork when the record changes.** The owner,
+   2026-08-10: *"when changing track there isn't any kind of nice visual
+   transition for album art in now playing. we should have something a bit
+   nicer, like a quick fade"*. **Deliberately deferred out of that afternoon's
+   batch** — six changes to that one surface landed together and a seventh done
+   hastily is worse than a seventh done next. Everything needed to build it is
+   written down here so nothing has to be rediscovered:
+   - a **bounded** crossfade of the hero, which is a *transition* and not
+     ambient motion — ADR-0020 permits exactly this class, and `crate::motion`
+     already owns the product's durations and easing. Do not invent a number.
+   - **fade only when the artwork actually changes.** Consecutive tracks on one
+     record share a cover, and fading a picture into an identical picture is a
+     flicker nobody can find a reason for. Compare the handle being drawn, not
+     the track.
+   - **start when the new art is ready, not when the track starts.**
+     `art::load_hero` decodes off-thread at 1024 px; beginning before the decode
+     lands fades to nothing and then pops, which is worse than today's cut.
+   - the **two-entry hero LRU** is what makes this possible with no new caching
+     — its second slot holds the record that just stopped, so both images are
+     alive at once. Written for prefetch; check it holds before relying on it.
+   - **the field must travel with the art.** It is one continuous wash since
+     this batch; if the cover crossfades while the room's colour cuts, the seam
+     the owner just had removed comes back in time instead of space.
+   - **idle must return to zero** — the tween ends, its subscription ends, the
+     surface is static. `the_ambient_clock_is_absent_outside_its_place` is the
+     shape of the test that keeps that honest.
+2. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** Visible in a
    committed frame: at 2560 with the run standing, ~700 px of field sits
    between the sleeve and the run column, because the record column hangs left
    and the run stays 440 wide. A4 takes it to ~1100 at that size.
-2. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
+3. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
    the Flatpak build are all done; what is left is a screenshot for the
    metainfo, the version edit from `0.0.0`, a `workflow_dispatch` dry run,
    then the tag. **The tag is the owner's to cut** — the workflow produces a
    draft.
-3. **Rewrite the README as the project's public face**, with the icon and real
+3. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+   The owner's *"ideally the by artist page could have more info"*, answered
+   with no network at all. Tier 1: one `SIZE_META` line under the header
+   (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
+   2019`, 40 px of wall pushed down, each term absent rather than empty);
+   `ALSO ON`, the records they guest on, in the wall's own tiles, from one
+   cached fold beside `vm::Collection`; and **`Look up`**, which opens the
+   artist on Wikipedia in the listener's own browser through the D-Bus
+   portal — **zero new crates and no Flatpak network permission**. Tier 2:
+   case-folded genres capped at three, an artist picture off the listener's
+   own disk (`artist.jpg` in the parent of the album folders, through
+   `art.rs`'s existing lookup), and the prose fix for the tile-size claim
+   below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
+4. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
-   last, so it describes what actually ships. Its keyboard table is badly
-   stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode, the
-   group keys changed, `Ctrl+B` exists.
+   last, so it describes what actually ships. Its keyboard table is still
+   stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode,
+   `Ctrl+B` exists. (The group-key row itself is current again — the six words
+   and `1`–`6` were corrected when `A–Z` came back.)
 
 ## Doing
 
@@ -48,6 +88,39 @@ Nothing. The queue above is the next thing.
 
 ## Waiting on the owner
 
+- **May baz make its first network request?** Doc 15 tier 4 / ADR-0037 §6,
+  priced rather than argued. `ureq` 3.4.0 costs **14 net-new crates**, one
+  new `deny.toml` licence (`CDLA-Permissive-2.0`), and no new build tool —
+  but its TLS core, `ring`, is C and per-architecture assembly with a
+  `links` key, and it would be the first C in baz parsing hostile input off
+  the wire. `reqwest` is **57** net-new crates and `aws-lc-sys` with `cmake`
+  + `bindgen`, which is `BACKLOG.md`'s Opus refusal word for word; it is
+  recorded as a finding, not offered as a choice. **The most expensive line
+  is not technical**: `packaging/flatpak/…yml` has no `--share=network`
+  today, so this puts *"Network access"* on baz's Flathub page permanently,
+  for an offline-first player. *Needs: yes or no.* **If no, that is a
+  complete outcome** — doc 15 tier 1's `Look up` already puts the
+  encyclopaedia one press away in his own browser for nothing.
+- **Doc 15's Tier 3**, five questions, three of them about the play ledger.
+  ADR-0018 §6 says **"no totals-by-artist"** in those words, so *first
+  heard*, *last played* and *records never played* on an artist's page each
+  reverse a written decision — and reversing one as a side effect of a page
+  redesign is the failure `WORK.md`'s preamble exists to prevent. The
+  smallest admissible form is drawn for him: `First heard 2019 · Last played
+  3 months ago`, in `Recency::label()`'s own vocabulary, **no counts, no
+  ranking, no comparison to another artist** — history as a door, which the
+  returns lane already does without performing. The other two are a frame
+  question (one band line or two) and the tile-size one below. *Needs: one
+  sentence each.*
+- **Should the artist page's covers be the wall's size to the pixel?**
+  Found while measuring doc 15: `views/artist.rs:19-26` says the tiles are
+  *"the wall's to the pixel"* and they are not. The wall feeds `Grid::new`
+  `window − sidebar − INDEX_LANE_W 108 − 4` (`app.rs:5095-5101`); the artist
+  page and Home feed it `body_width − 2 × HANG 40`. Covers are 4–11 px wider
+  on this page at every size, and **at 1920 with the lane collapsed it draws
+  six columns where the wall draws five**. The prose gets fixed either way;
+  the geometry is a one-line change with one visible consequence. *Needs:
+  his eye on a frame, not an argument.*
 - **Borderless window chrome.** Wayland already draws that title bar inside
   baz's own process, so turning it off is one field — but **iced 0.13 exposes
   no edge-drag resize anywhere in `window::Action`**, so going borderless today
@@ -127,6 +200,110 @@ Newest first. Fuller detail in `CHANGELOG.md`.
     be written as a marker, or the touch is lost rather than moved — asserted
     as `no_kind_is_written_that_the_lane_cannot_credit`, and it is the rule the
     §1 work below has to satisfy.
+- **The owner's `Now playing` batch, 2026-08-10** — six asks on one surface in
+  one afternoon, with frames for each at
+  `docs/design/impl/now-playing-shows-the-run/`.
+  - the **`Run` word and the two densities** removed. The run column is not
+    what went — it stands whenever there is a run, and all fifteen of its
+    affordances are untouched. `Ctrl+U` folded into `Message::ShowNowPlaying`.
+  - the place **shows whatever the bar names**, sounding or not. The record's
+    column is drawn even when there is no record, so a loaded run becoming a
+    sounding one moves nothing — and the field had believed that all along
+    (`Ground::Split`), which is how the disagreement was found.
+  - the **`Nothing queued` state** inset like the rows it replaces. The wall's
+    and the playlist page's were checked and are correct.
+  - **three kinds of list** (`RunSource::Fixed · Playlist · Assembled`), so the
+    save word appears only for a run assembled from nothing. *Has a file* was
+    never the predicate; *did the listener assemble this* is.
+  - the **field runs continuously under the run column**. The clamp that made
+    the seam was protecting the rows' contrast, so it is replaced by a
+    measurement: binding case `paper_faint` at 4.71 : 1 against a 4.5 floor.
+  - the **run column follows the music** — on the engine's confirmation only,
+    only when the row is off screen, landing it two rows down.
+  - **Deferred out of the batch, deliberately:** the artwork crossfade, now
+    item 1 of *Next* with everything it needs written down.
+  - **Left as it is, with evidence:** *"that needs a scrollbar as well"* — the
+    run column already draws one, at the list's 10 px form, at the column's own
+    right edge (frames `30`/`31`). `theme.rs`'s rule is that a list's bar is
+    its only readout of how much list there is, which is why the wall's is the
+    narrow one and this is not. **Needs the owner's eye on the frame**: if he
+    still cannot find it, the change is one line.
+- **`A–Z` is a group key again, first in the row** — the owner's *"that feels
+  like it should go back and honestly it's the first option, followed by
+  artist"*. The strip is `A–Z · ARTIST · YEAR · GENRE · ADDED · PLAYED` and the
+  number row is `1`–`6`. ADR-0035's third amendment; frames at
+  `docs/design/impl/az-and-artist/`.
+  - **The new key does not take `"artist"`'s code back.** It is `"alphabet"`,
+    because `"artist"` was already repurposed once without saying so — it named
+    the initial grouping before ADR-0035 and the artist grouping after, so a
+    `config.toml` written before that day quietly changed meaning. That is now
+    a paragraph on `GroupKey::code` itself, where the never-repurpose rule
+    lives, rather than folklore.
+  - **The budget was re-measured, not reused.** The last sixth word was
+    `ARTISTS` at 77.49 px; `A–Z` costs 44.92, so the row is 357.91 and
+    `KEYS_W` is **360** rather than the earlier costing's 368. Downstream:
+    `LIBRARY_LINE` 552, `TOP_BAR_SPLIT` 824, `SINGLE_LINE_NO_WELL` 600.
+    **Nothing forced the window's minimum**, which was the thing to confirm —
+    the library line sits 48 px under the 600 floor, and the
+    single-line-with-well band survives at 824…904.
+  - **Found on the way**: `views::top_bar::group_key`'s doc still carried a
+    paragraph about *"none of the five is current while the artists are on the
+    wall"*, describing a wall deleted the same day. Corrected.
+- **Design doc 15 — the artist's page**, and ADR-0037. The owner's *"maybe
+  just the wikipedia for the band or something?"* turned out to be **two asks
+  wearing one sentence**, and the study's whole structure is the separation:
+  the page can be worth visiting for **nothing**, and the encyclopaedia is
+  **baz's first network request**. Eleven local facts sort cleanly on
+  `views/home.rs:71-76`'s test — *would this figure be identical if the
+  application had never been opened?* — and the three that fail it are the
+  ledger's, which ADR-0018 §6 already refused **by name** (*"no
+  totals-by-artist"*), so they went to him as three questions rather than
+  into the page.
+  - **The network half was priced rather than argued**, against `deny.toml`
+    and against `BACKLOG.md`'s Opus refusal, by resolving both candidates in
+    a scratch crate outside the repo and intersecting against `Cargo.lock`:
+    `ureq` **14 net-new crates**, `reqwest` **57** plus `aws-lc-sys` with
+    `cmake` and `bindgen`. Three findings fell out that no argument would
+    have produced: `ureq`'s TLS is **not pure Rust** (`ring` has a `links`
+    key and compiles C and per-arch assembly), a C compiler is **already**
+    required so it is a new *C surface* rather than a new *build
+    requirement*, and the largest cost is not technical at all — the
+    Flatpak manifest has no `--share=network`, so this puts *"Network
+    access"* on baz's Flathub page for good.
+  - **Found on the way, twice.** (a) MusicBrainz **returned 503 on the first
+    request** from a non-descriptive User-Agent, which is the receipt that
+    its User-Agent and 1-req/s obligations are enforced rather than
+    advisory. (b) `views/artist.rs:19-26` claims the tiles are *"the wall's
+    to the pixel"* and the arithmetic says otherwise — 4–11 px wider at
+    every size, and six columns against the wall's five at 1920 with the
+    lane collapsed.
+  - **The zero-cost answer that nobody had costed**: `OpenURI` over the
+    D-Bus connection `mpris/server.rs:33` already makes opens the artist on
+    Wikipedia in the listener's own browser for **zero new crates and no
+    sandbox permission**, because the portal runs on the host. It ships in
+    tier 1 as what the page has while the dependency question is open, and
+    it may be all he wanted.
+
+- **Search off the Library, decided and built** — ADR-0036, the owner's *"how
+  the search works when we're not on the library needs to be decided… maybe a
+  little x or esc to clear would make sense too"*. The first half was **already
+  half-answered**: every road to the query has gone to the Library first since
+  the well moved into the lane (`App::reach_the_well`). What was missing is that
+  the field never said so, so the placeholder now names its subject —
+  **`Search library`**, in every place, in the field's resting 176 px, which
+  costs nothing because a placeholder and the count's slot are never on screen
+  together. **Contextual search is refused** on one hard constraint rather than
+  on taste: type-anywhere is a promise about the collection, and a scoped well
+  would revoke it on exactly the pages a scope applies to. And the **`×`** ships
+  in the mark's own box — the magnifier at rest, the cross while a query stands
+  — because the field's right edge is full and the swap costs the query none of
+  its 104 px. It runs `Esc`'s own function. Frames at
+  `docs/design/impl/search-scope/`.
+  - **The one thing this declines and does not dismiss**: a filter for a long
+    playlist's rows. Costed in `BACKLOG.md` as a *second control on the
+    playlist page* — its state beside `renaming`, peeled by
+    `peel_place_states`, and needing a key of its own because `/` and `Ctrl`+`F`
+    belong to the well. One surface earns it; that is the owner's call to make.
 
 - Doc 14 Tier 2 — **the distinction moves into the type**. A record's page sets
   its title in the serif italic; a playlist's page deliberately keeps the sans,
