@@ -2742,6 +2742,10 @@ impl App {
             // record's hover options unbidden, on the record you had happened
             // to touch on the way out.
             state.hovered_album = None;
+            // Home's `All songs` tile is the same case exactly: its own press
+            // navigates out from under the pointer, so without this the veil
+            // would be waiting on it when you came back.
+            state.hovered_all_songs = false;
             let from = self.place;
             self.place = door(self.place);
             self.note_place_left(from);
@@ -7895,10 +7899,11 @@ mod tests {
             "self.menu = None;",
             "self.drag = None;",
             "hovered_album = None;",
+            "hovered_all_songs = false;",
         ] {
             assert!(
                 body.contains(cleared),
-                "a place change must not outlive `{cleared}` — the three are \
+                "a place change must not outlive `{cleared}` — the four are \
                  one rule: what was about the place you left does not follow you"
             );
         }
