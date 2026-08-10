@@ -232,11 +232,14 @@
 > is still a fixed height, so no `RECENT` row is pushed down by a keystroke.
 >
 > **2. `SIDEBAR_WELL_H` falls from 52 to 32** — one control, nothing under it —
-> and the list below gets the 20 px back. Measured against the shipped frames:
-> **7 `RECENT` rows at 1280 × 860 where the second amendment left 6**; 10 at
-> 1920 × 1080, unchanged, the 20 px banked toward an eleventh. With the counts
-> gone the placeholder is free to say what the field is for, so it says
-> `Search`.
+> and the list below gets the 20 px back. **Measured** off two runs of the same
+> capture script against the binary either side of the change, rather than
+> predicted: **11 `RECENT` rows at 1920 × 1080 where the second amendment left
+> 10**; **7 either way at 1280 × 860**, where the 20 px buys three eighths of a
+> row and no whole one. The second amendment's own note — and doc 13 §9.2's,
+> which repeated it — said the well cost a row at 860 and would give that one
+> back; the frames say otherwise, and the frames win. With the counts gone the
+> placeholder is free to say what the field is for, so it says `Search`.
 >
 > **3. §6's inventory gains `COLLECTION`, and it is a *footer*.** Four figures:
 > albums, artists, tracks, and total playing time in one unit. It is the last

@@ -1173,9 +1173,13 @@ pub const SIDEBAR_WELL_GLYPH_LEAD: f32 = SIDEBAR_HEAD_GLYPH_X - ICON_PX / 2.0;
 /// which costs no line at all.
 ///
 /// So the block is one control tall, the head is 20 px shorter, and the list
-/// below it gets that back — one whole `RECENT` row at the shipped 860 px
-/// window (7 rather than 6). The height is still *fixed* for the reason it
-/// always was: nothing below the well may move when a key lands in it.
+/// below it gets that back: **11 whole `RECENT` rows at 1920 × 1080 where
+/// there were 10**, measured off the frames in
+/// `docs/design/impl/home-stats/`. At 1280 × 860 the same 20 px buys three
+/// eighths of a row and no whole one — 7 rows either way — which is stated
+/// because the arithmetic that preceded the measurement predicted the opposite.
+/// The height is still *fixed* for the reason it always was: nothing below the
+/// well may move when a key lands in it.
 pub const SIDEBAR_WELL_H: f32 = TRANSPORT_HIT;
 
 /// **The match count's reserved slot inside the lane's well**: **72**.

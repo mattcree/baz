@@ -851,9 +851,11 @@ next commit.
   `COLLECTION` footer now; the match count is **feedback about the query**, so
   it moved *inside* the field it answers, right-aligned in a 72 px slot, where
   it costs no line at all. The well's block falls from 52 px to 32, and the
-  `RECENT` list gets the difference: **7 rows at 1280 × 860 where there were
-  6**. The strip's own well, drawn only below `SIDEBAR_FLOOR`, is unchanged —
-  a strip is one control tall and never had a second line to lose.
+  `RECENT` list gets the difference: **11 rows at 1920 × 1080 where there were
+  10**, measured off the frames rather than predicted — at 1280 × 860 the
+  20 px buys three eighths of a row and the count stays at 7. The strip's own
+  well, drawn only below `SIDEBAR_FLOOR`, is unchanged — a strip is one control
+  tall and never had a second line to lose.
 - **Home's `CONTINUE` band is the question you ask in the silence** (ADR-0030's
   third amendment). It used to be a reading of the launch snapshot, so pressing
   `Resume` left a frozen placard describing where you *were* on screen while
