@@ -58,6 +58,10 @@
    between the sleeve and the run column, because the record column hangs
    left and the run stays 440 wide. A4 takes it to ~1100 at that size.
 4. **Rewrite the README as the project's public face**, with the icon and real
+   Flatpak build are all done; what is left is a screenshot for the metainfo,
+   the version edit from `0.0.0`, a `workflow_dispatch` dry run, then the tag.
+   **The tag is the owner's to cut** — the workflow produces a draft.
+3. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately near
    last, so it describes what actually ships. Its keyboard table is badly stale
    today: `Pull` is gone, `Q` never opened the queue, shuffle is a mode, the
@@ -141,6 +145,14 @@ Newest first. Fuller detail in `CHANGELOG.md`.
 - **`All songs` has a tile on Home**, second under `CONTINUE`. The strip's
   `Play all` stays: it plays what the *wall* shows, which is the only way to
   play seven search results; the tile plays the collection whole.
+- The wall's scrollbar moved to the **window's** right edge. It was the wall's
+  bar, not the lane's — this file's item said "the lane's", and a rendered
+  frame said otherwise: the lane draws no bar at all with a short list, and the
+  wall's sat at x 1168–1171 in a 1280 px window with the rail's 108 px lane
+  outboard of it. Now x 1276–1279, with the rail, its letters and the density
+  detents at exactly the x they had. It costs the rail 4 px of the press band
+  that ran to the screen edge; taken on purpose, and argued at
+  `docs/design/impl/wall-scrollbar/`.
 - `ARTIST` groups albums under their artist. It turned out to be an ordinary
   group key rather than a subject beside one — `shelves(Artist)` is `albums()`
   with its breaks named — and that identity retired `A–Z` too, since both are

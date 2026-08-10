@@ -677,17 +677,37 @@ next commit.
   52 is the largest square on the 4 px lattice inside the 56 px the tallest
   zone already reserved. No artwork, and the block renders exactly as it did
   before.
-- **The wall has a scrollbar** — 4 px, no trough, the room's own hairline, and
-  it reserves its own lane inside the scrollable so no cover is ever drawn
-  under it. The owner's decision (*"just a very minimal scroll bar because
-  otherwise, it's hard to just jump to the end"*); the product's *two
-  vertical strips may not do one job* entry is rewritten to record it. The wall
-  was the only scrolling surface in baz without one — every list already had
-  `list_scrollbar` — and the rail is untouched: it still says where you are and
-  still names the shelf it jumps to. What the bar adds is the gesture the rail
-  has no rung for, because *the end* is not a group key. `INDEX_LANE_W` and the
-  rail's width algebra are unchanged; the 4 px comes out of the wall's own
-  measure, which the grid absorbs.
+- **The wall has a scrollbar, on the window's right edge** — 4 px, no trough,
+  the room's own hairline, reserving a lane inside the scrollable so no cover
+  is ever drawn under it. The owner's decision (*"just a very minimal scroll
+  bar because otherwise, it's hard to just jump to the end"*); the product's
+  *two vertical strips may not do one job* entry is rewritten to record it. The
+  wall was the only scrolling surface in baz without one — every list already
+  had `list_scrollbar` — and the rail is untouched: it still says where you are
+  and still names the shelf it jumps to. What the bar adds is the gesture the
+  rail has no rung for, because *the end* is not a group key. `INDEX_LANE_W`
+  and the rail's width algebra are unchanged; the 4 px comes out of the wall's
+  own measure, which the grid absorbs.
+
+  It shipped at the right edge of the wall's *scrollable*, with the index
+  rail's 108 px lane standing outboard of it — *"scroll bar is in a strange
+  location… it seems to have padding on the right"*. Measured on a 1280 × 860
+  frame: the bar at **x 1168–1171**, the rail's letters at x 1226–1239, the
+  window's edge at 1280. It now sits at **x 1276–1279**, outboard of the rail,
+  on the window's edge; at 1920 × 1080, x 1808–1811 → x 1916–1919. The fix is
+  the one the returns lane already made in the owner's words (*"the scrollbar
+  should be at the edge of it"*): **the content keeps its inset, only the bar
+  reaches the edge.** The scrollable takes the whole body width and reserves
+  both lanes (`theme::WALL_RESERVE` 112 = the bar's 4 + the rail's 108), and
+  the rail is stacked *under* it — under, because iced hands the topmost layer
+  the pointer first and a rail over the bar would be a bar nobody can grab.
+  **Nothing else moved**: the bounding box of every differing pixel between the
+  before and after frames is the two bars' own columns. The price is stated
+  rather than hidden — the rail's press band ran to the window's edge, which
+  made an unaimed fling at the edge always hit it, and it now stops 4 px short;
+  the band is 104 px wide and what the edge hits instead is the other scroll
+  affordance for the same wall. Before/after captures, the ruler and the
+  argument at `docs/design/impl/wall-scrollbar/`.
 - **The wall's density has a visible control** (ADR-0028; doc 11 §5 P8, the
   owner choosing the visible handle): three detent marks at the foot of the
   index rail's lane — each the wall itself at its hang, one, four, nine works

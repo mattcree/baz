@@ -4676,14 +4676,17 @@ impl Shelf {
                 self.scroll_offset = viewport.absolute_offset().y;
                 let bounds = viewport.bounds();
                 // The scrollable's *outer* bounds. The rows are laid out inside
-                // the lane its own bar reserves, so the grid is told what the
-                // rows actually get — otherwise the estimate and the
-                // measurement disagree by exactly the bar's width, and at a
-                // boundary width that is one column too many.
-                self.grid_size = Size::new(
-                    (bounds.width - theme::WALL_SCROLLBAR_W).max(0.0),
-                    bounds.height,
-                );
+                // the lanes it reserves, so the grid is told what the rows
+                // actually get — otherwise the estimate and the measurement
+                // disagree, and at a boundary width that is one column too
+                // many. The reservation is [`theme::WALL_RESERVE`]: the bar's
+                // 4 px **and** the index rail's 108, because the scrollable now
+                // takes the whole body width so its bar can be drawn on the
+                // window's edge and the rail is stacked under it
+                // (`views::shelf::view`). It was the bar's width alone while
+                // the rail was a `row!` sibling that took its lane first.
+                self.grid_size =
+                    Size::new((bounds.width - theme::WALL_RESERVE).max(0.0), bounds.height);
                 self.request_visible_thumbs()
             }
             Message::WindowResized(size) => {

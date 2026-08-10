@@ -1297,6 +1297,86 @@ mod tests {
         }
     }
 
+    /// **The wall's right-hand lanes, at every width in the band** — the
+    /// arrangement the owner's *"scroll bar is in a strange location… it seems
+    /// to have padding on the right"* moved the bar into.
+    ///
+    /// Left to right, off the wall's own right edge (`crate::views::shelf`):
+    ///
+    /// ```text
+    /// … covers │ margin │ INDEX_CLEARANCE │ the rail's ink │ HANG │
+    ///          │        └──── theme::INDEX_LANE_W ───────────────┘
+    ///          │                                        the bar ┤▌
+    /// ```
+    ///
+    /// The bar is drawn on the **window's** edge, in the outer
+    /// [`crate::theme::WALL_SCROLLBAR_W`] of the rail's own window gutter — so
+    /// the four claims below have to hold together at every pixel, and three
+    /// of them are new with the move:
+    ///
+    /// 1. the grid is resolved for the wall less [`crate::theme::WALL_RESERVE`]
+    ///    — the bar's lane *and* the rail's, one number;
+    /// 2. **no cover is ever under the bar**, by the whole rail lane's width;
+    /// 3. the bar is outboard of the rail's ink rather than inboard of it,
+    ///    which is the defect's whole content;
+    /// 4. the rail's ink still ends on `W − HANG` (law L1) — the bar moved,
+    ///    the type did not.
+    #[test]
+    fn the_bar_is_outboard_of_the_rails_ink_at_every_width() {
+        use crate::theme::{HANG, INDEX_LANE_W, WALL_RESERVE, WALL_SCROLLBAR_W};
+
+        // The reservation is one number and it is the two lanes.
+        const { assert!(WALL_RESERVE == INDEX_LANE_W + WALL_SCROLLBAR_W) }
+
+        for density in Density::ALL {
+            let step = density.label();
+            for wall in band() {
+                let width = wall - WALL_RESERVE;
+                if width <= 0.0 {
+                    continue;
+                }
+                let grid = Grid::new(width, density);
+                // 1. The grid never sees the reserved lanes.
+                assert!(
+                    (grid.width - width).abs() < 0.01,
+                    "{step}, {wall} px of wall: the grid was resolved for {} px",
+                    grid.width
+                );
+
+                // The three x-positions the frame is measured at, in the
+                // wall's own coordinates.
+                let last_cover_right = grid.margin + grid.block_width();
+                let ink_right = wall - HANG;
+                let bar_left = wall - WALL_SCROLLBAR_W;
+
+                // 2. No cover is ever drawn under the bar — and the slack is
+                //    not a hair, it is the whole of the rail's lane.
+                assert!(
+                    bar_left - last_cover_right >= INDEX_LANE_W - 0.01,
+                    "{step}, {wall} px of wall: only {} px between the last \
+                     cover and the bar",
+                    bar_left - last_cover_right
+                );
+
+                // 3. The bar is outboard of the rail's ink. This is the
+                //    inversion the owner saw: it used to be inboard by
+                //    `INDEX_LANE_W`, which is the empty strip he described.
+                assert!(
+                    bar_left >= ink_right,
+                    "{step}, {wall} px of wall: the bar at {bar_left} is inboard \
+                     of the rail's ink, which ends at {ink_right}"
+                );
+
+                // 4. …and the ink did not move to let it past: law L1's one
+                //    window gutter, at every width and every step.
+                assert!(
+                    (wall - ink_right - HANG).abs() < 0.01,
+                    "{step}, {wall} px of wall: the rail's ink hangs from {ink_right}"
+                );
+            }
+        }
+    }
+
     /// The shelved wall's vertical rhythm, as arithmetic: the wall's top hang,
     /// then a one-hang band and its rows per shelf, and nothing else — at
     /// every step, because the wall's vertical unit is the step's hang and not

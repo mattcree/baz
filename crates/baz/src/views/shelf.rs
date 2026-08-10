@@ -27,12 +27,40 @@ use crate::{icon, rail, theme, vm};
 /// arrangement is the whole of step 8's composition:
 ///
 /// ```text
-/// ┌──────────────────────────────────────────┬──────┐
-/// │ scrollable( shelf headers + rows )        │ rail │  the rail is a sibling
-/// │ ────────────────────────────────────────  │      │  of the wall, so the
-/// │ ↑ the pinned header, stacked over the top  │      │  grid's width is what
-/// └──────────────────────────────────────────┴──────┘  the scrollable measures
+/// ┌───────────────────────────────────────────┬──────┬─┐
+/// │ scrollable( shelf headers + rows )        ╎ rail ╎█│  the scrollable takes
+/// │ ─────────────────────────────────────     ╎      ╎█│  the whole width and
+/// │ ↑ the pinned header, stacked over the top ╎      ╎█│  reserves the two
+/// └───────────────────────────────────────────┴──────┴─┘  right-hand lanes
+///  ←────────── Shelf::grid_width ────────────→ ←── 112 ─→  (theme::WALL_RESERVE)
 /// ```
+///
+/// # The bar is on the window's edge, and the rail is stacked under it
+///
+/// The bar used to be drawn at the right edge of the *scrollable*, with the
+/// rail's [`theme::INDEX_LANE_W`] 108 standing outboard of it — measured on a
+/// 1280 × 860 frame, a bar at x 1168–1171 with the window's edge at 1280. The
+/// owner: *"scroll bar is in a strange location… it seems to have padding on
+/// the right"*. The fix is the one the returns lane already made in his words
+/// (*"the scrollbar should be at the edge of it"*, [`crate::views::lane`]):
+/// **the content keeps its inset; only the bar reaches the edge.**
+///
+/// So the scrollable is given the whole body width and reserves both lanes
+/// ([`theme::shelf_scrollbar`]), and the rail is a stacked layer *under* it,
+/// right-aligned, at exactly the x it always had. iced draws a vertical bar at
+/// the far right of a scrollable's outer bounds regardless of what it
+/// reserves, so the bar lands in the rail's own window gutter — 4 px of a
+/// 40 px gutter that never held ink. The rail is the **lower** layer because
+/// iced hands the topmost layer the pointer first; a rail on top would own the
+/// 4 px the bar is drawn in and the bar would be ungrabbable.
+///
+/// What that costs: the rail's press band ran to the window's edge, which made
+/// flinging the pointer at the edge a guaranteed hit (Fitts). It now stops
+/// 4 px short, and those 4 px belong to the bar. The band is still 104 px
+/// wide, and what the edge now hits is the *other* affordance for the same
+/// surface — the one whose whole reason for existing is the gesture the rail
+/// cannot do. That is the trade, and it is the price of the bar being where
+/// people look for it.
 ///
 /// # The one alignment edge everything shares
 ///
@@ -111,13 +139,15 @@ pub(crate) fn view<'a>(
     )
     .id(scroll_id())
     .on_scroll(Message::Scrolled)
-    // **The wall's scrollbar** ([`theme::wall_scrollbar`]): 4 px, in the room's
-    // hairline, reserving its own lane inside the scrollable so no cover is
-    // ever drawn under it. The rail beside it still says *where you are* and
-    // still names the shelf it jumps to; what the bar adds is the one gesture
-    // the rail has no answer to — drag to the end. The owner's decision,
-    // 2026-08-09; the product's two-vertical-strips entry records it.
-    .direction(scrollable::Direction::Vertical(theme::wall_scrollbar()))
+    // **The wall's scrollbar** ([`theme::shelf_scrollbar`]): 4 px, in the
+    // room's hairline, reserving [`theme::WALL_RESERVE`] — its own lane *and*
+    // the rail's — inside the scrollable, so no cover is ever drawn under
+    // either and the bar itself is drawn on the window's edge. The rail under
+    // it still says *where you are* and still names the shelf it jumps to;
+    // what the bar adds is the one gesture the rail has no answer to — drag to
+    // the end. The owner's decision, 2026-08-09; the product's
+    // two-vertical-strips entry records it.
+    .direction(scrollable::Direction::Vertical(theme::shelf_scrollbar()))
     .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
     .width(Length::Fill)
     .height(Length::Fill);
@@ -150,9 +180,23 @@ pub(crate) fn view<'a>(
             songs_section(shelf, player, collecting, hang.block_width()),
             wall
         ]
+        .width(Length::Fill)
         .into()
     };
-    row![body, index_rail(shelf, &shelves)].into()
+    // **The rail is the layer under the body**, right-aligned in its own lane,
+    // at the same x it occupied as a `row!` sibling — see this function's docs
+    // for why it is under rather than over, and what the 4 px it yields to the
+    // bar cost.
+    stack![
+        container(index_rail(shelf, &shelves))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(alignment::Horizontal::Right),
+        body
+    ]
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 /// **The Songs section's block**: a `Songs` rule, up to [`vm::SONGS`] ranked
@@ -218,6 +262,13 @@ fn songs_section<'a>(
     .width(Length::Fill)
     .padding(iced::Padding {
         top: theme::HANG,
+        // **The same two lanes the wall's scrollable reserves**
+        // ([`theme::WALL_RESERVE`]): the section is a sibling of the
+        // scrollable, not a child of it, so nothing reserves them on its
+        // behalf — and a block centred in the whole body would sit 56 px right
+        // of the wall's own centre line, which is the one x-position this file
+        // is not allowed to introduce.
+        right: theme::WALL_RESERVE,
         ..iced::Padding::ZERO
     })
     .align_x(alignment::Horizontal::Center)
@@ -1449,6 +1500,76 @@ mod tests {
         assert!(control.contains("bottom: theme::HANG"));
         assert!(control.contains("for step in Density::ALL"));
         assert!(control.contains("alignment::Horizontal::Right"));
+    }
+
+    /// **The rail is the layer under the body, and the bar owns the window's
+    /// edge** — the arrangement the owner's *"scroll bar is in a strange
+    /// location… it seems to have padding on the right"* asked for.
+    ///
+    /// Three things have to stay true together, and each of them is a way of
+    /// getting it wrong that a plausible edit would reintroduce:
+    ///
+    /// 1. **The wall asks for [`theme::shelf_scrollbar`]**, not the bar every
+    ///    other list uses. The difference is the whole fix: it reserves the
+    ///    rail's lane as well as its own, so the scrollable can span to the
+    ///    window's edge and iced draws the bar there.
+    /// 2. **The rail is the `stack`'s *first* child.** iced hands the topmost
+    ///    layer the pointer first, so a rail pushed after the body would own
+    ///    the 4 px the bar is drawn in and the bar would be ungrabbable —
+    ///    which looks exactly like a bar that is merely decorative.
+    /// 3. **The Songs section reserves the same two lanes**, because it is the
+    ///    scrollable's sibling rather than its child and nothing reserves them
+    ///    on its behalf.
+    ///
+    /// Read off the source, the way the density marks' placement is: what is
+    /// being pinned is the *composition*, and the composition is the code.
+    #[test]
+    fn the_rail_hangs_under_the_body_and_the_bar_takes_the_window_edge() {
+        // The bar's lane and the rail's, one number, and it is what the
+        // scrollable reserves (`theme::shelf_scrollbar`'s `spacing`).
+        const { assert!(theme::WALL_RESERVE == theme::INDEX_LANE_W + theme::WALL_SCROLLBAR_W) }
+
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/shelf.rs"),
+        )
+        .expect("this module's own source")
+        .replace("\r\n", "\n");
+        let view = source
+            .split_once("pub(crate) fn view<'a>(")
+            .expect("the wall's view exists")
+            .1;
+        let view = &view[..view.find("\n}\n").expect("a function ends")];
+
+        assert!(
+            view.contains("theme::shelf_scrollbar()"),
+            "the wall's bar no longer reserves the rail's lane, so it is not \
+             on the window's edge"
+        );
+        // The stack's first child is the rail; the body is pushed over it.
+        let stack = view
+            .split_once("stack![\n        container(index_rail(")
+            .map(|(_, rest)| rest)
+            .expect("the rail is the layer under the body");
+        let stack = &stack[..stack.find("\n    ]").expect("the stack ends")];
+        assert!(
+            stack.contains("alignment::Horizontal::Right"),
+            "the rail's layer no longer hangs on the wall's right"
+        );
+        assert!(
+            stack.trim_end().ends_with("body"),
+            "the body is no longer the layer over the rail — the bar is under \
+             the rail and cannot be grabbed"
+        );
+
+        let songs = source
+            .split_once("fn songs_section<'a>(")
+            .expect("the Songs section exists")
+            .1;
+        let songs = &songs[..songs.find("\n}\n").expect("a function ends")];
+        assert!(
+            songs.contains("right: theme::WALL_RESERVE"),
+            "the Songs section centres on a different axis than the wall"
+        );
     }
 
     /// **A tile's box holds the tile, at every density and every width.**
