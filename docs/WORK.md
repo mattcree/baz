@@ -71,12 +71,23 @@
    he is asking to choose. Undesigned; the questions are where the toggle lives
    (the bar is already dense), whether the choice persists, and what the
    elapsed/remaining figures either side of the bar read in run mode.
-4. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
+4. **An artist has an `All songs` of their own.** The owner: *"the artist page
+   should have its own 'all songs' playlist I think"*. `implicit::ImplicitList`
+   already gives the library one, with an `Origin` kind and a collage sleeve, so
+   this is that list scoped to one artist rather than new machinery. Undecided:
+   its **order** (their records by year and then track order is the honest
+   default — an artist's songs have a chronology the library's `All songs` does
+   not); whether the tile sits with the artist's records or above them; and what
+   it says, since `All songs` on an artist's page means *their* songs and the
+   word may not need qualifying. It should credit the artist's list rather than
+   the underlying records when played, which is the rule that just landed for
+   playlists.
+5. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
    the Flatpak build are all done; what is left is a screenshot for the
    metainfo, the version edit from `0.0.0`, a `workflow_dispatch` dry run,
    then the tag. **The tag is the owner's to cut** — the workflow produces a
    draft.
-5. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+6. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -89,7 +100,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-6. **Rewrite the README as the project's public face**, with the icon and real
+7. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
    last, so it describes what actually ships. Its keyboard table is still
    stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode,
@@ -98,21 +109,6 @@
 
 ## Doing
 
-- **The shuffled continuation counted visits, not records** —
-  `fix/shuffled-continuation-counts-records`. The owner: *"the album count in
-  the bottom bar when in shuffle mode is weird... way too many albums shown"*.
-  Diagnosed and fixed: `continuation` grouped only *adjacent* items sharing an
-  album title, which is exactly right for a run in the listener's own order and
-  wrong under a walk that returns to a record — seed 0 of a three-record run
-  read `then 10 albums`. Counted distinct under shuffle only, so
-  `a_record_stacked_twice_is_two_entries` keeps its deliberate rule.
-- **The lane's lamp dot follows the sounding record, not the playing list** —
-  with the ledger agent, because one answer must serve both the dot and the
-  recency ordering or they will drift. The owner: *"I still see albums
-  specifically appearing as if they are playing rather than the playlist...
-  it only affects the little pip"*.
-- **The play ledger remembers which list played**, so a run's origin survives a
-  quit — ADR-0018 reopened, the `# baz run` marker.
 - **One composition for a record's page and a list's page** — the owner's *"can
   we reuse the basic layout and view of the playlist for the album view"*.
 - **Multi-disc albums are one record** — the owner's *"it would be good if
@@ -201,6 +197,20 @@
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **A shuffled run's continuation counts records, not visits** — the owner:
+  *"the album count in the bottom bar when in shuffle mode is weird... way too
+  many albums shown"*. `continuation` folded only *adjacent* items sharing an
+  album title, so a shuffled walk opened a fresh entry every time it returned
+  to a record: seed 0 of a three-record run read `then 10 albums`. The old rule
+  is not wrong, it is narrow — adjacency is a statement about *the listener's
+  own order*, which a shuffled walk has none of to break — so the fold is by
+  title under shuffle and by adjacency without it, and
+  `a_record_stacked_twice_is_two_entries` keeps its deliberate reading. The
+  function's own comment had claimed shuffle *"generalises rather than
+  changes"* here; that claim was the defect. Pinned by both readings of one
+  five-item run, and by a 32-seed sweep of the shuffle the player really
+  performs — confirmed to fail before the fix, because this defect does not
+  appear until the walk happens to return.
 - **The ledger remembers the list** — the owner: *"when I play a song from a
   playlist it should only bump the recency of that playlist, not the underlying
   albums please"*. The live half already worked; this is the **cross-quit**
