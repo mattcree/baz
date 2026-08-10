@@ -6226,9 +6226,7 @@ mod tests {
     fn no_shuffle_of_a_run_claims_more_records_than_it_holds() {
         let items: Vec<(Option<&str>, &str, u64)> = ["Geogaddi", "Kid A", "Amnesiac"]
             .iter()
-            .flat_map(|album| {
-                (1..=6_u64).map(move |track| (Some(*album), "track", 60 + track))
-            })
+            .flat_map(|album| (1..=6_u64).map(move |track| (Some(*album), "track", 60 + track)))
             .collect();
 
         for seed in 0..32_u64 {
