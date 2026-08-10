@@ -43,9 +43,6 @@
 
 ## Doing
 
-- **Shuffle stops permuting the run**, and `Play all` becomes a tile on Home.
-  The constraint that decides the design: baz is gapless, so the next track
-  must be chosen *before* the current one ends.
 - **The artwork at full size** (doc 12 step A2) — deletes the 720 px clamp that
   makes full-screen *"look weird"*, adds the 1024 px hero decode and the
   cover-derived field.
@@ -88,6 +85,17 @@
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **Shuffle is a property of the walk.** The run keeps its order; the engine
+  gained one standing `traversal` and nothing else. `shuffle.rs` deleted whole,
+  along with two invalidation rules, the restore walk and the snapshot case.
+  Gapless survives by handing a `Session` an itinerary plus a slot→position
+  plan, so the decode-ahead producer is unchanged to the line — every existing
+  gapless test passes untouched. The rule is a **bag**: one shuffled pass, no
+  repeat until everything has played, and the next row is *shown* (an open ring
+  beside the sounding row's dot) rather than hidden.
+- **`All songs` has a tile on Home**, second under `CONTINUE`. The strip's
+  `Play all` stays: it plays what the *wall* shows, which is the only way to
+  play seven search results; the tile plays the collection whole.
 - `ARTIST` groups albums under their artist. It turned out to be an ordinary
   group key rather than a subject beside one — `shelves(Artist)` is `albums()`
   with its breaks named — and that identity retired `A–Z` too, since both are
