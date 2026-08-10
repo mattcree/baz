@@ -148,17 +148,21 @@ sounding run, and editing the queue never writes back into the file.
    are duplicates, or skips what it cannot decode without saying so. None of
    that changed: the file is still byte-verbatim, still exactly what the page
    lists, still edited by nobody but the user (clause 2), and still what the
-   run is copied from at the moment of the gesture. What shuffle re-orders is
-   **the copy**, which the paragraph above already calls decoupled from the
-   file the instant it is made — and it re-orders it *visibly*, into a queue
-   the listener can open and read row by row.
+   run is copied from at the moment of the gesture.
+
+   **And shuffle does not re-order even the copy.** ADR-0023's amendment was
+   revised the same day, on the owner's *"shuffle as a concept is more about
+   going to an unknown next track rather than actually mutating the track
+   list"*: shuffle is a property of the **walk**, so the run holds the
+   playlist's own order — visibly, in a queue the listener can open and read row
+   by row — and what changes is which row is chosen next, which the run column
+   marks.
 
    The distinction the clause now draws is therefore sharper than the one it
    drew before: **a list is not a play order.** The playlist is ground truth
-   about *what*; the run is a record of *what, in what order, this time*. Turn
-   shuffle off and the run goes back to the file's own order (ADR-0023's
-   amendment), which is the property that makes the two statements consistent
-   rather than merely coexisting. A mode a listener set, can see lit, and can
+   about *what*; the run is a record of *what, in what order, this time*; and
+   with shuffle on, even the run's order is the file's — only the path through
+   it differs, and it is drawn. A mode a listener set, can see lit, and can
    unset is not the silent divergence this clause exists to forbid.
 2. Nothing edits a playlist but the user. baz writes a playlist file only as
    the direct result of a user's edit to that playlist — never on play, never

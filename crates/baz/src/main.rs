@@ -60,7 +60,6 @@ mod replaygain;
 mod scan;
 mod session;
 mod shelf;
-mod shuffle;
 mod spine;
 mod theme;
 mod undo;

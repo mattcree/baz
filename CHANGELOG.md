@@ -1096,35 +1096,67 @@ next commit.
 
 ### Changed
 
-- **Shuffle is a property of the player, not an act.** The owner: *"can you
-  make shuffle a property of the player i.e. toggle on/off."* It was one press
-  in the Library strip that drew eight records out of the wall and started
-  them, with nothing to turn off. It is now a **toggle** — the crossed arrows
-  on the now-playing bar, lit in the accent while it is on, remembered in
-  `config.toml` beside the other standing decisions — that says what order
-  things play in from here.
+- **Shuffle is a property of the player, and of the *walk* rather than of the
+  list.** The owner, twice in one day: *"can you make shuffle a property of the
+  player i.e. toggle on/off"*, and then, on seeing what that shipped as, *"I
+  think shuffle as a concept is more about going to an unknown next track
+  rather than actually mutating the track list if that makes sense."*
 
-  **Turning it off restores the order the run would have had.** That is the
-  part that would have felt broken if it were wrong, so the rule is stated
-  exactly: what is retained is the run's paths in the order the gesture laid
-  them out — inert data, read at one moment by one caller. It is invalidated by
-  a new run, and by a **hand reorder** (a stepper press or a drag restates the
-  order in as many words, and the hand beats the machine's memory). A row
-  deleted while shuffled stays deleted; a row appended stays at the end, where
-  the append put it; a file listed twice comes back twice. A run restored from
-  a snapshot has no retained order and is left exactly as it stands.
+  It was one press in the Library strip that drew eight records out of the wall
+  and started them, with nothing to turn off. It is now a **toggle** — the
+  crossed arrows on the now-playing bar, lit in the accent while it is on,
+  remembered in `config.toml` beside the other standing decisions — and what it
+  changes is which track is chosen next. **The queue is never permuted.** It
+  keeps the order the gesture that built it laid out, in both positions of the
+  control and whatever else happens to it.
 
-  **Nothing stops in either direction.** On and off both go out as
-  `UpdateQueue`, which ADR-0014 guarantees disturbs no delivered sample: on
-  permutes what is in front of the needle only, because what is behind it is
-  history and history does not re-order.
+  **The selection rule, in one sentence:** with shuffle on a run plays a
+  **bag** — one deterministic shuffled pass over the run's entries, in which no
+  entry repeats until every entry has played, and when the bag is spent the run
+  ends. A uniform draw can play the same track twice running and leave another
+  unheard for a whole album; a bag is what the word means to people. The bag is
+  **not** re-rolled when it empties (a fresh pass comes from a fresh gesture)
+  and **not** re-rolled by a jump — jumping moves the cursor within the bag, so
+  `Next` and `Previous` land where the run was actually going. A fresh seed per
+  run, so the same record played twice is two different shuffles.
 
-  **Every play gesture agrees**, structurally rather than by convention — press
+  **The decision lives in the engine, because baz is gapless.** `baz-core` gains
+  one standing property — `traversal`, set by `Command::SetTraversal` and
+  answered by `Event::TraversalChanged` — and nothing else: no repeat flag, no
+  continuation policy, nothing that refills. It has to be the engine: gapless
+  means the next track is decoded *while the current one plays*, and the only
+  way a front end can name the next track is by sending a queue, which ADR-0014
+  documents as costing the following boundary its sample-accurate splice. One
+  edit, one boundary is a fair price for an edit; a mode that charged it at
+  every boundary of a shuffled run is not. Internally a session is handed an
+  **itinerary** — the entries it will play, in the order it will play them —
+  so the decode-ahead loop is untouched to the line, and every existing gapless
+  test passes unchanged. The new one,
+  `a_shuffled_run_is_gapless_and_bit_identical`, plays a two-track queue under a
+  reversing traversal and compares the delivered stream sample for sample
+  against the reference decodes concatenated in the bag's order.
+
+  **baz says what is next.** The order is decided in advance, so baz knows it,
+  and the run column says so: the row that plays next carries an **open ring**
+  where the sounding row carries the filled lamp dot, and the entries the pass
+  is already past are dimmed. The bar's continuation counts the bag's
+  remainder rather than the list's tail, and the popover's `3 of 12` counts
+  how far through the pass you are rather than which row you are on. The mark is
+  drawn with shuffle **off** too, where it is simply the row below: a fact that
+  is true in both modes, and an interface that only marked what is next when it
+  was surprising would be one that had decided when you are allowed to know.
+
+  **Turning it off never stops the music, and never touches the run.** The
+  sounding track is delivered to its end and the run continues on the new plan
+  after it — ADR-0014's existing handover at its existing price of one
+  boundary.
+
+  **Every play gesture agrees**, structurally rather than by convention: press
   `Play` on a record with shuffle on and the record plays shuffled, and
-  `Play all`, a playlist's `Play` and a track click all build the list their
-  gesture means and hand it to the same arranger. A **track click** says both
-  of the things it means: the clicked track leads, and the rest follows
-  shuffled.
+  `Play all`, a playlist's `Play` and a track click all hand the list their
+  gesture means to the same function. A **track click** needs no special case
+  any more — starting at a row and continuing by the plan is exactly what
+  `JumpTo` does.
 
   **The crossed-arrows glyph, taken.** `docs/design/10-controls-and-iconography.md`
   §3.2 refused it *only* because the symbol promises a mode with a lit state
@@ -1139,18 +1171,13 @@ next commit.
   Both existed to answer one question about a draw whose source was only
   implied: *what can this shuffle play?* A mode has no source of its own, so
   **the pool is the run** — the queue, a place you can open and read row by
-  row — and the question answers itself. The design line the marks served still
-  holds and holds more strongly: a listener can see everything shuffle can
-  play. The ring's reserved lane stays as the sleeve's mat; only the ink went.
+  row — and the question answers itself. The ring's reserved lane stays as the
+  sleeve's mat; only the ink went.
 
-  Recorded in ADR-0023's amendment — which had said there is *"no live context
-  object that keeps acting after the gesture"* and now states precisely what is
-  retained, why an inert list of paths is not that object, and what invalidates
-  it — in ADR-0024 §1's first honesty clause (which said *no shuffle-on-play*),
-  and in doc 10 §3.2, where the crossed-arrows clause lives.
-
-  Captures, with the run before shuffle and the run after on-then-off compared
-  at **zero differing pixels**: `docs/design/impl/shuffle-and-all-songs/`.
+  Recorded as **one decision** in ADR-0023's amendment (rewritten in place
+  rather than corrected), in ADR-0024 §1's first honesty clause, and in doc 10
+  §3.2 where the crossed-arrows clause lives. Captures:
+  `docs/design/impl/shuffle-and-all-songs-tile/`.
 
 ### Removed
 
@@ -1161,8 +1188,10 @@ next commit.
   `shuffle.rs`), and `baz-core`'s `History::pull_weight` with `PULL_DAY_CAP`
   and `PULL_NEVER_WEIGHT` — the weighting had exactly one consumer, and a
   weighted draw nothing draws from is a recommendation engine's foundations
-  left in the ground. **Shuffle is untouched**: the two shared one function,
-  `shuffle::Pool::from_wall`, and shuffle owns it now.
+  left in the ground. **Shuffle was untouched** at the time: the two shared one
+  function, `shuffle::Pool::from_wall`, and shuffle owned it — until the pool
+  went with the draw later the same day, and then the module went with the
+  permutation (below).
 
   This is also the third answer to `docs/design/11-jobs-era-critique.md` **P9**
   (*"`Pull`: explain it or rename it"*), which was an open question addressed
@@ -1172,6 +1201,31 @@ next commit.
   sweep's licence list held `Pull` and `The pull` and nothing else, so **P4's
   one-vocabulary rule is now total**; and the strip's acts cluster fell from
   182 px to 144, taking the two-line split seam from 872 to 834.
+- **The whole of the front end's `shuffle` module, and the machinery that
+  existed to keep two orders in step.** Shuffle became a property of the walk
+  rather than of the list (above), so turning it off is trivial: nothing was
+  ever changed, and there is nothing to put back.
+
+  Gone with the permutation: `crates/baz/src/shuffle.rs` entire —
+  `SourceOrder`, `source_order`, `arranged`, `restored`, `leading`, and the
+  `SplitMix64` and Fisher–Yates it carried (those two moved to
+  `baz_core::traversal`, where the engine and the front end share one function
+  and therefore one answer). Gone from `PlayerState`: the retained
+  `Option<Vec<PathBuf>>` and its four methods (`source_order`,
+  `note_shuffled_run`, `retain_source_order`, `forget_source_order`), and the
+  `bool` that made the struct need an `#[expect(clippy::struct_excessive_bools)]`
+  — the allowance went with the flag. Gone from `App`: the branch in `send_run`
+  that permuted a run and the one in `toggle_shuffle` that un-permuted it, and
+  the two `forget_source_order` calls the reorder handlers made.
+
+  Gone from the *rules*, which is the larger part: the retained order's two
+  invalidation conditions; the restore walk and the three consequences it had to
+  define (a deleted row staying deleted, an appended row staying appended, a
+  repeated file being put back twice); the "a run restored from a snapshot has
+  no retained order" case and the stdout line that explained it; and the hoist
+  that made a track click's clicked row lead a permuted body. Every one of them
+  was a rule about keeping two orders in step. There is one order now, and it is
+  the run's.
 - **The playlist delete confirmation.** *"Delete "{name}"? The file goes;
   your music stays."* was the correct fallback while deletion was
   irreversible; the trash makes it reversible, and the 1992 HIG's ranking —

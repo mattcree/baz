@@ -208,6 +208,12 @@ pub struct Config {
     /// A fresh baz opens with it **off**. Silence is a feature and so is
     /// order: the record plays in the order it was made in until somebody says
     /// otherwise.
+    ///
+    /// **The mode is stored; the pass is not.** Shuffle is a traversal now
+    /// (`baz_core::traversal`) and a traversal carries a seed — which is
+    /// deliberately *not* written here. A seed belongs to a run, and two
+    /// launches with shuffle on should be two different shuffles; remembering
+    /// one would make every morning's first record play in last night's order.
     pub shuffle: bool,
     /// **Whether the now-playing place shows the run beside the record**
     /// (`docs/design/12-now-playing-and-kiosk.md` §3.4.3).

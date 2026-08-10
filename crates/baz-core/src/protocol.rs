@@ -80,6 +80,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::traversal::Traversal;
+
 /// A request from a front end to the engine.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -353,6 +355,45 @@ pub enum Command {
         /// [`ReplayGainSettings::resolve`](crate::replaygain::ReplayGainSettings::resolve).
         prevent_clipping: bool,
     },
+    /// **Set the order the engine walks its queue in** — front to back, or a
+    /// shuffled pass over it ([`crate::traversal`]).
+    ///
+    /// Absolute and idempotent, like [`Command::SetMute`] and
+    /// [`Command::SetReplayGain`], and engine state rather than session state:
+    /// it survives every transport command and is answered with
+    /// [`Event::TraversalChanged`]. Sending the traversal the engine already
+    /// has emits nothing and changes nothing.
+    ///
+    /// # It does not touch the queue
+    ///
+    /// This is the whole point of the command's existing. Shuffle used to be a
+    /// front-end permutation sent as [`Command::UpdateQueue`]; the queue is now
+    /// never permuted, and what changes is which entry follows which.
+    /// [`Event::QueueChanged`] is not emitted, because the list did not change
+    /// — only the walk over it did.
+    ///
+    /// # Why the engine and not the front end
+    ///
+    /// Gaplessness. The engine decodes the next track *while the current one
+    /// plays*, so the next track must be known before the current one ends. A
+    /// front end can only say what plays next by sending a queue, and
+    /// [`Command::UpdateQueue`] costs the boundary after it a sample-accurate
+    /// splice — one edit, one boundary, which is a fair price for an edit and an
+    /// unpayable one for a mode that would charge it at every boundary of a
+    /// shuffled run. [`crate::traversal`] carries the full argument.
+    ///
+    /// # While something is playing
+    ///
+    /// **The music does not stop.** The sounding track is delivered to its end
+    /// and the run continues from the new traversal after it — the handover
+    /// [`Command::UpdateQueue`] already defines, at the same cost (that one
+    /// boundary is a fresh decode rather than a splice), because the listener
+    /// changed their mind about what comes next and that is the moment the
+    /// decision has to be re-taken.
+    SetTraversal {
+        /// The order to walk in.
+        traversal: Traversal,
+    },
 }
 
 /// A notification from the engine to its front end.
@@ -592,6 +633,24 @@ pub enum Event {
         /// Whether the applied gain is lower than the tags asked for because
         /// the full figure would have exceeded full scale.
         clipping_prevented: bool,
+    },
+    /// **The order the engine walks its queue in changed** — the answer to
+    /// [`Command::SetTraversal`] ([`crate::traversal`]).
+    ///
+    /// Emitted only when the traversal actually moved, which is
+    /// [`Event::VolumeChanged`]'s rule and for the same reason: a front end
+    /// that sends the setting it already believes in should not be told
+    /// anything happened.
+    ///
+    /// **It says nothing about the queue**, because nothing happened to the
+    /// queue: the list a front end drew is still the list the engine holds, in
+    /// the order it holds it. What a front end does with this is recompute the
+    /// same [`Traversal::play_order`](crate::traversal::Traversal::play_order)
+    /// the engine just did — the function is pure and public precisely so that
+    /// the row marked *next* on screen is the row that plays next.
+    TraversalChanged {
+        /// The order now in effect.
+        traversal: Traversal,
     },
     /// A ReplayGain analysis pass has begun, and this is how much work it
     /// found (ADR-0015).
@@ -1130,6 +1189,17 @@ mod tests {
             Command::SetVolume { position: 1000 },
             Command::SetMute { muted: true },
             Command::SetMute { muted: false },
+            Command::SetTraversal {
+                traversal: Traversal::InOrder,
+            },
+            Command::SetTraversal {
+                traversal: Traversal::Shuffled { seed: 0 },
+            },
+            Command::SetTraversal {
+                traversal: Traversal::Shuffled {
+                    seed: 0x5EED_0F00_D1CE_1234,
+                },
+            },
             Command::SetReplayGain {
                 mode: ReplayGainMode::Off,
                 preamp_centidb: 0,
@@ -1161,6 +1231,12 @@ mod tests {
             Event::Resumed,
             Event::Stopped,
             Event::QueueEnded,
+            Event::TraversalChanged {
+                traversal: Traversal::InOrder,
+            },
+            Event::TraversalChanged {
+                traversal: Traversal::Shuffled { seed: 42 },
+            },
             Event::QueueChanged {
                 len: 12,
                 position: Some(3),
@@ -1675,6 +1751,25 @@ mod tests {
                 serde_json::to_string(&Command::SetMute { muted: false }).expect("serialize"),
                 r#"{"cmd":"set_mute","muted":false}"#,
             ),
+            (
+                // The traversal is internally tagged inside the command, so a
+                // mode with no payload is two keys and a mode with one is
+                // three. Pinned in both shapes because the flattening is the
+                // part a later serde version could plausibly render
+                // differently.
+                serde_json::to_string(&Command::SetTraversal {
+                    traversal: Traversal::InOrder,
+                })
+                .expect("serialize"),
+                r#"{"cmd":"set_traversal","traversal":{"traversal":"in_order"}}"#,
+            ),
+            (
+                serde_json::to_string(&Command::SetTraversal {
+                    traversal: Traversal::Shuffled { seed: 42 },
+                })
+                .expect("serialize"),
+                r#"{"cmd":"set_traversal","traversal":{"traversal":"shuffled","seed":42}}"#,
+            ),
         ];
         for (got, want) in cases {
             assert_eq!(got, want);
@@ -1720,6 +1815,47 @@ mod tests {
                 })
                 .expect("serialize"),
                 r#"{"cmd":"set_replay_gain","mode":"album","preamp_centidb":-1200,"no_tag_preamp_centidb":0,"prevent_clipping":true}"#,
+            ),
+        ];
+        for (got, want) in cases {
+            assert_eq!(got, want);
+        }
+    }
+
+    /// [`Event::TraversalChanged`]'s bytes, pinned — both modes, and both
+    /// halves of the nesting.
+    ///
+    /// Split from its sibling below for the reason the ReplayGain command was
+    /// split from its own: one test listing every variant of a growing enum
+    /// outgrows what is readable, not because the contract is any weaker. The
+    /// nesting is what is worth pinning here — a [`Traversal`] is internally
+    /// tagged inside an internally tagged event, so a mode with no payload is
+    /// one key and a mode with one is two.
+    #[test]
+    fn traversal_event_wire_format_is_stable() {
+        let cases: Vec<(String, &str)> = vec![
+            (
+                serde_json::to_string(&Event::TraversalChanged {
+                    traversal: Traversal::InOrder,
+                })
+                .expect("serialize"),
+                r#"{"event":"traversal_changed","traversal":{"traversal":"in_order"}}"#,
+            ),
+            (
+                serde_json::to_string(&Event::TraversalChanged {
+                    traversal: Traversal::Shuffled { seed: 42 },
+                })
+                .expect("serialize"),
+                r#"{"event":"traversal_changed","traversal":{"traversal":"shuffled","seed":42}}"#,
+            ),
+            (
+                // Zero is a real seed, and must encode as `0` rather than be
+                // elided as a default.
+                serde_json::to_string(&Event::TraversalChanged {
+                    traversal: Traversal::Shuffled { seed: 0 },
+                })
+                .expect("serialize"),
+                r#"{"event":"traversal_changed","traversal":{"traversal":"shuffled","seed":0}}"#,
             ),
         ];
         for (got, want) in cases {

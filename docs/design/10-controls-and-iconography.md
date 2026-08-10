@@ -423,6 +423,13 @@ a die. A die says *chance*, which is a promise about how a machine
 chose; crossed arrows say *these swap places*, which is a statement
 about order, and order is all baz's shuffle touches.
 
+One refinement, from the second half of the same day's decision: what
+the arrows swap is **the path**, not the rows. Shuffle became a
+traversal rather than a permutation (ADR-0023's amendment), so the run
+keeps its own order on screen and the crossed arrows describe the walk
+over it — which is, if anything, closer to what two crossing paths
+draw than a re-sorted list ever was.
+
 Where the control lives changed with it. It was the strip's second act,
 beside `Play all`; a property of the player belongs on the player's
 surface, so it is a slot on the now-playing bar — an **addition**, with

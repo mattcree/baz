@@ -42,6 +42,7 @@ use baz_core::history::{History, HistoryLedger};
 use baz_core::index::{GroupKey, Library};
 use baz_core::protocol::{self as protocol, Command, Event, SignalChain};
 use baz_core::replaygain::ReplayGainSettings;
+use baz_core::traversal::Traversal;
 use iced::keyboard;
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
 use iced::widget::{column, image as iced_image, row, scrollable, text_input};
@@ -55,8 +56,7 @@ use crate::playback::{Playback, PlayerEvent};
 use crate::player::{Availability, PlayerState};
 use crate::scan::ScanUpdate;
 use crate::{
-    art, config, font, keys, menu, motion, mpris, player, queue_edit, scan, shelf, shuffle, theme,
-    views, vm,
+    art, config, font, keys, menu, motion, mpris, player, queue_edit, scan, shelf, theme, views, vm,
 };
 
 // The top bar's height — used for the pre-first-scroll estimate of the grid
@@ -636,10 +636,11 @@ pub(crate) enum Message {
     /// bar's crossed arrows.
     ///
     /// A *mode*, not an act. It says what order things play in from here, and
-    /// it re-arranges the run in progress to match — forward of the needle
-    /// only, through [`Command::UpdateQueue`], so nothing stops. Turning it off
-    /// puts the run back into the order the gesture that started it built
-    /// ([`shuffle::restored`]). See [`App::toggle_shuffle`].
+    /// it changes **the walk, never the list** — the run keeps the order the
+    /// gesture that started it built, in both positions of the control, so
+    /// turning it off is a `SetTraversal` and nothing else. Nothing stops: the
+    /// sounding track plays to its end and what follows is re-planned
+    /// (`baz_core::traversal`). See [`App::toggle_shuffle`].
     ToggleShuffle,
     /// The record's page: a different format of this album was picked.
     EditionSelected(u64, vm::EditionKey),
@@ -1150,7 +1151,24 @@ impl App {
         // (`config::Config::shuffle`), seeded rather than assumed for
         // `seed_volume`'s reason: the control must be lit on the first frame,
         // not on the first press.
-        player.seed_shuffle(stored.as_ref().is_some_and(|config| config.shuffle));
+        //
+        // The *mode* is what is persisted; the seed belongs to a run, so a
+        // fresh one is rolled here rather than remembered. Two launches with
+        // shuffle on are two different passes, which is what a listener means
+        // by shuffle and what remembering a seed would quietly break.
+        //
+        // **Sent, not assumed**, on exactly the terms the ReplayGain settings
+        // above are: the traversal is engine state now, so the config's
+        // standing decision reaches it as a command and this process keeps a
+        // mirror. `InOrder` is the engine's own default and is not sent, which
+        // is the ordinary case and costs nothing.
+        let standing = traversal(stored.as_ref().is_some_and(|config| config.shuffle));
+        if standing != Traversal::InOrder {
+            playback.send(Command::SetTraversal {
+                traversal: standing,
+            });
+        }
+        player.seed_traversal(standing);
         let resume = read_snapshot();
         // The folders baz holds this run (ADR-0022): what the config remembers,
         // with a `baz DIR` argument **added to the front** rather than replacing
@@ -3287,123 +3305,98 @@ impl App {
         self.publish_mpris(false);
     }
 
-    /// **Arrange a run for the player's shuffle property, and send it.**
+    /// **Send a run, and say how it is to be walked.**
     ///
     /// The one place a `SetQueue` that *starts* something goes out, which is
     /// what makes "`Play` on a record, `Play all`, a playlist's `Play` and a
     /// track click all agree" a structural fact rather than four functions
     /// keeping a convention. Each caller builds the queue its own gesture
-    /// means, in the order that gesture means, and hands it here; what happens
-    /// to that order is decided once.
+    /// means, in the order that gesture means, and hands it here.
     ///
-    /// - **Shuffle off**: the queue goes out exactly as built. Nothing is
-    ///   retained, because there is nothing to come back from.
-    /// - **Shuffle on**: the source order is retained
-    ///   ([`shuffle::source_order`]), the run is permuted
-    ///   ([`shuffle::arranged`]), and the two are recorded **together**
-    ///   ([`PlayerState::note_shuffled_run`]) — so "a shuffled run the toggle
-    ///   cannot turn off" is not a state this shell can reach.
+    /// **What happens to that order is: nothing.** This function used to
+    /// permute the run when the mode was on and keep a copy of what it had
+    /// permuted; the owner's reading of shuffle — *"going to an unknown next
+    /// track rather than actually mutating the track list"* — took both away.
+    /// The run goes out as built, in every mode, and the mode goes out beside
+    /// it as a traversal the engine walks by (`baz_core::traversal`).
     ///
-    /// `lead` is a row the gesture named — a track click — which plays first
-    /// and is not shuffled into the body ([`shuffle::leading`]). `None` is a
-    /// plain `Play`, where the whole run is still *next*.
+    /// A **fresh seed per run**, because the same seed over a re-played record
+    /// would be the same shuffle twice.
     ///
-    /// Answers **the position playback should start at**: the named row with
-    /// shuffle off, `0` with it on — the front of the run for a plain `Play`,
-    /// and the hoisted track for a click. `None` when the engine would not take
-    /// the queue, which is the caller's cue to stop rather than to send a
+    /// `lead` is a row the gesture named — a track click. It needs no special
+    /// handling any more: starting at a row and continuing by the plan is what
+    /// the engine does with `JumpTo`, so *this one, then whatever* is one
+    /// command rather than a hoist and a permutation.
+    ///
+    /// Answers **the position playback should start at**: the named row, or the
+    /// head of the pass for a plain `Play`. `None` when the engine would not
+    /// take the queue, which is the caller's cue to stop rather than to send a
     /// transport command into a run that does not exist.
     fn send_run(&mut self, queue: vm::QueueVm, lead: Option<usize>) -> Option<usize> {
-        if !self.player.shuffle() {
-            let paths = queue.paths();
-            if !self.playback.send(Command::SetQueue { paths }) {
+        // **A fresh pass per run**, and only when the mode is on. The same seed
+        // over a re-played record would be the same shuffle twice, which is the
+        // one thing about a shuffle a listener notices immediately.
+        if self.player.shuffle() {
+            let traversal = Traversal::Shuffled { seed: draw_seed() };
+            if !self.playback.send(Command::SetTraversal { traversal }) {
                 self.player.engine_closed();
                 return None;
             }
-            self.player.note_queue_sent(queue);
-            return Some(lead.unwrap_or(0));
+            self.player.note_traversal(traversal);
         }
-        let source = shuffle::source_order(&queue);
-        let arranged = match lead {
-            // The clicked track leads and the rest follows by chance — the one
-            // reading that honours both halves of "play this one" and "shuffle
-            // is on".
-            Some(row) => shuffle::arranged(&shuffle::leading(&queue, row), draw_seed(), 1),
-            None => shuffle::arranged(&queue, draw_seed(), 0),
-        };
-        let paths = arranged.paths();
+        // **The queue goes out exactly as the gesture built it, in every mode.**
+        // There is no branch here any more and that is the reduction: what
+        // shuffle changes is the walk, which the engine was told about above.
+        let paths = queue.paths();
         if !self.playback.send(Command::SetQueue { paths }) {
             self.player.engine_closed();
             return None;
         }
-        self.player.note_shuffled_run(arranged, source);
-        Some(0)
+        self.player.note_queue_sent(queue);
+        // The row the gesture named is the row to start on — under either mode.
+        // It used to be hoisted to the front of a permuted list so that a click
+        // could mean *this one* and *then whatever*; a traversal means both by
+        // construction, because starting at a row and continuing by the plan is
+        // exactly what the engine does with `JumpTo`.
+        Some(lead.unwrap_or_else(|| self.player.first_of_the_pass()))
     }
 
     /// **Turn shuffle on or off** — the now-playing bar's crossed arrows
     /// (the owner, 2026-08-10: *"can you make shuffle a property of the player
-    /// i.e. toggle on/off"*).
+    /// i.e. toggle on/off"*, and *"shuffle as a concept is more about going to
+    /// an unknown next track rather than actually mutating the track list"*).
     ///
-    /// Three things, in this order: the property moves, the standing decision
-    /// is written to `config.toml`, and the run in progress is re-arranged to
-    /// match what the control now says.
+    /// Three things, in this order: the engine is told how to walk, the standing
+    /// decision is written to `config.toml`, and this process records the same
+    /// traversal so that what it draws and what the engine plays are one answer.
     ///
-    /// **Nothing stops.** The re-arrangement goes out as
-    /// [`Command::UpdateQueue`], which ADR-0014 guarantees disturbs no
-    /// delivered sample when the playing track stays where it is — and it
-    /// always does, because both directions keep the needle put:
+    /// **The queue is not touched, in either direction.** That is the whole
+    /// shape of the second decision: shuffle was a permutation this function
+    /// applied to the run and undid from a retained copy, and it is now a
+    /// property of the walk — so *on* sends a fresh pass and *off* sends
+    /// `InOrder`, and the run is in its own order again because it never left
+    /// it. Everything the old version needed to be careful about — a retained
+    /// order that a delete could stale, an append that had to survive the
+    /// restore, a run with no order to go back to — is gone rather than handled.
     ///
-    /// - **On**: what is behind the needle is history and does not re-order;
-    ///   what is in front of it is permuted ([`shuffle::arranged`], with
-    ///   `keep` = the playing row + 1). The order the run had is retained as
-    ///   the order to come back to.
-    /// - **Off**: the run goes back into its retained order
-    ///   ([`shuffle::restored`]), and the retained order is spent. A run with
-    ///   none — restored from a snapshot, or re-ordered by hand since — is
-    ///   left exactly as it stands and says so on stdout, which is the honest
-    ///   answer rather than an invented one.
+    /// **Nothing stops.** `SetTraversal` lets the sounding track play to its end
+    /// and continues on the new plan after it (`baz_core::traversal`), which is
+    /// the bargain `UpdateQueue` already made and the same one boundary's cost.
     ///
     /// A press with nothing playing moves the property and writes it, and that
     /// is the whole of what there is to do: the mode is about what plays
     /// **next**.
     fn toggle_shuffle(&mut self) {
-        let on = self.player.set_shuffle(!self.player.shuffle());
-        persist_shuffle(on);
-        let Some(queue) = self.player.queue().cloned() else {
-            println!("[shuffle] {}", if on { "on" } else { "off" });
-            return;
-        };
-        // `playing_queue_row` is the engine's answer reconciled against this
-        // record; `None` — queued but not started — means all of it is still
-        // to come.
-        let keep = self.player.playing_queue_row().map_or(0, |row| row + 1);
-        // **On** retains the order it is about to destroy; **off** spends the
-        // one it retained. A run with none to spend — restored from a snapshot,
-        // or re-ordered by hand since — is left exactly as it stands.
-        let arranged = if on {
-            Some(shuffle::arranged(&queue, draw_seed(), keep))
-        } else {
-            self.player
-                .source_order()
-                .map(|order| shuffle::restored(&queue, order))
-        };
-        let Some(arranged) = arranged else {
-            println!("[shuffle] off \u{2014} this run has no earlier order to return to");
-            return;
-        };
-        let source = on.then(|| shuffle::source_order(&queue));
-        let paths = arranged.paths();
-        if !self.playback.send(Command::UpdateQueue { paths }) {
+        let on = !self.player.shuffle();
+        let traversal = traversal(on);
+        if !self.playback.send(Command::SetTraversal { traversal }) {
             self.player.engine_closed();
             return;
         }
-        self.player.note_queue_edited(arranged);
-        match source {
-            Some(order) => self.player.retain_source_order(order),
-            None => self.player.forget_source_order(),
-        }
+        self.player.note_traversal(traversal);
+        persist_shuffle(on);
         println!(
-            "[shuffle] {} \u{2014} the run re-arranged from row {keep}",
+            "[shuffle] {} \u{2014} the run keeps its own order; the walk changed",
             if on { "on" } else { "off" }
         );
         self.publish_mpris(false);
@@ -3555,11 +3548,12 @@ impl App {
         let paths = edited.paths();
         if self.playback.send(Command::UpdateQueue { paths }) {
             self.player.note_queue_edited(edited);
-            // **A hand reorder restates the order**, so the order shuffle would
-            // return to is dropped with it (ADR-0023's amendment): the hand
-            // beats the machine's memory, and turning shuffle off after a
-            // stepper press leaves the run exactly as the press left it.
-            self.player.forget_source_order();
+            // **A hand reorder needs nothing undone.** It used to drop the
+            // order shuffle would return to, because shuffle owned an order of
+            // its own that the hand had just contradicted. Shuffle owns no
+            // order now — the run's order is the run's — so a stepper press is
+            // an ordinary edit and turning shuffle off after one leaves the run
+            // exactly as the press left it, by construction rather than by rule.
             // [`Self::remove_queued`]'s history rule, for the reorder.
             self.queue_undo.push(before);
         } else {
@@ -3698,8 +3692,6 @@ impl App {
         let paths = edited.paths();
         if self.playback.send(Command::UpdateQueue { paths }) {
             self.player.note_queue_edited(edited);
-            // [`Self::shift_queued`]'s rule, for the drag.
-            self.player.forget_source_order();
         } else {
             self.player.engine_closed();
         }
@@ -6190,15 +6182,30 @@ fn read_snapshot() -> crate::session::Snapshot {
 /// **The one place a draw gets its randomness**: the wall clock, in
 /// nanoseconds.
 ///
-/// `crate::shuffle` takes a seed rather than reading a clock or reaching for a
-/// global generator, so that every arrangement it can produce is reproducible
-/// in a test — the nondeterminism has to enter *somewhere*, and this is that
-/// somewhere, in the shell, where nothing is asserted about it.
+/// `baz_core::traversal` takes a seed rather than reading a clock or reaching
+/// for a global generator, so that every pass it can produce is reproducible in
+/// a test and identical on both sides of the protocol — the nondeterminism has
+/// to enter *somewhere*, and this is that somewhere, in the shell, where
+/// nothing is asserted about it.
 ///
 /// A clock that refuses to answer (it has been set before the epoch) gives a
-/// fixed seed rather than a panic. The consequence is that two shuffles in that
-/// state draw the same eight records, which is a strange machine's problem and
-/// not worth a branch anywhere else.
+/// fixed seed rather than a panic. The consequence is that two runs on that
+/// machine shuffle the same way, which is a strange machine's problem and not
+/// worth a branch anywhere else.
+/// **The traversal the shuffle control's two positions mean.**
+///
+/// One function so the start-up seed and the toggle cannot disagree about what
+/// "on" is, and so the seed enters in exactly one place. Off is
+/// [`Traversal::InOrder`] and carries nothing: there is no order to remember,
+/// because the run never left its own.
+fn traversal(on: bool) -> Traversal {
+    if on {
+        Traversal::Shuffled { seed: draw_seed() }
+    } else {
+        Traversal::InOrder
+    }
+}
+
 fn draw_seed() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -6780,55 +6787,58 @@ mod tests {
             );
         }
 
-        // And the arranger does the two things the mode is made of: it retains
-        // the order it is about to destroy, and it records the pair together.
+        // **The arranger sends the run as it was built, and says how to walk
+        // it.** The two halves of the owner's second decision: the queue is
+        // never permuted here, and the traversal is what carries shuffle.
         let arranger = body("send_run");
         assert!(
-            arranger.contains("shuffle::source_order"),
-            "the order is kept"
+            arranger.contains("Command::SetTraversal"),
+            "the walk is what shuffle changes, and the engine has to be told"
         );
         assert!(
-            arranger.contains("shuffle::arranged"),
-            "and the run permuted"
-        );
-        assert!(
-            arranger.contains("note_shuffled_run"),
-            "the run and its source order are recorded together, so a shuffled \
-             run the toggle cannot turn off is unreachable"
+            arranger.contains("queue.paths()") && arranger.contains("note_queue_sent"),
+            "the run goes out as the gesture built it"
         );
 
-        // **Turning it off never stops the music.** ADR-0014's bargain: an
-        // edit that leaves the playing track alone disturbs no delivered
-        // sample, so the toggle is an `UpdateQueue` and never a `SetQueue`.
+        // **Nothing in this shell permutes a run any more.** Swept over the
+        // whole file rather than over one function, because the value of the
+        // decision is that there is nowhere left for a permutation to live.
+        // Spelled in halves so these needles are not their own counter-examples.
+        for (head, tail) in [
+            ("shuffle", "::arranged"),
+            ("shuffle", "::restored"),
+            ("source", "_order"),
+            ("note_shuffled", "_run"),
+        ] {
+            let gone = format!("{head}{tail}");
+            assert!(
+                !source.contains(&gone),
+                "`{gone}` came back: shuffle is a property of the walk, and a \
+                 run that gets re-ordered has a list being mutated again"
+            );
+        }
+
+        // **Turning it off never stops the music, and never touches the run.**
+        // `SetTraversal` lets the sounding track play out and re-plans what
+        // follows; a queue command here would be the old design returning.
         let toggle = body("toggle_shuffle");
-        assert!(toggle.contains("Command::UpdateQueue"));
+        assert!(toggle.contains("Command::SetTraversal"));
         assert!(
-            !toggle.contains("Command::SetQueue") && !toggle.contains("Command::Play"),
-            "the toggle restarted the music instead of re-ordering it"
-        );
-        assert!(
-            toggle.contains("shuffle::restored"),
-            "turning it off puts the run back into its retained order"
+            !toggle.contains("Command::SetQueue")
+                && !toggle.contains("Command::UpdateQueue")
+                && !toggle.contains("Command::Play"),
+            "the toggle touched the queue instead of the walk"
         );
         assert!(
             toggle.contains("persist_shuffle"),
             "a standing decision that is not written down is a session setting"
         );
 
-        // **A hand reorder drops the retained order** — the hand beats the
-        // machine's memory (ADR-0023's amendment).
-        for reorder in ["shift_queued", "move_queued"] {
-            assert!(
-                body(reorder).contains("forget_source_order"),
-                "`{reorder}` re-stated the order by hand and kept the old one"
-            );
-        }
-
-        // **The pull and the wall's draw are gone, and nothing kept a stub of
-        // either.** Named here so that a re-introduction is a deliberate act
-        // with a test to move rather than a quiet reappearance. Spelled in two
-        // pieces so these assertions are not their own counter-examples.
-        for gone in ["draw_pull", "start_shuffle"] {
+        // **The pull, the wall's draw and the retained-order machinery are
+        // gone, and nothing kept a stub of any of them.** Named here so that a
+        // re-introduction is a deliberate act with a test to move rather than a
+        // quiet reappearance. Spelled in two pieces for the reason above.
+        for gone in ["draw_pull", "start_shuffle", "forget_source"] {
             let (head, tail) = gone.split_once('_').expect("a two-word name");
             assert!(
                 !source.contains(&format!("fn {head}_{tail}")),
