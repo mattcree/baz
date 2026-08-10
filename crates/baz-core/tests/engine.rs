@@ -77,6 +77,9 @@ struct Fixtures {
     chirp: PathBuf,
     head_44k: PathBuf,
     tail_48k: PathBuf,
+    /// A 5.1 file, so the signal-path readout can be asked what it says about
+    /// a track an ITU-R BS.775 matrix folded to stereo (ADR-0039).
+    surround: PathBuf,
     dc: PathBuf,
     /// ReplayGain-tagged fixtures (ADR-0013). Same audio as their untagged
     /// twins, so the reference decodes below are their ground truth too.
@@ -111,6 +114,33 @@ fn write_sine_wav_at(path: &Path, rate: u32, frames: usize, t0: f64) {
         let s = (AMP * (2.0 * PI * FREQ * t).sin()) as f32;
         w.write_sample(s).expect("write sample");
         w.write_sample(s).expect("write sample");
+    }
+    w.finalize().expect("finalize wav");
+}
+
+/// A 5.1 sine, the same tone in the front pair and silence in the other four.
+///
+/// `hound`'s synthesized channel mask for six channels is `0x3F`, which is
+/// WAVE's 5.1 layout exactly; a fixture needing a mask hound cannot write lives
+/// in `tests/playback.rs`, which writes its own header.
+fn write_five_one_wav(path: &Path, frames: usize) {
+    let spec = hound::WavSpec {
+        channels: 6,
+        sample_rate: RATE,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut w = hound::WavWriter::create(path, spec).expect("create wav");
+    #[allow(clippy::cast_precision_loss)] // frame indices are far below 2^52
+    for n in 0..frames {
+        let t = n as f64 / f64::from(RATE);
+        #[allow(clippy::cast_possible_truncation)] // f64 sine -> f32 sample
+        let s = (AMP * (2.0 * PI * FREQ * t).sin()) as f32;
+        w.write_sample(s).expect("write sample");
+        w.write_sample(s).expect("write sample");
+        for _ in 0..4 {
+            w.write_sample(0.0f32).expect("write sample");
+        }
     }
     w.finalize().expect("finalize wav");
 }
@@ -271,6 +301,7 @@ fn fixtures() -> &'static Fixtures {
         let chirp = dir.join("chirp_6s.wav");
         let head_44k = dir.join("head_1s_44k.wav");
         let tail_48k = dir.join("tail_4s_48k.wav");
+        let surround = dir.join("surround_1s_51.wav");
         let dc = dir.join("dc_3s.wav");
         write_dc_wav(&dc);
         let (rg_a, rg_b, rg_single, rg_clip) = write_replay_gain_fixtures(&dir);
@@ -279,6 +310,7 @@ fn fixtures() -> &'static Fixtures {
         write_chirp_wav(&chirp);
         write_sine_wav_at(&head_44k, RATE, HEAD_44K_FRAMES, 0.0);
         write_sine_wav_at(&tail_48k, TAIL_48K_RATE, TAIL_48K_FRAMES, 0.0);
+        write_five_one_wav(&surround, RATE as usize);
         std::fs::write(&bad, b"this is not audio at all, sorry").expect("write bad file");
         let a_ref = AudioSource::decode_all(&a).expect("decode a").samples;
         let b_ref = AudioSource::decode_all(&b).expect("decode b").samples;
@@ -310,6 +342,7 @@ fn fixtures() -> &'static Fixtures {
             chirp,
             head_44k,
             tail_48k,
+            surround,
             dc,
             rg_a,
             rg_b,
@@ -1241,6 +1274,7 @@ fn the_signal_path_reports_a_direct_chain_at_the_source_rate() {
         next_signal_path(&events),
         Event::SignalPath {
             source_rate_hz: TAIL_48K_RATE,
+            source_channels: 2,
             source_bits: Some(32),
             output_rate_hz: TAIL_48K_RATE,
             chain: SignalChain::Direct,
@@ -4105,4 +4139,72 @@ fn turning_shuffle_on_mid_run_lets_the_sounding_track_play_out() {
         &f.a_ref,
         "the sounding track after a mid-run traversal change",
     );
+}
+
+/// A 5.1 track plays, and the signal-path readout says the samples were
+/// matrixed — which is how ADR-0009's and ADR-0012's "baz converts nothing"
+/// stays true rather than quietly becoming false (ADR-0039).
+///
+/// The chain itself is unchanged and still honest: the *rate* is the source's
+/// and the *device* arrangement is what it was, so `Direct` keeps meaning
+/// exactly what it meant. What was missing was any way for a front end to
+/// learn that six channels became two, and a chain variant would have been the
+/// wrong shape for it — a downmixed track can be converting or not, exclusive
+/// or not, independently.
+#[test]
+fn a_downmixed_track_says_so_on_the_signal_path() {
+    let f = fixtures();
+    let (engine, events, _output) =
+        spawn_offline(fast_config(), RATE as usize * CHANNELS * 2).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.surround.clone()],
+            origin: None,
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.surround, 0));
+
+    let Event::SignalPath {
+        source_rate_hz,
+        source_channels,
+        chain,
+        ..
+    } = next_signal_path(&events)
+    else {
+        unreachable!("next_signal_path returns only SignalPath")
+    };
+    assert_eq!(source_channels, 6, "the file has six channels and says so");
+    assert_eq!(source_rate_hz, RATE, "the fold does not touch the rate");
+    assert!(
+        !chain.is_converting(),
+        "a downmix is not a sample-rate conversion and must not be reported as one"
+    );
+    engine.shutdown();
+}
+
+/// A stereo track reports two channels, so `source_channels` is a fact about
+/// every track rather than a flag that only appears when it is interesting —
+/// the same discipline `source_bits` follows.
+#[test]
+fn an_ordinary_track_reports_its_two_channels() {
+    let f = fixtures();
+    let (engine, events, _output) =
+        spawn_offline(fast_config(), A_FRAMES * CHANNELS).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone()],
+            origin: None,
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    let Event::SignalPath {
+        source_channels, ..
+    } = next_signal_path(&events)
+    else {
+        unreachable!("next_signal_path returns only SignalPath")
+    };
+    assert_eq!(source_channels, CHANNELS);
+    engine.shutdown();
 }

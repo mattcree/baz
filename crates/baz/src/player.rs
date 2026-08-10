@@ -832,6 +832,10 @@ pub enum PlayFrom {
 pub struct SignalPath {
     /// Sample rate of the track playing, in Hz.
     pub source_rate_hz: u32,
+    /// Channels the file carries, as distinct from the stereo the engine
+    /// emits. Above `CHANNELS` means an ITU-R BS.775 downmix is in the path
+    /// (ADR-0039), which is a conversion whatever `chain` says.
+    pub source_channels: usize,
     /// Bit depth its container declares, when it declares one.
     pub source_bits: Option<u32>,
     /// Rate the output stream is running at, in Hz.
@@ -1275,12 +1279,14 @@ impl PlayerState {
             // so each arrival simply replaces what was known (ADR-0009).
             Event::SignalPath {
                 source_rate_hz,
+                source_channels,
                 source_bits,
                 output_rate_hz,
                 chain,
             } => {
                 self.signal = Some(SignalPath {
                     source_rate_hz: *source_rate_hz,
+                    source_channels: *source_channels,
                     source_bits: *source_bits,
                     output_rate_hz: *output_rate_hz,
                     chain: *chain,
@@ -4260,6 +4266,7 @@ mod tests {
     fn signal(source: u32, output: u32, chain: SignalChain) -> Event {
         Event::SignalPath {
             source_rate_hz: source,
+            source_channels: 2,
             source_bits: Some(24),
             output_rate_hz: output,
             chain,

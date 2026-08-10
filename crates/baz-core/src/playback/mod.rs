@@ -4,8 +4,10 @@
 //! and ratified in ADR-0003/ADR-0004):
 //!
 //! - [`AudioSource`] decodes one file via Symphonia into interleaved stereo
-//!   f32 blocks. Mono is upmixed; more than two channels is rejected for now
-//!   (see [`AudioSource`] docs).
+//!   f32 blocks. Mono is upmixed by duplication; a multichannel source is
+//!   folded to stereo with the ITU-R BS.775 matrix (`downmix`, ADR-0039),
+//!   which is a **decode-side** transform — the ring, the resampler and the
+//!   gapless machinery never learn that the file had six channels.
 //! - [`engine::run_playlist`] streams the current track through an `rtrb`
 //!   lock-free SPSC ring buffer on a decode thread while a prefetch thread
 //!   decodes track N+1, so track boundaries are bookkeeping, not audio
@@ -139,7 +141,40 @@
 //!   octave is not reconstructed, so the track sounds duller than it should.
 //!   Trusting the container's rate instead would play the core an octave up
 //!   at double speed, which is why we do not.
+//!
+//! # Multichannel, and what it does to the bit-perfect claim
+//!
+//! A source with more than two channels is folded to stereo by `downmix`
+//! before it reaches the ring (ADR-0039). Three consequences are worth having
+//! here rather than one module down:
+//!
+//! - **Nothing downstream changes.** The fold happens inside
+//!   [`AudioSource::next_block`], in the same place mono has always been
+//!   upmixed, so every block leaving a source is still [`CHANNELS`]-interleaved
+//!   f32 and the ring, the resampler, the splice and [`Sink`] are untouched.
+//!   The output device is opened stereo in every mode — including the
+//!   exclusive backend, which negotiates [`CHANNELS`] — so a multichannel file
+//!   was never going to reach a converter as six channels whatever happened
+//!   here.
+//! - **A downmixed track is not bit-perfect, and baz says so.** ADR-0009 and
+//!   ADR-0012 promise that baz converts nothing and that in exclusive mode
+//!   nothing else does either. A matrix fold is a conversion by any reading, so
+//!   the guarantee has to be *narrowed honestly* rather than quietly kept:
+//!   [`Event::SignalPath`](crate::protocol::Event::SignalPath) carries
+//!   `source_channels`, and a value above [`CHANNELS`] means the BS.775 matrix
+//!   is in the path. `SignalChain::Exclusive { conversion: None }` continues to
+//!   mean exactly what it always meant — the *device* is held and the *rate* is
+//!   the source's — and it no longer has to carry a channel claim it was never
+//!   making.
+//! - **Multichannel AAC does not play**, and not because of this fold:
+//!   Symphonia 0.5's AAC decoder rejects a 5.1 stream outright
+//!   (`Unsupported("aac: aac too complex")`) before a single frame is decoded,
+//!   so no layout ever reaches the matrix. Reported as the decode error it is.
+//!   Multichannel FLAC, WAV, Vorbis and ALAC all decode and all play.
+//!
+//! Which layouts fold and which are still refused is `downmix`'s to state.
 
+pub(crate) mod downmix;
 pub mod engine;
 pub(crate) mod resample;
 pub mod sink;
@@ -280,17 +315,33 @@ pub enum PlaybackError {
     #[error("stream does not declare a channel layout")]
     UnknownChannelLayout,
 
-    /// The stream has more channels than the engine currently supports.
+    /// The stream declares no channels at all.
     ///
-    /// TODO(downmix): >2-channel sources should be downmixed to stereo with
-    /// standard coefficients; until that lands they are rejected so the
-    /// engine never plays something silently wrong.
-    #[error(
-        "unsupported channel count {channels}: only mono and stereo are supported (multichannel downmix is future work)"
-    )]
+    /// A layout of zero speakers is a broken header rather than an
+    /// arrangement baz declines to play, which is why it is not
+    /// [`Self::UnsupportedChannelLayout`]: there is nothing to describe.
+    #[error("unsupported channel count {channels}: the stream declares no channels")]
     UnsupportedChannelCount {
         /// Channel count found in the stream.
         channels: usize,
+    },
+
+    /// The stream's channel layout is not one ITU-R BS.775's two-channel
+    /// downmix places, so baz will not fold it (ADR-0039).
+    ///
+    /// More than two channels *do* play — 3.0, 4.0, 5.0 and 5.1 are downmixed
+    /// with the BS.775 matrix in `downmix`. This variant is what is left over
+    /// afterwards: 7.1, 6.1, height and wide channels, and layouts with only
+    /// half a surround pair. Refusing them is the same choice the blanket
+    /// refusal made and for the same reason — a fold with an invented
+    /// coefficient sounds wrong rather than failing — narrowed to the layouts
+    /// that still need it.
+    #[error("unsupported channel layout {layout}: {reason}")]
+    UnsupportedChannelLayout {
+        /// The layout found, named speaker by speaker (`FL+FR+FC+LFE+RL+RR`).
+        layout: String,
+        /// Why this layout is not one the downmix describes.
+        reason: &'static str,
     },
 
     /// The playlist was empty.

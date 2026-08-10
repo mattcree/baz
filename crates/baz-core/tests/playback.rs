@@ -266,8 +266,8 @@ struct FixtureSet {
     rate_48k: PathBuf,
     /// Mono variant of part1 (upmix test).
     part1_mono: PathBuf,
-    /// 4-channel file (rejection test).
-    quad: PathBuf,
+    /// Multichannel layouts, one distinct tone per speaker (ADR-0039).
+    multi: MultiFixtures,
     /// FLAC encodings, if an encoder CLI was found.
     flac: Option<FlacFixtures>,
     /// MP3 encodings (LAME via ffmpeg), if the encoder was found.
@@ -276,6 +276,275 @@ struct FixtureSet {
     ogg: Option<OggFixtures>,
     /// ALAC and AAC in MP4 (`.m4a`), if ffmpeg with both encoders was found.
     m4a: Option<M4aFixtures>,
+}
+
+// ---------------------------------------------------------------------------
+// Multichannel fixtures (ADR-0039)
+// ---------------------------------------------------------------------------
+
+/// WAVE `dwChannelMask` bits, which are also Symphonia's `Channels` bits and
+/// also the order channels are interleaved in — the three facts that let a
+/// downmix be built from a layout instead of from a channel count.
+mod speaker {
+    pub const FL: u32 = 0x1;
+    pub const FR: u32 = 0x2;
+    pub const FC: u32 = 0x4;
+    pub const LFE: u32 = 0x8;
+    pub const BL: u32 = 0x10;
+    pub const BR: u32 = 0x20;
+    pub const BC: u32 = 0x100;
+    pub const SL: u32 = 0x200;
+    pub const SR: u32 = 0x400;
+}
+
+/// 5.1 as WAVE and FLAC order it: front pair, centre, LFE, rear surrounds.
+const MASK_51: u32 =
+    speaker::FL | speaker::FR | speaker::FC | speaker::LFE | speaker::BL | speaker::BR;
+/// The same programme with the surrounds declared as *sides* — what an ALAC
+/// magic cookie and ffmpeg's `5.1(side)` produce for the same music.
+const MASK_51_SIDE: u32 =
+    speaker::FL | speaker::FR | speaker::FC | speaker::LFE | speaker::SL | speaker::SR;
+/// Quadraphonic.
+const MASK_QUAD: u32 = speaker::FL | speaker::FR | speaker::BL | speaker::BR;
+/// L, R and a discrete centre.
+const MASK_30: u32 = speaker::FL | speaker::FR | speaker::FC;
+/// 7.1: a rear pair *and* a side pair. BS.775 has one surround pair.
+const MASK_71: u32 = MASK_51 | speaker::SL | speaker::SR;
+/// 6.1: a rear centre, which BS.775 does not place.
+const MASK_61: u32 = MASK_51 | speaker::BC;
+
+/// One distinct, mutually non-harmonic tone per speaker slot, assigned in the
+/// mask's ascending-bit order.
+///
+/// Non-harmonic on purpose: a downmix that put the centre channel in a
+/// surround would still produce a plausible *waveform*, and only an
+/// independent tone per channel makes "which one landed where" a measurable
+/// question. 400 and 3100 are not multiples of one another and no pair here
+/// shares a harmonic below the 30th, so a Goertzel at one frequency reads
+/// nothing of any other.
+const SPEAKER_TONES: [f64; 8] = [400.0, 700.0, 1100.0, 1700.0, 2300.0, 3100.0, 4300.0, 5300.0];
+
+/// What each speaker carries in a fixture.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tone {
+    /// Its own distinct tone from [`SPEAKER_TONES`] — the fixture that makes
+    /// channel *placement* measurable.
+    PerSpeaker,
+    /// The same tone, in phase, in every channel — the fixture that makes the
+    /// matrix's worst-case gain reachable. Independent tones would not: six
+    /// different frequencies do not add coherently, so a per-speaker fixture
+    /// at full scale never sees the +7.66 dB the headroom exists for.
+    Correlated,
+}
+
+/// Amplitude of each speaker's tone in the placement fixtures — low enough
+/// that even the 5.1 matrix's worst case stays inside full scale, so the
+/// placement measurement is never confused with the clipping one.
+const TONE_AMP: f64 = 0.3;
+
+/// Frames in each multichannel fixture. One second at [`RATE`] is far more
+/// than the Goertzel needs and short enough to encode quickly in four codecs.
+const MULTI_FRAMES: usize = RATE as usize;
+
+struct MultiFixtures {
+    /// 5.1, float PCM, rear surrounds.
+    wav_51: PathBuf,
+    /// 5.1 with the surrounds declared as sides.
+    wav_51_side: PathBuf,
+    /// Quadraphonic.
+    wav_quad: PathBuf,
+    /// 3.0.
+    wav_30: PathBuf,
+    /// 7.1 — a layout BS.775 does not place.
+    wav_71: PathBuf,
+    /// 6.1 — likewise.
+    wav_61: PathBuf,
+    /// 5.1, every channel full-scale and perfectly correlated: the signal that
+    /// makes the matrix overflow if nothing takes headroom.
+    wav_clip: PathBuf,
+    /// The 5.1 fixture re-encoded, when ffmpeg was found. The point of these
+    /// is that each codec stores 5.1 in its *own* channel order, so a downmix
+    /// that assumed WAVE's would be audibly wrong in exactly one of them.
+    flac_51: Option<PathBuf>,
+    ogg_51: Option<PathBuf>,
+    alac_51: Option<PathBuf>,
+    aac_51: Option<PathBuf>,
+}
+
+/// The speakers of `mask`, lowest bit first — the order they are interleaved
+/// in and the order [`SPEAKER_TONES`] is assigned in.
+fn speakers_of(mask: u32) -> Vec<u32> {
+    (0..32)
+        .map(|b| 1u32 << b)
+        .filter(|b| mask & b != 0)
+        .collect()
+}
+
+/// Write a `WAVE_FORMAT_EXTENSIBLE` float WAV with an **explicit**
+/// `dwChannelMask`, one tone per speaker.
+///
+/// Hand-rolled rather than `hound`, for one reason that is the whole point of
+/// these fixtures: `hound` synthesizes the mask as `(1 << channels) - 1`, so it
+/// cannot write a quadraphonic file (which is `FL+FR+BL+BR`, not
+/// `FL+FR+FC+LFE`) and cannot write a `5.1(side)` at all. A fixture whose
+/// layout is *declared* is the only kind that can test a downmix that reads the
+/// layout.
+fn write_wav_layout(path: &Path, rate: u32, mask: u32, frames: usize, amp: f64, tone: Tone) {
+    let speakers = speakers_of(mask);
+    let channels = speakers.len();
+    let mut samples: Vec<f32> = Vec::with_capacity(frames * channels);
+    for n in 0..frames {
+        for (slot, _) in speakers.iter().enumerate() {
+            #[allow(clippy::cast_precision_loss)] // frame indices are small
+            let t = n as f64 / f64::from(rate);
+            let hz = match tone {
+                Tone::PerSpeaker => SPEAKER_TONES[slot],
+                Tone::Correlated => SPEAKER_TONES[0],
+            };
+            #[allow(clippy::cast_possible_truncation)] // f64 sine -> f32 sample
+            let s = (amp * (2.0 * PI * hz * t).sin()) as f32;
+            samples.push(s);
+        }
+    }
+    let mut out: Vec<u8> = Vec::new();
+    let block_align = channels * 4;
+    let data_bytes = samples.len() * 4;
+    let push_u16 = |v: &mut Vec<u8>, x: u16| v.extend_from_slice(&x.to_le_bytes());
+    let push_u32 = |v: &mut Vec<u8>, x: u32| v.extend_from_slice(&x.to_le_bytes());
+    out.extend_from_slice(b"RIFF");
+    push_u32(
+        &mut out,
+        u32::try_from(36 + 24 + data_bytes).expect("fixtures are under 4 GiB"),
+    );
+    out.extend_from_slice(b"WAVEfmt ");
+    push_u32(&mut out, 40); // WAVEFORMATEXTENSIBLE
+    push_u16(&mut out, 0xFFFE); // WAVE_FORMAT_EXTENSIBLE
+    push_u16(
+        &mut out,
+        u16::try_from(channels).expect("layouts here are at most 8 channels"),
+    );
+    push_u32(&mut out, rate);
+    push_u32(
+        &mut out,
+        rate * u32::try_from(block_align).expect("a frame is at most 32 bytes"),
+    );
+    push_u16(
+        &mut out,
+        u16::try_from(block_align).expect("a frame is at most 32 bytes"),
+    );
+    push_u16(&mut out, 32); // bits per sample
+    push_u16(&mut out, 22); // cbSize
+    push_u16(&mut out, 32); // wValidBitsPerSample
+    push_u32(&mut out, mask); // dwChannelMask — the declaration under test
+    // KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
+    out.extend_from_slice(&3u32.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0x0010u16.to_le_bytes());
+    out.extend_from_slice(&[0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71]);
+    out.extend_from_slice(b"data");
+    push_u32(
+        &mut out,
+        u32::try_from(data_bytes).expect("fixtures are under 4 GiB"),
+    );
+    for s in &samples {
+        out.extend_from_slice(&s.to_le_bytes());
+    }
+    std::fs::write(path, out).expect("write layout wav");
+}
+
+/// Peak amplitude of `x` at `f` Hz, by Goertzel.
+///
+/// Reads one frequency and ignores every other, which is what makes "the
+/// centre channel's tone appears in the left output at −3 dB" a number rather
+/// than an impression.
+fn amplitude_at(signal: &[f32], rate: u32, hz: f64) -> f64 {
+    #[allow(clippy::cast_precision_loss)] // sample counts are far below 2^52
+    let count = signal.len() as f64;
+    let omega = 2.0 * PI * hz / f64::from(rate);
+    let (mut real, mut imag) = (0.0f64, 0.0f64);
+    for (index, &sample) in signal.iter().enumerate() {
+        #[allow(clippy::cast_precision_loss)] // ditto
+        let phase = omega * index as f64;
+        real += f64::from(sample) * phase.cos();
+        imag += f64::from(sample) * phase.sin();
+    }
+    2.0 * real.hypot(imag) / count
+}
+
+/// Every speaker's tone, measured in one channel of a decoded stereo stream.
+///
+/// Returns amplitudes in the same slot order [`SPEAKER_TONES`] is assigned in,
+/// so the result reads directly against a row of the BS.775 matrix.
+fn tone_profile(stereo: &[f32], out_channel: usize, rate: u32, speakers: usize) -> Vec<f64> {
+    let chan: Vec<f32> = stereo
+        .iter()
+        .skip(out_channel)
+        .step_by(CHANNELS)
+        .copied()
+        .collect();
+    // Codec warm-up and lapped-transform edges live at the ends; the middle is
+    // steady state for every format here.
+    let lo = chan.len() / 8;
+    let hi = chan.len() - chan.len() / 8;
+    (0..speakers)
+        .map(|s| amplitude_at(&chan[lo..hi], rate, SPEAKER_TONES[s]))
+        .collect()
+}
+
+/// Build the multichannel set: five WAVs written here, four re-encodings by
+/// ffmpeg when it exists.
+fn build_multi(dir: &Path) -> MultiFixtures {
+    let wav = |name: &str, mask: u32, amp: f64, tone: Tone| {
+        let p = dir.join(name);
+        write_wav_layout(&p, RATE, mask, MULTI_FRAMES, amp, tone);
+        p
+    };
+    let wav_51 = wav("multi_51.wav", MASK_51, TONE_AMP, Tone::PerSpeaker);
+    let transcode = |name: &str, args: &[&str]| -> Option<PathBuf> {
+        let out = dir.join(name);
+        let mut cmd = Command::new("ffmpeg");
+        cmd.args(["-y", "-v", "error", "-i"])
+            .arg(&wav_51)
+            .args(args)
+            .arg(&out);
+        run_encoder(&mut cmd);
+        Some(out)
+    };
+    // ffmpeg reads the mask above and re-declares the layout in each
+    // container's own way, which is exactly the variation being tested.
+    let encode = |wanted: &str, name: &str, args: &[&str]| -> Option<PathBuf> {
+        (have("ffmpeg", "-version") && have_ffmpeg_encoder(wanted))
+            .then(|| transcode(name, args))
+            .flatten()
+    };
+    let as_flac = encode("flac", "multi_51.flac", &["-c:a", "flac"]);
+    let as_vorbis = encode(
+        "libvorbis",
+        "multi_51.ogg",
+        &["-c:a", "libvorbis", "-q:a", "8"],
+    );
+    let in_mp4_lossless = encode("alac", "multi_51_alac.m4a", &["-c:a", "alac"]);
+    let as_aac = encode("aac", "multi_51_aac.m4a", &["-c:a", "aac", "-b:a", "320k"]);
+    MultiFixtures {
+        wav_51,
+        wav_51_side: wav(
+            "multi_51_side.wav",
+            MASK_51_SIDE,
+            TONE_AMP,
+            Tone::PerSpeaker,
+        ),
+        wav_quad: wav("multi_quad.wav", MASK_QUAD, TONE_AMP, Tone::PerSpeaker),
+        wav_30: wav("multi_30.wav", MASK_30, TONE_AMP, Tone::PerSpeaker),
+        wav_71: wav("multi_71.wav", MASK_71, TONE_AMP, Tone::PerSpeaker),
+        wav_61: wav("multi_61.wav", MASK_61, TONE_AMP, Tone::PerSpeaker),
+        // Full scale in every channel, all in phase: the worst case the
+        // headroom exists for.
+        wav_clip: wav("multi_51_clip.wav", MASK_51, 1.0, Tone::Correlated),
+        flac_51: as_flac,
+        ogg_51: as_vorbis,
+        alac_51: in_mp4_lossless,
+        aac_51: as_aac,
+    }
 }
 
 fn have(cmd: &str, arg: &str) -> bool {
@@ -587,8 +856,9 @@ fn fixtures() -> &'static FixtureSet {
         let mono: Vec<f32> = channel(&full[..split], 0);
         let part1_mono = dir.join("part1_mono_f32.wav");
         write_wav_multi(&part1_mono, RATE, 1, &mono);
-        let quad = dir.join("quad_f32.wav");
-        write_wav_multi(&quad, RATE, 4, &mono[..4410]);
+        // Multichannel: layouts with an explicit channel mask and one tone
+        // per speaker (ADR-0039).
+        let multi = build_multi(&dir);
 
         let flac = encode_flac(&dir, &pcm_ref, &pcm_part1, &pcm_part2);
         let mp3 = encode_mp3(&dir, &pcm_ref, &pcm_part1, &pcm_part2);
@@ -603,7 +873,7 @@ fn fixtures() -> &'static FixtureSet {
             rate_44k,
             rate_48k,
             part1_mono,
-            quad,
+            multi,
             flac,
             mp3,
             ogg,
@@ -2065,15 +2335,424 @@ fn mono_upmixes_to_stereo() {
     assert_samples_eq(&mono.samples, &stereo.samples, "mono upmix");
 }
 
-/// More than two channels is rejected with the documented error (downmix is
-/// future work; silently wrong output is not acceptable).
+// ---------------------------------------------------------------------------
+// Multichannel downmix (ADR-0039)
+//
+// Every test below reads the *output samples*. "It decoded without an error"
+// is the assertion a wrong channel order passes, so it is never the assertion
+// made here: each fixture carries a different tone in each speaker, and what
+// is checked is which tone came out of which side, at what gain.
+// ---------------------------------------------------------------------------
+
+/// The BS.775 coefficient a speaker in `slot` of `mask` contributes to output
+/// channel `out`, **before** the headroom scale — the matrix as the
+/// recommendation writes it.
+fn bs775_coefficient(mask: u32, slot: usize, out: usize) -> f64 {
+    let k = f64::from(std::f32::consts::FRAC_1_SQRT_2);
+    let speaker = speakers_of(mask)[slot];
+    match (speaker, out) {
+        (speaker::FL, 0) | (speaker::FR, 1) => 1.0,
+        // BS.775's kC and kS are the same number, so the centre and the
+        // near-side surround share an arm; they are separate *coefficients*
+        // in the recommendation and would part company if either changed.
+        (speaker::FC, _) | (speaker::BL | speaker::SL, 0) | (speaker::BR | speaker::SR, 1) => k,
+        _ => 0.0,
+    }
+}
+
+/// The constant attenuation the matrix for `mask` takes, as a linear factor:
+/// the reciprocal of the largest absolute row sum.
+fn bs775_headroom(mask: u32) -> f64 {
+    let n = speakers_of(mask).len();
+    let worst = (0..CHANNELS)
+        .map(|out| {
+            (0..n)
+                .map(|s| bs775_coefficient(mask, s, out).abs())
+                .sum::<f64>()
+        })
+        .fold(0.0f64, f64::max);
+    1.0 / worst.max(1.0)
+}
+
+/// Assert that a decoded stereo stream is exactly `mask`'s BS.775 downmix of
+/// the per-speaker tone fixture.
+fn assert_is_bs775_downmix(samples: &[f32], rate: u32, mask: u32, tol: f64, what: &str) {
+    let n = speakers_of(mask).len();
+    let scale = bs775_headroom(mask);
+    for out in 0..CHANNELS {
+        let measured = tone_profile(samples, out, rate, n);
+        // Printed so `--nocapture` is the measurement run that
+        // `docs/design/impl/multichannel-downmix/measurements.md` records: the
+        // assertion below is the claim, and this is the evidence for it in a
+        // form a person can read next to ffmpeg's answer for the same file.
+        println!(
+            "  {what}: out {out} profile [{}]",
+            measured
+                .iter()
+                .map(|v| format!("{v:.5}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        for slot in 0..n {
+            let expected = TONE_AMP * bs775_coefficient(mask, slot, out) * scale;
+            assert!(
+                (measured[slot] - expected).abs() <= tol,
+                "{what}: output {out} should carry speaker {slot}'s tone \
+                 ({} Hz) at {expected:.5}, measured {:.5} (whole profile {measured:?})",
+                SPEAKER_TONES[slot],
+                measured[slot],
+            );
+        }
+    }
+}
+
+/// **The channel-order test.** Each speaker's own tone must land in the output
+/// its position dictates, at the gain BS.775 gives it.
+///
+/// This is the test a downmix that assumed WAVE's channel order would fail on
+/// something that is not WAVE. The same music is presented in five containers
+/// whose bitstreams order 5.1 differently — WAVE and FLAC as
+/// `FL FR FC LFE BL BR`, Vorbis as `FL FC FR BL BR LFE`, ALAC by its magic
+/// cookie — and all five must produce the same stereo pair, because all five
+/// declare a layout and the fold is built from the layout.
+///
+/// The failure it exists to catch is silent: put the centre in a surround and
+/// the file still decodes, still has the right length, and still sounds like
+/// music. Only the per-tone profile shows it.
 #[test]
-fn multichannel_is_rejected() {
+fn each_speaker_lands_where_the_layout_says() {
     let f = fixtures();
-    let err = AudioSource::decode_all(&f.quad).expect_err("quad must be rejected");
+    // Lossless containers: the profile should be exact to a few LSBs.
+    assert_is_bs775_downmix(
+        &AudioSource::decode_all(&f.multi.wav_51)
+            .expect("decode 5.1 wav")
+            .samples,
+        RATE,
+        MASK_51,
+        1e-4,
+        "5.1 WAV",
+    );
+    assert_is_bs775_downmix(
+        &AudioSource::decode_all(&f.multi.wav_51_side)
+            .expect("decode 5.1(side) wav")
+            .samples,
+        RATE,
+        MASK_51_SIDE,
+        1e-4,
+        "5.1(side) WAV — sides are the same surround pair as rears",
+    );
+    assert_is_bs775_downmix(
+        &AudioSource::decode_all(&f.multi.wav_quad)
+            .expect("decode quad wav")
+            .samples,
+        RATE,
+        MASK_QUAD,
+        1e-4,
+        "quadraphonic WAV",
+    );
+    assert_is_bs775_downmix(
+        &AudioSource::decode_all(&f.multi.wav_30)
+            .expect("decode 3.0 wav")
+            .samples,
+        RATE,
+        MASK_30,
+        1e-4,
+        "3.0 WAV",
+    );
+    let Some(flac) = &f.multi.flac_51 else {
+        println!("SKIP: ffmpeg not available; only the WAV layouts were checked");
+        return;
+    };
+    // FLAC quantizes to 16-bit on the way in, which is −96 dB of noise.
+    assert_is_bs775_downmix(
+        &AudioSource::decode_all(flac)
+            .expect("decode 5.1 flac")
+            .samples,
+        RATE,
+        MASK_51,
+        1e-3,
+        "5.1 FLAC",
+    );
+    if let Some(alac) = &f.multi.alac_51 {
+        // ALAC declares no layout in the container: the answer comes from the
+        // magic cookie, through `probe_first_packet`. It also spells 5.1's
+        // surrounds as *sides*, which is why the expectation is the side mask
+        // — the same programme, the same matrix, a different container's word
+        // for it.
+        assert_is_bs775_downmix(
+            &AudioSource::decode_all(alac)
+                .expect("decode 5.1 alac")
+                .samples,
+            RATE,
+            MASK_51_SIDE,
+            1e-3,
+            "5.1 ALAC in MP4 (layout from the magic cookie, surrounds as sides)",
+        );
+    }
+    if let Some(ogg) = &f.multi.ogg_51 {
+        // Vorbis is the format whose *bitstream* order differs most from
+        // WAVE's, and Symphonia's decoder permutes it back
+        // (`map_vorbis_channel`). Lossy, so the tolerance is a codec tolerance
+        // and not a rounding one.
+        assert_is_bs775_downmix(
+            &AudioSource::decode_all(ogg)
+                .expect("decode 5.1 ogg")
+                .samples,
+            RATE,
+            MASK_51,
+            2e-2,
+            "5.1 Vorbis in Ogg (bitstream order FL FC FR BL BR LFE)",
+        );
+    }
+}
+
+/// The matrix is BS.775's, stated as the numbers rather than as a shape: the
+/// centre and each surround arrive **−3 dB** relative to the front channel on
+/// the same side, and the LFE arrives at nothing.
+///
+/// Reading the ratios rather than the absolute amplitudes is deliberate: it is
+/// the same assertion whatever headroom scale is in force, so this test pins
+/// the *recommendation* and `the_downmix_takes_the_headroom_it_needs` pins the
+/// scale, and neither can be quietly satisfied by breaking the other.
+#[test]
+fn the_centre_and_surrounds_arrive_three_db_down() {
+    let f = fixtures();
+    let decoded = AudioSource::decode_all(&f.multi.wav_51).expect("decode 5.1 wav");
+    let left = tone_profile(&decoded.samples, 0, RATE, 6);
+    let right = tone_profile(&decoded.samples, 1, RATE, 6);
+    let db = |num: f64, den: f64| 20.0 * (num / den).log10();
+    // Slots, in mask order: 0 FL, 1 FR, 2 FC, 3 LFE, 4 BL, 5 BR.
     assert!(
-        matches!(err, PlaybackError::UnsupportedChannelCount { channels: 4 }),
-        "unexpected error: {err}"
+        (db(left[2], left[0]) + 3.0103).abs() < 0.01,
+        "centre into left is {:.4} dB, BS.775 says −3.0103",
+        db(left[2], left[0])
+    );
+    assert!(
+        (db(right[2], right[1]) + 3.0103).abs() < 0.01,
+        "centre into right is {:.4} dB",
+        db(right[2], right[1])
+    );
+    assert!(
+        (db(left[4], left[0]) + 3.0103).abs() < 0.01,
+        "left surround into left is {:.4} dB",
+        db(left[4], left[0])
+    );
+    assert!(
+        (db(right[5], right[1]) + 3.0103).abs() < 0.01,
+        "right surround into right is {:.4} dB",
+        db(right[5], right[1])
+    );
+    // The LFE is dropped, not folded — BS.775's equations have no LFE term.
+    assert!(
+        left[3] < 1e-4 && right[3] < 1e-4,
+        "the LFE tone must not appear in the downmix: {:.6} / {:.6}",
+        left[3],
+        right[3]
+    );
+    // And nothing crosses sides: a left surround belongs in the left output.
+    assert!(
+        left[1] < 1e-4 && left[5] < 1e-4 && right[0] < 1e-4 && right[4] < 1e-4,
+        "a channel crossed sides: left {left:?} right {right:?}"
+    );
+}
+
+/// **The clipping test.** A 5.1 file that is full-scale and correlated across
+/// every channel would leave the matrix at +7.66 dB. It must not.
+///
+/// The fixture is the worst case by construction — one tone, full amplitude,
+/// in phase in all six channels — so the sum `1 + 1/√2 + 1/√2 = 2.4142` is
+/// actually reached rather than approached. With no headroom taken the peak
+/// would be 2.41; the assertion is that it is 1.0, and that it *is* 1.0 rather
+/// than something smaller, because attenuating further than the matrix needs
+/// would be quiet for no reason.
+#[test]
+fn a_full_scale_multichannel_file_cannot_clip() {
+    let f = fixtures();
+    let decoded = AudioSource::decode_all(&f.multi.wav_clip).expect("decode the clipping fixture");
+    let peak = decoded.samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    assert!(
+        peak <= 1.0,
+        "the downmix overflowed to {peak} — the headroom scale is not being applied"
+    );
+    assert!(
+        peak > 0.99,
+        "peak of {peak} means more headroom was taken than the matrix needs"
+    );
+    // Stated the other way: the attenuation is exactly the matrix's worst-case
+    // row sum, which is a number derivable on paper (module docs) rather than
+    // one tuned by ear.
+    let attenuation = f64::from(peak) / (1.0 + 2.0 * f64::from(std::f32::consts::FRAC_1_SQRT_2));
+    assert!(
+        (attenuation - bs775_headroom(MASK_51)).abs() < 1e-3,
+        "attenuation measured {attenuation:.5}, matrix worst case {:.5}",
+        bs775_headroom(MASK_51)
+    );
+}
+
+/// The headroom is the matrix's own, so a layout that needs less takes less:
+/// quadraphonic has no centre and so sums to `1 + 1/√2`, not `1 + 2/√2`.
+#[test]
+fn the_downmix_takes_the_headroom_it_needs() {
+    let f = fixtures();
+    for (path, mask, layout) in [
+        (&f.multi.wav_51, MASK_51, "5.1"),
+        (&f.multi.wav_quad, MASK_QUAD, "quad"),
+        (&f.multi.wav_30, MASK_30, "3.0"),
+    ] {
+        let mut src = AudioSource::open(path).expect("open");
+        let db = src
+            .downmix_headroom_db()
+            .expect("a fold reports its headroom");
+        let expected = 20.0 * bs775_headroom(mask).log10();
+        assert!(
+            (f64::from(db) - expected).abs() < 0.01,
+            "{layout}: reported {db:.4} dB, matrix says {expected:.4} dB"
+        );
+        // A last sanity check that the number is the one the docs quote.
+        if mask == MASK_51 {
+            assert!(
+                (f64::from(db) + 7.66).abs() < 0.01,
+                "5.1 headroom is {db:.4} dB"
+            );
+        }
+        assert!(src.next_block().expect("decode").is_some());
+    }
+    // Stereo and mono are not folded at all and report nothing.
+    assert!(
+        AudioSource::open(&f.part1_f32)
+            .expect("open")
+            .downmix_headroom_db()
+            .is_none(),
+        "a stereo file must not be attenuated"
+    );
+    assert!(
+        AudioSource::open(&f.part1_mono)
+            .expect("open")
+            .downmix_headroom_db()
+            .is_none(),
+        "a mono file must not be attenuated"
+    );
+}
+
+/// The fold is stateless, so a seek lands on the same samples a whole-file
+/// decode produced at that position.
+///
+/// This is the property that ruled a limiter out (see the `downmix` module
+/// docs): a gain that depended on what it heard a moment ago would make these
+/// two decodes disagree, and there would be no honest way to say which one was
+/// the file.
+#[test]
+fn a_seek_into_a_downmixed_file_lands_on_the_same_samples() {
+    let f = fixtures();
+    let whole = AudioSource::decode_all(&f.multi.wav_51).expect("decode 5.1 whole");
+    let target_ms = 500;
+    let mut src = AudioSource::open(&f.multi.wav_51).expect("open");
+    src.seek(target_ms).expect("seek");
+    let mut after = Vec::new();
+    while let Some(block) = src.next_block().expect("decode after seek") {
+        after.extend_from_slice(block);
+    }
+    let offset =
+        usize::try_from(target_ms).expect("a seek target in ms fits usize") * RATE as usize / 1000
+            * CHANNELS;
+    assert_samples_eq(&after, &whole.samples[offset..], "downmix across a seek");
+}
+
+/// The layouts ITU-R BS.775 does not place are refused, and the refusal names
+/// the layout rather than only its size.
+///
+/// This is the honest edge the fix keeps: 7.1 and 6.1 do not play, and they do
+/// not play *for a stated reason*, which is a different thing from folding them
+/// on a coefficient nobody can cite.
+#[test]
+fn the_layouts_bs775_does_not_place_are_refused() {
+    let f = fixtures();
+    for (path, expected, what) in [
+        (&f.multi.wav_71, "FL+FR+FC+LFE+RL+RR+SL+SR", "7.1"),
+        (&f.multi.wav_61, "FL+FR+FC+LFE+RL+RR+RC", "6.1"),
+    ] {
+        let err = AudioSource::decode_all(path)
+            .expect_err("a layout BS.775 does not place must be refused, not guessed");
+        let PlaybackError::UnsupportedChannelLayout { layout, reason } = &err else {
+            panic!("{what}: wrong error: {err}");
+        };
+        assert_eq!(layout, expected, "{what}: the refusal must name the layout");
+        assert!(
+            !reason.is_empty(),
+            "{what}: the refusal must say why, not only that"
+        );
+    }
+}
+
+/// Multichannel AAC does not play, and the reason is Symphonia's decoder
+/// rather than anything the downmix decided.
+///
+/// Worth pinning because the two failures look identical to a listener and are
+/// completely different to fix: this one goes away when Symphonia's AAC
+/// decoder grows past two channels, and no coefficient of ours is involved.
+/// The day it starts decoding, this test fails and the fold is already there
+/// waiting for it.
+#[test]
+fn multichannel_aac_is_refused_by_the_decoder_not_by_the_downmix() {
+    let f = fixtures();
+    let Some(aac) = &f.multi.aac_51 else {
+        println!("SKIP: ffmpeg's aac encoder is not available");
+        return;
+    };
+    let err = AudioSource::decode_all(aac).expect_err("Symphonia 0.5 cannot decode 5.1 AAC");
+    assert!(
+        matches!(err, PlaybackError::Decode(_)),
+        "5.1 AAC should fail in the decoder, not in the layout check: {err}"
+    );
+}
+
+/// A downmixed source reports the channel count the file had, which is how
+/// `Event::SignalPath` gets to say that a BS.775 matrix is in the path and
+/// that the track is therefore not bit-perfect (ADR-0012, ADR-0039).
+#[test]
+fn a_downmixed_source_still_says_what_the_file_was() {
+    let f = fixtures();
+    let six = AudioSource::decode_all(&f.multi.wav_51).expect("decode 5.1");
+    assert_eq!(six.source_channels, 6);
+    assert_eq!(
+        six.samples.len() % CHANNELS,
+        0,
+        "the block handed on is stereo whatever the file was"
+    );
+    let two = AudioSource::decode_all(&f.part1_f32).expect("decode stereo");
+    assert_eq!(two.source_channels, CHANNELS);
+    let one = AudioSource::decode_all(&f.part1_mono).expect("decode mono");
+    assert_eq!(one.source_channels, 1);
+}
+
+/// A multichannel file plays through the whole engine, gaplessly, next to a
+/// stereo one — the fold is a decode-side transform and the ring, the splice
+/// and the sink never learn the file had six channels.
+#[test]
+fn a_multichannel_track_plays_through_the_engine() {
+    let f = fixtures();
+    let expected = MULTI_FRAMES * 2 * CHANNELS;
+    let mut sink = OfflineSink::with_capacity(expected);
+    let report = run_playlist(
+        &[f.multi.wav_51.clone(), f.multi.wav_quad.clone()],
+        test_config(),
+        &mut sink,
+    )
+    .expect("a 5.1 file and a quad file are two tracks the engine can play");
+    assert_eq!(report.stream_rate, RATE);
+    assert_eq!(
+        sink.samples().len(),
+        expected,
+        "two one-second multichannel tracks are two seconds of stereo"
+    );
+    // And the audio is the downmix, not silence or a passthrough of the first
+    // two planes: the first track's half of the sink still profiles as BS.775.
+    assert_is_bs775_downmix(
+        &sink.samples()[..MULTI_FRAMES * CHANNELS],
+        RATE,
+        MASK_51,
+        1e-4,
+        "5.1 through the engine",
     );
 }
 

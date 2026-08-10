@@ -105,6 +105,35 @@ next commit.
   (ADR-0009).
 - Seeking, with playback position reported from the engine's own knowledge and
   never extrapolated between reports.
+- **Multichannel files play**, folded to stereo with the ITU-R BS.775 matrix —
+  3.0, 4.0 (quadraphonic), 5.0 and 5.1, in WAV, FLAC, Vorbis and ALAC. Before
+  this they were refused outright, so a 5.1 record sat on the shelf and did
+  nothing when clicked (ADR-0039).
+  - The fold is built from the **channel layout the container and codec
+    declare**, never from a channel count: Vorbis orders 5.1 as
+    `FL FC FR BL BR LFE` against WAVE's `FL FR FC LFE Ls Rs`, and ALAC declares
+    no layout in the container at all. Verified by putting the same music
+    through five containers with a distinct tone in each speaker and measuring
+    which tone came out of which side — the failure this guards against is
+    silent, since a fold with the wrong order still decodes and still has the
+    right length.
+  - Centre and surrounds arrive at −3 dB, as the recommendation writes them;
+    the **LFE is dropped**, because BS.775's equations contain no LFE term.
+  - Headroom for the matrix's +7.66 dB worst case is taken as a **constant
+    attenuation** (−7.66 dB for 5.1, −4.65 dB for quad), so the fold cannot
+    clip for any input at any position and stays a pure function of position —
+    a limiter would have made a seeked decode disagree with a whole-file one.
+    The level is recovered exactly by the ReplayGain analysis pass, which
+    measures this decoder's own output.
+  - A downmixed track is **not bit-perfect and says so**: `Event::SignalPath`
+    carries `source_channels`. Multichannel plays under the exclusive path too,
+    folded and labelled rather than refused.
+  - **Still refused**, now by layout and with the layout named in the error:
+    7.1 and 6.1 (BS.775 places one surround pair and no rear centre), height
+    and wide channels, and half a surround pair. Multichannel **AAC** does not
+    decode at all — Symphonia 0.5 rejects it before the fold is reached.
+  - No rescan: the scanner never looked at a channel count, so these files were
+    always listed.
 - **Volume**, as engine state: a cubic 60 dB fader law shared by every front
   end, applied as software gain in the one place every sample passes. At
   exactly unity the samples reach the sink with no copy and no arithmetic, so

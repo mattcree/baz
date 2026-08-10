@@ -1543,3 +1543,57 @@ fn malformed_replay_gain_tags_neither_panic_nor_fail_the_scan() {
         "one good figure among four bad ones is still read"
     );
 }
+
+/// A multichannel file is on the shelf, and always was.
+///
+/// This is the library half of ADR-0039's question, and the answer decides
+/// whether shipping the downmix needs a rescan: it does not. The scanner reads
+/// headers with lofty and never decodes, and nothing in the scan path looks at
+/// a channel count, so a 5.1 record has been listed with its duration, format
+/// and rate since the day it was copied in — it simply refused to play when
+/// clicked. Adding the fold changes what happens on the *play* side and nothing
+/// on the shelf, so no library has to be rebuilt to gain it.
+///
+/// The fixture is `WAVE_FORMAT_EXTENSIBLE` with a real 5.1 channel mask,
+/// because a plain multichannel WAV would prove only that lofty counts bytes.
+#[test]
+fn a_multichannel_file_is_listed_like_any_other() {
+    const RATE: u32 = 48_000;
+    const CHANNELS: u16 = 6;
+    const MASK_51: u32 = 0x3F;
+    const BLOCK_ALIGN: u16 = CHANNELS * 2;
+    const DATA_BYTES: u32 = RATE * BLOCK_ALIGN as u32;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("Surround/Album/01 - In Five Point One.wav");
+    make_dirs(&path);
+    // 5.1: FL+FR+FC+LFE+BL+BR, one second of silence at 48 kHz, 16-bit.
+    let mut w: Vec<u8> = Vec::new();
+    w.extend_from_slice(b"RIFF");
+    w.extend_from_slice(&(36u32 + 24 + DATA_BYTES).to_le_bytes());
+    w.extend_from_slice(b"WAVEfmt ");
+    w.extend_from_slice(&40u32.to_le_bytes()); // WAVEFORMATEXTENSIBLE
+    w.extend_from_slice(&0xFFFEu16.to_le_bytes()); // WAVE_FORMAT_EXTENSIBLE
+    w.extend_from_slice(&CHANNELS.to_le_bytes());
+    w.extend_from_slice(&RATE.to_le_bytes());
+    w.extend_from_slice(&(RATE * u32::from(BLOCK_ALIGN)).to_le_bytes());
+    w.extend_from_slice(&BLOCK_ALIGN.to_le_bytes());
+    w.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+    w.extend_from_slice(&22u16.to_le_bytes()); // cbSize
+    w.extend_from_slice(&16u16.to_le_bytes()); // wValidBitsPerSample
+    w.extend_from_slice(&MASK_51.to_le_bytes()); // the declaration under test
+    // KSDATAFORMAT_SUBTYPE_PCM
+    w.extend_from_slice(&1u32.to_le_bytes());
+    w.extend_from_slice(&0u16.to_le_bytes());
+    w.extend_from_slice(&0x0010u16.to_le_bytes());
+    w.extend_from_slice(&[0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71]);
+    w.extend_from_slice(b"data");
+    w.extend_from_slice(&DATA_BYTES.to_le_bytes());
+    w.extend_from_slice(&vec![0u8; DATA_BYTES as usize]);
+    fs::write(&path, w).expect("write 5.1 fixture");
+
+    let t = only_track(dir.path());
+    assert_eq!(t.album.as_deref(), Some("Album"), "the row is on the shelf");
+    assert_eq!(t.sample_rate, Some(48_000));
+    assert_eq!(t.duration, Some(std::time::Duration::from_secs(1)));
+}

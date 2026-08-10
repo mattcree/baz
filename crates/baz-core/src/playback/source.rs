@@ -3,9 +3,21 @@
 //! Every source yields interleaved **stereo** f32 blocks regardless of the
 //! container or codec (WAV f32, WAV i16, FLAC all take the same path), so
 //! bit-exactness comparisons between engine output and reference single-file
-//! decodes are apples-to-apples. Mono is upmixed by duplication; more than
-//! two channels is rejected until proper downmix lands (see
-//! [`PlaybackError::UnsupportedChannelCount`]).
+//! decodes are apples-to-apples. Mono is upmixed by duplication; a
+//! multichannel source is folded with the ITU-R BS.775 matrix
+//! (`playback::downmix`, ADR-0039), and a layout that recommendation does not
+//! place is refused with [`PlaybackError::UnsupportedChannelLayout`] rather
+//! than folded on a guess.
+//!
+//! **The fold is built from the layout, never from the channel count.** Which
+//! plane of a decoded packet holds the centre channel is a property of the
+//! container and the codec, and WAVE, FLAC, Vorbis and ALAC do not agree; the
+//! only thing they agree on is Symphonia's own contract, that the *n*-th plane
+//! is the *n*-th speaker of `SignalSpec::channels` in ascending bit order.
+//! [`AudioSource`] therefore keeps the `Channels` **set** the decoder reports
+//! and hands it to the matrix, and a decoder whose plane order disagreed with
+//! its own declared layout would fail
+//! `each_speaker_lands_where_the_layout_says` rather than sound faintly wrong.
 //!
 //! # Gapless trim
 //!
@@ -118,7 +130,7 @@ use std::fs::File;
 use std::io::Cursor;
 use std::path::Path;
 
-use symphonia::core::audio::SampleBuffer;
+use symphonia::core::audio::{Channels, SampleBuffer};
 use symphonia::core::codecs::{Decoder, DecoderOptions};
 use symphonia::core::errors::{Error as SymphoniaError, SeekErrorKind};
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
@@ -127,6 +139,7 @@ use symphonia::core::meta::{MetadataOptions, MetadataRevision};
 use symphonia::core::probe::Hint;
 use symphonia::core::units::Time;
 
+use super::downmix::Downmix;
 use super::{CHANNELS, PlaybackError};
 use crate::replaygain::{ReplayGainReader, ReplayGainTags, field_of_key};
 
@@ -143,6 +156,11 @@ pub struct DecodedAudio {
     /// ([`AudioSource::bits_per_sample`]). Carried for the signal-path
     /// readout; the samples themselves are f32 either way.
     pub bits_per_sample: Option<u32>,
+    /// Channels the *source* carried ([`AudioSource::channels`]). Carried for
+    /// the signal-path readout, which is where a listener finds out that a
+    /// BS.775 downmix is in the path; the samples here are stereo whatever it
+    /// says.
+    pub source_channels: usize,
     /// The ReplayGain figures the file's tags declared
     /// ([`AudioSource::replay_gain`]). Carried so the engine can apply the
     /// right gain from this track's very first delivered sample; the samples
@@ -162,8 +180,10 @@ impl DecodedAudio {
 /// have withheld (see [`AudioSource::probe_first_packet`]).
 #[derive(Debug, Clone, Copy)]
 struct ProbedSpec {
-    /// Channels in the decoder's output buffer.
-    channels: usize,
+    /// The speakers in the decoder's output buffer, as a set — **not** a
+    /// count. The set is what fixes which plane is which (module docs), so it
+    /// is what travels.
+    channels: Channels,
     /// Sample rate of the decoder's output buffer, in Hz.
     rate: u32,
 }
@@ -174,8 +194,13 @@ pub struct AudioSource {
     decoder: Box<dyn Decoder>,
     track_id: u32,
     sample_rate: u32,
-    /// Channel count of the *source* (1 or 2); output is always stereo.
+    /// Channel count of the *source*; output is always stereo.
     source_channels: usize,
+    /// The BS.775 matrix for this file's layout, or `None` for the mono and
+    /// stereo sources that need no fold. Built once at open, applied per
+    /// packet, and stateless — so a seeked decode and a whole-file decode
+    /// agree sample for sample.
+    downmix: Option<Downmix>,
     /// Reusable native-interleaved decode buffer.
     sample_buf: Option<SampleBuffer<f32>>,
     /// Frames sitting in [`Self::sample_buf`] that have been decoded but not
@@ -304,7 +329,11 @@ impl AudioSource {
         // asks the decoder instead. `None` from a format that *should* have
         // told us is not distinguishable at this point, so the probe is the
         // single answer for both cases.
-        let declared_channels = params.channels.map(symphonia::core::audio::Channels::count);
+        //
+        // The *set* is kept, not its cardinality: it is what says which plane
+        // of a decoded packet is the centre channel, and the downmix is built
+        // from it (module docs).
+        let declared_channels = params.channels;
         // Emission cap only. Deliberately NOT `params.delay`: with gapless
         // enabled the reader/decoder pair has already trimmed delay and
         // padding out of the buffers we receive (and MP3 still reports
@@ -320,9 +349,10 @@ impl AudioSource {
             decoder,
             track_id,
             sample_rate,
-            // Provisional: overwritten by the probe below when the container
-            // declared nothing. Never read before then.
-            source_channels: declared_channels.unwrap_or(CHANNELS),
+            // Provisional: overwritten below once the layout is settled.
+            // Never read before then.
+            source_channels: CHANNELS,
+            downmix: None,
             sample_buf: None,
             pending_frames: 0,
             block: Vec::new(),
@@ -332,16 +362,23 @@ impl AudioSource {
             bits_per_sample,
             replay_gain,
         };
-        let channels = if let Some(n) = declared_channels {
-            n
+        let layout = if let Some(set) = declared_channels {
+            set
         } else {
             let probe = source.probe_first_packet()?;
             source.adopt_decoder_rate(probe.rate, sample_rate);
             probe.channels
         };
-        if channels == 0 || channels > CHANNELS {
+        let channels = layout.count();
+        if channels == 0 {
             return Err(PlaybackError::UnsupportedChannelCount { channels });
         }
+        // `None` for mono and stereo, which the block loop handles as it
+        // always has; `Some` for a layout BS.775 places; an error for one it
+        // does not (ADR-0039). Built here rather than lazily so a file that
+        // cannot be folded fails at `open`, where every other unplayable
+        // file already fails.
+        source.downmix = Downmix::for_layout(layout)?;
         source.source_channels = channels;
         Ok(source)
     }
@@ -402,22 +439,43 @@ impl AudioSource {
         self.sample_rate
     }
 
-    /// Channels the **source** carries — 1 or 2 — as distinct from the stereo
+    /// Channels the **source** carries — 1, 2, or the 3 to 6 of a layout the
+    /// downmix folds — as distinct from the stereo
     /// [`next_block`](Self::next_block) always emits.
     ///
-    /// Reported for exactly one caller: [`crate::analysis`], because a loudness
-    /// measurement is not invariant under duplicating a mono channel. BS.1770
-    /// sums the channels with unity weights, so measuring a mono file through
-    /// this decoder's stereo output reads 3.01 LU louder than every other
-    /// scanner would read the same file — and a library where baz's mono tracks
-    /// sat 3 dB from its tagged ones is the bug this accessor exists to prevent
-    /// (`a_mono_source_is_measured_as_one_channel`).
+    /// Two callers, for two different reasons.
     ///
-    /// Playback never asks: the engine wants stereo and gets it, and the
-    /// duplication is what a mono file has always sounded like.
+    /// [`crate::analysis`] asks because a loudness measurement is not invariant
+    /// under duplicating a mono channel. BS.1770 sums the channels with unity
+    /// weights, so measuring a mono file through this decoder's stereo output
+    /// reads 3.01 LU louder than every other scanner would read the same file —
+    /// and a library where baz's mono tracks sat 3 dB from its tagged ones is
+    /// the bug this accessor exists to prevent
+    /// (`a_mono_source_is_measured_as_one_channel`). It clamps to [`CHANNELS`],
+    /// so a **multichannel** file is measured as the stereo downmix baz will
+    /// actually play — which is the right measurement for a gain baz will
+    /// apply, and is deliberately *not* what a 5.1-aware scanner would report
+    /// for the same file (`a_multichannel_source_is_measured_as_its_downmix`).
+    ///
+    /// The engine asks so that
+    /// [`Event::SignalPath`](crate::protocol::Event::SignalPath) can say a
+    /// downmix is in the path. Playback itself never asks: it wants stereo and
+    /// gets it.
     #[must_use]
     pub fn channels(&self) -> usize {
         self.source_channels
+    }
+
+    /// The constant attenuation the downmix applies, in decibels, or `None`
+    /// for a source that is not downmixed.
+    ///
+    /// −7.66 dB for 5.1, −4.65 dB for quadraphonic; the matrix's own worst-case
+    /// gain, and the reason a 5.1 file plays quieter than the stereo master of
+    /// the same record. See `playback::downmix` for why it is a
+    /// constant rather than a limiter, and why ReplayGain gets the level back.
+    #[must_use]
+    pub fn downmix_headroom_db(&self) -> Option<f32> {
+        self.downmix.as_ref().map(Downmix::headroom_db)
     }
 
     /// Bit depth the container declares, when it declares one — 24 for the
@@ -554,7 +612,7 @@ impl AudioSource {
             let frames = decoded.frames() as u64;
             let spec = *decoded.spec();
             let probed = ProbedSpec {
-                channels: spec.channels.count(),
+                channels: spec.channels,
                 rate: spec.rate,
             };
             if frames == 0 {
@@ -564,7 +622,7 @@ impl AudioSource {
             // the buffer.
             let capacity = decoded.capacity() as u64;
             let sample_buf = match &mut self.sample_buf {
-                Some(b) if b.capacity() >= decoded.capacity() * probed.channels => b,
+                Some(b) if b.capacity() >= decoded.capacity() * probed.channels.count() => b,
                 slot => slot.insert(SampleBuffer::new(capacity, spec)),
             };
             sample_buf.copy_interleaved_ref(decoded);
@@ -634,19 +692,29 @@ impl AudioSource {
                 None => return Ok(None),
             };
 
-            // Normalize to stereo into the reusable output block.
-            self.block.clear();
-            self.block.reserve(take * CHANNELS);
-            match self.source_channels {
-                1 => {
-                    for &s in &native[skip..skip + take] {
-                        self.block.push(s);
-                        self.block.push(s);
+            // Normalize to stereo into the reusable output block. Three cases
+            // and no fourth: fold a multichannel layout with the BS.775 matrix,
+            // duplicate a mono channel, or hand a stereo packet straight
+            // through — the last still a `memcpy` of exactly the bytes the
+            // decoder produced, which is what keeps the bit-exactness tests
+            // meaningful for the formats that claim it.
+            if let Some(downmix) = &self.downmix {
+                let n = downmix.source_channels();
+                downmix.apply(&native[skip * n..(skip + take) * n], &mut self.block);
+            } else {
+                self.block.clear();
+                self.block.reserve(take * CHANNELS);
+                match self.source_channels {
+                    1 => {
+                        for &s in &native[skip..skip + take] {
+                            self.block.push(s);
+                            self.block.push(s);
+                        }
                     }
-                }
-                _ => {
-                    self.block
-                        .extend_from_slice(&native[skip * CHANNELS..(skip + take) * CHANNELS]);
+                    _ => {
+                        self.block
+                            .extend_from_slice(&native[skip * CHANNELS..(skip + take) * CHANNELS]);
+                    }
                 }
             }
             return Ok(Some(&self.block));
@@ -669,6 +737,7 @@ impl AudioSource {
             samples,
             sample_rate: src.sample_rate,
             bits_per_sample: src.bits_per_sample,
+            source_channels: src.source_channels,
             replay_gain: src.replay_gain,
         })
     }

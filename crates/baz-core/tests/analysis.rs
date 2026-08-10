@@ -882,3 +882,87 @@ fn a_cancel_while_idle_does_not_stop_the_next_pass() {
     );
     handle.shutdown();
 }
+
+/// Write the same tone as a **5.1** float WAV, in the two front channels only.
+///
+/// `hound` synthesizes the channel mask as `(1 << channels) - 1`, which for six
+/// channels is `0x3F` — `FL+FR+FC+LFE+BL+BR`, exactly the 5.1 layout WAVE
+/// specifies. That is a coincidence worth relying on here and nowhere else;
+/// `tests/playback.rs` writes its own header when it needs a mask hound cannot
+/// produce.
+fn write_five_one_front_pair_wav(path: &Path, interleaved_stereo: &[f32]) {
+    let spec = hound::WavSpec {
+        channels: 6,
+        sample_rate: RATE,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut writer = hound::WavWriter::create(path, spec).expect("create wav");
+    for frame in interleaved_stereo.chunks_exact(2) {
+        writer.write_sample(frame[0]).expect("write sample"); // FL
+        writer.write_sample(frame[1]).expect("write sample"); // FR
+        for _ in 0..4 {
+            writer.write_sample(0.0f32).expect("write sample"); // FC, LFE, BL, BR
+        }
+    }
+    writer.finalize().expect("finalize wav");
+}
+
+/// A multichannel file is measured as **the stereo downmix baz will play**, not
+/// as the six channels it stores — and that is what makes the downmix's
+/// attenuation cost a listener nothing on an analysed library (ADR-0039).
+///
+/// The fixture is the same tone twice: once as stereo, once as a 5.1 file
+/// carrying it in the front pair and silence in the other four. baz folds the
+/// second with the BS.775 matrix, whose 5.1 headroom scale is
+/// `1/(1 + 2/√2) = 0.41421` — **−7.66 dB** — so the audio the meter sees is
+/// 7.66 dB quieter than the stereo file's, and the pass therefore asks for
+/// 7.66 dB *more* gain: **766 centidecibels**, worked out from the matrix and
+/// not from a previous run.
+///
+/// That is the whole argument for taking headroom as a constant rather than
+/// limiting: it is a level change, and a level change is the one kind of damage
+/// ReplayGain undoes exactly. A 5.1 record on an analysed library plays at the
+/// same loudness as its stereo master.
+///
+/// Deliberately *not* what a 5.1-aware scanner reports for the same file:
+/// BS.1770 weights a six-channel programme differently, and would give a figure
+/// describing audio baz never produces. Measuring what will actually be played
+/// is the right answer for a gain that will actually be applied.
+#[test]
+fn a_multichannel_source_is_measured_as_its_downmix() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("library.db");
+    let stereo = dir.path().join("stereo.wav");
+    let surround = dir.path().join("surround.wav");
+    let signal = tone(5.0, -23.0);
+    write_wav(&stereo, &signal);
+    write_five_one_front_pair_wav(&surround, &signal);
+    {
+        let mut library = Library::open(&db).expect("open");
+        library
+            .add_tracks(vec![
+                row(&stereo, "Stereo", "Tone", 1, AudioFormat::Wav),
+                row(&surround, "Surround", "Tone", 1, AudioFormat::Wav),
+            ])
+            .expect("seed");
+    }
+
+    let (handle, events) = analysis::spawn(&db).expect("spawn");
+    run_pass(&handle, &events, false);
+    handle.shutdown();
+
+    let library = Library::open(&db).expect("open");
+    let stereo_gain = stored_track_gain(&library, &stereo).expect("stereo measured");
+    let surround_gain = stored_track_gain(&library, &surround).expect("surround measured");
+    let headroom_centidb =
+        -2000.0 * (1.0 + 2.0 * f64::from(std::f32::consts::FRAC_1_SQRT_2)).log10();
+    #[allow(clippy::cast_possible_truncation)] // a few hundred centidB
+    let expected = -headroom_centidb.round() as i16;
+    assert_eq!(expected, 766, "the 5.1 matrix takes 7.66 dB, on paper");
+    assert!(
+        (surround_gain - stereo_gain - expected).abs() <= TOLERANCE_CENTIDB,
+        "surround {surround_gain} vs stereo {stereo_gain} centidB: the pass must measure \
+         the downmix baz plays, and so ask for {expected} centidB more gain"
+    );
+}

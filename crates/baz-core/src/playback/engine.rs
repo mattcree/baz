@@ -376,6 +376,7 @@ fn prefetch_decode(
         samples,
         sample_rate: src.sample_rate(),
         bits_per_sample: src.bits_per_sample(),
+        source_channels: src.channels(),
         replay_gain: src.replay_gain(),
     })
 }

@@ -2536,6 +2536,9 @@ struct TrackBound {
     source_rate: u32,
     /// The depth the track's container declares, when it declares one.
     source_bits: Option<u32>,
+    /// The channels the track's *file* carries, for the signal-path readout —
+    /// above two means an ITU-R BS.775 downmix is in the path (ADR-0039).
+    source_channels: usize,
     /// The ReplayGain the track's tags declare, read at open from metadata the
     /// probe had already parsed (ADR-0013). Travels with the boundary because
     /// the gain has to be in effect on the first sample *after* it.
@@ -2577,7 +2580,7 @@ struct Session {
     durations: Vec<Option<u64>>,
     /// Stored rate and depth of each queue index's track, once known — the
     /// source half of [`Event::SignalPath`].
-    formats: Vec<Option<(u32, Option<u32>)>>,
+    formats: Vec<Option<(u32, Option<u32>, usize)>>,
     /// Where each track's audio starts in the delivered stream and what
     /// ReplayGain it carries, **in delivery order** — the cut points the pump
     /// must not read across.
@@ -2774,7 +2777,7 @@ impl Session {
     /// the rule for combining them (`Direct` **and** `Unity` is what
     /// bit-exactness means since ADR-0011).
     fn signal_path(&self, index: usize) -> Option<Event> {
-        let (source_rate_hz, source_bits) = (*self.formats.get(index)?)?;
+        let (source_rate_hz, source_bits, source_channels) = (*self.formats.get(index)?)?;
         let output_rate_hz = self.shared.stream_rate.load(Ordering::Acquire);
         let why = match self.boundary {
             // Following the source is the policy, so a mismatch here means the
@@ -2794,6 +2797,7 @@ impl Session {
         };
         Some(Event::SignalPath {
             source_rate_hz,
+            source_channels,
             source_bits,
             output_rate_hz,
             chain,
@@ -3024,7 +3028,7 @@ impl Session {
                 *slot = bound.duration_ms;
             }
             if let Some(slot) = self.formats.get_mut(bound.index) {
-                *slot = Some((bound.source_rate, bound.source_bits));
+                *slot = Some((bound.source_rate, bound.source_bits, bound.source_channels));
             }
             self.replay_gains.push(GainBound {
                 start_sample: bound.start_sample,
@@ -3328,11 +3332,20 @@ impl ProducerTask {
                 // the stream rate, which changes their count but not the
                 // seconds they represent.
                 let duration_ms = Some(frames_to_ms(d.frames() as u64, d.sample_rate));
-                let format = (d.sample_rate, d.bits_per_sample, d.replay_gain);
+                let format = (
+                    d.sample_rate,
+                    d.bits_per_sample,
+                    d.source_channels,
+                    d.replay_gain,
+                );
                 at_rate(d, stream_rate, &self.instruments)
                     .map(|samples| (samples, duration_ms, format))
             }) {
-                Ok((samples, duration_ms, (source_rate, source_bits, replay_gain))) => {
+                Ok((
+                    samples,
+                    duration_ms,
+                    (source_rate, source_bits, source_channels, replay_gain),
+                )) => {
                     let _ = self.bounds.push(TrackBound {
                         index: i,
                         start_sample: pushed,
@@ -3340,6 +3353,7 @@ impl ProducerTask {
                         replay_gain,
                         source_rate,
                         source_bits,
+                        source_channels,
                     });
                     if !push_with_backpressure(&mut self.ring, &samples, stop) {
                         break;
@@ -3422,6 +3436,7 @@ impl ProducerTask {
             duration_ms: src.duration_ms(),
             source_rate: src.sample_rate(),
             source_bits: src.bits_per_sample(),
+            source_channels: src.channels(),
             replay_gain: src.replay_gain(),
         };
         let mut pushed = 0usize;
@@ -3527,6 +3542,7 @@ fn decode_open(mut src: AudioSource, stop: &AtomicBool) -> Result<DecodedAudio, 
         samples,
         sample_rate: src.sample_rate(),
         bits_per_sample: src.bits_per_sample(),
+        source_channels: src.channels(),
         replay_gain: src.replay_gain(),
     })
 }
