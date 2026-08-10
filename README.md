@@ -111,7 +111,7 @@ being unable to make the big one is a reason to be strict about the rest:
 
 - **Every action has a visible, pointer-reachable control.** No action is
   keyboard-only, and no control's only affordance is hover. This is a
-  [standing refusal](docs/REFUSALS.md), not an aspiration — it has already
+  [standing refusal](docs/the product's standing rules), not an aspiration — it has already
   cost design proposals that were prettier without it.
 - **Contrast floors are tested**, every ink against every surface, with opacity
   composited before measuring rather than assumed away.

@@ -12,7 +12,7 @@ redirections from `docs/DEVELOPMENT.md`. Both runs print
 
 which is the receipt that nothing touched the owner's session bus.
 
-This reverses two entries of `docs/REFUSALS.md` — *sound from the wall is two
+This reverses two entries of the product's standing rules — *sound from the wall is two
 presses* and *nothing is ever drawn on top of a sleeve* — and ADR-0032 §2's
 *no hover-revealed verb group on the wall*. All three are rewritten to record
 what was decided; none is argued with. The ledger binds contributors and
@@ -56,7 +56,7 @@ page**, exactly as before.
 ## The one departure from the approved mockup
 
 The mockup gives the **amber** glyph to `Play` *and* `Queue`. `Play` has it
-here; **`Queue` is paper**. `docs/REFUSALS.md`'s amber entry names this case in
+here; **`Queue` is paper**. the product's amber entry names this case in
 these words — the lamp states what is true about playback right now and *"not
 what is queued"* — and it is the one entry the brief did not touch. The
 brief's own licence (*"if it reads too loud, drop to paper and say so"*) is

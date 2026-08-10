@@ -340,7 +340,7 @@ fn save_field(saving: Option<&NameEntry>) -> Element<'_, Message> {
 /// The header over one album's run of rows: the record's title, and who it is
 /// filed under, in the room's quietest voice.
 ///
-/// **Albums are listed as albums, never flattened** — `docs/REFUSALS.md` by way
+/// **Albums are listed as albums, never flattened** — the product's standing rules by way
 /// of the critique's stack. baz's queue is one list with a cursor and today it
 /// usually holds one album, so there is usually one of these; a shuffle's run
 /// already draws several, and a second album is a second header in this same
@@ -391,7 +391,7 @@ fn empty_state() -> Element<'static, Message> {
                 .size(theme::SIZE_META)
                 .line_height(theme::LEADING_META)
                 .color(room.paper_faint),
-            // Silence is a feature (`docs/REFUSALS.md`), and the empty queue is
+            // Silence is a feature (a standing rule of the product), and the empty queue is
             // the one surface where saying so costs nothing: this is what a
             // listener sees the moment a record ends, and it is the frame in
             // which every other player would have started something. Since

@@ -12,7 +12,7 @@ message, no token and no dependency.
 The product's own laws contradicted each other, and the contradiction was
 being resolved silently in favour of invisibility.
 
-- **The visible-control rule** (`docs/REFUSALS.md`, Accessibility): *"Every
+- **The visible-control rule** (the product's standing rule, Accessibility): *"Every
   action in baz has a visible, pointer-reachable control. No action is
   keyboard-only, and no control's only affordance is hover."* Doc 09 §5.2
   applied it to gestures in so many words when it admitted the context menu:
@@ -20,7 +20,7 @@ being resolved silently in favour of invisibility.
   entry is not taste — it is **the mitigation for a toolkit that publishes
   no accessibility tree** (ADR-0017 §4), which is why it has survived every
   design that wanted a control gone.
-- **The view-options refusal** (`docs/REFUSALS.md`, The interface): *"No
+- **The view-options refusal** (the product's standing rule, The interface): *"No
   view-options menus. No grid-size picker, no list-mode toggle, no column
   chooser, no sort dropdown… density is a zoom gesture."*
 
@@ -157,7 +157,7 @@ new message, no `DensitySet`, no second grammar.
 
 ### 4. The ledger, amended
 
-`docs/REFUSALS.md`'s interface entry is narrowed under the editing rule and
+the product's interface entry is narrowed under the editing rule and
 carries the amendment note. What stands: no view-options menus, no
 list-mode toggle, no column chooser, no sort dropdown, no free zoom, no
 Settings row for a view question. What falls: "no grid-size picker" *as

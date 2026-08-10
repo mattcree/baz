@@ -63,7 +63,7 @@
 //! the pointer approaches a letter, `p + shift(c − p) → c`, so the glyph
 //! *converges onto its own rest slot* under the arriving pointer rather than
 //! sliding off it. Absent values and elision marks stay inert
-//! (`docs/REFUSALS.md`: a control that did nothing when pressed would be a
+//! (a standing rule of the product: a control that did nothing when pressed would be a
 //! lie), and inert slots leave the cursor alone.
 //!
 //! # Hover says what a press would take
@@ -674,7 +674,7 @@ mod tests {
     }
 
     /// Absent values and elision marks are drawn and **inert** — a gap that
-    /// jumped somewhere would be the lie `docs/REFUSALS.md` names — and the
+    /// jumped somewhere would be the lie the product's standing rules names — and the
     /// lane outside the strip presses nothing.
     #[test]
     fn absent_values_and_the_lanes_empty_ends_press_nothing() {

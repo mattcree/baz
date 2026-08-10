@@ -2,7 +2,7 @@
 
 > ## Amendment (2026-08-09) — the owner's decisions, recorded not argued
 >
-> `docs/REFUSALS.md`'s preamble: *"The owner's decision is sufficient on its
+> the product's preamble: *"The owner's decision is sufficient on its
 > own; an entry he reverses gets rewritten to say what was decided and why,
 > and that is the whole of the process. Nobody argues with a document to
 > change their own product."* This record was written to be decided on, and it
@@ -154,7 +154,7 @@
 > snapshot, which by then names the start of that same track. **A run that
 > ended**: no band; this is the one case the word *stopped* does not settle on
 > its own, and it goes the other way from a pause, because a run played to its
-> end has no *where you stopped* and `docs/REFUSALS.md` states the silence at
+> end has no *where you stopped* and the product's standing rules states the silence at
 > the end of a run as a feature. **Nothing sounded yet**: the launch snapshot,
 > which is the only state in which it is read at all.
 >
@@ -195,7 +195,7 @@
 
 **Status**: accepted and shipped, as amended above (2026-08-09) · extracts the decisions of
 [`docs/design/13-everyday-flow.md`](../design/13-everyday-flow.md) §2, §3,
-§5 and §7 · **supersedes `docs/REFUSALS.md`'s no-resident-side-surfaces
+§5 and §7 · **supersedes the product's no-resident-side-surfaces
 entry and `11-jobs-era-critique.md` P10** · **restates ADR-0022's
 one-place-at-a-time sentence** · **removes the playlist panel's strip door**
 (the panel itself stays — see the amendment) · gives ADR-0023 §6's unbuilt
@@ -212,7 +212,7 @@ The owner has asked for a home page and a left sidebar. That decision is
 his, and this record does not argue it — it designs it. The whole of the
 ceremony is the next paragraph.
 
-`docs/REFUSALS.md` said *"baz has no resident side surfaces, and no surface
+the product's standing rules said *"baz has no resident side surfaces, and no surface
 that is a slot"*, and doc 11 P10 declined to restore a persistent left
 column partly because the owner had rejected sidebars twice. What was
 rejected twice was a **slot**: a 340 px column that showed the selected
@@ -276,7 +276,7 @@ subject is how the last one died: **the queue** (its subject is playback;
 it keeps its labelled door in the bar, its ambient continuation line and
 its place); **any destination row** (`Library`, `Settings` — that is a nav
 rail, refused by doc 07 L8.4); **a sort control or filter row** (the order
-*is* the design, and a sort dropdown is the form `REFUSALS.md`'s
+*is* the design, and a sort dropdown is the form the product's
 view-options entry names); **pinning** (a second ordering to arbitrate
 against the first).
 
@@ -367,7 +367,7 @@ lane (always available, where the panel had to be open before the drag
 began); the **picker** to ADR-0031's card at the pointer. Nothing remains.
 
 `views/playlist_panel.rs`, `PANEL_W`, the `panel_open` state, the
-`Playlists` strip door and `Ctrl+P` all go, and `REFUSALS.md`'s *"one
+`Playlists` strip door and `Ctrl+P` all go, and the product's *"one
 summoned, single-tenant panel exists"* sentence goes with them. `New
 playlist` moves into the card and to the lane's foot; `Save as playlist` on
 the queue place was never the panel's and is untouched.

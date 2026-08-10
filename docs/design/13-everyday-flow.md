@@ -106,7 +106,7 @@ controls may not).
 
 ### 0.3 The reversal, recorded once
 
-`docs/REFUSALS.md` says *"baz has no resident side surfaces, and no surface
+the product's standing rules says *"baz has no resident side surfaces, and no surface
 that is a slot"*, and `11-jobs-era-critique.md` P10 declined to restore a
 persistent left column partly because the owner had rejected sidebars
 twice. **He has now asked for one, and that decision is his to make.** The
@@ -249,7 +249,7 @@ every event in it is one the person caused:
 Ties break by name ascending, so the order is **total and reproducible** —
 two launches over the same data draw the same lane. There is no score, no
 decay, no weighting and no blend: this is the anti-invisible-pool rule
-(`REFUSALS.md`) applied to an ordering rather than to a pool, and it is the
+(the product's standing rules) applied to an ordering rather than to a pool, and it is the
 difference between this lane and the surface Spotify puts in the same
 pixels (§10.1).
 
@@ -259,7 +259,7 @@ the list must arbitrate against the first, which is finding 5 arriving
 through a feature request. Named in §11 so a re-proposal meets the reason.
 
 **No sort control and no filter row.** The order *is* the design, and the
-lane is short enough to read. `REFUSALS.md`'s view-options entry stands
+lane is short enough to read. the product's view-options entry stands
 here undisturbed: the alternative is a sort dropdown, which is the one
 thing it names.
 
@@ -561,7 +561,7 @@ third:
 
 Zero jobs remain. **The panel goes** — `views/playlist_panel.rs` in full,
 `PANEL_W`, the `panel_open` state, the `Playlists` strip door, `Ctrl+P`,
-and `Playlists::peel`'s layers. `REFUSALS.md`'s *"one summoned,
+and `Playlists::peel`'s layers. the product's *"one summoned,
 single-tenant panel exists"* sentence goes with it, replaced by the lane's
 own entry in ADR-0030.
 
@@ -1520,7 +1520,7 @@ own `Recents` is the same idea.
 
 | Spotify | baz | Reason |
 |---|---|---|
-| Four sort orders + a control | One order, no control | The order *is* the design (§2.2). A sort dropdown is the one form `REFUSALS.md`'s view-options entry names, and it is the answer to a pane holding four kinds and thousands of rows — baz's holds one kind and about thirty |
+| Four sort orders + a control | One order, no control | The order *is* the design (§2.2). A sort dropdown is the one form the product's view-options entry names, and it is the answer to a pane holding four kinds and thousands of rows — baz's holds one kind and about thirty |
 | A filter field and chips | Neither | Same reason: the chips exist to separate the four kinds Spotify mixed. baz's lane mixes two kinds that are the same subject, and it is short enough to read |
 | Draggable width | Two states | A dragged width is a per-user layout — `03` §4.3's customisable-panel tradition — and it would make every width claim in §9 conditional |
 | Pinning | Not at v1 | A pinned set is a second ordering to arbitrate against the first (§11) |

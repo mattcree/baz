@@ -21,7 +21,7 @@ current playlist. or play now… or just view details"*
 > options over a veil that gathers at the sleeve's left edge and dissolves
 > before the right one; `Play` sounds the record in one press. The
 > measurements in §2 are not wrong and are not withdrawn — they are about a
-> card floating beside a tile, which is not what shipped. `docs/REFUSALS.md`
+> card floating beside a tile, which is not what shipped. the product's standing rules
 > carries the rewritten entries and
 > `docs/design/impl/hover-options/` carries the render evidence. This ADR is
 > left otherwise unedited: it is a record of what was decided when, not a
@@ -174,7 +174,7 @@ permanently.
 **Cost if taken**: one arm in `Message::AlbumClicked`
 (`app.rs:1054–1061`), one accelerator string, and a sibling for
 `shift_click_queues_the_record_and_nothing_sounds_unasked`
-(`app.rs:5460`). `docs/REFUSALS.md`'s two-press entry would be **narrowed,
+(`app.rs:5460`). the product's two-press entry would be **narrowed,
 not deleted**: no timing gesture, no keyboard-only route and no mark on a
 sleeve buys the press; what falls is the enumeration's implicit claim to be
 complete.

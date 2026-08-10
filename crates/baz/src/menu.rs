@@ -2,7 +2,7 @@
 //! is** (`docs/design/09-implicit-playlists.md` §5.2).
 //!
 //! baz had no menus of any kind before this module, and the visible-control
-//! rule (`docs/REFUSALS.md`) would forbid one that *added* actions: a
+//! rule (a standing rule of the product) would forbid one that *added* actions: a
 //! right-click is a gesture, and no action's only route may be a gesture. So
 //! the menu gets the keyboard's own governing rule before it gets a single
 //! item — L8.7's clause, *the keyboard is the same decision, made twice*,

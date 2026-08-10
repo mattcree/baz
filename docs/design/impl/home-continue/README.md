@@ -78,7 +78,7 @@ image.
 **The run ending.** There is a third state in which there is no band — the run
 is *over* rather than something sounding — and it goes the other way from a
 pause: a run played to its end has no *where you stopped*, and
-[`docs/REFUSALS.md`](../../../REFUSALS.md) states the silence at the end of a
+[the product's standing rules](../../../the product's standing rules) states the silence at the end of a
 run as a feature. Filming it needs a queue played to its end, and the fixture's
 shortest track is 97 s. It is covered by tests on both sides:
 `a_run_that_finished_is_not_a_run_to_carry_on_with` (the band) and

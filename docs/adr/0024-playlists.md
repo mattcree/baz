@@ -77,7 +77,7 @@ extracts the decisions of
 [`docs/design/08-playback-and-playlists.md`](../design/08-playback-and-playlists.md)
 §4–§6 · changes no engine command — playing a playlist is `SetQueue` ·
 introduces `baz_core::playlist` and `Place::Playlist` · **amends two
-`docs/REFUSALS.md` entries under the ledger's own editing rule** (§5, §6) ·
+the product's standing rules entries under the ledger's own editing rule** (§5, §6) ·
 sibling of [ADR-0023](0023-playback-model.md) · the owner's brief: *"we need a
 way to see playlists, and possibly a section. it should be really easy to
 drag a song into a playlist"* — and *"we need to model playlists honestly"*
@@ -196,7 +196,7 @@ playlists: **counted and surfaced, never silently pruned.**
 
 ### 5. The panel, and the refusal it amends
 
-`docs/REFUSALS.md` — *"baz has no side surfaces"* — is amended, not deleted,
+the product's standing rules — *"baz has no side surfaces"* — is amended, not deleted,
 under the ledger's editing rule, and this ADR is the required argument. The
 rail died of five findings: three unrelated tenants, a paragraph of
 dismissal, the wrong tenant paying resident width, a gesture-breaking reflow,

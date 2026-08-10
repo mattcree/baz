@@ -3097,7 +3097,7 @@ impl App {
     /// any control that opens its page), the one-press accelerator over the
     /// picker's **Queue** row (ADR-0023 §3's stack; doc 09 §13 step 7).
     ///
-    /// The visible-control rule (`docs/REFUSALS.md`: no action's only route
+    /// The visible-control rule (a standing rule of the product: no action's only route
     /// is a gesture) is satisfied by the picker's Queue row: `Add to playlist…` on
     /// the record's page → the picker's first row sends the identical
     /// append, on screen, in two presses — this gesture is an accelerator
@@ -3281,7 +3281,7 @@ impl App {
     /// chronological order, and "everything in the library" is the empty
     /// query, one <kbd>Esc</kbd> away. Playing what you cannot see is
     /// refused for the reason shuffle's invisible pool is
-    /// (`docs/REFUSALS.md`) — which is why this reads `visible` and nothing
+    /// (a standing rule of the product) — which is why this reads `visible` and nothing
     /// wider, and why an empty wall means nothing happens and nothing is
     /// claimed (shuffle's own empty-pool rule). No confirmation stands
     /// between the press and the sound at any scale: the queue place is
@@ -4293,7 +4293,7 @@ pub(crate) struct Shelf {
 ///
 /// Deliberately two fields and no third. There is no "pending play", no timer,
 /// no accepted flag — because *nothing plays until the listener asks*
-/// (`docs/design/critique/02-surfaces.md`, and `docs/REFUSALS.md`'s *shuffle is
+/// (`docs/design/critique/02-surfaces.md`, and the product's *shuffle is
 /// a thing you start*). The pull selects a record and prints one line about it;
 /// accepting it is pressing the inspector's own **Play album**, which is the
 /// same control, sending the same commands, as it is for a record you found
@@ -6457,7 +6457,7 @@ mod tests {
             assert!(
                 !pull.contains(forbidden),
                 "the pull reached for `{forbidden}` — nothing plays until the \
-                 listener asks (docs/REFUSALS.md)"
+                 listener asks (docs/the product's standing rules)"
             );
         }
         // …and it does the two things it is for.

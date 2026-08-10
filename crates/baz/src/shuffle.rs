@@ -8,7 +8,7 @@
 //!
 //! # The pool is the wall
 //!
-//! `docs/REFUSALS.md`: **no invisible shuffle pools.** *"Shuffle draws only from
+//! the product's standing rules: **no invisible shuffle pools.** *"Shuffle draws only from
 //! what the wall currently shows — a shelf, the filter's matches, everything —
 //! and the pool is visible… A shuffle whose source you cannot see is a
 //! recommendation engine wearing a dice icon."*
@@ -237,7 +237,7 @@ pub(crate) fn last_played(album: &AlbumVm, history: Option<&History>, now: Syste
 /// The line the pull prints: *"Last played 3 years ago"*, or *"Never played"*.
 ///
 /// The ledger has the date, so this is a reading rather than a claim
-/// (`docs/REFUSALS.md`: history records, it never performs). It is the only
+/// (a standing rule of the product: history records, it never performs). It is the only
 /// number the pull shows — no score, no weight, no percentage. A weight is an
 /// implementation detail of a draw, and printing it would turn a suggestion into
 /// a ranking.

@@ -279,7 +279,7 @@ const INK_WASH_PRESS_A: f32 = 0.10;
 /// Opacity of [`Palette::lamp_wash`]: the accent at **10 %**.
 ///
 /// The only accent-coloured ground in baz, and it is a wash rather than a fill
-/// — `docs/REFUSALS.md`: *the accent is never an opaque fill*. At 10 % over the
+/// — the product's standing rules: *the accent is never an opaque fill*. At 10 % over the
 /// plinth it composites to a warmth rather than to a colour, so `Play album`
 /// warms under the pointer without becoming the brightest object in a room
 /// whose brightest object is supposed to be a record sleeve.
@@ -1529,7 +1529,7 @@ pub const ALBUM_GAP: f32 = GAP_XS * 2.0;
 /// The narrowest a segment may be drawn.
 ///
 /// Every entry in the queue is a control — clicking it jumps there — and the
-/// visible-control rule (`docs/REFUSALS.md`) does not have a "unless the track
+/// visible-control rule (a standing rule of the product) does not have a "unless the track
 /// is short" clause. So a segment's width is a floor plus a proportional share,
 /// never a bare proportion: a 40-second interlude between two 12-minute sides
 /// stays clickable, and an entry whose length the scan never read gets the
@@ -1779,7 +1779,7 @@ pub const NOW_PLAYING_H: f32 = LINE_BODY + LINE_META + CONTINUATION_H;
 /// [`NOW_PLAYING_H`] 56 between them are all unchanged, and 52 is the largest
 /// square on the 4 px lattice that sits inside the 56 with air left over. No
 /// proportion of the bar is re-derived and no slot is removed
-/// (`docs/REFUSALS.md`'s ratchet: *a slot may be added, none removed*).
+/// (the bar's ratchet: *a slot may be added, none removed*).
 ///
 /// It joins the now-playing block's **existing** hit target rather than
 /// standing beside it — the block is already the labelled control that takes
@@ -2115,7 +2115,7 @@ pub fn list_scrollbar() -> scrollable::Scrollbar {
 ///
 /// *The owner's decision, 2026-08-09* — *"can we allow there to be a scroll
 /// bar for any view? Just a very minimal scroll bar because otherwise, it's
-/// hard to just jump to the end"*. `docs/REFUSALS.md`'s *two vertical strips
+/// hard to just jump to the end"*. the product's *two vertical strips
 /// may not do one job* entry is rewritten to record it. Every **other** list
 /// in baz already had one ([`list_scrollbar`]); the wall was the only surface
 /// without, so "any view" is this view.
@@ -2593,7 +2593,7 @@ pub fn word_button(p: &Palette, on: Color, status: button::Status) -> button::St
 /// **A group key**: one of the five words the wall is arranged by — ARTIST ·
 /// YEAR · GENRE · ADDED · PLAYED (ADR-0017 §1.3, ADR-0019).
 ///
-/// `docs/REFUSALS.md` refuses view-options menus outright: *no grid-size
+/// the product's standing rules refuses view-options menus outright: *no grid-size
 /// picker, no list-mode toggle, no column chooser, no sort dropdown. Group
 /// keys are a row of words.* So there is no menu, no dropdown, no segmented
 /// control and — the part that is easy to get wrong — **no chip and no border
@@ -2613,7 +2613,7 @@ pub fn word_button(p: &Palette, on: Color, status: button::Status) -> button::St
 /// is lit. The ink step is `#E8E4DB` against `#888680`, which is 2.6 × the
 /// luminance; the weight step is a real drawn face rather than a synthesised
 /// one. Neither is colour, so *no state is signalled by colour alone* holds
-/// (`docs/REFUSALS.md`).
+/// (a standing rule of the product).
 ///
 /// Hover and press are [`word_button`]'s wash, because a key *is* a word that
 /// is a control; what this adds over `word_button` is the resting distinction
@@ -3519,10 +3519,10 @@ pub const PLACEHOLDER_MIX: f32 = 0.62;
 /// image opacity, rather than by putting anything over it. That distinction is
 /// the whole of why this mark is permitted at all:
 ///
-/// - `docs/REFUSALS.md`, *nothing is ever drawn on top of a sleeve* — nothing
+/// - the product's standing rules, *nothing is ever drawn on top of a sleeve* — nothing
 ///   is. The image is composited against the wall at 35 %; there is no scrim,
 ///   no tint, no veil widget, and the wall behind it is the wall.
-/// - `docs/REFUSALS.md`, *no scrim, ever* — that refusal is about *"dimming ten
+/// - the product's standing rules, *no scrim, ever* — that refusal is about *"dimming ten
 ///   thousand covers to show twelve rows"*, a layer over the collection to
 ///   privilege a panel. This is the opposite operation: it dims the records the
 ///   running shuffle **cannot play**, and it exists so the pool is legible
@@ -3555,7 +3555,7 @@ pub const POOL_DIM: f32 = 0.35;
 ///
 /// # Why this is not a border on artwork
 ///
-/// `docs/REFUSALS.md` refuses borders on artwork, and refuses them specifically
+/// the product's standing rules refuses borders on artwork, and refuses them specifically
 /// *"as the remedy for a sleeve that melts into its room"*. It also — in the
 /// same document, adopted from the same critique — requires that *"the next
 /// draws carry faint rings"*, and ADR-0017 §4 names dimming **and** rings as the
@@ -3795,7 +3795,7 @@ pub fn veil_row(p: &Palette, status: button::Status) -> button::Style {
 /// act, and it transfers to nothing else.
 ///
 /// **`Queue` is paper, and that is a departure from the approved mockup.** The
-/// mockup gives `Queue` the accent too. `docs/REFUSALS.md`'s amber entry names
+/// mockup gives `Queue` the accent too. the product's amber entry names
 /// this exact case in these exact words — the lamp states what is true about
 /// playback right now and *"not what is queued"* — and it is an entry the
 /// owner's brief did not touch. The brief's own licence (*"if it reads too
@@ -3810,7 +3810,7 @@ pub const fn veil_option_ink(p: &Palette, plays: bool) -> Color {
 /// dead rail's column and the queue popover stood (ADR-0024 §5 revives their
 /// verified float without their residency).
 ///
-/// No shadow — `docs/REFUSALS.md` reserves shadows for the playing halo — so
+/// No shadow — the product's standing rules reserves shadows for the playing halo — so
 /// what separates the panel from the wall it floats over is the surface step
 /// plus the 1 px hairline the view draws down its left edge, which is the
 /// same two-part seam the bottom bar uses.
@@ -3899,7 +3899,7 @@ pub const MENU_W: f32 = 232.0;
 
 /// The context menu's card (doc 09 §5.2): the panel's exact separation
 /// strategy at float scale — the surface step ([`Palette::plinth`]) plus a
-/// 1 px hairline, **no shadow** (`docs/REFUSALS.md` reserves shadows for
+/// 1 px hairline, **no shadow** (a standing rule of the product: reserves shadows for
 /// the playing halo, the same clause [`panel`] cites), and the float
 /// family's [`RADIUS_CHIP`] corner shared with [`tooltip`] and
 /// [`preview_tip`]. The items inside are ordinary [`track_row`] word
@@ -4026,7 +4026,7 @@ mod tests {
         // transition could have been tempted onto. Its thickness, its aiming
         // band and both its gaps are literals; its *segments* move only when
         // the queue changes, and its fill only when playback does. Neither is
-        // a tween (`docs/REFUSALS.md`: "the needle advancing with playback
+        // a tween (a standing rule of the product: "the needle advancing with playback
         // (data arriving) and scrolling" were never animation).
         const { assert!(NEEDLE_H == 2.0) }
         const { assert!(NEEDLE_HIT == GAP_MD) }
@@ -5301,7 +5301,7 @@ mod tests {
         const { assert!(SELECTION_EDGE >= 2.0) }
     }
 
-    /// **The accent is never an opaque fill.** `docs/REFUSALS.md`, and the one
+    /// **The accent is never an opaque fill.** the product's standing rules, and the one
     /// control that used to break it.
     ///
     /// `Play album` was a solid lamp rectangle — argued as an exception by the
@@ -6215,7 +6215,7 @@ mod tests {
     /// takes the accent because it is the control that creates playback truth.
     /// It is also the assertion that records the departure from the approved
     /// mockup — `Queue` was drawn in amber there and is paper here, under
-    /// `docs/REFUSALS.md`'s *not what is queued*.
+    /// the product's *not what is queued*.
     #[test]
     fn the_walls_play_option_is_the_only_glyph_that_wears_the_lamp() {
         for room in Room::ALL {
@@ -7003,7 +7003,7 @@ mod tests {
         // the product to be beaten by.
         const { assert!(SIZE_HERO >= SIZE_TITLE && SIZE_HERO >= SIZE_EMPHASIS) }
         // The sleeve is the source's own size and no larger, which is the one
-        // bound the page's work has (`docs/REFUSALS.md`: no artwork is ever
+        // bound the page's work has (a standing rule of the product: no artwork is ever
         // drawn larger than its source).
         const { assert!(ALBUM_SLEEVE == ART_MAX) }
         // The wall's inversion is deliberate and is declared as such: one sleeve

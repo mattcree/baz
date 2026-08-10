@@ -60,7 +60,7 @@ itself stays (ADR-0017 §1.2). Settings — the gear, icon-only (§2).
 `Play all` — glyph + word, `Play album`'s shipped anatomy without the
 accent. `Shuffle` — **word**, with the sharpened reason recorded: the
 crossed-arrows convention is a mode toggle with a lit state, and baz's
-shuffle is a bounded draw that ends in silence (`REFUSALS.md:19–34`);
+shuffle is a bounded draw that ends in silence (the product's standing rule);
 wearing the mode's symbol would claim a mode the product refuses.
 `Pull`, the group keys, every door (`Queue`, `Playlists`, `‹ Library`,
 `Back`), the page word-acts, and every readout — words or bare type,
@@ -130,7 +130,7 @@ assertion takes the const-arithmetic shape the bar already uses
 
 ### 5. What is deliberately unchanged
 
-The now-playing bar, in full (the ratchet, `REFUSALS.md:87–92`, and the
+The now-playing bar, in full (the ratchet, the product's standing rule, and the
 form rule passing it as shipped); every door that is a word; the group
 keys; every gesture, message, key binding and context menu; the accent
 discipline (no new glyph touches the lamp); the panel, the pages, and
@@ -170,8 +170,8 @@ overflow / hamburger menu (no overflow exists to sweep into, doc 07
 §0.1, and a menu holding acts breaks doc 09 §5.2's mirror rule); a
 customize-the-toolbar preference (`03` §4.3's tradition, and a hidden
 control violates the visible-control rule for whoever hid it); hiding
-controls behind hover (refused, `REFUSALS.md:147–149`); a group-key
-dropdown (refused by name, `REFUSALS.md:70–72`); crossed-arrows for
+controls behind hover (refused, the product's standing rule); a group-key
+dropdown (refused by name, the product's standing rule); crossed-arrows for
 `Shuffle` and a die for `Pull` (§1's semantics clause; the
 recommendation costume); icons for the `Queue`/`Playlists` doors (§2);
 icon + word everywhere (a hedge, not a statement); an icon font or SVG

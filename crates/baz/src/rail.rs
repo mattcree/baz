@@ -61,7 +61,7 @@ pub struct RailEntry {
     /// Which shelf clicking jumps to, or `None` for a value the collection has
     /// nothing under. An absent value is **drawn and inert**: it states a gap,
     /// and a control that did nothing when pressed would be the lie
-    /// `docs/REFUSALS.md` guards against from the other direction.
+    /// the product's standing rules guards against from the other direction.
     pub shelf: Option<usize>,
 }
 

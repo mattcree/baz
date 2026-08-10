@@ -9,7 +9,7 @@
 > two ship, two deferred — §1.5); and contrast (**WCAG floors stay** and govern
 > ink-on-surface, the ≥ 0.03 oklch-L step law is adopted alongside them and
 > governs surface-on-surface — §1.6). The refusals ledger is adopted and lives
-> in [`docs/REFUSALS.md`](../../REFUSALS.md). Everything else here — the rooms,
+> in [the product's standing rules](../../the product's standing rules). Everything else here — the rooms,
 > the history ledger, group keys, the index rail, the stack, shuffle-what-you-
 > see, the pull, lenses, the friction budget — is adopted as written.
 

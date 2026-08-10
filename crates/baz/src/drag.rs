@@ -9,7 +9,7 @@
 //! accelerator layer *over* them, precisely as ADR-0024 §6 designed it and
 //! for the reason the era kept the menu command beside every drag. That is
 //! also the accessibility honesty this widget owes the visible-control rule
-//! (`docs/REFUSALS.md`): a drag is a gesture, pointer-only by nature, and no
+//! (a standing rule of the product): a drag is a gesture, pointer-only by nature, and no
 //! action here is gesture-only — every reorder the drag can make, a stepper
 //! can make; every add it can make, the `+` and the picker can make. The
 //! visible controls are the route; this is the shortcut for the hand that

@@ -440,7 +440,7 @@ next commit.
 - **Sound from the wall is one press.** Hovering a record on the wall reveals
   four options laid over its sleeve — `Play`, `Queue`, `Add to…`, `Open` — and
   `Play` sounds the record without opening its page. The owner's approved
-  design, and the reversal of `docs/REFUSALS.md`'s *sound from the wall is two
+  design, and the reversal of the product's *sound from the wall is two
   presses* and *nothing is ever drawn on top of a sleeve*, and of ADR-0032 §2's
   *no hover-revealed verb group*; all three are rewritten to record what was
   decided. The `Ctrl`-click accelerator ADR-0032 §4 left open for the owner is
@@ -489,7 +489,7 @@ next commit.
 - **The wall has a scrollbar** — 4 px, no trough, the room's own hairline, and
   it reserves its own lane inside the scrollable so no cover is ever drawn
   under it. The owner's decision (*"just a very minimal scroll bar because
-  otherwise, it's hard to just jump to the end"*); `docs/REFUSALS.md`'s *two
+  otherwise, it's hard to just jump to the end"*); the product's *two
   vertical strips may not do one job* entry is rewritten to record it. The wall
   was the only scrolling surface in baz without one — every list already had
   `list_scrollbar` — and the rail is untouched: it still says where you are and
@@ -544,7 +544,7 @@ next commit.
   inspectable and editable in the popover, which now names each record where it
   begins rather than printing forty titles under one album's name. It **ends**,
   in silence, because a shuffle that refilled itself would be the radio
-  `docs/REFUSALS.md` rules out. There is no shuffle *mode*, nothing to turn off,
+  the product's standing rules rules out. There is no shuffle *mode*, nothing to turn off,
   and no "vibe shuffle": a mood is a group key or a query, so a future `MOOD`
   key needs no new code here and no new control.
 - **The pull** (ADR-0017 step 19) — `Ctrl+R`, or the word in the top bar. One

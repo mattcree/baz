@@ -158,7 +158,7 @@ ambient reading of the tail.
 
 ### 5. The end is silence, re-tested and reaffirmed
 
-`REFUSALS.md`'s entry stands: the queue empties and there is silence. The
+the product's entry stands: the queue empties and there is silence. The
 strongest counter-evidence — Longplay 1.0 shipped a dead stop and reversed it
 within one major version — does not bind, because Longplay had no way to ask
 for more *before* the silence and baz now has three: `Queue album` standing

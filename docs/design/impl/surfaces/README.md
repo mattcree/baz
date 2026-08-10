@@ -93,7 +93,7 @@ before   8 973 px of 9 344   (a slab)
 after        50 px of 9 344   (a 1 px outline)
 ```
 
-`docs/REFUSALS.md`: *amber is never an opaque fill — a ≤ 6 px mark, a 4 px rail,
+the product's standing rules: *amber is never an opaque fill — a ≤ 6 px mark, a 4 px rail,
 a 1 px line, or light.*
 
 ### D6 — the wall's scrollbar was iced's, not baz's

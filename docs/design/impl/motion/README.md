@@ -269,5 +269,5 @@ so lighting it moves the title under it by nothing.
 
 No shelf-grid stagger and no pop-in; no fade as a thumbnail decodes (a thumbnail
 replacing its placeholder is still an instant swap); no album-art crossfade; and
-no animation of the bar's geometry. `docs/REFUSALS.md` carries the list, and
+no animation of the bar's geometry. the product's standing rules carries the list, and
 ADR-0020 §3 is what put it there.

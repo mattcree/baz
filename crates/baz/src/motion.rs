@@ -41,7 +41,7 @@
 //! # What may move
 //!
 //! ADR-0020 §2's five, and nothing else. Still refused, and they are refusals
-//! rather than omissions (`docs/REFUSALS.md`): shelf-grid stagger or pop-in, any
+//! rather than omissions (a standing rule of the product): shelf-grid stagger or pop-in, any
 //! fade as a thumbnail decodes, album-art crossfades, **the bar's geometry**,
 //! and anything at all that needs a redraw while the window is idle. Motion
 //! states what changed; it never decorates, and it never moves the transport.

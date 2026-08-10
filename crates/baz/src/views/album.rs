@@ -334,7 +334,7 @@ fn main_column<'a>(
 /// read as a fault. The second is the ledger's own reading
 /// ([`crate::shuffle::pull_note`]): a date band, never a score, never a reason,
 /// never a "because you liked". History records; it never performs
-/// (`docs/REFUSALS.md`).
+/// (a standing rule of the product).
 ///
 /// There is no button here. The control that accepts the suggestion is the
 /// page's own `Play album`, in the place it always sits — so accepting the pull

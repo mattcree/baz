@@ -2,7 +2,7 @@
 //!
 //! ADR-0030 §3.2 recommended a home *band* at the head of the Library's body
 //! and drew this page in §9.4 as the alternative it was being recommended
-//! against. **The owner chose the page**, and `docs/REFUSALS.md`'s preamble
+//! against. **The owner chose the page**, and the product's preamble
 //! says his decision is sufficient on its own; the ADR carries the amendment.
 //!
 //! # Two sections, and an honest inventory behind them
@@ -194,7 +194,7 @@ pub(crate) fn view<'a>(
 ///    *ended*. **No band.** This is the one case the word "stopped" does not
 ///    settle on its own, and it goes the other way from a pause: a run you
 ///    played to the end has no "where you stopped", the needle would sit at a
-///    finish, and `docs/REFUSALS.md` is emphatic that the queue empties and
+///    finish, and the product's standing rules is emphatic that the queue empties and
 ///    the silence at the end of a run is a feature. An offer to carry on with
 ///    something you completed is the interface remembering something that is
 ///    over.
@@ -355,7 +355,7 @@ fn continue_band<'a>(
 ///
 /// It is drawn on the *placard*, at the sleeve's measure — not on the artwork.
 /// That is the design's signature and it is a rule rather than a preference:
-/// `docs/REFUSALS.md` forbids drawing on a work, and every product baz is
+/// the product's standing rules forbids drawing on a work, and every product baz is
 /// measured against puts this line across the bottom of the cover.
 ///
 /// The amber is licensed: this is playback truth, which is the accent's one
@@ -669,7 +669,7 @@ mod tests {
     ///
     /// The one case the word *stopped* does not settle on its own, and it goes
     /// the other way from a pause. A run played to its end has no "where you
-    /// stopped"; `docs/REFUSALS.md` calls the silence at the end of a run a
+    /// stopped"; the product's standing rules calls the silence at the end of a run a
     /// feature, and an offer to carry on with something you completed is the
     /// interface remembering something that is over. The snapshot is *not*
     /// fallen back on here — that is what [`PlayerState::has_sounded`] is for,

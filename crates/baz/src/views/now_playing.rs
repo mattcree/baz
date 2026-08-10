@@ -107,7 +107,7 @@ pub(crate) fn view<'a>(
         }
         // **Nothing is sounding**, said once and plainly. Not an error, not an
         // empty frame with a grey square in it: silence is a feature
-        // (`docs/REFUSALS.md`), and a place whose subject is absent says so.
+        // (a standing rule of the product), and a place whose subject is absent says so.
         return container(
             text("Nothing playing.")
                 .size(theme::SIZE_EMPHASIS)

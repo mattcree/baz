@@ -229,7 +229,7 @@ where
             // geometry is what makes it exact**: the entry that finished is
             // filled to its own end and the next begins at its own start, so
             // nothing has to travel between them (ADR-0020 forbids animating
-            // this, and `docs/REFUSALS.md` records that the needle advancing
+            // this, and the product's standing rules records that the needle advancing
             // with playback was never animation in the first place).
             let filled_to = match self.bar.playing {
                 Some(playing) if index < playing => span.end(),

@@ -1503,7 +1503,7 @@ mod tests {
     }
 
     /// **No artwork is ever drawn larger than its source** — the refusal, as
-    /// an equation (`docs/REFUSALS.md`, `.interface-design/system.md` §1.2) —
+    /// an equation (the product's standing rule, `.interface-design/system.md` §1.2) —
     /// **at every density**.
     ///
     /// `.interface-design/system.md` §7.1: *`ART_MAX` never exceeds `THUMB_PX`

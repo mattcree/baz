@@ -46,15 +46,15 @@ This study does not get to invent freely. Eight composition laws
 (`.interface-design/system.md` §13, plus doc 07's L8), the refusals ledger,
 and three shipped postures bound every answer:
 
-- **The visible-control rule** (`docs/REFUSALS.md:147–149`): every action
+- **The visible-control rule** (`docs/the product's standing rules:147–149`): every action
   has a visible, pointer-reachable control; nothing is keyboard-only; no
   control's only affordance is hover. Hiding controls behind hover is not
   on the table — it is refused, not merely rejected here.
-- **No view-options menus** (`REFUSALS.md:70–72`) and doc 07 §0.1's
+- **No view-options menus** (the product's standing rule) and doc 07 §0.1's
   corollary: *there is no overflow menu to sweep a control into, so every
   control must have a real home.* A hamburger, a "⋯", or a toolbar
   preferences panel cannot be this document's answer to crowding.
-- **The bar's ratchet** (`REFUSALS.md:87–92`): a slot may be added to the
+- **The bar's ratchet** (the product's standing rule): a slot may be added to the
   now-playing bar; none may be removed for tidiness. The bottom bar is
   therefore examined and — this is a finding, not an omission — left
   alone (§4.4).
@@ -294,7 +294,7 @@ Every current tenant, re-examined against it:
 | Tenant | Verdict | Why |
 |---|---|---|
 | Search well | **confirmed**, narrowed 360 → 200–280 fluid (§4.1) | Reads the collection; band B. Its *width* was sized in the era when you aimed at it; under type-anywhere (ADR-0017 §1.2) you reach it by typing, and 280 px holds a 40-character query |
-| Group keys ×5 | **confirmed** as words | States, not acts; the words are the data (arrangement names); a compressed or iconic form would be the view-options dropdown's ghost, refused by name (`REFUSALS.md:70–72`, `top_bar.rs:326–332`) |
+| Group keys ×5 | **confirmed** as words | States, not acts; the words are the data (arrangement names); a compressed or iconic form would be the view-options dropdown's ghost, refused by name (the product's standing rule, `top_bar.rs:326–332`) |
 | `Play all` | **confirmed**, gains the play triangle (§3.5) | The strip's one press that makes sound from rest; the glyph+word anatomy is `Play album`'s own, not a new pattern |
 | `Shuffle`, `Pull` | **confirmed** as words | §3.5's rule: the shuffle convention's symbol promises a mode baz refuses to have; the pull has no convention at all |
 | `Playlists` door | **confirmed** as a word | L8.4; no universal symbol distinguishes *playlists* from *queue* from *menu* — three list-shaped glyphs in one product would be the ambiguity the law exists to prevent |
@@ -348,7 +348,7 @@ know they need to learn it.
 | Add-to `+` | universal | exact — "put this somewhere" | **icon-only** — shipped as a font character; promoted to a drawn glyph (§3.6) |
 | Reorder ▲▼ | universal directional | exact | **icon-only** — promoted to drawn glyphs (§3.6) |
 | `Play all` | the triangle: universal for "press = sound now" | exact for the act, but the *scope* (the wall, as arranged) is baz's own | **icon + word** — the triangle says a press sounds; the words say what (§3.5) |
-| `Shuffle` | crossed arrows: universal — **as a mode toggle** with a lit state | **no** — baz's shuffle is a bounded draw of 8 from a visible pool, an act that ends (`REFUSALS.md:27–34`); wearing the mode glyph claims a mode the product refuses | **word-only**, reaffirming `top_bar.rs:163–169` with the sharper reason |
+| `Shuffle` | crossed arrows: universal — **as a mode toggle** with a lit state | **no** — baz's shuffle is a bounded draw of 8 from a visible pool, an act that ends (the product's standing rule); wearing the mode glyph claims a mode the product refuses | **word-only**, reaffirming `top_bar.rs:163–169` with the sharper reason |
 | `Pull` | none exists | — | **word-only** — the case the brief names: an invented icon is worse than a word |
 | Group keys | none (arrangement *names* are data) | — | **words** — caps-tracked states, unchanged |
 | `Queue` door, `Playlists` door, `‹ Library`, `Back` | no symbol distinguishes these three list-shaped destinations | — | **words** — L8.4 holds; the Sonos/Plexamp evidence (`03` §4.5, §5.2e) is about exactly this class |
@@ -407,7 +407,7 @@ argument was that a die is a recommendation engine's costume
 crossed-arrows convention is a *mode with a lit state* — press it and
 every subsequent play is shuffled until you press it again. baz's
 shuffle is an act: one press, eight records, an end, silence
-(`REFUSALS.md:19–34`). Convention's symbol over baz's semantics would
+(the product's standing rule). Convention's symbol over baz's semantics would
 be a promise the product is built to break. Rule 2 of §3.1 exists for
 exactly this case.
 
@@ -521,7 +521,7 @@ well 200–280 fluid · keys 312 · acts 182 (triangle + three words) ·
   product that is free whenever the counts have something to say. The
   fact lands where it is consulted: the corpus size, behind the glyph
   that says "search this". During a scan the placeholder ticks up, which
-  is the shelf-filling progress rule (`REFUSALS.md:84–86`) restated in
+  is the shelf-filling progress rule (the product's standing rule) restated in
   figures.
 - **The match count gets the in-well slot doc 07 §3.1 prescribed** —
   `7 / 1 284`, right-aligned, reserved width so arriving moves nothing.
@@ -601,7 +601,7 @@ by *removing* controls all reversed within two years (`03` §4.4.6, R11).
 The bar passes the form rule as shipped: its acts are the universal
 glyph family (icon-only, tooltipped), its doors are words (L8.4), its
 readouts are bare type (`02` §6.7), its geometry is reserved-slot and
-ratcheted (`REFUSALS.md:87–92`). The one candidate change — an icon for
+ratcheted (the product's standing rule). The one candidate change — an icon for
 the `Queue` door — fails §3.1(1) (no universal queue symbol distinct
 from playlist/menu) and would break the door law for nothing: the word
 plus its count *is* the readout-and-door compound the study's own R1
@@ -669,14 +669,14 @@ Recorded with the argument, so re-proposal meets a reason.
    a control that can be hidden by preference violates the
    visible-control rule for whoever hid it.
 3. **Hiding controls behind hover.** Refused outright
-   (`REFUSALS.md:147–149`); listed only because toolbars in the wild do
+   (the product's standing rule); listed only because toolbars in the wild do
    it.
 4. **A dropdown for the group keys** at narrow widths. Refused by name —
-   no view-options menus, no sort dropdown (`REFUSALS.md:70–72`); the
+   no view-options menus, no sort dropdown (the product's standing rule); the
    row of words *is* the design (`top_bar.rs:326–332`).
 5. **Crossed-arrows for `Shuffle`, a die for `Pull`.** §3.5: the first
    fails the semantics clause (mode symbol on an act), the second is the
-   recommendation engine's costume (`REFUSALS.md:27–34`,
+   recommendation engine's costume (the product's standing rule,
    `top_bar.rs:163–169`) — and `Pull` has no convention, which is the
    brief's own example of where an invented icon loses to a word.
 6. **Icons for the `Queue` and `Playlists` doors.** §3.4: no universal

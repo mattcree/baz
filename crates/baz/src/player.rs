@@ -486,7 +486,7 @@ pub struct Preview {
 /// now sits beside the wall label in the bar's left zone (ADR-0017 §1.1).
 ///
 /// The groove they were built for is gone; the *figures* are not, because
-/// `docs/REFUSALS.md` permits replacing a slot with a better statement of the
+/// the product's standing rules permits replacing a slot with a better statement of the
 /// same fact and not removing one. The needle states position and structure;
 /// these state the two numbers a needle cannot: exactly how far in, and exactly
 /// how long.
@@ -595,7 +595,7 @@ impl Span {
 /// Both are "put the needle here", which is why one gesture can mean both
 /// without anything on screen having to say which mode it is in. And it is why
 /// deleting the groove does not take pointer-reachable seeking with it, which
-/// `docs/REFUSALS.md`'s visible-control rule would have forbidden.
+/// the product's visible-control rule would have forbidden.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NeedleTarget {
     /// Move the playhead within the entry that is sounding.
@@ -1299,7 +1299,7 @@ impl PlayerState {
         // `None` there), so the fill stays where the music is instead of being
         // thrown across the window. Nothing here is a tween: the fill moves
         // because data arrived or a hand moved it, which is the distinction
-        // `docs/REFUSALS.md` draws and ADR-0020 forbids crossing.
+        // the product's standing rules draws and ADR-0020 forbids crossing.
         let shown = self
             .scrub_ms()
             .or(self.seek_pending)
@@ -1650,7 +1650,7 @@ impl PlayerState {
     ///
     /// **This slot used to read `3 / 12`.** That was a position, and the
     /// ambient line now states the same fact better — how much is left, and
-    /// what it is — which is the one move `docs/REFUSALS.md` permits on this
+    /// what it is — which is the one move the product's standing rules permits on this
     /// bar: *a slot may be added; none may be removed for tidiness*, and a slot
     /// may be replaced by a better statement of the same fact. Keeping both
     /// would have printed "9 more" beside "3 / 12", which are the same
@@ -2295,7 +2295,7 @@ impl<'a> Entry<'a> {
 /// # Silence rather than an omission
 ///
 /// The last track of the queue draws no line. Not `up next: nothing`, not `end
-/// of queue` — `docs/REFUSALS.md` makes silence a feature, and the interface
+/// of queue` — the product's standing rules makes silence a feature, and the interface
 /// announcing the silence it promised would be the announcement, not the
 /// silence.
 fn continuation(queue: &QueueVm, index: usize, elapsed_ms: u64) -> Option<String> {
@@ -5452,7 +5452,7 @@ mod tests {
 
     /// **The last track says nothing at all.**
     ///
-    /// Not `up next: nothing`, not `end of queue`. `docs/REFUSALS.md` makes the
+    /// Not `up next: nothing`, not `end of queue`. the product's standing rules makes the
     /// silence after a queue a feature; an interface that announced it would be
     /// the announcement rather than the silence. The bar reserves the lane
     /// either way, so the absence costs no movement (`views::bottom_bar`).

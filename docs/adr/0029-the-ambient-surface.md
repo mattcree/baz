@@ -17,7 +17,7 @@
 > held together. §3a is the new decision; §3 is unchanged except that its
 > instrument register now defaults to off.
 
-**Status**: proposed (2026-08-09), **amended 2026-08-09 (§3a: the spectrum analyser, promoted)** · extracts the decisions of `docs/design/12-now-playing-and-kiosk.md` · **amends [ADR-0020](0020-motion.md)** (adds §7, user-started ambient content) · **amends [ADR-0015](0015-replaygain-analysis.md) §3** (its reversal clause is triggered and re-decided) · rewrites four `docs/REFUSALS.md` entries on the owner's decision
+**Status**: proposed (2026-08-09), **amended 2026-08-09 (§3a: the spectrum analyser, promoted)** · extracts the decisions of `docs/design/12-now-playing-and-kiosk.md` · **amends [ADR-0020](0020-motion.md)** (adds §7, user-started ambient content) · **amends [ADR-0015](0015-replaygain-analysis.md) §3** (its reversal clause is triggered and re-decided) · rewrites four the product's standing rules entries on the owner's decision
 
 ## Context
 
@@ -40,7 +40,7 @@ and, on the constraint that governs all of it:
 
 > *"ambient motion is fine as long as the performance remains top tier."*
 
-**Four of this product's own entries stood in the way**, and `REFUSALS.md`'s
+**Four of this product's own entries stood in the way**, and the product's
 preamble settles the process: the ledger *"binds contributors and agents — not
 the owner… an entry he reverses gets rewritten to say what was decided and why,
 and that is the whole of the process."* So this record does not argue. It
@@ -66,7 +66,7 @@ matter because they change what the decisions are *about*:
 
 `now_playing.rs:168`'s call is deleted; nothing replaces it. The bar carries
 play/pause, previous, next, the needle and the fader in this place as in every
-other, visibly and at rest, which is all `REFUSALS.md`'s accessibility entry
+other, visibly and at rest, which is all the product's accessibility entry
 requires. This is the same reasoning that removed `‹ Library` from the place
 headers in `9a7e9a5` — **a place that repeats what a resident surface already
 carries is making one statement twice, and the copy is what goes**. It also
@@ -357,7 +357,7 @@ hole.
 
 ## Consequences
 
-- **Four `REFUSALS.md` entries are rewritten** — artwork-vs-source, the scrim,
+- **Four the product's standing rules entries are rewritten** — artwork-vs-source, the scrim,
   skeuomorphism's VU ban, and the motion clause — each in the ledger's own
   amendment form, quoting the old text and naming the constraint that replaced
   it. Doc 12 §14 carries the drafts.

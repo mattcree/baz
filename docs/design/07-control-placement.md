@@ -56,12 +56,12 @@ happens once a month can cost a click and a surface.*
 
 Three other documents bind the answer before it is written:
 
-- **[`docs/REFUSALS.md`](../REFUSALS.md), the visible-control rule.** *Every
+- **[the product's standing rules](../the product's standing rules), the visible-control rule.** *Every
   action in baz has a visible, pointer-reachable control. No action is
   keyboard-only, and no control's only affordance is hover.* This makes
   placement compulsory: an action cannot be "somewhere in the keyboard". It also
   makes deletion expensive, which is why §5 is short.
-- **[`docs/REFUSALS.md`](../REFUSALS.md), no view-options menus.** No list-mode
+- **[the product's standing rules](../the product's standing rules), no view-options menus.** No list-mode
   toggle, no column chooser, no sort dropdown, no free zoom slider (the
   grid-size clause narrowed by ADR-0028 to exactly those forms; three detents
   in the place's own body are not a menu). There is no overflow menu to sweep a
@@ -84,7 +84,7 @@ Five kinds of home exist, and only five:
 | **Another place** | Library · Album · Queue · Settings. One at a time, each filling the window | When you navigate to it |
 | *(nowhere)* | Not a control: a gesture, a key with no button, a hover reveal | Refused |
 
-`docs/REFUSALS.md` deletes the fifth. There is no sixth: no rail, no popover, no
+the product's standing rules deletes the fifth. There is no sixth: no rail, no popover, no
 panel, no menu, no dialog, no tray.
 
 ### 0.3 The vocabulary this law needs
@@ -271,7 +271,7 @@ This is the clause that answers the brief's hardest question — *where does an
 action that starts playback from the library belong?* — and it answers it
 without special-casing: **`Shuffle` and `Pull` are library controls, and they
 stay in the Library place's strip.** Their pool is what the wall shows
-(`docs/REFUSALS.md`: *no invisible shuffle pools*), so moving them away from the
+(a standing rule of the product — *no invisible shuffle pools*), so moving them away from the
 wall would separate a control from the only thing that tells it what to do.
 `views/top_bar.rs` already argues this in its own words; the law makes the
 argument general rather than local.
@@ -425,12 +425,12 @@ rationalisation of changes already wanted.
 | Inspector ✕ | inspector header | **becomes `Back`** in the Album place | Every place leaves by a labelled way out (L8.4) |
 | **`Ctrl+B`, hide the inspector** | keyboard only | **deleted** | Its subject was a sidebar that no longer exists; and it is the one binding in the product with no control at all (`app.rs`'s declared exception) |
 | Queue row | popover | **the Queue place** | An object (L8.5) |
-| Row ✕ (remove) | popover row, on hover | **the Queue place's row, drawn at rest** | An object — but hover-only affordances are refused (`docs/REFUSALS.md`); a place has the width to draw it |
+| Row ✕ (remove) | popover row, on hover | **the Queue place's row, drawn at rest** | An object — but hover-only affordances are refused (a standing rule of the product); a place has the width to draw it |
 | Popover ✕ | popover header | **becomes `Back`** in the Queue place | L8.4 |
 | `3 of 12 · 38:12 left` | popover header | **the Queue place's header** | A readout of the place you are in |
 | `Queue · N` | bar, left zone | **unchanged in position; becomes a door, losing its lit "open" state** | The place it opens fills the window; a door cannot be lit and visible at once (L8.4) |
 | Continuation lane | bar, left zone | **unchanged** | The resident *fact* that pays for the queue being a place (L8.3) |
-| Previous / Play / Next | bar centre | **unchanged** | Read the sounding queue; band A; and `docs/REFUSALS.md` ratchets the bar's slots |
+| Previous / Play / Next | bar centre | **unchanged** | Read the sounding queue; band A; and the product's standing rules ratchets the bar's slots |
 | Needle | window's bottom edge | **unchanged** | Reads the sounding queue; it is the object of position (L8.5) |
 | Elapsed / total | bar, left zone | **unchanged** | Readouts of the sounding track |
 | Volume fader / mute | bar, right | **unchanged** | Read the engine's output stage (ADR-0011) |
@@ -457,7 +457,7 @@ products that refused to let detail hide the collection. Either a strip of
 sleeves along the bottom of the Album place, or a labelled previous/next pair in
 its header. Not a gesture, and not nothing.
 
-> **Amended 2026-08-09 by the owner** (`docs/REFUSALS.md`'s preamble: his
+> **Amended 2026-08-09 by the owner** (the owner's own decision: his
 > decision is sufficient on its own, and the entry gets rewritten rather than
 > argued). The header pair shipped, and he withdrew it: *"previous and next on
 > albums doesn't make sense on the album view. we could add an Artist > album
@@ -576,7 +576,7 @@ as unprincipled as one that only adds:
 - **Previous and Next, beside a needle that can jump to any entry.** `03` R11:
   three vendors bought visual calm by removing control density inside two years
   and all three reversed, and what was lost was always position, provenance and
-  skip. `docs/REFUSALS.md` ratchets this bar.
+  skip. the product's standing rules ratchets this bar.
 - **`Play album`, beside a sleeve you can double-click.** L8.5: the gesture is
   the object, the button is the control, and the visible-control rule requires
   the second.

@@ -709,7 +709,7 @@ Both facts are the same fact.
 documents: a list of things considered and rejected *on principle*, where
 re-opening one requires beating the argument rather than merely wanting to.
 
-**It lives in [`docs/REFUSALS.md`](../REFUSALS.md)**, which ships with this ADR
+**It lives in [the product's standing rules](../the product's standing rules)**, which ships with this ADR
 — a standing document, not a section of this ADR and not an ADR of its own.
 Reasons: an ADR records one decision at one moment and is never edited; the
 ledger must be added to as the product grows.
@@ -791,7 +791,7 @@ A/B/C. Ordered so nothing is built on a foundation about to be replaced.
 |---|---|---|---|
 | **1** | **History ledger.** Append-only plain local file, one line per play, written from the first beta with zero UI. The user's to grep, back up or burn. Last.fm/ListenBrainz output later, never a dependency. | `baz-core` (new) | **Cannot be backfilled.** PLAYED, the inspector card, the pull and shuffle weighting all feed on it. *In flight in a parallel agent; assumed to land.* |
 | **2** | **The palette indirection.** `theme.rs` `pub const Color` → a `Palette` resolved at startup; Closing Time the only selectable room; Reading Room's tokens defined, not selectable. Adopt the oklch-L step assertion and the L .45–.58 dead-zone rule; extend the contrast test per §1.6 (composite the ink ramp, name the exemptions). | 2 | Every per-surface style below is written against this. Writing them against constants first means writing them twice. |
-| **3** | **The accessibility stance, published.** README section; `About → Accessibility` in the Settings place; a hit-target assertion; a tooltip audit over every icon-only control. (`docs/REFUSALS.md` ships **with this ADR** — see §6.) | docs + small view | It is the constraint every step below is checked against, so it precedes them. Cheap, and it is a commitment rather than a note. |
+| **3** | **The accessibility stance, published.** README section; `About → Accessibility` in the Settings place; a hit-target assertion; a tooltip audit over every icon-only control. (the accessibility stance ships **with this ADR** — see §6.) | docs + small view | It is the constraint every step below is checked against, so it precedes them. Cheap, and it is a commitment rather than a note. |
 | **4** | **Group keys in `baz-core`.** `Library::albums(key)` for ARTIST / YEAR / GENRE / ADDED; schema gains a genre column and a first-seen column; genre verbatim from tags. PLAYED joins at step 8. Amends ADR-0008. | `baz-core` | The shelf's headers, the index rail and the PLAYED key are all projections of this. Building the rail first would build it against one key. |
 | **5** | **The hang.** `HANG` 40, `ART_MIN` 240, `ART_TARGET` 272, `ART_MAX` 320 as functions of grid width; `floor(x + 0.5)`; `gutter == HANG` wherever art is uncapped; extend the virtualization test from two widths to the band. (`02` B3.) | 1 (`shelf.rs`) + 3 | Density, the rail's lane and the thumbnail size are all functions of it. |
 | **6** | **Density as zoom.** Three steps (Spacious / Balanced / Dense) as pure data; `Ctrl+-` / `Ctrl+=` / `Ctrl+scroll`; current step persisted in `config.rs`. **Not a Settings row** (§1.3). | 1 + 3 + config | Parameterises step 5's arithmetic; must not be added after the rail's lane is tuned. |

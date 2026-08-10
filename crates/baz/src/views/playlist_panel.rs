@@ -4,7 +4,7 @@
 //!
 //! # Why this exists when the refusals ledger buried its ancestors
 //!
-//! `docs/REFUSALS.md`'s side-surfaces entry is **amended, not deleted**, by
+//! the product's side-surfaces entry is **amended, not deleted**, by
 //! ADR-0024 under the ledger's own editing rule, and the amendment names this
 //! panel and closes the slot. The rail died of five findings; this panel has
 //! none of them by construction — one tenant forever, summoned not resident,
@@ -171,7 +171,7 @@ pub(crate) fn view<'a>(
     );
     // One hairline down the left edge is the seam between the panel and the
     // wall it floats over — the surface step does the rest; a shadow is
-    // refused (`docs/REFUSALS.md`).
+    // refused (a standing rule of the product).
     row![
         container(Space::with_width(Length::Fixed(1.0)))
             .width(Length::Fixed(1.0))

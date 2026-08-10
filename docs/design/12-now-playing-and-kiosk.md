@@ -90,7 +90,7 @@ own preamble settles what that means:
 > sufficient on its own**; an entry he reverses gets rewritten to say what was
 > decided and why, and that is the whole of the process. Nobody argues with a
 > document to change their own product."*
-> (`REFUSALS.md:6–14`)
+> (the product's standing rule)
 
 So the table below is in two halves, and the split is the honest one. Nothing
 here is an argument against him; the second half is a record of decisions, and
@@ -100,24 +100,24 @@ here is an argument against him; the second half is a record of decisions, and
 
 | Entry | Where | What it holds to on this surface |
 |---|---|---|
-| **Every action has a visible, pointer-reachable control; no control's only affordance is hover** | `REFUSALS.md:249–250` | No kiosk whose controls appear on mouse-move. This is the mitigation for a toolkit that publishes no accessibility tree, and ADR-0028 re-confirmed it outranks a quietness preference (`REFUSALS.md:88–98`). It is what makes §6's *drop the transport* legal — the bar keeps it, visibly, in this place as in every other |
-| **No state is signalled by colour alone** | `REFUSALS.md:259–261` | A meter that is only a colour change; a fact whose "new" is only a tint |
-| **Amber is never an opaque fill**, and states playback truth only | `REFUSALS.md:271–274` | The accent on anything that is not *which record, which track, where the playhead is*. §9.6 is why the meter is **not** amber |
-| **No snake oil** | `REFUSALS.md:348–350` | Any signal-path claim the path cannot demonstrate. This binds the meter hardest of all: a meter that contradicts `bit-perfect` would be exactly the unearned claim this entry exists to stop |
-| **No engagement stats. History records; it never performs** | `REFUSALS.md:68–73` | Streaks, charts, top-artists, listening-time totals. §8.4 states which side the rotating fact falls on, and why, rather than assuming it |
+| **Every action has a visible, pointer-reachable control; no control's only affordance is hover** | the product's standing rule | No kiosk whose controls appear on mouse-move. This is the mitigation for a toolkit that publishes no accessibility tree, and ADR-0028 re-confirmed it outranks a quietness preference (the product's standing rule). It is what makes §6's *drop the transport* legal — the bar keeps it, visibly, in this place as in every other |
+| **No state is signalled by colour alone** | the product's standing rule | A meter that is only a colour change; a fact whose "new" is only a tint |
+| **Amber is never an opaque fill**, and states playback truth only | the product's standing rule | The accent on anything that is not *which record, which track, where the playhead is*. §9.6 is why the meter is **not** amber |
+| **No snake oil** | the product's standing rule | Any signal-path claim the path cannot demonstrate. This binds the meter hardest of all: a meter that contradicts `bit-perfect` would be exactly the unearned claim this entry exists to stop |
+| **No engagement stats. History records; it never performs** | the product's standing rule | Streaks, charts, top-artists, listening-time totals. §8.4 states which side the rotating fact falls on, and why, rather than assuming it |
 | **No cloud dependency; internet features individually opt-in** | `README.md:22–24`, `VISION.md` pillar 3 | A screen whose feed is empty without a network. §8 is built local-first for this reason and not merely in deference to it |
-| **The bar's ratchet** | `REFUSALS.md:137–142` | Removing a bar slot for tidiness. Replacing a slot with *a better statement of the same fact* is the one permitted move — and §6 is the mirror case: the *place* drops what the bar already says |
-| **No borders on artwork**; **no shadows** except the playing halo | `REFUSALS.md:279–282` | A frame or drop-shadow to separate the cover from the field behind it. §5.4 solves that separation with light, which is the one thing permitted |
+| **The bar's ratchet** | the product's standing rule | Removing a bar slot for tidiness. Replacing a slot with *a better statement of the same fact* is the one permitted move — and §6 is the mirror case: the *place* drops what the bar already says |
+| **No borders on artwork**; **no shadows** except the playing halo | the product's standing rule | A frame or drop-shadow to separate the cover from the field behind it. §5.4 solves that separation with light, which is the one thing permitted |
 
 **Reversed by the owner, and rewritten in §14** — each of these is the entry
 this study would otherwise have had to break:
 
 | Entry as it stood | Where | What the owner decided |
 |---|---|---|
-| **No artwork is ever drawn larger than its source.** `ART_MAX == THUMB_PX`, asserted in code | `REFUSALS.md:123–124`, `art.rs:44–48` | *"the album art was somehow more prominent, like it takes up the background"*. §5 draws the true-size cover **and** a derived field behind it; §14.1 rewrites the entry around the distinction the code already needs. Note this entry is **already false on this surface today** (§0.4) |
-| **No scrim, ever** | `REFUSALS.md:126–132` | The field is not a scrim — §5.3 makes the argument the ledger's own hover-veil amendment already made once (`REFUSALS.md:113–121`), and §14.2 records it |
-| **Skeuomorphism: banned — vinyl discs, wood grain, tonearms, VU meters, wear, patina** | `REFUSALS.md:330–335` | *"some nice VU meter stuff over it in a stylised way"*. §9 distinguishes the **instrument** (banned surface: beige panel, glass face, swinging needle) from the **measurement** (permitted data), which is the entry's own *"physics, structure and vocabulary… never surface"* applied rather than overridden. §14.3 |
-| **No motion that costs anything when nothing is moving**; *anything requiring a redraw while the window is idle* | `REFUSALS.md:284–320`, ADR-0020 | *"ambient motion is fine as long as the performance remains top tier"*. ADR-0020 **gains a sixth class** rather than losing its rule: user-started ambient content, on a surface whose whole purpose is to be looked at. §7, and §14.4 |
+| **No artwork is ever drawn larger than its source.** `ART_MAX == THUMB_PX`, asserted in code | the product's standing rule, `art.rs:44–48` | *"the album art was somehow more prominent, like it takes up the background"*. §5 draws the true-size cover **and** a derived field behind it; §14.1 rewrites the entry around the distinction the code already needs. Note this entry is **already false on this surface today** (§0.4) |
+| **No scrim, ever** | the product's standing rule | The field is not a scrim — §5.3 makes the argument the ledger's own hover-veil amendment already made once (the product's standing rule), and §14.2 records it |
+| **Skeuomorphism: banned — vinyl discs, wood grain, tonearms, VU meters, wear, patina** | the product's standing rule | *"some nice VU meter stuff over it in a stylised way"*. §9 distinguishes the **instrument** (banned surface: beige panel, glass face, swinging needle) from the **measurement** (permitted data), which is the entry's own *"physics, structure and vocabulary… never surface"* applied rather than overridden. §14.3 |
+| **No motion that costs anything when nothing is moving**; *anything requiring a redraw while the window is idle* | the product's standing rule, ADR-0020 | *"ambient motion is fine as long as the performance remains top tier"*. ADR-0020 **gains a sixth class** rather than losing its rule: user-started ambient content, on a surface whose whole purpose is to be looked at. §7, and §14.4 |
 
 Two further postures, not refusals but settled, and both survive intact:
 
@@ -362,7 +362,7 @@ with a `dead_code` annotation on it.
 **ADR-0022 created the vacancy.** The refusals ledger permits the history
 ledger exactly three surfaces, and one of them is *"the inspector card
 ('PLAYED — N times since YYYY', plus a column of date stamps)"*
-(`REFUSALS.md:58–60`). ADR-0022 deleted the inspector. The permission
+(the product's standing rule). ADR-0022 deleted the inspector. The permission
 survived its surface; the fact has had nowhere to stand since.
 
 So the surface is not being invented to satisfy a brief. **It is the room
@@ -464,7 +464,7 @@ is the whole of §5's decision:
 matches what this product already believes.** The ledger already says colour
 read from a record is data: *"the art-derived lamp is **data** — hue read from
 the record, lightness and chroma pinned — not a preference"*
-(`REFUSALS.md:267–269`). A field built from the cover's own palette is that
+(the product's standing rule). A field built from the cover's own palette is that
 sentence at a larger size. §5.3 makes the argument in full, because it is the
 one this study must make explicitly rather than assume.
 
@@ -523,14 +523,14 @@ authority:
 
 > *"ADR-0030 recommended a home **band** at the head of the Library's body and
 > recorded `Place::Home` under 'deliberately not done'. **The owner overruled
-> both**, and `docs/REFUSALS.md`'s preamble says his decision is sufficient on
+> both**, and the product's preamble says his decision is sufficient on
 > its own: home is a real place, and a `Now playing` place stands beside it."*
 
 Three things that decision settles, so this study does not re-open them:
 
 - **The route in is the lane, not a bar door.** The head's three destinations —
   Home, Library, Now playing — are *"a closed set of three"* and *"a fourth is
-  the refused thing"* (`REFUSALS.md:200–202`). The `Now playing` row carries the
+  the refused thing"* (the product's standing rule). The `Now playing` row carries the
   amber lamp when something sounds. **The bar gains no slot**, and the first
   draft of this document's proposal to add one is withdrawn: the ratchet permits
   it, but the lane already delivers it and a second route would be the
@@ -560,7 +560,7 @@ symbol whose convention promises one scope while acting on another:
 
 So the place's top-right carries **two** controls and no more: one glyph
 (expand, tooltipped per the icon-only law) and one word (`Ambient`). Both are
-visible at rest and pointer-reachable, which `REFUSALS.md:249–250` requires; the
+visible at rest and pointer-reachable, which the product's standing rule requires; the
 alternative — revealing them on mouse-move, as most kiosks do — is refused
 outright, and ADR-0028 re-confirmed that entry outranks a quietness preference.
 
@@ -678,7 +678,7 @@ lane; ③ `F11`. Then nothing, for eight hours.
 
 - Given the ledger has records for the sounding track, when the kiosk renders,
   then it states the permitted card — *"Played N times since YYYY"* — in the
-  ledger's own permitted form (`REFUSALS.md:71–73`), read from `TrackHistory`
+  ledger's own permitted form (the product's standing rule), read from `TrackHistory`
   (`history/read.rs:140–159`).
 - Given the ledger has **no** record for this track, when the kiosk renders,
   then it says so as a positive statement — *"never played before"* — which is
@@ -718,7 +718,7 @@ lane; ③ `F11`. Then nothing, for eight hours.
   with a dash.
 - Given any state, when the reading renders, then its words are flat: no
   "degraded", no "fallback", no boast, no badge, no colour carrying a verdict
-  (ADR-0009 §5, `REFUSALS.md:348–350`).
+  (ADR-0009 §5, the product's standing rule).
 - Given the meter is on, when the listener changes the volume, then **the meter
   does not move**, because it reads pre-gain (§9.2) — and the instrument says so
   in its own caption, so the behaviour is explained on screen rather than
@@ -884,7 +884,7 @@ are composited as a slow radial-plus-linear wash over `#0C0D0E`, at a ceiling of
    refusal was always about **the work**, and the field is not the work.
 3. **The ledger already ruled on exactly this object.** *"The art-derived lamp
    is **data** — hue read from the record, lightness and chroma pinned — not a
-   preference"* (`REFUSALS.md:267–269`). The field is the lamp's own rule, with
+   preference"* (the product's standing rule). The field is the lamp's own rule, with
    three colours instead of one and a large area instead of a small one. If
    hue-read-from-the-record is data at 6 px, it does not become decoration at
    1920.
@@ -894,7 +894,7 @@ are composited as a slow radial-plus-linear wash over `#0C0D0E`, at a ceiling of
 
 **Why it is not a scrim.** The ledger's objection is specific and it is worth
 quoting: *"a scrim is a surface laid over **the collection** to make something
-else readable"* (`REFUSALS.md:126–132`). The field is under everything, laid over
+else readable"* (the product's standing rule). The field is under everything, laid over
 nothing, and dims no artwork — it is the room's own colour, changed. This is the
 same distinction the ledger itself drew when it admitted the hover veil, and it
 is recorded in §14.2 rather than assumed here.
@@ -927,18 +927,18 @@ uniform upload rather than N quads.
 > **Nothing is drawn on the sleeve. Everything ambient is drawn on the field.**
 
 That sentence is what reconciles the owner's *"VU meter stuff over it"* with
-`REFUSALS.md:107–111`'s *"anything on artwork anywhere but a wall tile — not the
+the product's standing rule's *"anything on artwork anywhere but a wall tile — not the
 Songs rows, not the lane, not the record's page"*. What *"takes up the
 background"* is the field; the meter is over **the field**. The sleeve is the
 one object on this screen with nothing on top of it, and it stays that way. The
 owner's brief and the entry ask for the same composition once the field and the
 work are understood as two objects.
 
-The work keeps its halo (`theme::lamp_glow`, `REFUSALS.md:282` — *"no shadows
+The work keeps its halo (`theme::lamp_glow`, the product's standing rule — *"no shadows
 except the playing halo, which is not elevation, it is light"*), and that halo
 is now doing real work: it is what separates a sleeve from a field of a similar
 colour, which is the job a border would otherwise be reached for and which
-`REFUSALS.md:279–280` forbids in as many words.
+the product's standing rule forbids in as many words.
 
 ### 5.5 The layouts, measured
 
@@ -1070,7 +1070,7 @@ redundant. One precedent, applied twice, four commits apart.
 **What it costs: nothing, and this is checkable.** Every function of the deleted
 control survives at full size, visibly, one surface down — play/pause, previous,
 next, the needle, the fader, the doors. The accessibility refusal
-(`REFUSALS.md:249–250`) is satisfied by *a* visible pointer-reachable control,
+(the product's standing rule) is satisfied by *a* visible pointer-reachable control,
 not by two; and it is satisfied by the control the listener has used forty times
 a session rather than by a copy of it that exists in one place.
 
@@ -1098,7 +1098,7 @@ The alternatives were weighed and each fails on a named rule:
 
 | Alternative | Fails on |
 |---|---|
-| **Hover-revealed transport** | Refused outright: *"no control's only affordance is hover"* (`REFUSALS.md:249–250`). ADR-0028 has just re-confirmed that this entry outranks a quietness preference, and it is the mitigation for a toolkit with no accessibility tree — which is precisely the wrong thing to trade for a tidier picture. Doc 10 §6.3 already lists it as refused rather than merely rejected |
+| **Hover-revealed transport** | Refused outright: *"no control's only affordance is hover"* (the product's standing rule). ADR-0028 has just re-confirmed that this entry outranks a quietness preference, and it is the mitigation for a toolkit with no accessibility tree — which is precisely the wrong thing to trade for a tidier picture. Doc 10 §6.3 already lists it as refused rather than merely rejected |
 | **A bar re-laid for this place** (drop the wall label, keep the transport) | A bar that changes shape per place is a bar you cannot learn. Doc 10 §4.4's finding stands: *"the transport a listener uses forty times a session does not move a pixel under this study."* The ratchet's permitted move — replacing a slot with a better statement of the same fact — is about the bar's own evolution, not about the bar becoming five bars |
 | **No bar, plus a kiosk-local transport** | Two transports in one product, and the second one unlearned. It also re-opens every arithmetic ADR-0022 settled |
 | **No bar, no transport** | S1's listener cannot pause the music from the screen they are looking at |
@@ -1123,7 +1123,7 @@ statement each to two readers, and the product already had both.
 ### 6.3 What the place itself accepts
 
 **Four things, and the list is closed.** Every one is visible at rest, which is
-the whole of what `REFUSALS.md:249–250` asks:
+the whole of what the product's standing rule asks:
 
 - **The needle**, at the work's width (§5.5). Already interactive, already
   hit-tested through the same module that draws it (`player.rs:527–531` — *"the
@@ -1140,7 +1140,7 @@ the whole of what `REFUSALS.md:249–250` asks:
 And one thing it deliberately refuses: **the artwork is not a control.** A
 click on the sleeve is a gesture with no visible affordance, and the ledger
 forbids both halves of that — nothing may be drawn on a sleeve to advertise it
-(`REFUSALS.md:107–111`), and no action may be gesture-only (`REFUSALS.md:249–250`,
+(the product's standing rule), and no action may be gesture-only (the product's standing rule,
 doc 09 §5.2's reading). The route to the record's page is the bar's
 now-playing block, in this place as in every other.
 
@@ -1191,7 +1191,7 @@ this needs:
 >   that is `Place::NowPlaying` and nothing else, and a second such surface
 >   needs an argument that beats this one;
 > - it is **a thing you start, never a thing that starts itself** — the same
->   sentence the ledger already applies to shuffle (`REFUSALS.md:37–38`), and
+>   sentence the ledger already applies to shuffle (the product's standing rule), and
 >   the reason the toggles in §7.2 are first-class rather than a preference
 >   panel;
 > - it costs **exactly nothing when it is off or when its surface is not on
@@ -1203,7 +1203,7 @@ this needs:
 >   a loophole: a bounded tween exists to say *something changed*, and ambient
 >   content exists to be pleasant. Because it makes no claim, it may never be
 >   the only carrier of one — no state is signalled by the field's motion, and
->   `REFUSALS.md:259–261` is why.
+>   the product's standing rule is why.
 
 The last clause is what stops this class swallowing the other two. A drifting
 field cannot tell you the track changed; the hard cut does that, and it stays a
@@ -1252,7 +1252,7 @@ it opt-in would ship the hazard by default.
 - **On the surface** — a single **`Ambient`** word-door in the place's
   top-right, opening a small menu with the four switches and the ballistics
   selector. It is a labelled,
-  pointer-reachable control at rest, which `REFUSALS.md:249–250` requires and
+  pointer-reachable control at rest, which the product's standing rule requires and
   which a hover-revealed gear would violate. It is a *word* and not a glyph for
   doc 10 §3.4's reason: the enumerated symbol list is closed at two, the gear
   and the magnifier (`system.md:876–879`), and no universal symbol means
@@ -1532,7 +1532,7 @@ is *interesting*, because a feed of boring true facts is worse than no feed.
 
 | # | Fact | Source, cited | Worth reading? |
 |---|---|---|---|
-| F1 | **"Played 34 times since March 2019"** | `TrackHistory::plays`, `first_played_unix_s` (`history/read.rs:150–159`) | **The best one.** It is the ledger's own permitted form (`REFUSALS.md:71–73`), and it is the fact nobody else has |
+| F1 | **"Played 34 times since March 2019"** | `TrackHistory::plays`, `first_played_unix_s` (`history/read.rs:150–159`) | **The best one.** It is the ledger's own permitted form (the product's standing rule), and it is the fact nobody else has |
 | F2 | **"Last played 8 months ago"** | `TrackHistory::last_played_unix_s` | **Strong.** Re-encountering something you had forgotten is the surface's best moment |
 | F3 | **"You have never played this before"** | `Recency::Never`, the ledger's *positive* statement, distinct from `Unrecorded` (`0018-play-history-ledger.md:5–11`) | **Strong**, and honest — it is a thing the ledger knows, not an absence |
 | F4 | **The signal path in full** — source rate, output rate, whether anything converted, whether the device is held exclusively, whether any gain stage touches the samples | `PlayerState::signal_path()` (`player.rs:2016–2027`) — **dead code today**, kept because *"a diagnostics readout is ADR-0009's next step"* | **Strong for Karl** (`research/05-personas.md:35`), and it is already computed and currently thrown away |
@@ -1560,7 +1560,7 @@ is *interesting*, because a feed of boring true facts is worse than no feed.
 
 The ledger's discipline here is the no-invisible-pool rule — *"a shuffle whose
 source you cannot see is a recommendation engine wearing a dice icon"*
-(`REFUSALS.md:41–47`). A rotating fact is close enough to that line that the
+(the product's standing rule). A rotating fact is close enough to that line that the
 rule which picks facts must be statable in a sentence. It is:
 
 > **The feed shows one fact at a time, cycling in a fixed order through exactly
@@ -1585,7 +1585,7 @@ Four properties, each deliberate:
   — a record with no ReplayGain analysis simply has no F6 in its cycle, exactly
   as S3's signal register is *absent, not empty*.
 - **It advances on a press**, which makes it a control rather than a
-  performance, and satisfies `REFUSALS.md:249–250` — the line is a labelled,
+  performance, and satisfies the product's standing rule — the line is a labelled,
   pointer-reachable target, not a thing that only happens *to* you.
 
 ### 8.3 Why it is one line and not a panel
@@ -1604,7 +1604,7 @@ wrap and it does not reflow the composition.
 
 ### 8.4 The engagement-stats line, and which side this falls on
 
-`REFUSALS.md:68–73` is the entry that binds hardest here, and it is worth
+the product's standing rule is the entry that binds hardest here, and it is worth
 quoting rather than paraphrasing:
 
 > **No engagement stats.** No Wrapped, no streaks, no charts, no "top artists of
@@ -1627,7 +1627,7 @@ the room an existing one has been waiting for.
 |---|---|
 | **`listened_ms` as a total** — "you have listened to 4.2 hours of this artist" | A listening-time total, refused by name. The field exists (`history/read.rs:157`) and is **deliberately not rendered** |
 | **Any cross-track or cross-artist aggregation** — "your most played record this month" | This is a chart. The pool would be the collection rather than the record, which also breaks §8.2 |
-| **Any framing that congratulates** — "you're on a 6-day streak", "your #1 record" | *History records; it never performs.* The tone test is that every fact reads as an **archivist's note** (`REFUSALS.md:348–350`'s posture for the condition report), stated flatly, with no second person doing anything impressive |
+| **Any framing that congratulates** — "you're on a 6-day streak", "your #1 record" | *History records; it never performs.* The tone test is that every fact reads as an **archivist's note** (the product's standing rule's posture for the condition report), stated flatly, with no second person doing anything impressive |
 
 **The tone rule, made concrete.** *"Played 34 times since March 2019"* is a
 record. *"You've played this 34 times — one of your favourites!"* is a
@@ -1676,7 +1676,7 @@ Every constraint below is a requirement, not a preference, and none of it is in
 - **Attributed on the fact itself.** A fact from Wikipedia says so, in the line,
   because a screen that mixes *measured from your file* with *scraped from the
   web* without marking which is which is the beginning of snake oil
-  (`REFUSALS.md:348–350`).
+  (the product's standing rule).
 - **Refusable and failure-silent.** No network, no spinner, no error — the
   cycle simply has fewer facts in it, exactly as a record with no ReplayGain has
   no F6. This is the property that makes the local design load-bearing: **if the
@@ -1797,7 +1797,7 @@ nothing has touched it yet. Four consequences, and each is a reason:
    worth looking at, and what makes it comparable to F6's stored figure (also
    measured from the decoded file, `loudness.rs`).
 4. **It reads before ReplayGain too**, which must be **labelled** or it is snake
-   oil (`REFUSALS.md:348–350`). The instrument's own caption says what it
+   oil (the product's standing rule). The instrument's own caption says what it
    measures — *the file as decoded* — so a listener who sees the meter unmoved
    after enabling ReplayGain has the answer on screen rather than a mystery.
 
@@ -1946,7 +1946,7 @@ stories about the same instant.
 
 ### 9.6 Why the meter is not amber, and other refusals kept
 
-- **Not amber.** `REFUSALS.md:271–274`: the accent *"states what is true about
+- **Not amber.** a standing rule of the product: the accent *"states what is true about
   playback right now and nothing else: not what is queued, not what is selected,
   not what has focus"*. A level is not *which record, which track, where the
   playhead is* — it is a measurement of the audio. The meter draws in the room's
@@ -1954,7 +1954,7 @@ stories about the same instant.
   because the needle is exactly what the accent is reserved for. **The one
   exception is the peak indicator crossing 0 dBFS**, which is playback truth of
   the kind the accent exists for — and it is accompanied by the numeral, because
-  `REFUSALS.md:259–261` forbids state signalled by colour alone.
+  the product's standing rule forbids state signalled by colour alone.
 - **Not an instrument face.** §14.3 rewrites the skeuomorphism entry, and the
   line it draws is the entry's own: *"the record supplies physics, structure and
   vocabulary… it never supplies **surface**."* **Refused: a beige panel, a glass
@@ -1963,9 +1963,9 @@ stories about the same instant.
   a mark, a numeral, the room's inks. The owner's *"in a stylised way"* is read
   as exactly this: the instrument's *behaviour*, not its *costume*.
 - **No peak-hold-forever, no session maxima, no "loudness score".** Those are
-  engagement stats about audio, and `REFUSALS.md:68–73`'s tone rule applies to
+  engagement stats about audio, and the product's standing rule's tone rule applies to
   the meter as much as to the feed.
-- **No headroom claim, no "audiophile" framing.** `REFUSALS.md:348–350`. The
+- **No headroom claim, no "audiophile" framing.** the product's standing rule. The
   meter reports a number and names its standard. It does not say the number is
   good.
 
@@ -2171,7 +2171,7 @@ octave only, and it is ranked in §13 rather than pre-built.
 - **Digital silence is exactly flat, and it is exact rather than approximate.**
   If every sample in the window is `0.0`, every bin's magnitude is exactly
   `0.0`, which clamps to the floor and draws zero height. **The bars are still —
-  not low, not shimmering.** *Silence is a feature* (`REFUSALS.md:19–21`) is
+  not low, not shimmering.** *Silence is a feature* (the product's standing rule) is
   drawn rather than merely honoured, which is the same property §7.6 relies on
   for the stopped case.
 - **Stopped or paused: the surface holds no bars at all.** When nothing is
@@ -2256,7 +2256,7 @@ quad the surface already draws.
   legible against it, below the sleeve so **the artwork remains the brightest
   object on the screen**, which is the promise §5.3 made and this must not
   break.
-- **Not amber.** `REFUSALS.md:271–274` reserves the accent for *"what is true
+- **Not amber.** the product's standing rule reserves the accent for *"what is true
   about playback right now… not what is queued, not what is selected"* — and a
   spectrum is a property of the audio, not playback truth. The needle keeps the
   amber; the bars never take it.
@@ -2281,7 +2281,7 @@ The composition sits in a calm pocket and the spectrum surrounds it. **This
 costs no layout at all** — `below` is unchanged, so the artwork keeps every
 pixel §5 fought for. And it is the discipline the ledger already blessed for the
 hover veil: *"a gradient that dies before the [edge], never a flat panel"*
-(`REFUSALS.md:113–121`).
+(the product's standing rule).
 
 **1920 × 1080, lane collapsed — 64 bars, 28 px pitch:**
 
@@ -2526,7 +2526,7 @@ keyed by album id, filled for the sounding record and its successor. `art_edge`
 gains its third term (`hero_px`); **`NOW_PLAYING_MAX` is deleted.**
 
 *Ships*: artwork at its real size — 1000 px at 2560, up from 720 — and
-`REFUSALS.md`'s artwork entry becomes true on this surface for the first time
+the product's artwork entry becomes true on this surface for the first time
 (§0.4 b).
 *Test*: `the_now_playing_surface_never_draws_art_larger_than_its_source`, swept
 over `hero_px ∈ {120, 320, 500, 1024}` × sides 400–4000, mirroring
@@ -2697,10 +2697,10 @@ Everything this study declined, in the order it should be picked up.
 
 ## 14. The ledger entries, rewritten
 
-Per `REFUSALS.md:6–14`, an entry the owner reverses *"gets rewritten to say what
+Per the product's standing rule, an entry the owner reverses *"gets rewritten to say what
 was decided and why, and that is the whole of the process."* These are drafted
 in the ledger's own voice, in the form it already uses for the hover veil
-(`REFUSALS.md:113–121`) and the wall's scrollbar (`REFUSALS.md:235–243`) — the
+(the product's standing rule) and the wall's scrollbar (the product's standing rule) — the
 old text quoted, the decision recorded, and **the constraint that replaced the
 blanket refusal** named along with the test that holds it.
 

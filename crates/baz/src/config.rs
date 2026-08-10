@@ -153,7 +153,7 @@ pub struct Config {
     /// accelerators, and this key is where the press's *result* is
     /// remembered, exactly as `group_key` remembers the press on a word in
     /// the top bar. There is no density row anywhere in the Settings place,
-    /// and `docs/REFUSALS.md` (as ADR-0028 narrowed it) still refuses the
+    /// and the product's standing rules (as ADR-0028 narrowed it) still refuses the
     /// view-options menu that would be the other way to spell it.
     ///
     /// Written as [`Density::code`], for `group_key`'s reason.

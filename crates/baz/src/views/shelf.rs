@@ -116,7 +116,7 @@ pub(crate) fn view<'a>(
     // ever drawn under it. The rail beside it still says *where you are* and
     // still names the shelf it jumps to; what the bar adds is the one gesture
     // the rail has no answer to — drag to the end. The owner's decision,
-    // 2026-08-09; `docs/REFUSALS.md`'s two-vertical-strips entry records it.
+    // 2026-08-09; the product's two-vertical-strips entry records it.
     .direction(scrollable::Direction::Vertical(theme::wall_scrollbar()))
     .style(move |_theme, status| theme::scrollbar(room, room.wall, status))
     .width(Length::Fill)
@@ -463,7 +463,7 @@ fn header_band(shelf: &Shelf, hang: Grid, run: Run, block: f32) -> Element<'_, M
 /// are the full width of the wall. There is no rule, no shadow and no lift: a
 /// pinned header differs from an unpinned one in nothing a screenshot can
 /// show, which is what makes this a position rather than a state, and is why
-/// it needs no transition (`docs/REFUSALS.md`: *no motion — hard cuts by
+/// it needs no transition (a standing rule of the product — *no motion — hard cuts by
 /// design*).
 ///
 /// `run` is `None` when nothing is pinned, and the layer is still built: see
@@ -559,7 +559,7 @@ fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
 /// collection, so the letters, decades and buckets the library has nothing
 /// under are drawn in the muted ink and are **inert** — no button, no hover,
 /// no press. A control that did nothing when pressed would be the lie
-/// `docs/REFUSALS.md` guards against from the other side.
+/// the product's standing rules guards against from the other side.
 ///
 /// # Where its edges are
 ///
@@ -677,7 +677,7 @@ const MARK_INSET: f32 = (theme::STEPPER_HIT - theme::ICON_PX) / 2.0;
 /// — the exact signed notch count the <kbd>Ctrl</kbd>+scroll /
 /// <kbd>Ctrl</kbd>+<kbd>±</kbd> gesture would spend, making keys and wheel
 /// *accelerators of a visible control* rather than the control itself
-/// (the mirror rule, doc 07 L8.7; `docs/REFUSALS.md` as amended by
+/// (the mirror rule, doc 07 L8.7; the product's standing rules as amended by
 /// ADR-0028). The **active mark is inert** — pressing the step you are on
 /// would do nothing, and a control that does nothing when pressed is the lie
 /// the rail's absent letters already refuse. It is the fact; the other two
@@ -770,7 +770,7 @@ fn density_mark(step: Density, current: Density) -> Element<'static, Message> {
 /// surface in three moods rather than as three screens; it is the section shape
 /// the Settings place uses, at the scale of a whole wall.
 ///
-/// **No spinner and no progress bar** (`docs/REFUSALS.md`): the shelf filling
+/// **No spinner and no progress bar** (a standing rule of the product): the shelf filling
 /// with covers *is* the scan indicator, and this text exists only for the
 /// seconds before the first cover lands. It is why the scanning line says what
 /// will happen rather than how far along it is — a fraction here would be a
@@ -1066,7 +1066,7 @@ fn state_rule(hovered: f32, selected: bool, edge: f32) -> Element<'static, Messa
 }
 
 /// **The four options, laid over the sleeve the pointer is on** — the owner's
-/// approved design, and the reversal of ADR-0032 §2 and of `docs/REFUSALS.md`'s
+/// approved design, and the reversal of ADR-0032 §2 and of the product's
 /// *nothing is ever drawn on a sleeve*. Both entries are rewritten to record
 /// what was decided; neither is argued with here.
 ///
@@ -1108,7 +1108,7 @@ fn state_rule(hovered: f32, selected: bool, edge: f32) -> Element<'static, Messa
 ///
 /// Every one of them is a message some visible control already sends, and the
 /// tile's right-press menu remains the pointer-reachable twin of all four — so
-/// this layer is an accelerator and never the only route (`docs/REFUSALS.md`,
+/// this layer is an accelerator and never the only route (a standing rule of the product,
 /// Accessibility). An option's press is **captured by the option**: iced's
 /// `button` returns `Captured` for a child's press before its own `on_press`
 /// fires (the same mechanism `album_door` relies on), so pressing `Play` here
@@ -1466,7 +1466,7 @@ mod hover_option_tests {
 
     /// **Every option is a press some visible control already makes**, and the
     /// tile's right-press menu is the pointer-reachable twin of all four
-    /// (`docs/REFUSALS.md`, Accessibility: *no control's only affordance is
+    /// (the product's standing rule, Accessibility: *no control's only affordance is
     /// hover*). The reveal is an accelerator over routes that exist; it is
     /// never the only way to any of them.
     ///
@@ -1544,7 +1544,7 @@ mod hover_option_tests {
 
     /// **The veil is a gradient. A flat panel is not the design.**
     ///
-    /// `docs/REFUSALS.md`'s *no scrim, ever* was written against dimming ten
+    /// the product's *no scrim, ever* was written against dimming ten
     /// thousand covers to show twelve rows, and the owner's reversal is
     /// specifically of a **gradient over one sleeve under the pointer** — so
     /// the shape of the mark is the decision, not an implementation detail. A

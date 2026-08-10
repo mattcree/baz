@@ -134,7 +134,7 @@ measurements have never been taken because the feature does not exist yet.
   of being built.
 - CI is the guide: main goes red, main gets fixed, before anything else.
 - Every stack-level choice becomes a short ADR at the moment it is made.
-- **`REFUSALS.md` holds only the owner's own words forbidding something.**
+- **the product's standing rules holds only the owner's own words forbidding something.**
   Nothing else goes in it — design conclusions are reasoning and belong in
   `docs/adr/` and `docs/design/`. The one rule above all of them: **anything he
   asks for goes in the app**, and an entry that appears to stand in the way of

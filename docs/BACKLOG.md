@@ -93,7 +93,7 @@
   same row, held as a `WallSubject` beside `group_key` rather than as a sixth
   `GroupKey`: ADR-0019 §1 promises every key is a projection where every album
   appears exactly once, and a key that shelves *artists* falsifies that sweep
-  rather than extending it. Not a lens either — `docs/REFUSALS.md` fixes the
+  rather than extending it. Not a lens either — the product's standing rules fixes the
   lens switcher at two words and both are spoken for (`WALL` · `MARQUEE`).
 
   **What it costs, measured in the bundled face at `SIZE_META`**: six words
@@ -640,7 +640,7 @@ it being an act:
 - Doc 10 §3.2 refuses the crossed-arrows glyph *specifically* because it is
   *"a mode toggle with a lit state"* and baz's shuffle *"is an act"*. Reversing
   the semantics **un-blocks the glyph**; the two decisions are joined.
-- `REFUSALS.md`'s *no invisible shuffle pools* is satisfiable today only
+- the product's *no invisible shuffle pools* is satisfiable today only
   because the pool is the wall and the wall can mark itself — dimmed covers
   plus rings (`shelf.rs:885-935`). **A playlist is not a wall**, and
   `views/playlist.rs` has no equivalent marking, so the visibility mitigation
@@ -687,12 +687,12 @@ Two traps:
   (`shuffle.rs:86-89`).
 
 `Play all`'s scope rule must survive whatever shape it takes
-(`REFUSALS.md:43-47`): *"its scope is exactly what the wall shows, in the
+(the product's standing rule): *"its scope is exactly what the wall shows, in the
 wall's own order — playing what you cannot see is refused."*
 
 ### 4. The `Queue` door leaves the bar — the ratchet's escape hatch does not quite fit
 
-The ratchet (`REFUSALS.md:137-142`) permits exactly one removal: *"Replacing a
+The ratchet (the product's standing rule) permits exactly one removal: *"Replacing a
 slot with a **better statement of the same fact**."* The door's fact is **how
 much is left** (`queue_size_note`, `player.rs:1663`). A now-playing block that
 opens the current playlist states **where the run came from**. Doc 09 §6
@@ -711,7 +711,7 @@ Two more collisions:
   record"*). `bottom_bar.rs:452-457` argues explicitly that this block must
   **not** have a lit state, because that would make it a door rather than a
   record control — repointing it inverts that argument. And
-  `REFUSALS.md:215-223` names *both* halves: the `Queue` door as a survivor of
+  the product's standing rule names *both* halves: the `Queue` door as a survivor of
   prior removal attempts, and the now-playing block as the labelled control for
   *get back to what is playing*.
 
@@ -859,7 +859,7 @@ The second half is a real, small piece of work and a real design question:
 - **A Settings row would have to be restart-scoped.** The compositor is
   created once when the window opens and iced 0.13 exposes no way to swap it
   live, so the row is a stored preference plus an honest *takes effect next
-  launch* line — the shape `docs/REFUSALS.md` tolerates least well.
+  launch* line — the shape the product's standing rules tolerates least well.
 - **The open question is whether it earns a row at all.** The automatic
   fallback covers "no GPU". A toggle only buys the case where the GPU path is
   present and bad: a tearing driver, or a hybrid laptop spinning up a discrete

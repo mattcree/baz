@@ -15,7 +15,7 @@
 //! any button — cannot fall through to a tile underneath, **no scrim**
 //! (refused; the wall stays fully legible), and the separation strategy is
 //! the panel's exact pair, a surface step plus a 1 px hairline
-//! ([`theme::menu`]) — no shadow, which `docs/REFUSALS.md` reserves for the
+//! ([`theme::menu`]) — no shadow, which the product's standing rules reserves for the
 //! playing halo. The items are ordinary [`theme::track_row`] word buttons at
 //! [`theme::TRANSPORT_HIT`] (law L7: a control is one height everywhere), so
 //! the card introduces no colour and no control anatomy the room does not

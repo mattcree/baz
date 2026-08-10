@@ -48,7 +48,7 @@ use crate::{groove, icon, needle, player, theme};
 /// **The bar is 81 px and the needle is 2**, where the bar alone was 105 before
 /// the needle and 57 after it. The seek row is not deleted so much as *moved*:
 /// its job is stated better by a line that also says what the queue is shaped
-/// like, and `docs/REFUSALS.md` permits exactly that one move on this bar — a
+/// like, and the product's standing rules permits exactly that one move on this bar — a
 /// slot may be replaced by a better statement of the same fact, and none may be
 /// removed for tidiness.
 ///
@@ -334,7 +334,7 @@ fn stamp(
 ///   [`PlayerState::continuation_note`] states it as *what is left* rather than
 ///   *where you are*. Printing both would have been the same subtraction twice.
 ///   Nothing was removed from the bar: a slot was replaced by a better
-///   statement of the same fact, which is the one move `docs/REFUSALS.md`
+///   statement of the same fact, which is the one move the product's standing rules
 ///   permits here.
 /// - **The readout is a reserved slot.** [`theme::POSITION_W`] wide whether or
 ///   not there is anything queued, so a queue arriving moves no title; and
@@ -455,7 +455,7 @@ fn back_to_playing(
     // makes S4 two gestures *from anywhere*: the sounding track is always
     // in the bar, so `Add to "{current}"` is always one right-click away.
     // The bar gains no slot for it; the menu is a layer, and the ratchet
-    // (`docs/REFUSALS.md`) is untouched.
+    // (a standing rule of the product) is untouched.
     crate::menu::area(
         tooltip(
             button(lines)
@@ -489,7 +489,7 @@ fn back_to_playing(
 /// different price. So the continuation is ambient:
 /// [`PlayerState::continuation_note`] owns every word of it, this draws it, and
 /// on the last track of a queue it draws nothing at all — silence is a refusal,
-/// not an omission (`docs/REFUSALS.md`).
+/// not an omission (a standing rule of the product).
 ///
 /// # Nothing here can move
 ///
@@ -647,7 +647,7 @@ fn signal_path(player: &PlayerState) -> Element<'_, Message> {
 /// three reversed; our own audit found "there is no Previous" the most-missed
 /// control in the app; and glyphs over the playing cover need the playing cover
 /// to be *on screen*, which after a filter or a long scroll it is not.
-/// `docs/REFUSALS.md`'s visible-control rule makes it binding.
+/// the product's visible-control rule makes it binding.
 ///
 /// **And they stay here only.** The Now playing place drew this row a second
 /// time, a few hundred pixels above the bar that was already under it — the

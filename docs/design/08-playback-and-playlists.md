@@ -29,8 +29,8 @@
 
 ## 0. What this document is judged against
 
-1. **[`docs/REFUSALS.md`](../REFUSALS.md), which binds.** No autoplay, no
-   radio, silence is a feature (`REFUSALS.md:19–25`). No invisible shuffle
+1. **[the product's standing rules](../the product's standing rules), which binds.** No autoplay, no
+   radio, silence is a feature (the product's standing rule). No invisible shuffle
    pools (`:28`). No auto-generated playlists (`:32`). No side surfaces
    (`:92–96`) — an entry §5 must engage rather than sneak past, because the
    ledger's editing rule says a refusal leaves only by an ADR that beats its
@@ -232,7 +232,7 @@ wipes the manual queue. The best statement of the failure is a user's
 > means I will hear song A1, then B1, B2, […], then A2, A3."*
 
 Spotify additionally appends a **radio tail** — autoplay continues with
-similar tracks when the context ends — which is the piece `REFUSALS.md`
+similar tracks when the context ends — which is the piece the product's standing rules
 forbids outright. **Plexamp** models the context explicitly and well:
 its Play Queue is a server object carrying `playQueueSourceURI`, *"the
 original request that created the queue"*, so the system knows you are playing
@@ -306,7 +306,7 @@ Extracted as [ADR-0023](../adr/0023-playback-model.md).
 a track on a record's page enqueues **that record, whole, in order** (the
 selected edition), and starts playback **at that track**. The vocabulary is
 the record's own, and the skeuomorphism rule permits exactly this use of it
-(`REFUSALS.md`, Skeuomorphism: physics, structure and vocabulary — never
+(the product's standing rules, Skeuomorphism: physics, structure and vocabulary — never
 surface): the gesture is **dropping the needle**. You did not extract track 7
 from the record; you put the record on and set the needle down at track 7.
 
@@ -336,7 +336,7 @@ and never disturbs a shuffle's marks (`app.rs:1466–1471`).
 
 ### 3.2 The end: silence, reaffirmed against the strongest counter-evidence
 
-When the queue's last track ends, **nothing happens**. `REFUSALS.md:19–25` is
+When the queue's last track ends, **nothing happens**. the product's standing rule is
 already binding — *the queue empties and there is silence; silence is a
 feature* — and this document re-tested it against the strongest evidence on
 the other side before repeating it, because Longplay 1.0 shipped exactly this
@@ -451,7 +451,7 @@ stored in a file that person owns.** Every clause is load-bearing:
   deduplicates it, or "cleans it up".
 - **Track references**: paths, not copies and not database ids — the same
   identity the queue, the ledger and the engine already speak.
-- **Made by a person**: `REFUSALS.md:32`. §6 says exactly what this permits a
+- **Made by a person**: the product's standing rule. §6 says exactly what this permits a
   generator.
 - **A file the person owns**: §4.3.
 
@@ -494,7 +494,7 @@ mechanical:
 ### 4.2 The word
 
 The surfaces say **Playlists**. The vinyl register offered *mixtape* (already
-in `REFUSALS.md:32`'s gloss) and it was considered and declined for the
+in the product's standing rule's gloss) and it was considered and declined for the
 surface: the skeuomorphism rule says the record supplies vocabulary where the
 vocabulary carries structure — *drop the needle* names a mechanism — but
 "mixtape" would rename a concept every listener already owns under its
@@ -650,7 +650,7 @@ the panel scrolls; the day that fails is the day a place earns proposing.
 Every action, its gestures, and its budget cost. **P** marks the pointer
 route the visible-control rule requires; where a drag exists it is always an
 *additional* route, never the only one (drag-only would violate
-`REFUSALS.md:112–115`, and §5.6 says why the drag also cannot ship first).
+the product's standing rule, and §5.6 says why the drag also cannot ship first).
 
 | Action | Pointer route (P) | Other routes | Gestures |
 |---|---|---|---|
@@ -731,7 +731,7 @@ are provenance, not behaviour: nothing in baz reads them to decide anything.
 
 ### 5.5 The panel — justified against the model that deleted its ancestors
 
-`REFUSALS.md:92–96`: *"baz has no side surfaces. No sidebar, no inspector, no
+a standing rule of the product — *"baz has no side surfaces. No sidebar, no inspector, no
 rail, no drawer, no popover, no float."* Rejected twice by the owner before it
 was written down. A playlist panel is a side surface, and the same owner has
 now blessed one: *"I think a sidebar/collapsible panel for playlist is okay…
@@ -806,7 +806,7 @@ the record is appended. Two gestures, no modifier, no drag — the budget met
 with the toolkit baz has today. A track row's reserved-slot `+` (the queue
 ✕'s exact anatomy: `STEPPER_HIT`, slot always reserved, control on hover)
 does the same for one track — and because hover-revealed controls need a
-second route (`REFUSALS.md:112–115`; ADR-0022 held the queue ✕ to this), the
+second route (the product's standing rule; ADR-0022 held the queue ✕ to this), the
 track's second route is layer 2's open target, and until layer 2 ships the
 `+` is drawn **at rest, not on hover**, on every track row of a page the
 panel is open beside. A quiet mark that appears only while the user is
@@ -889,7 +889,7 @@ shell script the user wrote:
    the wall", "from the whole library"), the same legibility rule shuffle's
    visible pool already obeys.
 
-And one amendment owed to the ledger: `REFUSALS.md:32` reads *"No
+And one amendment owed to the ledger: the product's standing rule reads *"No
 auto-generated playlists. Every crate and every mixtape is made by a
 person."* The entry's argument is against **auto** — playlists that generate
 themselves, unbidden, as engagement surfaces. A person explicitly asking for
@@ -954,7 +954,7 @@ with the same honesty. No flow silently exceeds it.
   (2) the panel and layer-1 adds; (3) `Queue album` / the stack; (4) queue
   resume; (5) `Save as playlist`; (6) the open target; (7) the drag widget.
   Each step ships whole and none waits on the one after it.
-- **REFUSALS.md changes twice, by ADR-0024, under its own editing rule**:
+- **the product's standing rules changes twice, by ADR-0024, under its own editing rule**:
   the side-surfaces entry gains the panel as its named, argued exception
   (§5.5), and the auto-generated-playlists entry has its gloss tightened
   (§6). Neither entry is deleted; both keep their teeth.

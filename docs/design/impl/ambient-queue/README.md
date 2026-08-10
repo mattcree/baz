@@ -52,7 +52,7 @@ All crops are the same 1280 × 104 region of the window (`+0+756`).
 | [`bar-03-popover-agrees.png`](bar-03-popover-agrees.png) · [`full-03-popover-agrees.png`](full-03-popover-agrees.png) | **One computation, two surfaces.** The popover's summary reads `1 of 20 · 57:38 left`; the bar under it reads `then 19 more · 57:38 left`. Same figure, because it is the same function (`player::left_note`) — and 1 + 19 = 20. |
 | [`bar-04-loose-songs-counted.png`](bar-04-loose-songs-counted.png) | **Several loose songs.** `Battery` / **`then 2 tracks · 7:05 left`**, `Queue 3`. Songs queued one by one are counted as tracks, never as an album. |
 | [`bar-05-one-loose-song-named.png`](bar-05-one-loose-song-named.png) | **One thing coming, so it is named.** `Cell` / **`then Terminal · 4:08 left`**. `then 1 track` would be the interface refusing to say the one word it knows. |
-| [`bar-06-last-track-says-nothing.png`](bar-06-last-track-says-nothing.png) | **The last track says nothing at all.** `Terminal`, and the lane below it is empty. Not `up next: nothing`, not `end of queue` — [`docs/REFUSALS.md`](../../../REFUSALS.md) makes the silence after a queue a feature, and announcing it would be the announcement rather than the silence. |
+| [`bar-06-last-track-says-nothing.png`](bar-06-last-track-says-nothing.png) | **The last track says nothing at all.** `Terminal`, and the lane below it is empty. Not `up next: nothing`, not `end of queue` — [the product's standing rules](../../../the product's standing rules) makes the silence after a queue a feature, and announcing it would be the announcement rather than the silence. |
 
 ### What is not here, and why
 
@@ -145,7 +145,7 @@ and empty with nothing queued. The door says *what it opens*; the position is
 stated better beside it, as what is **left**. Printing both would have been the
 same subtraction twice. No slot was removed from the bar: one was replaced by a
 better statement of the same fact, which is the single move
-[`docs/REFUSALS.md`](../../../REFUSALS.md) permits here.
+[the product's standing rules](../../../the product's standing rules) permits here.
 
 ## Cleanup
 

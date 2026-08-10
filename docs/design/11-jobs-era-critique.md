@@ -15,7 +15,7 @@
 >
 > **This document changes no code and edits no ledger.** §5's proposals are
 > ranked and tiered; the owner adjudicates. Proposals that would overturn a
-> `REFUSALS.md` entry or an ADR say so explicitly and carry the argument the
+> the product's standing rules entry or an ADR say so explicitly and carry the argument the
 > ledger's editing rule demands — an ADR that beats the entry's argument, not
 > a preference.
 
@@ -27,7 +27,7 @@
 newest sets read closely (`places/`, `playlists/`, `queue-parity/`,
 `context-menus/`, `controls-iconography/`, `songs-search/`,
 `index-magnification/`); the design corpus (`docs/design/01–10`,
-`.interface-design/system.md`, `docs/REFUSALS.md`); ADR-0014 and ADR-0016
+`.interface-design/system.md`, the product's standing rules); ADR-0014 and ADR-0016
 through ADR-0026; and the shipped view code where a claim needed the source
 (`views/top_bar.rs`, `views/queue.rs`, `views/playlist.rs`,
 `views/bottom_bar.rs`).
@@ -572,7 +572,7 @@ identity and this report proposes building on them, not around them.
 1. **The refusals ledger is "deciding what not to do" made institutional.**
    Jobs practised subtraction as personal taste; baz wrote the subtraction
    down, gave every "no" an argument, and made removal cost an ADR that beats
-   the argument. The era has no artefact like `REFUSALS.md`. It is the most
+   the argument. The era has no artefact like the product's standing rules. It is the most
    Jobs-era thing in the repository, *including* its willingness to be
    overruled by measurement (ADR-0020's motion amendment, ADR-0025's picker).
 2. **Silence at the end of the queue.** *"The software will not decide to
@@ -785,7 +785,7 @@ adjudicates.
 >
 > The owner, looking at it: *"previous and next on albums doesn't make sense
 > on the album view. we could add an Artist > album breadcrumb though. and
-> have an artist page."* `docs/REFUSALS.md`'s preamble settles it, and the
+> have an artist page."* the product's preamble settles it, and the
 > reversal is recorded rather than argued — but it is worth saying **why he
 > is right**, because this proposal's own reasoning is what missed it.
 >
@@ -1124,7 +1124,7 @@ adjudicates.
 
 | Era principle | baz today | Verdict |
 |---|---|---|
-| Focus / deciding what not to do | REFUSALS.md, the ratchet, zero-settings features | **exceeds the era** |
+| Focus / deciding what not to do | the product's standing rules, the ratchet, zero-settings features | **exceeds the era** |
 | Defaults over configuration | near-absolute | **exceeds the era** |
 | Aesthetic integrity | measured, law-bound, tested | **meets it with receipts** |
 | One primitive, done perfectly | places + doors + `Esc`; tiles navigate, rows play | **meets it** |
@@ -1209,7 +1209,7 @@ to the sentence are flagged below rather than silently kept.
   retrospective: Cabel Sasser, "The True Story of Audion" (Panic),
   <https://panic.com/extras/audionstory/>.
 
-**This repo.** `docs/REFUSALS.md`; ADR-0014, -0016, -0017, -0020, -0021,
+**This repo.** the product's standing rules; ADR-0014, -0016, -0017, -0020, -0021,
 -0022 (places), -0023, -0024, -0025, -0026; `docs/design/01–10`;
 `.interface-design/system.md`; captures in `docs/design/impl/` as cited
 inline; fresh renders and the isolation receipt in §0.

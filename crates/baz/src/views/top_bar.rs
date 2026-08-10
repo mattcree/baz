@@ -233,7 +233,7 @@ pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Mes
 /// wall is showing. That is this bar's subject (L8.1: a control goes where
 /// what it reads is). The now-playing bar's subject is the record that is
 /// sounding, and none of these is about that record; putting them there would
-/// also mean moving the transport, which `docs/REFUSALS.md` does not permit
+/// also mean moving the transport, which the product's standing rules does not permit
 /// for tidiness and would not be tidy anyway.
 ///
 /// They sit *after* the group keys, in the same cluster, because the cluster
@@ -247,7 +247,7 @@ pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Mes
 ///
 /// # They are controls, and that is not optional
 ///
-/// `docs/REFUSALS.md`: *"Every action in baz has a visible, pointer-reachable
+/// the product's standing rules: *"Every action in baz has a visible, pointer-reachable
 /// control. No action is keyboard-only, and no control's only affordance is
 /// hover."* The pull has a key (<kbd>Ctrl</kbd>+<kbd>R</kbd>); shuffle and
 /// `Play all` have none; all three have this. Each sends the identical message
@@ -418,7 +418,7 @@ fn well(shelf: &Shelf, width: f32) -> Element<'_, Message> {
     // is by definition empty exactly when the query is — the one lane in the
     // product that is free whenever the counts have something to say. During
     // a scan the figure ticks up, which is the shelf-filling progress rule
-    // (`REFUSALS.md`) restated in figures.
+    // (the product's standing rules) restated in figures.
     let input = text_input(&resting_counts(shelf), &shelf.query)
         .id(search_id())
         .on_input(Message::SearchChanged)
@@ -586,7 +586,7 @@ fn match_count(shelf: &Shelf) -> String {
 /// # It is a word, and nothing else
 ///
 /// No menu, no dropdown, no segmented control, no chip around the live one.
-/// `docs/REFUSALS.md` refuses view-options menus by name, and a pill drawn
+/// the product's standing rules refuses view-options menus by name, and a pill drawn
 /// around the active key would be the dropdown's ghost — the same "this is a
 /// widget" statement one step quieter. What says *active* is
 /// [`theme::group_key`]: full paper in the Medium face against

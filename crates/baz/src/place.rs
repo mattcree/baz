@@ -18,7 +18,7 @@
 //!
 //! ADR-0030 recommended a home *band* at the head of the Library's body and
 //! recorded `Place::Home` under "deliberately not done". **The owner overruled
-//! both**, and `docs/REFUSALS.md`'s preamble says his decision is sufficient
+//! both**, and the product's preamble says his decision is sufficient
 //! on its own: home is a real place, and a `Now playing` place stands beside
 //! it. Both are reached from the returns lane's head, which is what pays the
 //! cost ADR-0030 priced — *"a fifth place needs a route back to the wall,

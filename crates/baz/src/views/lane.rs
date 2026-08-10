@@ -480,7 +480,7 @@ fn readout(shelf: &Shelf, filtering: bool) -> String {
 /// The lamp dot on `Now playing`: [`theme::DOT`], the accent, and nothing
 /// else.
 ///
-/// `docs/REFUSALS.md`'s amber entry is what licenses it — the lamp states what
+/// the product's amber entry is what licenses it — the lamp states what
 /// is true about playback *right now*, and "something is sounding" is exactly
 /// that fact. It is not lit by hover, by the queue holding music, or by the
 /// place being on screen.

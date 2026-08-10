@@ -405,7 +405,7 @@ gesture does.
   `Play all` is pressed, then the queue is exactly the visible matches in
   visible order — **the scope is the wall**, always; playing what you
   cannot see is refused for the reason shuffle's invisible pool is
-  (`REFUSALS.md:28–31`). "Everything in the library" is the empty query,
+  (the product's standing rule). "Everything in the library" is the empty query,
   one `Esc` away.
 - Given the resulting queue, when the Queue place is opened, then it is an
   ordinary queue: readable to its end, jumpable, editable, saveable via
@@ -441,7 +441,7 @@ answer):
   reordered (§8.2), then the run edits like any queue and the pool's marks
   survive anything short of a re-queue (`app.rs:1466–1471`).
 - Given the draw ends, when the last track finishes, then silence
-  (`REFUSALS.md:19–25`); another press is another draw. The bounded draw is
+  (the product's standing rule); another press is another draw. The bounded draw is
   kept over shuffle-the-whole-pool deliberately: a run you can read to the
   end is a run you own, and eight records is an evening — the unbounded
   alternative is honest but unreadable, and it is one `Play all` +
@@ -568,7 +568,7 @@ discards the track-level answer (`vm.rs:1810`'s pinned fold). The design:
 The owner reached for right-click twice, and his audience's muscle memory
 (foobar2000, MusicBee) reaches for it hourly. baz has no menus of any kind;
 this is a new interaction class and gets a governing rule before it gets a
-single item, because the visible-control rule (`REFUSALS.md:112–115`)
+single item, because the visible-control rule (the product's standing rule)
 otherwise forbids it — a right-click is a gesture, and no action may be
 gesture-only.
 
@@ -604,7 +604,7 @@ otherwise.
 The bar row is what makes S4 two gestures *from anywhere*: the sounding
 track is always in the bar, so its menu is always one right-click away —
 and every item on it mirrors a control that already exists, so the bar
-gains no slot and the ratchet (`REFUSALS.md:72–76`) is untouched.
+gains no slot and the ratchet (the product's standing rule) is untouched.
 
 ## 6. Decision: the current playlist, defined
 
@@ -680,7 +680,7 @@ audience. Named as the implementation gate, not designed here.
 
 Shuffle's function end-to-end (all shipped, S7 pins it): the pool is what
 the wall shows and nothing else, marked by dimming and rings
-(`REFUSALS.md:28–31`, `app.rs:1532–1574`); a press draws eight records
+(the product's standing rule, `app.rs:1532–1574`); a press draws eight records
 whole and queues them as an ordinary finite queue; the draw is an implicit
 playlist — readable, editable, saveable, ending in silence; another press
 is another draw, and a draw is a *thing you start, never a thing that
@@ -907,7 +907,7 @@ sheet conceded it.
   search is a surface over data the index already returns; menus,
   provenance, `Play all`, reorder, the picker's appends — all
   `SetQueue`/`UpdateQueue`/`JumpTo`; naming is a file write.
-- **REFUSALS.md as amended**: the panel's single-tenant clause holds
+- **the product's standing rules as amended**: the panel's single-tenant clause holds
   under the ADR-0024 amendment's restatement — the Queue row is not a
   second tenant, because the panel's subject was always *ordered lists of
   tracks* and the unification's claim is that there is one kind. The

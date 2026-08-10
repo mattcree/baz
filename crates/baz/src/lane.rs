@@ -50,7 +50,7 @@ pub(crate) const RECENT_ALBUMS: usize = 24;
 /// think spotify"*, and *"as an extension we will want a Now playing page at
 /// the top with the Home and Library"*. ADR-0030 §1 had refused destination
 /// rows in the lane on the grounds that a second subject is what killed the
-/// last one; the owner overruled it, and `docs/REFUSALS.md`'s preamble says
+/// last one; the owner overruled it, and the product's preamble says
 /// that settles it. What survives of the argument is the *shape* of the
 /// concession: the head is a closed set of three, above a hairline, and the
 /// list below it still has exactly one subject.
