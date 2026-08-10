@@ -379,3 +379,207 @@ where nothing hangs from.
 - Captures under `docs/design/impl/density-on-every-page/` — every step on
   three pages at two windows, the absence on a page of rows, the marks pressed
   on each page, and the artist-versus-wall defect before and after.
+
+---
+
+## Second amendment (2026-08-10) — the ladder only tightens, and it is a proof now
+
+**Status**: accepted · the owner, looking at the running app: *"why is balanced
+smaller than compact... I think the dense should be a bit smaller"* ·
+**overturns nothing in this entry's decisions** and corrects an arithmetic
+defect underneath all of them · **retunes the tight end of the ladder on the
+owner's taste** · adds no message, no token, no dependency and no state.
+
+Evidence, sweeps and every frame quoted below:
+`docs/design/impl/the-ladder-only-tightens/`.
+
+### 1 · The defect: a density ladder that was not ordered
+
+Two things in one sentence, and they are kept apart because one is a bug and
+one is a preference.
+
+The bug. Each step brings its own `hang`, and the wall's art is
+
+```text
+art = (w − (columns + 1) · hang) / columns
+```
+
+which **rises as the hang falls**. So wherever two steps land on the same
+column count — which they must at any window narrow enough that the counts are
+already consecutive integers, a fact this entry's first amendment already
+recorded — the *tighter* step drew the *larger* work, because its gutters were
+smaller. At 880 px of grid, `Balanced` hung 3 × 240.0 and `Compact` hung
+3 × 250.7. At the shipped 1280 px window, 4 × 243 against 4 × 253. **That is
+the ask, verbatim: balanced was smaller than compact.**
+
+Swept 300 … 2560 px at every whole pixel, **30 of the 96 widths on the ask's
+own 20 px grid inverted**. The three-step ladder that preceded `Compact`
+inverted at 11 of them — 720 … 780, 1060 … 1140, 1400 … 1420, where `Spacious`
+drew smaller works than `Balanced`. **`Compact` exposed the defect; it did not
+introduce it.** The `git log` on the step table says so and so does the sweep:
+this has been true since `b935a4e` gave the wall a zoom.
+
+**Why the tests did not catch it, which is the part worth keeping.**
+`a_tighter_step_never_hangs_fewer_works` asserted **column count**, and the
+column count was correct the whole time — it is monotone by construction,
+because a tighter step has both a smaller target and a smaller floor. Nothing
+in the file asserted the quantity a listener actually sees. Worse, the file had
+*noticed*: the same test's doc comment read *"the art is deliberately not
+asserted to be monotone with it, and that is not an omission: at 1120 px
+Spacious hangs 3 × 309.3 while Balanced hangs 3 × 320."* That is the inversion,
+written down as a property and waved through.
+
+### 2 · The fix: the steps partition the art range
+
+Three fixes were available and each costs something.
+
+- **One `hang` for all four steps.** Monotone immediately, and it throws away
+  the thing the ladder was built for: a looser step is supposed to *breathe*
+  more, and `Grid::header_h` — the shelf's header band — **is** the step's
+  hang, so a shared hang means a shelf header that no longer zooms with the
+  works. Refused.
+- **Resolve the four steps together and clamp each to the one above.** The
+  smallest behavioural footprint of the three (324 widths move for `Balanced`
+  against 744 below) and trivially total. Refused on two grounds: it leaves
+  the *cause* — overlapping ranges — in the table and guards it at resolution
+  time; and it makes `Grid::new(w, Compact)` a function of Spacious and
+  Balanced too, so §7.1's published table stops being computable from the row
+  it publishes. This entry's reproducibility argument is that every screenshot
+  is one of four **named, derivable** walls per width, and a non-local
+  derivation weakens it.
+- **Per-step ranges that cannot overlap.** Taken.
+
+`Density::art_max` **stops being a tuned row and becomes derived**: it *is* the
+next-looser step's `art_min`, and the loosest step's is `art::THUMB_PX`. The
+four intervals abut and do not overlap:
+
+| step | `hang` | art |
+|---|---|---|
+| `Spacious` | 48 | 288 … 320 |
+| `Balanced` | 40 | 240 … 288 |
+| `Compact` | 32 | 200 … 240 |
+| `Dense` | 28 | 160 … 200 |
+
+That is the whole proof. `Grid::new` clamps art to at most the step's cap, and
+the column ceiling holds it to at least the step's floor, so a tighter step's
+largest work **is** a looser step's smallest: they can meet, and they cannot
+cross. It is checkable by reading four rows rather than by running a sweep.
+
+One more rule closes the degenerate tail. Below about 416 px of grid every step
+has collapsed to one column and `art` is `w − 2 · hang`, which rises as the
+step tightens; so `Grid::art_cap` also caps art at **`w − 2 × WIDEST_HANG`**,
+one column at the ladder's loosest hang. It binds nowhere a real window
+reaches, and it is what finally makes `ART_FLOOR`'s own promise true — that
+comment has said *a degenerate width yields a small wall instead of an inverted
+one* since before there was a ladder to invert. The pairwise form (cap each
+step against its own neighbour's hang) does not compose; one number, the
+ladder's widest, closes every pair at once.
+
+Swept at quarter-pixel resolution from 0 to 4000 px and at whole pixels to
+20 000: **no inversion at any width.**
+
+### 3 · What it costs, which is not nothing and is not hidden
+
+**The default wall moves.** `Balanced`'s cap falls from 320 to 288, because
+`Spacious` floors at 288, and **744 of the band's 2261 widths draw smaller art
+than they did** — the tops of each column band, where `Balanced` used to run up
+to the source's own edge. §7's published table changes in three rows: at 760,
+860 and 1120 px of grid the default wall drew 320 px works and now draws 288.
+
+It is not collateral, it is the fix seen from the other side: at those three
+widths `Spacious` itself drew 308, 320 and 302.7, so the default step was
+drawing a Spacious-sized cover. A ladder whose rungs name overlapping sizes has
+as many rungs as it has numbers and no more. About 132 of the 744 were not
+inversions — widths where `Balanced` was legitimately below `Spacious` and is
+capped anyway — and those are the honest price of the ranges being disjoint
+rather than merely ordered.
+
+Two bounds hold and are asserted: every width that moves moves **down**, and
+none moves below `Balanced`'s own floor 240, so no listener's wall crosses into
+another step's range. `theme::ART_MAX` keeps its meaning (*no artwork is drawn
+larger than its source*) and its other consumers — the album page's sleeve is
+still 320.
+
+**The rungs are shorter where they used to be backwards.** Where two steps tie
+on column count the tighter one now flattens against the looser one's floor
+instead of overtaking it: at 1172 px, `Balanced` 243 and `Compact` 240. A short
+rung is a wall that barely changes; a backwards one is a wall that changes the
+wrong way, and only one of those is a defect. **This is the thing to look at in
+the frames**, and the narrow-window flatness the first amendment already
+recorded is now visible in art as well as in columns.
+
+**More widths sit in the gutters-take-the-slack regime.** Capped widths roughly
+double for `Balanced` (360 → 748) and `Compact` (288 → 564). The module docs
+call that the one asymmetric padding in the product; it is now less rare.
+
+### 4 · The preference: `Dense`, and where the floor is
+
+The second half of the ask, kept separate because it is taste rather than a
+defect. `Dense` was 176 … 240 art at `hang` 28 — *today's shelf*, the 208 px
+cell baz drew before density existed, and this entry's first amendment leant on
+that equivalence (*"nobody loses what they have by the default moving"*). The
+owner overturned it: the step exists to put the most works on screen and it was
+hanging the wall baz drew when there was no ladder at all.
+
+`Dense` is now **160 … 200**, target 184. At 1280 it hangs 6 × 162.7 where it
+hung 5 × 200.8; at 1920, 9 × 170.2 where it hung 8 × 195. `Compact` is
+**re-derived, not re-tuned** — it is still exactly the `Balanced`-to-`Dense`
+rung halved, which is now 200 = (240 + 160)/2 and 228 = (272 + 184)/2, with the
+hang's midpoint 34 still taken down to 32 on the 4 px lattice. The property
+survives the retune, which is what it was written to do.
+
+**The floor, and it is principled rather than the smallest number that fits.**
+`ART_FLOOR` 1.0 is not a candidate — it is the backstop that keeps the geometry
+total, and its own comment says so. Two of the product's own numbers are:
+
+- **`art::THUMB_PX` halved.** The cache decodes to 320 px per edge and the wall
+  is its largest consumer. Below half that edge the wall is discarding three
+  quarters of the pixels it paid to decode, and the step stops being a density
+  and starts being waste.
+- **`theme::CONTINUE_SLEEVE` 132**, the smallest sleeve in the product that
+  carries a record's *identity* — its own token says *"large enough that the
+  record is identified by its cover rather than by its name."*
+  `theme::PANEL_SLEEVE` 40 is below it and is an identifier beside a name, not
+  a cover.
+
+160 satisfies both, on the 4 px lattice, and clears the second by exactly one
+`Dense` hang. It is a floor the wall really *reaches* — the tight end arrives
+at 160 inside the band — so the claim is about something.
+
+**A fifth step is still refused at both ends**, and the tight end's argument is
+now this number rather than the caption block's.
+
+### 5 · The test that was missing
+
+`the_ladder_only_tightens_the_work_it_draws` sweeps every whole pixel of the
+band **and** every quarter pixel below 420, and asserts on `art`. A single
+width proves nothing here — the inversion appears and disappears with the
+window, 880 inverted and 920 did not — which is why it is a sweep and why the
+old test's single-width doc example was able to look like a property.
+
+`the_steps_partition_the_art_range` pins the construction rather than the
+consequence, so a later hand re-tuning a row fails on the rule rather than on a
+width. `a_tighter_step_never_hangs_fewer_works` stays, and its doc now says
+what it does and does not cover.
+
+### Deliberately not done
+
+- **No change to the marks, their placement, their glyphs or their messages.**
+  This is the step table and `Grid`'s arithmetic; the control is untouched.
+- **No change to `hang` at any step**, `Dense` included. A tighter hang gives
+  *more* art, not less, so it is the wrong lever for the ask.
+- **No fifth step and no slider.** §1 and this entry's first amendment.
+- **No re-tuning to make the cost smaller.** Raising `Spacious`'s floor would
+  buy `Balanced` its 320 back and turn `Spacious` into a fixed-size wall with
+  pooled gutters — the design this file's module docs open by condemning.
+
+### Consequences
+
+- `crates/baz/src/shelf.rs`: `Density::art_max` derived; `Density::WIDEST_HANG`;
+  `Grid::art_cap`; `Compact` and `Dense`'s art numbers; the monotonicity proof
+  in the module docs; `the_ladder_only_tightens_the_work_it_draws`,
+  `the_steps_partition_the_art_range` and
+  `the_wall_hangs_no_work_below_the_size_a_cover_identifies_a_record_at`.
+  Five existing tests re-pointed, three of them because the default wall moved.
+- `.interface-design/system.md` §7.1: the art column, and the three §7 rows.
+- Captures under `docs/design/impl/the-ladder-only-tightens/`.

@@ -24,7 +24,35 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ## [Unreleased]
 
-*Nothing yet.*
+### Fixed
+
+- **A tighter density step could draw *larger* covers than a looser one.** Each
+  step carries its own hang, and the wall's art rises as the hang falls, so
+  wherever two steps landed on the same column count the tighter one drew the
+  bigger work: at the shipped 1280 px window `Balanced` hung 4 × 243 px and
+  `Compact` hung 4 × 253. Swept every whole pixel from 300 to 2560, the ladder
+  inverted at 30 of the 96 widths on a 20 px grid — and at 11 of them before
+  the fourth step existed, so this was true from the day the wall gained a
+  zoom. The step table's own test asserted **column count**, which was correct
+  throughout, so nothing ever checked the size a listener sees.
+
+  A step's largest work is now **derived**: it is the next-looser step's
+  smallest, so the four art ranges abut and cannot overlap, and a tighter step
+  can meet a looser one but never cross it. Monotonic at every width, swept to
+  quarter-pixel resolution. **This moves the default wall**: `Balanced` caps at
+  288 px rather than 320, so at the tops of each column band the covers are
+  smaller and the gutters wider — 744 of 2261 widths, none of them below
+  `Balanced`'s own 240 px floor. ADR-0028's second amendment.
+
+### Changed
+
+- **The `Dense` step is tighter** — art 160 … 200 where it was 176 … 240, on
+  the owner's *"I think the dense should be a bit smaller"*. At 1280 the wall
+  hangs 6 × 162.7 px where it hung 5 × 200.8; at 1920, 9 × 170.2 where it hung
+  8 × 195. `Compact` is re-derived from it and is still exactly the
+  `Balanced`-to-`Dense` rung halved. The floor is `art::THUMB_PX` halved — the
+  wall never discards more than three quarters of the thumbnail it decoded —
+  and stands one hang above the smallest sleeve baz identifies a record by.
 
 ## [0.1.0] - 2026-08-10
 
