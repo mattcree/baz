@@ -86,9 +86,13 @@ byline line restored, and the run's own control made to say what it saves.
 14 tier 2; captures at
 [`docs/design/impl/serif-titles/`](../design/impl/serif-titles/README.md)),
 with `views/now_playing.rs`'s prose amended in the same change and §A4.3's
-byline extended to state its composition. §A3's closing
-paragraph and §A4.4's last sentence are the two questions **left to the
-owner** ·
+byline extended to state its composition.
+**§A2's arrangement is one function since 2026-08-10** — `views/page.rs`, on
+the owner's *"right now they are different but for no good reason"*; §A4.5
+is the strip's lead, and the frames are at
+[`docs/design/impl/one-page-two-subjects/`](../design/impl/one-page-two-subjects/README.md).
+§A3's closing paragraph and §A4.4's last sentence are the two questions
+**left to the owner** ·
 extracts the decisions of
 [`docs/design/08-playback-and-playlists.md`](../design/08-playback-and-playlists.md)
 §4–§6 · changes no engine command — playing a playlist is `SetQueue` ·
@@ -452,6 +456,43 @@ rows.
   list is its name. A playlist's page declares **the name ≫ `Play` → the
   collage → the rows**. The two columns, the 320 px aside and the
   `ALBUM_BREAKPOINT` stack are unchanged.
+
+  *Amended 2026-08-10 (one page, two subjects)*: **the arrangement is now
+  one function**, `crates/baz/src/views/page.rs`, and the two pages hand it
+  what differs. The owner: *"can we reuse the basic layout and view of the
+  playlist for the album view and the playlist view accessed via clicking
+  into info — right now they are different but for no good reason."* He is
+  reading a real thing: this bullet said *the record page's own two-column
+  arrangement*, and what shipped was **a second copy of it**, written weeks
+  later. Two copies of the breakpoint arithmetic, two of the scroll, two
+  identity blocks held level only by a test that read both files' tokens,
+  two spellings of the quiet act, two `Play` buttons, two lamp dots, four
+  copies of one reserved icon slot.
+
+  What the two pages now supply is only what is *about their subject*: the
+  strip's lead, the sleeve, the commitment's label, the acts, the aside's
+  tail, the hero's face, the byline, the facts and their optional `Undo`,
+  the rows and their edit slots, and the empty state. What was drift is
+  gone: the quiet act had two alignments and two inks, a record's page had
+  no empty state at all, its `Play album` was hidden in a no-engine build
+  while a playlist's `Play` stood there dead, `DISC 1` took air under the
+  `TRACKS` rule where a first record head does not, and the strip led with
+  the *kind* on one page and the *subject* on the other — see §A4.5.
+
+  **And the frames found a divergence three studies had missed.** A
+  playlist's whole page rode **12 px higher** than a record's:
+  `theme::TOP_BAR_H` is `2 · TOP_BAR_PAD_V + TRANSPORT_HIT + 1` = 49, but
+  `views::place_header_led` lays out whatever lead it is handed — a record's
+  breadcrumb is a *control* and declares 32, a playlist's name was a bare
+  `LINE_EMPHASIS` 20, so that strip came to 37. Tiers 1 and 2 could not have
+  seen it: each cropped its two identity blocks out of *its own* page and
+  compared their **shapes**, which was true and is still true. The
+  composition boxes its lead at the control height now. **Queue, Settings
+  and the Artist place still carry the same 12 px** — moving four places is
+  a change to the frame, and it is logged in `docs/WORK.md` with its
+  measurement rather than taken in passing.
+  Captures and the before/after readings at
+  [`docs/design/impl/one-page-two-subjects/`](../design/impl/one-page-two-subjects/README.md).
 - **Whether playlists join the wall is deliberately not decided here.** The
   owner has opened the deeper information-hierarchy question — *"I am really
   struggling to come up with a simple and satisfying information hierarchy
@@ -654,6 +695,33 @@ transfer, and it is why the name does not read as prominent.
 
    The wall and the lane are untouched and the question above stays the
    owner's.
+
+5. **The strip names the subject on both pages, and the kind word is not
+   drawn twice.** *Added 2026-08-10, one page, two subjects.*
+
+   `views::place_header_led`'s own rule: four places lead with their name and
+   nothing else, and the two whose **subject changes** lead with the subject
+   — the Album place with `Anne-Marie Puig › Ochre`, the Artist place with a
+   runtime string. A playlist's page is the third of those and led with the
+   word `Playlist`, because it predates the breadcrumb by weeks.
+
+   It leads with the list's name now. **This subtracts a statement, not the
+   statement**: design 14 §3.5 had already found the chrome the wrong home
+   for the kind — *"58 px above the name… invisible at the moment the eye is
+   actually deciding"* — and §A4.3 above put it in the byline, at
+   `SIZE_TITLE` 19 directly under the name instead of `SIZE_EMPHASIS` 15 in
+   the strip. One rule now covers both pages: **the strip names what you are
+   looking at; the byline says what kind of thing it is.**
+
+   **No eyebrow, and that is answered from a frame rather than argued.** The
+   owner asked for *"some sort of title/subtitle telling us if it's an Album
+   or a Playlist"*, and
+   [`0d-identities-together-after-1280x860.png`](../design/impl/one-page-two-subjects/README.md)
+   shows the two blocks at one crop: a serif italic title over a person's
+   name against a sans name over `Playlist · 12 records`. A word above the
+   name would state a second time what that frame states plainly, which is
+   §A3.3's badge wearing a word. If a later frame shows otherwise, the
+   eyebrow is the candidate and it goes on **both** pages or neither.
 
 ### A5. `Save as playlist` belongs to the run, and must say so
 

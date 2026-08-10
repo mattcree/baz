@@ -82,12 +82,31 @@
    word may not need qualifying. It should credit the artist's list rather than
    the underlying records when played, which is the rule that just landed for
    playlists.
-5. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
+5. **The frame is not the frame in every place, by 12 px.** `theme::TOP_BAR_H`
+   is `2 · TOP_BAR_PAD_V + TRANSPORT_HIT + 1` = 49, but
+   `views::place_header_led` lays out whatever lead it is handed. A lead that
+   is a *control* — the Album place's breadcrumb, and `views::page`'s boxed
+   lead — makes a 49 px strip; a lead that is a bare `place_name` makes a
+   37 px one. So **Queue, Settings and the Artist place all sit 12 px above
+   where the Library, the record's page and the playlist's page sit**, and
+   `views/mod.rs`'s own sentence — *"the frame is the frame in every place —
+   navigating may not slide the content area by a pixel"* — is false by that
+   much today.
+
+   The fix is one line: hold the strip's lead at `TRANSPORT_HIT` inside
+   `place_header_led`, and delete `views::page`'s local box, which exists only
+   because the general fix moves four places' content on screen at once. It
+   wants its own commit, frames of all six places, and the `y=105`-style
+   measurements in `docs/design/impl/queue-merged/` and
+   `docs/design/12-now-playing-and-kiosk.md` re-read afterwards. Found in a
+   frame and measured at `docs/design/impl/one-page-two-subjects/` — a
+   playlist page's sleeve top at y = 77 against a record page's y = 88.
+6. **Cut v0.1.** Nothing is installable. The icon, the release rehearsal and
    the Flatpak build are all done; what is left is a screenshot for the
    metainfo, the version edit from `0.0.0`, a `workflow_dispatch` dry run,
    then the tag. **The tag is the owner's to cut** — the workflow produces a
    draft.
-6. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+7. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -100,7 +119,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-7. **Rewrite the README as the project's public face**, with the icon and real
+8. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
    last, so it describes what actually ships. Its keyboard table is still
    stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode,
@@ -109,8 +128,6 @@
 
 ## Doing
 
-- **One composition for a record's page and a list's page** — the owner's *"can
-  we reuse the basic layout and view of the playlist for the album view"*.
 - **Density: a fourth step, and the control on every page** — the owner's *"we
   should ensure the density options are available on all pages..."* and *"4
   levels makes sense to me"*. Carries the `views/artist.rs` tile-width defect
@@ -203,6 +220,26 @@
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **One page, two subjects** — the owner's *"can we reuse the basic layout and
+  view of the playlist for the album view and the playlist view accessed via
+  clicking into info — right now they are different but for no good reason."*
+  ADR-0024 §A2 had given the two pages one arrangement; what shipped was a
+  second **copy** of it. `crates/baz/src/views/page.rs` is that arrangement
+  written once, and the two pages hand it what is about their subject.
+  ADR-0024 §A2 (amended) and §A4.5; frames from both builds at
+  `docs/design/impl/one-page-two-subjects/`.
+  - **His second sentence needed nothing built.** *"clear via some sort of
+    title/subtitle telling us if it's an Album or a Playlist"* is what design
+    14's tiers 1 and 2 shipped: a serif italic title over a person's name
+    against a sans name over `Playlist · 12 records`. The frame of the two
+    blocks at one crop says so, so no eyebrow is drawn. If a later frame says
+    otherwise, an eyebrow goes on **both** pages or neither.
+  - **The strip leads with the subject on both now.** A playlist's page led
+    with the word `Playlist`, which is the kind stated twice — 58 px above
+    the byline that already says it, 4 px smaller.
+  - **Found in a frame, and it is the reason the harness shoots two builds:**
+    the quiet act hung from two lanes (x = 115 against x = 12), and **a
+    playlist's whole page rode 12 px higher than a record's**.
 - **A multi-CD album is one record** — the owner's *"it would be good if multi
   CD albums were a single item"*. ADR-0038; fixture, before/after frames and
   the shape table at `docs/design/impl/multi-disc/`.

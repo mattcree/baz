@@ -13,7 +13,12 @@
 
 **Status**: design study · **tier 1 shipped 2026-08-10** (§9) · **tier 2
 shipped 2026-08-10** — #6 and #7 adopted, **#8 declined on a frame** (§9) ·
-tier 3 is three questions waiting on the owner. Proposes an
+tier 3 is three questions waiting on the owner ·
+**§6 amended 2026-08-10** — *one page, two subjects*: the arrangement this
+study said the two pages *share* was two copies of it, and making it one
+found two divergences §3.4's table could not see (the quiet act's lane, and
+a whole page 12 px out because its strip's lead was a word rather than a
+control). Proposes an
 amendment to
 [ADR-0024](../adr/0024-playlists.md) §A1–§A2, which is where the sleeve and
 the shared page arrangement were decided, and touches
@@ -417,6 +422,14 @@ side, so it reads as a route rather than a contrast; and (c) invisible at
 the moment the eye is actually deciding, which is when it lands on the
 28 px name.
 
+> *Settled 2026-08-10 (one page, two subjects; ADR-0024 §A4.5).* Tier 1 gave
+> the kind its home in the byline, and the chrome's copy then said the same
+> thing twice, 58 px up and 4 px smaller. The strip leads with the **list's
+> name** now, which is `views::place_header_led`'s own rule for a place whose
+> subject changes and which the Album and Artist places already followed. The
+> lead was also 12 px shorter than a record's, because a bare word is not a
+> control — see §6's amendment.
+
 ---
 
 ## 4. Why they were built alike, and which premise has failed
@@ -711,6 +724,39 @@ the hierarchy.**
 the stack below `ALBUM_BREAKPOINT` 744. This was right: two arrangements for
 two nearly identical jobs would be two vocabularies, and the family the
 owner asked for in the first place is worth keeping.
+
+> **Amended 2026-08-10 — *one page, two subjects*.** This section said *share
+> the arrangement*, and §3.4 measured the two pages against each other and
+> found them the same. Both were right about the design and wrong about the
+> code: the arrangement was **two copies**, written weeks apart, and this
+> study compared them by reading them rather than by making them one. The
+> owner named it — *"right now they are different but for no good reason"* —
+> and the arrangement is now `crates/baz/src/views/page.rs`, one function the
+> two pages hand what differs (ADR-0024 §A2 as amended; §A4.5 for the strip's
+> lead).
+>
+> **Two divergences this study missed, both found in a frame** rather than in
+> the source, at [`impl/one-page-two-subjects/`](impl/one-page-two-subjects/README.md):
+>
+> 1. **The quiet act hung from two lanes.** §3.4's table compared the identity
+>    blocks and the rows and never looked at the aside below `Play`. A
+>    record's `Add to playlist…` was a *centred, full-width* box at
+>    `paper_dim`; a playlist's three acts were *natural-width* words at
+>    `paper`. Leftmost ink x = 115 against x = 12.
+> 2. **A playlist's whole page rode 12 px higher than a record's.**
+>    `TOP_BAR_H` is `2 · TOP_BAR_PAD_V + TRANSPORT_HIT + 1` = 49, but the
+>    shared strip lays out whatever lead it is handed, and §3.5's *"a kind
+>    word exists, but it is in the wrong place"* was reading a lead that was a
+>    bare 20 px word where the record's is a 32 px control. Sleeve top y = 88
+>    against y = 77.
+>
+>    **Tier 1's own frames could not have shown it**, and this is the
+>    methodological finding: §5.4 and tier 1 cropped each identity block out
+>    of *its own* page and stacked the crops, which compares **shapes**. The
+>    80 px claim was true and is still true. Two blocks of one shape at two
+>    positions look identical in that pair of crops and are 12 px apart on
+>    screen. A crop taken at the *same window coordinates* is what turns a
+>    shape into a position, and it is what this branch's harness does.
 
 **Change** — §A2's imported declared hierarchy. Restated per kind:
 
