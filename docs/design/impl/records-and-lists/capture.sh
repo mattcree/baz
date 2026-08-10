@@ -154,6 +154,14 @@ for size in "1280 860" "1920 1080"; do
   crop "${P}5-record-page-${W}x${H}" "${P}6-identity-found-${W}x${H}" \
        "620x120+$((280 + 40 + AIR + 320 + 24))+68"
   key Escape; sleep 0.8
+  # The two blocks stacked at the same crop, so the comparison is a look
+  # rather than an argument: same three lines, same three sizes, same three
+  # inks, same 80 px — and the middle line saying two different sorts of
+  # thing, which is the whole design.
+  magick "$OUT/${P}4-identity-made-${W}x${H}.png" \
+         "$OUT/${P}6-identity-found-${W}x${H}.png" -append \
+         "$OUT/${P}d-identities-together-${W}x${H}.png"
+  echo "  shot ${P}d-identities-together-${W}x${H}"
 
   # -------------------------------------------------------- 3 · the run strip
   # A · a record's run — no file behind it, so the word is live and the strip

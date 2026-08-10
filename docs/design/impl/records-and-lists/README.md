@@ -48,6 +48,7 @@ two sizes.
 | `04` / `14` `-identity-made` | Its identity block, cropped: `Road Trip` 28 / `Playlist` 19 / `14 tracks · 2:02:56` 12 |
 | `05` / `15` `-record-page` | A found thing's page, unchanged |
 | `06` / `16` `-identity-found` | Its identity block at the same crop: `Ochre` 28 / `Anne-Marie Puig` 19 / `1999 · 12 tracks · 59:18 · FLAC · 16-bit · 44.1 kHz` 12 |
+| `0d` / `1d` `-identities-together` | **The two blocks at the same crop, stacked** — the comparison as a look rather than an argument. Same three lines, three sizes, three inks, one 80 px block; the middle line is the only thing saying two different sorts of thing |
 | `07` / `17` `-run-of-a-record` | `Now playing` with a **record's** run — the case the owner was looking at |
 | `08` / `18` `-strip-unfiled` | Its summary strip, cropped: `Run · 2 of 12 · 55:03 left … Save as playlist` |
 | `09` / `19` `-run-from-a-file` | The same place with a run reified from `Road Trip`, untouched |
