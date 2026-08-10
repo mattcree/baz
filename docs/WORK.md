@@ -99,7 +99,15 @@
 ## Next
 
 1. **A deleted folder's records never leave the library — and the last thing
-   missing is one press.** `rm -rf` an album directory and its eight rows stay
+   missing is one press.** **Blocked, briefly and on purpose:** ADR-0042 §8
+   puts the item's *visible twin* on the record page's own strip, and that strip
+   is being rewritten right now by the branch merging the run column with the
+   two pages (the owner's *"the playlist view in the now playing and the
+   playlist view/album view are the same thing"*). Adding a control to a
+   composition mid-restructure is how `WORK.md` itself got mangled three times.
+   **Take this the moment that branch lands** — the design below is complete and
+   nothing about it depends on the outcome.
+   `rm -rf` an album directory and its eight rows stay
    on the wall for good. This is **deliberate and the reasoning is sound**: from
    the filesystem's side a deleted folder and an unmounted NAS are the same
    `NotFound` for every path beneath, and wiping a present listener's library to
