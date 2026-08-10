@@ -53,7 +53,11 @@
    Flatpak build are all done; what is left is a screenshot for the metainfo,
    the version edit from `0.0.0`, a `workflow_dispatch` dry run, then the tag.
    **The tag is the owner's to cut** — the workflow produces a draft.
-3. **Rewrite the README as the project's public face**, with the icon and real
+3. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** Visible in a
+   committed frame: at 2560 with the run standing, ~700 px of field sits
+   between the sleeve and the run column, because the record column hangs
+   left and the run stays 440 wide. A4 takes it to ~1100 at that size.
+4. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately near
    last, so it describes what actually ships. Its keyboard table is badly stale
    today: `Pull` is gone, `Q` never opened the queue, shuffle is a mode, the
@@ -61,9 +65,6 @@
 
 ## Doing
 
-- **The artwork at full size** (doc 12 step A2) — deletes the 720 px clamp that
-  makes full-screen *"look weird"*, adds the 1024 px hero decode and the
-  cover-derived field.
 - **The wall's scrollbar sits 108 px inboard of the window.** Measured on an
   isolated 1280×860 frame: the bar is at x 1168–1171 and the rail's letters at
   1233–1239, so the rail's whole lane sits between the bar and the window edge
@@ -121,6 +122,14 @@
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **The artwork stops at the file, and the room takes the record's colour**
+  (doc 12 A2 **and A3** — A2 alone did not answer the complaint: at 1920 the
+  record is height-bound, so deleting the 720 px clamp bought 53 px and left
+  the same empty room. The clamp made the square small; the *absent field*
+  made the room empty). A 1024 px hero decode, the sleeve now source-bound
+  (1024 at 2560; **300** for a 300 px cover, where it used to be a 2.25×
+  upscale of a 320 px thumb), and a three-hue field on the room's own
+  lightness ladder.
 - **Shuffle is a property of the walk.** The run keeps its order; the engine
   gained one standing `traversal` and nothing else. `shuffle.rs` deleted whole,
   along with two invalidation rules, the restore walk and the snapshot case.
