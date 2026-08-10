@@ -99,12 +99,23 @@ pair() { # prefix
   run_word                            # …and the run as we found it
 }
 
-for size in "1280 860" "1920 1080"; do
+restacked() { # the one composition below SPLIT_FLOOR
+  xdotool mousemove 340 250; sleep 0.4
+  xdotool click --repeat 2 --delay 120 1; sleep 1.2
+  key space
+  key ctrl+u
+  park; shot "03-restacked-${W}x${H}"
+}
+
+for size in "1280 860" "1920 1080" "1000 800"; do
   set -- $size; W=$1; H=$2
   Xvfb "$DISP" -screen 0 ${W}x${H}x24 -nolisten tcp & XPID=$!
   sleep 1
   launch "$W" "$H"
-  case $W in 1280) pair 01 ;; *) pair 02 ;; esac
+  # 1000 × 800 with the lane open is a 720 px body — below SPLIT_FLOOR 784,
+  # where the two columns re-stack into one and the record becomes the run's
+  # head block. It is the regime §5.5a says is real rather than theoretical.
+  case $W in 1280) pair 01 ;; 1920) pair 02 ;; *) restacked ;; esac
   kill "$APID" 2>/dev/null; wait "$APID" 2>/dev/null
   kill "$XPID" 2>/dev/null; wait "$XPID" 2>/dev/null
 done

@@ -32,6 +32,7 @@ fixture sample is a zero. The receipt the run printed:
 | `01c-run-on-collapsed-1280x860.png` | The run at the same 440 with the returns lane collapsed — the case §5.5a says costs the record nothing |
 | `01d-sleeve-collapsed-1280x860.png` | The widest the record gets at this window, and the one that shows ADR-0029's recovered 32 px |
 | `02a`…`02d` | The same four at 1920 × 1080 |
+| `03-restacked-1000x800.png` | **Below `SPLIT_FLOOR`.** A 720 px body, where the two columns re-stack into one: the record at `ART_MIN` 240 as the run's head block, cover left with the identity beside it, the needle under the pair at the head's width, and the rows below in the same scroll. One composition degrading, not a second layout — and the head scrolls away with the list, which is right once the surface has become the editor |
 
 ## What the pixels say
 
