@@ -68,9 +68,10 @@
 //! through [`crate::queue_window`]'s virtual window — everything off screen
 //! is two spacers, the wall's own discipline at list scale.
 
+use std::borrow::Cow;
+
 use iced::widget::{
-    Column, Space, button, column, container, image as iced_image, mouse_area, row, scrollable,
-    text, text_input, tooltip,
+    Column, Space, button, column, container, mouse_area, row, scrollable, text, text_input,
 };
 use iced::{Element, Length, alignment};
 
@@ -78,6 +79,7 @@ use crate::app::Message;
 use crate::player::{PlayerState, QueueRow, QueueRowState, RunOrigin};
 use crate::playlists::{Collecting, NameEntry};
 use crate::queue_window::{self, RowShape};
+use crate::views::page;
 use crate::{icon, theme};
 
 /// The `Save as playlist` field's id, so the caret can land in it the moment
@@ -170,12 +172,9 @@ pub(crate) struct Frame {
 /// render-ready reading, which is why the element is `'static`: the contents
 /// are a projection of engine events and a request-side record, not a borrow of
 /// the library, so nothing on screen can outlive a view-model rebuild mid-scan.
-#[expect(
-    clippy::too_many_lines,
-    reason = "the column is one composition — the summary strip, the save \
-              field, and the windowed rows loop — and the loop's boxing \
-              rules must stay in sight of the spacers they keep honest"
-)]
+// The `too_many_lines` expectation this carried is **gone rather than
+// silenced**: the rows loop no longer spells a row's anatomy, so the column is
+// the summary strip, the save field and the windowed loop, and that fits.
 #[expect(
     clippy::too_many_arguments,
     reason = "each argument is one independent reading the column renders — \
@@ -239,18 +238,15 @@ pub(crate) fn run_column<'a>(
                 let row_state = list.rows[index].clone();
                 if let Some(head) = row_state.head.clone() {
                     rows.push(
-                        container(album_group(
-                            head.album.as_deref(),
-                            &head.artist,
-                            // One `GAP_MD` of air around a new record's name,
-                            // so the break belongs to the record it opens.
-                            theme::GAP_MD,
-                        ))
-                        .height(Length::Fixed(queue_window::header_pitch(
-                            head.album.is_some(),
-                        )))
-                        .align_y(alignment::Vertical::Top)
-                        .into(),
+                        // A head that is not the list's own opener takes its
+                        // `GAP_MD` of air above, so the break belongs to the
+                        // record it opens.
+                        container(page::list_head(head.album.as_deref(), &head.artist, false))
+                            .height(Length::Fixed(queue_window::header_pitch(
+                                head.album.is_some(),
+                            )))
+                            .align_y(alignment::Vertical::Top)
+                            .into(),
                     );
                 }
                 let two_line = row_state.artist.is_some();
@@ -301,7 +297,7 @@ pub(crate) fn run_column<'a>(
                 .align_y(iced::Alignment::Center),
                 save_field(saving),
                 column![
-                    album_group(list.album.as_deref(), &list.artist, 0.0),
+                    page::list_head(list.album.as_deref(), &list.artist, true),
                     Column::with_children(rows),
                 ]
                 .spacing(theme::GAP_XS),
@@ -523,43 +519,6 @@ fn save_field(saving: Option<&NameEntry>) -> Element<'_, Message> {
     block.into()
 }
 
-/// The header over one album's run of rows: the record's title, and who it is
-/// filed under, in the room's quietest voice.
-///
-/// **Albums are listed as albums, never flattened** — the product's standing rules by way
-/// of the critique's stack. baz's queue is one list with a cursor and today it
-/// usually holds one album, so there is usually one of these; `Play all`
-/// already stacks several, and a second album is a second header in this same
-/// column with **no other part of this surface changing**.
-fn album_group(album: Option<&str>, artist: &str, air: f32) -> Element<'static, Message> {
-    let room = theme::active();
-    let title = album.unwrap_or(artist);
-    let mut block = column![
-        text(title.to_owned())
-            .size(theme::SIZE_BODY)
-            .line_height(theme::LEADING_BODY)
-            .font(theme::MEDIUM)
-            .color(room.paper_dim)
-            .wrapping(text::Wrapping::None),
-    ]
-    .spacing(theme::GAP_XXS);
-    // Only when it is not already the line above: an album with no title is
-    // headed by its artist, and repeating the artist under itself says nothing.
-    if album.is_some() {
-        block = block.push(
-            text(artist.to_owned())
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.heading())
-                .wrapping(text::Wrapping::None),
-        );
-    }
-    // **On the place's own heading lane**, with no inset of its own — two
-    // x-edges in this surface rather than four (law L5, and the audit's
-    // defect 11).
-    container(block).padding(theme::pad(air, 0.0)).into()
-}
-
 /// Nothing queued yet: said plainly, with the gesture that fills it.
 ///
 /// Quiet text rather than an illustration or a call to action — an empty queue
@@ -656,7 +615,6 @@ pub(crate) fn empty_state() -> Element<'static, Message> {
 /// pointer against its own bounds — both from the shell's one drag state.
 #[expect(
     clippy::too_many_arguments,
-    clippy::too_many_lines,
     reason = "a row is one anatomy and these are its readings; a struct \
               would name this call site and nothing else"
 )]
@@ -685,8 +643,13 @@ fn queue_row(
     // — but it is drawn in both modes, because the fact is true in both and an
     // interface that only marks what is next when it is surprising is one that
     // has decided when you are allowed to know.
+    //
+    // **The ring is this surface's own**, and it is the one part of the row a
+    // page cannot use: a document has no cursor, so it has no *next*. The dot
+    // beside it is [`page::lamp_dot`], shared, because *sounding* is a fact
+    // every surface states.
     let marker: Element<'static, Message> = match row_state.state {
-        QueueRowState::Playing => lamp_dot(),
+        QueueRowState::Playing => page::lamp_dot(),
         QueueRowState::Next => next_ring(),
         _ => text(row_state.position.to_string())
             .size(theme::SIZE_META)
@@ -694,62 +657,17 @@ fn queue_row(
             .color(room.paper_faint)
             .into(),
     };
-    // The playing row's title gains the medium weight the now-playing bar gives
-    // the same string; everything else keeps the list's regular face, so the
-    // emphasis moves down the queue with the music.
-    let heading = text(row_state.title)
-        .size(theme::SIZE_BODY)
-        .line_height(theme::LEADING_BODY)
-        .color(ink)
-        .wrapping(text::Wrapping::None);
-    let heading = if playing {
-        heading.font(theme::MEDIUM)
-    } else {
-        heading
-    };
-    let mut title = column![heading].spacing(theme::GAP_XXS);
-    if let Some(artist) = row_state.artist {
-        title = title.push(
-            text(artist)
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_dim)
-                .wrapping(text::Wrapping::None),
-        );
-    }
-    let body = button(
-        row![
-            // Centred on the title's own line rather than on the row's block,
-            // and the row top-aligned to keep it there — the same fix, the same
-            // lane and the same argument as `album::track_row`, because these
-            // are the same twelve rows.
-            container(marker)
-                .width(Length::Fixed(theme::TRACK_NO_W))
-                .height(Length::Fixed(theme::CAPTION_LINE_H))
-                .align_x(alignment::Horizontal::Right)
-                .align_y(alignment::Vertical::Center),
-            container(title).width(Length::Fill),
-            container(
-                text(row_state.duration)
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_faint)
-                    .wrapping(text::Wrapping::None)
-            )
-            .width(Length::Fixed(theme::DURATION_W))
-            .height(Length::Fixed(theme::CAPTION_LINE_H))
-            .align_x(alignment::Horizontal::Right)
-            .align_y(alignment::Vertical::Center),
-        ]
-        .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Start),
-    )
-    .width(Length::Fill)
-    // One indent lane for rows and one heading lane above them — no third edge
-    // introduced by a row's own padding (law L5).
-    .padding(theme::pad(theme::GAP_XS, 0.0))
-    .style(move |_theme, status| theme::track_row(room, room.wall, status, playing))
-    .on_press_maybe(live.then_some(Message::JumpToQueued(index)));
+    let body = page::track_row(page::TrackRow {
+        marker,
+        title: row_state.title.into(),
+        ink,
+        under: row_state
+            .artist
+            .map(|artist| (Cow::Owned(artist), room.paper_dim)),
+        duration: row_state.duration.into(),
+        playing,
+        press: live.then_some(Message::JumpToQueued(index)),
+    });
     // The drag wrapper owns the pointer for the body (crate::drag's module
     // docs): live rows lift on threshold and still click under it; every
     // row of the list measures a drag in flight against its own bounds.
@@ -770,21 +688,31 @@ fn queue_row(
     let offered = live && hovered;
     let mut slots = row![
         body,
-        step_slot(
+        // The reorder pair and the removal cross, in the composition's one
+        // slot anatomy ([`page::icon_slot`]) — the same three this file drew
+        // for itself in three private functions that were byte-for-byte the
+        // shared one.
+        page::icon_slot(
             icon::Glyph::ArrowUp,
             "Move up",
             index > 0,
             offered,
             Message::ShiftQueued(index, -1)
         ),
-        step_slot(
+        page::icon_slot(
             icon::Glyph::ArrowDown,
             "Move down",
             index + 1 < total,
             offered,
             Message::ShiftQueued(index, 1),
         ),
-        remove_slot(index, offered),
+        page::icon_slot(
+            icon::Glyph::Close,
+            "Remove from the queue",
+            true,
+            offered,
+            Message::RemoveQueued(index),
+        ),
     ]
     .spacing(theme::GAP_XS)
     .align_y(iced::Alignment::Center);
@@ -792,7 +720,10 @@ fn queue_row(
         // The transfer slot needs no engine — a pick can land in a file —
         // so it is offered on hover alone, and at rest while the panel
         // stands (the album page's own rule).
-        slots = slots.push(transfer_slot(index, collecting.panel_open || hovered));
+        slots = slots.push(page::transfer_slot(
+            collecting.panel_open || hovered,
+            Message::AddQueuedToPlaylist(index),
+        ));
     }
     // The row's right press opens its mirror menu (doc 09 §5.2): play,
     // the transfer verbs, remove — each a press this row's own controls
@@ -805,149 +736,6 @@ fn queue_row(
     )
 }
 
-/// One reorder stepper's reserved slot: the drawn ↑ or ↓ while the pointer
-/// is on the row, and a space of exactly the same width when it is not —
-/// the playlist page's `step_slot`, spending the queue's own message
-/// ([`Message::ShiftQueued`]) so the two editors stay one anatomy
-/// (doc 09 §8.2).
-///
-/// **Drawn glyphs, not font characters** (doc 10 §3.6): the slot row used
-/// to hold the drawn ✕ beside U+2191/U+2193 borrowed from the face at a
-/// visibly different stroke weight — the accidental fourth vocabulary the
-/// study names — and a control slot now carries a drawn glyph or a word,
-/// never a borrowed character. Icon-only, so the tooltip carries its name
-/// (§3.1's rule; ADR-0017 §4c), and it draws at the hovered weight for the
-/// ✕'s own reason: a control that exists only under the pointer has one
-/// reading.
-fn step_slot(
-    glyph: icon::Glyph,
-    name: &'static str,
-    can: bool,
-    offered: bool,
-    message: Message,
-) -> Element<'static, Message> {
-    let room = theme::active();
-    if !offered {
-        return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
-    }
-    let mark = container(
-        iced_image(icon::handle(glyph))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(if can {
-                theme::GLYPH_OPACITY_HOVER
-            } else {
-                theme::GLYPH_OPACITY_DISABLED
-            }),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(alignment::Horizontal::Center)
-    .align_y(alignment::Vertical::Center);
-    tooltip(
-        button(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .padding(0)
-            .style(move |_theme, status| theme::transport(room, room.wall, status))
-            .on_press_maybe(can.then_some(message)),
-        text(name)
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        tooltip::Position::Left,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
-}
-
-/// The row's transfer slot: the album page's `+` anatomy — the drawn
-/// [`icon::Glyph::Plus`] since doc 10 §3.6 — holding this row's track and
-/// opening the picker (doc 09 §8.1 — pick a destination, the Queue first
-/// among them).
-fn transfer_slot(index: usize, offered: bool) -> Element<'static, Message> {
-    let room = theme::active();
-    if !offered {
-        return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
-    }
-    let mark = container(
-        iced_image(icon::handle(icon::Glyph::Plus))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            .opacity(theme::GLYPH_OPACITY_HOVER),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(alignment::Horizontal::Center)
-    .align_y(alignment::Vertical::Center);
-    tooltip(
-        button(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .padding(0)
-            .style(move |_theme, status| theme::transport(room, room.wall, status))
-            .on_press(Message::AddQueuedToPlaylist(index)),
-        text("Add to a playlist, or the queue")
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        tooltip::Position::Left,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
-}
-
-/// The per-row removal target: a ✕ while the pointer is on the row, and an
-/// empty space of exactly the same width when it is not.
-///
-/// [`theme::STEPPER_HIT`] rather than [`theme::TRANSPORT_HIT`], the same square
-/// the settings' `−`/`+` pair uses: a destructive control inside a list row
-/// should be reachable without being the largest thing in the row, and 24 px is
-/// the size this room already gives a secondary target.
-///
-/// Inert when there is no engine to send the edit to — the same rule the row it
-/// sits in follows: a control that cannot act must not pretend it can.
-fn remove_slot(index: usize, offered: bool) -> Element<'static, Message> {
-    let room = theme::active();
-    if !offered {
-        return Space::with_width(Length::Fixed(theme::STEPPER_HIT)).into();
-    }
-    let mark = container(
-        iced_image(icon::handle(icon::Glyph::Close))
-            .width(Length::Fixed(theme::ICON_PX))
-            .height(Length::Fixed(theme::ICON_PX))
-            // Drawn at the hovered weight, like every glyph in the slot row:
-            // a control that exists only while the pointer is on its row has
-            // one reading, so its resting weight and its hovered weight are
-            // the same weight.
-            .opacity(theme::GLYPH_OPACITY_HOVER),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(alignment::Horizontal::Center)
-    .align_y(alignment::Vertical::Center);
-    tooltip(
-        button(mark)
-            .width(Length::Fixed(theme::STEPPER_HIT))
-            .height(Length::Fixed(theme::STEPPER_HIT))
-            .padding(0)
-            .style(move |_theme, status| theme::transport(room, room.wall, status))
-            .on_press(Message::RemoveQueued(index)),
-        text("Remove from the queue")
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        tooltip::Position::Left,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
-    .into()
-}
-
-/// The playing row's lamp dot — the same amber circle the shelf puts beside
-/// the playing album, and the same token behind it.
 /// **The next row's mark**: the lamp dot's ring, unlit.
 ///
 /// The same [`theme::DOT`] box in the same lane, drawn as a hairline circle in
@@ -976,16 +764,6 @@ fn next_ring() -> Element<'static, Message> {
     .into()
 }
 
-fn lamp_dot() -> Element<'static, Message> {
-    let room = theme::active();
-    container(Space::new(
-        Length::Fixed(theme::DOT),
-        Length::Fixed(theme::DOT),
-    ))
-    .style(move |_theme| theme::lamp_dot(room))
-    .into()
-}
-
 #[cfg(test)]
 mod tests {
     /// **The place draws the window's slice and nothing else** (doc 09 §7.1's
@@ -1003,12 +781,31 @@ mod tests {
         )
         .expect("this module's own source")
         .replace("\r\n", "\n");
+        // **The code half only** — `views::page`'s own `pages()` rule, and here
+        // it is load-bearing rather than tidy.
+        //
+        // This test searches **the file it lives in**, so until 2026-08-10
+        // every needle below was satisfied by the assertion that spelled it and
+        // the test could not fail. It had gone stale twice without anyone
+        // noticing: it looked for `window.height` after that argument was
+        // renamed `viewport_h`, and it looked for a reserved-slot literal that
+        // had moved to `views::page` entirely. Both passed.
+        //
+        // `now_playing.rs` and `implicit.rs` solve this by spelling their
+        // needles in halves; that works for a handful and not for twenty, so
+        // this one takes the same cut `views::page::tests::pages` takes and
+        // searches only what the module actually builds.
+        let source = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a source has a head")
+            .to_owned();
 
         // The window: the rows loop spends `queue_window`'s slice, both
         // spacers are built, and every drawn element is boxed at the pitch
         // the module declared — which is what keeps the spacers honest.
         assert!(
-            source.contains("queue_window::window(&shapes, scroll - rows_top, window.height)"),
+            source.contains("queue_window::window(&shapes, scroll - rows_top, viewport_h)"),
             "the rows are windowed by the pure module"
         );
         assert!(
@@ -1039,9 +836,22 @@ mod tests {
                 "a queue row's reserved slots spend `{spent}`"
             );
         }
+        // …and the reservation itself is `views::page::icon_slot`'s now — this
+        // file had three private copies of it, byte-for-byte, until the rows
+        // became one anatomy. The claim is unchanged and the address moved.
+        let shared = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/page.rs"),
+        )
+        .expect("the shared composition's source")
+        .replace("\r\n", "\n");
         assert!(
-            source.contains("Space::with_width(Length::Fixed(theme::STEPPER_HIT))"),
+            shared.contains("Space::with_width(Length::Fixed(theme::STEPPER_HIT))"),
             "an unoffered slot is a space of exactly the control's width"
+        );
+        assert!(
+            source.matches("page::icon_slot(").count() == 3
+                && source.contains("page::transfer_slot("),
+            "a queue row's four reserved slots are the composition's own"
         );
 
         // Step 8: the row's body is a drag source, and the drag is sugar —

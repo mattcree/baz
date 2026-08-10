@@ -562,66 +562,23 @@ fn track_row(
             .color(room.paper_faint)
             .into()
     };
-    // The playing row's title takes the medium weight the now-playing bar and
-    // the queue both give the same string — one more place the three surfaces
-    // agree about what is sounding.
-    let heading = text(track.title.as_str())
-        .size(theme::SIZE_BODY)
-        .line_height(theme::LEADING_BODY)
-        .wrapping(text::Wrapping::None);
-    let heading = if playing {
-        heading.font(theme::MEDIUM)
-    } else {
-        heading
-    };
-    let mut title = column![heading].spacing(theme::GAP_XXS);
-    if let Some(artist) = track.artist.as_deref().filter(|_| show_artist) {
-        title = title.push(
-            text(artist)
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_dim)
-                .wrapping(text::Wrapping::None),
-        );
-    }
-    let body = button(
-        row![
-            // The number column and the duration lane are centred on the
-            // **title's own line**, not on the row's block, and the row is
-            // top-aligned so they stay there. Centred on the block, a
-            // soundtrack row that carries a composer under its title dragged
-            // its number and its duration halfway down two lines.
-            container(marker)
-                .width(Length::Fixed(theme::TRACK_NO_W))
-                .height(Length::Fixed(theme::CAPTION_LINE_H))
-                .align_x(alignment::Horizontal::Right)
-                .align_y(alignment::Vertical::Center),
-            container(title).width(Length::Fill),
-            // The duration lives in a reserved [`theme::DURATION_W`] lane,
-            // right-aligned, so a thirteen-track record has a ruled right edge
-            // rather than a ragged one.
-            container(
-                text(duration)
-                    .size(theme::SIZE_META)
-                    .line_height(theme::LEADING_META)
-                    .color(room.paper_faint)
-                    .wrapping(text::Wrapping::None)
-            )
-            .width(Length::Fixed(theme::DURATION_W))
-            .height(Length::Fixed(theme::CAPTION_LINE_H))
-            .align_x(alignment::Horizontal::Right)
-            .align_y(alignment::Vertical::Center),
-        ]
-        .spacing(theme::GAP_SM)
-        .align_y(iced::Alignment::Start),
-    )
-    .width(Length::Fill)
-    // **No horizontal inset**: the number column starts on the page's own
-    // content lane and the duration lane ends on it, so the block a listener
-    // reads down shares its edges with the column that holds it (law L5).
-    .padding(theme::pad(theme::GAP_XS, 0.0))
-    .style(move |_theme, status| theme::track_row(room, room.wall, status, playing))
-    .on_press_maybe(press);
+    let body = page::track_row(page::TrackRow {
+        marker,
+        title: track.title.as_str().into(),
+        // A published record's row has no dimmed state — nothing on it can be
+        // missing or already played — so the ink is the one ink, stated. It
+        // used to be left unset and inherited from `theme::track_row`'s
+        // `text_color`, which is this exact colour.
+        ink: room.paper,
+        under: track
+            .artist
+            .as_deref()
+            .filter(|_| show_artist)
+            .map(|artist| (artist.into(), room.paper_dim)),
+        duration: duration.into(),
+        playing,
+        press,
+    });
     // The row's right press opens its mirror menu (doc 09 §5.2): the same
     // verbs the row's own controls speak, at the pointer.
     let target = crate::menu::Target::Track { album, row: index };
