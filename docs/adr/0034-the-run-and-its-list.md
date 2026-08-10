@@ -1,6 +1,6 @@
 # ADR-0034: The run and its list — `Origin`, and a history that remembers which list you were in
 
-**Status**: proposed (2026-08-10) · records the owner's model, given while the
+**Status**: accepted (2026-08-10) · **§2–§5 shipped**; §1's `QueueVm::origin` is not built yet — see *What shipped* below · records the owner's model, given while the
 queue/now-playing merge was being designed · **amends [ADR-0023](0023-playback-model.md) §1 and §4** (provenance
 generalised from *a playlist's name* to *the list's identity*) · **amends
 [ADR-0018](0018-play-history-ledger.md)** (the ledger gains a run marker; the
@@ -11,6 +11,46 @@ any pinned wire byte** · closes `docs/BACKLOG.md:9–25`, the owner's
 attribution defect · the surface that spends it is
 [`docs/design/12-now-playing-and-kiosk.md`](../design/12-now-playing-and-kiosk.md)
 and [ADR-0029 §8](0029-the-ambient-surface.md)
+
+## What shipped, 2026-08-10
+
+The owner asked for the defect, not the model: *"when I play a song from a
+playlist it should only bump the recency of that playlist, not the underlying
+albums please"*. So the **ledger half** was built whole and §1's queue-side
+refactor was not. What is on `main`:
+
+| | |
+|---|---|
+| **§2** the origin on `SetQueue` | **shipped.** `command_wire_format_is_stable` is *unmodified* — `protocol.rs` gained 92 lines and deleted none. The `Some` arm is pinned in its own test, beside one that reads an older `set_queue` back. |
+| **§3** the `kind:key:display` encoding | **shipped**, as `crate::origin::Origin::{encode,decode}`, all six kinds, with one deviation below. |
+| **§4** the run marker | **shipped**, less rule 4 — see ADR-0018's amendment for why the second header block on an *older* file is refused. Rules 1–3 hold, and the marker is written in the **same `write_all`** as the run's first play, so it can never be orphaned by a crash between the two. |
+| **§5** `History::runs()` | **shipped**, with `History::last_played_unlisted()` beside it — the per-track reading the lane folds. `TrackHistory` gained nothing. |
+| **§1** `Origin` as a type | **shipped as the type**, promoted out of `implicit` exactly as §1.4 asks, with `file()`, `is_destination()` and `name()`. |
+| **§1** `QueueVm::origin` | **not built.** `QueueVm::provenance` is still `Option<String>`, so the product constructs `Origin::Playlist` and nothing else. |
+
+**That last row is the honest boundary, and it is not a shortfall against the
+owner's ask.** A run with no origin writes a marker naming no list, and its
+plays fold onto their records exactly as an unmarked ledger's always did — so
+an album's run still credits the album, which is the other half of what he
+said. What §1 would add is a *subject* for the five other kinds: the queue
+summary reading `Ochre · 2 of 9` instead of `2 of 9`, and a draw crediting
+nothing where today it credits the records it quoted. Neither is the defect.
+
+**One deviation from §3, found by building it.** §1's `Album { id, name,
+artist }` cannot round-trip: the encoding has **one** display field, and a
+second name would need a fourth. `Album` and `Artist` therefore carry `id` and
+`name` only. The lane already resolves a record's artist from the index when it
+draws the row, so nothing reads a name this loses.
+
+**One rule the implementation adds**, because marking a run *excludes* its
+plays from the records they quoted: **a kind `lane::subject_of` answers `None`
+for must not be written as a marker until the lane can credit it**, or the
+touch is lost rather than moved. `origin.rs`'s
+`no_kind_is_written_that_the_lane_cannot_credit` is that rule as a test, and it
+is what §1 has to satisfy when it lands.
+
+Frames, and the owner's own check end to end:
+[`docs/design/impl/ledger-remembers-the-list/`](../design/impl/ledger-remembers-the-list/README.md).
 
 ## Context
 

@@ -6,8 +6,20 @@
 
 ## Product decisions to honour later
 
-- **A list played in a *previous* session still shows as its records in the
-  lane.** The owner: *"the recent bit shows albums popping up even though it
+- ~~**A list played in a *previous* session still shows as its records in the
+  lane.**~~ **Closed 2026-08-10** — ADR-0034 §2–§5 shipped. `SetQueue` carries
+  the run's origin, the ledger opens each run with a `# baz run` marker, and
+  the lane's launch fold reads the markers, so a list played last week comes
+  back as the list. Two frames of the owner's own check —
+  play, quit, relaunch — are in
+  [`docs/design/impl/ledger-remembers-the-list/`](design/impl/ledger-remembers-the-list/README.md).
+  The **sixth ledger field this entry called for was the wrong answer**, and
+  specifying it is what found that; the marker costs no pinned wire byte, no
+  migration and no downgrade hazard, and every byte-exact and four-tab pin in
+  the repository passes unmodified. The entry as it stood is kept below,
+  because the reasoning it records is what the fix was measured against.
+
+  The owner: *"the recent bit shows albums popping up even though it
   was the playlist which was played"*. The live half is fixed — a run reified
   from a list touches the **list** and not the records it quotes
   (`lane::played_list`) — but the fix cannot reach across a quit, and the
@@ -38,6 +50,26 @@
   > written, and costs **no pinned wire byte** — `skip_serializing_if` keeps
   > `command_wire_format_is_stable`'s bytes exactly. Closed when M4 of doc 12
   > §12.0 ships.
+- **A run still carries a playlist's *name*, not its `Origin`** — ADR-0034 §1's
+  half, deliberately not built with §2–§5. `QueueVm::provenance` is still
+  `Option<String>`, so the product constructs `Origin::Playlist` and nothing
+  else: an album's run, `Play all`, a draw and a run made by hand all reach the
+  ledger as *we do not know*, which folds them onto their records exactly as an
+  unmarked ledger always did. **That is correct for the owner's ask** — a fixed
+  list is not a playlist, and an album's run should credit the album — so what
+  is deferred is not a defect but a *subject*: `queue_summary` reading `Ochre ·
+  2 of 9 · 31:04 left` instead of `2 of 9 · 31:04 left`, five kinds of run
+  naming themselves in the ledger, and `Origin::Draw` crediting **nothing**
+  where today it credits every record it quoted. The type is built and its
+  decoder already reads all six kinds, so this is a `QueueVm` field and its
+  construction sites, not a design.
+  **One rule it must satisfy**, discovered while building the fold: marking a
+  run *excludes* its plays from the records they quoted, so a kind
+  `lane::subject_of` answers `None` for — `Artist`, `AllSongs`, `Draw`, `Hand`
+  — **must not be written as a marker until the lane can credit it**, or the
+  touch is lost rather than moved. `origin.rs`'s
+  `no_kind_is_written_that_the_lane_cannot_credit` fails the moment a second
+  constructor appears without that question being answered.
 - **The lane and the panel both list playlists**, and that is an accepted
   transitional state rather than a design (ADR-0030's amendment). The panel
   cannot go while it is the picker for `Add to…` — ADR-0031's card at the

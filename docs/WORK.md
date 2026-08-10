@@ -96,6 +96,38 @@ Nothing. The queue above is the next thing.
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **The ledger remembers the list** — the owner: *"when I play a song from a
+  playlist it should only bump the recency of that playlist, not the underlying
+  albums please"*. The live half already worked; this is the **cross-quit**
+  half, which `docs/BACKLOG.md`'s first entry had carried as **Owner decision**
+  since the live fix landed. ADR-0034 §2–§5 shipped: `SetQueue` carries the
+  run's origin, the ledger opens each run with a `# baz run` comment, and the
+  lane's launch fold reads the markers. `docs/BACKLOG.md`'s entry is struck.
+  Frames of his own check — play, quit, relaunch — at
+  `docs/design/impl/ledger-remembers-the-list/`.
+  - **The backlog's own prescription was wrong, and specifying it is what
+    found that.** It called for *"a sixth field in the ledger line (format v1 →
+    v2)"*. `format::decode` rejects a six-column line outright and ADR-0018 §3
+    guarantees the file is never rewritten, so a v2 writer would have left a
+    permanently mixed file that every older baz reads as **partly corrupt** —
+    silently losing those plays from the play counts, the `PLAYED` key and the
+    lane. `#` lines were already skipped and already not damage, so the grain
+    of the file changed and the grammar of a line did not. Every byte-exact and
+    four-tab pin passes unmodified; `command_wire_format_is_stable` was not
+    touched, and `protocol.rs` has 92 insertions and no deletions.
+  - **Found on the way, three things.** (a) ADR-0034 §1's `Album { id, name,
+    artist }` **cannot round-trip** through §3's encoding, which has one
+    display field — `Album` and `Artist` carry `id` and `name`, and the lane
+    resolves the artist from the index as it already did. (b) §4's fourth rule,
+    a second header block appended to an older file, is **refused**: detecting
+    "already appended" in an append-only file needs an unbounded scan at every
+    launch or a second store of a fact the ledger should hold. ADR-0018's
+    amendment records it. (c) Marking a run *excludes* its plays from the
+    records they quoted, so a kind `lane::subject_of` cannot credit must never
+    be written as a marker, or the touch is lost rather than moved — asserted
+    as `no_kind_is_written_that_the_lane_cannot_credit`, and it is the rule the
+    §1 work below has to satisfy.
+
 - Doc 14 Tier 2 — **the distinction moves into the type**. A record's page sets
   its title in the serif italic; a playlist's page deliberately keeps the sans,
   and that asymmetry *is* the design. The two identity blocks did not move a
