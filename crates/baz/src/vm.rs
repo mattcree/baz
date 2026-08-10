@@ -55,8 +55,8 @@ pub const SEARCH_LIMIT: usize = 10_000;
 /// How many rows the **Songs** section shows
 /// (`docs/design/09-implicit-playlists.md` §5): the ranked head of the match
 /// set, not an exhaustive list — the filtered wall below is the exhaustive
-/// answer, in covers. Eight echoes the room's other handful,
-/// [`crate::shuffle::SLEEVES`].
+/// answer, in covers. Eight is the room's own handful — the number of rows a
+/// listener reads without counting.
 pub const SONGS: usize = 8;
 
 /// One album tile on the shelf, owned by the UI.

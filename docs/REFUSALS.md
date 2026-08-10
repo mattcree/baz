@@ -32,19 +32,48 @@
 **No autoplay. No radio.** The queue empties and there is silence. **Silence is
 a feature.**
 
-Shuffle is a thing you *start*, never a thing that starts itself. `VISION.md`
+Shuffle is a thing you *turn on*, never a thing that starts itself. `VISION.md`
 pillar 4's steered shuffle survives as an explicit gesture. This answers the
 open decision ADR-0016 recorded and refused to answer silently: *what happens
-when an album ends.* Nothing happens.
+when an album ends.* Nothing happens — shuffle on or off, the run reaches its
+end and there is silence, because a mode that re-ordered a finite list is still
+a mode over a finite list.
 
-**No invisible shuffle pools.** Shuffle draws only from what the wall currently
-shows — a shelf, the filter's matches, everything — and the pool is visible:
-non-pool covers dim, the next draws carry faint rings. A shuffle whose source
-you cannot see is a recommendation engine wearing a dice icon. `Play all`
-(doc 09 §7.1) keeps the same rule from the other direction: its scope is
-exactly what the wall shows, in the wall's own order — playing what you
-cannot see is refused for the reason drawing from it is, and "everything in
-the library" is the empty query, one `Esc` away.
+*Rewritten 2026-08-10 to record the owner's decision.* This read *"a thing you
+**start**"*, which was written when shuffle was an **act**: one press drew eight
+records from the wall and there was nothing to turn off. The owner: *"can you
+make shuffle a property of the player i.e. toggle on/off."* The entry's force
+was never about act-versus-mode — it was about **nothing beginning that nobody
+asked for**, and a toggle a listener sets, sees lit and unsets is as far from
+autoplay as a press was.
+
+**No shuffle a listener cannot see the whole of.** *(Rewritten 2026-08-10 from
+"no invisible shuffle pools".)*
+
+The entry read: *shuffle draws only from what the wall currently shows — a
+shelf, the filter's matches, everything — and the pool is visible: non-pool
+covers dim, the next draws carry faint rings. A shuffle whose source you cannot
+see is a recommendation engine wearing a dice icon.* It was written for a
+**draw**, and a draw has a source; the dimming and the rings were the mitigation
+for a source that was otherwise only implied.
+
+**A mode has no source of its own at all**, and that is the honest answer to
+what the pool is now: *the pool is the run*. Shuffle re-orders the queue — the
+list a gesture already put there, on purpose — and it can neither widen it nor
+add to it, because permuting a list is all it can do. Which makes the pool an
+ordinary place you can open: the Queue place lists every row of it, in the order
+it will play, with the needle stating how much is left. The wall's dimming and
+rings went with the draw, and what replaced them is stronger than a mitigation —
+the pool is not *marked* visible, it is *literally the list on screen*.
+
+The principle is unchanged and is what the rewrite exists to keep: **a listener
+can see everything shuffle can play.** What is refused, still and by name: a
+shuffle that reaches past the run into the library for "something similar", a
+shuffle that refills an emptying queue, and any candidate pool that is not a
+list you can read. `Play all` (doc 09 §7.1) keeps the rule from the other
+direction: its scope is exactly what the wall shows, in the wall's own order —
+playing what you cannot see is refused, and "everything in the library" is the
+empty query, one `Esc` away.
 
 **No auto-generated playlists.** Every playlist is asked for by a person and
 owned by them thereafter. Refused: generation without a request, mutation
@@ -138,9 +167,11 @@ asserted in code.
 mistake the palette exists to avoid. Unchanged by the hover veil above and
 worth saying why: a scrim is a surface laid over *the collection* to make
 something else readable, and the veil is a mark on **one** object under the
-pointer that stops before that object is hidden. The shuffle pool's dimming is
-governed here too, and it is not a scrim for the same reason — it is the
-artwork's own opacity, not a layer over it.
+pointer that stops before that object is hidden. (The shuffle pool's dimming was
+governed here too and was not a scrim for the same reason — the artwork's own
+opacity, not a layer over it. It went on 2026-08-10 when shuffle became a
+property of the player and there stopped being a pool to mark; nothing on the
+wall is dimmed by anything now.)
 
 **No spinner and no progress bar, anywhere.** During a scan the shelf filling
 with covers *is* the progress indicator. No importer dialog, no progress modal.
@@ -151,6 +182,16 @@ tidiness.** (`docs/design/03-interface-prior-art.md` R11: three vendors bought
 reversed; what was lost was always position, provenance and skip.) Replacing a
 slot with a *better statement of the same fact* is the one permitted move — it
 is how the seek row became the needle.
+
+*The addition half spent (2026-08-10), and recorded here because the ratchet is
+only worth anything if its permitted moves are logged as well as its forbidden
+ones.* **Shuffle is now a slot on this bar**: the owner made it a property of
+the player, and the player's surface is the bar — which is under every place,
+where the Library strip it came from is under one. It stands at the head of the
+right-hand zone, with the volume and the mute, because that zone already holds
+the player's *standing properties* where the transport holds acts that are spent
+the moment they are pressed. Nothing was removed to make room and the transport
+did not move.
 
 **Sound from the wall is one press.** Hover a sleeve and four options are laid
 over it — `Play`, `Queue`, `Add to…`, `Open`. `Play` sounds the record from
@@ -269,7 +310,15 @@ bar's now-playing text) rather than a gesture.
 
 **No state is signalled by colour alone.** The lamp dot *replaces* the track
 number rather than tinting it; the halo is accompanied by a dot; the shuffle
-pool is marked by dimming *and* by rings.
+toggle's lit state is carried by the **accent and the glyph's own tooltip**,
+which names which way the control stands in words.
+
+*Rewritten 2026-08-10.* The third example was *"the shuffle pool is marked by
+dimming **and** by rings"* — the wall's two marks, which went with the draw when
+shuffle became a property of the player. The rule did not go with them: a
+control whose only difference between on and off is its colour is exactly what
+this entry forbids, so the toggle's second channel is the sentence it says on
+hover.
 
 ---
 

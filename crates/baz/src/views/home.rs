@@ -523,13 +523,7 @@ fn recently_added<'a>(
     let mut tiles = row![].spacing(hang.gutter);
     for album in newest {
         tiles = tiles.push(crate::views::shelf::tile(
-            shelf,
-            player,
-            hang,
-            album,
-            0.0,
-            (false, false),
-            collecting,
+            shelf, player, hang, album, 0.0, collecting,
         ));
     }
     Some(

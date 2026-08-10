@@ -15,8 +15,8 @@
 //!
 //! What is left is one subject, stated in the two vocabularies doc 10 §0.3
 //! separates: **the states** — ARTIST · YEAR · GENRE · ADDED · PLAYED, caps
-//! and tracked, one of them current — and **the acts** — `Play all` and
-//! `Shuffle`, sentence-case words. Narrow-then-arrange used to read
+//! and tracked, one of them current — and **the act** — `Play all`, one
+//! sentence-case word behind the play triangle. Narrow-then-arrange used to read
 //! left to right across this strip; the narrowing is in the lane now and the
 //! strip begins at the arrangement. The gear stays in the corner because it is
 //! the *application's* affair rather than the frame's, and the lane's head is
@@ -64,14 +64,16 @@ pub(crate) const WELL_W: f32 = 200.0;
 /// measured against it.
 pub(crate) const KEYS_W: f32 = 314.0;
 
-/// The acts cluster's reserved width (logical px): the triangle and its
-/// word, `Shuffle`, their paddings and the one `GAP_XS` gap.
+/// The act's reserved width (logical px): the triangle, its word, and their
+/// padding.
 ///
-/// It was 182 with `Pull` in it. The owner removed that word on 2026-08-10
-/// and the reservation shrank with it — a slot still reserving room for a
-/// control that is gone is the strip's budget lying about what it holds
-/// (ADR-0026 §3's *asserted in code*).
-pub(crate) const ACTS_W: f32 = 144.0;
+/// It was 182 with `Pull` and `Shuffle` in it. Both left on 2026-08-10 on the
+/// owner's decision — `Pull` removed outright, `Shuffle` **moved** to the
+/// now-playing bar when it stopped being an act and became a property of the
+/// player. A slot still reserving room for a control that is elsewhere is the
+/// strip's budget lying about what it holds (ADR-0026 §3's *asserted in
+/// code*), so the reservation follows the words: 182 → 144 → 88.
+pub(crate) const ACTS_W: f32 = 88.0;
 
 /// The slim Library strip — one line at [`theme::TOP_BAR_SPLIT`] and above,
 /// two below it, a hairline rule under either.
@@ -227,67 +229,56 @@ pub(crate) fn view(shelf: &Shelf, strip_width: f32, ink: Ink) -> Element<'_, Mes
     .into()
 }
 
-/// **The wall's two acts**: `Play all` and `Shuffle`, as words, beside the
-/// arrangement.
+/// **The wall's one act**: `Play all`, beside the arrangement.
 ///
-/// # Why they are here and not in the transport
+/// # Why it is here and not in the transport
 ///
-/// Both are questions asked *of the collection* — "play what I am looking
-/// at, in order" and "play what I am looking at, by chance" — and the answer
-/// to each is decided entirely by what the wall is showing. That is this bar's subject (L8.1: a control goes where
-/// what it reads is). The now-playing bar's subject is the record that is
-/// sounding, and none of these is about that record; putting them there would
-/// also mean moving the transport, which `docs/REFUSALS.md` does not permit
-/// for tidiness and would not be tidy anyway.
+/// It is a question asked *of the collection* — "play what I am looking at, in
+/// order" — and the answer is decided entirely by what the wall is showing.
+/// That is this bar's subject (L8.1: a control goes where what it reads is).
+/// The now-playing bar's subject is the record that is sounding; putting this
+/// there would also mean moving the transport, which `docs/REFUSALS.md` does
+/// not permit for tidiness and would not be tidy anyway.
 ///
-/// They sit *after* the group keys, in the same cluster, because the cluster
-/// reads left to right as **narrow, then arrange, then play or draw** — the
-/// order the gestures actually happen in. `Play all` leads the three
-/// (doc 09 §7.1, S6): it is the plainest of them — the wall, front to back —
-/// and the one press that makes February's select-all-to-a-playlist workaround
-/// one word. Its scope *is* the wall: the empty query plays everything, a
-/// filter plays the matches, a YEAR arrangement plays the collection in
-/// chronological order.
+/// # `Shuffle` stood beside it, and L8.1 is why it does not
 ///
-/// # They are controls, and that is not optional
+/// It was the second act, asking the same question a different way: *play what
+/// I am looking at, by chance*. The owner made shuffle a property of the player
+/// on 2026-08-10 — *"can you make shuffle a property of the player i.e. toggle
+/// on/off"* — and L8.1 then moves it on its own: a control goes where what it
+/// reads is, what a mode reads is **the player**, and the player's surface is
+/// the now-playing bar, which is in every place where this strip is in one. A
+/// mode that governs a playlist's `Play` cannot live on a control a listener
+/// cannot see from the playlist page. It is `crate::views::bottom_bar`'s
+/// `shuffle_toggle` now, and it wears the crossed arrows doc 10 §3.2 refused it
+/// while it was an act.
+///
+/// `Play all` sits *after* the group keys, in the same cluster, because the
+/// cluster reads left to right as **narrow, then arrange, then play** — the
+/// order the gestures actually happen in. Its scope *is* the wall: the empty
+/// query plays everything, a filter plays the matches, a YEAR arrangement plays
+/// the collection in chronological order.
+///
+/// # It is a control, and that is not optional
 ///
 /// `docs/REFUSALS.md`: *"Every action in baz has a visible, pointer-reachable
 /// control. No action is keyboard-only, and no control's only affordance is
-/// hover."* Neither has a key; both have this. Each sends the identical
-/// message any other route sends, which is the same discipline the group keys
-/// and the transport already keep.
+/// hover."* `Play all` has no key; it has this. It sends the identical message
+/// any other route sends, which is the same discipline the group keys and the
+/// transport already keep.
 ///
-/// # And they are words
+/// # And it is a word
 ///
-/// No dice glyph. `crate::icon` draws one small deliberate sprite sheet and a
-/// die would be a new mark for a thing with a short unambiguous name — and, more
-/// to the point, a dice icon is exactly the costume the refusals ledger says a
-/// recommendation engine wears. baz's shuffle can afford to be spelled out
-/// because it can say what it is drawing from.
-///
-/// Sentence case in the Medium face, like the doors: these are **actions**,
-/// where the caps-and-tracked row beside them is a set of *states* one of
-/// which is current — two of doc 10 §0.3's three vocabularies, and the third
-/// (the drawn glyph) enters this strip only where its rule admits it: the
-/// gear, the magnifier, and `Play all`'s leading triangle.
+/// Sentence case in the Medium face, like the doors: this is an **action**,
+/// where the caps-and-tracked row beside it is a set of *states* one of which
+/// is current — two of doc 10 §0.3's three vocabularies, and the third (the
+/// drawn glyph) enters this strip only where its rule admits it: the gear, the
+/// magnifier, and `Play all`'s leading triangle.
 fn draws() -> Element<'static, Message> {
-    row![
-        play_all(),
-        // The draw word teaches at the moment of relevance (doc 11 §5 P6.2):
-        // it carries a tooltip saying what the press will do, in words,
-        // before the first press ever risks it — `Shuffle`'s word is almost
-        // enough but its bound is not in it. ("What the Library shows", not
-        // "the wall": room vocabulary stays internal, P4's rule applied to
-        // P6's sentences.)
-        draw_word(
-            "Shuffle",
-            Message::Shuffle,
-            "Play 8 records drawn from what the Library shows",
-        ),
-    ]
-    .spacing(theme::GAP_XS)
-    .align_y(iced::Alignment::Center)
-    .into()
+    row![play_all()]
+        .spacing(theme::GAP_XS)
+        .align_y(iced::Alignment::Center)
+        .into()
 }
 
 /// **`Play all`, wearing the triangle** (doc 10 §3.5, §7 step 4): `Play
@@ -327,46 +318,6 @@ fn play_all() -> Element<'static, Message> {
     .padding(theme::pad(0.0, theme::GAP_SM))
     .style(move |_theme, status| theme::word_button(room, room.wall, status))
     .on_press(Message::PlayAll)
-    .into()
-}
-
-/// The draw word: [`theme::TRANSPORT_HIT`] tall like every control
-/// in the product (law L7), centred in its box by the box (law L3), with a
-/// tooltip naming what the press does (doc 11 §5 P6.2) — the mechanism the
-/// gear already spends, now spent where the words are load-bearing and not
-/// quite enough. Below the control, the gear's own position rule: the strip
-/// is the window's top edge and a tip above it would clip.
-fn draw_word(
-    label: &'static str,
-    message: Message,
-    tip: &'static str,
-) -> Element<'static, Message> {
-    let room = theme::active();
-    let control = button(
-        container(
-            text(label)
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .font(theme::MEDIUM)
-                .wrapping(text::Wrapping::None),
-        )
-        .height(Length::Fill)
-        .align_y(alignment::Vertical::Center),
-    )
-    .height(Length::Fixed(theme::TRANSPORT_HIT))
-    .padding(theme::pad(0.0, theme::GAP_SM))
-    .style(move |_theme, status| theme::word_button(room, room.wall, status))
-    .on_press(message);
-    tooltip(
-        control,
-        text(tip)
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION),
-        tooltip::Position::Bottom,
-    )
-    .gap(theme::GAP_XS)
-    .padding(theme::GAP_XS)
-    .style(move |_theme| theme::tooltip(room))
     .into()
 }
 

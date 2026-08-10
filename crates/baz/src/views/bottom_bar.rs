@@ -108,7 +108,11 @@ pub(crate) fn view(
             .width(Length::Fill)
             .clip(true),
         transport_row(player, ink),
-        container(status)
+        // **The properties zone.** Shuffle stands at its head, in a fixed slot
+        // *outside* the right-aligned status row, so that nothing the status
+        // says — a skipped-tracks note, a signal path arriving — can move it.
+        // The row grows leftward into the slack between the two.
+        container(row![shuffle_toggle(player, ink), status].spacing(theme::GAP_LG))
             .width(Length::Fill)
             .align_x(alignment::Horizontal::Right)
             .clip(true),
@@ -778,6 +782,94 @@ fn glyph_button(
     mouse_area(named)
         .on_enter(Message::ControlEntered(control))
         .on_exit(Message::ControlLeft(control))
+        .into()
+}
+
+/// **The player's shuffle property**: the crossed arrows, lit when it is on.
+///
+/// # Why it is on this bar and not in the Library strip
+///
+/// One line, and it is L8.1's: *a control goes where what it reads is.* What a
+/// mode reads is **the player**, and the player's surface is this bar — which
+/// is under every place, where the strip is under one. A shuffle that governs a
+/// playlist's `Play` cannot live on a control a listener cannot see from the
+/// playlist page.
+///
+/// `docs/REFUSALS.md`'s slot ratchet is engaged rather than snuck past: it
+/// permits **adding** a slot to this bar and forbids removing one for
+/// tidiness. This is an addition, and the entry is amended to record it.
+///
+/// # Why the right-hand zone rather than the transport
+///
+/// The transport is the zone of **acts that happen once** — Previous, Play,
+/// Next, each spent the moment it is pressed — and a fourth glyph among three
+/// verbs would read as a fourth verb. The right-hand zone is where the player's
+/// **standing properties** already are: the volume, the mute, and the signal
+/// path they produce, none of which any track boundary touches. Shuffle is one
+/// of those, so it stands with them. It also keeps the transport symmetric
+/// about the bar's centre line and [`theme::TRANSPORT_W`] untouched.
+///
+/// # The glyph, and the lit state
+///
+/// `docs/design/10-controls-and-iconography.md` §3.2 refused the crossed arrows
+/// for a precise reason: the symbol *promises a mode with a lit state*, and
+/// baz's shuffle was an act. It is a mode now, so the promise is one the control
+/// can keep, and the clause is rewritten rather than merely overridden. Lit is
+/// the **accent**, and that is the one place the accent-discipline note admits
+/// a second use: this control creates playback truth about what sounds next in
+/// exactly the way `Play album` creates it about what sounds now.
+///
+/// The tooltip says which way the press goes, because a two-state glyph with
+/// one name is the thing a first-timer cannot form an expectation about
+/// (doc 11 §5 P6.2).
+fn shuffle_toggle(player: &PlayerState, ink: Ink) -> Element<'static, Message> {
+    let room = theme::active();
+    let on = player.shuffle();
+    let mark = container(
+        iced_image(icon::inked(
+            icon::Glyph::Shuffle,
+            if on { room.lamp } else { room.glyph() },
+        ))
+        .width(Length::Fixed(theme::ICON_PX))
+        .height(Length::Fixed(theme::ICON_PX))
+        .opacity(if on {
+            1.0
+        } else {
+            theme::glyph_ink(
+                true,
+                false,
+                ink.hover(Control::Shuffle),
+                ink.pressed(Control::Shuffle),
+            )
+        }),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    let control = button(mark)
+        .width(Length::Fixed(theme::TRANSPORT_HIT))
+        .height(Length::Fixed(theme::TRANSPORT_HIT))
+        .padding(0)
+        .style(move |_theme, status| theme::transport(room, room.recess, status))
+        .on_press(Message::ToggleShuffle);
+    let named = tooltip(
+        control,
+        text(if on {
+            "Shuffle is on \u{2014} turn it off and the run goes back to its own order"
+        } else {
+            "Shuffle is off \u{2014} turn it on and what plays next is shuffled"
+        })
+        .size(theme::SIZE_CAPTION)
+        .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Top,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room));
+    mouse_area(named)
+        .on_enter(Message::ControlEntered(Control::Shuffle))
+        .on_exit(Message::ControlLeft(Control::Shuffle))
         .into()
 }
 

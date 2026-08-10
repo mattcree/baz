@@ -838,6 +838,10 @@ pub struct SignalNote {
 /// `PartialEq` but not `Eq`: pointer geometry is measured in floating-point
 /// logical pixels, and there is no honest total equality over those.
 #[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "four independent facts about four different things — whether a transport command               is in flight, whether the output is muted, whether a mute command is in flight,               and whether shuffle is on. The last is a standing decision the listener made and               the other three are moments in a conversation with the engine; folding any of them               together would invent states the player does not have"
+)]
 pub struct PlayerState {
     availability: Availability,
     phase: Phase,
@@ -899,6 +903,38 @@ pub struct PlayerState {
     /// the one place engine events are allowed to change anything. The
     /// vocabulary and the arithmetic live in [`crate::replaygain`].
     replay_gain: ReplayGain,
+    /// **Whether shuffle is on** — the owner's decision, 2026-08-10:
+    /// *"can you make shuffle a property of the player i.e. toggle on/off."*
+    ///
+    /// A **standing decision**, not session state: persisted in `config.toml`
+    /// beside ReplayGain, the group key and the density, seeded at start-up by
+    /// [`Self::seed_shuffle`] for [`Self::seed_volume`]'s reason. Nothing about
+    /// starting, stopping or skipping a track touches it, so it is deliberately
+    /// absent from [`Self::reset_progress`] and from [`Self::engine_closed`].
+    ///
+    /// It is a property of the **player** rather than of a list, which is why
+    /// it lives here: it governs `Play` on a record, `Play all`, a playlist's
+    /// `Play` and a track click alike, and a flag hung on any one of those
+    /// would have to be four flags that agreed.
+    ///
+    /// **The engine does not know about it.** ADR-0023 §4 keeps the queue
+    /// dumb — no shuffle flag, no repeat flag, no continuation policy — and
+    /// that is untouched: shuffle is expressed entirely as the *order of the
+    /// paths* in `SetQueue`/`UpdateQueue`, which is what its amendment says.
+    shuffle: bool,
+    /// **The order the current run would play in with shuffle off**, or `None`
+    /// when there is no such order to go back to.
+    ///
+    /// `Some` exactly while the run in progress was arranged by this session's
+    /// shuffle and has not since been re-ordered by hand. Set with the run
+    /// ([`Self::note_shuffled_run`]), cleared by every other `SetQueue`
+    /// ([`Self::note_queue_sent`]) and by a hand reorder
+    /// ([`Self::forget_source_order`]).
+    ///
+    /// Inert: see [`crate::shuffle::SourceOrder`] for why it is a list of paths
+    /// and not an object, which is what keeps ADR-0023 §1's refusal of a live
+    /// context intact.
+    source_order: Option<crate::shuffle::SourceOrder>,
 }
 
 impl PlayerState {
@@ -938,7 +974,51 @@ impl PlayerState {
             // with the engine's own reading at start-up, for `seed_volume`'s
             // reason.
             replay_gain: ReplayGain::default(),
+            // Off, and no run to remember an order for. `seed_shuffle`
+            // replaces the first from the config at start-up, for
+            // `seed_volume`'s reason.
+            shuffle: false,
+            source_order: None,
         }
+    }
+
+    /// Seed the shuffle property from `config.toml` at start-up, so the
+    /// control is lit on the first frame rather than on the first press —
+    /// [`Self::seed_volume`]'s reason, for a standing decision that is baz's
+    /// rather than the engine's.
+    pub fn seed_shuffle(&mut self, shuffle: bool) {
+        self.shuffle = shuffle;
+    }
+
+    /// Whether shuffle is on.
+    #[must_use]
+    pub fn shuffle(&self) -> bool {
+        self.shuffle
+    }
+
+    /// Turn shuffle on or off, and answer with the value that now stands.
+    pub fn set_shuffle(&mut self, shuffle: bool) -> bool {
+        self.shuffle = shuffle;
+        shuffle
+    }
+
+    /// The order the run in progress would play in with shuffle off, if there
+    /// is one to go back to.
+    #[must_use]
+    pub fn source_order(&self) -> Option<&[PathBuf]> {
+        self.source_order.as_deref()
+    }
+
+    /// **A hand reorder restates the order**, so the retained one is dropped.
+    ///
+    /// A stepper press or a drag is the listener saying *this order*, in as
+    /// many words. Turning shuffle off afterwards leaves the run exactly as it
+    /// stands rather than undoing the drag — the hand beats the machine's
+    /// memory, and an "off" that silently discarded a reposition would be the
+    /// worse surprise of the two. Recorded in ADR-0023's amendment as one of
+    /// the two things that invalidate a source order.
+    pub fn forget_source_order(&mut self) {
+        self.source_order = None;
     }
 
     /// Seed the volume from [`EngineHandle::volume`](baz_core::engine::EngineHandle::volume)
@@ -1094,6 +1174,34 @@ impl PlayerState {
         self.queue = Some(queue);
         self.queue_position = None;
         self.failed = 0;
+        // A new run is a new order, and it has no earlier one to return to.
+        // Every gesture that *did* arrange one says so through
+        // [`Self::note_shuffled_run`] instead.
+        self.source_order = None;
+    }
+
+    /// Record a queue the shuffle property arranged, with the order it would
+    /// have played in unshuffled.
+    ///
+    /// [`Self::note_queue_sent`] with the one extra fact, and a separate method
+    /// rather than an argument because the pairing must not be possible to
+    /// forget: a shuffled run recorded through the plain call would be a run
+    /// the toggle could not turn off, which is the failure mode this whole
+    /// feature is judged on.
+    pub fn note_shuffled_run(&mut self, queue: QueueVm, source: crate::shuffle::SourceOrder) {
+        self.note_queue_sent(queue);
+        self.source_order = Some(source);
+    }
+
+    /// Retain a source order against the run already recorded — the toggle
+    /// turning shuffle **on** mid-run, where the queue is *edited* rather than
+    /// replaced ([`Self::note_queue_edited`]) and so the position must survive.
+    ///
+    /// Separate from [`Self::note_shuffled_run`] for exactly that reason: one
+    /// starts a run, the other re-arranges the one that is sounding, and
+    /// ADR-0014's bargain is the difference between them.
+    pub fn retain_source_order(&mut self, source: crate::shuffle::SourceOrder) {
+        self.source_order = Some(source);
     }
 
     /// Record an *edit* accepted by the engine's channel
@@ -4967,6 +5075,81 @@ mod tests {
     /// are the ones [`started`] names.
     fn geogaddi_queue() -> QueueVm {
         vm::album_queue(&albums()[0], None)
+    }
+
+    // -----------------------------------------------------------------
+    // The shuffle property
+    // -----------------------------------------------------------------
+
+    /// **A fresh player plays in order, and the property is a property** —
+    /// seeded from the config, moved by the toggle, and touched by nothing
+    /// else.
+    #[test]
+    fn shuffle_is_off_until_something_says_otherwise() {
+        let mut player = PlayerState::new(Availability::Ready);
+        assert!(!player.shuffle(), "silence and order are both the default");
+        assert_eq!(player.source_order(), None);
+
+        // Seeded from `config.toml` at start-up, so the control is lit on the
+        // first frame rather than on the first press.
+        player.seed_shuffle(true);
+        assert!(player.shuffle());
+
+        // The toggle answers with what now stands.
+        assert!(!player.set_shuffle(false));
+        assert!(player.set_shuffle(true));
+        assert!(player.shuffle());
+
+        // **Nothing about playback touches it.** A track starting, the queue
+        // being replaced, the engine dying — the property is a standing
+        // decision, and a standing decision that a track boundary could clear
+        // would be session state wearing a toggle's clothes.
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums());
+        assert!(player.shuffle());
+        player.note_queue_sent(geogaddi_queue());
+        assert!(player.shuffle());
+        player.engine_closed();
+        assert!(player.shuffle());
+    }
+
+    /// **The run and its source order are recorded together, or not at all.**
+    ///
+    /// The failure this rules out is the one the whole feature is judged on: a
+    /// run that was shuffled and has no order to go back to, so the toggle
+    /// turns off and nothing happens.
+    #[test]
+    fn a_shuffled_run_always_carries_the_order_it_would_have_played_in() {
+        let mut player = PlayerState::new(Availability::Ready);
+        let order = crate::shuffle::source_order(&geogaddi_queue());
+        assert!(!order.is_empty(), "the fixture has tracks to order");
+
+        player.note_shuffled_run(geogaddi_queue(), order.clone());
+        assert_eq!(player.source_order(), Some(order.as_slice()));
+
+        // **An ordinary run replaces it with nothing.** A new gesture has no
+        // memory of the last one's order, and leaving the old one standing
+        // would let the toggle put a run back into an order that was never its.
+        player.note_queue_sent(geogaddi_queue());
+        assert_eq!(
+            player.source_order(),
+            None,
+            "a plain SetQueue left the previous run's order standing"
+        );
+
+        // Retained against the run already recorded — the toggle turning
+        // shuffle *on* mid-run, where the queue is edited rather than replaced.
+        player.retain_source_order(order.clone());
+        assert_eq!(player.source_order(), Some(order.as_slice()));
+        player.note_queue_edited(geogaddi_queue());
+        assert_eq!(
+            player.source_order(),
+            Some(order.as_slice()),
+            "an edit is not a new run: the order it can return to survives it"
+        );
+
+        // **A hand reorder restates the order**, so the retained one goes.
+        player.forget_source_order();
+        assert_eq!(player.source_order(), None);
     }
 
     fn states(list: &QueueList) -> Vec<QueueRowState> {

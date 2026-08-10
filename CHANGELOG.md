@@ -870,6 +870,62 @@ next commit.
   string, and Flatpak requires that string to be reverse-DNS. The MPRIS *bus*
   name is unaffected and remains `org.mpris.MediaPlayer2.baz`.
 
+### Changed
+
+- **Shuffle is a property of the player, not an act.** The owner: *"can you
+  make shuffle a property of the player i.e. toggle on/off."* It was one press
+  in the Library strip that drew eight records out of the wall and started
+  them, with nothing to turn off. It is now a **toggle** — the crossed arrows
+  on the now-playing bar, lit in the accent while it is on, remembered in
+  `config.toml` beside the other standing decisions — that says what order
+  things play in from here.
+
+  **Turning it off restores the order the run would have had.** That is the
+  part that would have felt broken if it were wrong, so the rule is stated
+  exactly: what is retained is the run's paths in the order the gesture laid
+  them out — inert data, read at one moment by one caller. It is invalidated by
+  a new run, and by a **hand reorder** (a stepper press or a drag restates the
+  order in as many words, and the hand beats the machine's memory). A row
+  deleted while shuffled stays deleted; a row appended stays at the end, where
+  the append put it; a file listed twice comes back twice. A run restored from
+  a snapshot has no retained order and is left exactly as it stands.
+
+  **Nothing stops in either direction.** On and off both go out as
+  `UpdateQueue`, which ADR-0014 guarantees disturbs no delivered sample: on
+  permutes what is in front of the needle only, because what is behind it is
+  history and history does not re-order.
+
+  **Every play gesture agrees**, structurally rather than by convention — press
+  `Play` on a record with shuffle on and the record plays shuffled, and
+  `Play all`, a playlist's `Play` and a track click all build the list their
+  gesture means and hand it to the same arranger. A **track click** says both
+  of the things it means: the clicked track leads, and the rest follows
+  shuffled.
+
+  **The crossed-arrows glyph, taken.** `docs/design/10-controls-and-iconography.md`
+  §3.2 refused it *only* because the symbol promises a mode with a lit state
+  and baz's shuffle was an act — a conditional argument that named its own
+  condition. It is a mode now, so the clause is rewritten and the symbol is
+  honest. It went to the **bar** rather than staying in the strip because a
+  control goes where what it reads is: what a mode reads is the player, and the
+  player's surface is under every place where the strip is under one.
+
+  **What went with the act**: the wall's shuffle pool and its two marks — the
+  35 % dimming of every record outside the draw, and the ring on the next two.
+  `REFUSALS.md`'s *no invisible shuffle pools* was written for a draw, and is
+  rewritten for the mode: a mode has no source of its own, so **the pool is the
+  run** — the queue, which is a place you can open and read row by row. The
+  ring's reserved lane stays as the sleeve's mat; only the ink went.
+
+  Recorded in ADR-0023's amendment (which refused *"a live context object that
+  keeps acting after the gesture"* and now says precisely what is retained and
+  what invalidates it), ADR-0024 §1's first honesty clause (which said *no
+  shuffle-on-play*), doc 10 §3.2, and three entries in `docs/REFUSALS.md` — the
+  shuffle entry, the visible-pool entry, and the colour-alone entry whose third
+  example was the pool's two marks. The bar's slot ratchet permits *additions*,
+  and this is one; it is logged there, because a ratchet is only worth anything
+  if its permitted moves are recorded as well as its forbidden ones.
+
 ### Removed
 
 - **`Pull`, and everything that existed only for it.** The owner: *"please can

@@ -113,7 +113,31 @@ sounding run, and editing the queue never writes back into the file.
 **The honesty clauses:**
 
 1. The playlist a user edits is exactly what plays — entries, order,
-   verbatim; no shuffle-on-play, no dedup, no silent skipping.
+   verbatim; no dedup, no silent skipping.
+
+   *Amended 2026-08-10 to record the owner's decision* — *"can you make
+   shuffle a property of the player i.e. toggle on/off."* This clause said
+   **no shuffle-on-play**, and it was the direct blocker: with shuffle on, a
+   playlist's `Play` sounds its tracks in a shuffled order.
+
+   **What the clause was protecting is untouched, and it is worth naming what
+   that was.** It was written against a *list* that quietly differed from the
+   list on screen — a player that reorders the file, or drops what it thinks
+   are duplicates, or skips what it cannot decode without saying so. None of
+   that changed: the file is still byte-verbatim, still exactly what the page
+   lists, still edited by nobody but the user (clause 2), and still what the
+   run is copied from at the moment of the gesture. What shuffle re-orders is
+   **the copy**, which the paragraph above already calls decoupled from the
+   file the instant it is made — and it re-orders it *visibly*, into a queue
+   the listener can open and read row by row.
+
+   The distinction the clause now draws is therefore sharper than the one it
+   drew before: **a list is not a play order.** The playlist is ground truth
+   about *what*; the run is a record of *what, in what order, this time*. Turn
+   shuffle off and the run goes back to the file's own order (ADR-0023's
+   amendment), which is the property that makes the two statements consistent
+   rather than merely coexisting. A mode a listener set, can see lit, and can
+   unset is not the silent divergence this clause exists to forbid.
 2. Nothing edits a playlist but the user. baz writes a playlist file only as
    the direct result of a user's edit to that playlist — never on play, never
    on scan.

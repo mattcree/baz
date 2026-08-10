@@ -1,5 +1,83 @@
 # ADR-0023: The playback model — one list with a cursor, and the queue as a record of a choice
 
+> **Amendment (2026-08-10) — shuffle is a property of the player, and one
+> thing is retained after the gesture.**
+>
+> The owner: *"can you make shuffle a property of the player i.e. toggle
+> on/off."* This record's §1 says the playing context is *"reified into the
+> queue at the moment of the gesture and then discarded"*, and that **there is
+> no live context object that keeps acting after the gesture.** Turning shuffle
+> off has to put the run back into the order it would have had, and nothing in
+> the model kept that order. The owner's decision settles it; what follows is
+> the decision written down, precisely, because the value of §1 is in its
+> precision and a vague amendment would cost more than the feature is worth.
+>
+> **1. What is retained.** One `Vec<PathBuf>` per run — the queue's paths, in
+> the order the gesture laid them out, taken at the moment shuffle permutes
+> them. It lives on `PlayerState` beside the queue record.
+>
+> **2. Why this is not the thing §1 refuses.** §1 refuses a *context object that
+> keeps acting*. This is inert: it has no methods, cannot re-read a playlist
+> file, cannot notice a rescan, cannot refill anything, and nothing consults it
+> for behaviour. It is read at exactly one moment — the listener turning shuffle
+> off — and by exactly one caller. The distinction §1 draws is between a live
+> link and a recorded fact, and §4's playing provenance already stands on the
+> recorded-fact side of it; this is a second fact on the same side. **A run's
+> order is not its source**, and remembering an order does not resurrect a
+> source.
+>
+> **3. What invalidates it.** Two things, and only two:
+>
+> - **A new run.** Any `SetQueue` from any gesture clears it, in the same call
+>   that records the new queue. A gesture that shuffled records the pair
+>   together, so a shuffled run with no order to return to is unrepresentable.
+> - **A hand reorder.** A stepper press or a completed drag is the listener
+>   stating an order in as many words, so the retained one is dropped and
+>   turning shuffle off afterwards leaves the run exactly as the hand left it.
+>   The hand beats the machine's memory; an "off" that silently undid a drag
+>   would be the worse of the two surprises.
+>
+> **4. What happens when the queue is edited while shuffled.** The restore walks
+> the retained order and takes the next item carrying each path, then appends
+> whatever is left in the order the run currently has. Three consequences, each
+> a real thing a listener does:
+>
+> - a row **deleted** while shuffled stays deleted (its path is in the order and
+>   no longer in the run, so the walk passes over it) — turning shuffle off does
+>   not resurrect music somebody threw out;
+> - a row **appended** while shuffled stays at the end (its path is not in the
+>   retained order at all, so it falls into the leftovers), which is where the
+>   append put it — *play next* keeps meaning next;
+> - a file the run lists **twice** is put back twice, because the walk consumes
+>   one item per path rather than matching by identity — `queue_edit`'s
+>   position-not-identity rule, one layer up.
+>
+> **5. A run restored from a snapshot has no retained order** (§6). What was
+> interrupted is put back as it was; baz does not remember an order for a run it
+> did not arrange this session, and turning shuffle off over such a run leaves it
+> as it stands and says so rather than inventing one.
+>
+> **6. What shuffle-on means for a new play gesture.** It applies to all of them
+> and to the same degree: press `Play` on a record and the record plays
+> shuffled; `Play all`, a playlist's `Play` and a track click agree, because
+> they all build the list their gesture means and hand it to one arranger. A
+> **track click** is the one with two things to say — *this track* and *shuffle
+> is on* — and it says both: the clicked track leads, and the rest follows
+> shuffled.
+>
+> **7. Turning the mode on or off never stops the music.** Both directions leave
+> the sounding track where it is and go out as `UpdateQueue`, which ADR-0014
+> guarantees disturbs no delivered sample. On permutes what is in front of the
+> needle only: what is behind it is history and history does not re-order.
+>
+> **8. §"Consequences" is corrected.** It recorded *"shuffle or repeat in the
+> engine (unchanged from ADR-0014's deferral — both remain front-end expressions
+> over `SetQueue`/`UpdateQueue`)"*. **That is still exactly true and is the point
+> worth keeping**: the engine's queue still has no shuffle flag, no repeat flag
+> and no continuation policy. Shuffle is expressed entirely as the order of the
+> paths sent. What changed is where the *decision* lives on the front end — the
+> player, persisted in `config.toml` — not what the engine is told.
+
 > **Amendment (2026-08-09), from
 > [`docs/design/09-implicit-playlists.md`](../design/09-implicit-playlists.md)**
 > — the implicit-playlist study, commissioned on the owner's *"we are
