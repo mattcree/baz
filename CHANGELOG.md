@@ -559,11 +559,40 @@ next commit.
   step. Its head holds three fixed destinations — `Home`, `Library`,
   `Now playing` — always all three, the current one in full paper ink, and
   **`Now playing` carries the lamp dot when something is sounding**, stacked
-  on the glyph so it survives the collapse. Below a hairline, `RECENT`: every
-  playlist and the last 24 records played, one list, last touched first, ties
-  by name. No queue, no sort, no filter, no pinning — each of those is one of
-  the five findings that killed the last resident column (ADR-0024 §5), read
-  here as engineering lessons.
+  on the glyph so it survives the collapse. Below a hairline, two sections:
+  **`PLAYLISTS`**, every list, and **`RECENT`**, the last 24 records played —
+  each last touched first, ties by name. No queue, no sort, no filter, no
+  pinning — each of those is one of the five findings that killed the last
+  resident column (ADR-0024 §5), read here as engineering lessons.
+  - **The lists have a section of their own**, and it reverses the brief the
+    lane was built from. The owner asked for *"recent albums and playlists
+    mixed based on some order"*, that is what shipped, and then he read it:
+    *"I guess we need to add playlists into their own section under library"*.
+    So it is a **split, not an addition** — `RECENT` holds no list at all now,
+    because a list in both sections is one door drawn twice, and it costs
+    nothing to obey because `PLAYLISTS` is *every* list. Both sentences are on
+    the record: ADR-0030 is amended (sixth), not rewritten.
+    - **The order is untouched.** Last touched first, in each section — a list
+      played this morning moved section, not rank. Alphabetical was the other
+      honest answer for a section holding all of them and was declined: the
+      ask is for a section, not a second ordering, and it would have spent the
+      recency he already had.
+    - **Under the head, not inside it.** *"Under library"* read positionally;
+      a section between `Library` and `Now playing` would split the closed
+      triple of destinations. The lane still has exactly **one** seam — the
+      sections are named by headings, not divided by a second rule.
+    - **One scroller over both sections**, which is the load-bearing part.
+      `PLAYLISTS` has no cap, so two scrollers would have given the surface
+      two scroll positions to arbitrate between and a fixed-height first
+      section would have pushed `RECENT` off the bottom of the window at about
+      a dozen lists. Proved at thirty lists, expanded and collapsed, at 1280
+      and 1920 (`docs/design/impl/playlists-section/`).
+    - **A section with nothing in it is absent, not empty**, for both sections:
+      a first run gets no headings over nothing, where `RECENT` used to draw
+      its word over an empty column. **Collapsed, a heading is nothing** —
+      `RECENT`'s own answer at 96 px, taken rather than re-invented; the two
+      runs of sleeves are separated by the sections' own `GAP_MD` and every
+      row keeps its tooltip.
   - **The collapse is a hard cut, one frame, no tween.** It is the one press
     in the product whose subject is the collection's width, and it is safe
     because it lands outside the wall: no wall gesture can be in flight. The
