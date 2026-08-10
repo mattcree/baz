@@ -3068,12 +3068,21 @@ impl App {
                     // wrong (see crate::playback's "Signal path").
                     Event::SignalPath {
                         source_rate_hz,
+                        source_channels,
                         source_bits,
                         output_rate_hz,
                         chain,
                     } => {
                         let depth =
                             source_bits.map_or_else(String::new, |bits| format!("/{bits}-bit"));
+                        // Named only when there is something to say: a
+                        // multichannel file is being folded to stereo and the
+                        // log line is where that is admitted (ADR-0039).
+                        let fold = if *source_channels > baz_core::playback::CHANNELS {
+                            format!("/{source_channels}ch downmixed")
+                        } else {
+                            String::new()
+                        };
                         let doing = match chain {
                             SignalChain::Direct => "direct".to_string(),
                             SignalChain::Converting { reason } => {
@@ -3082,7 +3091,7 @@ impl App {
                             other => format!("{other:?}"),
                         };
                         println!(
-                            "[playback] signal path: {source_rate_hz} Hz{depth} source -> \
+                            "[playback] signal path: {source_rate_hz} Hz{depth}{fold} source -> \
                              {output_rate_hz} Hz output, {doing}"
                         );
                     }

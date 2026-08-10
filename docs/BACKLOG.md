@@ -540,8 +540,29 @@ Newest first. Each was asked for in conversation and is now in the product.
   wall of albums nothing can ever correct or remove. A tombstone (remember the
   first-seen for a forgotten root's paths, and restore it if the folder comes
   back) would fix it and is its own small design.
-- **Multichannel (>2ch) files are rejected**, not downmixed — a typed error
-  rather than silently wrong output. 5.1 downmix is unwritten.
+- ~~**Multichannel (>2ch) files are rejected**, not downmixed.~~ — **narrowed
+  by ADR-0039.** 3.0, 4.0 (quadraphonic), 5.0 and 5.1 now play, folded with the
+  ITU-R BS.775 matrix in `playback::downmix`, in WAV, FLAC, Vorbis and ALAC.
+  **What remains** is three separate things, and only the first is baz's to
+  fix:
+  - **7.1 and 6.1 are still refused**, now by layout rather than by count and
+    with the layout named in the error. BS.775's downmix has **one** surround
+    pair and does not place a rear centre; folding 7.1's two pairs at −3 dB
+    each would put 3 dB too much surround in the mix, and any other number
+    would be invented. The ordinary answer is a two-stage 7.1 → 5.1 → 2.0
+    fold, and it wants a citation for the first stage that this work did not
+    have. Height, wide and top channels, and layouts with half a surround
+    pair, are refused on the same terms.
+  - **Multichannel AAC does not decode**, and not because of the fold:
+    Symphonia 0.5 rejects a 5.1 AAC stream with `aac too complex` before a
+    frame exists. Upstream; pinned by a test that fails the day it changes.
+  - **A folded 5.1 file plays 7.66 dB below its stereo master** until it is
+    analysed, because the headroom the matrix needs is taken as a constant
+    attenuation rather than by a limiter (ADR-0039 §4 has the argument, which
+    turns on the decode path having to stay a pure function of position). The
+    ReplayGain pass recovers it exactly, so the gap is only on an unanalysed
+    library. A per-file peak normalisation would close it without a limiter —
+    baz already computes true peak — and is the follow-on if it ever bites.
 - **Skip and seek are drain-and-restart**, not sample-accurate splices (tens of
   ms of latency, documented in the engine module docs).
 - ~~**Bit-perfect is shared-mode only.**~~ — **closed on Linux (ADR-0012)**.

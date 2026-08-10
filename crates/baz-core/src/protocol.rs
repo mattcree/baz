@@ -559,9 +559,30 @@ pub enum Event {
     /// completely different cadences — this one per session, that one per
     /// pointer drag — and folding them would mean restating a track's whole
     /// format every time someone nudged a slider.
+    ///
+    /// And since ADR-0039 there is a **third** independent fact, for the same
+    /// reason the second one exists: `source_channels` above
+    /// [`CHANNELS`](crate::playback::CHANNELS) means the track is multichannel
+    /// and an ITU-R BS.775 matrix folded it to stereo before anything else in
+    /// this event happened. That is a conversion, so a downmixed track is not
+    /// bit-exact however `chain` and `path` read. It is a field here rather
+    /// than a fourth `SignalChain` variant because it changes on exactly this
+    /// event's cadence — once per track — and because it is orthogonal to both
+    /// of the questions the chain answers: a 5.1 file can be downmixed and
+    /// still be played at its own rate, on a device baz holds exclusively.
     SignalPath {
         /// Sample rate of the track now playing, in Hz.
         source_rate_hz: u32,
+        /// Channels the **file** carries, as distinct from the two the engine
+        /// emits. `1` for mono (duplicated), `2` for stereo (untouched), and
+        /// 3 to 6 for a multichannel source folded with the ITU-R BS.775
+        /// matrix (ADR-0039, `playback::downmix`).
+        ///
+        /// The fold costs a constant attenuation — −7.66 dB for 5.1 — so this
+        /// number also explains why a 5.1 record plays quieter than its stereo
+        /// master. Layouts BS.775 does not describe are not folded at all;
+        /// they fail to open, and this event never happens for them.
+        source_channels: usize,
         /// Bit depth the track's container declares, when it declares one.
         /// `None` for sources that carry no integer depth (float PCM) or do
         /// not say. The engine's own output format is f32, whose 24-bit
@@ -1252,6 +1273,63 @@ mod tests {
         ]
     }
 
+    /// Every shape of [`Event::SignalPath`] there is, kept apart from
+    /// [`sample_events`] only because the two together outgrew one function.
+    fn sample_signal_paths() -> Vec<Event> {
+        vec![
+            Event::SignalPath {
+                source_rate_hz: 48_000,
+                source_channels: 2,
+                source_bits: Some(24),
+                output_rate_hz: 48_000,
+                chain: SignalChain::Direct,
+            },
+            Event::SignalPath {
+                source_rate_hz: 48_000,
+                source_channels: 2,
+                source_bits: None,
+                output_rate_hz: 44_100,
+                chain: SignalChain::Converting {
+                    reason: ConversionReason::DeviceRateUnavailable,
+                },
+            },
+            Event::SignalPath {
+                source_rate_hz: 96_000,
+                source_channels: 2,
+                source_bits: Some(24),
+                output_rate_hz: 44_100,
+                chain: SignalChain::Converting {
+                    reason: ConversionReason::FixedOutputRate,
+                },
+            },
+            Event::SignalPath {
+                source_rate_hz: 96_000,
+                source_channels: 2,
+                source_bits: Some(24),
+                output_rate_hz: 96_000,
+                chain: SignalChain::Exclusive { conversion: None },
+            },
+            Event::SignalPath {
+                source_rate_hz: 96_000,
+                source_channels: 2,
+                source_bits: Some(24),
+                output_rate_hz: 48_000,
+                chain: SignalChain::Exclusive {
+                    conversion: Some(ConversionReason::DeviceRateUnavailable),
+                },
+            },
+            // A downmixed track: six channels became two, on a chain that is
+            // otherwise as untouched as a chain gets (ADR-0039).
+            Event::SignalPath {
+                source_rate_hz: 48_000,
+                source_channels: 6,
+                source_bits: Some(24),
+                output_rate_hz: 48_000,
+                chain: SignalChain::Exclusive { conversion: None },
+            },
+        ]
+    }
+
     fn sample_events() -> Vec<Event> {
         vec![
             Event::TrackStarted {
@@ -1288,42 +1366,6 @@ mod tests {
                 elapsed_ms: 93_500,
                 track_ms: Some(214_000),
             },
-            Event::SignalPath {
-                source_rate_hz: 48_000,
-                source_bits: Some(24),
-                output_rate_hz: 48_000,
-                chain: SignalChain::Direct,
-            },
-            Event::SignalPath {
-                source_rate_hz: 48_000,
-                source_bits: None,
-                output_rate_hz: 44_100,
-                chain: SignalChain::Converting {
-                    reason: ConversionReason::DeviceRateUnavailable,
-                },
-            },
-            Event::SignalPath {
-                source_rate_hz: 96_000,
-                source_bits: Some(24),
-                output_rate_hz: 44_100,
-                chain: SignalChain::Converting {
-                    reason: ConversionReason::FixedOutputRate,
-                },
-            },
-            Event::SignalPath {
-                source_rate_hz: 96_000,
-                source_bits: Some(24),
-                output_rate_hz: 96_000,
-                chain: SignalChain::Exclusive { conversion: None },
-            },
-            Event::SignalPath {
-                source_rate_hz: 96_000,
-                source_bits: Some(24),
-                output_rate_hz: 48_000,
-                chain: SignalChain::Exclusive {
-                    conversion: Some(ConversionReason::DeviceRateUnavailable),
-                },
-            },
             Event::VolumeChanged {
                 position: 1000,
                 muted: false,
@@ -1346,6 +1388,7 @@ mod tests {
             },
         ]
         .into_iter()
+        .chain(sample_signal_paths())
         .chain(sample_replay_gain_events())
         .chain(sample_analysis_events())
         .chain(sample_history_events())
@@ -2014,18 +2057,20 @@ mod tests {
                 // The ordinary state: a 24/48 master played at 48 kHz.
                 serde_json::to_string(&Event::SignalPath {
                     source_rate_hz: 48_000,
+                    source_channels: 2,
                     source_bits: Some(24),
                     output_rate_hz: 48_000,
                     chain: SignalChain::Direct,
                 })
                 .expect("serialize"),
-                r#"{"event":"signal_path","source_rate_hz":48000,"source_bits":24,"output_rate_hz":48000,"chain":{"state":"direct"}}"#,
+                r#"{"event":"signal_path","source_rate_hz":48000,"source_channels":2,"source_bits":24,"output_rate_hz":48000,"chain":{"state":"direct"}}"#,
             ),
             (
                 // The case the readout exists for: conversion is happening,
                 // and the wire says so — with the reason, not a bare flag.
                 serde_json::to_string(&Event::SignalPath {
                     source_rate_hz: 48_000,
+                    source_channels: 2,
                     source_bits: None,
                     output_rate_hz: 44_100,
                     chain: SignalChain::Converting {
@@ -2033,11 +2078,12 @@ mod tests {
                     },
                 })
                 .expect("serialize"),
-                r#"{"event":"signal_path","source_rate_hz":48000,"source_bits":null,"output_rate_hz":44100,"chain":{"state":"converting","reason":"device_rate_unavailable"}}"#,
+                r#"{"event":"signal_path","source_rate_hz":48000,"source_channels":2,"source_bits":null,"output_rate_hz":44100,"chain":{"state":"converting","reason":"device_rate_unavailable"}}"#,
             ),
             (
                 serde_json::to_string(&Event::SignalPath {
                     source_rate_hz: 96_000,
+                    source_channels: 2,
                     source_bits: Some(24),
                     output_rate_hz: 44_100,
                     chain: SignalChain::Converting {
@@ -2045,7 +2091,7 @@ mod tests {
                     },
                 })
                 .expect("serialize"),
-                r#"{"event":"signal_path","source_rate_hz":96000,"source_bits":24,"output_rate_hz":44100,"chain":{"state":"converting","reason":"fixed_output_rate"}}"#,
+                r#"{"event":"signal_path","source_rate_hz":96000,"source_channels":2,"source_bits":24,"output_rate_hz":44100,"chain":{"state":"converting","reason":"fixed_output_rate"}}"#,
             ),
         ];
         for (got, want) in cases {
@@ -2108,18 +2154,20 @@ mod tests {
                 // sender did not say".
                 serde_json::to_string(&Event::SignalPath {
                     source_rate_hz: 96_000,
+                    source_channels: 2,
                     source_bits: Some(24),
                     output_rate_hz: 96_000,
                     chain: SignalChain::Exclusive { conversion: None },
                 })
                 .expect("serialize"),
-                r#"{"event":"signal_path","source_rate_hz":96000,"source_bits":24,"output_rate_hz":96000,"chain":{"state":"exclusive","conversion":null}}"#,
+                r#"{"event":"signal_path","source_rate_hz":96000,"source_channels":2,"source_bits":24,"output_rate_hz":96000,"chain":{"state":"exclusive","conversion":null}}"#,
             ),
             (
                 // Owning the device does not give it modes it does not have:
                 // exclusive and converting is a real, reportable state.
                 serde_json::to_string(&Event::SignalPath {
                     source_rate_hz: 96_000,
+                    source_channels: 2,
                     source_bits: Some(24),
                     output_rate_hz: 48_000,
                     chain: SignalChain::Exclusive {
@@ -2127,7 +2175,25 @@ mod tests {
                     },
                 })
                 .expect("serialize"),
-                r#"{"event":"signal_path","source_rate_hz":96000,"source_bits":24,"output_rate_hz":48000,"chain":{"state":"exclusive","conversion":"device_rate_unavailable"}}"#,
+                r#"{"event":"signal_path","source_rate_hz":96000,"source_channels":2,"source_bits":24,"output_rate_hz":48000,"chain":{"state":"exclusive","conversion":"device_rate_unavailable"}}"#,
+            ),
+            (
+                // The state ADR-0039 added, and the reason it is a field and
+                // not a chain variant: a 5.1 file, folded by the BS.775
+                // matrix, played at its own rate on a device baz holds. The
+                // chain reads `exclusive` with no conversion — which is still
+                // true of the *rate* and the *device* — and the six says the
+                // samples were nonetheless matrixed. A reader that wants "is
+                // this literally the file" must consult both.
+                serde_json::to_string(&Event::SignalPath {
+                    source_rate_hz: 48_000,
+                    source_channels: 6,
+                    source_bits: Some(24),
+                    output_rate_hz: 48_000,
+                    chain: SignalChain::Exclusive { conversion: None },
+                })
+                .expect("serialize"),
+                r#"{"event":"signal_path","source_rate_hz":48000,"source_channels":6,"source_bits":24,"output_rate_hz":48000,"chain":{"state":"exclusive","conversion":null}}"#,
             ),
         ];
         for (got, want) in cases {

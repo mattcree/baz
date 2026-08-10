@@ -72,13 +72,7 @@
      a pin, or a patch upstream — and *"which"* is the design, not the fix.
      Reproduce with `cargo fuzz run playback_decode` on the artifact the run
      wrote; nobody has run it locally yet.
-2. **Multichannel files do not play at all.** Anything over two channels is
-   refused with a typed error rather than downmixed, so a 5.1 record is not a
-   record baz has. The error is honest — silently wrong output would be worse
-   — but *"this file is not supported"* is a gap and not a feature. A stereo
-   downmix (ITU-R BS.775 coefficients, the ordinary answer) is unwritten.
-   `docs/BACKLOG.md`, *Known gaps in shipped features*.
-3. **A deleted folder's records never leave the library.** `rm -rf` an album
+2. **A deleted folder's records never leave the library.** `rm -rf` an album
    directory and its eight rows stay on the wall for good. This is
    **deliberate and the reasoning is sound**: from the filesystem's side a
    deleted folder and an unmounted NAS are the same `NotFound` for every path
@@ -89,7 +83,7 @@
    order, and it needs no guessing about mounts because a person is asserting
    the fact. Related: the owner's library is on a NAS by design (ADR-0025), so
    the unmount case is his real case and not a hypothetical.
-4. **Removing a music folder destroys `first_seen_ns`.** Remove a root and
+3. **Removing a music folder destroys `first_seen_ns`.** Remove a root and
    add it back and every album files under ADDED = *today* — a real loss of
    the one fact ADR-0019 built a column and a structural guarantee to protect,
    and it is unrecoverable, which puts it above the two items below it. The
@@ -97,13 +91,13 @@
    forgotten root's paths and restore it if the folder comes back. Called
    *"its own small design"* there, which is a design that has never been
    written rather than a line of code.
-5. **The seek bar says which thing it measures.** The owner: *"I think the seek
+4. **The seek bar says which thing it measures.** The owner: *"I think the seek
    bar at the bottom should have a toggle indicating for song or for whole
    playlist"*. Both are true readouts — the track's position and the run's — and
    he is asking to choose. Undesigned; the questions are where the toggle lives
    (the bar is already dense), whether the choice persists, and what the
    elapsed/remaining figures either side of the bar read in run mode.
-6. **An artist has an `All songs` of their own.** The owner: *"the artist page
+5. **An artist has an `All songs` of their own.** The owner: *"the artist page
    should have its own 'all songs' playlist I think"*. `implicit::ImplicitList`
    already gives the library one, with an `Origin` kind and a collage sleeve, so
    this is that list scoped to one artist rather than new machinery. Undecided:
@@ -114,7 +108,7 @@
    word may not need qualifying. It should credit the artist's list rather than
    the underlying records when played, which is the rule that just landed for
    playlists.
-7. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
+6. **Doc 12 step A4 — `RUN_MEASURE` scaled by `kiosk_scale`.** The owner, on
    2026-08-10: *"at full screen the now playing page looks odd because the
    playlist hugs right and the art hugs left"* — which is this item, reported
    from the frame rather than from the measurement, and worth recording as a
@@ -126,7 +120,7 @@
    too — A4 widening the run closes the gap from one side, and if the sleeve is
    also hanging hard left rather than sitting in its column, that is a second
    fault the widening would hide rather than fix.
-8. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+7. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -139,7 +133,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-9. **Rewrite the README as the project's public face**, with the icon and real
+8. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
    last, so it describes what actually ships. Two of those four now exist and
    are regenerable — `docs/screenshots/capture.sh` writes the wall and Now
@@ -239,6 +233,62 @@
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **A 5.1 record is a record baz has** — the queue's *"multichannel files do
+  not play at all"*, answered with the ITU-R BS.775 stereo downmix. **3.0, 4.0
+  (quadraphonic), 5.0 and 5.1 play**, in WAV, FLAC, Vorbis and ALAC. The matrix
+  is written down where the next reader will find it
+  (`crates/baz-core/src/playback/downmix.rs`), with the recommendation cited and
+  cross-checked against a second implementation. ADR-0039; measurements,
+  fixtures and the generator in `docs/design/impl/multichannel-downmix/`.
+  - **The layout is read, never inferred from the channel count.** Which plane
+    of a decoded packet holds the centre channel is a property of the container
+    *and* the codec, and they disagree — Vorbis's bitstream orders 5.1 as
+    `FL FC FR BL BR LFE` against WAVE's `FL FR FC LFE Ls Rs`, and ALAC declares
+    no layout in the container at all. **Measured**: the same music through five
+    containers, a distinct tone in each speaker, profiled per frequency per
+    output — all five produce the same stereo pair. A fold that assumed WAVE's
+    order would have put Vorbis's centre channel in the right output, which is
+    audible and which no test that checks lengths catches.
+  - **Clipping is answered by a constant, not a limiter.** The matrix's
+    worst case is +7.66 dB and it is reachable by ordinary loud material, so
+    every coefficient is scaled by the reciprocal of it: −7.66 dB for 5.1,
+    −4.65 dB for quad, provably no overflow for any input at any position. A
+    limiter was rejected on a structural ground before a taste one — it is
+    stateful, and the decode path must be a pure function of position or a
+    seeked decode stops matching a whole-file decode.
+  - **The cost is named, and paid for by something baz already has.** A 5.1
+    file plays 7.66 dB below its stereo master until it is analysed; the
+    ReplayGain pass measures this decoder's own output, so it recovers the
+    level exactly. **Measured** end to end: 766 centidecibels, derived from the
+    matrix rather than from a previous run.
+  - **A downmixed track is not bit-perfect, and now the readout admits it.**
+    ADR-0009 and ADR-0012 promise baz converts nothing; a matrix fold is a
+    conversion. `Event::SignalPath` carries `source_channels`, and a
+    multichannel file plays under the exclusive path *folded and labelled*
+    rather than being refused there — the output has always been opened stereo
+    in both modes, so nothing was ever going to reach a converter as six
+    channels.
+  - **The refusal is narrowed, not removed.** 7.1, 6.1, height and wide
+    channels and half a surround pair still fail — BS.775 places one surround
+    pair and does not place a rear centre, and folding two pairs at −3 dB each
+    would be a coefficient invented here. The error now names the layout it
+    found. `docs/BACKLOG.md` narrowed accordingly.
+  - **Found while building it, and left for the owner's eye:** the brief asked
+    for *"centre and LFE folded at −3 dB"*, and the LFE is **dropped** instead.
+    BS.775's equations contain no LFE term; folding a band-limited effects
+    channel mixed +10 dB hot into a stereo pair puts subsonic energy the mix
+    engineer never auditioned into two loudspeakers, and libswresample's
+    `lfe_mix_level` defaults to `0` for the same reason. Recorded as a
+    departure rather than absorbed quietly — it is one row of the table if he
+    disagrees.
+  - **Separately, and not ours: multichannel AAC does not decode at all.**
+    Symphonia 0.5 rejects a 5.1 AAC stream with `aac too complex` before a
+    frame exists. Pinned by a test that will fail the day that changes, at
+    which point the fold is already there waiting for it.
+  - **No rescan.** The scanner reads headers and never looked at a channel
+    count, so multichannel files have always been *listed* — they refused to
+    play when clicked. Proven rather than assumed
+    (`a_multichannel_file_is_listed_like_any_other`).
 - **v0.1.0 is cut up to the tag, and the tag is still the owner's.** Everything
   `docs/RELEASING.md` §"Cutting a release" asks for before step 7 is on this
   branch: the workspace at `0.1.0` in `Cargo.toml`, `Cargo.lock` and the
