@@ -161,7 +161,7 @@ pub(crate) fn view(
                 .padding(theme::pad(0.0, theme::HANG))
                 .style(move |_theme| theme::bar(room)),
             // **The needle hangs off no gutter**, deliberately: it is the
-            // window's own bottom edge and it states the whole queue, so it
+            // window's own bottom edge and it states the current song, so it
             // runs the full width. Law L5 gives the bar `HANG`, `W − HANG`, its
             // zone boundaries and its reserved slots' edges; the needle's edges
             // are the window's, which is the one pair every surface shares.
@@ -172,9 +172,8 @@ pub(crate) fn view(
     .into()
 }
 
-/// The needle proper: [`needle::Needle`] over the queue the engine is holding,
-/// wired to the pointer when there is a queue to move within and inert when
-/// there is not.
+/// The needle proper: [`needle::Needle`] over the current song, wired to the
+/// pointer when that song has a declared duration and inert when it does not.
 ///
 /// The two style functions are the whole difference. An inert needle draws its
 /// unfilled track rather than nothing, because a line that came and went with
@@ -264,18 +263,11 @@ fn now_playing_block(
     source: Option<Message>,
 ) -> Element<'_, Message> {
     let stamps = player.stamps();
-    // **The two timestamps moved here** (ADR-0017 §1.1), into the same
-    // [`theme::STAMP_W`] slots they held when they flanked a groove — elapsed
-    // right-aligned and total left-aligned, so the pair reads nose to nose with
-    // one gap between them instead of 260 px of bar.
-    //
-    // They are reserved in both senses: the slot is that wide whatever the
-    // digits say, and it is *there* whether or not anything is playing. A
-    // stopped bar keeps the lane, so a track starting moves no title.
+    let room = theme::active();
     let elapsed_color = if stamps.as_ref().is_some_and(|stamps| stamps.pending) {
-        theme::active().lamp
+        room.lamp
     } else {
-        theme::active().paper_faint
+        room.paper_faint
     };
     row![
         container(back_to_source(player, cover, source))
@@ -288,7 +280,7 @@ fn now_playing_block(
         ),
         stamp(
             stamps.as_ref().map(|stamps| stamps.total.clone()),
-            theme::active().paper_faint,
+            room.paper_faint,
             alignment::Horizontal::Left,
         ),
     ]
@@ -1331,8 +1323,7 @@ mod tests {
         // And the needle draws its track with no fill and refuses the pointer,
         // rather than vanishing and taking 2 px of wall with it.
         let line = player.needle_bar();
-        assert!(line.entries.is_empty());
-        assert_eq!(line.playing, None);
+        assert!((line.position - 0.0).abs() < f32::EPSILON);
         assert!(!line.interactive);
 
         player.apply(
@@ -1342,10 +1333,9 @@ mod tests {
             },
             &[],
         );
-        // Without a recorded queue there is still nothing to say follows, and
-        // no segment to point at — the front end never invents either (see
-        // `player.rs`'s honesty rule). The stamps do appear, because an elapsed
-        // time is a fact the engine reported.
+        // Without a recorded queue there is still nothing to say follows. The
+        // stamps do appear because an elapsed time is a fact the engine
+        // reported, while the line stays inert until a duration is known.
         assert_eq!(player.continuation_note(), None);
         assert!(player.stamps().is_some());
         assert!(!player.needle_bar().interactive);

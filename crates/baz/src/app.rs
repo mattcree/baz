@@ -810,8 +810,7 @@ pub(crate) enum Message {
     /// The needle: the pointer left it; the tip goes with it.
     NeedleLeft,
     /// The needle was released — the moment the request actually goes to the
-    /// engine, as a `Seek` inside the sounding entry or a `JumpTo` outside it
-    /// ([`player::NeedleTarget`]).
+    /// engine as a seek within the current song.
     NeedleReleased,
     /// Bottom bar: the pointer went down on the volume fader. Unlike the
     /// seek bar this *is* the request — a fader answers at once (see
@@ -3652,30 +3651,22 @@ impl App {
     /// reason the volume's nine are: every one of them resolves to "tell the
     /// state machine, maybe tell the engine".
     ///
-    /// **One gesture, two commands, and the segment decides which.**
-    /// [`player::PlayerState::release_drag`] resolves the release into a
-    /// [`player::NeedleTarget`]; this only dispatches, so "is this a move
-    /// within the record or a choice of record" has exactly one answer in
-    /// exactly one place — and neither command is invented here (ADR-0014:
-    /// seeking is `Seek`, jumping is `JumpTo`, and the UI state comes back from
-    /// the engine's events either way).
+    /// The player resolves the gesture to a current-song timestamp; this
+    /// method only dispatches the resulting `Seek` command.
     fn update_needle(&mut self, message: &Message) -> bool {
         match *message {
-            Message::NeedlePressed(pointer) => self.player.press(pointer),
+            Message::NeedlePressed(pointer) => {
+                self.player.press(pointer);
+            }
             Message::NeedleDragged(pointer) => self.player.drag_to(pointer),
-            Message::NeedleHovered(pointer) => self.player.hover_to(pointer),
+            Message::NeedleHovered(pointer) => {
+                self.player.hover_to(pointer);
+            }
             Message::NeedleLeft => self.player.hover_left(),
-            Message::NeedleReleased => match self.player.release_drag() {
-                Some(player::NeedleTarget::Seek { position_ms }) => {
-                    self.send_seek(Some(position_ms));
-                }
-                Some(player::NeedleTarget::Jump { position }) => {
-                    self.jump_to_queued(position);
-                    // A jump moves what is playing, which MPRIS publishes.
-                    self.publish_mpris(false);
-                }
-                None => {}
-            },
+            Message::NeedleReleased => {
+                let position_ms = self.player.release_drag();
+                self.send_seek(position_ms);
+            }
             _ => return false,
         }
         true

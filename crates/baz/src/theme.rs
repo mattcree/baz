@@ -38,7 +38,7 @@
 //! 1. the playing album's halo — [`sleeve`] with `playing`;
 //! 2. the playing dot — [`lamp_dot`], beside a tile's title or in a row's
 //!    number column;
-//! 3. the needle's fill — [`needle`], where the queue has played;
+//! 3. the needle's fill — [`needle`], where the current song has played;
 //! 4. a seek in flight — the elapsed timestamp warms to [`Palette::lamp`] while a
 //!    position has been asked for and not yet confirmed, because a position
 //!    being asked for is a claim about the playhead;
@@ -1550,16 +1550,15 @@ pub const KNOB: f32 = 5.0;
 // The needle (ADR-0017 §1.1, step 9)
 // ---------------------------------------------------------------------------
 
-/// Thickness of the needle — the seek line flush on the window's bottom edge,
-/// segmented by the queue's real entry lengths.
+/// Thickness of the needle — the current-song seek line flush on the window's
+/// bottom edge.
 ///
 /// **2**, and the number is the argument. The 260 px groove plus its two stamps
 /// and its hit band spent 45 of the bar's 102 px saying *where the playhead is*,
 /// and the composition audit measured what that bought: the seek row was **last
 /// of six** in the bar's own ink hierarchy, at 2.5 %, while occupying 37 of the
-/// 77 px of content height. The needle states position *and* structure in 2 px —
-/// you can see that you are three minutes into a nine-minute closer, which no
-/// scalar groove has ever said — and gives the other 43 back to the collection.
+/// 77 px of content height. The needle states the same position in 2 px and
+/// gives the other 43 back to the collection.
 pub const NEEDLE_H: f32 = 2.0;
 
 /// The band the pointer may aim at above the needle.
@@ -1585,34 +1584,6 @@ pub const NEEDLE_H: f32 = 2.0;
 /// the wall. The bound that keeps it honest is asserted, not asserted-about:
 /// `NEEDLE_HIT <= BAR_LEAD`.
 pub const NEEDLE_HIT: f32 = GAP_MD;
-
-/// The gap the needle leaves between two consecutive queue entries.
-///
-/// [`GAP_XXS`], the lattice's one named exception (law L2) — an *intra-block*
-/// gap, which is exactly what this is: the segments are one line, not a row of
-/// slots. The critique specified 2 px here and this is that 2 px.
-pub const SEGMENT_GAP: f32 = GAP_XXS;
-
-/// The gap the needle leaves where one record ends and the next begins.
-///
-/// **8, where the critique said 6.** Six is off the 4 px lattice law L2 puts
-/// every gap on, and 8 is the lattice's neighbour in the direction that makes
-/// the break *more* legible on a 2 px line — four times the track gap rather
-/// than three. It is the critique's "side break", generalised: baz's queue is
-/// one list with a cursor (ADR-0016), so the wide gap falls at an **album
-/// boundary** and the critique's spec is the single-album case of this one.
-pub const ALBUM_GAP: f32 = GAP_XS * 2.0;
-
-/// The narrowest a segment may be drawn.
-///
-/// Every entry in the queue is a control — clicking it jumps there — and the
-/// visible-control rule (a standing rule of the product) does not have a "unless the track
-/// is short" clause. So a segment's width is a floor plus a proportional share,
-/// never a bare proportion: a 40-second interlude between two 12-minute sides
-/// stays clickable, and an entry whose length the scan never read gets the
-/// floor **and no proportional claim at all** — which is the honest drawing of
-/// "we do not know how long this is".
-pub const SEGMENT_MIN: f32 = GAP_XS;
 
 /// Width of the needle's hover tip.
 ///
@@ -3077,8 +3048,8 @@ pub fn input(p: &Palette, status: text_input::Status) -> text_input::Style {
     }
 }
 
-/// **The needle**: lamp amber where the queue has played, the room's faintest
-/// mark where it has not.
+/// **The needle**: lamp amber where the current song has played, the room's
+/// faintest mark where it has not.
 ///
 /// Position is playback truth, so it earns the accent — the same rule that
 /// gives the playing sleeve its halo, and the same rule the 260 px groove this
@@ -3127,13 +3098,13 @@ pub fn needle(p: &Palette, status: slider::Status) -> slider::Style {
     }
 }
 
-/// The needle with nothing queued, or a queue this process never sent: the
-/// track alone, drawn rather than hidden.
+/// The needle when the current song cannot be sought: the track alone, drawn
+/// rather than hidden.
 ///
 /// Drawn, because a line that came and went with the music would be movement in
 /// the one place ADR-0020 forbids it and the reserved-slot rule forbids it
-/// twice; and unfilled, because a fill is a claim about a playhead there is no
-/// queue to have.
+/// twice; and unfilled, because a fill is a proportional claim the current
+/// song cannot support.
 #[must_use]
 pub fn needle_inert(p: &Palette, _status: slider::Status) -> slider::Style {
     slider::Style {
@@ -4274,16 +4245,12 @@ mod tests {
         // mark in the bar sits on (law L4).
         const { assert!(BAR_CONTENT_H == 2.0 * BAR_LEAD + TRANSPORT_HIT) }
         const { assert!(BAR_LEAD == GAP_XL) }
-        // **And the needle's geometry is a constant too** — ADR-0020 forbids
-        // animating bar geometry, and the needle is the one new surface a
-        // transition could have been tempted onto. Its thickness, its aiming
-        // band and both its gaps are literals; its *segments* move only when
-        // the queue changes, and its fill only when playback does. Neither is
-        // a tween (a standing rule of the product: "the needle advancing with playback
-        // (data arriving) and scrolling" were never animation).
+        // **And the needle's geometry is constant too** — ADR-0020 forbids
+        // animating bar geometry. Its thickness and aiming band are literals;
+        // its fill moves only when playback does, which is data rather than a
+        // tween.
         const { assert!(NEEDLE_H == 2.0) }
         const { assert!(NEEDLE_HIT == GAP_MD) }
-        const { assert!(SEGMENT_GAP == GAP_XXS && ALBUM_GAP == 8.0) }
         // **And there is nothing left above the bar to be pushed by.** The
         // queue popover's arrival was the one transition that flew over it;
         // ADR-0022 made the queue a place, so a navigation is a hard cut and
@@ -7059,8 +7026,6 @@ mod tests {
             assert!(on_lattice(BAR_LEAD));
             assert!(on_lattice(BAR_CONTENT_H));
             assert!(on_lattice(NEEDLE_HIT));
-            assert!(on_lattice(ALBUM_GAP));
-            assert!(on_lattice(SEGMENT_MIN));
             assert!(on_lattice(NEEDLE_TIP_W));
         }
         // Every control height.
@@ -7077,12 +7042,6 @@ mod tests {
         // line gap, never a slot — and it is named rather than silently on the
         // lattice, because a law with an unnamed exception is a habit.
         const { assert!(GAP_XXS == 2.0 && !on_lattice(GAP_XXS)) }
-        // …and the needle's track gap **is** that exception rather than a
-        // second one: the segments are one line, not a row of slots, so the gap
-        // between two of them is an intra-block gap by the same reading. The
-        // album gap is a slot-scale break and is on the lattice, which is why
-        // the critique's 6 became 8 (see [`ALBUM_GAP`]).
-        const { assert!(SEGMENT_GAP == GAP_XXS) }
     }
 
     /// **L3 — optical centring: the box centres the ink, not the line box.**

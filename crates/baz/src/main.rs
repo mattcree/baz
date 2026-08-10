@@ -22,7 +22,7 @@
 //! (`app`, and beside it `keys` and `mpris`, which produce the shell's
 //! messages from a keyboard and from the desktop respectively). Three controls
 //! are hand-built `Widget`s rather than view composition — `groove` (the
-//! volume fader) and `needle` (the queue's seek line) over the pointer
+//! volume fader) and `needle` (the current song's seek line) over the pointer
 //! machinery they share (`pointer`), and `spine` (the index rail's fisheye
 //! lane), which reads the pointer's position rather than its gestures and so
 //! shares nothing; ADR-0017 §5 records why that is now the norm for anything

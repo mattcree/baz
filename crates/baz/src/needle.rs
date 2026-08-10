@@ -1,27 +1,19 @@
-//! The needle: a 2 px seek line flush on the window's bottom edge, segmented
-//! by the queue's real entry lengths.
+//! The needle: a 2 px current-song seek line flush on the window's bottom
+//! edge.
 //!
 //! ADR-0017 §1.1 calls this the best single idea in any of the three design
 //! documents, and the reason is a measurement rather than a preference. The
 //! composition audit ranked the bottom bar's own contents by contrast-weighted
 //! ink and found **position last of six**, at 2.5 %, while the seek row it was
 //! drawn in occupied 37 of the bar's 77 px of content height. The needle states
-//! the same fact and one the groove never could — *structure* — in 2 px: you
-//! can see that you are three minutes into a nine-minute closer, and where the
-//! record you are on ends.
+//! the same position in 2 px without giving it a separate row.
 //!
 //! # What it is, precisely
 //!
-//! - **Segments are queue entries**, not album tracks. baz's queue is one list
-//!   with a cursor (ADR-0016) holding whole records and loose songs, so the
-//!   critique's album-track needle is the single-album case of this one. The
-//!   wide gap therefore falls at an **album boundary**.
 //! - **The fill is the lamp**; the unplayed track is the room's hairline. Both
 //!   choices are argued in [`theme::needle`].
-//! - **A press inside the sounding entry seeks; a press anywhere else jumps.**
-//!   One gesture, two commands, and no mode — because the segment you pointed
-//!   at is what says which you meant. [`player::NeedleTarget`] carries the
-//!   argument; this widget does not know about it.
+//! - **Every press is a seek within the current song.** The queue remains a
+//!   list of explicit rows; the bottom edge never pretends to measure it.
 //!
 //! # The aiming band is claimed upward, out of layout
 //!
@@ -49,7 +41,7 @@ use iced::advanced::{Clipboard, Shell, Widget};
 use iced::widget::slider::Style;
 use iced::{Element, Event, Length, Rectangle, Size, Theme, event, mouse};
 
-use crate::player::{self, NeedleBar, Pointer};
+use crate::player::{NeedleBar, Pointer};
 use crate::pointer::{self, Pointers, State};
 use crate::theme;
 
@@ -58,10 +50,9 @@ use crate::theme;
 /// `slider::Style` and the widgets stay a drawing detail.
 type StyleFn = fn(&theme::Palette, iced::widget::slider::Status) -> Style;
 
-/// The queue's seek line.
+/// The current song's seek line.
 pub struct Needle<'a, Message> {
-    /// The queue as segments, where the engine is in it, and where the
-    /// playhead is inside the entry that is sounding.
+    /// The current song's position and interaction state.
     bar: NeedleBar,
     /// The room this needle is painted in, carried rather than looked up, so
     /// the widget draws the same room the view that built it did.
@@ -195,63 +186,34 @@ where
         // on the window's edge whatever the reservation happens to be.
         let y = bounds.y + bounds.height - style.rail.width;
 
-        let spans = player::needle_spans(&self.bar.entries, bounds.width);
-        if spans.is_empty() {
-            // Nothing queued: the track, whole, drawn rather than hidden.
+        // The unplayed track is always present, so starting and stopping do
+        // not make the window's edge appear or disappear.
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: Rectangle {
+                    x: bounds.x,
+                    y,
+                    width: bounds.width,
+                    height: style.rail.width,
+                },
+                ..renderer::Quad::default()
+            },
+            track,
+        );
+        let filled = bounds.width * self.bar.position.clamp(0.0, 1.0);
+        if filled > 0.0 {
             renderer.fill_quad(
                 renderer::Quad {
                     bounds: Rectangle {
                         x: bounds.x,
                         y,
-                        width: bounds.width,
+                        width: filled,
                         height: style.rail.width,
                     },
                     ..renderer::Quad::default()
                 },
-                track,
+                fill,
             );
-            return;
-        }
-        for (index, span) in spans.iter().enumerate() {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: bounds.x + span.x,
-                        y,
-                        width: span.w,
-                        height: style.rail.width,
-                    },
-                    ..renderer::Quad::default()
-                },
-                track,
-            );
-            // **The hand-over at a track boundary is a hard cut, and the
-            // geometry is what makes it exact**: the entry that finished is
-            // filled to its own end and the next begins at its own start, so
-            // nothing has to travel between them (ADR-0020 forbids animating
-            // this, and the product's standing rules records that the needle advancing
-            // with playback was never animation in the first place).
-            let filled_to = match self.bar.playing {
-                Some(playing) if index < playing => span.end(),
-                Some(playing) if index == playing => {
-                    span.x + span.w * self.bar.position.clamp(0.0, 1.0)
-                }
-                _ => span.x,
-            };
-            if filled_to > span.x {
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: bounds.x + span.x,
-                            y,
-                            width: filled_to - span.x,
-                            height: style.rail.width,
-                        },
-                        ..renderer::Quad::default()
-                    },
-                    fill,
-                );
-            }
         }
     }
 }
@@ -270,8 +232,6 @@ where
 mod tests {
     use iced::advanced::clipboard;
     use iced::{Background, Point, Transformation, touch, window};
-
-    use crate::player::NeedleEntry;
 
     use super::*;
 
@@ -340,17 +300,10 @@ mod tests {
         renderer: Ink,
     }
 
-    fn queued(count: usize) -> NeedleBar {
+    fn bar(interactive: bool) -> NeedleBar {
         NeedleBar {
-            entries: (0..count)
-                .map(|index| NeedleEntry {
-                    ms: Some(200_000),
-                    album_break: index == count / 2 && count > 1,
-                })
-                .collect(),
-            playing: (count > 0).then_some(0),
             position: 0.25,
-            interactive: count > 0,
+            interactive,
             preview: None,
         }
     }
@@ -371,10 +324,10 @@ mod tests {
             }
         }
 
-        /// A live needle over a four-entry queue.
+        /// A live current-song line.
         fn live() -> Self {
             Self::new(
-                Needle::new(queued(4), &theme::CLOSING_TIME, theme::needle).on_pointer(
+                Needle::new(bar(true), &theme::CLOSING_TIME, theme::needle).on_pointer(
                     Msg::Press,
                     Msg::Drag,
                     Msg::Hover,
@@ -384,10 +337,10 @@ mod tests {
             )
         }
 
-        /// A needle with nothing queued: no handlers, so no pointer.
+        /// An unseekable song line: no handlers, so no pointer.
         fn inert() -> Self {
             Self::new(Needle::new(
-                queued(0),
+                bar(false),
                 &theme::CLOSING_TIME,
                 theme::needle_inert,
             ))
@@ -491,7 +444,7 @@ mod tests {
         line.press(at_line(30.0));
         assert_eq!(line.cursor(at_line(30.0)), theme::GROOVE_CURSOR_HELD);
 
-        // A needle with nothing queued leaves the cursor alone rather than
+        // An unseekable line leaves the cursor alone rather than
         // looking identical and doing nothing.
         let inert = Line::inert();
         assert_eq!(inert.cursor(at_line(30.0)), theme::GROOVE_CURSOR_INERT);
@@ -582,7 +535,7 @@ mod tests {
         );
     }
 
-    /// A needle with nothing queued refuses the pointer entirely, so it has
+    /// An unseekable song line refuses the pointer entirely, so it has
     /// nothing to lose and nothing to say when it does.
     #[test]
     fn an_inert_needle_ignores_the_pointer_entirely() {
@@ -601,9 +554,9 @@ mod tests {
     /// collection pays 2 px for this and 2 px is what it pays.
     #[test]
     fn the_needle_reserves_two_pixels_and_nothing_else() {
-        for count in [0, 1, 4, 400] {
+        for interactive in [false, true] {
             let needle: Needle<'static, Msg> =
-                Needle::new(queued(count), &theme::CLOSING_TIME, theme::needle);
+                Needle::new(bar(interactive), &theme::CLOSING_TIME, theme::needle);
             let size = Widget::<Msg, Theme, Ink>::size(&needle);
             assert_eq!(size.height, Length::Fixed(theme::NEEDLE_H));
             assert_eq!(size.width, Length::Fill);

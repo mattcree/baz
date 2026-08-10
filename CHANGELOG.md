@@ -26,6 +26,10 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Fixed
 
+- **The bottom-edge needle is a conventional song seek bar.** It measures only
+  the current track, with track elapsed/total figures and one continuous seek
+  target. The proposed whole-list toggle, cumulative figures, queue segments
+  and jump behaviour were removed: playlist progress does not belong there.
 - **Now playing is simply the song that is playing.** It keeps the large
   centred artwork, current-track placard, needle and figures, with no queue or
   second layout competing for the page. A restrained full-width source footer

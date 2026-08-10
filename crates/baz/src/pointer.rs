@@ -1,7 +1,7 @@
 //! The pointer machinery every hand-built widget in baz shares.
 //!
 //! baz draws two things by hand — [`crate::groove`] (the volume fader) and
-//! [`crate::needle`] (the queue's seek line) — and ADR-0017 §5 records why
+//! [`crate::needle`] (the current song's seek line) — and ADR-0017 §5 records why
 //! that is now the norm rather than the exception: *"a ~400-line hand-built
 //! `Widget` with pointer geometry and its own tests is not disposable view
 //! composition. It is the **second** such widget after `groove.rs`."* The

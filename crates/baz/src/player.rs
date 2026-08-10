@@ -257,7 +257,6 @@ use baz_core::traversal::Traversal;
 use baz_core::volume::{MAX_POSITION, Volume};
 
 use crate::replaygain::{ReplayGain, ReplayGainReadout};
-use crate::theme;
 use crate::vm::{self, AlbumVm, QueueItemVm, QueueVm};
 
 /// Whether a playback engine exists to talk to.
@@ -492,9 +491,8 @@ pub struct Preview {
 ///
 /// The groove they were built for is gone; the *figures* are not, because
 /// the product's standing rules permits replacing a slot with a better statement of the
-/// same fact and not removing one. The needle states position and structure;
-/// these state the two numbers a needle cannot: exactly how far in, and exactly
-/// how long.
+/// same fact and not removing one. The needle states position; these state the
+/// two numbers a line cannot: exactly how far in, and exactly how long.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stamps {
     /// Left timestamp: the position being shown — scrubbed, pending, or
@@ -509,110 +507,18 @@ pub struct Stamps {
     pub pending: bool,
 }
 
-/// One entry of the queue, as much of it as the needle's geometry needs.
-///
-/// Deliberately **not** a track: ADR-0017 §1.1 generalised the critique's
-/// album-track needle to baz's own queue, which is one list with a cursor
-/// (ADR-0016) holding whole records *and* loose songs. So the segments are
-/// queue entries, and the wide gap falls where one record ends rather than at a
-/// side break. The critique's specification is the single-album case of this
-/// one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NeedleEntry {
-    /// Playing time in milliseconds, when the scan read one. `None` is drawn
-    /// as [`crate::theme::SEGMENT_MIN`] and no proportional claim at all —
-    /// the honest width for a length nobody knows.
-    pub ms: Option<u64>,
-    /// Whether this entry begins a different record from the one before it.
-    /// Never true of the first entry: a gap needs something on both sides.
-    pub album_break: bool,
-}
-
-/// The needle's render-ready state: the queue as segments, where the engine is
-/// in it, and where the playhead is inside the entry that is sounding.
-///
-/// Everything here is event-derived or request-side record, and nothing here is
-/// geometry: the widths are a pure function of this plus the width the widget
-/// is laid out at ([`needle_spans`]), computed in the same module the widget
-/// hit-tests through, so the line that is drawn and the line that is clicked
-/// can never be two different lines.
+/// The current song's render-ready seek line.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NeedleBar {
-    /// The queue, in play order. Empty when this process has queued nothing —
-    /// in which case the needle draws its unfilled track and refuses the
-    /// pointer, rather than vanishing.
-    pub entries: Vec<NeedleEntry>,
-    /// Which entry the engine last said it started, reconciled against the
-    /// path it named. `None` leaves the whole line unfilled.
-    pub playing: Option<usize>,
-    /// How far into the playing entry the playhead is, `0.0..=1.0`. Always 0
+    /// How far into the current song the playhead is, `0.0..=1.0`. Always 0
     /// when the track length is unknown — there is no proportion to show.
     pub position: f32,
-    /// Whether the pointer can do anything: an engine, and a queue to move
-    /// within.
+    /// Whether the current song has a declared duration and can be sought.
     pub interactive: bool,
     /// Where the pointer is resting and what a click there would ask for —
     /// `None` unless the pointer is on a live needle with no scrub in
     /// progress (see the module's precedence rules).
     pub preview: Option<Preview>,
-}
-
-/// Where one entry sits along the needle, in the needle's own pixels.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Span {
-    /// Distance from the needle's left edge to this segment's left edge.
-    pub x: f32,
-    /// The segment's drawn width.
-    pub w: f32,
-}
-
-impl Span {
-    /// Where the segment ends.
-    #[must_use]
-    pub fn end(self) -> f32 {
-        self.x + self.w
-    }
-
-    /// How far along this segment `x` falls, `0.0..=1.0`. A zero-width
-    /// segment reads 0 — the only honest answer when there is nothing to
-    /// divide by.
-    #[must_use]
-    pub fn fraction(self, x: f32) -> f32 {
-        if !self.w.is_finite() || self.w <= 0.0 || !x.is_finite() {
-            return 0.0;
-        }
-        ((x - self.x) / self.w).clamp(0.0, 1.0)
-    }
-}
-
-/// What a press on the needle is asking for.
-///
-/// Two answers, because the needle inherited the seek row's job **and** gained
-/// one, and ADR-0014 gives each its own command. Which applies is decided by
-/// *which segment was pointed at*, which is the whole reason the needle can
-/// carry both without a mode:
-///
-/// - point inside the entry that is already sounding, and you are moving the
-///   playhead — [`Seek`](baz_core::protocol::Command::Seek), track-relative;
-/// - point at any other entry, and you are choosing a record —
-///   [`JumpTo`](baz_core::protocol::Command::JumpTo), queue-relative.
-///
-/// Both are "put the needle here", which is why one gesture can mean both
-/// without anything on screen having to say which mode it is in. And it is why
-/// deleting the groove does not take pointer-reachable seeking with it, which
-/// the product's visible-control rule would have forbidden.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NeedleTarget {
-    /// Move the playhead within the entry that is sounding.
-    Seek {
-        /// Absolute position in the current track, in milliseconds.
-        position_ms: u64,
-    },
-    /// Play a different entry of the queue.
-    Jump {
-        /// Zero-based queue position.
-        position: usize,
-    },
 }
 
 /// The placeholder shown where a track length would be, when the container
@@ -1438,8 +1344,8 @@ impl PlayerState {
     /// a click until it travels [`DRAG_THRESHOLD_PX`] (module docs). Nothing
     /// is requested and nothing on the bar moves yet.
     ///
-    /// A no-op when the needle is not live: with no queue there is no segment
-    /// a position could land in, and inventing one would be inventing music.
+    /// A no-op when the current song has no declared duration, because there
+    /// is no honest position for a seek to land on.
     pub fn press(&mut self, pointer: Pointer) {
         if !self.needle_live() {
             return;
@@ -1473,7 +1379,7 @@ impl PlayerState {
     /// (module docs) — and records it as pending so the bar keeps showing it
     /// until an event confirms. `None` when no gesture was in progress, or
     /// when the track stopped being seekable under it.
-    pub fn release_drag(&mut self) -> Option<NeedleTarget> {
+    pub fn release_drag(&mut self) -> Option<u64> {
         let gesture = self.gesture.take()?;
         let landing = if gesture.scrubbing {
             gesture.latest
@@ -1484,85 +1390,35 @@ impl PlayerState {
         // previewing from there when that is still on the needle, and show
         // nothing when the release happened off the end of a scrub.
         self.hover = gesture.latest.is_over().then_some(gesture.latest);
-        let target = self.needle_target(landing)?;
-        if let NeedleTarget::Seek { position_ms } = target {
-            self.seek_pending = Some(position_ms);
-        }
-        Some(target)
+        let position_ms = self.needle_target(landing)?;
+        self.seek_pending = Some(position_ms);
+        Some(position_ms)
     }
 
-    /// Whether the needle can act: an engine, and a queue to move within.
-    ///
-    /// Note what is *not* required — a track playing, or a declared length.
-    /// `JumpTo` works from every transport state including stopped (ADR-0014),
-    /// so a queue that has been sent and not started is still a line you can
-    /// point at. What a missing length costs is the *seek* half, and only
-    /// within the entry that is sounding.
+    /// Whether the current song has an honest pointer action.
     fn needle_live(&self) -> bool {
-        self.engine_ready() && self.queue.as_ref().is_some_and(|queue| !queue.is_empty())
-    }
-
-    /// The queue as the needle segments it — durations and album boundaries,
-    /// and nothing else.
-    ///
-    /// A boundary is *consecutive entries not sharing a record*, which is the
-    /// same reading [`continuation`] counts by and the same one
-    /// [`vm::QueueItemVm::album`] documents: the queue is one list holding
-    /// whole records and loose songs, so the fact lives per item rather than
-    /// per queue.
-    fn needle_entries(&self) -> Vec<NeedleEntry> {
-        let Some(queue) = self.queue.as_ref() else {
-            return Vec::new();
-        };
-        queue
-            .items
-            .iter()
-            .enumerate()
-            .map(|(index, item)| NeedleEntry {
-                ms: item
-                    .duration
-                    .map(|length| u64::try_from(length.as_millis()).unwrap_or(u64::MAX)),
-                album_break: index > 0 && queue.items[index - 1].album != item.album,
-            })
-            .collect()
+        self.seekable_total().is_some()
     }
 
     /// What a press at `pointer` is asking for — the needle's one decision,
     /// made here rather than in the widget (ADR-0006's layer boundary, and the
     /// same split [`crate::groove`] has always had).
     ///
-    /// `None` when there is nothing honest to ask for: no queue, or a pointer
-    /// inside the sounding entry of a track whose length was never declared,
-    /// where a position is a proportion of a number nobody has.
-    fn needle_target(&self, pointer: Pointer) -> Option<NeedleTarget> {
-        if !self.needle_live() {
-            return None;
-        }
-        let entries = self.needle_entries();
-        let spans = needle_spans(&entries, pointer.usable_width());
-        let index = needle_index(&spans, pointer.x)?;
-        if self.playing_row() == Some(index) {
-            let total = self.seekable_total()?;
-            return Some(NeedleTarget::Seek {
-                position_ms: scale(total, spans[index].fraction(pointer.x)),
-            });
-        }
-        Some(NeedleTarget::Jump { position: index })
+    /// `None` when the current song has no declared duration, because a
+    /// position would be a proportion of a number nobody has.
+    fn needle_target(&self, pointer: Pointer) -> Option<u64> {
+        Some(scale(self.seekable_total()?, pointer.fraction()))
     }
 
-    /// The needle's render-ready state. Always answers — a needle with nothing
-    /// queued draws its unfilled track and refuses the pointer, because a line
+    /// The song seek line's render-ready state. Always answers — a line with
+    /// nothing seekable draws its unfilled track and refuses the pointer, because a line
     /// that came and went with the music would be movement in the one place
     /// ADR-0020 forbids it.
     #[must_use]
     pub fn needle_bar(&self) -> NeedleBar {
         let total = self.seekable_total();
         // **The fill follows playback, a seek that has been asked for, and a
-        // scrub — in that order of precedence, and only ever *within the entry
-        // that is sounding*.** A drag that wanders onto another segment is a
-        // choice of record rather than a position ([`Self::scrub_ms`] answers
-        // `None` there), so the fill stays where the music is instead of being
-        // thrown across the window. Nothing here is a tween: the fill moves
+        // scrub — in that order of precedence.** Nothing here is a tween: the fill moves
         // because data arrived or a hand moved it, which is the distinction
         // the product's standing rules draws and ADR-0020 forbids crossing.
         let shown = self
@@ -1570,8 +1426,6 @@ impl PlayerState {
             .or(self.seek_pending)
             .unwrap_or(self.elapsed_ms);
         NeedleBar {
-            entries: self.needle_entries(),
-            playing: self.playing_row(),
             position: total.map_or(0.0, |total| fraction(shown, total)),
             interactive: self.needle_live(),
             preview: self.preview(),
@@ -1834,11 +1688,12 @@ impl PlayerState {
             .scrub_ms()
             .or(self.seek_pending)
             .unwrap_or(self.elapsed_ms);
+        let pending = self.dragging() || self.seek_pending();
         let total = self.seekable_total();
         Some(Stamps {
             elapsed: format_ms(total.map_or(shown, |total| shown.min(total))),
             total: total.map_or_else(|| UNKNOWN_TOTAL.to_owned(), format_ms),
-            pending: self.dragging() || self.seek_pending(),
+            pending,
         })
     }
 
@@ -2101,17 +1956,7 @@ impl PlayerState {
     /// The position under the pointer while a scrub is engaged.
     fn scrub_ms(&self) -> Option<u64> {
         let gesture = self.gesture.filter(|gesture| gesture.scrubbing)?;
-        match self.needle_target(gesture.latest)? {
-            // Inside the sounding entry a scrub is a seek, and the elapsed
-            // stamp shows where the hand is — the affordance the amber
-            // timestamp was always for.
-            NeedleTarget::Seek { position_ms } => Some(position_ms),
-            // Over another entry it is a *choice of record*, and there is no
-            // elapsed time to show for a track that has not started. The tip
-            // names what the release would play; the stamp keeps saying where
-            // the music actually is.
-            NeedleTarget::Jump { .. } => None,
-        }
+        self.needle_target(gesture.latest)
     }
 
     /// The hover preview: what a click under the pointer would seek to.
@@ -2123,24 +1968,12 @@ impl PlayerState {
         }
         let hover = self.hover?;
         let width = hover.usable_width();
-        let entries = self.needle_entries();
-        let spans = needle_spans(&entries, width);
-        let index = needle_index(&spans, hover.x)?;
-        // **The tip says what a click there would ask for**, which is the only
-        // rule it needs and the reason it can carry two different kinds of
-        // string without a mode: inside the sounding entry a click moves the
-        // playhead, so the tip is a timestamp; anywhere else a click plays a
-        // record, so the tip is its name. A sounding entry of undeclared length
-        // falls to the name too — there is no timestamp to promise.
-        let label = match (self.playing_row() == Some(index), self.seekable_total()) {
-            (true, Some(total)) => format_ms(scale(total, spans[index].fraction(hover.x))),
-            _ => self.queue.as_ref()?.items.get(index)?.title.clone(),
-        };
+        let total = self.seekable_total()?;
         Some(Preview {
-            label,
+            label: format_ms(scale(total, hover.fraction())),
             // Derived from the (clamped) fraction rather than from `x`, so
             // the tip and the label can never disagree about where the pointer
-            // is — including past either end of the needle.
+            // is — including past either end of the line.
             x: hover.fraction() * width,
             width,
         })
@@ -2817,153 +2650,6 @@ pub fn preview_offset(preview: &Preview, tip_width: f32) -> f32 {
     (preview.x - tip_width / 2.0).clamp(0.0, slack)
 }
 
-/// Round to a whole pixel the way the hang does — `floor(x + 0.5)`, so a
-/// boundary lands on a pixel edge rather than half on two of them.
-fn round_px(x: f32) -> f32 {
-    (x + 0.5).floor()
-}
-
-/// A duration in milliseconds, or a count, as a float the ratio arithmetic can
-/// divide with.
-///
-/// The precision the lint is about begins at 2^53 milliseconds — 285 000 years
-/// of music, and nine quadrillion tracks — so the loss is unreachable rather
-/// than tolerated.
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "the values are durations in milliseconds and a queue length, and f64 holds \
-              both exactly at every magnitude a music collection can reach"
-)]
-fn widen(value: u64) -> f64 {
-    value as f64
-}
-
-/// A pixel width computed in `f64` for the ratio's precision, narrowed to the
-/// `f32` a layout is expressed in.
-///
-/// Every value narrowed here is a fraction of a window's width — bounded by the
-/// line the segments are drawn on — so there is nothing at the top of `f32`'s
-/// range to truncate.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "a pixel width bounded by the needle's own length; f64 buys the ratio its \
-              precision and the layout is f32"
-)]
-fn narrow(value: f64) -> f32 {
-    value as f32
-}
-
-/// **The needle's geometry.** Where each queue entry sits along a needle
-/// `width` logical pixels wide.
-///
-/// Pure, total, and the single source of both what is drawn and what is
-/// clicked — [`crate::needle`] calls this to paint and [`PlayerState`] calls it
-/// to resolve a press, so the line on screen and the line under the pointer are
-/// the same line by construction rather than by two implementations agreeing.
-///
-/// The rule, in the order it is applied:
-///
-/// 1. **The gaps come out first.** [`crate::theme::SEGMENT_GAP`] between two
-///    entries, [`crate::theme::ALBUM_GAP`] where one record ends and the next
-///    begins. They are fixed rather than proportional because they are
-///    *punctuation*: a gap that shrank with a long queue would stop being
-///    legible exactly when the structure it marks matters most.
-/// 2. **Every entry gets [`crate::theme::SEGMENT_MIN`] before anything gets a
-///    share.** Each segment is a control — clicking it jumps there — and the
-///    visible-control rule has no "unless the track is short" clause. A
-///    40-second interlude between two twelve-minute sides stays clickable.
-/// 3. **What is left is shared by declared duration.** An entry whose length
-///    the scan never read takes the floor and **no share at all**, which is the
-///    honest drawing of "we do not know how long this is". When *no* entry
-///    declares a length there is nothing to be proportional to, so the leftover
-///    is shared equally — the needle then states structure only, which is still
-///    more than a scalar groove ever said.
-///
-/// Two degenerate cases, both bounded rather than special-cased away: a queue
-/// long enough that its gaps alone exceed the window **drops the gaps** (the
-/// entries are what the control is for), and one long enough that the floors do
-/// not fit divides the space evenly. Boundaries are rounded with
-/// [`round_px`], and the sum is the width exactly — the last segment ends on
-/// the window's right edge, not a rounding error short of it.
-#[must_use]
-pub fn needle_spans(entries: &[NeedleEntry], width: f32) -> Vec<Span> {
-    let count = entries.len();
-    if count == 0 || !width.is_finite() || width <= 0.0 {
-        return Vec::new();
-    }
-    let each = |index: usize, entry: &NeedleEntry| -> f32 {
-        if index == 0 {
-            0.0
-        } else if entry.album_break {
-            theme::ALBUM_GAP
-        } else {
-            theme::SEGMENT_GAP
-        }
-    };
-    let mut gaps: Vec<f32> = entries
-        .iter()
-        .enumerate()
-        .map(|(i, e)| each(i, e))
-        .collect();
-    if gaps.iter().sum::<f32>() >= width {
-        // More punctuation than line. The entries are the control; the gaps
-        // are the commentary, and the commentary is what gives way.
-        gaps.fill(0.0);
-    }
-    let available = width - gaps.iter().sum::<f32>();
-    let n = narrow(widen(count as u64));
-    let floor = if n * theme::SEGMENT_MIN <= available {
-        theme::SEGMENT_MIN
-    } else {
-        available / n
-    };
-    let extra = (available - floor * n).max(0.0);
-    let declared: f64 = entries.iter().filter_map(|entry| entry.ms).map(widen).sum();
-
-    let mut spans = Vec::with_capacity(count);
-    let mut cursor = 0.0_f32;
-    for (index, entry) in entries.iter().enumerate() {
-        let share = if declared > 0.0 {
-            narrow(f64::from(extra) * (entry.ms.map_or(0.0, widen) / declared))
-        } else {
-            extra / n
-        };
-        cursor += gaps[index];
-        let width_of = floor + share;
-        let start = round_px(cursor);
-        let end = round_px(cursor + width_of);
-        spans.push(Span {
-            x: start,
-            w: (end - start).max(0.0),
-        });
-        cursor += width_of;
-    }
-    spans
-}
-
-/// Which segment `x` falls in — the needle's hit test.
-///
-/// **Total on a non-empty queue**, deliberately: `x` before the first segment
-/// reads as the first, past the last reads as the last (a held scrub keeps
-/// reporting off both ends), and `x` inside a *gap* reads as the segment before
-/// it. Every pixel of a 2 px line is live, which is the least a control that
-/// thin can offer a hand.
-#[must_use]
-pub fn needle_index(spans: &[Span], x: f32) -> Option<usize> {
-    if spans.is_empty() || !x.is_finite() {
-        return None;
-    }
-    let mut hit = 0;
-    for (index, span) in spans.iter().enumerate() {
-        if x >= span.x {
-            hit = index;
-        } else {
-            break;
-        }
-    }
-    Some(hit)
-}
-
 #[cfg(test)]
 mod tests {
     use baz_core::library::AudioFormat;
@@ -3388,7 +3074,7 @@ mod tests {
         })
     }
 
-    /// What a release inside the sounding entry asks for, in the shape
+    /// What a release on the song seek line asks for, in the shape
     /// [`PlayerState::release_drag`] answers in — so a test that expected a
     /// target and a test that expected nothing read the same way.
     #[expect(
@@ -3396,30 +3082,15 @@ mod tests {
         reason = "the wrapper is the point: these are compared against an Option-returning
                   release, beside assertions that expect None"
     )]
-    fn seek_to(position_ms: u64) -> Option<NeedleTarget> {
-        Some(NeedleTarget::Seek { position_ms })
-    }
-
-    /// What a release anywhere else asks for.
-    #[expect(
-        clippy::unnecessary_wraps,
-        reason = "as above — the shape is what makes the assertions comparable"
-    )]
-    fn jump(position: usize) -> Option<NeedleTarget> {
-        Some(NeedleTarget::Jump { position })
+    fn seek_to(position_ms: u64) -> Option<u64> {
+        Some(position_ms)
     }
 
     /// A player mid-track: playing `/m/boc/geogaddi/01.flac`, 30 s into a
     /// 200 s track, with **one** entry queued.
     ///
-    /// One entry is the case worth writing the gesture tests against, because
-    /// over a one-entry queue the needle *is* the seek bar it replaced: a single
-    /// segment spanning the whole width, every point in it inside the sounding
-    /// entry, and every position therefore the same arithmetic the 260 px
-    /// groove did. Every number below is the number the groove's tests asserted,
-    /// which is the cheapest possible proof that the control changed shape and
-    /// not behaviour. The *segment* cases are
-    /// [`needle_spans`]'s own tests and the multi-entry ones below.
+    /// Every gesture is track-relative, regardless of how many entries the
+    /// held queue contains.
     fn playing_with_progress() -> (Vec<AlbumVm>, PlayerState) {
         let albums = albums();
         let mut player = ready_with_queue(1);
@@ -3448,20 +3119,12 @@ mod tests {
     /// A track of undeclared length: the elapsed time still counts up, and the
     /// needle refuses to invent a position inside it.
     ///
-    /// **What changed at step 9, and it is a gain rather than a loss.** The
-    /// groove went inert here — it refused the pointer outright, because a
-    /// scalar bar with no total has nothing to scrub against. The needle only
-    /// loses the *seek* half: the entry is still a segment, so it is still
-    /// something you can point at and play, and the tip names it rather than
-    /// promising a timestamp nobody can compute. A queue whose scan read no
-    /// durations at all is still a queue you can navigate.
+    /// A scalar bar with no total has nothing to scrub against, so the line is
+    /// visible but inert and offers no timestamp preview.
     #[test]
     fn a_track_without_a_declared_length_shows_elapsed_but_does_not_scrub() {
         let albums = albums();
         let mut player = PlayerState::new(Availability::Ready);
-        // The queue holds the stray itself, so the engine's position and the
-        // record agree and the segment under the pointer really is the one
-        // that is sounding.
         player.note_queue_sent(vm::album_queue(&albums[1], None));
         player.apply(&started("/m/strays/a.wav", 0), &albums);
         player.apply(&progress(7_000, None), &albums);
@@ -3470,30 +3133,15 @@ mod tests {
         assert_eq!(bar.total, "--:--", "an undeclared length is not invented");
         assert!(
             (bar.position - 0.0).abs() < 1e-6,
-            "no length, no proportion — the segment is drawn unfilled"
+            "no length, no proportion — the line is drawn unfilled"
         );
-        // The line is live, because a queue is something to move within even
-        // when nobody knows how long its entries are.
-        assert!(bar.interactive);
-        // But a press inside the sounding entry asks for nothing: a position is
-        // a proportion of a number this track does not have.
+        assert!(!bar.interactive);
         player.hover_to(at(100.0));
         player.press(at(100.0));
         player.drag_to(at(160.0));
-        assert!(player.dragging());
+        assert!(!player.dragging());
         assert_eq!(player.release_drag(), None);
-        // And the tip says what a click *would* do, which here is name the
-        // record rather than promise a timestamp.
-        player.hover_to(at(100.0));
-        assert_eq!(
-            reading(&player)
-                .expect("bar")
-                .preview
-                .expect("a live needle previews")
-                .label,
-            "a.wav",
-            "no length, no honest timestamp — so the tip names the entry"
-        );
+        assert!(reading(&player).expect("bar").preview.is_none());
     }
 
     #[test]
@@ -3638,325 +3286,6 @@ mod tests {
     }
 
     // -----------------------------------------------------------------
-    // The needle's segment geometry
-    // -----------------------------------------------------------------
-
-    /// An entry `secs` long, optionally starting a new record.
-    fn entry(secs: Option<u64>, album_break: bool) -> NeedleEntry {
-        NeedleEntry {
-            ms: secs.map(|secs| secs * 1_000),
-            album_break,
-        }
-    }
-
-    /// The needle's width in these tests — a round number so the arithmetic
-    /// below is readable rather than merely correct.
-    const LINE: f32 = 1200.0;
-
-    /// **Segment boundaries come out of the entries' real lengths**, which is
-    /// the whole claim the needle makes that no scalar groove ever could.
-    #[test]
-    fn segments_are_proportional_to_the_lengths_the_scan_read() {
-        // 100 s, 200 s, 300 s: a sixth, a third and a half of the music, and
-        // therefore of the line once the punctuation is taken out of it.
-        let entries = [
-            entry(Some(100), false),
-            entry(Some(200), false),
-            entry(Some(300), false),
-        ];
-        let spans = needle_spans(&entries, LINE);
-        assert_eq!(spans.len(), 3);
-
-        // The gaps come out first, then every entry takes its floor, then what
-        // is left is shared by declared duration.
-        let gaps = 2.0 * theme::SEGMENT_GAP;
-        let available = LINE - gaps;
-        let extra = available - 3.0 * theme::SEGMENT_MIN;
-        for (index, share) in [(0, 1.0 / 6.0), (1, 2.0 / 6.0), (2, 3.0 / 6.0)] {
-            let want = theme::SEGMENT_MIN + extra * share;
-            assert!(
-                (spans[index].w - want).abs() <= 1.0,
-                "segment {index} is {} px, wanted {want} px",
-                spans[index].w
-            );
-        }
-        // Nine minutes of closer is visibly three times the two-minute opener,
-        // which is the sentence ADR-0017 §1.1 justifies the whole widget with.
-        assert!(spans[2].w > 2.9 * spans[0].w);
-
-        // No gap is left over at either end, and the segments run edge to edge
-        // in order with exactly the punctuation between them.
-        assert!((spans[0].x - 0.0).abs() < f32::EPSILON);
-        assert!((spans[2].end() - LINE).abs() <= 1.0);
-        for pair in spans.windows(2) {
-            let gap = pair[1].x - pair[0].end();
-            assert!(
-                (gap - theme::SEGMENT_GAP).abs() <= 1.0,
-                "a track boundary is {gap} px, wanted {}",
-                theme::SEGMENT_GAP
-            );
-        }
-    }
-
-    /// **The wide gap falls at an album boundary**, not at a track boundary —
-    /// ADR-0017 §1.1's generalisation of the critique's side break to a queue
-    /// that is one list holding whole records and loose songs.
-    #[test]
-    fn a_record_ending_is_a_wider_gap_than_a_track_ending() {
-        let entries = [
-            entry(Some(200), false),
-            entry(Some(200), false),
-            entry(Some(200), true),
-            entry(Some(200), false),
-        ];
-        let spans = needle_spans(&entries, LINE);
-        let gap = |left: usize| spans[left + 1].x - spans[left].end();
-
-        assert!((gap(0) - theme::SEGMENT_GAP).abs() <= 1.0);
-        assert!(
-            (gap(1) - theme::ALBUM_GAP).abs() <= 1.0,
-            "the record ends here"
-        );
-        assert!((gap(2) - theme::SEGMENT_GAP).abs() <= 1.0);
-        // A side break that is not wider than a track break is not a break.
-        const { assert!(theme::ALBUM_GAP > theme::SEGMENT_GAP) }
-        // Four equal tracks, so the wider gap is paid for out of the line and
-        // not out of one segment: every entry is still the same width.
-        let first = spans[0].w;
-        for span in &spans {
-            assert!((span.w - first).abs() <= 1.0);
-        }
-    }
-
-    /// **An entry whose length nobody read takes the floor and no share.**
-    ///
-    /// The honest drawing of "we do not know how long this is": it is present,
-    /// it is clickable, and it makes no proportional claim. The alternative —
-    /// giving it an average — would be inventing a duration, which is the one
-    /// thing this module's rules exist to stop.
-    #[test]
-    fn an_entry_of_unknown_length_is_drawn_at_the_floor_and_claims_nothing() {
-        let entries = [
-            entry(Some(300), false),
-            entry(None, false),
-            entry(Some(300), false),
-        ];
-        let spans = needle_spans(&entries, LINE);
-        assert!(
-            (spans[1].w - theme::SEGMENT_MIN).abs() <= 1.0,
-            "an undeclared length took a share it has no claim to"
-        );
-        // …and it is still a target, which is what the floor is for: the
-        // visible-control rule has no "unless the scan was incomplete" clause.
-        assert!(spans[1].w >= theme::SEGMENT_MIN - 1.0);
-        assert_eq!(needle_index(&spans, spans[1].x + 1.0), Some(1));
-        // The two that *are* declared split what is left evenly.
-        assert!((spans[0].w - spans[2].w).abs() <= 1.0);
-
-        // And when nothing at all declares a length there is nothing to be
-        // proportional to, so the needle states structure only — equal
-        // segments, which is still more than a scalar groove ever said.
-        let unknown = [entry(None, false), entry(None, false), entry(None, false)];
-        let spans = needle_spans(&unknown, LINE);
-        let first = spans[0].w;
-        for span in &spans {
-            assert!((span.w - first).abs() <= 1.0);
-        }
-        assert!((spans[2].end() - LINE).abs() <= 1.0);
-    }
-
-    /// **Hit-testing is total on a non-empty queue**: every pixel of a 2 px
-    /// line resolves to an entry, including the pixels between two of them and
-    /// the ones past either end.
-    #[test]
-    fn every_pixel_of_the_needle_resolves_to_an_entry() {
-        let entries = [
-            entry(Some(200), false),
-            entry(Some(200), true),
-            entry(Some(200), false),
-        ];
-        let spans = needle_spans(&entries, LINE);
-
-        for (index, span) in spans.iter().enumerate() {
-            assert_eq!(needle_index(&spans, span.x), Some(index));
-            assert_eq!(needle_index(&spans, span.x + span.w / 2.0), Some(index));
-            assert_eq!(needle_index(&spans, span.end() - 1.0), Some(index));
-        }
-        // A pixel inside the album gap belongs to the record that just ended,
-        // not to the one about to start — a click there is a click on what you
-        // were pointing at when you slowed down.
-        let in_the_gap = spans[0].end() + 1.0;
-        assert!(in_the_gap < spans[1].x);
-        assert_eq!(needle_index(&spans, in_the_gap), Some(0));
-        // A held scrub keeps reporting off both ends, so both ends clamp.
-        assert_eq!(needle_index(&spans, -500.0), Some(0));
-        assert_eq!(needle_index(&spans, LINE + 500.0), Some(2));
-        // Nothing that is not a number resolves to anything.
-        assert_eq!(needle_index(&spans, f32::NAN), None);
-    }
-
-    /// **An empty queue has no geometry at all**, and neither has a needle with
-    /// no width. Both are answered rather than panicked at, because both are
-    /// ordinary: the first is baz at launch and the second is a frame before
-    /// the first layout.
-    #[test]
-    fn an_empty_queue_and_a_zero_width_needle_have_no_segments() {
-        assert!(needle_spans(&[], LINE).is_empty());
-        assert!(needle_spans(&[entry(Some(200), false)], 0.0).is_empty());
-        assert!(needle_spans(&[entry(Some(200), false)], f32::NAN).is_empty());
-        assert_eq!(needle_index(&[], 40.0), None);
-
-        // And a queue long enough that its punctuation alone would fill the
-        // window drops the punctuation rather than the entries: the segments
-        // are the control, the gaps are the commentary.
-        let crowded: Vec<NeedleEntry> = (0..800).map(|_| entry(Some(200), true)).collect();
-        let spans = needle_spans(&crowded, LINE);
-        assert_eq!(spans.len(), 800);
-        assert!((spans[0].x - 0.0).abs() < f32::EPSILON);
-        assert!((spans[799].end() - LINE).abs() <= 1.0);
-        for span in &spans {
-            assert!(span.w >= 0.0, "no segment may have negative width");
-        }
-    }
-
-    /// **The one gesture, resolving two ways** — the needle's whole interaction
-    /// design, as arithmetic rather than as a mode.
-    ///
-    /// Point inside the entry that is sounding and you are moving the playhead
-    /// (`Command::Seek`); point at any other entry and you are choosing a
-    /// record (`Command::JumpTo`). Both are "put the needle here", which is why
-    /// nothing on screen has to say which one you meant — and it is why
-    /// deleting the groove did not take pointer-reachable seeking with it.
-    #[test]
-    fn a_press_inside_the_sounding_entry_seeks_and_anywhere_else_jumps() {
-        let albums = albums();
-        let mut player = ready_with_queue(3);
-        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
-        player.apply(&progress(30_000, Some(200_000)), &albums);
-
-        let spans = needle_spans(&player.needle_entries(), BAR);
-        assert_eq!(spans.len(), 3);
-
-        // Halfway into the sounding entry: a seek to halfway through *that
-        // track*, not halfway through the queue.
-        let middle = spans[0].x + spans[0].w / 2.0;
-        player.press(Pointer::new(middle, BAR));
-        assert_eq!(player.release_drag(), seek_to(100_000));
-
-        // The third entry: a jump, and no seek is left pending — nothing has
-        // been asked about a playhead.
-        player.apply(&progress(30_000, Some(200_000)), &albums);
-        let third = spans[2].x + spans[2].w / 2.0;
-        player.press(Pointer::new(third, BAR));
-        assert_eq!(player.release_drag(), jump(2));
-
-        // A drag from one entry to another lands where the pointer ended, not
-        // where it went down — the same rule the fader has always had, applied
-        // to a coordinate system made of records.
-        player.press(Pointer::new(middle, BAR));
-        player.drag_to(Pointer::new(third, BAR));
-        assert!(player.dragging());
-        assert_eq!(player.release_drag(), jump(2));
-
-        // With nothing started, every segment is a jump: there is no sounding
-        // entry for a press to be inside of.
-        let mut fresh = ready_with_queue(3);
-        fresh.press(Pointer::new(middle, BAR));
-        assert_eq!(fresh.release_drag(), jump(0));
-    }
-
-    /// The tip says what a click there would ask for, which is the only rule
-    /// it needs — and the reason one chip can carry two kinds of string.
-    #[test]
-    fn the_tip_names_a_record_outside_the_sounding_entry_and_a_time_inside_it() {
-        let albums = albums();
-        let mut player = ready_with_queue(3);
-        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums);
-        player.apply(&progress(30_000, Some(200_000)), &albums);
-        let spans = needle_spans(&player.needle_entries(), BAR);
-
-        player.hover_to(Pointer::new(spans[0].x + spans[0].w / 2.0, BAR));
-        assert_eq!(
-            player.needle_bar().preview.expect("a live needle").label,
-            "1:40",
-            "inside the sounding entry a click moves the playhead"
-        );
-
-        player.hover_to(Pointer::new(spans[1].x + 1.0, BAR));
-        assert_eq!(
-            player.needle_bar().preview.expect("a live needle").label,
-            "Music Is Math",
-            "outside it a click plays a record, so the tip names the record"
-        );
-
-        // A scrub outranks the tip — the fill and the stamp already say where
-        // the hand is, and two things chasing one pointer is noise.
-        player.press(Pointer::new(spans[0].x, BAR));
-        player.drag_to(Pointer::new(spans[0].x + 60.0, BAR));
-        assert!(player.needle_bar().preview.is_none());
-    }
-
-    /// The needle is live whenever there is a queue to move within — including
-    /// from a full stop, because `JumpTo` works from every transport state
-    /// (ADR-0014) — and dead when there is not.
-    #[test]
-    fn the_needle_is_live_exactly_when_there_is_a_queue_to_move_within() {
-        // No queue: a line, drawn, and nothing to point at.
-        let bare = PlayerState::new(Availability::Ready);
-        let line = bare.needle_bar();
-        assert!(line.entries.is_empty());
-        assert!(!line.interactive);
-        assert_eq!(line.playing, None);
-
-        // A queue sent but not started: live, and nothing filled.
-        let stopped = ready_with_queue(3);
-        let line = stopped.needle_bar();
-        assert_eq!(line.entries.len(), 3);
-        assert!(line.interactive);
-        assert_eq!(line.playing, None);
-        assert!((line.position - 0.0).abs() < 1e-6);
-
-        // Playing: the engine's own position, reconciled against the path it
-        // named, is what fills the line — never the click.
-        let albums = albums();
-        let mut player = ready_with_queue(3);
-        player.apply(&started("/m/boc/geogaddi/02.flac", 1), &albums);
-        player.apply(&progress(50_000, Some(200_000)), &albums);
-        let line = player.needle_bar();
-        assert_eq!(line.playing, Some(1));
-        assert!((line.position - 0.25).abs() < 1e-6);
-
-        // No engine: nothing to send to, so nothing to point at.
-        let mut dead = ready_with_queue(3);
-        dead.engine_closed();
-        assert!(!dead.needle_bar().interactive);
-    }
-
-    /// The album boundary the *view model* produces, rather than one a test
-    /// wrote by hand: consecutive entries sharing a record are one record, and
-    /// the fact lives per item because the queue mixes whole albums with loose
-    /// songs.
-    #[test]
-    fn album_boundaries_come_from_the_queue_the_engine_was_sent() {
-        let mut player = PlayerState::new(Availability::Ready);
-        player.note_queue_sent(stacked(&[
-            (Some("Geogaddi"), "Ready Lets Go", 200),
-            (Some("Geogaddi"), "Music Is Math", 200),
-            (None, "a stray", 200),
-            (Some("Music Has the Right"), "Wildlife Analysis", 200),
-            (Some("Music Has the Right"), "An Eagle in Your Mind", 200),
-        ]));
-        let entries = player.needle_entries();
-        assert_eq!(entries.len(), 5, "two, one and two");
-        let breaks: Vec<bool> = entries.iter().map(|entry| entry.album_break).collect();
-        assert_eq!(
-            breaks,
-            vec![false, false, true, true, false],
-            "a boundary is where the record changes, and never at the head"
-        );
-    }
-
-    // -----------------------------------------------------------------
     // Click vs scrub: the movement threshold
     // -----------------------------------------------------------------
 
@@ -4070,16 +3399,14 @@ mod tests {
         assert_eq!(player.release_drag(), seek_to(0));
         player.press(Pointer::new(BAR + 40.0, BAR));
         assert_eq!(player.release_drag(), seek_to(200_000));
-        // A needle of no width has no *segments*, so there is nothing to ask
-        // for — and, which is the point of the case, nothing is divided by
-        // either. It was `Some(0)` when the bar was one scalar track and the
-        // honest answer is now that a queue with no line to draw it on has no
-        // position in it.
+        // A zero-width scalar line resolves to its start without dividing by
+        // zero. A real layout will immediately give it width; this pins the
+        // state machine's total answer during that first frame.
         player.press(Pointer::new(37.0, 0.0));
         assert_eq!(
             player.release_drag(),
-            None,
-            "a zero-width needle has no segment to click but must not divide by it"
+            seek_to(0),
+            "a zero-width song line resolves safely to its start"
         );
     }
 
@@ -4123,10 +3450,13 @@ mod tests {
         assert_eq!(preview.label, "3:20");
         assert!((preview.x - BAR).abs() < 1e-6);
 
-        // A needle of no width segments into nothing, so there is nothing to
-        // name — and nothing is divided by zero on the way to saying so.
+        // A zero-width scalar line still has the only honest preview: its
+        // start. Nothing is divided by zero on the way to saying so.
         player.hover_to(Pointer::new(12.0, 0.0));
-        assert!(reading(&player).expect("bar").preview.is_none());
+        let preview = reading(&player).expect("bar").preview.expect("preview");
+        assert_eq!(preview.label, "0:00");
+        assert!((preview.x - 0.0).abs() < f32::EPSILON);
+        assert!((preview.width - 0.0).abs() < f32::EPSILON);
     }
 
     #[test]

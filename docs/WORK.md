@@ -102,13 +102,7 @@
 
 ## Next
 
-1. **The seek bar says which thing it measures.** The owner: *"I think the seek
-   bar at the bottom should have a toggle indicating for song or for whole
-   playlist"*. Both are true readouts — the track's position and the run's — and
-   he is asking to choose. Undesigned; the questions are where the toggle lives
-   (the bar is already dense), whether the choice persists, and what the
-   elapsed/remaining figures either side of the bar read in run mode.
-2. **An artist has an `All songs` of their own.** The owner: *"the artist page
+1. **An artist has an `All songs` of their own.** The owner: *"the artist page
    should have its own 'all songs' playlist I think"*. `implicit::ImplicitList`
    already gives the library one, with an `Origin` kind and a collage sleeve, so
    this is that list scoped to one artist rather than new machinery. Undecided:
@@ -119,7 +113,7 @@
    word may not need qualifying. It should credit the artist's list rather than
    the underlying records when played, which is the rule that just landed for
    playlists.
-3. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
+2. **Doc 15 tiers 1 and 2 — the artist's page is worth visiting, offline.**
    The owner's *"ideally the by artist page could have more info"*, answered
    with no network at all. Tier 1: one `SIZE_META` line under the header
    (`4 hours 12 minutes · 1988–1991 · FLAC, MP3 · In your library since
@@ -132,7 +126,7 @@
    own disk (`artist.jpg` in the parent of the album folders, through
    `art.rs`'s existing lookup), and the prose fix for the tile-size claim
    below. `docs/design/15-the-artist-page.md`, ADR-0037 §1–§4.
-4. **Ship the public beta.** The last item by construction: it is the one
+3. **Ship the public beta.** The last item by construction: it is the one
    that makes the blockers above reach anybody. `v0.1.0` is prepared up to the
    tag and `docs/RELEASING.md` holds the owner's three commands, but a *beta*
    asks two more things of the release than a private tag does. **Flathub** —
@@ -303,6 +297,10 @@ only.
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **The bottom edge is for one song.** The attempted song/list toggle was
+  rejected in use and removed completely: no selector, cumulative list time,
+  queue segments or jump targeting remain. The full-width needle is a single
+  continuous seek line for the current track, with track elapsed/total figures.
 - **Now playing is one current song, not another list page.** The large centred
   cover, track-led placard, needle and figures are the whole composition. A
   quiet, borderless source footer spans the bottom of the place and leads to
