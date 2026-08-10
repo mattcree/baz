@@ -154,6 +154,57 @@ pub(crate) fn subject_of(origin: &crate::origin::Origin) -> Option<Subject> {
     }
 }
 
+/// **Which lane row is sounding** — the row the lamp dot belongs on.
+///
+/// The owner, on the shipped lane: *"I still see albums specifically appearing
+/// as if they are playing rather than the playlist. in a sense we need to track
+/// which playlist + track is playing to actually understand what is happening
+/// … it is showing next to the album rather than the playlist"*. He had
+/// isolated it exactly: the **order** was already right, and the **mark** was
+/// not.
+///
+/// The rule is [`played_list`]'s, and deliberately the same call rather than a
+/// second one that agrees today: **the dot follows the run's origin.** A run
+/// reified from a list marks the *list*, and none of the records it quotes,
+/// however many of their tracks are sounding; every other run marks the record,
+/// exactly as before. Order and mark now come out of one function, so they
+/// cannot drift into saying different things about the same run — which is the
+/// failure mode a second reading of "the same" fact always has.
+///
+/// # `sounding` is the liveness, and it is not optional
+///
+/// **A run's origin outlives the run.** `QueueVm::provenance` is a fact about
+/// the list that *remains* after `QueueEnded` — deliberately, since ADR-0023 §4
+/// keeps it until a replacing `SetQueue` — whereas the record this used to read
+/// (`PlayerState::playing_album`) went to `None` the moment nothing sounded, and
+/// was silently carrying the liveness for the whole mark. Reading the origin
+/// without `sounding` therefore leaves the lamp lit on a list that finished an
+/// hour ago. So the liveness is taken as its own argument and answered first:
+/// **the dot says *this is on*, and only then *which row*.**
+///
+/// `record` is the sounding file's record, `None` for a file the library does
+/// not hold — which still marks nothing for a record's run (the head's own dot
+/// answers instead) but does **not** cost a list's run its mark, because a
+/// list's identity does not depend on the library resolving the file.
+///
+/// **At most one row is ever marked**, because a run has one origin —
+/// `only_one_row_is_ever_marked` is that as a test, since two dots would mean
+/// the model had been broken upstream rather than that the lane had drawn
+/// something odd.
+pub(crate) fn sounding_subject(
+    sounding: bool,
+    provenance: Option<&str>,
+    record: Option<u64>,
+) -> Option<Subject> {
+    if !sounding {
+        return None;
+    }
+    match played_list(provenance) {
+        Some(id) => Some(Subject::Playlist(id)),
+        None => record.map(Subject::Record),
+    }
+}
+
 /// One thing the listener has touched, as the shell reports it.
 ///
 /// `at` is seconds since the Unix epoch — the ledger's own unit
@@ -600,6 +651,104 @@ mod tests {
             );
             assert!(history.last_played_unlisted(Path::new(track)).is_some());
         }
+    }
+
+    /// **The dot follows the run's origin, not the sounding file's record.**
+    ///
+    /// The owner, on the shipped lane: *"I still see albums specifically
+    /// appearing as if they are playing rather than the playlist … it is
+    /// showing next to the album rather than the playlist"*. Recency was
+    /// already right; this is the mark.
+    #[test]
+    fn the_sounding_row_is_the_list_when_a_list_is_what_was_put_on() {
+        let list = crate::playlists::playlist_id("Road Trip");
+
+        // A run reified from a list marks the **list**, even though the track
+        // sounding belongs to a record the lane also holds.
+        assert_eq!(
+            sounding_subject(true, Some("Road Trip"), Some(10)),
+            Some(Subject::Playlist(list))
+        );
+        // Every other run marks the record, exactly as before.
+        assert_eq!(
+            sounding_subject(true, None, Some(10)),
+            Some(Subject::Record(10))
+        );
+        // A *record's* run over a file the library does not hold marks nothing
+        // — the head's own dot still answers, and the list has nothing to
+        // point at. A **list's** run is not so limited: its identity is the
+        // file's name, not the library's opinion of the track.
+        assert_eq!(sounding_subject(true, None, None), None);
+        assert_eq!(
+            sounding_subject(true, Some("Road Trip"), None),
+            Some(Subject::Playlist(list))
+        );
+    }
+
+    /// **Nothing sounding, nothing marked** — its own test rather than a line
+    /// in the one above, because this is the case that made `sounding` a
+    /// separate argument. A run's origin **outlives the run**: ADR-0023 §4
+    /// keeps it until a replacing `SetQueue`, so a lane that read the origin
+    /// alone would leave the lamp lit on a list that finished an hour ago. The
+    /// record this mark used to read was carrying the liveness by accident,
+    /// because it went to `None` the moment the music stopped.
+    #[test]
+    fn a_finished_run_leaves_no_lamp_behind() {
+        // The run ended: the queue still knows which list it came from, and
+        // there is no sounding record any more.
+        assert_eq!(sounding_subject(false, Some("Road Trip"), None), None);
+        // …and silence marks nothing even where a record is still resolvable.
+        assert_eq!(sounding_subject(false, Some("Road Trip"), Some(10)), None);
+        assert_eq!(sounding_subject(false, None, Some(10)), None);
+    }
+
+    /// **At most one row is ever marked.** A run has one origin, so two dots
+    /// would mean the model had been broken upstream rather than that the lane
+    /// had drawn something odd — which is why this is asserted over the whole
+    /// resolved lane rather than trusted to the row loop.
+    #[test]
+    fn only_one_row_is_ever_marked() {
+        let list = crate::playlists::playlist_id("Road Trip");
+        let rows = resolve(
+            vec![
+                touched(Subject::Playlist(list), "Road Trip", Some(300)),
+                touched(Subject::Playlist(2), "Sunday", Some(100)),
+            ],
+            vec![
+                touched(Subject::Record(10), "Ochre", Some(400)),
+                touched(Subject::Record(11), "Violet Ledger", Some(200)),
+            ],
+        );
+        for (provenance, record) in [
+            (Some("Road Trip"), Some(10)),
+            (Some("Road Trip"), None),
+            (None, Some(10)),
+            (None, Some(11)),
+            (None, None),
+            // A list the lane does not hold, and a record it does not hold:
+            // nothing is marked rather than something arbitrary.
+            (Some("Late Shift"), None),
+            (None, Some(999)),
+        ] {
+            let sounding = sounding_subject(true, provenance, record);
+            let marked = rows
+                .iter()
+                .filter(|row| sounding.is_some() && sounding == Some(row.subject))
+                .count();
+            assert!(
+                marked <= 1,
+                "{provenance:?}/{record:?} marked {marked} rows"
+            );
+        }
+        // And the list's run marks the list itself — not nothing, and not one
+        // of the records it quotes.
+        let sounding = sounding_subject(true, Some("Road Trip"), Some(10));
+        let marked: Vec<&str> = rows
+            .iter()
+            .filter(|row| sounding == Some(row.subject))
+            .map(|row| row.name.as_str())
+            .collect();
+        assert_eq!(marked, ["Road Trip"]);
     }
 
     /// The head is a closed set of three, in the owner's order. A fourth

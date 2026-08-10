@@ -4143,7 +4143,16 @@ impl App {
                     // does not hold — the head still answers, the list has
                     // nothing to mark.
                     //
-                    self.player.playing_album(),
+                    // **The row is the run's origin, not the sounding file's
+                    // record** — the owner's *"it is showing next to the album
+                    // rather than the playlist"*. `lane::sounding_subject` is
+                    // the same call the recency ordering makes, so the dot and
+                    // the order cannot say different things about one run.
+                    crate::lane::sounding_subject(
+                        self.player.now_playing_path().is_some(),
+                        self.player.queue_provenance(),
+                        self.player.playing_album(),
+                    ),
                     self.window.width,
                 ),
                 screen

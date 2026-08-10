@@ -193,6 +193,16 @@ next commit.
     `PLAYED` group key still see every one of those plays. *When did I last
     play this track* and *when did I last put this record on* are different
     questions.
+  - **The lamp dot follows the run's origin too.** The owner, on the same
+    surface: *"I still see albums specifically appearing as if they are playing
+    rather than the playlist … it is showing next to the album rather than the
+    playlist"*. Order and mark now come out of one function
+    (`lane::sounding_subject`), so they cannot drift; a list's run marks the
+    list and none of the records it quotes, and at most one row is ever marked
+    because a run has one origin. A **finished** run marks nothing, which took
+    saying out loud: a run's origin outlives the run, where the sounding record
+    the mark used to read went to `None` when the music stopped and was
+    carrying the liveness by accident.
   - `docs/design/impl/ledger-remembers-the-list/` has the owner's own check —
     play a list, quit, relaunch — in frames.
 

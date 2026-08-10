@@ -118,8 +118,17 @@ xdotool key Escape; sleep 1
 click 140 317
 park; shot "00-the-list-before-it-is-played"
 click 480 425
+# **The lamp dot, while the list is actually on.** Pause immediately so the run
+# holds still for the still: the null sink otherwise races four silent tracks
+# in a couple of seconds, and a finished run marks nothing at all — which is
+# `a_finished_run_leaves_no_lamp_behind`, and is why this frame is taken here
+# rather than after `await`.
+xdotool key space; sleep 1
+click 140 124                       # Library, so the lane stands against the wall
+park; shot "04-the-dot-is-on-the-list-not-its-records"
+xdotool key space; sleep 0.5        # …and let the run finish
 # All four of the list's tracks, so the run quotes *both* records — which is
-# what makes the two frames differ by two rows rather than by one.
+# what makes the two lane frames differ by two rows rather than by one.
 await 6
 echo "  the list's run is in the ledger"
 park; shot "01-the-live-half-in-the-same-session"

@@ -53,6 +53,36 @@ a line did not.
 | [`01-the-live-half-in-the-same-session.png`](01-the-live-half-in-the-same-session.png) | The same session after playing the list. `Road Trip` is at the head: **the live half has worked since `lane::played_list`**, and is not what this change is about. |
 | [`02-before-the-records-jump-the-list.png`](02-before-the-records-jump-the-list.png) | **Before.** The relaunch over a v1 ledger. `Paper Mill` and `Closing Time` are at the head and **`Road Trip` is last** — the lane re-derived the run from its play lines, so the two records the list quoted jumped over the list that was actually played. This is exactly what the owner reported. |
 | [`03-after-the-list-is-at-the-head.png`](03-after-the-list-is-at-the-head.png) | **After.** The relaunch over the v1.1 ledger. `Road Trip` is at the head. |
+| [`04-the-dot-is-on-the-list-not-its-records.png`](04-the-dot-is-on-the-list-not-its-records.png) | **The lamp dot**, with the list actually on. The bar names `The Long Lie Down 1 · Halvard Sten` — a track of `Closing Time` — and the dot is on **`Road Trip`**, with none on `Closing Time` one row below. |
+
+## The mark, which was the owner's second reading of the same surface
+
+> *"I still see albums specifically appearing as if they are playing rather than
+> the playlist. in a sense we need to track which playlist + track is playing to
+> actually understand what is happening. recent albums seem to be working
+> properly i.e. it only affects the little pip that shows -- it is showing next
+> to the album rather than the playlist"*
+
+He had isolated it exactly: the **order** was right and the **mark** was not.
+Frame `04` is the fix. The dot follows the run's **origin** — the same call the
+recency ordering makes (`lane::sounding_subject`), so the two cannot come to
+disagree about one run — and at most one row ever carries it, because a run has
+one origin.
+
+The argument the old code made is kept in `views/lane.rs` rather than deleted:
+a list must never light *incidentally*, because one of its members happens to be
+playing. That is still true. It simply does not reach the case where the list
+**is what the listener put on**, which is the most direct fact available rather
+than an inference from membership.
+
+**A finished run leaves no lamp behind**, and that is not free: a run's origin
+*outlives* the run (ADR-0023 §4 keeps it until a replacing `SetQueue`), whereas
+the sounding record the mark used to read went to `None` the moment the music
+stopped — carrying the liveness by accident. So liveness is now its own
+argument, answered first. `a_finished_run_leaves_no_lamp_behind` is that, and it
+is why frame `04` is taken with the run **paused** rather than after it: the
+null sink races four silent tracks in a couple of seconds, and a finished run
+correctly marks nothing at all.
 
 ### What frame `03` gets right that is easy to miss
 

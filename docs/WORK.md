@@ -200,6 +200,22 @@ Newest first. Fuller detail in `CHANGELOG.md`.
     be written as a marker, or the touch is lost rather than moved — asserted
     as `no_kind_is_written_that_the_lane_cannot_credit`, and it is the rule the
     §1 work below has to satisfy.
+  - **And the mark, which he read off the same surface separately**: *"I still
+    see albums specifically appearing as if they are playing rather than the
+    playlist … it is showing next to the album rather than the playlist"*. The
+    lamp dot follows the run's **origin** now, through `lane::sounding_subject`
+    — the same call the recency ordering makes, so the dot and the order cannot
+    drift into two answers about one run. `views/lane.rs`'s argument against a
+    list lighting *incidentally* is **kept and amended rather than deleted**: it
+    is still true, and it never reached the case where the list is what the
+    listener put on. Frame at
+    `docs/design/impl/ledger-remembers-the-list/04-…`.
+  - **A defect this change introduced and the frame caught**: a run's origin
+    *outlives* the run (ADR-0023 §4), where the sounding record the mark used to
+    read went to `None` when the music stopped — so it had been carrying the
+    liveness by accident, and reading the origin alone left the lamp lit on a
+    list that finished an hour ago. Liveness is its own argument now, answered
+    first; `a_finished_run_leaves_no_lamp_behind` is the test.
 - **The owner's `Now playing` batch, 2026-08-10** — six asks on one surface in
   one afternoon, with frames for each at
   `docs/design/impl/now-playing-shows-the-run/`.
