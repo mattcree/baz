@@ -1280,7 +1280,40 @@ impl App {
         // record drawn next to it, so the lane's rows and Home's newest row
         // ask for their own — through the same cache, so a sleeve is one
         // decode however many surfaces draw it.
-        Task::batch([task, self.request_offscreen_art(), self.request_hero()])
+        let art = self.request_hero();
+        // **And what the Now playing place draws of the record**, settled
+        // after the ask rather than before it: the two things that can change
+        // that surface's picture are the engine naming another record and a
+        // hero landing, and both have already happened by here
+        // ([`Shelf::settle_art`]).
+        self.settle_art();
+        Task::batch([task, self.request_offscreen_art(), art])
+    }
+
+    /// Hand the sounding record to [`Shelf::settle_art`], which owns the whole
+    /// of the crossfade's decision.
+    ///
+    /// The split is [`Self::request_hero`]'s: the shell knows what is sounding
+    /// and the shelf knows what is decoded, and neither reaches into the other.
+    fn settle_art(&mut self) {
+        let sounding = self.player.playing_album();
+        // **The transition belongs to a surface, so it runs only where that
+        // surface is drawn.** The *commitment* is unconditional — arriving at
+        // the place must find the right picture, whenever the record changed —
+        // but a tween is a clock, and a clock spent easing a hero nobody is
+        // looking at would redraw whatever place *is* on screen twelve times
+        // for nothing. That is the one cost ADR-0020's argument does not
+        // license, and it is the owner's standing rule about responsiveness.
+        //
+        // It deliberately does **not** follow [`Self::request_hero`], which is
+        // ungated on purpose: a decode is 4 MiB and one per record, and gating
+        // it would make the surface grow its artwork into place every time it
+        // was opened. A decode is a fact to have ready; a transition is
+        // something to watch.
+        let watching = self.place == Place::NowPlaying;
+        if let Screen::Shelf(state) = &mut self.screen {
+            state.settle_art(sounding, watching, Instant::now());
+        }
     }
 
     /// Everything [`Self::update`] does except keep the lane true — the update
@@ -4435,6 +4468,69 @@ pub(crate) struct Hero {
     pub(crate) field: Option<crate::field::Field>,
 }
 
+/// **What a newly-committed picture asks of the Now playing place** — the whole
+/// of the crossfade's predicate, as a function of the two pictures and of
+/// nothing else.
+///
+/// A free decision rather than three lines inside [`Shelf::settle_art`],
+/// because *when a transition may run* is the part of this feature that is
+/// worth being able to state and to test without a window, a library or a
+/// player (ADR-0006 layer 1's habit, applied to a rule that could not quite
+/// live in [`crate::motion`] — it is about an `iced` handle).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Change {
+    /// **Draw the new picture and keep no clock.** Everything that is not two
+    /// distinct covers: the first record of a session, a record with no art at
+    /// either end, and — the case the owner would notice — a picture that has
+    /// not actually changed.
+    Cut,
+    /// **Dissolve, over [`motion::DISSOLVE`].** Two decoded covers that are not
+    /// the same picture.
+    Dissolve,
+}
+
+impl Change {
+    /// The rule: **two pictures, and they must differ.**
+    ///
+    /// `None` is *a record with no art*, which draws the wall's deterministic
+    /// gradient — a stand-in rather than artwork, and dissolving a stand-in is
+    /// decoration (ADR-0020 §3).
+    ///
+    /// Distinctness is `Handle`'s own equality, which for a decoded image is
+    /// its allocation id and its pixels: **the handle being drawn**, not the
+    /// track and not the record. Two clones of one decode are equal, so a
+    /// surface redrawing what it already had can never start a flight. Two
+    /// *separate* decodes of byte-identical covers — one record ripped twice —
+    /// are not equal and would run a dissolve, which is invisible by
+    /// construction (`X · (1 − t) + X · t` is `X` at every `t`) and costs the
+    /// 200 ms of clock a rarity may cost.
+    fn between(from: Option<&Hero>, to: Option<&Hero>) -> Self {
+        match (from, to) {
+            (Some(from), Some(to)) if from.handle != to.handle => Self::Dissolve,
+            _ => Self::Cut,
+        }
+    }
+}
+
+/// **The Now playing place's artwork, mid-change and at rest** — what to draw,
+/// what to draw it over, and how far between them the surface stands.
+///
+/// One value rather than three readings, for the reason
+/// `views::now_playing::work`'s caller needs: the cover and the field are two
+/// readings of one decode, and a surface that fetched them separately could
+/// draw one record's picture over another record's room for a frame.
+pub(crate) struct Showing<'a> {
+    /// The picture the surface has committed to. `None` before the first hero
+    /// of a session lands, and for a record with no art — both of which fall
+    /// through to the thumbnail and then the gradient.
+    pub(crate) hero: Option<&'a Hero>,
+    /// The picture it is dissolving away from, while it is dissolving.
+    pub(crate) from: Option<&'a Hero>,
+    /// [`Self::hero`]'s own opacity over [`Self::from`], in `[0, 1]`. **`1.0`
+    /// at rest**, which is one picture at full strength and no clock.
+    pub(crate) t: f32,
+}
+
 /// `min(w, h)` as the `f32` a layout wants.
 ///
 /// Named because both tiers spend it and because what it *means* is the same
@@ -4633,6 +4729,35 @@ pub(crate) struct Shelf {
     /// one sleeve to the next hands the mark over rather than restarting it
     /// (see [`crate::motion::Keyed`]).
     pub(crate) tile_hover: Keyed<u64>,
+    /// **What the Now playing place has committed to drawing of the record** —
+    /// the record's id, and its hero when the answer was a picture.
+    ///
+    /// The word is *committed* rather than *sounding*, and the difference is
+    /// the whole of [`Self::settle_art`]: a record whose hero has not finished
+    /// decoding has no answer yet, so this still names the record before it and
+    /// the surface goes on drawing what it was drawing. `Some((id, None))` is
+    /// a record the decode has answered *no art* for — the gradient
+    /// placeholder, and nothing to dissolve.
+    ///
+    /// **It costs no memory.** The `Hero` is a clone whose handle is an `Arc`
+    /// over the same decoded pixels, and the record it names is always the
+    /// freshest entry of the two-entry hero LRU — [`Self::request_hero`] `get`s
+    /// the sounding record on every message, which is what keeps it there.
+    art_shown: Option<(u64, Hero)>,
+    /// **The picture the hero is dissolving away from**, for as long as
+    /// [`Self::art_dissolve`] is live, and `None` at every other instant.
+    ///
+    /// The second entry of the hero LRU is what makes this free: the record
+    /// that just stopped is still decoded, so both pictures are alive at once
+    /// and the crossfade needs no cache of its own. Checked rather than
+    /// assumed — see [`Self::settle_art`].
+    art_prior: Option<Hero>,
+    /// **The incoming hero's opacity**, `0` → `1` over [`motion::DISSOLVE`],
+    /// linear (ADR-0020's third amendment).
+    ///
+    /// Settled at `1` at rest, which is the surface drawing one picture at full
+    /// strength and keeping no clock.
+    art_dissolve: Tween,
     /// The width of the window the shelf is laid out in.
     ///
     /// **The wall's width, full stop.** It used to be the window's less
@@ -4763,6 +4888,9 @@ impl Shelf {
             hovered_album: None,
             hovered_all_songs: false,
             tile_hover: Keyed::new(),
+            art_shown: None,
+            art_prior: None,
+            art_dissolve: Tween::settled(1.0).with_curve(motion::Curve::Linear),
             window_w: WINDOW.width,
             lane_open,
             lane_played: HashMap::new(),
@@ -5254,12 +5382,130 @@ impl Shelf {
     /// Advance the shelf's own transitions.
     fn tick_motion(&mut self, now: Instant) -> Task<Message> {
         self.tile_hover.tick(now);
+        if !self.art_dissolve.tick(now) {
+            // **A settled dissolve holds no picture.** The same rule
+            // [`Keyed::tick`] follows when it drops its key: a transition at
+            // rest must not keep a reference to the thing it moved, or the
+            // outgoing hero's 4 MiB would outlive the 200 ms that needed it and
+            // the LRU's budget would be a fiction.
+            self.art_prior = None;
+        }
         Task::none()
     }
 
     /// Whether the shelf still needs a clock (see [`App::moving`]).
     fn moving(&self) -> bool {
-        self.tile_hover.live()
+        self.tile_hover.live() || self.art_dissolve.live()
+    }
+
+    /// **Commit what the Now playing place draws of the record, and start the
+    /// dissolve when the picture — not the track — has changed** (ADR-0020's
+    /// third amendment; the owner, 2026-08-10: *"when changing track there
+    /// isn't any kind of nice visual transition for album art in now playing.
+    /// we should have something a bit nicer, like a quick fade"*).
+    ///
+    /// Called after **every** message, for [`App::request_hero`]'s reason and
+    /// at its cost: the two moments that can change this surface's artwork are
+    /// the engine naming another record and a hero decode landing, and asking
+    /// on both by asking always is one call site instead of a list that has to
+    /// stay complete. At rest it is an `Option` compare.
+    ///
+    /// # The three rules, and each is a defect avoided
+    ///
+    /// 1. **The picture, never the track.** Consecutive tracks on one record
+    ///    share a cover, and the first line out of this function is the record
+    ///    the surface is already committed to — so a twelve-track album is
+    ///    *twelve* track changes and **no** transition, no clock and no frame.
+    ///    Where two records genuinely differ, the predicate is still the
+    ///    picture: [`Change::between`] compares the handles being drawn.
+    /// 2. **The new art, not the new track.** A record whose hero is still
+    ///    decoding has **no answer**, and this returns without touching
+    ///    anything — the surface goes on drawing the picture it has. Starting
+    ///    on `TrackStarted` instead would dissolve to whatever was ready, which
+    ///    is a 320 px thumbnail or nothing at all, and then pop when the hero
+    ///    landed: worse than the cut it replaces, twice over.
+    /// 3. **Two pictures, or no transition.** A record with no art draws the
+    ///    wall's deterministic gradient, which is a *stand-in* rather than
+    ///    artwork; dissolving one is decoration, and ADR-0020 §3 forbids that.
+    ///    So art → no art, and no art → art, stay the hard cuts they are today.
+    /// 4. **`watching` — the surface is on screen.** The commitment is
+    ///    unconditional, so opening the place finds the right picture whenever
+    ///    the record changed; the *tween* is not, because a clock easing a hero
+    ///    nobody is looking at would redraw whatever place is on screen a dozen
+    ///    times for nothing. See [`App::settle_art`] for why this differs from
+    ///    [`Self::request_hero`], which is ungated on purpose.
+    ///
+    /// # The second LRU entry, checked rather than trusted
+    ///
+    /// This needs both pictures alive at once and adds no cache to get them.
+    /// [`art::HERO_CACHE_ENTRIES`] is 2 and [`Self::request_hero`] `get`s the
+    /// *sounding* record — so when the incoming hero is `put`, the entry it
+    /// would evict is the third-oldest and there is no third: the record that
+    /// just stopped is still decoded, and `art_prior`'s handle is an `Arc` onto
+    /// those same pixels rather than a copy of them. Asserted rather than
+    /// assumed, because the entry that makes it true was written for a prefetch
+    /// this product does not have yet:
+    /// `the_hero_lru_holds_both_records_a_dissolve_needs`.
+    fn settle_art(&mut self, sounding: Option<u64>, watching: bool, now: Instant) {
+        let Some(id) = sounding else {
+            // Nothing is sounding: there is no record on this surface to draw,
+            // so there is nothing to dissolve *to* and the transition is
+            // abandoned rather than run out. The light goes out with the music
+            // and so does the picture ([`App::warm_lamp`]'s own rule).
+            self.art_shown = None;
+            self.art_prior = None;
+            self.art_dissolve.set(1.0);
+            return;
+        };
+        if self
+            .art_shown
+            .as_ref()
+            .is_some_and(|(shown, _)| *shown == id)
+        {
+            return;
+        }
+        // **The answer, or nothing at all** — rule 2. `None` here is "the
+        // decode has not come back", which is not the same as "there is no
+        // art"; the second is an answer and lives in `no_art`.
+        let answer = if let Some(hero) = self.hero(id) {
+            Some(hero.clone())
+        } else if self.no_art.contains(&id) {
+            None
+        } else {
+            return;
+        };
+        let prior = self.art_shown.take().map(|(_, hero)| hero);
+        let change = Change::between(prior.as_ref(), answer.as_ref());
+        self.art_shown = answer.map(|hero| (id, hero));
+        match change {
+            // **Committed, but cut** — the picture changed while the place was
+            // not on screen. The surface is correct the moment it is opened and
+            // no clock was spent easing something nobody saw.
+            Change::Dissolve if !watching => {
+                self.art_prior = None;
+                self.art_dissolve.set(1.0);
+            }
+            Change::Dissolve => {
+                self.art_prior = prior;
+                self.art_dissolve.set(0.0);
+                self.art_dissolve.go(1.0, motion::DISSOLVE, now);
+            }
+            Change::Cut => {
+                self.art_prior = None;
+                self.art_dissolve.set(1.0);
+            }
+        }
+    }
+
+    /// **What the Now playing place draws of the record, and how far through a
+    /// change it is** — one answer, so the cover and the field derived from it
+    /// cannot disagree about which record they are of.
+    pub(crate) fn showing(&self) -> Showing<'_> {
+        Showing {
+            hero: self.art_shown.as_ref().map(|(_, hero)| hero),
+            from: self.art_prior.as_ref(),
+            t: self.art_dissolve.value(),
+        }
     }
 
     /// The hang the grid lays out with: resolved for what the viewport
@@ -7859,10 +8105,15 @@ mod tests {
         let mut ink: Keyed<Control> = Keyed::new();
         let mut warmth = Tween::settled(0.0).with_curve(motion::Curve::Linear);
         let mut tile: Keyed<u64> = Keyed::new();
+        // The hero's dissolve, at its resting value: **1.0**, which is one
+        // picture at full strength. The other three rest at 0; this one rests
+        // at the end of its own flight, because "no transition" here means the
+        // incoming picture is all there is.
+        let mut dissolve = Tween::settled(1.0).with_curve(motion::Curve::Linear);
         // The exact disjunction the two `moving` functions form between them.
         macro_rules! moving {
             () => {
-                ink.live() || warmth.live() || tile.live()
+                ink.live() || warmth.live() || tile.live() || dissolve.live()
             };
         }
 
@@ -7886,19 +8137,44 @@ mod tests {
         warmth.tick(start + motion::LAMP);
         assert!(!moving!());
 
-        // All three at once, and the clock stops with the *last* of them rather
-        // than the first: the lamp runs longest, so it is what keeps the timer
-        // alive after everything else has settled.
+        // **The hero's dissolve** (ADR-0020's third amendment). The record
+        // changed, so the picture crosses — and the surface is static again the
+        // instant it lands, which is the half of this feature the owner's
+        // responsiveness rule is about.
+        dissolve.set(0.0);
+        dissolve.go(1.0, motion::DISSOLVE, start);
+        assert!(moving!(), "the hero crossing to another record");
+        dissolve.tick(start + motion::DISSOLVE);
+        assert!(!moving!());
+        assert!(
+            (dissolve.value() - 1.0).abs() < f32::EPSILON,
+            "a settled dissolve is the new picture, whole"
+        );
+
+        // All four at once, and the clock stops with the *last* of them rather
+        // than the first: the lamp and the dissolve are one number and run
+        // longest, so they are what keep the timer alive after the two 90 ms
+        // fades have settled.
         ink.enter(Control::Next, motion::INK, start);
         tile.enter(9, motion::TILE, start);
         warmth.go(0.0, motion::LAMP, start);
+        dissolve.set(0.0);
+        dissolve.go(1.0, motion::DISSOLVE, start);
         for at in [motion::INK, motion::TILE] {
             ink.tick(start + at);
             tile.tick(start + at);
             warmth.tick(start + at);
+            dissolve.tick(start + at);
             assert!(moving!(), "settled at {at:?} with the lamp still warming");
         }
         warmth.tick(start + motion::LAMP);
+        // The light and the picture land on the same tick — one event, one
+        // number (`motion::the_dissolve_is_the_lamps_own_number`).
+        assert!(
+            moving!(),
+            "the dissolve outlived the lamp it shares a clock with"
+        );
+        dissolve.tick(start + motion::DISSOLVE);
         assert!(
             !moving!(),
             "the last tween settled and the clock did not stop"
@@ -7909,8 +8185,95 @@ mod tests {
             ink.tick(start + later);
             tile.tick(start + later);
             warmth.tick(start + later);
+            dissolve.tick(start + later);
             assert!(!moving!());
         }
+    }
+
+    /// A 1 × 1 decode standing in for a cover: a distinct [`Hero`] every call,
+    /// which is what makes the handle comparisons below mean anything.
+    fn a_hero() -> Hero {
+        Hero {
+            handle: iced_image::Handle::from_rgba(1, 1, vec![0_u8; 4]),
+            px: 1.0,
+            field: None,
+        }
+    }
+
+    /// **The dissolve's predicate is the picture, and it is a refusal three
+    /// ways out of four** (ADR-0020's third amendment; [`Change::between`]).
+    ///
+    /// The case that matters most is the third: consecutive tracks on one
+    /// record share a cover, and fading a picture into an identical picture is
+    /// a flight, a clock and 25 wakes announcing a change nothing made.
+    #[test]
+    fn a_dissolve_needs_two_pictures_that_are_not_the_same_picture() {
+        let (first, second) = (a_hero(), a_hero());
+        assert_eq!(
+            Change::between(Some(&first), Some(&second)),
+            Change::Dissolve,
+            "two decoded covers that differ"
+        );
+        // The same picture, arrived at twice — the surface redrawing what it
+        // already had. A clone shares the handle, so this is an identity test
+        // and not a coincidence of contents.
+        assert_eq!(
+            Change::between(Some(&first), Some(&first.clone())),
+            Change::Cut,
+            "a picture that has not changed may not start a flight"
+        );
+        // A stand-in is not artwork: the wall's deterministic gradient is what
+        // a record with no cover draws, and dissolving one is decoration.
+        assert_eq!(Change::between(None, Some(&second)), Change::Cut);
+        assert_eq!(Change::between(Some(&first), None), Change::Cut);
+        // The first record of a session has nothing behind it.
+        assert_eq!(Change::between(None, None), Change::Cut);
+    }
+
+    /// **The transition needs both records decoded at once, and the two-entry
+    /// hero LRU already holds them** — checked rather than trusted, because the
+    /// entry that makes it true was written for a *prefetch* this product does
+    /// not have yet ([`art::HERO_CACHE_ENTRIES`]'s own note).
+    ///
+    /// The discipline being reproduced is the one the shell really runs:
+    /// [`Shelf::request_hero`] `get`s the **sounding** record on every message,
+    /// which keeps it the freshest entry, and `HeroLoaded` `put`s the decode
+    /// when it lands. Under that discipline the entry a `put` evicts is always
+    /// the record *before last*, so the record that just stopped is still
+    /// decoded for exactly as long as the dissolve needs it — and
+    /// [`Shelf::art_prior`] is an `Arc` onto those same pixels rather than a
+    /// copy of them.
+    #[test]
+    fn the_hero_lru_holds_both_records_a_dissolve_needs() {
+        let mut heroes: LruCache<u64, Hero> = LruCache::new(
+            NonZeroUsize::new(art::HERO_CACHE_ENTRIES).expect("the hero tier has entries"),
+        );
+        assert_eq!(art::HERO_CACHE_ENTRIES, 2, "the whole of the claim");
+
+        // Four records in a row, which is more than the cache holds — so if
+        // the second slot were spent on anything but the last record, one of
+        // these rounds would find it gone.
+        let mut previous: Option<u64> = None;
+        for id in 1..=4 {
+            // `request_hero`: ask for the sounding record, miss, decode.
+            assert!(heroes.get(&id).is_none(), "record {id} was not decoded yet");
+            // `HeroLoaded`: the decode lands.
+            heroes.put(id, a_hero());
+            // …and the dissolve asks for the record that just stopped.
+            if let Some(was) = previous {
+                assert!(
+                    heroes.peek(&was).is_some(),
+                    "record {was} was evicted before {id}'s dissolve could use it"
+                );
+                // Both alive at once is the whole requirement.
+                assert!(heroes.peek(&id).is_some());
+                assert_eq!(heroes.len(), 2);
+            }
+            previous = Some(id);
+        }
+        // And the one *before* that is gone, which is the budget holding: two
+        // entries, 8 MiB, and the crossfade adds no third.
+        assert!(heroes.peek(&2).is_none());
     }
 
     /// The run baz launched with, as [`App::restore_the_run`] hands it back to

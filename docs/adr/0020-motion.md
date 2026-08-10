@@ -123,3 +123,96 @@ here instead.
 
 One instance ships: the index rail (`spine.rs`). A second instance means
 re-arguing this amendment, not citing it.
+
+## Amendment (2026-08-10): the hero's dissolve, and one refusal reversed
+
+The owner: *"when changing track there isn't any kind of nice visual transition
+for album art in now playing. we should have something a bit nicer, like a
+quick fade"*.
+
+§3 above forbids **album-art crossfades** by name, and it is now the only one
+of that list the owner has asked for. It comes off — narrowly, and with the
+argument written down, because a refusal that is quietly dropped is a list
+nobody can trust the rest of.
+
+**Why the refusal was there, and why it does not survive contact.** §3's rule
+is *motion states what changed; it never decorates*. The refusal read
+album-art crossfade as decoration: a picture prettily giving way to another
+picture. On the surfaces that existed when §3 was written, that was right —
+the artwork was a 320 px tile on a wall of a hundred others, and a tile fading
+into a tile states nothing a tile cannot state by simply being there. It is
+wrong on the surface that exists now. ADR-0029 made the Now playing place's
+artwork **the subject** — one work, at the size the viewport allows, with the
+room lit from its own palette — and on that surface *the picture changing is
+the whole of what the change is*. There is no other element that could state
+it. The cut was not stating it either: it was interrupting.
+
+8. **The hero's dissolve is permitted**, as ADR-0020 §2's sixth transition and
+   under §1's discipline in full — a bounded `Tween`, a subscription that is a
+   function of state, and no clock at rest. Its scope is exactly this:
+   - **`motion::DISSOLVE`, which *is* `motion::LAMP`** — 200 ms, linear. It is
+     an alias and not a copy: the lamp warms because the light moved to
+     another record, and the hero dissolves because the picture of that record
+     changed, so they are one event and must finish together
+     (`the_dissolve_is_the_lamps_own_number`). No number was invented; the
+     owner said *quick* and named none, and 90 ms — `INK` and `TILE` — is a
+     cut with a smear on it.
+   - **One surface**: the Now playing place's hero. The wall's tiles, the
+     lane's rows, every collage and the bar's own small sleeve are untouched,
+     and §3's neighbouring refusal — *any fade as a thumbnail decodes* —
+     stands unmodified. A second consumer means re-arguing this amendment,
+     not citing it.
+   - **The predicate is the picture, not the track.** Consecutive tracks on
+     one record share a cover; the shell holds what it has committed to
+     drawing and compares the *handle*
+     (`a_dissolve_needs_two_pictures_that_are_not_the_same_picture`). A
+     twelve-track album is twelve track changes, no transition, and no clock.
+   - **It begins when the new art is ready**, not when the track starts.
+     `art::load_hero` decodes off-thread; a dissolve begun before the decode
+     lands fades to nothing and then pops, which is worse than the cut it
+     replaces. So the surface **holds the picture it has** until there is an
+     answer for the incoming record — either a hero or *this record has no
+     art* — and only then crosses.
+   - **The field crosses with it.** `field::dissolve` takes the same `t` the
+     cover's incoming layer is drawn at. The wash is derived from the cover;
+     a cover that dissolved over a room that cut would be the seam ADR-0029's
+     one-wash fix removed, back in time instead of in space.
+   - **Two pictures, or no transition.** A record with no art draws the wall's
+     deterministic gradient, which is a stand-in rather than artwork; fading a
+     stand-in is decoration and stays forbidden. So art → no art, and no art →
+     art, are hard cuts.
+   - **One square, or no transition.** Both covers are drawn at
+     `now_playing::art_edge`'s answer, whose third term is the decode's own
+     pixels. Two decodes that resolve to different squares would make the
+     dissolve a resize as well, and §3 forbids animating geometry — so that
+     change stays the cut it has always been
+     (`a_dissolve_is_refused_where_the_two_covers_are_not_one_square`).
+
+**What it costs, measured rather than assumed** (`docs/design/impl/art-crossfade/`,
+which films the real binary at 60 fps and reads every frame back). At rest:
+nothing — one `image` widget, as before, and the `Tween` is settled so the
+timer does not exist (`a_settled_surface_has_nothing_to_dissolve`,
+`the_motion_clock_is_off_until_something_moves`, both extended for this).
+While it runs: one extra `image` in a `stack!`, for 200 ms, once per **record**
+change, and no new decode or cache — `art::HERO_CACHE_ENTRIES` is 2 and its
+second entry already holds the record that just stopped, which
+`the_hero_lru_holds_both_records_a_dissolve_needs` checks rather than trusts.
+
+The film counts **twelve** distinct frames across the transition against the
+`before` build's **one**, and twelve is the number
+`a_200ms_transition_is_about_twelve_frames_at_60hz` derives from the tween's
+arithmetic with no window anywhere near it. The cover's own fraction and the
+field's never disagree by more than **0.018**. CPU at rest is flat between the
+two builds.
+
+**And one thing this amendment reveals rather than fixes.** The hold measures
+the wait for `art::load_hero` — **33 ms** on a quiet machine with the fixture's
+600 px covers, and 100–320 ms on a loaded one — during which the previous
+record's cover stands under the new record's title. It is bounded, it is
+strictly better than what it replaces (which cut to a 320 px thumbnail on a
+room with no field and then popped to full size), and it goes to zero the
+moment the *successor's* hero is prefetched, which `art::HERO_CACHE_ENTRIES`
+already describes as one line once ADR-0034's `Origin` work can name the next
+record. The crossfade is the first consumer that makes that prefetch worth
+having, and a listener whose covers are 3000 px is the case that would make it
+urgent.

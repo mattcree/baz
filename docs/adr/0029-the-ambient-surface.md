@@ -668,6 +668,53 @@ rejected, and a moving seam would be worse than the static one he saw.
   stop after any of them, and the shorter path to the bars is
   **M1 → M2 → A2 → A6 → A8**.
 
+## Amendment (2026-08-10): the artwork arrives, it does not appear
+
+The owner: *"when changing track there isn't any kind of nice visual transition
+for album art in now playing. we should have something a bit nicer, like a
+quick fade"*.
+
+The motion itself is [ADR-0020](0020-motion.md)'s to permit and it does, in its
+third amendment. What belongs **here** is what the transition does to *this*
+surface's own argument, because it changes two of the sentences above.
+
+1. **The field is no longer only a still.** §5.3's *"no motion, no shader, no
+   toggle"* described a wash that is a pure function of the sounding record.
+   It still is — the field has no clock of its own and nothing drifts — but the
+   *record* can now be two records for 200 ms, and during those 200 ms the wash
+   is the mix of the two (`field::dissolve`). The property that mattered is
+   untouched and is the reason the mix is a mix rather than a second layer:
+   lightness and chroma are the room's and are pinned, so two fields differ in
+   **hue alone**, and a straight blend of their stops is exactly what stacking
+   one wash over the other would composite to. The ceiling
+   ([`CEILING_L`]) is not exceeded at any point of the flight, because every
+   stop is a convex combination of two colours already under it —
+   `a_dissolve_never_leaves_the_gamut_its_ends_sit_in` sweeps it rather than
+   reasoning it. §8.4's legibility sweep is therefore unaffected: no mixed
+   field is brighter than the brighter of its ends.
+
+2. **The one wash gained a second way to have a seam, and it does not have
+   it.** The owner's *"the background fade behind the album art seems to
+   abruptly end beside the track list"* was a seam in **space**, and the fix
+   was one wash over the whole body. A cover that dissolved over a room that
+   cut would be the same defect in **time** — and on this surface it would be
+   the more visible of the two, because the wash covers the whole body and a
+   whole body changing in one frame is a light being switched. So the cover's
+   opacity and the field's mix are **one number**, threaded from one place
+   (`views::now_playing::view`), rather than two numbers kept in step.
+
+3. **The artwork's size is not animated, and one case is refused to keep that
+   true.** §2's whole subject is artwork drawn as large as its source honestly
+   allows, so the edge is a fact about the decode. Where two records' decodes
+   resolve to different edges the change stays a hard cut: a dissolve that was
+   also a resize would animate the one number this ADR spent its argument
+   making honest.
+
+What this does **not** change: nothing is drawn on the sleeve, the field is
+still under everything and is still not a scrim, and the surface is still
+static at rest — the transition's clock is a function of state and there is no
+clock when nothing is crossing.
+
 ## What would reverse this
 
 - **The measurement gate failing.** If the field cannot hold 12 ms at 4K on real
