@@ -270,10 +270,22 @@ impl Config {
             }
             let _ = writeln!(out, "]");
         }
+        // **The comment lists `GroupKey::ALL`'s own codes**, built rather than
+        // spelled out. It was spelled out, and it went stale the day a key was
+        // added — a config file telling its reader that a word it does not
+        // name is not a legal value is worse than no comment, because it is
+        // the file being wrong about itself.
+        let codes: Vec<String> = GroupKey::ALL
+            .iter()
+            .map(|key| toml_string(key.code()))
+            .collect();
+        let arrangements = match codes.split_last() {
+            Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+            _ => codes.join(", "),
+        };
         let _ = writeln!(
             out,
-            "# how the wall is arranged: \"artist\", \"year\", \"genre\", \
-             \"added\" or \"played\"\n{GROUP_KEY} = {}",
+            "# how the wall is arranged: {arrangements}\n{GROUP_KEY} = {}",
             toml_string(self.group_key.code()),
         );
         let _ = writeln!(
@@ -631,6 +643,23 @@ mod tests {
         let read = |code: &str| Config::from_toml(&format!("group_key = \"{code}\"\n")).group_key;
         assert_eq!(read("alphabet"), GroupKey::Alphabet);
         assert_eq!(read("artist"), GroupKey::Artist);
+
+        // **And the comment above the line names every one of them**, because
+        // it is built from `GroupKey::ALL` rather than spelled out. The
+        // spelled-out version went stale the day a key was added, which is a
+        // config file being wrong about what it will accept.
+        let document = Config::default().to_toml();
+        let comment = document
+            .lines()
+            .find(|line| line.starts_with("# how the wall is arranged"))
+            .expect("the arrangement comment");
+        for key in GroupKey::ALL {
+            assert!(
+                comment.contains(&format!("\"{}\"", key.code())),
+                "{key:?}'s code is missing from {comment:?}"
+            );
+        }
+        assert!(comment.contains(" or \"played\""), "{comment:?}");
     }
 
     /// **A `wall_subject` key from the release that had one is ignored, and
