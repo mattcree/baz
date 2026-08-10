@@ -877,6 +877,43 @@ next commit.
   string, and Flatpak requires that string to be reverse-DNS. The MPRIS *bus*
   name is unaffected and remains `org.mpris.MediaPlayer2.baz`.
 
+### Added
+
+- **`All songs` — the implicit playlist, given a type.** The owner: *"the
+  'all songs' should be an implicit playlist."* `docs/design/09-implicit-playlists.md`
+  §2 had listed *"the wall, in its arrangement"* among the implicit playlists
+  since the study was written, but the vocabulary was design language and not a
+  thing in the code — `grep -rn "implicit playlist" crates/` returned one
+  comment. It is `crate::all_songs::AllSongs` now: a name, a counts line, a
+  collage sleeve, and a row at the head of the playlist panel, above the
+  unnamed sounding list it is a sibling of.
+
+  **`Play all` is its `Play`** — one concept where there were two. The strip's
+  word no longer builds a queue of its own; it resolves the list and plays it.
+
+  **It is ordered by the wall's arrangement and the wall's filter**, and it says
+  so rather than pretending to be a snapshot: playing it twice with the wall
+  unchanged is the same list, and what changes it is a control the listener
+  pressed. Under a query the counts read `7 of 1284 records` rather than
+  letting the name claim otherwise, because a list called *All songs* holding
+  seven of twelve hundred would be lying.
+
+  **It is playable and viewable, never a destination.** There is no file behind
+  it, so the picker never offers `Add to "All songs"` — swept in `menu.rs` over
+  every target and every reachable set of facts, and closed at its source in
+  `all_songs.rs`, which pins that the list's run carries no provenance (giving
+  the wall's run provenance is exactly what would put the name into a transfer
+  verb).
+
+  **Where you look at it is the wall.** Doc 09 §2's own table already answered
+  that — *"the wall itself"* — and a second page listing the same music as text
+  would be doc 07 L8.6's one fact drawn twice, drawn worse and without the art.
+  The panel's row is the handle; its press goes to the Library.
+
+  ADR-0024 §1's definition of a playlist (*"made by a person, stored in a file
+  that person owns"*) is amended to say why All songs is deliberately **not**
+  one, and why the definition is not widened to swallow it.
+
 ### Changed
 
 - **Shuffle is a property of the player, not an act.** The owner: *"can you
@@ -931,6 +968,9 @@ next commit.
   retained, why an inert list of paths is not that object, and what invalidates
   it — in ADR-0024 §1's first honesty clause (which said *no shuffle-on-play*),
   and in doc 10 §3.2, where the crossed-arrows clause lives.
+
+  Captures, with the run before shuffle and the run after on-then-off compared
+  at **zero differing pixels**: `docs/design/impl/shuffle-and-all-songs/`.
 
 ### Removed
 

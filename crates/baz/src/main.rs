@@ -34,6 +34,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
+mod all_songs;
 mod app;
 mod art;
 mod config;

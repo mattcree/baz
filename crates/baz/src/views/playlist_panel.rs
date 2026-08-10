@@ -53,6 +53,7 @@ use iced::widget::{
 };
 use iced::{Element, Length, alignment};
 
+use crate::all_songs;
 use crate::app::{Message, Shelf};
 use crate::icon;
 use crate::player::PlayerState;
@@ -142,8 +143,14 @@ pub(crate) fn view<'a>(
     // Top, and stable: a control that migrates to the end of a growing list
     // is a control you have to hunt for, and the head of a list of things
     // reads as *make one* where the foot reads as *and one more*.
-    let mut listed: Vec<Element<'_, Message>> =
-        vec![queue_row(player, picking), ghost_row(playlists)];
+    // **All songs stands at the head of the directory**, above the Queue: the
+    // sounding list and the whole library are the two lists nobody made, and
+    // the one that is always there comes first.
+    let mut listed: Vec<Element<'_, Message>> = vec![
+        all_songs_row(shelf, picking),
+        queue_row(player, picking),
+        ghost_row(playlists),
+    ];
     if playlists.rows.is_empty() {
         listed.push(empty_words(playlists));
     } else {
@@ -186,6 +193,73 @@ pub(crate) fn view<'a>(
             .style(move |_theme| theme::panel(room)),
     ]
     .into()
+}
+
+/// **The All songs row** — the implicit playlist, drawn as a playlist
+/// (`crate::all_songs`).
+///
+/// The owner, 2026-08-09: *"The play all thing also does not need to exist.
+/// That should be existing as a kind of playlist that is implicit."* Doc 09 §2
+/// had already listed *"the wall, in its arrangement"* among the implicit
+/// playlists; this row is that entry made an object you can point at.
+///
+/// # It is a door to the wall, not to a page of its own
+///
+/// Pressing it goes to the **Library**. Doc 09 §2 names the wall itself as
+/// where this list is seen, and a second page listing the same music as text
+/// would be doc 07 L8.6's one-fact-drawn-twice — the same collection drawn
+/// worse, without the art, needing its own virtual window, its own scroll
+/// memory and its own search before it caught up with the surface baz opens
+/// onto. So the row is the *handle*: name, counts, sleeve, and a press that
+/// takes you to the thing itself.
+///
+/// # It is never a destination
+///
+/// While a pick is in flight every other row in this panel becomes a target
+/// and says `Add`. This one does not, and cannot: there is no file behind it
+/// to append to. It stays a readout — present, legible, and plainly not
+/// offering — because a row that vanished mid-gesture would make the panel
+/// re-flow under the hand, and one that offered `Add to "All songs"` would be
+/// promising a write with nowhere to go.
+///
+/// The sleeve is the playlist collage (ADR-0024 §A1), quoting the first four
+/// records the wall shows: an implicit list is a list, and gets a list's
+/// sleeve. Under a query it quotes the matches, so the sleeve is a picture of
+/// the list rather than of the library behind it.
+fn all_songs_row(shelf: &Shelf, picking: bool) -> Element<'_, Message> {
+    let room = theme::active();
+    let list = shelf.all_songs();
+    let sleeve = playlist_sleeve(shelf, &list.art, all_songs::NAME, theme::PANEL_SLEEVE);
+    let name_block = column![
+        text(all_songs::NAME)
+            .size(theme::SIZE_BODY)
+            .line_height(theme::LEADING_BODY)
+            .font(theme::MEDIUM)
+            .color(if picking { room.paper_dim } else { room.paper })
+            .wrapping(text::Wrapping::None),
+        text(list.counts())
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_faint)
+            .wrapping(text::Wrapping::None),
+    ]
+    .spacing(theme::GAP_XXS);
+    let body = row![sleeve, container(name_block).width(Length::Fill)]
+        .spacing(theme::GAP_SM)
+        .align_y(iced::Alignment::Center);
+    if picking {
+        // A readout, and deliberately not a target: no press, no `Add`.
+        return container(body)
+            .width(Length::Fill)
+            .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+            .into();
+    }
+    button(body)
+        .width(Length::Fill)
+        .padding(theme::pad(theme::GAP_XS, theme::GAP_SM))
+        .style(move |_theme, status| theme::track_row(room, room.plinth, status, false))
+        .on_press(Message::ShowAllSongs)
+        .into()
 }
 
 /// **The Queue's row** — the unnamed, sounding list at the head of the

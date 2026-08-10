@@ -103,6 +103,28 @@ honesty requirement rules out.
 > **A named, ordered list of track references, made by a person, stored in a
 > file that person owns.**
 
+*Amended 2026-08-10 to record the owner's decision* — *"the 'all songs' should
+be an implicit playlist."* **All songs** is a named, ordered list of track
+references that no person made and no file stores, so it is not a playlist
+under this definition, and the definition is not widened to swallow it. It is
+the other kind of list this product has always had and only recently named:
+doc 09 §2's *implicit* playlist, of which the queue is the other resident
+example.
+
+The distinction is load-bearing rather than pedantic, and it is exactly the
+one that keeps §1's honesty clauses meaningful. **A playlist is a
+destination**; an implicit list is not, because there is no file to write to —
+which is why the picker offers every named list and never offers this one.
+**A playlist is frozen ground truth** (clause 3); an implicit list is a view of
+a live thing, and All songs says so in its own counts line rather than
+pretending otherwise. What the two share is everything about *being played*:
+both reify into the queue at the moment of the gesture, both decouple from it
+instantly, and both are one `Save as playlist` from becoming the other kind.
+
+So the surface word **Playlists** still means files a person owns, and the
+panel that carries it now has one row at its head that is not one — labelled,
+sleeved and legible as a list, with no `Add` beside it in any state.
+
 Distinct from the queue (transient, one run), from an album (derived from
 tags, not editable), and from any future saved query (visibly live, never
 wearing a playlist's name). The boundary with the queue is MPD's, adopted

@@ -127,20 +127,48 @@ about by name:
 | The implicit playlist | Who wrote it | Mutable? | Named? | Where it shows |
 |---|---|---|---|---|
 | An album's track list | the artist (read from tags) | no — fix the tags | by the artist | the record's page |
-| **The wall, in its arrangement** | the group key and the filter | by arranging | no | the wall itself |
-| **A shuffle draw** | chance, from the wall's visible pool | — | no | the queue, once drawn |
-| The pull's offer | the ledger's weighting | — | no | one record's page |
+| **The wall, in its arrangement — *All songs*** | the group key and the filter | by arranging | **yes, since 2026-08-10** | the wall itself; its handle is the playlist panel's first row |
+| ~~A shuffle draw~~ | ~~chance, from the wall's visible pool~~ | — | no | — |
+| ~~The pull's offer~~ | ~~the ledger's weighting~~ | — | no | — |
 | **The queue** | **the listener's gestures, tonight** | **yes** | **no** | the Queue place |
 | A saved playlist | the listener, deliberately | yes | yes | its page |
 | A generator's output (future) | a person's explicit ask | yes | yes | its page |
 
 So the owner's question — *"what happens when you shuffle the library? has
 that created an implicit playlist?"* — has a one-word answer: **yes.** The
-draw reifies into the queue, which is the implicit playlist: readable to its
+run reifies into the queue, which is the implicit playlist: readable to its
 end, editable row by row, endable, and one `Save as playlist` from being
 kept. And the wall row is the key to play-everything (§7): the arrangement a
 listener is looking at *is already an ordered list of records* — playing it
 needs no selection ceremony, because the scope is on screen.
+
+> **Two rows changed on 2026-08-10, both on the owner's decisions.**
+>
+> **The wall's row got a name.** *"The play all thing also does not need to
+> exist. That should be existing as a kind of playlist that is implicit."* The
+> vocabulary was here and the type was not — `grep -rn "implicit playlist"
+> crates/` returned one comment. It is `crate::all_songs::AllSongs` now:
+> **All songs**, with a name, a counts line, a collage sleeve, and a row at the
+> head of the playlist panel. `Play all` is that list's own `Play` — one
+> concept where there were two — and this table's "Named?" column moves from
+> *no* to *yes* for it, which is the whole of what was built.
+>
+> Three things it deliberately is **not**. It is not a *file*: there is nothing
+> to append to, so the picker never offers `Add to "All songs"` — asserted in
+> `menu.rs` over every target, and closed at its source by the list's run
+> carrying no provenance, since provenance is what would put the name in a
+> transfer verb (§6). It is not a *snapshot*: it follows the wall's current
+> arrangement and the wall's current filter, and it says so — under a query the
+> counts read `7 of 1284 records` rather than letting the name claim otherwise.
+> And it is not a *page*: this table's own last column already says where the
+> wall is seen — **the wall itself** — and a second surface listing the same
+> music as text would be doc 07 L8.6's one fact drawn twice, drawn worse.
+>
+> **The shuffle-draw and pull rows are struck.** The pull was removed. Shuffle
+> became a property of the player (ADR-0023's amendment), so there is no draw
+> that reifies — what the mode produces is not a new list but a re-ordering of
+> the queue row below, which was always the implicit playlist the answer above
+> pointed at.
 
 Read down the table and the queue and a saved playlist differ in exactly two
 properties: **a name, and whether the engine is holding it.** Everything

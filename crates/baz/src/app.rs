@@ -600,6 +600,12 @@ pub(crate) enum Message {
     /// in is the player's shuffle property's answer, the same as every other
     /// play gesture's ([`App::send_run`]).
     PlayAll,
+    /// **The playlist panel's `All songs` row**: go to the list.
+    ///
+    /// The list is the wall (`crate::all_songs`), so this is the Library —
+    /// the same destination the lane's `Library` row names, reached from the
+    /// object that names the list rather than the frame.
+    ShowAllSongs,
     /// **Turn the player's shuffle property on or off** — the now-playing
     /// bar's crossed arrows.
     ///
@@ -1285,6 +1291,13 @@ impl App {
             Message::PlayTrack(id, row) => {
                 self.play_track(id, row);
                 Task::none()
+            }
+            Message::ShowAllSongs => {
+                // The panel closes with the press, exactly as picking a
+                // destination closes it: a panel that stayed open over the
+                // place it just sent you to would be a float with no subject.
+                self.playlists.close_panel();
+                self.go(Place::back)
             }
             Message::ToggleShuffle => {
                 self.toggle_shuffle();
@@ -3277,25 +3290,20 @@ impl App {
         let Screen::Shelf(state) = &self.screen else {
             return;
         };
-        let picks: Vec<(&vm::AlbumVm, Option<vm::EditionKey>)> = state
-            .visible
-            .iter()
-            .filter_map(|&index| state.albums.get(index))
-            .map(|album| (album, state.edition_choice.get(&album.id).copied()))
-            .collect();
-        let queue = vm::stacked_queue(&picks);
-        if queue.is_empty() {
+        // **`Play all` is the All songs list's own `Play`.** It used to build
+        // its own queue out of `state.visible`; it now resolves the implicit
+        // playlist and plays that, which is what makes the two one concept
+        // rather than two that had to be kept agreeing.
+        let list = state.all_songs();
+        if list.is_empty() {
             // The wall is showing nothing — an empty library, or a query
             // that matched no record. Nothing to play, so nothing happens
             // and nothing is claimed. Silence is the correct answer here
             // too.
             return;
         }
-        println!(
-            "[play-all] {} records · {} tracks — the wall, in its arrangement",
-            picks.len(),
-            queue.len()
-        );
+        println!("[all-songs] play — {}", list.counts());
+        let queue = list.queue;
         if self.send_run(queue, None).is_some() && self.playback.send(Command::Play) {
             self.player.note_transport_sent();
         } else {
@@ -4653,6 +4661,19 @@ impl Shelf {
             scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
             self.request_visible_thumbs(),
         ])
+    }
+
+    /// **The All songs list, resolved from this wall** (`crate::all_songs`).
+    ///
+    /// Built on demand rather than held, because the list *is* the wall and the
+    /// wall is recomputed: an implicit playlist that cached itself would be a
+    /// snapshot claiming to be a view, and would go stale the moment a query
+    /// was typed. It costs one pass over `visible`, and is asked for only when
+    /// something is about to be played or drawn.
+    pub(crate) fn all_songs(&self) -> crate::all_songs::AllSongs {
+        crate::all_songs::AllSongs::from_wall(&self.albums, &self.visible, |id| {
+            self.edition_choice.get(&id).copied()
+        })
     }
 
     /// Put a shelf at the top of the wall — what an index-rail entry does.
@@ -6385,9 +6406,10 @@ mod tests {
     /// thread — with each criterion named by the literal a reviewer would have
     /// to move:
     ///
-    /// - *the scope is the wall*: the queue is built from `state.visible`,
-    ///   in its order, as whole records (`vm::stacked_queue` — the shape
-    ///   whose order-preservation `vm`'s own tests pin);
+    /// - *the scope is the wall*: the queue is the **All songs** list, which
+    ///   is `state.visible` in its order as whole records
+    ///   (`crate::all_songs`, whose own tests pin that and `vm`'s pin
+    ///   `stacked_queue`'s order-preservation under it);
     /// - *the first track sounds*: the run goes out and `Play` follows, one
     ///   press, no confirmation at any scale — §7.1's answer to the
     ///   10 000-track question is the virtual window, not a dialog;
@@ -6413,21 +6435,19 @@ mod tests {
         let play_all = &rest[..rest.find("\n    }\n").expect("a function ends")];
 
         assert!(
-            // rustfmt sets the chain one call per line, so the receiver and
-            // the field arrive split.
-            play_all.contains(".visible"),
-            "the scope is the wall — the visible set, nothing wider"
+            play_all.contains("state.all_songs()"),
+            "`Play all` is the All songs list's own Play — one concept, not two"
         );
         assert!(
-            play_all.contains("vm::stacked_queue"),
-            "whole records, in the wall's arrangement order"
+            play_all.contains("list.queue"),
+            "and it plays that list, rather than building a second one beside it"
         );
         assert!(
             play_all.contains("self.send_run(") && play_all.contains("Command::Play"),
             "one press, and the first track sounds"
         );
         assert!(
-            play_all.contains("if queue.is_empty()"),
+            play_all.contains("if list.is_empty()"),
             "an empty wall: nothing happens and nothing is claimed"
         );
     }

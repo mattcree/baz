@@ -653,6 +653,78 @@ mod tests {
         }
     }
 
+    /// **The picker never offers `Add to "All songs"`** — the implicit list is
+    /// playable and viewable, never a destination (`crate::all_songs`).
+    ///
+    /// There is no file behind it to append to, so an `Add` aimed at it would
+    /// be a verb promising a write with nowhere to go. This is already
+    /// structural — the picker's destinations are `PanelRow`s read out of the
+    /// playlists folder, and `AllSongs` is not one and carries no id, no path
+    /// and no `save` — but it is asserted anyway, over **every** target this
+    /// menu knows and over the whole `Facts` space that could name a current
+    /// list. "Structurally impossible" is what the last surface that quietly
+    /// grew a destination looked like from the inside as well.
+    ///
+    /// The trap it closes is a specific one the earlier mapping named: giving
+    /// the wall's run *provenance* would immediately make every one of these
+    /// menus offer the named verb for a list with no file. So the sweep is over
+    /// the labels, which is where that would surface.
+    #[test]
+    fn no_menu_anywhere_offers_to_add_to_the_implicit_list() {
+        let targets = [
+            Target::NowPlaying,
+            Target::Album { album: 3 },
+            Target::Track { album: 3, row: 1 },
+            Target::QueueRow { row: 2 },
+            Target::PlaylistTrack {
+                row: 1,
+                missing: false,
+            },
+            Target::PlaylistTrack {
+                row: 1,
+                missing: true,
+            },
+        ];
+        // Every combination of the facts that could put a name in a verb.
+        //
+        // `current` is deliberately swept over its **reachable** values only —
+        // no provenance, and a real playlist file. Handing it the implicit
+        // list's name would prove nothing about the product, because the way
+        // that value is built is the guard: it is `queue_provenance()` filtered
+        // through `Playlists::row`, so it names a file that exists or it is
+        // `None`. The half of the trap that lives upstream — the run carrying
+        // provenance the implicit list has no business having — is asserted at
+        // its own source, in `all_songs`, where a `Some` would have to be
+        // written for this menu to ever see one.
+        let currents = [None, Some((7, "Road Trip".to_owned()))];
+        let named = format!("Add to \u{201c}{}\u{201d}", crate::all_songs::NAME);
+        for target in targets {
+            for current in &currents {
+                for collecting in [false, true] {
+                    let facts = Facts {
+                        engine_ready: true,
+                        collecting,
+                        current: current.clone(),
+                        playing_album: Some(3),
+                        playing_queue_row: Some(2),
+                    };
+                    for item in items(target, &facts) {
+                        assert_ne!(
+                            item.label, named,
+                            "{target:?} offered to write to a list with no file"
+                        );
+                        assert!(
+                            !item.label.contains(crate::all_songs::NAME)
+                                || !item.label.starts_with("Add to"),
+                            "{target:?} named the implicit list in a transfer verb: {:?}",
+                            item.label
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// **S4's item, at the menu layer** (09 §4): provenance standing → the
     /// bar's menu carries `Add to "{name}"`, and its presses are the
     /// sounding row's `+` then the picker's hoisted row — the file append,
