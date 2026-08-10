@@ -116,6 +116,35 @@ is asserted beside `SCROLLBAR_W > 0.0`, because every *other* list in baz keeps
 its bar — none of them has a rail beside it, and a page with neither has no
 readout of how much of it there is.
 
+> **Amended, 2026-08-09 and 2026-08-10 — the bar came back, and then it moved.**
+>
+> The owner reversed this section the day he used it: *"can we allow there to be
+> a scroll bar for any view? Just a very minimal scroll bar because otherwise,
+> it's hard to just jump to the end"*. The reasoning above is right about what
+> the rail *does* and wrong about what it leaves out: the rail jumps to shelves
+> by group key, and **the end is not a group key** — under `ARTIST` the last
+> shelf may be `Z` or `#`, and under a filter it is whatever survived. So
+> `WALL_SCROLLBAR_W` is `theme::RAIL` 4, not 0, and the "two vertical strips" rule
+> now reads that the second strip must be the *lesser* mark and must not repeat
+> what the first one says. It says nothing; it is a handle.
+>
+> **Where it goes is this ADR's business too**, because the lane it stands
+> beside is the rail's. It shipped at the right edge of the wall's scrollable,
+> which put the rail's `INDEX_LANE_W` 108 *outboard* of it: measured at
+> 1280 × 860, a bar at x 1168–1171 with the window's edge at 1280 — *"scroll
+> bar is in a strange location… it seems to have padding on the right"*. It is
+> now drawn on the **window's** edge, x 1276–1279, in the outer 4 px of the
+> rail's own window gutter, where there is no ink. **The rail's lane, its
+> letters' `W − HANG` edge and the density detents at its foot (ADR-0028 §1)
+> are untouched to the pixel** — the reservation moved, the type did not.
+>
+> The cost is the rail's Fitts win. Its press band ran to the window's edge on
+> purpose, so a fling at the edge always hit it; it now stops 4 px short and
+> those 4 px are the bar's. Taken deliberately: the band is still 104 px wide,
+> and what the screen edge now hits is the other scroll affordance for the same
+> wall rather than nothing. `docs/design/impl/wall-scrollbar/` holds the
+> before/after frames, the ruler and the alternatives that were refused.
+
 ### Getting back to what is playing
 
 `docs/design/03-interface-prior-art.md`'s **R3** is band A in the study: *get

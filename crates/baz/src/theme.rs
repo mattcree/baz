@@ -2209,6 +2209,11 @@ pub fn list_scrollbar() -> scrollable::Scrollbar {
 /// grid 4 px, which it absorbs the way it absorbs every other width, and
 /// [`INDEX_LANE_W`] is unchanged: the rail's algebra, and every test over it,
 /// is untouched.
+///
+/// This is the bar **every list-shaped surface with a quiet bar** uses — the
+/// returns lane, `Home`, an artist's page. The *wall* uses
+/// [`shelf_scrollbar`], which is this bar with the rail's lane added to the
+/// reservation so the bar itself lands on the window's edge.
 #[must_use]
 pub fn wall_scrollbar() -> scrollable::Scrollbar {
     scrollable::Scrollbar::new()
@@ -2220,6 +2225,60 @@ pub fn wall_scrollbar() -> scrollable::Scrollbar {
         .spacing(0.0)
 }
 
+/// **The wall's own bar: [`wall_scrollbar`] with the index rail's lane added
+/// to what it reserves**, so the bar is drawn on the *window's* right edge and
+/// the rail hangs inboard of it.
+///
+/// # The defect this fixes
+///
+/// The bar shipped at the right edge of the wall's *scrollable*, which is the
+/// structurally honest place for it and the wrong place to look. Measured on a
+/// 1280 × 860 frame with the lane open: the bar occupied x 1168–1171 and the
+/// rail's letters x 1233–1239, so 108 px of window stood outboard of a bar
+/// that had nothing but the rail's sparse type in it. The owner: *"scroll bar
+/// is in a strange location… it seems to have padding on the right"*. He is
+/// describing a real composition, not misreading one.
+///
+/// # Why the edge, and why this way round
+///
+/// The returns lane already answered this question, in his words — *"the
+/// scrollbar should be at the edge of it"* ([`crate::views::lane`]): the rows
+/// carry the lane's gutter so the bar can ride the surface's own edge. **The
+/// content keeps its inset; only the bar reaches the edge.** The wall's
+/// surface is the window, so the same move puts the bar on the window's edge
+/// and moves nothing else — the rail's lane, its letters, the density detents
+/// at its foot and every number in [`INDEX_LANE_W`] are exactly where they
+/// were.
+///
+/// # How iced is made to do it
+///
+/// `Scrollbars::new` puts the bar at `bounds.x + bounds.width −
+/// (width + 2 × margin)` — the far right of the scrollable's **outer** bounds,
+/// which ignores `spacing` entirely (`scrollable.rs:1583–1602`). So the
+/// scrollable is given the whole body width, the rail is stacked *under* it
+/// right-aligned, and `spacing` is [`INDEX_LANE_W`]: the content is confined
+/// to the same [`WALL_RESERVE`]-less width it always had, and the 4 px the bar
+/// occupies fall in the rail's own window gutter, where there is no ink.
+///
+/// The rail stays *under* the bar in the stack rather than over it because
+/// iced hands the topmost layer the pointer first, and a rail on top would own
+/// the 4 px the bar is drawn in — a bar nobody can grab. Under it, the rail
+/// answers everywhere except those 4 px.
+#[must_use]
+pub fn shelf_scrollbar() -> scrollable::Scrollbar {
+    wall_scrollbar().spacing(INDEX_LANE_W)
+}
+
+/// What the wall's scrollable takes off its own right edge before the grid
+/// gets what is left: the bar's 4 px **and** the index rail's lane —
+/// **112**.
+///
+/// One number for one reservation. [`shelf_scrollbar`] spends it as iced's
+/// `width + 2 × margin + spacing`, and `Shelf::grid_size` subtracts it from
+/// the scrollable's measured outer bounds; `Shelf::grid_width` reaches the
+/// same total the long way, through its own two terms.
+pub const WALL_RESERVE: f32 = WALL_SCROLLBAR_W + 2.0 * SCROLLBAR_MARGIN + INDEX_LANE_W;
+
 /// The width of the wall's scrollbar — **4**, the [`RAIL`] width, which is the
 /// narrowest mark in the product that is still something to aim at.
 ///
@@ -2229,6 +2288,19 @@ pub fn wall_scrollbar() -> scrollable::Scrollbar {
 /// handle for the one gesture the rail has no answer to, and it is drawn in
 /// the same hairline as every other edge in the room.
 pub const WALL_SCROLLBAR_W: f32 = RAIL;
+
+const _: () = {
+    // The reservation is the bar's lane plus the rail's, and nothing else: the
+    // 4 px at the window's edge and the 108 the rail hangs in.
+    assert!(WALL_RESERVE == WALL_SCROLLBAR_W + INDEX_LANE_W);
+    assert!(WALL_RESERVE == 112.0);
+    // The bar fits in the rail's window gutter with room to spare, which is
+    // what lets it sit at the edge without touching a letter: the rail's ink
+    // stops at `W − HANG`, the bar starts at `W − WALL_SCROLLBAR_W`.
+    assert!(WALL_SCROLLBAR_W < HANG);
+    // …and the rail keeps all but those 4 px of its hit lane (the Fitts band).
+    assert!(INDEX_LANE_W - WALL_SCROLLBAR_W > INDEX_CLEARANCE + INDEX_W);
+};
 
 /// A list's scrollbar: no trough, and a scroller in the same hairline the room
 /// uses for every other edge, one step firmer while it is being driven.
@@ -6705,8 +6777,12 @@ mod tests {
         // every list's, and far narrower than the rail's ink. Asserted as
         // *which geometry the wall asks for* rather than as the presence of a
         // `scrollable`, which is what it always was.
+        //
+        // It is [`shelf_scrollbar`] and not [`wall_scrollbar`] because the
+        // wall's bar rides the *window's* edge: same 4 px, the rail's lane
+        // added to what it reserves.
         assert!(
-            read("shelf.rs").contains("theme::wall_scrollbar()"),
+            read("shelf.rs").contains("theme::shelf_scrollbar()"),
             "the wall asks for some other scrollbar geometry than its own"
         );
         const {
@@ -6714,6 +6790,9 @@ mod tests {
             assert!(WALL_SCROLLBAR_W < SCROLLBAR_W);
             assert!(WALL_SCROLLBAR_W * 4.0 < INDEX_W);
         }
+        // The bar on the window's edge does **not** move the rail's ink off
+        // `W − HANG`: it is drawn inside the rail's own gutter, and 4 < 40.
+        const { assert!(WALL_SCROLLBAR_W < HANG) }
         // The lane arithmetic agrees: the rail's gutter is the same token.
         const { assert!(INDEX_LANE_W == INDEX_CLEARANCE + INDEX_W + HANG) }
         // A panel's *internal* padding is a different edge and stays `GAP_XL`:
