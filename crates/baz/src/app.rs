@@ -4663,15 +4663,15 @@ impl Shelf {
         ])
     }
 
-    /// **The All songs list, resolved from this wall** (`crate::all_songs`).
+    /// **The All songs list, resolved from this wall** (`crate::implicit`).
     ///
     /// Built on demand rather than held, because the list *is* the wall and the
     /// wall is recomputed: an implicit playlist that cached itself would be a
     /// snapshot claiming to be a view, and would go stale the moment a query
     /// was typed. It costs one pass over `visible`, and is asked for only when
     /// something is about to be played or drawn.
-    pub(crate) fn all_songs(&self) -> crate::all_songs::AllSongs {
-        crate::all_songs::AllSongs::from_wall(&self.albums, &self.visible, |id| {
+    pub(crate) fn all_songs(&self) -> crate::implicit::ImplicitList {
+        crate::implicit::ImplicitList::all_songs(&self.albums, &self.visible, |id| {
             self.edition_choice.get(&id).copied()
         })
     }

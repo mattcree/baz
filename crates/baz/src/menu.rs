@@ -697,7 +697,10 @@ mod tests {
         // its own source, in `all_songs`, where a `Some` would have to be
         // written for this menu to ever see one.
         let currents = [None, Some((7, "Road Trip".to_owned()))];
-        let named = format!("Add to \u{201c}{}\u{201d}", crate::all_songs::NAME);
+        let named = format!(
+            "Add to \u{201c}{}\u{201d}",
+            crate::implicit::Origin::AllSongs.name()
+        );
         for target in targets {
             for current in &currents {
                 for collecting in [false, true] {
@@ -714,7 +717,9 @@ mod tests {
                             "{target:?} offered to write to a list with no file"
                         );
                         assert!(
-                            !item.label.contains(crate::all_songs::NAME)
+                            !item
+                                .label
+                                .contains(crate::implicit::Origin::AllSongs.name())
                                 || !item.label.starts_with("Add to"),
                             "{target:?} named the implicit list in a transfer verb: {:?}",
                             item.label

@@ -34,7 +34,6 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-mod all_songs;
 mod app;
 mod art;
 mod config;
@@ -42,6 +41,7 @@ mod drag;
 mod font;
 mod groove;
 mod icon;
+mod implicit;
 mod keys;
 mod lane;
 mod menu;

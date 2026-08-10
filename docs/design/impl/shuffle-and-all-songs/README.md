@@ -68,7 +68,7 @@ compares them:
 0 (0)
 
   the rows: shuffled vs. before  (must not be 0):
-6.51942e+08 (9948)
+6.51418e+08 (9940)
 ```
 
 **Zero differing pixels.** The second comparison is there so the first cannot
@@ -117,7 +117,7 @@ unnamed sounding list it is a sibling of. Its counts are the wall's:
 because a list called *All songs* that held seven of twenty-five would be
 lying. There is no `Add` beside it in any state and there cannot be: it has no
 file. That negative is asserted where a picture cannot carry it — `menu.rs`
-sweeps every target and every reachable `Facts`, and `all_songs.rs` closes the
+sweeps every target and every reachable `Facts`, and `implicit.rs` closes the
 upstream half by pinning that the list's run carries no provenance.
 
 ## What is *not* captured, and why

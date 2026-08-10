@@ -1,24 +1,51 @@
-//! **All songs** — the implicit playlist the vocabulary already had a name
-//! for, given a type.
+//! **Implicit playlists** — the lists nobody made a file for, and the type they
+//! share.
 //!
-//! ADR-0006 layer 1: pure, iced-free, unit-tested. Albums and the wall's own
-//! filter in; a name, two counts, a queue and four sleeve quotations out. No
+//! ADR-0006 layer 1: pure, iced-free, unit-tested. Records and the wall's own
+//! filter in; an origin, two counts, a queue and four sleeve quotations out. No
 //! window, no engine, no disk — and *no file*, which is the whole point.
 //!
-//! # What it is
+//! # The model this is shaped for
 //!
-//! The owner, 2026-08-09: *"The play all thing also does not need to exist.
-//! That should be existing as a kind of playlist that is implicit."*
+//! The owner, 2026-08-10: *"probably the basic model is that every album has a
+//! playlist implicitly… and so when we track the state of what is playing now
+//! or what our recent plays were… it should be basically which playlist and
+//! which track."*
 //!
-//! `docs/design/09-implicit-playlists.md` §2 had already listed *"the wall, in
-//! its arrangement"* as an implicit playlist, and §2's own model line is
-//! *"baz has one kind of list. One of them is sounding and has no name; the
-//! rest are named and silent."* So the vocabulary existed and the type did
-//! not: `grep -rn "implicit playlist" crates/` returned one comment.
-//! [`AllSongs`] is that type — a list you can see and play, with nobody's file
-//! behind it.
+//! So **everything that plays is a list and a cursor**, and lists differ only
+//! in what they are made of and what identity they have. A named playlist has a
+//! *file*; an album's implicit list would have an *album id*; a draw's list has
+//! nothing durable at all; **All songs** has only a name. This module is the
+//! type for the ones with no file behind them, and it is deliberately built as
+//! a **kind with an origin** rather than as one bespoke thing, so that the
+//! remaining kinds can be named without it being rewritten.
 //!
-//! # What it is ordered by, stated plainly
+//! **Only one origin is built here** ([`Origin::AllSongs`]), because only one
+//! was asked for. [`Origin`]'s own docs say exactly where an album's list and a
+//! draw's list slot in and what each would carry; the full model — including
+//! the harder half, where the play ledger records one line per *track path* and
+//! the engine is never told a run's provenance — is a separate piece of design
+//! work and is not decided here.
+//!
+//! # What an implicit list is, and what it is not
+//!
+//! `docs/design/09-implicit-playlists.md` §2 has listed these since the study
+//! was written — *"the wall, in its arrangement"*, a draw, the queue — and its
+//! model line is *"baz has one kind of list. One of them is sounding and has no
+//! name; the rest are named and silent."* The vocabulary existed and the type
+//! did not: `grep -rn "implicit playlist" crates/` returned one comment.
+//!
+//! The load-bearing property, and the one every origin shares: **an implicit
+//! list is playable and viewable, never a destination.** There is no file to
+//! append to, so the picker must never offer `Add to "…"` for one. That is
+//! structural rather than remembered — the picker's rows are
+//! [`crate::playlists::PanelRow`]s read out of the playlists folder, and this
+//! type is not one and cannot become one: it has no id, no path and no `save`,
+//! and [`Origin::file`] answers `None` by construction. `crate::menu`'s own
+//! sweep asserts it anyway, because "structurally impossible" is what the last
+//! surface that grew a destination looked like from the inside too.
+//!
+//! # All songs: what it is ordered by, stated plainly
 //!
 //! **The wall's own arrangement and the wall's own filter.** It is a *view of a
 //! live thing*, not a snapshot, and this module will not pretend otherwise.
@@ -39,81 +66,144 @@
 //! listener pressed.
 //!
 //! **And the name stays honest under a query.** A list called *All songs* that
-//! held seven of twelve hundred records would be lying, so [`AllSongs::counts`]
-//! says which case it is in — the plain figures at rest, and `7 of 1284
-//! records` while the wall is filtered. The honesty is in the readout rather
-//! than in a second name, because the list *is* the wall and the wall is one
-//! thing.
+//! held seven of twelve hundred records would be lying, so
+//! [`ImplicitList::counts`] says which case it is in — the plain figures at
+//! rest, and `7 of 1284 records` while the wall is filtered. The honesty is in
+//! the readout rather than in a second name, because the list *is* the wall and
+//! the wall is one thing.
 //!
-//! # It is playable and viewable, never a destination
+//! # Where you look at one
 //!
-//! There is no file to append to, so **the picker must never offer
-//! `Add to "All songs"`**. That is structural rather than remembered: the
-//! picker's rows are [`crate::playlists::PanelRow`]s read out of the playlists
-//! folder, and this type is not one and cannot become one — it has no id, no
-//! path and no `save`. `crate::menu`'s own sweep asserts it anyway, because
-//! "structurally impossible" is what the last surface that grew a destination
-//! looked like from the inside too.
-//!
-//! # Where you look at it
-//!
-//! **The wall**, and there is deliberately no second page. Doc 09 §2 names the
-//! wall itself as where this list is seen, and doc 07 L8.6 refuses one fact
-//! drawn twice; a page listing the same music as text would be the same
-//! collection drawn worse, without the art, and would need its own virtual
-//! window, its own scroll memory and its own search to catch up with the
-//! surface baz opens onto. The panel's row is the *handle* — name, counts,
+//! For All songs: **the wall**, and there is deliberately no second page. Doc
+//! 09 §2 names the wall itself as where this list is seen, and doc 07 L8.6
+//! refuses one fact drawn twice; a page listing the same music as text would be
+//! the same collection drawn worse, without the art, and would need its own
+//! virtual window, its own scroll memory and its own search to catch up with
+//! the surface baz opens onto. The panel's row is the *handle* — name, counts,
 //! sleeve, and a press that takes you to the wall.
 
 use crate::vm::{AlbumVm, EditionKey, QueueVm, format_duration, stacked_queue};
 
-/// The list's name, in the listener's language.
+/// **Which implicit list this is**, and the identity that kind of list has.
 ///
-/// The owner's own words, kept: *"the 'all songs' should be an implicit
-/// playlist"*. Sentence case like every other name in the product, and not
-/// *Everything* — which the earlier mapping used as a placeholder and which
-/// reads as a claim about the library rather than a name for a list.
-pub(crate) const NAME: &str = "All songs";
+/// The general half of this module (module docs): a run is a list and a
+/// cursor, and what distinguishes one list from another is *what identity it
+/// carries*. A named playlist carries a **file**; the kinds below carry less
+/// than that, and each carries something different, which is why this is an
+/// enum rather than a name-plus-flags.
+///
+/// # The origins that are not built yet
+///
+/// Only [`Self::AllSongs`] exists, because only it was asked for. The two the
+/// owner's model names next are recorded here rather than guessed at, so that
+/// adding either is a variant and a constructor and touches nothing else:
+///
+/// - **An album's own track list.** Its identity is the **album id** — it is a
+///   list that already has a name (the record's), an order (the edition's) and
+///   a page (the record's own), so its constructor would take an `AlbumVm` and
+///   its `narrowed_from` would be `None`: an album's tracks are its tracks, and
+///   no filter narrows them.
+/// - **A draw.** Its identity is **nothing durable** — that is the finding, not
+///   a gap. A draw is a list that existed once, and the run it produced is
+///   already the queue.
+///
+/// Neither is built here, and the state-tracking half of the owner's model —
+/// what "recent plays" means when the ledger records one line per *track path*
+/// and the engine is never told a run's origin — is separate design work that
+/// reopens ADR-0018. This type is a door for it, not an answer to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Origin {
+    /// **All songs** — the whole library, as the wall arranges it.
+    ///
+    /// The owner: *"the 'all songs' should be an implicit playlist."* Its
+    /// identity is its **name and nothing else**: there is no file, no id, and
+    /// nothing to look it up by, because there is only ever one of it.
+    AllSongs,
+}
 
-/// How many records the sleeve quotes, and the reason is
+impl Origin {
+    /// The list's name, in the listener's language.
+    ///
+    /// The owner's own words, kept. Sentence case like every other name in the
+    /// product, and not *Everything* — which the earlier mapping used as a
+    /// placeholder and which reads as a claim about the library rather than as
+    /// a name for a list.
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::AllSongs => "All songs",
+        }
+    }
+
+    /// **The playlist file this list is stored in** — always `None`, for every
+    /// origin, by construction.
+    ///
+    /// The one method that makes the module's load-bearing property a fact
+    /// about the type rather than a convention: an implicit list has no file,
+    /// so there is nothing for the picker to append to and nothing for playing
+    /// provenance to name. It is written as a method returning `None` rather
+    /// than left unwritten because a *later* origin must have somewhere to say
+    /// so, and because the sweep in `crate::menu` is more legible against an
+    /// API that answers the question than against one that lacks it.
+    pub(crate) const fn file(self) -> Option<&'static str> {
+        match self {
+            Self::AllSongs => None,
+        }
+    }
+}
+
+/// How many records a list's sleeve quotes, and the reason is
 /// [`crate::playlists::PanelRow::art`]'s: four for the 2 × 2 collage.
 const QUOTED: usize = 4;
 
-/// **The implicit playlist**, resolved from the wall exactly as the wall
-/// resolves itself.
+/// **A playable list with no file behind it**, resolved and ready to draw.
 ///
-/// Built per frame from the same three things the wall reads, and holding no
-/// state of its own — which is what makes *"a view of a live thing"* a fact
-/// about the type rather than a promise about how it is used. There is nowhere
-/// here to cache an order, so there is no order that can go stale.
+/// One type for every [`Origin`], holding no state of its own — which is what
+/// makes *"a view of a live thing"* a fact about it rather than a promise about
+/// how it is used. There is nowhere here to cache an order, so there is no
+/// order that can go stale.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AllSongs {
+pub(crate) struct ImplicitList {
+    /// Which list this is, and the identity that kind carries.
+    pub(crate) origin: Origin,
     /// What `Play` sends, and what the counts were taken from — one value for
     /// both, so the paths sent and the figures shown cannot describe different
     /// music ([`QueueVm`]'s own rule).
     pub(crate) queue: QueueVm,
-    /// The sleeve's quotations: the first [`QUOTED`] records the wall shows,
-    /// in wall order. Fewer means "draw the first full-bleed", none means the
+    /// The sleeve's quotations: the first [`QUOTED`] records the list holds, in
+    /// its own order. Fewer means "draw the first full-bleed", none means the
     /// rest tile — [`crate::views::playlist_sleeve`]'s rule, unchanged, because
     /// an implicit list is a list and gets a list's sleeve.
     pub(crate) art: Vec<u64>,
-    /// How many records the wall is showing.
+    /// How many records this list spans.
     pub(crate) records: usize,
-    /// How many records the library holds, whether or not the wall is showing
-    /// them — the denominator the honesty line needs.
-    pub(crate) held: usize,
+    /// **The larger set this list is a view of**, when it is a view of one.
+    ///
+    /// `Some` for a list a filter can narrow — All songs is the wall, and the
+    /// wall's query narrows it, so this is the library's own record count and
+    /// the denominator [`ImplicitList::counts`] needs to stay honest under a
+    /// query. `None` for a list whose extent is fixed by what it *is*: an
+    /// album's tracks are its tracks, and no query makes them fewer.
+    ///
+    /// The distinction is the reason this is an `Option` and not a number. A
+    /// list that is not a view of anything has no "of N" to print, and printing
+    /// one would invent a whole for it to be part of.
+    pub(crate) narrowed_from: Option<usize>,
 }
 
-impl AllSongs {
-    /// Resolve the list from the wall: `albums` in the active group key's
-    /// order, `visible` the filter's own index list, `chosen` the edition
+impl ImplicitList {
+    /// **All songs**, resolved from the wall: `albums` in the active group
+    /// key's order, `visible` the filter's own index list, `chosen` the edition
     /// picked per record.
     ///
     /// The same three inputs, in the same order, that decide what is on screen
     /// — and there is deliberately nowhere to put a fourth. A future `MOOD`
     /// group key, or a mood spelled as a query, arrives here as a different
     /// `albums`/`visible` pair and needs not one line of new code.
-    pub(crate) fn from_wall(
+    ///
+    /// Named for its origin rather than called `new`, because each origin has
+    /// its own inputs: an album's list would take an `AlbumVm` and a chosen
+    /// edition, and would be a sibling of this rather than a branch inside it.
+    pub(crate) fn all_songs(
         albums: &[AlbumVm],
         visible: &[usize],
         chosen: impl Fn(u64) -> Option<EditionKey>,
@@ -129,11 +219,18 @@ impl AllSongs {
             .take(QUOTED)
             .collect();
         Self {
+            origin: Origin::AllSongs,
             records: picks.len(),
             art,
             queue: stacked_queue(&picks),
-            held: albums.len(),
+            // The wall is a view of the library, and the query narrows it.
+            narrowed_from: Some(albums.len()),
         }
+    }
+
+    /// The list's name — its origin's.
+    pub(crate) const fn name(&self) -> &'static str {
+        self.origin.name()
     }
 
     /// Whether the list is empty — an empty library, or a query that matched
@@ -143,14 +240,15 @@ impl AllSongs {
         self.queue.is_empty()
     }
 
-    /// Whether the wall's filter is narrowing the list.
+    /// Whether a filter is narrowing the list below the set it is a view of.
     ///
     /// A comparison rather than a copy of the query, because what matters is
-    /// not *whether somebody typed* but whether the list on screen is the whole
-    /// library. A query that matches everything narrows nothing, and the
-    /// readout should not claim it did.
+    /// not *whether somebody typed* but whether the list is the whole of what
+    /// it is a view of. A query that matches everything narrows nothing, and
+    /// the readout should not claim it did. A list that is a view of nothing
+    /// larger ([`Self::narrowed_from`] `None`) is never narrowed.
     pub(crate) fn filtered(&self) -> bool {
-        self.records < self.held
+        self.narrowed_from.is_some_and(|whole| self.records < whole)
     }
 
     /// **The row's second line**: `1284 records · 9902 songs · 84:12:07` at
@@ -168,10 +266,9 @@ impl AllSongs {
     /// not print a figure it has not measured
     /// ([`crate::playlists::PanelRow::counts`]'s rule).
     pub(crate) fn counts(&self) -> String {
-        let head = if self.filtered() {
-            format!("{} of {} records", self.records, self.held)
-        } else {
-            format!("{} records", self.records)
+        let head = match self.narrowed_from.filter(|_| self.filtered()) {
+            Some(whole) => format!("{} of {whole} records", self.records),
+            None => format!("{} records", self.records),
         };
         let songs = format!("{head} · {} songs", self.queue.len());
         let time = self.queue.total_time();
@@ -241,11 +338,11 @@ mod tests {
             .collect()
     }
 
-    fn of(albums: &[AlbumVm], visible: &[usize]) -> AllSongs {
-        AllSongs::from_wall(albums, visible, |_| None)
+    fn of(albums: &[AlbumVm], visible: &[usize]) -> ImplicitList {
+        ImplicitList::all_songs(albums, visible, |_| None)
     }
 
-    fn all(albums: &[AlbumVm]) -> AllSongs {
+    fn all(albums: &[AlbumVm]) -> ImplicitList {
         let visible: Vec<usize> = (0..albums.len()).collect();
         of(albums, &visible)
     }
@@ -256,7 +353,7 @@ mod tests {
     #[test]
     fn the_list_is_the_wall_in_the_walls_own_order() {
         let albums = wall();
-        let titles = |list: &AllSongs| -> Vec<String> {
+        let titles = |list: &ImplicitList| -> Vec<String> {
             list.queue
                 .items
                 .iter()
@@ -380,6 +477,49 @@ mod tests {
         assert_eq!(of(&albums, &[]).queue.provenance, None);
     }
 
+    /// **Every origin answers "which file?" with `None`**, which is the
+    /// property the whole kind is built on: an implicit list has nothing for
+    /// the picker to append to and nothing for playing provenance to name.
+    ///
+    /// Swept over every variant rather than asserted about the one that exists,
+    /// so that adding an album's list or a draw's list to [`Origin`] without
+    /// answering this question fails here.
+    #[test]
+    #[expect(
+        clippy::single_element_loop,
+        reason = "the loop is the claim: it sweeps every Origin, and there is \
+                  one today. Unrolling it would make adding a variant silently \
+                  skip this assertion, which is the exact failure the sweep \
+                  exists to prevent"
+    )]
+    fn no_origin_has_a_file_behind_it() {
+        for origin in [Origin::AllSongs] {
+            assert_eq!(origin.file(), None, "{origin:?} claimed a file");
+            assert!(!origin.name().is_empty(), "{origin:?} has no name");
+        }
+        assert_eq!(Origin::AllSongs.name(), "All songs");
+    }
+
+    /// **`narrowed_from` is what makes the counts general.** A list that is a
+    /// view of something larger prints "of N"; one whose extent is fixed by
+    /// what it is has no whole to be part of, and must not invent one.
+    #[test]
+    fn a_list_that_is_a_view_of_nothing_larger_is_never_narrowed() {
+        let albums = wall();
+        // All songs is a view of the library, so it carries the denominator.
+        assert_eq!(all(&albums).narrowed_from, Some(6));
+
+        // The shape an album's own list would have: the same type, no whole
+        // behind it. Built by hand here because that origin is not built yet —
+        // what is asserted is that the *type* already answers correctly for it.
+        let fixed = ImplicitList {
+            narrowed_from: None,
+            ..of(&albums, &[0, 1])
+        };
+        assert!(!fixed.filtered(), "a fixed-extent list cannot be narrowed");
+        assert_eq!(fixed.counts(), "2 records · 4 songs · 6:40");
+    }
+
     /// **There is no file behind it, and no way to make one.** The picker's
     /// destinations are `PanelRow`s read out of the playlists folder; this type
     /// carries no id, no path and no `save`, which is what makes
@@ -391,20 +531,20 @@ mod tests {
     #[test]
     fn the_list_carries_nothing_that_could_be_written_to() {
         let source = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/all_songs.rs"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/implicit.rs"),
         )
         .expect("this module's own source")
         .replace("\r\n", "\n");
         let start = source
-            .find("pub(crate) struct AllSongs {")
+            .find("pub(crate) struct ImplicitList {")
             .expect("the type exists");
         let rest = &source[start..];
         let body = &rest[..rest.find("\n}\n").expect("the struct ends")];
         for forbidden in ["PathBuf", "path:", "id:", "fn save"] {
             assert!(
                 !body.contains(forbidden),
-                "`AllSongs` grew `{forbidden}` — an implicit list is playable and \
-                 viewable, never a destination (module docs, doc 09 §2)"
+                "`ImplicitList` grew `{forbidden}` — an implicit list is playable \
+                 and viewable, never a destination (module docs, doc 09 §2)"
             );
         }
         // And nothing in the module writes anything anywhere. Spelled in

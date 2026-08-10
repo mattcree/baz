@@ -147,11 +147,20 @@ needs no selection ceremony, because the scope is on screen.
 > **The wall's row got a name.** *"The play all thing also does not need to
 > exist. That should be existing as a kind of playlist that is implicit."* The
 > vocabulary was here and the type was not — `grep -rn "implicit playlist"
-> crates/` returned one comment. It is `crate::all_songs::AllSongs` now:
+> crates/` returned one comment. It is `crate::implicit::ImplicitList` now:
 > **All songs**, with a name, a counts line, a collage sleeve, and a row at the
 > head of the playlist panel. `Play all` is that list's own `Play` — one
 > concept where there were two — and this table's "Named?" column moves from
 > *no* to *yes* for it, which is the whole of what was built.
+>
+> **The type is this table's own column, made code.** On the owner's steer that
+> *"every album has a playlist implicitly… it should be basically which
+> playlist and which track"*, it is an `Origin` **kind** rather than one
+> bespoke thing, and what each variant carries is exactly this table's
+> *"Who wrote it"* and *"Named?"* columns resolved into an identity: a file for
+> a saved playlist, an album id for a record's own list, nothing durable for a
+> draw, a name alone for All songs. Only the All-songs variant is built; the
+> rest of this table is where the others come from when they are.
 >
 > Three things it deliberately is **not**. It is not a *file*: there is nothing
 > to append to, so the picker never offers `Add to "All songs"` — asserted in

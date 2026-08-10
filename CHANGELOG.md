@@ -884,9 +884,30 @@ next commit.
   §2 had listed *"the wall, in its arrangement"* among the implicit playlists
   since the study was written, but the vocabulary was design language and not a
   thing in the code — `grep -rn "implicit playlist" crates/` returned one
-  comment. It is `crate::all_songs::AllSongs` now: a name, a counts line, a
+  comment. It is `crate::implicit::ImplicitList` now: a name, a counts line, a
   collage sleeve, and a row at the head of the playlist panel, above the
   unnamed sounding list it is a sibling of.
+
+  **The type is the kind, not the instance**, on the owner's steer that *"the
+  basic model is that every album has a playlist implicitly… it should be
+  basically which playlist and which track"*. So it is an `Origin` with a
+  variant rather than a bespoke `AllSongs` struct, and each origin carries the
+  identity that kind actually has: a named playlist has a **file**, an album's
+  list would have an **album id**, a draw has **nothing durable**, and
+  All songs has only a **name**. Only the All-songs origin is built — the
+  others are recorded in `Origin`'s own docs with what each would carry, so
+  adding one is a variant and a constructor. The state-tracking half of that
+  model (what "recent plays" means when the ledger records one line per track
+  path and the engine is never told a run's origin) is separate design work
+  and is deliberately not decided here.
+
+  Two things fall out of building it as a kind. `Origin::file()` answers
+  `None` for every origin, and the panel *reads* that to decide the row cannot
+  be a pick destination — so a later origin inherits the refusal instead of
+  needing to be remembered about. And `narrowed_from` is an `Option`: All songs
+  is a view of the library and prints `7 of 25 records` under a query, where a
+  list whose extent is fixed by what it is (an album's tracks) has no whole to
+  be part of and must not invent one.
 
   **`Play all` is its `Play`** — one concept where there were two. The strip's
   word no longer builds a queue of its own; it resolves the list and plays it.
@@ -901,7 +922,7 @@ next commit.
   **It is playable and viewable, never a destination.** There is no file behind
   it, so the picker never offers `Add to "All songs"` — swept in `menu.rs` over
   every target and every reachable set of facts, and closed at its source in
-  `all_songs.rs`, which pins that the list's run carries no provenance (giving
+  `implicit.rs`, which pins that the list's run carries no provenance (giving
   the wall's run provenance is exactly what would put the name into a transfer
   verb).
 
