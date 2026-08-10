@@ -73,6 +73,20 @@ number was nearly believed. It was caught only because the claim *"the Library
 must not move"* was written down first and checked, so the harness had
 something to be surprised by. Both are now under private paths.
 
+**And a third thing, which is why these frames were shot twice.** A parallel
+branch's harness was leaking a `baz` and an `Xvfb` per run — `kill` on a
+`toolbox run` wrapper signals the wrapper, not the `podman exec`'d process
+inside the container — and by the time it was noticed, thirty-seven had
+accumulated and the machine had hit its thread limit: an app failed to start
+its audio and MPRIS threads with `EAGAIN`, and a library scan lost a race it
+normally wins. **These frames were taken inside that window.** They were
+therefore re-shot afterwards on a quiet machine and are **byte-identical to
+the committed ones, all eight**, with the same hairline numbers — so the
+evidence stands on its own re-verification rather than on the absence of a
+reason to doubt it. This harness does not leak (it runs *inside* the
+container, so its `kill` reaches the real process), but "my script is fine"
+was a claim worth checking rather than asserting.
+
 ## Reproducing
 
 ```sh
