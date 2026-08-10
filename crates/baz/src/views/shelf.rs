@@ -568,7 +568,12 @@ fn pinned_header(shelf: &Shelf, hang: Grid, run: Option<Run>, block: f32) -> Ele
 /// name is, and the two remain pixel-identical at rest — which is what makes
 /// pinning a position rather than a state (see [`pinned_header`]).
 ///
-/// Every other key's header is inert text, because a decade is not a place.
+/// Every other key's header is inert text, because a decade is not a place —
+/// and neither is a letter. **A–Z's headers stay inert** (ADR-0035's third
+/// amendment): `S` is a bucket of artists rather than one, so there is no
+/// single place for it to lead to. The two keys draw the same line of type and
+/// only one of them is a door, which is the difference between a header that
+/// names a subject and one that names a break.
 fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
     let room = theme::active();
     let header = shelf.groups.get(run.group).map(|group| &group.header);

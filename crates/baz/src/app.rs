@@ -548,11 +548,8 @@ pub(crate) enum Message {
     Scrolled(Viewport),
     /// Window resized (approximate grid geometry until the next scroll).
     WindowResized(Size),
-    /// A word in the top bar's group-key row, or `1`–`5`: arrange the wall by
+    /// A word in the top bar's group-key row, or `1`–`6`: arrange the wall by
     /// this key (ADR-0019). Persisted — a listener sets it once.
-    ///
-    /// It also puts the wall back on the **records** (ADR-0035): the five keys
-    /// are how records are arranged, so pressing one is asking for records.
     GroupKeySelected(baz_core::index::GroupKey),
     /// An entry in the index rail was clicked: put that shelf at the top of
     /// the wall. Carries the run's index, not a pixel — the rail knows which
@@ -4316,7 +4313,7 @@ pub(crate) struct Shelf {
     /// The open library: the search index the counts and the query run over.
     pub(crate) library: Library,
     /// How the wall is arranged (ADR-0019). Persisted in `config.toml`; the
-    /// top bar's row of words and `1`–`5` are the two ways to change it.
+    /// top bar's row of words and `1`–`6` are the two ways to change it.
     pub(crate) group_key: GroupKey,
     /// How closely the wall hangs (ADR-0017 step 6). Persisted in
     /// `config.toml`; <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd>
@@ -4956,7 +4953,7 @@ impl Shelf {
         Task::none()
     }
 
-    /// **Arrange the wall by `key`** — the top bar's row of words and `1`–`5`
+    /// **Arrange the wall by `key`** — the top bar's row of words and `1`–`6`
     /// both land here.
     ///
     /// Re-arranging is a *projection*, never a filter: every album is still
@@ -6625,9 +6622,10 @@ mod tests {
             ),
             (
                 "GroupKeySelected",
-                "the top bar's row of five words (ADR-0019); the first of \
-                 them, ARTIST, shelves the wall one artist at a time \
-                 (ADR-0035)",
+                "the top bar's row of six words (ADR-0019); the first two, \
+                 A–Z and ARTIST, are the same order broken into letter \
+                 shelves and into a shelf per artist (ADR-0035, as thrice \
+                 amended)",
             ),
             (
                 "SetVolume",

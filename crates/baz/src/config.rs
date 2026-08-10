@@ -620,6 +620,17 @@ mod tests {
             );
             assert_eq!(Config::from_toml(&text), config, "{key:?} did not survive");
         }
+
+        // **The restored `A–Z` is `"alphabet"`, and `"artist"` was not handed
+        // back to it** (ADR-0035's third amendment). That code has been
+        // repurposed once already — it meant *group by the artist's initial*
+        // before ADR-0035 and *group by the artist* after — so a `config.toml`
+        // on disk keeps the meaning it has had since, and the key that came
+        // back is spelled with a word no baz has ever written. Giving it
+        // `"artist"` would have made one code name three arrangements.
+        let read = |code: &str| Config::from_toml(&format!("group_key = \"{code}\"\n")).group_key;
+        assert_eq!(read("alphabet"), GroupKey::Alphabet);
+        assert_eq!(read("artist"), GroupKey::Artist);
     }
 
     /// **A `wall_subject` key from the release that had one is ignored, and

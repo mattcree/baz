@@ -1,11 +1,14 @@
 # ADR-0035: One word called artist — the key groups by artist, and the sixth word stops existing
 
-**Status**: accepted (2026-08-10) · **amends [ADR-0019](0019-group-keys.md) §2**
-(the first key breaks on the artist, not on their initial; §1's projection
-promise is untouched and is the reason this is a key at all) · builds on the
-Artist place from [ADR-0022](0022-places-and-nothing-else.md)'s line of work ·
-closes the costed proposal at `docs/BACKLOG.md` · the frames are
-[`docs/design/impl/artists-grouped/`](../design/impl/artists-grouped/)
+**Status**: accepted (2026-08-10), **amended three times the same day** ·
+**amends [ADR-0019](0019-group-keys.md) §2** (the first key breaks on the
+artist, not on their initial; §1's projection promise is untouched and is the
+reason this is a key at all) · builds on the Artist place from
+[ADR-0022](0022-places-and-nothing-else.md)'s line of work · closes the costed
+proposal at `docs/BACKLOG.md` · the frames are
+[`docs/design/impl/artists-grouped/`](../design/impl/artists-grouped/) and, for
+the third amendment,
+[`docs/design/impl/az-and-artist/`](../design/impl/az-and-artist/)
 
 > **This ADR was accepted twice on one day.** The first form is described
 > under *What was deleted* below and its frames are kept at
@@ -16,6 +19,12 @@ closes the costed proposal at `docs/BACKLOG.md` · the frames are
 > correction. The inventory at the end is there because the first form is on
 > `main`'s history and a reader who finds it deserves to know what happened to
 > it — and because what a change *removes* is the part of it worth recording.
+>
+> **And amended a third time the same evening**, which is the last section of
+> this document: §3 below deleted `A–Z`, and the owner has put it back. §3 is
+> kept as written rather than edited, because the reasoning in it is exactly
+> what the amendment overrules and a reader deserves to see the thing that was
+> overruled.
 
 ## Context
 
@@ -277,3 +286,75 @@ for the word twice over, and then the word left too.
   `docs/BACKLOG.md` still says why: opening is not touching, and admitting one
   would mean a third store — *places I visited* — which `place.rs` refuses by
   name.
+
+---
+
+## Third amendment (2026-08-10): `A–Z` comes back, first in the row
+
+The owner, having looked at the product §3 shipped:
+
+> *"also, we have removed the a-z option from grouping? that feels like it
+> should go back and honestly it's the first option, followed by artist"*
+
+**`A–Z` is a group key again, and it is the first word in the row: `A–Z ·
+ARTIST · YEAR · GENRE · ADDED · PLAYED`.** §3 is not wrong about the
+arithmetic — the two keys are the same traversal, and `ARTIST` names the finer
+breaks of the order `A–Z` names coarsely — but it drew the wrong conclusion
+from it, which is that one of them is therefore redundant. A wall broken into
+27 letter shelves and a wall broken into one shelf per artist are two
+**densities** of one order, they look and scroll nothing like each other at the
+sizes a real library reaches, and the owner uses them differently. That is the
+decision; it is his, and it stands.
+
+### The code is `"alphabet"`, and `"artist"` is not given back
+
+`GroupKey::code` is on-disk config and the type's own doc says a code is never
+repurposed — so the restored key gets a **new** code, `"alphabet"`, which no
+baz has ever written. Handing it `"artist"` back would make one word name the
+initial grouping, then the artist grouping, then the initial grouping again.
+Which is worth stating plainly, because **`"artist"` was already repurposed
+once, silently**: it meant *group by the album artist's initial* in every
+release up to §1 of this ADR and *group by the album artist* after it, so a
+`config.toml` written before that day now names a different arrangement than it
+did when it was written. Nothing failed and nobody was told. That is the
+failure the never-repurpose rule exists to prevent, it is now recorded on
+`GroupKey::code` itself, and it is the whole reason this amendment spends a new
+word rather than reclaiming an old one.
+
+### The rail, and what did not change
+
+The rail is one function over both keys and gained no branch to be one: it
+takes the first shelf of each initial's run, which is a letter per artist-run
+under `ARTIST` and the identity under `A–Z`. `Initial` is unchanged again —
+it is now both a header and a rail letter, one mapping asked of `baz-core` in
+both places. `A–Z`'s headers stay inert text, because a letter is not a place;
+`ARTIST`'s header is still the door to `Place::Artist`. The min-spelling rule
+(§1), the projection sweep — which `A–Z` satisfies as it always did — and the
+art prefetch on the wall's own range guard are all untouched.
+
+### The strip's budget, re-derived
+
+**Measured, not reused.** The row has been six words before, and the sixth was
+`ARTISTS` at 77.49 px in its box with its gap. This one is `A–Z` at **44.92**,
+so every figure below is smaller than the earlier costing's:
+
+| | five words | six with `ARTISTS` | **six with `A–Z`** |
+|---|---:|---:|---:|
+| the row, measured | 312.99 | 366.50 | **357.91** |
+| `KEYS_W` | 314 | 368 | **360** |
+| `LIBRARY_LINE` | 506 | 560 | **552** |
+| `SINGLE_LINE` = `TOP_BAR_SPLIT` | 778 | 832 | **824** |
+| `SINGLE_LINE_NO_WELL` | 554 | 608 | **600** |
+| `WIDEST_LANE_STRIP` | 720 | 720 | 720 (unmoved) |
+| `TOP_BAR_FLOOR`, and the window's own minimum | 600 / 696 | 600 / 696 | 600 / 696 (**unmoved**) |
+
+`ACTS_FREED` is still 94 — what `Pull`'s removal and shuffle's move to the
+now-playing bar gave back — and `KEYS_SPENT` is now **46** of it, leaving 48 px
+under the floor. **The window's minimum did not have to move**, which was the
+thing to confirm rather than assume: the library line is 552 against a floor of
+600, so the strip holds its tenants at the smallest window baz offers, and the
+single-line-with-well band survives at **824…904**. Both halves are asserted as
+differences of the movements that produced them in
+`the_strip_holds_its_tenants_at_the_single_line_floor`, so neither can be right
+by coincidence. A seventh word is argued against that 48, with two measured
+prices — 46 and 54 — on record to estimate from.

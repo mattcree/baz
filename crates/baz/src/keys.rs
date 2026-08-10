@@ -283,14 +283,16 @@
 //! dozens of times a session. Turning shuffle on is a standing decision made
 //! once, from a control that is on screen in every place (`crate::views::bottom_bar`).
 //!
-//! # The arrangement — `1` … `5`
+//! # The arrangement — `1` … `6`
 //!
-//! The five group keys (ADR-0019) select from the number row: `1` ARTIST,
-//! `2` YEAR, `3` GENRE, `4` ADDED, `5` PLAYED, in the order the top bar's row
-//! of words states them and the order
+//! The six group keys (ADR-0019) select from the number row: `1` A–Z,
+//! `2` ARTIST, `3` YEAR, `4` GENRE, `5` ADDED, `6` PLAYED, in the order the
+//! top bar's row of words states them and the order
 //! [`GroupKey::ALL`](baz_core::index::GroupKey::ALL) publishes them. The
 //! mapping is [`group_key`], which reads that array rather than repeating it,
-//! so the digits, the words and the library's own order cannot drift apart.
+//! so the digits, the words and the library's own order cannot drift apart —
+//! and it is why restoring `A–Z` at the head of the row moved every other
+//! key's digit without an edit here.
 //!
 //! **Digits, deliberately — and they are the one place bare characters are not
 //! query.** ADR-0017 §1.2 states the trade out loud: *digits are not letters,
@@ -298,15 +300,15 @@
 //! (step 11) took every letter and every punctuation mark for the query; the
 //! number row is what survived, and this is where it is spent. The ADR's table
 //! pencils `1` and `2` in for the Wall / Marquee lenses, which are step 18 and
-//! not built; the five group keys are built, they are five and not two, and a
+//! not built; the six group keys are built, they are six and not two, and a
 //! row of words in the top bar already names them.
 //!
-//! `6` was the sixth word's accelerator for one release (ADR-0035's `ARTISTS`)
-//! and is unbound again: the sixth word became the first key's own grouping,
-//! so there is no sixth statement for a sixth digit to make.
+//! `6` has been bound before, to ADR-0035's `ARTISTS` — a word that was not a
+//! key. It is a key now, `PLAYED`, and it binds for the ordinary reason every
+//! other digit does.
 //!
-//! **The whole row is out of the query, not just the five keys that bind.**
-//! `0` and `6`–`9` do nothing rather than typing themselves, because a row in
+//! **The whole row is out of the query, not just the six keys that bind.**
+//! `0` and `7`–`9` do nothing rather than typing themselves, because a row in
 //! which `1` arranges the wall and `7` types a `7` is two rules wearing one
 //! shape. The cost is stated rather than discovered: from a cold wall you
 //! cannot type `1999`. You press `/` first — which is what `/` is for — and
@@ -434,9 +436,9 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
         // edit history, the chord falls dead.
         Key::Character("z" | "Z") if command => Some(Message::Undo),
 
-        // Arrangement. `1`–`5` are the five group keys, in the order the top
+        // Arrangement. `1`–`6` are the six group keys, in the order the top
         // bar's row of words states them (module docs).
-        Key::Character(digit @ ("1" | "2" | "3" | "4" | "5")) if bare => {
+        Key::Character(digit @ ("1" | "2" | "3" | "4" | "5" | "6")) if bare => {
             Some(Message::GroupKeySelected(group_key(digit)?))
         }
         // Search. `/` is the reflex from every pager and browser; Ctrl+F
@@ -480,13 +482,13 @@ pub(crate) fn binding_for(key: &Key, modifiers: Modifiers, focus: Focus) -> Opti
 }
 
 /// The group key a digit names: `1` is the first word in
-/// [`GroupKey::ALL`](baz_core::index::GroupKey::ALL) and `5` is the last.
+/// [`GroupKey::ALL`](baz_core::index::GroupKey::ALL) and `6` is the last.
 ///
 /// Derived from the enum's own order rather than written out, so the row of
 /// words in the top bar, the digits that select them and the order
-/// `baz-core` publishes are one list. A sixth *key* (CRATES, MOOD) becomes
-/// `7` here with no edit at all — `6` is the arrangement row's sixth word, the
-/// wall's subject, which is not a key and is bound in the table above.
+/// `baz-core` publishes are one list. A seventh key (CRATES, MOOD) becomes
+/// `7` here with one character's edit in the table above and none at all in
+/// this function.
 fn group_key(digit: &str) -> Option<baz_core::index::GroupKey> {
     let index = digit.parse::<usize>().ok()?.checked_sub(1)?;
     baz_core::index::GroupKey::ALL.get(index).copied()
@@ -895,11 +897,12 @@ mod tests {
         assert_eq!(bind(&ch("f"), none()).as_deref(), Some("QueryTyped(\"f\")"));
     }
 
-    /// **`1`–`5` are the five group keys, in `baz-core`'s own order**, and the
-    /// mapping is that order rather than a copy of it; `6` is the sixth word
-    /// in the same row, which is the wall's subject rather than a key.
+    /// **`1`–`6` are the six group keys, in `baz-core`'s own order**, and the
+    /// mapping is that order rather than a copy of it — which is why `A–Z`
+    /// taking the head of the row moved every other key's digit by one with no
+    /// list to keep in step.
     #[test]
-    fn the_number_row_selects_the_five_arrangements() {
+    fn the_number_row_selects_the_six_arrangements() {
         use baz_core::index::GroupKey;
 
         for (index, key) in GroupKey::ALL.iter().enumerate() {
@@ -914,16 +917,17 @@ mod tests {
         // failure rather than a silently different wall.
         assert_eq!(
             bind(&ch("1"), none()).as_deref(),
+            Some("GroupKeySelected(Alphabet)")
+        );
+        assert_eq!(
+            bind(&ch("2"), none()).as_deref(),
             Some("GroupKeySelected(Artist)")
         );
         assert_eq!(
-            bind(&ch("5"), none()).as_deref(),
+            bind(&ch("6"), none()).as_deref(),
             Some("GroupKeySelected(Played)")
         );
-        // **And there is no sixth word and no zeroth one.** `6` sent the
-        // strip's `ARTISTS` for one release; that word became the first key's
-        // own grouping (ADR-0035), so the digit is silent again.
-        assert_eq!(bind(&ch("6"), none()), None);
+        // **And there is no seventh word and no zeroth one.**
         assert_eq!(bind(&ch("7"), none()), None);
         assert_eq!(bind(&ch("0"), none()), None);
         // A modifier is not the binding, and a focused well types the digit.
@@ -1029,10 +1033,10 @@ mod tests {
     fn space_the_digits_and_the_slash_are_not_query() {
         assert_eq!(bind(&ch(" "), none()).as_deref(), Some("PlayPause"));
         assert_eq!(bind(&ch("/"), none()).as_deref(), Some("FocusSearch"));
-        // The number row is spent as a row: the five that bind state the
-        // wall's arrangement, and the five that do not are silent, so `1` and
+        // The number row is spent as a row: the six that bind state the
+        // wall's arrangement, and the four that do not are silent, so `1` and
         // `7` are one rule rather than two.
-        for digit in ["1", "2", "3", "4", "5"] {
+        for digit in ["1", "2", "3", "4", "5", "6"] {
             assert!(
                 bind(&ch(digit), none())
                     .as_deref()
@@ -1040,7 +1044,7 @@ mod tests {
                 "{digit} should arrange the wall"
             );
         }
-        for digit in ["0", "6", "7", "8", "9"] {
+        for digit in ["0", "7", "8", "9"] {
             assert_eq!(bind(&ch(digit), none()), None, "{digit} must not be query");
         }
         // The predicate itself, stated once rather than inferred from the
@@ -1223,9 +1227,8 @@ mod tests {
             named(key::Named::End),
             named(key::Named::PageUp),
             named(key::Named::F1),
-            // `1`–`5` are the five group keys and `6` is the wall's subject;
-            // the rest of the row is silent, because the row is spent as a row
-            // (module docs).
+            // `1`–`6` are the six group keys; the rest of the row is silent,
+            // because the row is spent as a row (module docs).
             ch("7"),
             ch("0"),
         ];

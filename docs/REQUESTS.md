@@ -45,6 +45,7 @@ Newest first. Each was asked for in conversation and is now in the product.
 
 | Ask | Landed as |
 |---|---|
+| *"also, we have removed the a-z option from grouping? that feels like it should go back and honestly it's the first option, followed by artist"* | `A–Z` is a group key again and first in the row — `A–Z · ARTIST · YEAR · GENRE · ADDED · PLAYED`, <kbd>1</kbd>…<kbd>6</kbd>. It gets a **new** code, `"alphabet"`, because `"artist"` has been repurposed once already (ADR-0035's third amendment). `KEYS_W` 314 → 360; the window's minimum did not move |
 | *"artists should be grouping stuff by artist not just alphabetically"* | `ARTIST` groups albums under their artist; `A–Z`, `WallSubject` and 700 lines went with it |
 | *"artists should be grouping stuff by artist not just alphabetically"* | `ARTIST` shelves one artist per shelf, the header a door to their place; `A–Z` and the `ARTISTS` word both gone (ADR-0035) |
 | The `ARTIST` group key and the `Artist` place are both called artist | the key groups by artist now, so the word is true and the two are one thing (ADR-0035) |

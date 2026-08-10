@@ -49,7 +49,7 @@ modifier: the letters belong to the query now.
 | <kbd>↑</kbd> <kbd>↓</kbd> | volume up / down, one step (~1 dB at the top of the fader) |
 | <kbd>Ctrl</kbd>+<kbd>M</kbd> | mute / unmute |
 | <kbd>Ctrl</kbd>+<kbd>-</kbd> <kbd>Ctrl</kbd>+<kbd>=</kbd>, or <kbd>Ctrl</kbd>+scroll | hang the wall closer or wider — **spacious**, **balanced**, **dense** |
-| <kbd>1</kbd> … <kbd>5</kbd> | arrange the wall by **artist**, **year**, **genre**, **added** or **played** — the same five words in the top bar. Under **artist** every shelf is one person, and pressing their name opens their page |
+| <kbd>1</kbd> … <kbd>6</kbd> | arrange the wall by **A–Z**, **artist**, **year**, **genre**, **added** or **played** — the same six words in the top bar. **A–Z** breaks the wall into letter shelves; **artist** breaks the same order finer, one shelf per person, and pressing their name opens their page |
 | <kbd>/</kbd>, or <kbd>Ctrl</kbd>+<kbd>F</kbd> | put the caret in the search field without typing anything |
 | <kbd>Ctrl</kbd>+<kbd>U</kbd> | go to **Now playing** with the run beside it — what is playing, and what is **up next**, on one surface |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | go to the settings, or come back |
@@ -65,9 +65,9 @@ over MPRIS rather than as key presses, which is the same thing by a different
 road. The *volume* media keys are deliberately left alone: on every desktop
 they mean the system's volume, and baz's fader is baz's own.
 
-**The number row is the one place a bare key is not the query.** `1`–`5` pick
+**The number row is the one place a bare key is not the query.** `1`–`6` pick
 the arrangement and the rest of the row does nothing, because a row where `1`
-rearranges the wall and `6` types a `6` would be two rules wearing one shape.
+rearranges the wall and `7` types a `7` would be two rules wearing one shape.
 The cost, stated rather than discovered: you cannot start a search with a digit
 from the wall. Press <kbd>/</kbd> first and every digit types, including the
 first.

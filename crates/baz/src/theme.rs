@@ -1001,8 +1001,8 @@ pub const SHELF_HEADER_H: f32 = HANG;
 /// **60, where ADR-0017 §1.7 first said 36** — an amendment recorded on that
 /// ADR, and it is a correction rather than a preference. At 36 the lane clipped
 /// `Unknown`, every recency bucket (`This month`, `This year`, `Earlier`) and
-/// most genre names: it held the letters of the ARTIST key and failed for three
-/// of the five keys the wall can be arranged by, which is a rail that only
+/// most genre names: it held the letters of the alphabet keys and failed for
+/// three of the keys the wall can be arranged by, which is a rail that only
 /// works in one arrangement. 60 holds every label the keys can *produce* except
 /// arbitrary genre names — and those still elide, with the full value set in the
 /// shelf header one gutter to the left, in the same voice, at the same moment.
@@ -1967,7 +1967,7 @@ pub const TOP_BAR_PAD_V: f32 = GAP_SM;
 pub const TOP_BAR_H: f32 = 2.0 * TOP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
 
 /// **Strip width** below which the Library strip splits into its two lines
-/// (logical px) — **832**, an exact sum rather than a rounded one.
+/// (logical px) — **824**, an exact sum rather than a rounded one.
 ///
 /// It was 960: the tenants summed to 958 with the well at its 200 px floor and
 /// the seam was declared on the next lattice step up. Three of those tenants
@@ -1980,23 +1980,26 @@ pub const TOP_BAR_H: f32 = 2.0 * TOP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
 /// 778. A split declared where the line still fits would put the strip on two
 /// rows for controls it no longer draws.
 ///
-/// The row of words was **six** for one release: `ARTISTS` joined it and the
-/// first key's word shrank from `ARTIST` to `A–Z`, taking
-/// [`crate::views::top_bar::KEYS_W`] from 314 to 368 and this seam from 778 to
-/// 832. The sixth word then became the first key's own grouping (ADR-0035) and
-/// both movements reversed, so the seam is **778** again. The seam follows the
-/// tenants **up** as readily as it follows them down, which is the property
-/// that makes it arithmetic rather than a judgement.
+/// The row of words has been **six** twice, and cost a different number each
+/// time — which is why it is measured each time. `ARTISTS` joined it beside a
+/// first key relabelled `A–Z`, taking [`crate::views::top_bar::KEYS_W`] from
+/// 314 to 368 and this seam to 832; the sixth word then became the first key's
+/// own grouping (ADR-0035) and both movements reversed, back to 778. The row
+/// is six again now that **`A–Z` is a key of its own, first in the row**
+/// (ADR-0035's third amendment) — but `A–Z` is a shorter word than `ARTISTS`,
+/// so `KEYS_W` is 360 rather than 368 and the seam is **824** rather than 832.
+/// The seam follows the tenants **up** as readily as it follows them down,
+/// which is the property that makes it arithmetic rather than a judgement.
 ///
 /// **The well left too** (ADR-0030's search amendment), but it left only where
 /// the lane can hold it, which is exactly the widths at which this seam cannot
 /// be reached: see [`strip_holds_the_well`]. So the split's own arithmetic
-/// still counts the well, and 778 is the sum with it in.
+/// still counts the well, and 824 is the sum with it in.
 ///
 /// The number this is compared against is the **strip's** width — the window
 /// less the returns lane — never the window's. See [`top_bar_h`], which is the
 /// one place that resolution happens.
-pub const TOP_BAR_SPLIT: f32 = 778.0;
+pub const TOP_BAR_SPLIT: f32 = 824.0;
 
 /// The strip's floor, and the window's sensible minimum (logical px) —
 /// **600**, from the two-line regime's own arithmetic (doc 10 §4.3): the
@@ -2004,13 +2007,14 @@ pub const TOP_BAR_SPLIT: f32 = 778.0;
 /// collapses — there is no third regime, and a proposal that needs one has
 /// outgrown the strip (doc 10 §8).
 ///
-/// **It no longer sits exactly on that sum, and it does not follow it down.**
-/// Both draw words left the acts cluster on 2026-08-10 and the library line
-/// came to 506; the arrangement row's sixth word (ADR-0035) then took it to
-/// **560**. The floor stays at 600 because it is *also* the window's sensible
+/// **It no longer sits exactly on that sum, and it does not follow it.** Both
+/// draw words left the acts cluster on 2026-08-10 and the library line came to
+/// 506; the arrangement row's sixth word took it to 560, then back to 506, and
+/// `A–Z` (ADR-0035's third amendment) now puts it at **552**. The floor stays
+/// at 600 through all of it because it is *also* the window's sensible
 /// minimum, and a window minimum that moved every time a word joined or left a
 /// strip would be a promise about the smallest usable baz that was really a
-/// statement about the strip's current population. The slack — 40 px, and it
+/// statement about the strip's current population. The slack — 48 px, and it
 /// is the first thing to read if a seventh word is ever proposed — is recorded
 /// in `the_strip_holds_its_tenants_at_the_single_line_floor`, which asserts the
 /// line fits under the floor rather than meeting it.
@@ -2764,8 +2768,8 @@ pub fn word_button(p: &Palette, on: Color, status: button::Status) -> button::St
     }
 }
 
-/// **A group key**: one of the five words the wall is arranged by — ARTIST ·
-/// YEAR · GENRE · ADDED · PLAYED (ADR-0017 §1.3, ADR-0019).
+/// **A group key**: one of the six words the wall is arranged by — A–Z ·
+/// ARTIST · YEAR · GENRE · ADDED · PLAYED (ADR-0017 §1.3, ADR-0019).
 ///
 /// the product's standing rules refuses view-options menus outright: *no grid-size
 /// picker, no list-mode toggle, no column chooser, no sort dropdown. Group
@@ -2782,8 +2786,8 @@ pub fn word_button(p: &Palette, on: Color, status: button::Status) -> button::St
 /// | active | [`Palette::paper`] | [`MEDIUM`] |
 /// | at rest | [`Palette::paper_faint`] | [`SANS`] |
 ///
-/// One size for all five, one caps treatment for all five, one tracked
-/// spelling for all five — the row is a single line of type in which one word
+/// One size for all six, one caps treatment for all six, one tracked
+/// spelling for all six — the row is a single line of type in which one word
 /// is lit. The ink step is `#E8E4DB` against `#888680`, which is 2.6 × the
 /// luminance; the weight step is a real drawn face rather than a synthesised
 /// one. Neither is colour, so *no state is signalled by colour alone* holds
@@ -7284,15 +7288,14 @@ mod tests {
         /// (144 → 88).
         const ACTS_FREED: f32 = 182.0 - top_bar::ACTS_W;
         /// What the arrangement row has spent, as the rise in that cluster's
-        /// declared width — **nothing, and that is the claim** (ADR-0035).
+        /// declared width — **46 px, for `A–Z` back in the row and first in it**
+        /// (ADR-0035's third amendment).
         ///
-        /// It was 54 for the release in which the row carried a sixth word,
-        /// `ARTISTS`, beside a first key relabelled `A–Z`. The sixth word
-        /// became the first key's own grouping, so the row is five words again
-        /// and the 54 px came back. Stated as a difference from the historical
-        /// 314 rather than deleted, because what a *word* costs the strip is
-        /// the number a seventh one would be argued against, and a constant
-        /// that is zero says the row is where it started.
+        /// Stated as a difference from the five-word 314 rather than as a
+        /// literal, because what a *word* costs the strip is the number the
+        /// next one is argued against. It was 54 the last time the row was six,
+        /// when the sixth word was `ARTISTS`; a word's price is the word's, so
+        /// this one is measured (`font.rs`) rather than inherited.
         const KEYS_SPENT: f32 = top_bar::KEYS_W - 314.0;
         /// The window a strip at its floor now needs, with the lane's rail
         /// always beside it.
@@ -7345,38 +7348,47 @@ mod tests {
         // from 182 to 88 and this seam to 778; then the arrangement row gained
         // a sixth word, spending 54 of that back and taking the seam to 832;
         // then that word became the first key's own grouping (ADR-0035) and
-        // gave all 54 back, returning the seam to **778**. The seam follows
-        // the tenants in **both**
-        // directions, because a split declared where the line still fits would
-        // put the strip on two rows for controls it no longer draws, and one
-        // declared where the line no longer fits would let a word run off the
-        // window's edge.
+        // gave all 54 back, returning the seam to 778; and now the row is six
+        // again with `A–Z` restored as a key of its own, first in it, which
+        // costs 46 of the 94 and puts the seam at **824**. The seam follows
+        // the tenants in **both** directions, because a split declared where
+        // the line still fits would put the strip on two rows for controls it
+        // no longer draws, and one declared where the line no longer fits
+        // would let a word run off the window's edge.
         const { assert!(FREED == 88.0) }
         const { assert!(ACTS_FREED == 94.0) }
-        const { assert!(KEYS_SPENT == 0.0) }
-        const { assert!(SINGLE_LINE == 778.0) }
+        const { assert!(KEYS_SPENT == 46.0) }
+        const { assert!(SINGLE_LINE == 824.0) }
         const { assert!(SINGLE_LINE + FREED + ACTS_FREED - KEYS_SPENT == 960.0) }
         const { assert!(SINGLE_LINE == TOP_BAR_SPLIT) }
+        // **And the two six-word rows are not the same six-word row.** The
+        // earlier costing measured 368 for a sixth word that was `ARTISTS`;
+        // this one is `A–Z`, 8 px cheaper in its declaration and the reason
+        // every figure below is re-derived rather than read off that table.
+        const { assert!(KEYS_SPENT < 54.0) }
 
         // **The two-line split still earns its keep, and no removal bought it
         // away.** The frame line is what the door and the well stood on, so
         // those removals made *that* line cheaper — but the split exists for
         // the **library** line, and both draw words were on it. The line now
-        // comes to 506 against a floor of 600, so it fits **under** the floor
-        // with 94 px to spare rather than meeting it exactly; the floor does
+        // comes to 552 against a floor of 600, so it fits **under** the floor
+        // with 48 px to spare rather than meeting it exactly; the floor does
         // not follow, because it is also the window's sensible minimum (see
-        // [`TOP_BAR_FLOOR`]). Between 600 and 778 there is still no single line
+        // [`TOP_BAR_FLOOR`]). Between 600 and 824 there is still no single line
         // that fits and a two-line pair that does, which is the band the split
         // serves.
         //
-        // **94 px is the headroom a sixth word would come out of**, and it is
-        // stated as the difference of the two movements rather than as a
-        // number, so it cannot be right by coincidence: the acts cluster gave
-        // 94 back and the arrangement row has spent none of it. A sixth word
-        // cost 54 of that 94 for one release, which is the measured price of
-        // the next one.
-        const { assert!(LIBRARY_LINE == 506.0) }
+        // **The 94 px the acts cluster freed is what the sixth word came out
+        // of**, and both halves are stated as differences of the movements
+        // that produced them rather than as numbers, so neither can be right by
+        // coincidence: the acts gave 94 back, the arrangement row has spent 46
+        // of it on `A–Z`, and 48 is what is left under the floor. A seventh
+        // word is argued against that 48, and the two prices already on record
+        // — 46 for `A–Z`, 54 for `ARTISTS` — are what it would be estimated
+        // from.
+        const { assert!(LIBRARY_LINE == 552.0) }
         const { assert!(TOP_BAR_FLOOR - LIBRARY_LINE == ACTS_FREED - KEYS_SPENT) }
+        const { assert!(ACTS_FREED - KEYS_SPENT == 48.0) }
         const { assert!(LIBRARY_LINE < TOP_BAR_FLOOR) }
         const { assert!(TOP_BAR_FLOOR < SINGLE_LINE) }
         // The strip's width is the *body's* — the window less the returns
@@ -7393,13 +7405,16 @@ mod tests {
         // at every width above `SIDEBAR_FLOOR`, in either lane state, and
         // `top_bar_h`'s `strip_holds_the_well` branch is a fact rather than a
         // hope. It was 648 before the two draw words left and 554 after; a
-        // sixth word put 54 of that back for one release and ADR-0035 took it
-        // out again, leaving 166 px of headroom against the narrowest strip
-        // the regime can be handed.
-        const { assert!(SINGLE_LINE_NO_WELL == 554.0) }
+        // sixth word put 54 of that back for one release, ADR-0035 took it out
+        // again, and `A–Z` now puts 46 back — **600**, with 120 px of headroom
+        // against the narrowest strip the regime can be handed. That it lands
+        // on `TOP_BAR_FLOOR`'s own figure is a coincidence of two independent
+        // sums and is asserted as an inequality against 720, which is the
+        // claim that matters.
+        const { assert!(SINGLE_LINE_NO_WELL == 600.0) }
         const { assert!(WIDEST_LANE_STRIP == 720.0) }
         const { assert!(SINGLE_LINE_NO_WELL < WIDEST_LANE_STRIP) }
-        const { assert!(WIDEST_LANE_STRIP - SINGLE_LINE_NO_WELL == 166.0) }
+        const { assert!(WIDEST_LANE_STRIP - SINGLE_LINE_NO_WELL == 120.0) }
         // The rail is wider still, so the collapsed lane cannot reach it either.
         const { assert!(SIDEBAR_FLOOR - SIDEBAR_RAIL_W > WIDEST_LANE_STRIP) }
 
@@ -7411,10 +7426,13 @@ mod tests {
         // all (`SIDEBAR_FLOOR − SIDEBAR_RAIL_W` = 904), which would have
         // deleted the band outright and made the strip two lines at every
         // width below the lane's floor. `Pull` and `Shuffle` left in between
-        // and paid for the word twice over; then the word itself went
-        // (ADR-0035). The seam is 778 and the band is 778…904.
+        // and paid for the word twice over. The row is six words again and the
+        // band is still there: the seam is 824 and the band is **824…904**,
+        // 80 px wide. That is the narrowest it has been since the two draw
+        // words left, and it is the figure a seventh word would close.
         const { assert!(WIDEST_STRIP_WITH_WELL == 904.0) }
         const { assert!(SINGLE_LINE < WIDEST_STRIP_WITH_WELL) }
+        const { assert!(WIDEST_STRIP_WITH_WELL - SINGLE_LINE == 80.0) }
 
         // The two-line band is the single-line band's own lead three times
         // around two control rows — 8+32+8+32+8, plus the hairline: 89

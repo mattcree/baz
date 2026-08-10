@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use baz_core::history::{History, Recency};
-use baz_core::index::{Album, AlbumArtist, Edition, GroupHeader, GroupKey, Library};
+use baz_core::index::{Album, AlbumArtist, Edition, GroupHeader, GroupKey, Initial, Library};
 use baz_core::library::{AudioFormat, TrackMeta};
 
 /// What the shelf calls an album whose artist is not known at all.
@@ -441,6 +441,9 @@ pub fn song_row(album: &AlbumVm, chosen: Option<EditionKey>, song: &SongVm) -> O
 /// shelves that exist and nothing else.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GroupHeaderVm {
+    /// [`GroupKey::Alphabet`] — the album artist's initial, or one of the two
+    /// anonymous buckets ([`baz_core::index::Initial`]).
+    Initial(Initial),
     /// [`GroupKey::Artist`] — the artist whose records the shelf holds, in the
     /// spelling that sorts first among them (see
     /// [`baz_core::index::GroupHeader::Artist`]).
@@ -456,6 +459,7 @@ pub enum GroupHeaderVm {
 impl GroupHeaderVm {
     fn from_core(header: &GroupHeader<'_>) -> Self {
         match header {
+            GroupHeader::Initial(initial) => Self::Initial(*initial),
             GroupHeader::Artist(artist) => Self::Artist(AlbumArtistVm::from_core(*artist)),
             GroupHeader::Decade(decade) => Self::Decade(*decade),
             GroupHeader::Genre(genre) => Self::Genre(genre.map(str::to_owned)),
@@ -482,6 +486,12 @@ impl GroupHeaderVm {
             // beside tile captions and an artist page that already say them
             // that way, and one artist must not be named twice on one screen.
             Self::Artist(artist) => artist.label().to_owned(),
+            // The letter shelves keep `baz-core`'s bare `Unknown` and
+            // `Various` at the two ends: they are the *bucket*'s names — the
+            // records with no artist, the compilations with none — rather than
+            // one artist being named, so the reason the ARTIST arm reaches for
+            // the front end's longer words does not apply.
+            Self::Initial(initial) => initial.label(),
             Self::Decade(Some(decade)) => format!("{decade}s"),
             Self::Decade(None) => "No year".to_owned(),
             Self::Genre(Some(genre)) => genre.clone(),
@@ -1622,7 +1632,7 @@ mod tests {
         }
     }
 
-    /// The headers each key draws, on one library — the five arrangements, in
+    /// The headers each key draws, on one library — the six arrangements, in
     /// the order the wall lays them out.
     #[test]
     fn each_key_draws_its_own_headers() {
@@ -1633,6 +1643,22 @@ mod tests {
                 .map(|shelf| shelf.header.label())
                 .collect::<Vec<_>>()
         };
+        // A–Z: the letters, one shelf each — five shelves for six records,
+        // because the two B's share one.
+        assert_eq!(labels(GroupKey::Alphabet), ["#", "A", "B", "T", "Ó"]);
+        // ARTIST: the same records, one shelf per person — the coarser and the
+        // finer break of one order, side by side (ADR-0035's third amendment).
+        assert_eq!(
+            labels(GroupKey::Artist),
+            [
+                "10cc",
+                "Aphex Twin",
+                "Bark Psychosis",
+                "Boards of Canada",
+                "Talk Talk",
+                "Ólafur Arnalds"
+            ]
+        );
         // Undated at the front, then decades, oldest first.
         assert_eq!(
             labels(GroupKey::Year),

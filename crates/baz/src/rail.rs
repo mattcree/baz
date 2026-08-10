@@ -29,7 +29,7 @@
 //!
 //! | Key | Universe | Why |
 //! |---|---|---|
-//! | ARTIST | `#` and `A`–`Z`, always | The alphabet exists whether or not the collection uses it. Non-Latin initials ([`Initial::Letter`] is not ASCII-only) join it where they sort. The key's *headers* are the artists themselves, one shelf each; the rail indexes their initials, because a letter is what a reader can aim at. |
+//! | A–Z / ARTIST | `#` and `A`–`Z`, always | The alphabet exists whether or not the collection uses it. Non-Latin initials ([`Initial::Letter`] is not ASCII-only) join it where they sort. A–Z's *headers* are those letters; ARTIST's are the artists themselves, one shelf each, and the rail indexes their initials — the same rail either way, because a letter is what a reader can aim at. |
 //! | YEAR | Every decade from the earliest to the latest present | A run of decades with a hole in it is a fact about the collection. |
 //! | GENRE | The **initials** of the genres present, on the `A`–`Z` frame | **There is still no universe of genres** (ADR-0019 §4), and the rail does not draw one — it indexes their *spellings*, which live in an alphabet the reader already knows. The names themselves were the vocabulary at first, and failed as an index; see [`genre`]. |
 //! | ADDED / PLAYED | Every [`Recency`] bucket between the newest and the oldest present | The buckets are an ordered, enumerable scale, so a gap in it is real. |
@@ -102,7 +102,8 @@ pub fn entries(key: GroupKey, headers: &[GroupHeaderVm]) -> Vec<RailEntry> {
         return Vec::new();
     }
     match key {
-        GroupKey::Artist => artist(headers),
+        // One arm, because it is one rail: see [`artist`].
+        GroupKey::Alphabet | GroupKey::Artist => artist(headers),
         GroupKey::Year => year(headers),
         GroupKey::Genre => genre(headers),
         GroupKey::Added | GroupKey::Played => recency(headers),
@@ -122,23 +123,30 @@ fn present_only(headers: &[GroupHeaderVm]) -> Vec<RailEntry> {
         .collect()
 }
 
-/// ARTIST: the alphabet, always, with the collection's own initials merged in
-/// — **a letter per run of artists, not a letter per shelf**.
+/// A–Z and ARTIST: the alphabet, always, with the collection's own initials
+/// merged in — **a letter per run of shelves, not a letter per shelf**.
 ///
-/// The key shelves one artist per shelf (ADR-0035), so there are far more
-/// headers than letters and the rail cannot be one entry per header: a rail
-/// with four hundred names in it is a list, and a list is the thing the wall
+/// **One function for both keys, and it needs no branch to be one.** A–Z
+/// shelves a letter at a time, so each initial appears once and the run is a
+/// single shelf; ARTIST shelves an artist at a time (ADR-0035), so an initial
+/// covers a run of them. Taking the *first shelf of each initial's run* is the
+/// right answer in both cases and reduces to identity in the first, which is
+/// why restoring A–Z beside ARTIST cost this module a header arm and nothing
+/// else. The two rails are the same rail at the two densities the two keys
+/// hang the same order at.
+///
+/// Under ARTIST the rail could not be one entry per header: with four hundred
+/// artists that is a list in a 36 px lane, and a list is the thing the wall
 /// already is. The alphabet is what a reader can guess and aim at without
 /// reading it, which is §7.2's own premise for an index — so a letter is
-/// **the first artist filed under it**, and pressing `C` lands you on Corvin.
+/// **the first shelf filed under it**, and pressing `C` lands you on Corvin.
 /// This is the same shape [`genre`] arrived at from the other direction, and
 /// for the same reason.
 ///
-/// It costs the rail nothing that the headers got finer: [`Initial::of`] is
-/// still the whole mapping, and it is `baz-core`'s answer rather than a letter
-/// re-derived here from a display string — which is what keeps `Various` and
-/// `Unknown` at the ends where the wall shelves them instead of in the middle
-/// of the alphabet under `V` and `U`.
+/// [`Initial::of`] is the whole mapping in both cases, asked of `baz-core`
+/// rather than re-derived here from a display string — which is what keeps
+/// `Various` and `Unknown` at the ends where the wall shelves them instead of
+/// in the middle of the alphabet under `V` and `U`.
 ///
 /// Ordered by [`Initial`]'s own `Ord`, which *is* the wall's own order
 /// (ADR-0019 §2: "variant order is shelf order"), so the rail cannot disagree
@@ -149,10 +157,13 @@ fn artist(headers: &[GroupHeaderVm]) -> Vec<RailEntry> {
     // that separated two same-initial artists could not mint the letter twice.
     let mut slots: Vec<(Initial, Option<usize>)> = Vec::new();
     for (shelf, header) in headers.iter().enumerate() {
-        let GroupHeaderVm::Artist(artist) = header else {
-            continue;
+        // The header *is* the letter under A–Z and carries it under ARTIST;
+        // either way the letter is `baz-core`'s, never this module's.
+        let initial = match header {
+            GroupHeaderVm::Initial(initial) => *initial,
+            GroupHeaderVm::Artist(artist) => Initial::of(artist.as_core()),
+            _ => continue,
         };
-        let initial = Initial::of(artist.as_core());
         if !slots.iter().any(|(seen, _)| *seen == initial) {
             slots.push((initial, Some(shelf)));
         }
@@ -457,6 +468,11 @@ mod tests {
         GroupHeaderVm::Artist(crate::vm::AlbumArtistVm::Named(name.to_owned()))
     }
 
+    /// One letter shelf — what [`GroupKey::Alphabet`] produces.
+    fn initial(letter: char) -> GroupHeaderVm {
+        GroupHeaderVm::Initial(Initial::Letter(letter))
+    }
+
     fn labels(entries: &[RailEntry]) -> Vec<&str> {
         entries.iter().map(|entry| entry.label.as_str()).collect()
     }
@@ -467,6 +483,54 @@ mod tests {
             .filter(|entry| !entry.present())
             .map(|entry| entry.label.as_str())
             .collect()
+    }
+
+    /// **A–Z's rail is its own headers, and it is the same rail ARTIST gets**
+    /// (ADR-0035's third amendment).
+    ///
+    /// The two keys hang one order at two densities, so the rail that indexes
+    /// them is one rail: a letter per run of shelves, which is a letter per
+    /// shelf when the shelves are already letters. Asserted as an identity —
+    /// the letter wall's rail is the *same list* as the artist wall's for the
+    /// same records — because that identity is what let `A–Z` come back
+    /// without [`entries`] gaining a branch.
+    #[test]
+    fn the_letter_wall_and_the_artist_wall_get_the_same_rail() {
+        // The same eight records, shelved the two ways: four letters, and
+        // eight artists.
+        let letters = [
+            GroupHeaderVm::Initial(Initial::Other),
+            initial('A'),
+            initial('B'),
+            initial('C'),
+            initial('Z'),
+        ];
+        let artists = [
+            artist("10cc"),
+            artist("Anne-Marie Puig"),
+            artist("Aphex Twin"),
+            artist("Bell"),
+            artist("Cornelius"),
+            artist("Zed"),
+        ];
+        let coarse = entries(GroupKey::Alphabet, &letters);
+        assert_eq!(coarse.len(), 27, "{:?}", labels(&coarse));
+        assert_eq!(labels(&coarse)[..5], ["#", "A", "B", "C", "D"]);
+        // Under A–Z a letter *is* a shelf, so the jump is the identity.
+        assert_eq!(coarse[0].shelf, Some(0), "# is its own shelf");
+        assert_eq!(coarse[1].shelf, Some(1), "A is its own shelf");
+        assert_eq!(coarse[4].shelf, None, "no D on this wall");
+        assert_eq!(coarse[26].shelf, Some(4), "Z");
+
+        // And the words are the same words: only the shelf each letter jumps
+        // to differs, because the walls are broken up differently.
+        let fine = entries(GroupKey::Artist, &artists);
+        assert_eq!(labels(&coarse), labels(&fine));
+        assert_eq!(fine[3].shelf, Some(4), "C is Cornelius, the fifth shelf");
+
+        // An empty letter wall indexes nothing, exactly as every other key's
+        // empty wall does.
+        assert!(entries(GroupKey::Alphabet, &[]).is_empty());
     }
 
     /// **The rail is still the alphabet, over a wall with far more headers

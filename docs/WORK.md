@@ -38,9 +38,10 @@
    draft.
 3. **Rewrite the README as the project's public face**, with the icon and real
    screenshots of the wall, Home, Now playing and a playlist. Deliberately
-   last, so it describes what actually ships. Its keyboard table is badly
-   stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode, the
-   group keys changed, `Ctrl+B` exists.
+   last, so it describes what actually ships. Its keyboard table is still
+   stale: `Pull` is gone, `Q` never opened the queue, shuffle is a mode,
+   `Ctrl+B` exists. (The group-key row itself is current again — the six words
+   and `1`–`6` were corrected when `A–Z` came back.)
 
 ## Doing
 
@@ -96,6 +97,27 @@ Nothing. The queue above is the next thing.
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **`A–Z` is a group key again, first in the row** — the owner's *"that feels
+  like it should go back and honestly it's the first option, followed by
+  artist"*. The strip is `A–Z · ARTIST · YEAR · GENRE · ADDED · PLAYED` and the
+  number row is `1`–`6`. ADR-0035's third amendment; frames at
+  `docs/design/impl/az-and-artist/`.
+  - **The new key does not take `"artist"`'s code back.** It is `"alphabet"`,
+    because `"artist"` was already repurposed once without saying so — it named
+    the initial grouping before ADR-0035 and the artist grouping after, so a
+    `config.toml` written before that day quietly changed meaning. That is now
+    a paragraph on `GroupKey::code` itself, where the never-repurpose rule
+    lives, rather than folklore.
+  - **The budget was re-measured, not reused.** The last sixth word was
+    `ARTISTS` at 77.49 px; `A–Z` costs 44.92, so the row is 357.91 and
+    `KEYS_W` is **360** rather than the earlier costing's 368. Downstream:
+    `LIBRARY_LINE` 552, `TOP_BAR_SPLIT` 824, `SINGLE_LINE_NO_WELL` 600.
+    **Nothing forced the window's minimum**, which was the thing to confirm —
+    the library line sits 48 px under the 600 floor, and the
+    single-line-with-well band survives at 824…904.
+  - **Found on the way**: `views::top_bar::group_key`'s doc still carried a
+    paragraph about *"none of the five is current while the artists are on the
+    wall"*, describing a wall deleted the same day. Corrected.
 - Doc 14 Tier 2 — **the distinction moves into the type**. A record's page sets
   its title in the serif italic; a playlist's page deliberately keeps the sans,
   and that asymmetry *is* the design. The two identity blocks did not move a

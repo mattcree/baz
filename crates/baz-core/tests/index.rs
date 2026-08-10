@@ -3230,6 +3230,84 @@ fn a_track_added_later_carries_a_later_first_seen() {
     assert_eq!(grown.first_seen_ns, Some(first));
 }
 
+/// **A–Z and ARTIST are two densities of one order** — the same traversal,
+/// broken into 27 letter shelves or into one shelf per artist (ADR-0035's
+/// third amendment).
+///
+/// That identity was the argument for deleting `A–Z`, and it is now the
+/// argument for keeping both: the owner uses a wall of letter shelves and a
+/// wall of artist shelves differently, and neither can put a record somewhere
+/// the other would not. So it is asserted from both ends — the two keys
+/// flatten to the *same* list in the *same* order, and their headers differ
+/// only in where the breaks fall.
+#[test]
+fn the_alphabet_key_is_the_artist_key_with_coarser_breaks() {
+    let mut library = Library::open_in_memory().expect("open");
+    library
+        .add_tracks([
+            track("/m/1.flac", "Stan Rogers", "Northwest Passage", "T", 1),
+            track("/m/2.flac", "Sibylle Baier", "Colour Green", "T", 1),
+            track("/m/3.flac", "10cc", "Sheet Music", "T", 1),
+            track("/m/4.flac", "Aphex Twin", "Drukqs", "T", 1),
+            TrackMeta {
+                compilation: Some(true),
+                ..track("/m/5.flac", "Someone", "A Compilation", "T", 1)
+            },
+            bare("/m/6.flac"),
+        ])
+        .expect("add");
+
+    let coarse = library.shelves(GroupKey::Alphabet);
+    let fine = library.shelves(GroupKey::Artist);
+
+    // The coarse wall: the two anonymous ends, `#`, and one shelf per letter —
+    // with Sibylle Baier and Stan Rogers sharing `S`, which is the whole
+    // difference between the two arrangements.
+    assert_eq!(
+        coarse.iter().map(|s| s.header.label()).collect::<Vec<_>>(),
+        ["Unknown", "#", "A", "S", "Various"]
+    );
+    assert_eq!(
+        fine.iter().map(|s| s.header.label()).collect::<Vec<_>>(),
+        [
+            "Unknown",
+            "10cc",
+            "Aphex Twin",
+            "Sibylle Baier",
+            "Stan Rogers",
+            "Various"
+        ]
+    );
+    assert_eq!(coarse[3].albums.len(), 2, "one S shelf holds both");
+
+    // And under the headers it is one wall. `albums()` is the same list a
+    // third time, which is what makes *both* keys "the flat shelf with its
+    // breaks named" rather than one being a second traversal.
+    let flatten = |shelves: &[baz_core::index::Shelf<'_>]| -> Vec<String> {
+        shelves
+            .iter()
+            .flat_map(|shelf| shelf.albums.iter().map(|a| format!("{:?}", a.title)))
+            .collect()
+    };
+    assert_eq!(flatten(&coarse), flatten(&fine));
+    assert_eq!(
+        flatten(&coarse),
+        library
+            .albums()
+            .iter()
+            .map(|a| format!("{:?}", a.title))
+            .collect::<Vec<_>>()
+    );
+
+    // The coarse key's headers are `Initial`s — the type the rail also speaks,
+    // asked of `baz-core` in both places so the wall's letters and the rail's
+    // letters cannot disagree.
+    assert_eq!(coarse[2].header, GroupHeader::Initial(Initial::Letter('A')));
+    assert_eq!(coarse[1].header, GroupHeader::Initial(Initial::Other));
+    assert_eq!(coarse[0].header, GroupHeader::Initial(Initial::Unknown));
+    assert_eq!(coarse[4].header, GroupHeader::Initial(Initial::Various));
+}
+
 /// ARTIST is the shelf ADR-0008 built, with **one break per artist** stated
 /// (ADR-0035). The albums and their order must be identical to `albums()`, or
 /// two views of one library would disagree — which is also the whole argument
@@ -3720,19 +3798,39 @@ fn group_key_codes_round_trip() {
     assert_eq!(GroupKey::from_code("crates"), None);
     assert_eq!(GroupKey::from_code(""), None);
 
-    // **The key's word is true, and its code never moved** (ADR-0035). The
-    // first key was labelled `Artist` while it grouped by the album artist's
-    // *initial*, which is what collided with the front end's Artist place; for
-    // one release the label was `A–Z` and the grouping was unchanged. It now
-    // groups by the artist, so the word is `Artist` again and says what the
-    // key does.
-    assert_eq!(GroupKey::ALL[0].label(), "Artist");
-    assert_eq!(GroupKey::ALL[0].code(), "artist");
-    // **The migration path for a config written by any baz ever released**:
-    // the code is unchanged, so every `group_key = "artist"` on disk still
-    // resolves — and resolves to the arrangement that word always claimed.
-    // Nothing was retired and nothing needs rewriting.
+    // **The row's own order, and every word true of the key under it**
+    // (ADR-0035's third amendment): `A–Z` first, `ARTIST` second.
+    assert_eq!(GroupKey::ALL[0].label(), "A–Z");
+    assert_eq!(GroupKey::ALL[1].label(), "Artist");
+    assert_eq!(
+        GroupKey::ALL.map(GroupKey::label),
+        ["A–Z", "Artist", "Year", "Genre", "Added", "Played"]
+    );
+
+    // **`"artist"` is not given back to the key it used to name.** It meant
+    // *group by the artist's initial* until ADR-0035 and *group by the artist*
+    // after it — the one silent repurposing in this method's history — so
+    // handing it to `A–Z` now would make one word name three things in three
+    // releases. `A–Z` is `"alphabet"`, which no baz has ever written, and
+    // `"artist"` keeps the meaning it has had since ADR-0035.
+    assert_eq!(GroupKey::Alphabet.code(), "alphabet");
+    assert_eq!(GroupKey::from_code("alphabet"), Some(GroupKey::Alphabet));
     assert_eq!(GroupKey::from_code("artist"), Some(GroupKey::Artist));
+    assert_ne!(GroupKey::Alphabet.code(), GroupKey::Artist.code());
+    // The other four are untouched, which is what "never change an existing
+    // code" means when a key is *added*: nothing on disk changes meaning.
+    for (key, code) in [
+        (GroupKey::Year, "year"),
+        (GroupKey::Genre, "genre"),
+        (GroupKey::Added, "added"),
+        (GroupKey::Played, "played"),
+    ] {
+        assert_eq!(key.code(), code);
+    }
+    // The en dash is the label's, and it is deliberately *not* the code: a
+    // code is typed by hand into a config file.
+    assert_eq!(GroupKey::from_code("a–z"), None);
+    assert_eq!(GroupKey::from_code("a-z"), None);
 }
 
 // ---------------------------------------------------------------------------
