@@ -98,14 +98,20 @@ measurements have never been taken because the feature does not exist yet.
   edge-drag resize anywhere in `window::Action`, so going borderless today
   loses pointer resizing. The route is a ~30-line upstream-shaped iced patch,
   which means a forked dependency.
-- **Shuffle as a toggle.** It has a mechanical problem, not just a
-  philosophical one: turning it *off* has nothing to restore, since playing a
-  playlist copies it and decouples. Reversing act → mode would also un-block
-  the crossed-arrows glyph that doc 10 refuses only because shuffle is an act.
-- **Whether `Pull` goes.** Self-contained, sends no engine command, and its
-  removal would answer design 11's P9 (*"explain it or rename it"*) a third
-  way. If it, `Shuffle` and `Play all` all went, the strip's acts lane drops to
-  zero and the two-line split loses its reason to exist.
+- ~~**Shuffle as a toggle.**~~ **Done, 2026-08-10**, and the "mechanical
+  problem" this raised — *turning it off has nothing to restore, since playing
+  a playlist copies it and decouples* — turned out to be the right observation
+  with the opposite conclusion. It shipped first as a permutation with a
+  retained order, and the owner's *"shuffle as a concept is more about going to
+  an unknown next track rather than actually mutating the track list"* replaced
+  that with a traversal the engine walks: **off restores nothing because
+  nothing was changed.** The crossed-arrows glyph was un-blocked as this
+  predicted (doc 10 §3.2, rewritten). ADR-0023's amendment.
+- ~~**Whether `Pull` goes.**~~ **Done, 2026-08-10** — removed on the owner's
+  decision, answering design 11's P9 by removal. The acts lane did **not** drop
+  to zero: `Shuffle` moved to the now-playing bar rather than going, and
+  `Play all` stayed (it plays exactly what the wall shows, which nothing else
+  does). `ACTS_W` 182 → 88, and the two-line split kept its reason.
 
 ### 5. The chapters not yet begun
 

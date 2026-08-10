@@ -1,82 +1,111 @@
 # ADR-0023: The playback model — one list with a cursor, and the queue as a record of a choice
 
-> **Amendment (2026-08-10) — shuffle is a property of the player, and one
-> thing is retained after the gesture.**
+> **Amendment (2026-08-10) — shuffle is a property of the player, and it is a
+> property of the *walk* rather than of the list.**
 >
-> The owner: *"can you make shuffle a property of the player i.e. toggle
-> on/off."* This record's §1 says the playing context is *"reified into the
-> queue at the moment of the gesture and then discarded"*, and that **there is
-> no live context object that keeps acting after the gesture.** Turning shuffle
-> off has to put the run back into the order it would have had, and nothing in
-> the model kept that order. The owner's decision settles it; what follows is
-> the decision written down, precisely, because the value of §1 is in its
-> precision and a vague amendment would cost more than the feature is worth.
+> The owner, twice in one day. First: *"can you make shuffle a property of the
+> player i.e. toggle on/off."* Then, on seeing what that shipped as: *"I think
+> shuffle as a concept is more about going to an unknown next track rather than
+> actually mutating the track list if that makes sense."*
 >
-> **1. What is retained.** One `Vec<PathBuf>` per run — the queue's paths, in
-> the order the gesture laid them out, taken at the moment shuffle permutes
-> them. It lives on `PlayerState` beside the queue record.
+> **This is one decision and is written as one.** The first version of the
+> amendment made shuffle a *permutation*: turning it on re-ordered the queue
+> ahead of the cursor, turning it off restored a retained `Vec<PathBuf>`, and
+> most of the text was rules about when that retained order was still valid. The
+> owner's second sentence says that was the wrong object. What follows replaces
+> it rather than correcting it, because a record that reads as a decision plus a
+> correction teaches the correction instead of the decision.
 >
-> **2. Why this is not the thing §1 refuses.** §1 refuses a *context object that
-> keeps acting*. This is inert: it has no methods, cannot re-read a playlist
-> file, cannot notice a rescan, cannot refill anything, and nothing consults it
-> for behaviour. It is read at exactly one moment — the listener turning shuffle
-> off — and by exactly one caller. The distinction §1 draws is between a live
-> link and a recorded fact, and §4's playing provenance already stands on the
-> recorded-fact side of it; this is a second fact on the same side. **A run's
-> order is not its source**, and remembering an order does not resurrect a
-> source.
+> **1. The model.** A run is a list and a cursor (§1). **Shuffle changes how the
+> cursor moves; it never changes the list.** The queue keeps the order the
+> gesture that built it laid out — always, in both positions of the control, and
+> whatever else happens to it — and what shuffle decides is which entry the
+> cursor goes to next. `baz_core::traversal` holds the type and the argument.
 >
-> **3. What invalidates it.** Two things, and only two:
+> **2. The selection rule, in one sentence.** *With shuffle on a run plays a
+> **bag**: one deterministic shuffled pass over the run's entries, in which no
+> entry repeats until every entry has played, and when the bag is spent the run
+> ends.*
 >
-> - **A new run.** Any `SetQueue` from any gesture clears it, in the same call
->   that records the new queue. A gesture that shuffled records the pair
->   together, so a shuffled run with no order to return to is unrepresentable.
-> - **A hand reorder.** A stepper press or a completed drag is the listener
->   stating an order in as many words, so the retained one is dropped and
->   turning shuffle off afterwards leaves the run exactly as the hand left it.
->   The hand beats the machine's memory; an "off" that silently undid a drag
->   would be the worse of the two surprises.
+> A bag rather than a uniform draw, and the difference is not fussiness. A
+> uniform draw can play the same track twice running and can leave a track
+> unheard across a whole album, and a listener has no way to tell an unlucky run
+> from a broken one. A bag is what the word means to people: everything gets
+> played, nothing gets played twice, the order is the surprise. Concretely a bag
+> **is** a permutation of the run's positions, computed once from a seed — which
+> is not an implementation convenience but the thing §4 depends on.
 >
-> **4. What happens when the queue is edited while shuffled.** The restore walks
-> the retained order and takes the next item carrying each path, then appends
-> whatever is left in the order the run currently has. Three consequences, each
-> a real thing a listener does:
+> **3. Where the decision lives: in the engine.** This is the one place this
+> amendment changes something the original §"Consequences" was proud of, and it
+> is stated rather than slipped in. The engine learns **one** standing property,
+> the order it walks its queue in (`Command::SetTraversal`,
+> `Event::TraversalChanged`). It gains no repeat flag, no continuation policy and
+> nothing that refills; a bag is finite and §5's silence is untouched.
 >
-> - a row **deleted** while shuffled stays deleted (its path is in the order and
->   no longer in the run, so the walk passes over it) — turning shuffle off does
->   not resurrect music somebody threw out;
-> - a row **appended** while shuffled stays at the end (its path is not in the
->   retained order at all, so it falls into the leftovers), which is where the
->   append put it — *play next* keeps meaning next;
-> - a file the run lists **twice** is put back twice, because the walk consumes
->   one item per path rather than matching by identity — `queue_edit`'s
->   position-not-identity rule, one layer up.
+> **Because baz is gapless.** Gapless means the engine knows the next track
+> *before the current one ends* — it decodes one ahead on a prefetch thread and
+> splices into the same ring (ADR-0004, ADR-0009). A shuffle that chose its next
+> track when the current one ended would be choosing after the moment the
+> decision was needed. And a front end cannot supply the answer either: the only
+> way to say "this plays next" over this protocol is to send a queue, and
+> ADR-0014's `UpdateQueue` costs the following boundary its sample-accurate
+> splice. One edit, one boundary is a fair price for an edit; a mode that charged
+> it at **every** boundary of a shuffled run is not. The acceptance test is
+> `a_shuffled_run_is_gapless_and_bit_identical`, which plays a two-track queue
+> under a reversing traversal and compares the delivered stream sample for sample
+> against the reference decodes concatenated in the bag's order.
 >
-> **5. A run restored from a snapshot has no retained order** (§6). What was
-> interrupted is put back as it was; baz does not remember an order for a run it
-> did not arrange this session, and turning shuffle off over such a run leaves it
-> as it stands and says so rather than inventing one.
+> **4. baz says what is next.** The order is decided in advance, so baz knows it,
+> and this product does not conceal what it knows: the run column marks the row
+> that plays next and dims the entries the pass is already past, and the bar's
+> continuation counts the bag's remainder rather than the list's tail. *Unknown*
+> in "an unknown next track" describes how the choice is made, not something
+> withheld from the listener. This is why `Traversal::play_order` is a pure
+> public function: the front end computes the identical pass from the identical
+> seed, so the row marked on screen is the row that plays.
 >
-> **6. What shuffle-on means for a new play gesture.** It applies to all of them
-> and to the same degree: press `Play` on a record and the record plays
-> shuffled; `Play all`, a playlist's `Play` and a track click agree, because
-> they all build the list their gesture means and hand it to one arranger. A
-> **track click** is the one with two things to say — *this track* and *shuffle
-> is on* — and it says both: the clicked track leads, and the rest follows
-> shuffled.
+> **5. When the bag empties.** The run ends — `QueueEnded`, exactly as an
+> unshuffled run ends at its last track. Nothing refills and nothing re-rolls; a
+> fresh pass comes from a fresh gesture, which is where every other list in baz
+> comes from. §5's silence is unchanged, and there is nowhere in the engine for a
+> refill to live.
 >
-> **7. Turning the mode on or off never stops the music.** Both directions leave
-> the sounding track where it is and go out as `UpdateQueue`, which ADR-0014
-> guarantees disturbs no delivered sample. On permutes what is in front of the
-> needle only: what is behind it is history and history does not re-order.
+> **6. What a manual jump does to it.** It moves the cursor **within** the bag
+> and does not re-roll it: jump to a track and the pass continues from that
+> track's place in the order, so entries earlier in the bag are passed over and
+> entries later in it still come. Re-rolling on every jump would mean the order
+> on screen changed each time the listener touched a row, which contradicts §4.
+> `Next` and `Previous` step along the bag for the same reason — a skip must land
+> where the run was going, or the interface lied about where that was.
 >
-> **8. §"Consequences" is corrected.** It recorded *"shuffle or repeat in the
+> **7. What a new run does.** A fresh seed, per run. The same seed over a
+> re-played record would be the same shuffle twice, which is the one thing about
+> a shuffle a listener notices immediately. The **mode** is persisted in
+> `config.toml`; the **seed** is not, so two launches with shuffle on are two
+> different passes.
+>
+> **8. Turning the mode on or off never stops the music.** The sounding track is
+> delivered to its end and the run continues on the new plan after it — that one
+> boundary is a fresh decode rather than a splice, which is ADR-0014's existing
+> bargain at its existing price. Nothing behind the cursor is disturbed and
+> nothing in the list moves at all.
+>
+> **9. What was deleted, and why the deletion is the point.** Turning shuffle off
+> is now trivial because nothing was ever changed. Gone with the permutation:
+> the retained `Vec<PathBuf>` and its two invalidation rules; the restore walk
+> and the three consequences it had to define (a deleted row staying deleted, an
+> appended row staying appended, a repeated file being put back twice); the "a
+> run restored from a snapshot has no retained order" case and the message it
+> needed; the hand-reorder rule that dropped the retained order; the hoist that
+> made a track click's clicked row lead a permuted body; and the whole of the
+> front end's `shuffle` module. **Every one of those was a rule about keeping two
+> orders in step.** There is one order now, and it is the run's.
+>
+> **10. §"Consequences" is corrected.** It recorded *"shuffle or repeat in the
 > engine (unchanged from ADR-0014's deferral — both remain front-end expressions
-> over `SetQueue`/`UpdateQueue`)"*. **That is still exactly true and is the point
-> worth keeping**: the engine's queue still has no shuffle flag, no repeat flag
-> and no continuation policy. Shuffle is expressed entirely as the order of the
-> paths sent. What changed is where the *decision* lives on the front end — the
-> player, persisted in `config.toml` — not what the engine is told.
+> over `SetQueue`/`UpdateQueue`)"*. **That is no longer true of shuffle**, and §3
+> says what replaced it and why the alternative was a gap at every boundary.
+> Repeat is unchanged: still deferred, still nothing in the engine.
 
 > **Amendment (2026-08-09), from
 > [`docs/design/09-implicit-playlists.md`](../design/09-implicit-playlists.md)**
@@ -268,5 +297,7 @@ is felt every launch.
 - `docs/BACKLOG.md`'s "The queue cannot be built" closes when §3 ships.
 - What is deliberately not done: `Queue next` (deferred, semantics fixed);
   any continuation policy (refused, again); any second queue lane (refused);
-  shuffle or repeat in the engine (unchanged from ADR-0014's deferral — both
-  remain front-end expressions over `SetQueue`/`UpdateQueue`).
+  **repeat** in the engine (unchanged from ADR-0014's deferral). *Shuffle* was
+  on that list until 2026-08-10 and is not any more — see the amendment's §3
+  for the one property the engine gained and the gapless argument that put it
+  there.

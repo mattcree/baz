@@ -1059,7 +1059,7 @@ const RULE_LANE_H: f32 = theme::GAP_XS + theme::SELECTION_EDGE;
 /// The lane is reserved rather than sized to the mark, which is the same
 /// fixed-slot rule the bottom bar's timestamps follow and the reason the mark
 /// can be 0, 1 or 2 px without a row of covers shifting under the pointer.
-fn state_rule(hovered: f32, selected: bool, edge: f32) -> Element<'static, Message> {
+pub(crate) fn state_rule(hovered: f32, selected: bool, edge: f32) -> Element<'static, Message> {
     let room = theme::active();
     let thickness = theme::tile_rule_h(hovered, selected);
     container(
@@ -1128,47 +1128,86 @@ fn hover_options<'a>(
     engine: bool,
     collecting: Collecting,
 ) -> Element<'a, Message> {
+    let listed: [Option<VeilOption>; theme::VEIL_OPTIONS] = [
+        engine.then(|| VeilOption::accented(icon::Glyph::Play, "Play", Message::PlayAlbum(album))),
+        engine.then(|| VeilOption::new(icon::Glyph::Queue, "Queue", Message::QueueAlbum(album))),
+        collecting.available.then(|| {
+            VeilOption::new(
+                icon::Glyph::Plus,
+                "Add to…",
+                Message::AddAlbumToPlaylist(album),
+            )
+        }),
+        Some(VeilOption::new(
+            icon::Glyph::Open,
+            "Open",
+            Message::AlbumClicked(album),
+        )),
+    ];
+    veil(work, listed.into_iter().flatten())
+}
+
+/// One row of a hover veil: its mark, its word, what it sends, and whether it
+/// is the one that wears the accent.
+///
+/// A named type rather than a tuple because [`veil`] is now called from two
+/// surfaces — the wall's tiles and Home's **All songs** tile — and a
+/// four-element tuple read at a distance is exactly the kind of thing whose
+/// third field nobody remembers.
+pub(crate) struct VeilOption {
+    glyph: icon::Glyph,
+    label: &'static str,
+    press: Message,
+    accent: bool,
+}
+
+impl VeilOption {
+    /// An ordinary option, in the room's own glyph ink.
+    pub(crate) const fn new(glyph: icon::Glyph, label: &'static str, press: Message) -> Self {
+        Self {
+            glyph,
+            label,
+            press,
+            accent: false,
+        }
+    }
+
+    /// The one option that wears the accent — `Play`, and only `Play`
+    /// ([`theme::veil_option_ink`] holds the discipline).
+    pub(crate) const fn accented(glyph: icon::Glyph, label: &'static str, press: Message) -> Self {
+        Self {
+            glyph,
+            label,
+            press,
+            accent: true,
+        }
+    }
+}
+
+/// **The veil and its options, over a `work`-px square.**
+///
+/// The geometry and the argument are [`hover_options`]'s; this is that function
+/// with its *list* taken as a parameter, so that a surface which is not a record
+/// — Home's **All songs** tile — can wear the wall's own layer rather than a
+/// second one that looks like it. Options the caller has already filtered out
+/// are simply absent, and the rows left divide the sleeve between them.
+pub(crate) fn veil<'a>(
+    work: f32,
+    listed: impl IntoIterator<Item = VeilOption>,
+) -> Element<'a, Message> {
     let room = theme::active();
     let band = work * theme::VEIL_BAND_X;
     let ink_lane = (work * theme::VEIL_INK_X - theme::VEIL_LEAD).max(0.0);
-    let listed: [(icon::Glyph, &'static str, Option<Message>, bool); theme::VEIL_OPTIONS] = [
-        (
-            icon::Glyph::Play,
-            "Play",
-            engine.then_some(Message::PlayAlbum(album)),
-            true,
-        ),
-        (
-            icon::Glyph::Queue,
-            "Queue",
-            engine.then_some(Message::QueueAlbum(album)),
-            false,
-        ),
-        (
-            icon::Glyph::Plus,
-            "Add to…",
-            collecting
-                .available
-                .then_some(Message::AddAlbumToPlaylist(album)),
-            false,
-        ),
-        (
-            icon::Glyph::Open,
-            "Open",
-            Some(Message::AlbumClicked(album)),
-            false,
-        ),
-    ];
     let mut options = column![]
         .width(Length::Fixed(band))
         .height(Length::Fixed(work));
-    for (glyph, label, press, accent) in listed {
-        // Absent, not disabled: an option with no engine or no playlists
-        // folder behind it is not offered, and the rows left divide the
-        // sleeve between them.
-        let Some(press) = press else {
-            continue;
-        };
+    for VeilOption {
+        glyph,
+        label,
+        press,
+        accent,
+    } in listed
+    {
         // One decision about which option wears the accent, made in the
         // theme and read here — see [`theme::veil_option_ink`], which also
         // records the one place this departs from the approved mockup.
@@ -1487,7 +1526,8 @@ mod hover_option_tests {
     /// | `Open` | `AlbumClicked` | the tile's own press, and the menu's `Open` |
     #[test]
     fn every_option_is_a_press_some_visible_control_already_makes() {
-        let options = function(&source(), "hover_options<'a>");
+        let source = source();
+        let options = function(&source, "hover_options<'a>");
         for (label, press) in [
             ("Play", "Message::PlayAlbum(album)"),
             ("Queue", "Message::QueueAlbum(album)"),
@@ -1504,12 +1544,17 @@ mod hover_option_tests {
             );
         }
         // Four options and four presses: no fifth verb slipped onto a sleeve.
+        assert_eq!(theme::VEIL_OPTIONS, 4);
+        // **One press arm for every veil in the product.** The layer is drawn
+        // by [`veil`] now — Home's `All songs` tile wears the wall's own rather
+        // than a second one that looks like it — so the arm is asserted where
+        // it lives, and the list above is asserted where the *record's* options
+        // are decided.
         assert_eq!(
-            options.matches(".on_press(").count(),
+            function(&source, "veil<'a>").matches(".on_press(").count(),
             1,
             "the options are pressed through one arm, once"
         );
-        assert_eq!(theme::VEIL_OPTIONS, 4);
     }
 
     /// **An option's press never also opens the page.**
@@ -1561,7 +1606,7 @@ mod hover_option_tests {
     /// permitted thing's name.
     #[test]
     fn the_veil_is_a_gradient_over_one_sleeve_and_never_a_flat_panel() {
-        let options = function(&source(), "hover_options<'a>");
+        let options = function(&source(), "veil<'a>");
         assert!(
             options.contains("Background::Gradient(theme::hover_veil(room)"),
             "the veil stopped being the design's gradient"

@@ -23,6 +23,7 @@ use baz_core::protocol::{
     Command, ConversionReason, Event, ReplayGainMode, ReplayGainSource, SignalChain, VolumePath,
 };
 use baz_core::replaygain::{ComputedGains, MAX_PREAMP_CENTIDB, ReplayGainTags};
+use baz_core::traversal::Traversal;
 use baz_core::volume::{MAX_POSITION, RAMP_MS, Volume, VolumeState};
 
 /// Test tone parameters (arbitrary; equality checks are exact either way).
@@ -3815,4 +3816,232 @@ fn the_handle_reports_a_measured_source_too() {
         }
     }
     engine.shutdown();
+}
+
+// ---------------------------------------------------------------------------
+// Traversal: shuffle is a property of the walk, not of the list
+// ---------------------------------------------------------------------------
+
+/// The first seed whose pass over `len` entries is `want`.
+///
+/// Searched rather than pinned because the generator is an implementation
+/// detail and a hardcoded seed would be a magic number that only the
+/// implementation could explain. The search is over a pure public function, so
+/// it is deterministic and costs microseconds.
+fn seed_ordering(len: usize, want: &[usize]) -> u64 {
+    (0..10_000_u64)
+        .find(|&seed| Traversal::Shuffled { seed }.play_order(len) == want)
+        .unwrap_or_else(|| panic!("no seed in 10 000 walks {len} entries as {want:?}"))
+}
+
+/// **Gaplessness holds with shuffle on.** The acceptance test for the whole
+/// traversal design, and the reason the decision lives in the engine at all.
+///
+/// The queue is `[a, b]` and the traversal is a seed that walks it `[1, 0]`. The
+/// delivered stream is then compared, **sample for sample**, against the
+/// reference decode of `b` concatenated with the reference decode of `a` — the
+/// same ground truth [`unity_volume_delivers_a_bit_identical_stream`] uses for
+/// the unshuffled pair, with the two halves swapped.
+///
+/// What a bit-identical stream rules out is exactly what a gap is: a shuffle
+/// that chose its next track when the current one *ended* could not have decoded
+/// it in time, and the silence, the click or the repeated block that follows
+/// would all be a length or a value mismatch here. It also rules out the
+/// cheaper mistakes — a boundary that resampled, a boundary that dropped its
+/// first block, a run that played the queue in its own order and ignored the
+/// traversal entirely.
+#[test]
+fn a_shuffled_run_is_gapless_and_bit_identical() {
+    let f = fixtures();
+    let seed = seed_ordering(2, &[1, 0]);
+    let mut want = f.b_ref.clone();
+    want.extend_from_slice(&f.a_ref);
+    let (engine, events, output) = spawn_offline(paced_config(), want.len()).expect("spawn engine");
+    let traversal = Traversal::Shuffled { seed };
+    engine
+        .send(Command::SetTraversal { traversal })
+        .expect("send");
+    assert_eq!(
+        next_transport_event(&events),
+        Event::TraversalChanged { traversal }
+    );
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    // The run visits the queue's positions in the bag's order, and says so with
+    // *queue* positions — the numbers the front end drew its rows from.
+    assert_eq!(next_transport_event(&events), started(&f.b, 1));
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    engine.shutdown();
+    assert_samples_eq(&collect(output), &want, "shuffled gapless output");
+}
+
+/// **The queue is never permuted.** The owner's decision, asserted as a
+/// property of the protocol rather than as a property of a screen: a traversal
+/// change emits [`Event::TraversalChanged`] and **no** [`Event::QueueChanged`],
+/// because the list did not change — only the walk over it did.
+///
+/// This is what makes turning shuffle off trivial. There is nothing to put
+/// back, so there is no retained order to keep, to invalidate, or to get out of
+/// step with an edit; `SetTraversal { InOrder }` and the run is in its own order
+/// again, whatever has happened to it in between.
+#[test]
+fn changing_the_traversal_never_touches_the_queue() {
+    let f = fixtures();
+    let (engine, events, _output) = spawn_offline(fast_config(), 1).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    assert_eq!(next_queue_changed(&events), (2, None));
+
+    // On, then off, over a queue nobody is playing: two answers about the
+    // traversal, and not one word about the queue.
+    for traversal in [Traversal::Shuffled { seed: 5 }, Traversal::InOrder] {
+        engine
+            .send(Command::SetTraversal { traversal })
+            .expect("send");
+        assert_eq!(
+            next_transport_event(&events),
+            Event::TraversalChanged { traversal }
+        );
+    }
+    // Idempotent, like every other absolute setting in this protocol.
+    engine
+        .send(Command::SetTraversal {
+            traversal: Traversal::InOrder,
+        })
+        .expect("send");
+    assert_no_event_within(&events, Duration::from_millis(120));
+    engine.shutdown();
+}
+
+/// **A bag plays everything, exactly once, and then the run ends.**
+///
+/// The selection rule stated as a test: no entry repeats until every entry has
+/// played, nothing is refilled when the bag is spent, and the silence at the end
+/// of a shuffled run is the silence at the end of any other run (ADR-0023 §5).
+#[test]
+fn a_shuffled_pass_plays_every_entry_once_and_then_ends() {
+    let f = fixtures();
+    let queue = vec![f.b.clone(), f.b.clone(), f.b.clone(), f.b.clone()];
+    let seed = 12;
+    let want = Traversal::Shuffled { seed }.play_order(queue.len());
+    let (engine, events, _output) =
+        spawn_offline(fast_config(), f.b_ref.len() * queue.len()).expect("spawn engine");
+    let traversal = Traversal::Shuffled { seed };
+    engine
+        .send(Command::SetTraversal { traversal })
+        .expect("send");
+    assert_eq!(
+        next_transport_event(&events),
+        Event::TraversalChanged { traversal }
+    );
+    engine
+        .send(Command::SetQueue { paths: queue })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    let mut visited = Vec::new();
+    loop {
+        match next_transport_event(&events) {
+            Event::TrackStarted { position, .. } => visited.push(position),
+            Event::QueueEnded => break,
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+    assert_eq!(visited, want, "the run did not walk the bag");
+    engine.shutdown();
+}
+
+/// **`Next` and `Previous` step along the bag, not down the list.**
+///
+/// The pair that would betray a traversal implemented only in the producer: a
+/// skip is a fresh session at a chosen position, and the position it chooses has
+/// to be the one the run would have reached on its own — otherwise pressing skip
+/// would take a listener somewhere the interface never said they were going.
+#[test]
+fn skipping_follows_the_traversal_in_both_directions() {
+    let f = fixtures();
+    let seed = seed_ordering(3, &[2, 0, 1]);
+    // Five-second fixtures, so every assertion below lands well inside the
+    // track it is about rather than racing the run's own advance.
+    let (engine, events, _output) =
+        spawn_offline(paced_config(), f.a_ref.len() * 4).expect("spawn engine");
+    let traversal = Traversal::Shuffled { seed };
+    engine
+        .send(Command::SetTraversal { traversal })
+        .expect("send");
+    assert_eq!(
+        next_transport_event(&events),
+        Event::TraversalChanged { traversal }
+    );
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.a.clone(), f.a.clone()],
+        })
+        .expect("send");
+    engine.send(Command::JumpTo { position: 2 }).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 2));
+    // Forwards: the bag says 0 comes after 2, and 1 after that.
+    engine.send(Command::Next).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    engine.send(Command::Next).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 1));
+    // Backwards, well under the restart threshold: the bag says 0 came before
+    // 1, and 2 before that.
+    engine.send(Command::Previous).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    engine.send(Command::Previous).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 2));
+    // **Queue position 2 leads this bag**, and at the head of the plan there is
+    // nothing before — so `Previous` restarts, exactly as it does at the head of
+    // a list. Note that it is *not* position 0 that behaves this way here: the
+    // rule is about the walk, and the walk is what has a head.
+    engine.send(Command::Previous).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 2));
+    engine.shutdown();
+}
+
+/// **Turning shuffle on mid-run does not stop the music**, and the track that is
+/// sounding is delivered to its end.
+///
+/// The listener changed their mind about what comes *next*; nothing about that
+/// is a reason to interrupt what is playing now. The first track's audio is
+/// therefore still bit-identical to its reference decode, and the run continues
+/// on the new plan after it.
+#[test]
+fn turning_shuffle_on_mid_run_lets_the_sounding_track_play_out() {
+    let f = fixtures();
+    let capacity = f.a_ref.len() + f.b_ref.len();
+    let (engine, events, output) = spawn_offline(paced_config(), capacity).expect("spawn engine");
+    engine
+        .send(Command::SetQueue {
+            paths: vec![f.a.clone(), f.b.clone()],
+        })
+        .expect("send");
+    engine.send(Command::Play).expect("send");
+    assert_eq!(next_transport_event(&events), started(&f.a, 0));
+    let traversal = Traversal::Shuffled { seed: 3 };
+    engine
+        .send(Command::SetTraversal { traversal })
+        .expect("send");
+    assert_eq!(
+        next_transport_event(&events),
+        Event::TraversalChanged { traversal }
+    );
+    // Nothing stopped: no `Stopped`, and the run carries on to its second track.
+    assert_eq!(next_transport_event(&events), started(&f.b, 1));
+    assert_eq!(next_transport_event(&events), Event::QueueEnded);
+    engine.shutdown();
+    let out = collect(output);
+    assert_samples_eq(
+        &out[..f.a_ref.len()],
+        &f.a_ref,
+        "the sounding track after a mid-run traversal change",
+    );
 }

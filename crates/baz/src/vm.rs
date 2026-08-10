@@ -856,8 +856,9 @@ pub struct QueueItemVm {
     /// `None` means "as the queue's own header already says" — the ordinary
     /// case, where a queue is one album and [`QueueVm::artist`] covers every
     /// row of it. It is carried per item for the same reason [`Self::album`]
-    /// is: a queue may hold several records (a shuffle draws eight of them,
-    /// `crate::shuffle`), and the second one is by somebody else. Without it the
+    /// is: a queue may hold several records (`Play all` stacks the whole wall,
+    /// and one shift-click appends another), and the second one is by somebody
+    /// else. Without it the
     /// popover could name the second record but not who made it, which is
     /// exactly the half-fact a catalogue must not print.
     pub album_artist: Option<String>,
@@ -1066,8 +1067,8 @@ pub fn restored_queue(
     (queue, landed)
 }
 
-/// **A queue of whole records**, in the order given — what a shuffle sends
-/// (`crate::shuffle`).
+/// **A queue of whole records**, in the order given — what `Play all` and the
+/// **All songs** list send.
 ///
 /// The one thing this must not do is flatten. ADR-0014 §"albums are listed as
 /// albums, never flattened" is a promise about the *queue*, not only about the
