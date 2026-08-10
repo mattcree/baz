@@ -34,6 +34,8 @@
 | Kiosk mode — full screen on a second monitor | **designed, unbuilt** | design 12; single window, iced has no monitor enumeration |
 | Vibe- or prompt-generated playlists | **designed, unmerged** | `design/dynamic-playlists`: a rule you can say out loud, drawn into the queue |
 | The `ARTIST` group key and the `Artist` place are both called artist | **open** | rename the key, or make Artists a lens |
+| *"the album and track count below the search bar doesn't look good... maybe this should go into the home as some basic stats?"* | **building** | resting counts to Home; match count into the field |
+| Integrate the queue with Now playing, so the bar's `Queue` door can go | **next** | `Place::Queue` and `Place::NowPlaying` become one surface |
 
 ## Shipped
 
