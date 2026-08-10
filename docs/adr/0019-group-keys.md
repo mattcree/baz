@@ -1,8 +1,21 @@
 # ADR-0019: Group keys — the shelf gets five arrangements, not one
 
 **Status**: accepted (2026-08-08) · **amends ADR-0008** (its grouping stops
-being the only grouping) · implements step 4 of ADR-0017's build plan · builds
-on ADR-0018's play-history ledger
+being the only grouping) · **§2 amended by
+[ADR-0035](0035-the-wall-has-a-subject.md)** (2026-08-10) · implements step 4
+of ADR-0017's build plan · builds on ADR-0018's play-history ledger
+
+> **§2 amended by ADR-0035 (2026-08-10).** ARTIST breaks on the **artist**, not
+> on their initial: one shelf per person, headed by their name, in the order
+> `ArtistKey` already sorted in. Everything §2 says about that order and about
+> the two anonymous ends is unchanged and now applies to whole names rather
+> than to letters; `Initial` is unchanged too and became the *index rail's*
+> vocabulary, which is where its non-ASCII rule was always earning its keep.
+> **§1's promise is untouched and is what licenses the change**: grouping
+> albums under their album artist shows every album exactly once, so
+> `shelves(GroupKey::Artist)` is still `albums()` with its breaks named,
+> element for element — only finer. The key's word went back to `Artist`, and
+> its code never moved.
 
 ## Context
 
@@ -79,6 +92,10 @@ album title, and shelving preserves it, so within a decade or a genre the wall
 reads alphabetically — the order every other view of this library already uses.
 
 ### 2. ARTIST — ADR-0008's grouping, with its breaks named
+
+*(Amended by ADR-0035: the breaks are the artists themselves and `Initial` is
+now the rail's vocabulary. The order below is unchanged and is the order the
+artist shelves go in.)*
 
 The albums and their order are precisely ADR-0008's. What is new is that the
 breaks between them are *stated*, as `Initial`:

@@ -512,10 +512,11 @@ costs no key at all.
 ### 4.2 The digits, and the collision the code already flagged
 
 `keys.rs` binds `1`–`5` to the five group keys, derived from `GroupKey::ALL`
-rather than copied from it, and `6` to the wall's **subject**
-([ADR-0035](../adr/0035-the-wall-has-a-subject.md)) — the sixth word in the
-same row, which is the law below applied to a word rather than an exception to
-it. It records that ADR-0017 §1.2 also spends `1` and
+rather than copied from it. `6` was bound for one release to a sixth word in
+the same row, `ARTISTS`; that word became the first key's own grouping
+([ADR-0035](../adr/0035-the-wall-has-a-subject.md)), so the digit is unbound
+again and the row is `GroupKey::ALL` exactly. It records that ADR-0017 §1.2
+also spends `1` and
 `2` on the Wall / Marquee lens switcher — *"the resolution is a decision for step
 18 rather than a thing to guess at now"*.
 

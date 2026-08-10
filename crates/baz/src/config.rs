@@ -135,7 +135,7 @@ pub struct Config {
     /// a session: unlike panel visibility (`crate::panels`, deliberately not
     /// persisted) it has something to say on the first frame of every launch.
     pub replay_gain: ReplayGainSettings,
-    /// How the wall is arranged — A–Z / YEAR / GENRE / ADDED / PLAYED
+    /// How the wall is arranged — ARTIST / YEAR / GENRE / ADDED / PLAYED
     /// (ADR-0019).
     ///
     /// **View state, persisted**, which is the distinction ADR-0017 §1.3 draws

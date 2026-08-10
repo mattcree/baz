@@ -5828,10 +5828,7 @@ fn persist_group_key(key: GroupKey) {
 ///
 /// The shelves are contiguous slices of the flat list and `surviving` is in
 /// the same order, so this is one walk of the two lists together rather than
-/// a second filter that could disagree with the first. One function for both
-/// subjects, because the shape is the same shape and two copies of it would
-/// be two chances for the artists wall to lay out differently from the
-/// records wall.
+/// a second filter that could disagree with the first.
 fn surviving_per_shelf(surviving: &[usize], groups: &[GroupVm]) -> Vec<usize> {
     let mut seen = surviving.iter().peekable();
     groups

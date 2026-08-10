@@ -1472,7 +1472,7 @@ mod tests {
     /// `the_artist_key_is_the_flat_shelf_with_its_breaks_named` compares
     /// `albums()` against `shelves(GroupKey::Artist)` element for element, so
     /// the two hold the same albums in the same order and the only difference
-    /// is whether the A–Z breaks between them are stated.
+    /// is whether the breaks between them — one per artist — are stated.
     ///
     /// So it survives here, where the tests that were written against the flat
     /// list still want one, and `the_artist_key_flattens_to_the_wall_as_it_was`

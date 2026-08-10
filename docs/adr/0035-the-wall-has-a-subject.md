@@ -1,22 +1,29 @@
-# ADR-0035: The wall has a subject — `A–Z`, `ARTISTS`, and one word that was two things
+# ADR-0035: One word called artist — the key groups by artist, and the sixth word stops existing
 
-**Status**: accepted (2026-08-10) · **amends [ADR-0019](0019-group-keys.md)**
-(the first key's *label*; §1's projection promise is untouched and is the
-reason the sixth word is not a key) · **amends
-[ADR-0026](0026-iconography-and-the-strip-budget.md) §3** (the strip's budget
-is re-derived: `KEYS_W` 314 → 368 and everything downstream) · builds on the
-Artist place from [ADR-0022](0022-places-and-nothing-else.md)'s line of work and
-reuses [ADR-0024](0024-playlists.md) §A1's collage verbatim · closes the costed
-proposal at `docs/BACKLOG.md` · the frames are
-[`docs/design/impl/artists-wall/`](../design/impl/artists-wall/)
+**Status**: accepted (2026-08-10) · **amends [ADR-0019](0019-group-keys.md) §2**
+(the first key breaks on the artist, not on their initial; §1's projection
+promise is untouched and is the reason this is a key at all) · builds on the
+Artist place from [ADR-0022](0022-places-and-nothing-else.md)'s line of work ·
+closes the costed proposal at `docs/BACKLOG.md` · the frames are
+[`docs/design/impl/artists-grouped/`](../design/impl/artists-grouped/)
+
+> **This ADR was accepted twice on one day.** The first form is described
+> under *What was deleted* below and its frames are kept at
+> [`docs/design/impl/artists-wall/`](../design/impl/artists-wall/); it added a
+> sixth word to the strip and a second wall behind it. The owner looked at what
+> shipped and named the real defect, which was smaller and one level down. What
+> follows is the decision as it stands, not the first decision plus a
+> correction. The inventory at the end is there because the first form is on
+> `main`'s history and a reader who finds it deserves to know what happened to
+> it — and because what a change *removes* is the part of it worth recording.
 
 ## Context
 
 baz had **two things called artist**, and they were different things.
 
-- The wall's **`ARTIST` group key** breaks records on their album artist's
-  initial. Its shelves read `Unknown`, `#`, `A`, `C`, `Various`; its index rail
-  is the alphabet. It is a *sort*.
+- The wall's **`ARTIST` group key** broke records on their album artist's
+  *initial*. Its shelves read `Unknown`, `#`, `A`, `C`, `Various`; its index
+  rail was the alphabet. It was a *sort*.
 - The **Artist place** is a page about a person: their name, their records,
   reached from a record page's `Artist › Album` breadcrumb. It is a *subject*.
 
@@ -24,197 +31,247 @@ One word, one product, two meanings — and they are adjacent on screen, because
 the key's word sits in the strip above a wall you can press a tile in to reach
 the place.
 
-A costed proposal for fixing it was carried in `docs/BACKLOG.md`: an agent had
-built the whole thing before its branch was discarded as a duplicate, and its
-measurements were kept precisely so they would not need re-deriving. This ADR
-records what shipped, which is that proposal with its numbers re-measured
-against a main that had moved underneath them.
+The owner, in one line, on the first answer to that:
+
+> *"artists should be grouping stuff by artist not just alphabetically"*
+
+Which locates the defect exactly. The word was never the problem. **A key
+called `ARTIST` that groups by a letter is a key whose word is false**, and
+every way of fixing the *word* leaves that standing.
 
 ## Decision
 
-### 1. The key's word becomes `A–Z`; its code does not move
+### 1. `GroupKey::Artist` groups by the artist
 
-`GroupKey::Artist.label()` is `"A–Z"`. The variant is unchanged and
-`GroupKey::code()` is still `"artist"`.
+One shelf per artist, headed by their name. Scrolling the wall reads
+*Anne-Marie Puig* and her two records, then *Corvin* and his two, and so on.
 
-**Why `A–Z` and not `NAME`.** The key produces an alphabet: its headers are
-letters and its rail *is* the alphabet, so `A–Z` names the thing on screen.
-`NAME` would still read as a subject — the name *of what?* — and would collide
-with the Artist place again one release later.
+**The order of the shelves** is `ArtistKey`'s: unknowns first, then named
+artists case-folded alphabetically, then unnamed compilations. That is not a
+new rule — it is the order `Library::albums()` has sorted in since ADR-0008,
+and the order `Initial`'s variants were already in
+(ADR-0019 §2: *"variant order is shelf order"*). The two anonymous ends stay at
+the two ends for ADR-0008 §Consequences' reason: an unnamed compilation is not
+a `V` and an unreadable artist is not a `U`, so neither may land in the middle
+of the alphabet where a sentinel string's letters would have put it. The type
+is *literally* reused — `ShelfSort::Artist(ArtistKey)` — because "the order the
+artist shelves go in" and "the order the library's albums go in" are the same
+sentence, and two copies of one sentence eventually disagree.
 
-**Why the code cannot follow.** It is on-disk data. Every `config.toml` baz has
-ever written carries `group_key = "artist"`, and the type's own doc says never
-change an existing code. The rename is therefore a *label* change and the
-distinction between the two is now stated on `label()` itself, with the round
-trip pinned in `baz-core`'s tests: the label moved, the code did not, and no
-key's word is a subject the product has a place for.
+**The order within a shelf** is library order, which is album title,
+case-folded. Not release year. ADR-0019 §1 set that rule for every key and
+ADR-0019's *Deliberately deferred* explicitly held per-shelf ordering back as
+"a view decision with no evidence behind it yet"; nothing here is new evidence.
+A second ordering *within* a shelf would also be a second arrangement control
+that nothing on screen explains.
 
-### 2. `ARTISTS` is a sixth **word**, holding a `WallSubject` beside the key
+**The header is the spelling that sorts first**, not the first one found.
+Identity is case-folded, so `Alpha` and `alpha` are one artist with two
+spellings on disk, and the shelf's first album is an order — album title's — a
+retag can change. A minimum is a property of the set. This is the same rule and
+therefore the same answer as `views::artist::label`, which is what stops a
+header and the page it opens from naming one artist two ways; the front end
+re-takes the minimum over the albums it actually draws, because `build_album`
+drops albums with no readable track and a header must name the records under
+it.
 
-The strip's row is now `A–Z · YEAR · GENRE · ADDED · PLAYED · ARTISTS` — six
-words, one of them current, drawn identically. Pressing `ARTISTS` puts a wall
-of **artists** up: one tile per person the collection is filed under, shelved
-by initial.
+### 2. It is an ordinary group key, and that is the whole argument
 
-**It is not a sixth `GroupKey`.** ADR-0019 §1 promises that every key is a
-*projection* in which every album appears exactly once, and `baz-core` sweeps
-`GroupKey::ALL` to assert it. A key that shelved artists would **falsify that
-sweep rather than extend it**: it does not re-arrange the albums, it changes
-what a tile *is*. So the subject is a separate `vm::WallSubject` held beside
-`group_key` on the shelf and beside it in the config.
+ADR-0019 §1 promises that every key is a *projection* in which **every album
+appears exactly once**, and `baz-core` sweeps `GroupKey::ALL` asserting it.
+Grouping albums by their album artist satisfies that promise exactly — every
+album has exactly one album artist, including the ones whose files declare
+none. So there is no new machinery: no second projection, no subject held
+beside the key, no parallel search, no fork in the virtualizer.
 
-**It is not a lens.** The lens switcher is fixed at two words by the product's
-standing rules (`WALL` · `MARQUEE`) and both are spoken for.
+It is stronger than "satisfies": `shelves(GroupKey::Artist)` is **`albums()`
+with its breaks named**, element for element, which is the property ADR-0019 §1
+already asserted for this key and which survives unchanged
+(`the_artist_key_is_the_flat_shelf_with_its_breaks_named`). The finer headers
+name breaks that were already in the list.
 
-**What holding it separately buys, and it is visible.** The arrangement
-survives a trip through the artists and back. Leave the records on `YEAR`,
-press `ARTISTS`, press `YEAR`: the decades are exactly where they were — the
-frames are pixel-identical, which `capture.sh` diffs and reports. A sixth key
-would have had to forget the arrangement to show the artists and guess one to
-come back.
+### 3. `A–Z` does not survive, because it never had anything of its own
 
-Pressing one of the five *does* return the wall to records, and only in that
-direction: the five words are how records are arranged, so pressing one is
-asking for records. A `YEAR` that left the artists standing would be a word
-that did nothing.
+The obvious shape was to keep the letter grouping beside the artist grouping —
+six words, `A–Z` and `ARTIST`. It is not what shipped, and the reason is the
+identity above.
 
-Its accelerator is `6` — the digit the number row had already kept out of the
-query for exactly this, and `crate::keys` says so where it says the row is
-spent as a row.
+`A–Z` grouped albums by their artist's initial. `ARTIST` groups them by their
+artist and sorts those groups alphabetically. **Both are `albums()`**; they
+differ only in where the headers fall. So the two words would put the same
+records on the wall in the same order under two sets of headers, one of which
+is strictly coarser. That is not a second arrangement, it is a second *caption*
+for the first — and a strip with two words producing one traversal is the
+"two things called artist" defect wearing new clothes.
 
-### 3. One query, projected twice
+What `A–Z` was actually good for was **jumping to a letter**, which
+`03-interface-prior-art.md` R8 named as the single most concrete regression
+Sonos users reported. That is not in the headers and never was: it is the index
+rail, and the rail still speaks the alphabet (§5). Losing the letter headers
+loses no navigation.
 
-`Shelf::refilter` spends the search **once**, for the records, and then puts
-that same answer through `vm::visible_artists`. Two searches would give the two
-walls two chances to disagree about what a query means and would cost every
-keystroke double.
+The one thing that genuinely changes is **density**: a letter shelf packs many
+artists' records into one flowing grid, and a shelf per artist is taller, with
+more headers and more short last rows. That is a real difference and it is the
+one the owner asked for by name. It is also a difference in *packing* rather
+than in arrangement, and the product's answer to packing is the density detents
+(ADR-0028), which are one press away at the foot of the rail.
 
-The property, swept over every subset of a six-record collection rather than
-demonstrated on three examples: **an artist survives exactly when one of their
-records does.**
+### 4. Nothing was retired, so nothing needs migrating
 
-### 4. The artists wall costs the wall's machinery nothing
+`GroupKey::code()` is on-disk config data and the type's own doc says a code is
+never repurposed. Nothing here repurposes one. **The variant is the same
+variant and its code is still `"artist"`** — it names the same key, which
+arranges the same albums in the same order, and now says so. Every
+`config.toml` baz has ever written resolves, and resolves to the arrangement
+its word always claimed.
 
-The virtualizer, the sticky headers, the grid arithmetic and the index rail are
-untouched. The view asks *the wall* for its headers, its survivors and its
-per-shelf counts — `wall_groups`, `wall_visible`, `wall_visible_counts` — and
-only what a cell *is* forks. `rail::entries` is a pure function of the shelf
-headers, and this wall's headers are `Initial`s, so `rail::artist` indexes it
-verbatim: no branch, no new vocabulary, no state.
+The *label* moves back: `GroupKey::Artist.label()` is `"Artist"` again, so the
+strip reads `ARTIST · YEAR · GENRE · ADDED · PLAYED`. That word is now true —
+the key's shelves are artists, and pressing one opens the artist. The collision
+ADR-0035 was first written to solve has stopped existing rather than been
+renamed around.
 
-### 5. The tile is the album tile's anatomy and the playlist's collage
+The one key that *did* exist and does not now is the config's `wall_subject`
+(see *What was deleted*). Its migration is the shape of `config.rs`: every value is read by name,
+so a key nothing reads is not read, the arrangement beside it still resolves,
+and the next save writes the document without it. Asserted in
+`a_wall_subject_from_the_older_release_is_ignored_and_costs_nothing`.
 
-Same art edge inside the same mat, same two reserved caption lanes, same rule
-lane, same hit box — the two subjects share a wall and must share its
-arithmetic. The sleeve is `views::playlist_sleeve`: the 2 × 2 of the first
-four, the full-bleed single below four, the designed rest tile at zero, out of
-the same thumbnail cache with the same gradient while a decode is in flight. A
-second collage would be two renderings of one idea that could drift apart.
+### 5. The header is the door, and the rail is still the alphabet
 
-The caption's second line is the record count, where an album tile carries the
-artist and the year — the one fact about an artist the collection can state
-without going to a network, which is the same line `views::artist` already
-draws on the page.
+**The header is a door to `Place::Artist`.** The place stays — the record
+page's `Artist › Album` breadcrumb still needs it — and this is now how you
+reach it from the wall, which is the job the artist tiles were doing. Same
+`vm::artist_id`, so the two doors cannot land on different pages.
 
-What the tile deliberately lacks, each for a reason: **no hover options** (play,
-queue and add are answers about a *record*, and an artist has no equivalent
-verb yet), **no right-press menu** (`menu::Target` names records and lists),
-and **no opened rule** (`Shelf::opened` is *the record the wall was last left
-for* and it is one value; spending it on an artist would take the mark off the
-record it was built for).
+The type does not change: same face, same size, same tracking, same
+`paper_faint` ink, same line box, in the pinned copy as in the in-flow one —
+which is what keeps pinning a *position* rather than a *state* and is why it
+needs no transition. What it gains is `theme::word_button`'s ground under the
+pointer, the paint the breadcrumb already wears, on **the word's own box** and
+not the shelf's width: a band-wide ground would light the whole wall on a
+mouse-over, and a padded one would inset the header's ink off the block's left
+edge, which is law L1's line. Every other key's header stays inert text,
+because a decade is not a place.
 
-**The display spelling is the one that sorts first.** Identity is case-folded,
-so `Alpha` and `alpha` are one artist with two spellings on disk, and *first
-found* is an order a rescan can change. This is the same rule and the same
-answer as `views::artist::label`, which is what stops a tile and the page it
-opens from naming one artist two ways.
+**The rail is the alphabet**, still, and this needed checking rather than
+assuming. `rail::entries` is a pure function of the shelf headers, and with a
+shelf per artist there are far more headers than letters — a rail of one entry
+per header would be a list of every artist in a 36 px lane, which is the wall
+again. §7.2's premise for an index is that the reader can guess the vocabulary
+and aim at it without reading it, and the alphabet is that; four hundred names
+are not. So a letter is **the first artist filed under it**: press `C`, land on
+Corvin.
 
-An artist's quotations are their records in the **records' own alphabetical
-order**, not the wall's: the wall's order would make a collage depend on the
-active group key, so pressing `YEAR` would reshuffle every artist's artwork.
+This is exactly the shape `rail::genre` arrived at from the other direction and
+for the same reason, and it costs the rail no new vocabulary: `Initial::of` is
+still the whole mapping. It is asked of `baz-core`'s type rather than taken
+from the header's text, which is what keeps `Various Artists` and `Unknown
+Artist` at the two ends instead of filed under `V` and `U` in the middle of the
+letters.
 
-### 6. Artist tiles have their own art prefetch
+`Initial` itself is unchanged. It stopped being the wall's header and became
+the rail's letter, which is the one place a coarse bucket earns its keep.
 
-An artist's collage quotes records that are **not on the wall**, and the wall's
-visible range is the whole of the thumbnail guard. Without this an artist's
-collage draws the deterministic gradient until one of the records it quotes
-happens to scroll past on the *records* wall — real artwork by luck, which is
-verbatim the defect the playlist collages had and then the artist page had.
-This is the third surface to need the guard extended, and the last one that
-needs it.
+### 6. What one query buys, and what the wall's own guard was for
 
-It lives in `Shelf::request_visible_thumbs` rather than beside the artist
-page's own line in `App::request_offscreen_art`, and the reason is a
-correction to the plan: `request_offscreen_art` is keyed on the lane's stamps
-and the place, neither of which moves when the wall slides under the pointer.
-Only the wall's own range guard re-fires on a scroll, and the artists wall's
-range *is* that guard. `SLEEVE_CELLS` is named in `views` so the prefetch and
-the collage cannot ask for different numbers of cells.
+Two things the first form got right are kept, and one is deleted along with
+what needed it.
 
-### 7. The readouts follow the subject
+**Kept: one query, spent once.** `Shelf::refilter` spends the search once and
+the wall is that answer. There is no second projection to keep in step, because
+there is no second wall.
 
-Both wells — the lane's, and the strip's at the widths the lane cannot hold it
-— count whatever the wall is a wall of, through `Shelf::wall_counts` and
-`wall_noun`. `10 / 11` artists, and `11 artists · 206 tracks` as the strip
-well's placeholder. A figure counting albums beside a wall of people would be a
-readout describing a surface that is not on screen.
+**Kept: the min-spelling rule, agreeing with `views::artist::label`** (§1).
 
-**Home's `COLLECTION` footer is deliberately not touched.** Its four figures
-are a statistic about the whole collection, unnarrowed by any query, on a
-different place from the wall — and it already states records and artists side
-by side. There is no narrowed figure there to be wrong.
+**Deleted: the artists' own art prefetch.** It existed because an artist tile
+was a *collage* quoting records that were not on the wall, and the wall's
+visible range is the whole of the thumbnail guard — so without it a collage
+drew the deterministic gradient until one of the records it quoted happened to
+scroll past, which is real artwork by luck and was verbatim the defect the
+playlist collages and then the artist page had. There are no artist tiles now:
+every tile on the wall is a record, inside the range guard, and the guard is
+what it always was. `views::SLEEVE_CELLS` went with it; `views::playlist_sleeve`
+stays, because playlists still have sleeves.
 
-The **Songs** section is drawn only over a wall of records: it ends in an
-`Albums` rule naming the wall beneath it, and its rows are tracks. Two subjects
-stacked over a third would be the wall answering one query three ways.
+## What was deleted, and what the first form taught
 
-## The strip's budget, re-derived
+The first form, accepted the same day and shipped as `feat/artists-wall`:
+`GroupKey::Artist.label()` became `"A–Z"`; `ARTISTS` became a **sixth word** in
+the strip's row, holding a `vm::WallSubject` beside `group_key` and persisted
+beside it; pressing it put up a wall of **artist tiles**, one per person,
+shelved by `Initial`, each a `views::playlist_sleeve` collage, each opening
+`Place::Artist`.
 
-Measured in the bundled face at the metadata size, with `theme::tracked`
-applied, and asserted as const arithmetic. Six words come to **366.50 px**;
-`KEYS_W` is the next 4 px step, **368**.
+Its central argument was that a wall of artists *could not* be a key, because a
+wall showing no albums falsifies ADR-0019 §1's sweep. That argument was
+correct, and it was an argument about the wrong wall. **Grouping the records
+under their artist shows every album exactly once**, so the thing the owner
+actually wanted was a key all along, and everything the subject existed to
+carry could go:
 
-| | before | after |
+`vm::WallSubject`, `vm::ArtistVm`, `vm::ArtistShelfVm`, `vm::build_artists`,
+`vm::visible_artists`, the four parallel `artist_*` fields on `Shelf`,
+`Shelf::show_subject`, the five `wall_*` accessors that let one virtualizer
+serve two subjects, `views::shelf::artist_tile`, `views::SLEEVE_CELLS`,
+`views::top_bar::subject_word`, the `wall_counts` / `wall_noun` readout split in
+both wells, `Message::WallSubjectSelected`, the `6` accelerator, the
+`wall_subject` config key, and the artists' art prefetch. Net −1 200 lines.
+
+Two of its findings survive it and are worth stating as findings rather than as
+history. The **art-prefetch fix was correct and hard-won** — that collage-by-luck
+defect has now bitten three surfaces — and the reason it belonged on the wall's
+own range guard rather than beside `App::request_offscreen_art` still holds for
+anything that quotes off-screen artwork from a scrolling surface: only the
+wall's range guard re-fires on a scroll. And the **strip's budget is
+arithmetic in both directions**, which the sixth word proved by costing 54 px
+and this proves by giving all 54 back.
+
+## The strip's budget, back where it was
+
+Six words came to 366.50 px and `KEYS_W` was the next 4 px step, 368. Five
+words come to 312.99 and `KEYS_W` is 314, which is the number it was before
+this ADR's first form and is asserted as const arithmetic in `theme.rs`.
+
+| | with the sixth word | now |
 |---|---:|---:|
-| `KEYS_W` | 314 | **368** |
-| `LIBRARY_LINE` | 506 | **560** |
-| `SINGLE_LINE` = `TOP_BAR_SPLIT` | 778 | **832** |
-| `SINGLE_LINE_NO_WELL` | 554 | **608** |
+| `KEYS_W` | 368 | **314** |
+| `LIBRARY_LINE` | 560 | **506** |
+| `SINGLE_LINE` = `TOP_BAR_SPLIT` | 832 | **778** |
+| `SINGLE_LINE_NO_WELL` | 608 | **554** |
 | `WIDEST_LANE_STRIP` | 720 | 720 (unmoved) |
 | `TOP_BAR_FLOOR`, and the window's own minimum | 600 / 696 | 600 / 696 (unmoved) |
 
-Two things are worth stating plainly.
+`KEYS_SPENT` is kept at **0** rather than deleted, and stated as a difference
+from the historical 314 rather than as a literal: what a word costs the strip is
+the number the next one is argued against, and a constant that is zero says the
+row is where it started. The library line sits 94 px under the floor and the
+well-less regime has 166 px of headroom against the narrowest strip it can be
+handed — both asserted as differences of the movements that produced them, so
+neither can be right by coincidence.
 
-**The backlog's costing said the single-line-with-well band would cease to
-exist**, and it was right about the arithmetic and wrong about the world. It
-measured six words against a strip whose acts cluster was still 182 px wide and
-got a split of 926 — above the widest strip that can hold the well at all
-(`SIDEBAR_FLOOR − SIDEBAR_RAIL_W` = 904), which would have made the strip two
-lines at every width below the lane's floor. `Pull` was removed and `Shuffle`
-moved to the now-playing bar in between, taking `ACTS_W` from 182 to 88 and
-paying for the sixth word twice over. The split is 832, the band is 832…904,
-and it is now asserted **because it was predicted not to be there**.
-
-**The headroom is stated as a difference, not a number.** The acts cluster gave
-94 px back and the arrangement row has spent 54 of it, so the library line sits
-40 px under the floor — and the assertion is written that way, so it cannot be
-right by coincidence. Against the narrowest strip the well-less regime can be
-handed there are 112 px. Those two figures, and the 1.50 px between the six
-measured words and their declaration, are what a seventh word would come out
-of.
+The single-line-with-well band is **778…904**, which is wider than it has ever
+been. The costing in `docs/BACKLOG.md` predicted this band would cease to exist
+under six words; `Pull` and `Shuffle` left the acts cluster in between and paid
+for the word twice over, and then the word left too.
 
 ## Consequences
 
-- One word means one thing. `A–Z` is a sort and `Artist` is a subject, and the
-  strip no longer says the second when it means the first.
-- The wall has a subject as well as an arrangement, and they are independent
-  state that persists independently.
-- Artist **search** is still not built. ADR-0021 already ranks by which field a
-  query landed in and throws that information away at the album fold; the
-  artists wall narrows by *whose records matched*, which is a projection of the
-  record search rather than a search of its own. That is the honest reading of
-  what the query means today, and a real artist search is a larger change than
-  this one.
+- One word means one thing, because the two things became one thing. `ARTIST`
+  arranges the wall by artist and an artist's name on that wall opens their
+  place.
+- The wall has one subject again: records. Every tile is a record, so every
+  readout counts records and the noun is a literal rather than a call.
+- **A shelf is now often one short row.** A library of many one-record artists
+  is a taller wall with more headers than it was. That is the arrangement the
+  owner asked for, and the density detents are the control for how tightly it
+  hangs.
+- Artist **search** is still not built, unchanged from the first form: ADR-0021
+  ranks by which field a query landed in and throws that away at the album fold.
+  What narrows now is records, and an artist's shelf survives when one of their
+  records does — which is the same honest reading, arrived at with no
+  projection to maintain.
 - An artist is still not admitted to the returns lane, and the rule in
   `docs/BACKLOG.md` still says why: opening is not touching, and admitting one
   would mean a third store — *places I visited* — which `place.rs` refuses by

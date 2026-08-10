@@ -499,7 +499,7 @@ fn pinned_header(shelf: &Shelf, hang: Grid, run: Option<Run>, block: f32) -> Ele
 ///
 /// The key shelves one artist per shelf, so the header names a person the
 /// product has a *place* for — and that place is now reached by pressing their
-/// name on the wall, which is the door the artists wall's tiles used to be.
+/// name on the wall, which is the door the artist tiles used to be (ADR-0035).
 /// The breadcrumb on a record's page still opens the same place with the same
 /// [`crate::vm::artist_id`], so the two doors cannot land on different pages.
 ///
