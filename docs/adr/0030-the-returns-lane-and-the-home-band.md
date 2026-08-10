@@ -272,6 +272,42 @@
 > Frames and the measured row count:
 > [`docs/design/impl/home-stats/`](../design/impl/home-stats/README.md).
 
+> ## Fifth amendment (2026-08-10) — Home gains a third section: the **All songs** tile
+>
+> The owner: *"again I wanted the Play all, to be more like a tile on the home
+> screen, a special 'playlist'"* — and the *again* is recorded, because it had
+> been asked for before and not built (`docs/REQUESTS.md` exists for exactly
+> that failure).
+>
+> **§6's inventory gains a third item, and the addition is tested against §6's
+> own rule rather than waved through.** §6 admitted a fact to this surface only
+> if it was *true, stable and about your music rather than about your
+> behaviour*. `All songs` passes on all three: it is the collection, it changes
+> only when the library does, and there is nothing in it about what you played
+> or how often. It is also the one thing on the page that is **always** there —
+> `CONTINUE` is absent most of the time and `RECENTLY ADDED` needs a row's worth
+> of records — so it is what makes Home a door rather than a page that is
+> sometimes nearly empty.
+>
+> **It is a tile in the wall's own anatomy**, with a list's own collage sleeve
+> (ADR-0024 §A1), and it sits **second**: under `CONTINUE`, above
+> `RECENTLY ADDED`, ordered by how *particular* each offer is. The full argument
+> — including why the collage rather than a designed face, and why no section
+> rule over one tile — is at `crate::views::home`'s `all_songs_tile`.
+>
+> **The five refusals are untouched.** It is not a suggestion (it is your
+> collection, listed), not recently-played, not a playlist row duplicating the
+> lane, and carries no engagement statistic. §9.4's `YOUR LISTS` band is still
+> not built and this does not revive it: one tile for one list that has no file
+> is not an index of the lists that do.
+>
+> **The strip's `Play all` stays.** The two differ in **scope**, and each states
+> its own: `Play all` sits beside the query and the arrangement that decide the
+> wall and plays exactly what the wall shows; the tile is on a page that shows
+> no wall, so it plays the collection whole. `ACTS_W` is therefore untouched —
+> nothing left the strip, so the acts lane's budget does not move a third time
+> today.
+
 **Status**: accepted and shipped, as amended above (2026-08-09, 2026-08-10) · extracts the decisions of
 [`docs/design/13-everyday-flow.md`](../design/13-everyday-flow.md) §2, §3,
 §5 and §7 · **supersedes the product's no-resident-side-surfaces

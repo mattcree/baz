@@ -253,11 +253,12 @@ use std::time::Duration;
 
 use baz_core::protocol::{ConversionReason, Event, ReplayGainSource, SignalChain, VolumePath};
 use baz_core::replaygain::ReplayGainSettings;
+use baz_core::traversal::Traversal;
 use baz_core::volume::{MAX_POSITION, Volume};
 
 use crate::replaygain::{ReplayGain, ReplayGainReadout};
 use crate::theme;
-use crate::vm::{self, AlbumVm, QueueVm};
+use crate::vm::{self, AlbumVm, QueueItemVm, QueueVm};
 
 /// Whether a playback engine exists to talk to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -699,11 +700,28 @@ pub struct VolumeBar {
 /// stopped queue has not been played, it is waiting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueRowState {
-    /// Behind the playing row: the engine has been past it.
+    /// **The pass has been past it**: it played, or the listener jumped over
+    /// it. Behind the cursor *in the traversal*, which for an unshuffled run is
+    /// exactly "above the playing row" and for a shuffled one is the honest
+    /// answer a row number cannot give.
     Played,
     /// The row the engine last said it started.
     Playing,
-    /// Ahead of the playing row, or the whole queue when nothing is playing.
+    /// **The row that plays next** — the one fact this product would otherwise
+    /// be concealing.
+    ///
+    /// The next track is chosen in advance (it has to be: the engine decodes it
+    /// while the current one plays, `baz_core::traversal`), so baz *knows* it,
+    /// and knowing something about what you are listening to and not saying it
+    /// is not a thing this interface does. "Unknown" in *shuffle picks an
+    /// unknown next track* describes how the choice is made, not a secret kept
+    /// from the listener.
+    ///
+    /// With shuffle off it is the row under the playing one, which is where a
+    /// reader's eye already was — the mark costs that case nothing and makes
+    /// the shuffled case legible.
+    Next,
+    /// Still to come, and not next.
     Upcoming,
 }
 
@@ -729,10 +747,10 @@ pub struct QueueRow {
     /// draws at the head of the list.
     ///
     /// This is what keeps ADR-0014's *"albums are listed as albums, never
-    /// flattened"* true of a queue holding more than one of them. A shuffle
-    /// draws eight sleeves (`crate::shuffle`); without a break per record the
-    /// popover would print forty titles under one album's name, which is a
-    /// flattening the data had not done.
+    /// flattened"* true of a queue holding more than one of them. `Play all`
+    /// stacks the whole wall; without a break per record the popover would print
+    /// forty titles under one album's name, which is a flattening the data had
+    /// not done.
     pub head: Option<QueueHead>,
 }
 
@@ -837,11 +855,13 @@ pub struct SignalNote {
 ///
 /// `PartialEq` but not `Eq`: pointer geometry is measured in floating-point
 /// logical pixels, and there is no honest total equality over those.
+///
+/// It used to carry an `#[expect(clippy::struct_excessive_bools)]`, for a
+/// fourth flag: whether shuffle was on. Shuffle is a `Traversal` now
+/// (`baz_core::traversal`) rather than a boolean with a permutation behind it,
+/// which takes the count back under the lint's threshold — the kind of
+/// reduction that shows up as an allowance nobody needs any more.
 #[derive(Debug, Clone, PartialEq)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "four independent facts about four different things — whether a transport command               is in flight, whether the output is muted, whether a mute command is in flight,               and whether shuffle is on. The last is a standing decision the listener made and               the other three are moments in a conversation with the engine; folding any of them               together would invent states the player does not have"
-)]
 pub struct PlayerState {
     availability: Availability,
     phase: Phase,
@@ -903,38 +923,44 @@ pub struct PlayerState {
     /// the one place engine events are allowed to change anything. The
     /// vocabulary and the arithmetic live in [`crate::replaygain`].
     replay_gain: ReplayGain,
-    /// **Whether shuffle is on** — the owner's decision, 2026-08-10:
-    /// *"can you make shuffle a property of the player i.e. toggle on/off."*
+    /// **The order the run is walked in** — the owner's decision, 2026-08-10:
+    /// *"can you make shuffle a property of the player i.e. toggle on/off"*,
+    /// and later the same day *"shuffle as a concept is more about going to an
+    /// unknown next track rather than actually mutating the track list"*.
     ///
-    /// A **standing decision**, not session state: persisted in `config.toml`
-    /// beside ReplayGain, the group key and the density, seeded at start-up by
-    /// [`Self::seed_shuffle`] for [`Self::seed_volume`]'s reason. Nothing about
-    /// starting, stopping or skipping a track touches it, so it is deliberately
-    /// absent from [`Self::reset_progress`] and from [`Self::engine_closed`].
+    /// A **standing decision**, not session state: the *mode* is persisted in
+    /// `config.toml` beside ReplayGain, the group key and the density, and
+    /// seeded at start-up by [`Self::seed_traversal`] for
+    /// [`Self::seed_volume`]'s reason. Nothing about starting, stopping or
+    /// skipping a track touches it, so it is deliberately absent from
+    /// [`Self::reset_progress`] and from [`Self::engine_closed`].
     ///
     /// It is a property of the **player** rather than of a list, which is why
     /// it lives here: it governs `Play` on a record, `Play all`, a playlist's
     /// `Play` and a track click alike, and a flag hung on any one of those
     /// would have to be four flags that agreed.
     ///
-    /// **The engine does not know about it.** ADR-0023 §4 keeps the queue
-    /// dumb — no shuffle flag, no repeat flag, no continuation policy — and
-    /// that is untouched: shuffle is expressed entirely as the *order of the
-    /// paths* in `SetQueue`/`UpdateQueue`, which is what its amendment says.
-    shuffle: bool,
-    /// **The order the current run would play in with shuffle off**, or `None`
-    /// when there is no such order to go back to.
+    /// **The engine holds the same value**, which is the change of 2026-08-10:
+    /// shuffle was a permutation this process applied to the paths it sent, and
+    /// is now a traversal the engine is told about
+    /// ([`Command::SetTraversal`](baz_core::protocol::Command::SetTraversal)),
+    /// because only the engine knows the next track early enough to decode it
+    /// (`baz_core::traversal`). What is kept here is a mirror of engine state,
+    /// on exactly the terms [`Self::volume`] is.
+    traversal: Traversal,
+    /// [`Self::traversal`] resolved against the queue this process last sent:
+    /// the run's positions, in the order they will play.
     ///
-    /// `Some` exactly while the run in progress was arranged by this session's
-    /// shuffle and has not since been re-ordered by hand. Set with the run
-    /// ([`Self::note_shuffled_run`]), cleared by every other `SetQueue`
-    /// ([`Self::note_queue_sent`]) and by a hand reorder
-    /// ([`Self::forget_source_order`]).
+    /// The same permutation the engine computed, from the same seed through the
+    /// same public function — which is the whole reason
+    /// [`Traversal::play_order`] is public. **Baz says what is next because it
+    /// knows what is next**: this is what the run column's marks and the bar's
+    /// continuation are read from, and there is no second answer for them to
+    /// disagree with.
     ///
-    /// Inert: see [`crate::shuffle::SourceOrder`] for why it is a list of paths
-    /// and not an object, which is what keeps ADR-0023 §1's refusal of a live
-    /// context intact.
-    source_order: Option<crate::shuffle::SourceOrder>,
+    /// A permutation of `0..queue.len()`, kept in step by every method that
+    /// changes either input ([`Self::replan`]).
+    order: Vec<usize>,
 }
 
 impl PlayerState {
@@ -974,51 +1000,90 @@ impl PlayerState {
             // with the engine's own reading at start-up, for `seed_volume`'s
             // reason.
             replay_gain: ReplayGain::default(),
-            // Off, and no run to remember an order for. `seed_shuffle`
-            // replaces the first from the config at start-up, for
-            // `seed_volume`'s reason.
-            shuffle: false,
-            source_order: None,
+            // In order, over no run at all. `seed_traversal` replaces it from
+            // the config at start-up, for `seed_volume`'s reason.
+            traversal: Traversal::default(),
+            order: Vec::new(),
         }
     }
 
-    /// Seed the shuffle property from `config.toml` at start-up, so the
-    /// control is lit on the first frame rather than on the first press —
+    /// Seed the traversal from `config.toml` at start-up, so the control is lit
+    /// on the first frame rather than on the first press —
     /// [`Self::seed_volume`]'s reason, for a standing decision that is baz's
     /// rather than the engine's.
-    pub fn seed_shuffle(&mut self, shuffle: bool) {
-        self.shuffle = shuffle;
+    pub fn seed_traversal(&mut self, traversal: Traversal) {
+        self.traversal = traversal;
+        self.replan();
     }
 
-    /// Whether shuffle is on.
+    /// Whether shuffle is on — what the bar's crossed arrows ask.
     #[must_use]
     pub fn shuffle(&self) -> bool {
-        self.shuffle
+        self.traversal.is_shuffled()
     }
 
-    /// Turn shuffle on or off, and answer with the value that now stands.
-    pub fn set_shuffle(&mut self, shuffle: bool) -> bool {
-        self.shuffle = shuffle;
-        shuffle
+    /// Record the traversal the engine has been sent, and re-derive the plan.
+    pub fn note_traversal(&mut self, traversal: Traversal) {
+        self.traversal = traversal;
+        self.replan();
     }
 
-    /// The order the run in progress would play in with shuffle off, if there
-    /// is one to go back to.
-    #[must_use]
-    pub fn source_order(&self) -> Option<&[PathBuf]> {
-        self.source_order.as_deref()
+    /// Re-derive [`Self::order`] from the traversal and the run's length — the
+    /// front-end half of the engine's own `replan`, and the same function.
+    fn replan(&mut self) {
+        let len = self.queue.as_ref().map_or(0, QueueVm::len);
+        self.order = self.traversal.play_order(len);
     }
 
-    /// **A hand reorder restates the order**, so the retained one is dropped.
+    /// **Where the pass begins** — the queue position a plain `Play` starts at.
     ///
-    /// A stepper press or a drag is the listener saying *this order*, in as
-    /// many words. Turning shuffle off afterwards leaves the run exactly as it
-    /// stands rather than undoing the drag — the hand beats the machine's
-    /// memory, and an "off" that silently discarded a reposition would be the
-    /// worse surprise of the two. Recorded in ADR-0023's amendment as one of
-    /// the two things that invalidate a source order.
-    pub fn forget_source_order(&mut self) {
-        self.source_order = None;
+    /// Zero for an unshuffled run, which is what "from the top" always meant;
+    /// the bag's first entry otherwise. The engine parks at the same place for
+    /// the same reason, so this is a reading rather than an instruction.
+    #[must_use]
+    pub fn first_of_the_pass(&self) -> usize {
+        self.order.first().copied().unwrap_or(0)
+    }
+
+    /// **Where each queue position sits in the pass**: the inverse of
+    /// [`Self::order`].
+    ///
+    /// Built once per reading rather than kept as a second field, because two
+    /// vectors that have to agree are two vectors that can disagree — and the
+    /// cost is one linear pass over a list the caller is about to walk anyway.
+    fn slots(&self) -> Vec<usize> {
+        let mut slots = vec![0; self.order.len()];
+        for (slot, &at) in self.order.iter().enumerate() {
+            if let Some(cell) = slots.get_mut(at) {
+                *cell = slot;
+            }
+        }
+        slots
+    }
+
+    /// **How far through the pass the run is, and what is still to come** —
+    /// the reading every "what is next" surface is drawn from.
+    ///
+    /// Answers the playing entry's *slot* (not its row: under a shuffled pass
+    /// the two differ, and it is the slot that means "the third of twelve") and
+    /// the entries after it **in the order they will play**. `None` for a run
+    /// nothing has started, whose whole pass is still to come.
+    fn pass(&self) -> (Option<usize>, Vec<&QueueItemVm>) {
+        let Some(queue) = self.queue.as_ref() else {
+            return (None, Vec::new());
+        };
+        let cursor = self
+            .playing_row()
+            .and_then(|row| self.order.iter().position(|&at| at == row));
+        let from = cursor.map_or(0, |slot| slot + 1);
+        let rest = self
+            .order
+            .get(from..)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|&at| queue.items.get(at))
+            .collect();
+        (cursor, rest)
     }
 
     /// Seed the volume from [`EngineHandle::volume`](baz_core::engine::EngineHandle::volume)
@@ -1174,34 +1239,10 @@ impl PlayerState {
         self.queue = Some(queue);
         self.queue_position = None;
         self.failed = 0;
-        // A new run is a new order, and it has no earlier one to return to.
-        // Every gesture that *did* arrange one says so through
-        // [`Self::note_shuffled_run`] instead.
-        self.source_order = None;
-    }
-
-    /// Record a queue the shuffle property arranged, with the order it would
-    /// have played in unshuffled.
-    ///
-    /// [`Self::note_queue_sent`] with the one extra fact, and a separate method
-    /// rather than an argument because the pairing must not be possible to
-    /// forget: a shuffled run recorded through the plain call would be a run
-    /// the toggle could not turn off, which is the failure mode this whole
-    /// feature is judged on.
-    pub fn note_shuffled_run(&mut self, queue: QueueVm, source: crate::shuffle::SourceOrder) {
-        self.note_queue_sent(queue);
-        self.source_order = Some(source);
-    }
-
-    /// Retain a source order against the run already recorded — the toggle
-    /// turning shuffle **on** mid-run, where the queue is *edited* rather than
-    /// replaced ([`Self::note_queue_edited`]) and so the position must survive.
-    ///
-    /// Separate from [`Self::note_shuffled_run`] for exactly that reason: one
-    /// starts a run, the other re-arranges the one that is sounding, and
-    /// ADR-0014's bargain is the difference between them.
-    pub fn retain_source_order(&mut self, source: crate::shuffle::SourceOrder) {
-        self.source_order = Some(source);
+        // A new run is a new list, so the pass over it has a new length. The
+        // *order* is untouched: it is the run the gesture built, and nothing
+        // here permutes it.
+        self.replan();
     }
 
     /// Record an *edit* accepted by the engine's channel
@@ -1228,6 +1269,10 @@ impl PlayerState {
     /// run, and the files that failed in this one still failed.
     pub fn note_queue_edited(&mut self, queue: QueueVm) {
         self.queue = Some(queue);
+        // An edit can change the run's length, and the pass is a permutation of
+        // its positions — so the plan is re-derived here exactly as the engine
+        // re-derives its own on the `UpdateQueue` that carried the edit.
+        self.replan();
     }
 
     /// Record that a transport command (Play/Pause/Next) was accepted by
@@ -1707,6 +1752,15 @@ impl PlayerState {
     pub fn queue_list(&self) -> Option<QueueList> {
         let queue = self.queue.as_ref()?;
         let playing = self.playing_row();
+        // **The list keeps the order the gesture gave it, always.** What the
+        // traversal decides is which row is marked, never where a row sits —
+        // that is the whole of the owner's *"shuffle… rather than actually
+        // mutating the track list"*, drawn.
+        let (cursor, rest) = self.pass();
+        let slots = self.slots();
+        // What plays next: the slot after the cursor, or the first slot of the
+        // pass when nothing has started yet.
+        let next = cursor.map_or(0, |slot| slot + 1);
         let rows = queue
             .items
             .iter()
@@ -1716,9 +1770,10 @@ impl PlayerState {
                 title: item.title.clone(),
                 artist: item.artist.clone(),
                 duration: item.duration.map(vm::format_duration).unwrap_or_default(),
-                state: match playing {
-                    Some(current) if current == index => QueueRowState::Playing,
-                    Some(current) if index < current => QueueRowState::Played,
+                state: match (playing, slots.get(index).copied()) {
+                    (Some(current), _) if current == index => QueueRowState::Playing,
+                    (_, Some(slot)) if slot == next => QueueRowState::Next,
+                    (_, Some(slot)) if cursor.is_some_and(|at| slot < at) => QueueRowState::Played,
                     _ => QueueRowState::Upcoming,
                 },
                 // A record's name where the record begins — and never on the
@@ -1741,7 +1796,13 @@ impl PlayerState {
         Some(QueueList {
             album: queue.album.clone(),
             artist: queue.artist.clone(),
-            summary: queue_summary(queue, playing, self.elapsed_ms),
+            summary: queue_summary(
+                queue,
+                cursor,
+                playing.and_then(|row| queue.items.get(row)),
+                &rest,
+                self.elapsed_ms,
+            ),
             rows,
         })
     }
@@ -1772,7 +1833,9 @@ impl PlayerState {
     #[must_use]
     pub fn continuation_note(&self) -> Option<String> {
         let queue = self.queue.as_ref()?;
-        continuation(queue, self.playing_row()?, self.elapsed_ms)
+        let current = queue.items.get(self.playing_row()?)?;
+        let (_, rest) = self.pass();
+        continuation(current, &rest, self.elapsed_ms)
     }
 
     /// The queue this process handed the engine, if it has handed it one.
@@ -2242,26 +2305,32 @@ impl PlayerState {
 /// (`docs/design/09-implicit-playlists.md` §6, §10). Origin, never a live
 /// link: the name keeps leading through every edit, and goes only when a
 /// different play gesture replaces the run.
-fn queue_summary(queue: &QueueVm, playing: Option<usize>, elapsed_ms: u64) -> String {
-    let reading = match playing {
-        None => {
-            let count = match queue.len() {
-                1 => "1 track".to_owned(),
-                n => format!("{n} tracks"),
-            };
-            let total = queue.total_time();
-            if total == Duration::ZERO {
-                count
-            } else {
-                format!("{count} · {}", vm::format_duration(total))
-            }
+fn queue_summary(
+    queue: &QueueVm,
+    cursor: Option<usize>,
+    current: Option<&QueueItemVm>,
+    rest: &[&QueueItemVm],
+    elapsed_ms: u64,
+) -> String {
+    let reading = if let (Some(slot), Some(current)) = (cursor, current) {
+        // **How far through the pass**, not which row: `3 of 12` means "the
+        // third of twelve I will hear", and under a shuffled pass a row number
+        // answers a different question nobody asked.
+        let count = format!("{} of {}", slot + 1, queue.len());
+        match left_note(Some(current), rest, elapsed_ms) {
+            None => count,
+            Some(left) => format!("{count} · {left}"),
         }
-        Some(index) => {
-            let count = format!("{} of {}", index + 1, queue.len());
-            match left_note(queue, index, elapsed_ms) {
-                None => count,
-                Some(left) => format!("{count} · {left}"),
-            }
+    } else {
+        let count = match queue.len() {
+            1 => "1 track".to_owned(),
+            n => format!("{n} tracks"),
+        };
+        let total = queue.total_time();
+        if total == Duration::ZERO {
+            count
+        } else {
+            format!("{count} · {}", vm::format_duration(total))
         }
     };
     match &queue.provenance {
@@ -2284,17 +2353,20 @@ fn queue_summary(queue: &QueueVm, playing: Option<usize>, elapsed_ms: u64) -> St
 /// clock reading rather than a property of the list — clamped so a progress
 /// report that lands past a track's declared length cannot go negative, and
 /// absent rather than `0:00` when the scan read no durations to add up.
-fn left_note(queue: &QueueVm, index: usize, elapsed_ms: u64) -> Option<String> {
-    let ahead: Duration = queue
-        .items
-        .iter()
-        .skip(index + 1)
-        .filter_map(|item| item.duration)
-        .sum();
+fn left_note(
+    current: Option<&QueueItemVm>,
+    rest: &[&QueueItemVm],
+    elapsed_ms: u64,
+) -> Option<String> {
+    // **What is ahead in the pass**, which under an unshuffled run is the tail
+    // of the list and under a shuffled one is a different set of the same size.
+    // Either way it is what the listener has left to hear, which is what the
+    // figure claims to be.
+    let ahead: Duration = rest.iter().filter_map(|item| item.duration).sum();
     // The playing track counts only for what is left *of it*. The engine's
     // last confirmed position is the only honest source for that, and it is
     // clamped so a report that arrives a beat past the end cannot go negative.
-    let current = queue.items.get(index).and_then(|item| item.duration);
+    let current = current.and_then(|item| item.duration);
     let remaining = match current {
         Some(track) => ahead + track.saturating_sub(Duration::from_millis(elapsed_ms)),
         None => ahead,
@@ -2376,14 +2448,17 @@ impl<'a> Entry<'a> {
 /// of queue` — the product's standing rules makes silence a feature, and the interface
 /// announcing the silence it promised would be the announcement, not the
 /// silence.
-fn continuation(queue: &QueueVm, index: usize, elapsed_ms: u64) -> Option<String> {
-    let tail = queue.items.get(index + 1..)?;
+fn continuation(current: &QueueItemVm, tail: &[&QueueItemVm], elapsed_ms: u64) -> Option<String> {
     // How much of the record now playing is still ahead. Only a *named* album
     // can be continued: two adjacent loose songs are two things, not a run.
-    let playing_album = queue
-        .items
-        .get(index)
-        .and_then(|item| item.album.as_deref());
+    //
+    // `tail` is **the pass's remainder**, so this generalises rather than
+    // changes: an unshuffled run through one record still reads `then 9 more`,
+    // and a shuffled pass over that same record reads it too — every entry left
+    // is still that record's, whatever order they come in. A shuffled pass over
+    // a mixed run stops sharing a title after the first entry and falls into
+    // the counted forms below, which is the truth about it.
+    let playing_album = current.album.as_deref();
     let rest = playing_album.map_or(0, |album| {
         tail.iter()
             .take_while(|item| item.album.as_deref() == Some(album))
@@ -2427,7 +2502,7 @@ fn continuation(queue: &QueueVm, index: usize, elapsed_ms: u64) -> Option<String
             }
         }
     };
-    Some(match left_note(queue, index, elapsed_ms) {
+    Some(match left_note(Some(current), tail, elapsed_ms) {
         None => format!("then {what}"),
         Some(left) => format!("then {what} · {left}"),
     })
@@ -5058,16 +5133,14 @@ mod tests {
     fn shuffle_is_off_until_something_says_otherwise() {
         let mut player = PlayerState::new(Availability::Ready);
         assert!(!player.shuffle(), "silence and order are both the default");
-        assert_eq!(player.source_order(), None);
 
         // Seeded from `config.toml` at start-up, so the control is lit on the
         // first frame rather than on the first press.
-        player.seed_shuffle(true);
+        player.seed_traversal(Traversal::Shuffled { seed: 9 });
         assert!(player.shuffle());
-
-        // The toggle answers with what now stands.
-        assert!(!player.set_shuffle(false));
-        assert!(player.set_shuffle(true));
+        player.note_traversal(Traversal::InOrder);
+        assert!(!player.shuffle());
+        player.note_traversal(Traversal::Shuffled { seed: 9 });
         assert!(player.shuffle());
 
         // **Nothing about playback touches it.** A track starting, the queue
@@ -5082,44 +5155,102 @@ mod tests {
         assert!(player.shuffle());
     }
 
-    /// **The run and its source order are recorded together, or not at all.**
+    /// **The run keeps the order it was given, whatever the traversal says** —
+    /// the owner's decision of 2026-08-10, asserted where the run is recorded.
     ///
-    /// The failure this rules out is the one the whole feature is judged on: a
-    /// run that was shuffled and has no order to go back to, so the toggle
-    /// turns off and nothing happens.
+    /// This is the test that replaced *"a shuffled run always carries the order
+    /// it would have played in"*. That property existed to make the toggle's
+    /// **off** possible, and it is not needed because off is not a restoration
+    /// any more: the list was never permuted, so there is nothing to put back.
+    /// What is asserted instead is the stronger thing — that no traversal, in
+    /// any order, over any number of passes, moves a single row.
     #[test]
-    fn a_shuffled_run_always_carries_the_order_it_would_have_played_in() {
+    fn the_run_is_never_permuted_by_a_traversal() {
         let mut player = PlayerState::new(Availability::Ready);
-        let order = crate::shuffle::source_order(&geogaddi_queue());
-        assert!(!order.is_empty(), "the fixture has tracks to order");
+        let sent = queue_of(6);
+        let rows: Vec<String> = sent.items.iter().map(|item| item.title.clone()).collect();
+        player.note_queue_sent(sent);
+        for traversal in [
+            Traversal::Shuffled { seed: 4 },
+            Traversal::Shuffled { seed: 5 },
+            Traversal::InOrder,
+            Traversal::Shuffled { seed: 6 },
+        ] {
+            player.note_traversal(traversal);
+            let list = player.queue_list().expect("a run was sent");
+            let drawn: Vec<String> = list.rows.iter().map(|row| row.title.clone()).collect();
+            assert_eq!(drawn, rows, "{traversal:?} moved a row");
+            // …and the pass is a permutation of that list, every time.
+            let mut visited: Vec<usize> = player.order.clone();
+            visited.sort_unstable();
+            assert_eq!(visited, (0..rows.len()).collect::<Vec<_>>());
+        }
+    }
 
-        player.note_shuffled_run(geogaddi_queue(), order.clone());
-        assert_eq!(player.source_order(), Some(order.as_slice()));
+    /// **Baz says what is next, in both modes** — the row that plays next is
+    /// marked, and the rows the pass has been past are dimmed.
+    ///
+    /// With shuffle off this is the row under the playing one, which costs the
+    /// ordinary case nothing. With it on it is the only thing on screen that
+    /// could tell a listener where the run is going, and the product does not
+    /// conceal what it knows.
+    #[test]
+    fn the_run_column_marks_what_plays_next() {
+        let mut player = PlayerState::new(Availability::Ready);
+        player.note_queue_sent(queue_of(6));
+        let len = player.queue().expect("a run").len();
 
-        // **An ordinary run replaces it with nothing.** A new gesture has no
-        // memory of the last one's order, and leaving the old one standing
-        // would let the toggle put a run back into an order that was never its.
-        player.note_queue_sent(geogaddi_queue());
-        assert_eq!(
-            player.source_order(),
-            None,
-            "a plain SetQueue left the previous run's order standing"
+        // Nothing started yet: the whole pass is to come, and its first entry
+        // is the one that is next.
+        let list = player.queue_list().expect("a run");
+        assert_eq!(list.rows[0].state, QueueRowState::Next);
+        assert!(
+            list.rows[1..]
+                .iter()
+                .all(|row| row.state == QueueRowState::Upcoming)
         );
 
-        // Retained against the run already recorded — the toggle turning
-        // shuffle *on* mid-run, where the queue is edited rather than replaced.
-        player.retain_source_order(order.clone());
-        assert_eq!(player.source_order(), Some(order.as_slice()));
-        player.note_queue_edited(geogaddi_queue());
+        // Playing the first row: the second is next, and nothing is behind.
+        player.apply(&started("/m/boc/geogaddi/01.flac", 0), &albums());
+        let list = player.queue_list().expect("a run");
         assert_eq!(
-            player.source_order(),
-            Some(order.as_slice()),
-            "an edit is not a new run: the order it can return to survives it"
+            states(&list)[..3],
+            [
+                QueueRowState::Playing,
+                QueueRowState::Next,
+                QueueRowState::Upcoming
+            ]
         );
 
-        // **A hand reorder restates the order**, so the retained one goes.
-        player.forget_source_order();
-        assert_eq!(player.source_order(), None);
+        // **Shuffled, the marks follow the pass rather than the list.** The
+        // rows do not move; the row that is next is wherever the bag says.
+        let traversal = Traversal::Shuffled { seed: 11 };
+        player.note_traversal(traversal);
+        let order = traversal.play_order(len);
+        let cursor = order.iter().position(|&at| at == 0).expect("row 0 is in");
+        let list = player.queue_list().expect("a run");
+        for (row, state) in list.rows.iter().enumerate() {
+            let slot = order.iter().position(|&at| at == row).expect("in the bag");
+            let want = if row == 0 {
+                QueueRowState::Playing
+            } else if slot == cursor + 1 {
+                QueueRowState::Next
+            } else if slot < cursor {
+                QueueRowState::Played
+            } else {
+                QueueRowState::Upcoming
+            };
+            assert_eq!(state.state, want, "row {row} at slot {slot}");
+        }
+        // Exactly one row is next, and exactly one is playing.
+        let list = player.queue_list().expect("a run");
+        assert_eq!(
+            list.rows
+                .iter()
+                .filter(|row| row.state == QueueRowState::Next)
+                .count(),
+            1
+        );
     }
 
     fn states(list: &QueueList) -> Vec<QueueRowState> {
@@ -5137,9 +5268,9 @@ mod tests {
         );
     }
 
-    /// A queue that has been sent but not started lists everything as
-    /// upcoming, numbered from one, and counts rather than claiming a
-    /// position — "0 of 12" is not a place.
+    /// A queue that has been sent but not started marks its first row as the
+    /// one that plays next, lists the rest as upcoming, numbers from one, and
+    /// counts rather than claiming a position — "0 of 12" is not a place.
     #[test]
     fn a_queued_but_unstarted_queue_lists_everything_as_upcoming() {
         let mut player = PlayerState::new(Availability::Ready);
@@ -5164,7 +5295,8 @@ mod tests {
         assert_eq!(list.rows[0].duration, "3:20");
         assert_eq!(
             states(&list),
-            vec![QueueRowState::Upcoming, QueueRowState::Upcoming]
+            vec![QueueRowState::Next, QueueRowState::Upcoming],
+            "nothing has started, so the head of the pass is what plays next"
         );
         assert_eq!(player.queued(), 2);
         assert!(player.play_pause_enabled(), "a queue makes Play meaningful");
@@ -5218,10 +5350,10 @@ mod tests {
     /// **A queue holding several records lists them as records** — one name
     /// where each begins, and none where a record simply continues.
     ///
-    /// The state a shuffle puts this surface in (`crate::shuffle` draws eight
-    /// sleeves), and the thing ADR-0014's *"albums are listed as albums, never
-    /// flattened"* actually costs: without a break per record the popover would
-    /// print forty titles under one album's name.
+    /// The state `Play all` puts this surface in, and the thing ADR-0014's
+    /// *"albums are listed as albums, never flattened"* actually costs: without
+    /// a break per record the popover would print forty titles under one
+    /// album's name.
     #[test]
     fn a_queue_of_several_records_names_each_one_where_it_begins() {
         let queue = QueueVm {
@@ -5273,8 +5405,8 @@ mod tests {
     }
 
     /// The marking comes from `TrackStarted` and moves with it: everything
-    /// behind the playing row is played, everything ahead is upcoming, and the
-    /// summary counts the position.
+    /// behind the playing row is played, the row after it is next, everything
+    /// beyond that is upcoming, and the summary counts the position.
     #[test]
     fn the_playing_row_is_marked_from_track_started_and_moves_with_it() {
         let albums = albums();
@@ -5285,7 +5417,7 @@ mod tests {
         let list = player.queue_list().expect("a queue");
         assert_eq!(
             states(&list),
-            vec![QueueRowState::Playing, QueueRowState::Upcoming]
+            vec![QueueRowState::Playing, QueueRowState::Next]
         );
         // Nothing has elapsed yet, so what is left is the whole queue.
         assert_eq!(list.summary, "1 of 2 · 6:40 left");
@@ -5822,7 +5954,7 @@ mod tests {
         );
         assert_eq!(
             states(&player.queue_list().expect("a queue")),
-            vec![QueueRowState::Playing, QueueRowState::Upcoming],
+            vec![QueueRowState::Playing, QueueRowState::Next],
             "what sounded second now reads first, still marked; nothing is 'played'"
         );
 
@@ -5868,7 +6000,7 @@ mod tests {
             states(&list),
             vec![
                 QueueRowState::Playing,
-                QueueRowState::Upcoming,
+                QueueRowState::Next,
                 QueueRowState::Upcoming
             ]
         );
@@ -5914,7 +6046,8 @@ mod tests {
         assert_eq!(player.playing_row(), None);
         assert_eq!(
             states(&player.queue_list().expect("a queue")),
-            vec![QueueRowState::Upcoming, QueueRowState::Upcoming]
+            vec![QueueRowState::Next, QueueRowState::Upcoming],
+            "nothing is playing, so what is next is the head of the pass again"
         );
     }
 
@@ -5958,7 +6091,7 @@ mod tests {
         let list = player.queue_list().expect("a queue");
         assert_eq!(
             states(&list),
-            vec![QueueRowState::Upcoming, QueueRowState::Upcoming],
+            vec![QueueRowState::Next, QueueRowState::Upcoming],
             "an unknown track must not mark the row its position points at"
         );
         assert_eq!(list.summary, "2 tracks · 6:40");
@@ -5996,8 +6129,8 @@ mod tests {
                 .expect("the queue survives the session that played it");
             assert_eq!(
                 states(&list),
-                vec![QueueRowState::Upcoming, QueueRowState::Upcoming],
-                "{ending:?} left a row marked"
+                vec![QueueRowState::Next, QueueRowState::Upcoming],
+                "{ending:?} left a row playing"
             );
             assert_eq!(list.summary, "2 tracks · 6:40");
             assert_eq!(player.queued(), 2);
@@ -6017,7 +6150,7 @@ mod tests {
         let list = player.queue_list().expect("the new queue");
         assert_eq!(list.album.as_deref(), Some("Untitled"));
         assert_eq!(list.rows.len(), 1);
-        assert_eq!(states(&list), vec![QueueRowState::Upcoming]);
+        assert_eq!(states(&list), vec![QueueRowState::Next]);
         assert_eq!(
             list.summary, "1 track · 3:20",
             "one track is a track, not tracks"
@@ -6038,7 +6171,8 @@ mod tests {
         let list = player.queue_list().expect("what we queued is still true");
         assert_eq!(
             states(&list),
-            vec![QueueRowState::Upcoming, QueueRowState::Upcoming]
+            vec![QueueRowState::Next, QueueRowState::Upcoming],
+            "no engine, no marking — but the run this process sent still has a head"
         );
     }
 

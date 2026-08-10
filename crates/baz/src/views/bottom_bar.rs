@@ -403,7 +403,7 @@ fn back_to_playing(
                 .width(Length::Fill)
                 .padding(0)
                 .style(move |_theme, status| theme::now_playing_text(room, status))
-                .on_press(Message::ShowPlayingAlbum),
+                .on_press(Message::ShowNowPlaying),
             text("Go to the record that is playing")
                 .size(theme::SIZE_CAPTION)
                 .line_height(theme::LEADING_CAPTION),
@@ -760,7 +760,10 @@ fn glyph_button(
 ///
 /// The tooltip says which way the press goes, because a two-state glyph with
 /// one name is the thing a first-timer cannot form an expectation about
-/// (doc 11 §5 P6.2).
+/// (doc 11 §5 P6.2). Both readings are about **what plays next** and neither
+/// mentions the list, because the list is not what this control touches: the
+/// run keeps its own order in both positions, and the run column goes on
+/// showing it (`baz_core::traversal`).
 fn shuffle_toggle(player: &PlayerState, ink: Ink) -> Element<'static, Message> {
     let room = theme::active();
     let on = player.shuffle();
@@ -795,9 +798,9 @@ fn shuffle_toggle(player: &PlayerState, ink: Ink) -> Element<'static, Message> {
     let named = tooltip(
         control,
         text(if on {
-            "Shuffle is on \u{2014} turn it off and the run goes back to its own order"
+            "Shuffle is on \u{2014} turn it off to play the run in its own order"
         } else {
-            "Shuffle is off \u{2014} turn it on and what plays next is shuffled"
+            "Shuffle is off \u{2014} turn it on and what plays next is a surprise"
         })
         .size(theme::SIZE_CAPTION)
         .line_height(theme::LEADING_CAPTION),

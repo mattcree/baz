@@ -331,42 +331,46 @@ next commit.
 
 **Interface**
 
-- **The wall has a subject, and one word stopped meaning two things**
-  ([ADR-0035](docs/adr/0035-the-wall-has-a-subject.md)). baz had two things
-  called artist: the wall's `ARTIST` group key, which sorts records by their
-  album artist's initial, and the Artist *place*, whose subject is a person.
-  - **The key's word is `A–Z`**, which names what it produces — its headers are
-    letters and its rail *is* the alphabet. `GroupKey::code()` is still
-    `"artist"`: it is on-disk data in every `config.toml` baz has written, and
-    a label may be renamed where a code may not.
-  - **`ARTISTS` is a sixth word in the same row**, in the same voice — one of a
-    closed set of six, one of them current — with <kbd>6</kbd> as its
-    accelerator. It puts up a wall of **artists**: one tile per person the
-    collection is filed under, shelved by initial, indexed by the same alphabet
-    rail the records get, wearing the same collage a playlist's sleeve wears
-    (2 × 2 of the first four, full-bleed below four).
-  - It is **not** a sixth group key. ADR-0019 promises every key is a
-    projection in which every album appears exactly once and `baz-core` sweeps
-    the keys to assert it; a key that shelved artists would falsify that sweep
-    rather than extend it. The subject is held beside the arrangement instead —
-    so leaving the records on `YEAR`, visiting the artists and pressing `YEAR`
-    again returns a **pixel-identical** wall, which `capture.sh` diffs.
-  - **One query, projected twice**: the search is spent once and its answer
-    projected onto the people, so the two walls cannot disagree and a keystroke
-    costs one search. An artist survives exactly when one of their records
-    does, swept over every subset of a six-record collection.
-  - The **readouts follow the subject** — both wells count whatever the wall is
-    a wall of — and artist tiles have their own art prefetch, because their
-    quotations are outside the wall's visible range and that range is the whole
-    thumbnail guard.
-  - **The strip's budget, re-derived** in the bundled face: `KEYS_W` 314 →
-    **368**, `LIBRARY_LINE` 506 → **560**, `TOP_BAR_SPLIT` 778 → **832**,
-    `SINGLE_LINE_NO_WELL` 554 → **608** against an unmoved `WIDEST_LANE_STRIP`
-    720. The window's own minimum does not move. The costed proposal predicted
-    the single-line-with-well band would cease to exist; `Pull` and `Shuffle`
-    had left the acts cluster in between and paid for the word twice over, so
-    the band 832…904 is alive and is now asserted because it was predicted not
-    to be.
+- **`ARTIST` groups the wall by artist**
+  ([ADR-0035](docs/adr/0035-the-wall-has-a-subject.md)). The owner, on the
+  artists wall that shipped earlier the same day: *"artists should be grouping
+  stuff by artist not just alphabetically"*.
+  - **One shelf per artist, headed by their name** — unknowns first, then names
+    case-folded alphabetically, then unnamed compilations, with each artist's
+    records alphabetical under them. It broke records on the artist's *initial*
+    before, which is what made a key called `ARTIST` a key whose word was false
+    and what made it collide with the Artist **place**.
+  - **The header is the door to that place**, in the record page breadcrumb's
+    own paint and on the word's own box. The type is unchanged, so the band is
+    still pixel-identical pinned and unpinned.
+  - **The index rail is still the alphabet.** With a shelf per artist there are
+    far more headers than letters, so a letter jumps to the **first artist
+    filed under it** — the shape `rail::genre` already had. `Initial` is
+    unchanged; it stopped being the wall's header and became the rail's letter.
+  - **It is an ordinary group key**, because grouping albums under their album
+    artist shows every album exactly once, which is ADR-0019 §1's promise
+    verbatim. `shelves(GroupKey::Artist)` is still `albums()` with its breaks
+    named, element for element — the finer headers name breaks that were
+    already in the list.
+  - **So `A–Z` and `ARTISTS` are both gone**, and the strip is five words
+    again. `A–Z` was the same traversal under coarser headers, and the
+    jump-to-letter it was good for lives in the rail. `GroupKey::code()` is
+    still `"artist"` — nothing was retired, so every `config.toml` baz has ever
+    written resolves, now to the arrangement its word always claimed. A
+    `wall_subject` line from the release that had one is read by nothing and
+    dropped on the next save.
+  - **Deleted with them**: `vm::WallSubject`, `ArtistVm`, `ArtistShelfVm`,
+    `build_artists`, `visible_artists`, four parallel `artist_*` fields on
+    `Shelf`, `show_subject`, five `wall_*` accessors, the artist tile,
+    `views::SLEEVE_CELLS`, `top_bar::subject_word`, the `wall_counts` /
+    `wall_noun` readout split in both wells, `WallSubjectSelected`, the
+    <kbd>6</kbd> accelerator, the `wall_subject` config key, and the artists'
+    own art prefetch. Net −700 lines across `crates/`, tests included.
+  - **The strip's budget goes back**: `KEYS_W` 368 → **314**, `LIBRARY_LINE`
+    560 → **506**, `TOP_BAR_SPLIT` 832 → **778**, `SINGLE_LINE_NO_WELL` 608 →
+    **554** against an unmoved `WIDEST_LANE_STRIP` 720. The window's own
+    minimum does not move. The single-line-with-well band is 778…904, wider
+    than it has ever been.
 
 - **The returns lane**: a resident surface at the window's left edge
   (ADR-0030), on the room's `recess` so it reads as cut into the room rather
@@ -1129,38 +1133,114 @@ next commit.
   ADR-0024 §1's definition of a playlist (*"made by a person, stored in a file
   that person owns"*) is amended to say why All songs is deliberately **not**
   one, and why the definition is not widened to swallow it.
+- **`All songs` has a face: a tile on Home.** The owner: *"again I wanted the
+  Play all, to be more like a tile on the home screen, a special 'playlist'"* —
+  and the *again* is the point, because it had been asked for before and not
+  built.
+
+  It is the wall's own tile, to the token: the grid's art edge, the sleeve
+  inside its mat, the two-lane caption box, the state rule, and the wall's own
+  hover veil — built by the wall's own function rather than by a second one that
+  looks like it. Two options where a record has four, and the two it does not
+  have are the two an implicit list cannot answer: `Add to…` is refused by
+  construction (there is no file), and `Queue` would append a library to a run.
+
+  **It wears a list's collage sleeve** rather than a designed face. The
+  objection to the collage is real — four arbitrary covers claim to characterise
+  a list whose definition is *no selection at all* — and it loses to a larger
+  one: the playlist panel's `All songs` row already draws exactly this collage,
+  and a second face for one list is worse than a restless one. A typographic
+  face fails twice over, because the figures it would carry are the `COLLECTION`
+  footer's own, three sections down the same page.
+
+  **Second on the page**: under `CONTINUE`, above `RECENTLY ADDED`, ordered by
+  how *particular* each offer is. `CONTINUE` is your own interrupted run and is
+  absent most of the time; with it absent — the page's ordinary state — the tile
+  is the first thing on Home, which is right for a door. No section rule over
+  it: a rule names a set, and this is one thing that names itself in its own
+  caption.
+
+  **It plays the collection whole**, not whatever the wall is filtered to, and
+  it says which in its counts line. Home shows no wall and no query, so a tile
+  there that applied a filter set on another page would be acting on state the
+  listener cannot see or clear from where they are standing.
+
+  **The strip's `Play all` stays**, and the two are not one control at two
+  sizes: `Play all` lives beside the query and the arrangement that decide the
+  wall and plays exactly what the wall shows — the only way to play seven search
+  results — where the tile is the way into all of it. One list, one origin, one
+  sleeve, one `Play`, two scopes, each stating its own. `ACTS_W` is untouched:
+  nothing left the strip, so the acts lane's budget does not move a third time
+  in one day.
+
+  `Origin::file()` still answers `None`, so the picker still refuses the list as
+  a destination by construction. Recorded in ADR-0030's fifth amendment, which
+  tests the addition against §6's own inventory rule and confirms the five
+  refusals are untouched.
 
 ### Changed
 
-- **Shuffle is a property of the player, not an act.** The owner: *"can you
-  make shuffle a property of the player i.e. toggle on/off."* It was one press
-  in the Library strip that drew eight records out of the wall and started
-  them, with nothing to turn off. It is now a **toggle** — the crossed arrows
-  on the now-playing bar, lit in the accent while it is on, remembered in
-  `config.toml` beside the other standing decisions — that says what order
-  things play in from here.
+- **Shuffle is a property of the player, and of the *walk* rather than of the
+  list.** The owner, twice in one day: *"can you make shuffle a property of the
+  player i.e. toggle on/off"*, and then, on seeing what that shipped as, *"I
+  think shuffle as a concept is more about going to an unknown next track
+  rather than actually mutating the track list if that makes sense."*
 
-  **Turning it off restores the order the run would have had.** That is the
-  part that would have felt broken if it were wrong, so the rule is stated
-  exactly: what is retained is the run's paths in the order the gesture laid
-  them out — inert data, read at one moment by one caller. It is invalidated by
-  a new run, and by a **hand reorder** (a stepper press or a drag restates the
-  order in as many words, and the hand beats the machine's memory). A row
-  deleted while shuffled stays deleted; a row appended stays at the end, where
-  the append put it; a file listed twice comes back twice. A run restored from
-  a snapshot has no retained order and is left exactly as it stands.
+  It was one press in the Library strip that drew eight records out of the wall
+  and started them, with nothing to turn off. It is now a **toggle** — the
+  crossed arrows on the now-playing bar, lit in the accent while it is on,
+  remembered in `config.toml` beside the other standing decisions — and what it
+  changes is which track is chosen next. **The queue is never permuted.** It
+  keeps the order the gesture that built it laid out, in both positions of the
+  control and whatever else happens to it.
 
-  **Nothing stops in either direction.** On and off both go out as
-  `UpdateQueue`, which ADR-0014 guarantees disturbs no delivered sample: on
-  permutes what is in front of the needle only, because what is behind it is
-  history and history does not re-order.
+  **The selection rule, in one sentence:** with shuffle on a run plays a
+  **bag** — one deterministic shuffled pass over the run's entries, in which no
+  entry repeats until every entry has played, and when the bag is spent the run
+  ends. A uniform draw can play the same track twice running and leave another
+  unheard for a whole album; a bag is what the word means to people. The bag is
+  **not** re-rolled when it empties (a fresh pass comes from a fresh gesture)
+  and **not** re-rolled by a jump — jumping moves the cursor within the bag, so
+  `Next` and `Previous` land where the run was actually going. A fresh seed per
+  run, so the same record played twice is two different shuffles.
 
-  **Every play gesture agrees**, structurally rather than by convention — press
+  **The decision lives in the engine, because baz is gapless.** `baz-core` gains
+  one standing property — `traversal`, set by `Command::SetTraversal` and
+  answered by `Event::TraversalChanged` — and nothing else: no repeat flag, no
+  continuation policy, nothing that refills. It has to be the engine: gapless
+  means the next track is decoded *while the current one plays*, and the only
+  way a front end can name the next track is by sending a queue, which ADR-0014
+  documents as costing the following boundary its sample-accurate splice. One
+  edit, one boundary is a fair price for an edit; a mode that charged it at
+  every boundary of a shuffled run is not. Internally a session is handed an
+  **itinerary** — the entries it will play, in the order it will play them —
+  so the decode-ahead loop is untouched to the line, and every existing gapless
+  test passes unchanged. The new one,
+  `a_shuffled_run_is_gapless_and_bit_identical`, plays a two-track queue under a
+  reversing traversal and compares the delivered stream sample for sample
+  against the reference decodes concatenated in the bag's order.
+
+  **baz says what is next.** The order is decided in advance, so baz knows it,
+  and the run column says so: the row that plays next carries an **open ring**
+  where the sounding row carries the filled lamp dot, and the entries the pass
+  is already past are dimmed. The bar's continuation counts the bag's
+  remainder rather than the list's tail, and the popover's `3 of 12` counts
+  how far through the pass you are rather than which row you are on. The mark is
+  drawn with shuffle **off** too, where it is simply the row below: a fact that
+  is true in both modes, and an interface that only marked what is next when it
+  was surprising would be one that had decided when you are allowed to know.
+
+  **Turning it off never stops the music, and never touches the run.** The
+  sounding track is delivered to its end and the run continues on the new plan
+  after it — ADR-0014's existing handover at its existing price of one
+  boundary.
+
+  **Every play gesture agrees**, structurally rather than by convention: press
   `Play` on a record with shuffle on and the record plays shuffled, and
-  `Play all`, a playlist's `Play` and a track click all build the list their
-  gesture means and hand it to the same arranger. A **track click** says both
-  of the things it means: the clicked track leads, and the rest follows
-  shuffled.
+  `Play all`, a playlist's `Play` and a track click all hand the list their
+  gesture means to the same function. A **track click** needs no special case
+  any more — starting at a row and continuing by the plan is exactly what
+  `JumpTo` does.
 
   **The crossed-arrows glyph, taken.** `docs/design/10-controls-and-iconography.md`
   §3.2 refused it *only* because the symbol promises a mode with a lit state
@@ -1175,18 +1255,13 @@ next commit.
   Both existed to answer one question about a draw whose source was only
   implied: *what can this shuffle play?* A mode has no source of its own, so
   **the pool is the run** — the queue, a place you can open and read row by
-  row — and the question answers itself. The design line the marks served still
-  holds and holds more strongly: a listener can see everything shuffle can
-  play. The ring's reserved lane stays as the sleeve's mat; only the ink went.
+  row — and the question answers itself. The ring's reserved lane stays as the
+  sleeve's mat; only the ink went.
 
-  Recorded in ADR-0023's amendment — which had said there is *"no live context
-  object that keeps acting after the gesture"* and now states precisely what is
-  retained, why an inert list of paths is not that object, and what invalidates
-  it — in ADR-0024 §1's first honesty clause (which said *no shuffle-on-play*),
-  and in doc 10 §3.2, where the crossed-arrows clause lives.
-
-  Captures, with the run before shuffle and the run after on-then-off compared
-  at **zero differing pixels**: `docs/design/impl/shuffle-and-all-songs/`.
+  Recorded as **one decision** in ADR-0023's amendment (rewritten in place
+  rather than corrected), in ADR-0024 §1's first honesty clause, and in doc 10
+  §3.2 where the crossed-arrows clause lives. Captures:
+  `docs/design/impl/shuffle-and-all-songs-tile/`.
 
 ### Removed
 
@@ -1197,8 +1272,10 @@ next commit.
   `shuffle.rs`), and `baz-core`'s `History::pull_weight` with `PULL_DAY_CAP`
   and `PULL_NEVER_WEIGHT` — the weighting had exactly one consumer, and a
   weighted draw nothing draws from is a recommendation engine's foundations
-  left in the ground. **Shuffle is untouched**: the two shared one function,
-  `shuffle::Pool::from_wall`, and shuffle owns it now.
+  left in the ground. **Shuffle was untouched** at the time: the two shared one
+  function, `shuffle::Pool::from_wall`, and shuffle owned it — until the pool
+  went with the draw later the same day, and then the module went with the
+  permutation (below).
 
   This is also the third answer to `docs/design/11-jobs-era-critique.md` **P9**
   (*"`Pull`: explain it or rename it"*), which was an open question addressed
@@ -1208,6 +1285,31 @@ next commit.
   sweep's licence list held `Pull` and `The pull` and nothing else, so **P4's
   one-vocabulary rule is now total**; and the strip's acts cluster fell from
   182 px to 144, taking the two-line split seam from 872 to 834.
+- **The whole of the front end's `shuffle` module, and the machinery that
+  existed to keep two orders in step.** Shuffle became a property of the walk
+  rather than of the list (above), so turning it off is trivial: nothing was
+  ever changed, and there is nothing to put back.
+
+  Gone with the permutation: `crates/baz/src/shuffle.rs` entire —
+  `SourceOrder`, `source_order`, `arranged`, `restored`, `leading`, and the
+  `SplitMix64` and Fisher–Yates it carried (those two moved to
+  `baz_core::traversal`, where the engine and the front end share one function
+  and therefore one answer). Gone from `PlayerState`: the retained
+  `Option<Vec<PathBuf>>` and its four methods (`source_order`,
+  `note_shuffled_run`, `retain_source_order`, `forget_source_order`), and the
+  `bool` that made the struct need an `#[expect(clippy::struct_excessive_bools)]`
+  — the allowance went with the flag. Gone from `App`: the branch in `send_run`
+  that permuted a run and the one in `toggle_shuffle` that un-permuted it, and
+  the two `forget_source_order` calls the reorder handlers made.
+
+  Gone from the *rules*, which is the larger part: the retained order's two
+  invalidation conditions; the restore walk and the three consequences it had to
+  define (a deleted row staying deleted, an appended row staying appended, a
+  repeated file being put back twice); the "a run restored from a snapshot has
+  no retained order" case and the stdout line that explained it; and the hoist
+  that made a track click's clicked row lead a permuted body. Every one of them
+  was a rule about keeping two orders in step. There is one order now, and it is
+  the run's.
 - **The playlist delete confirmation.** *"Delete "{name}"? The file goes;
   your music stays."* was the correct fallback while deletion was
   irreversible; the trash makes it reversible, and the 1992 HIG's ranking —

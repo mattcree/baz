@@ -538,6 +538,7 @@ use crate::replaygain::{
     ComputedGains, ReplayGainDecision, ReplayGainSettings, ReplayGainState, ReplayGainTags,
     SharedReplayGain,
 };
+use crate::traversal::Traversal;
 use crate::volume::{Fader, SharedVolume, Volume, VolumeState};
 
 /// Sleep per engine-loop iteration while paused: long enough to idle
@@ -1178,6 +1179,22 @@ struct Control<S: Sink> {
     delivered: Arc<AtomicUsize>,
     instruments: Arc<Instruments>,
     queue: Vec<PathBuf>,
+    /// **The order this engine walks its queue in** ([`crate::traversal`]) —
+    /// engine state, not session state, so it survives every transport command
+    /// exactly as the volume does.
+    traversal: Traversal,
+    /// [`Self::traversal`] resolved against the queue's length: the queue
+    /// positions to visit, in the order to visit them.
+    ///
+    /// Held rather than recomputed per command because it is *the* answer to
+    /// "what plays next", asked at every boundary, every skip and every start,
+    /// and because the whole design depends on the answer being the same one
+    /// twice. Re-derived exactly when one of its two inputs moves — the queue
+    /// ([`Self::replan`]) or the traversal — and never anywhere else.
+    ///
+    /// A permutation of `0..queue.len()`, so `order.len() == queue.len()` is an
+    /// invariant every reader may rely on.
+    order: Vec<usize>,
     /// Queue index where the next idle-state `Play` starts.
     position: usize,
     /// Where the running session's current track sits in the queue **as it is
@@ -1333,6 +1350,8 @@ impl<S: Sink> Control<S> {
             delivered,
             instruments,
             queue: Vec::new(),
+            traversal: Traversal::default(),
+            order: Vec::new(),
             position: 0,
             edited_index: None,
             paused: false,
@@ -1611,7 +1630,8 @@ impl<S: Sink> Control<S> {
                 let changed = paths != self.queue;
                 self.stop_session();
                 self.queue = paths;
-                self.position = 0;
+                self.replan();
+                self.position = self.top();
                 self.announce_queue(changed, before);
             }
             Command::UpdateQueue { paths } => self.update_queue(paths),
@@ -1637,12 +1657,16 @@ impl<S: Sink> Control<S> {
             }
             Command::Stop => {
                 self.stop_session();
-                self.position = 0;
+                self.position = self.top();
             }
             Command::Next => {
-                // `JumpTo(current + 1)` in everything but name, and the same
-                // code says so. Nothing to be relative to means no-op.
-                if let Some(next) = self.playing_index().map(|current| current + 1) {
+                // `JumpTo(whatever follows)` in everything but name, and the
+                // same code says so. What follows is the traversal's answer,
+                // not `current + 1`: under a shuffled pass the next entry is
+                // wherever the bag puts it, and `Next` must land on exactly the
+                // track the run would have reached on its own. Nothing to be
+                // relative to means no-op.
+                if let Some(next) = self.playing_index().map(|current| self.successor(current)) {
                     self.jump_to(next);
                 }
             }
@@ -1679,7 +1703,107 @@ impl<S: Sink> Control<S> {
                     self.settle_replay_gain(true);
                 }
             }
+            Command::SetTraversal { traversal } => self.set_traversal(traversal),
         }
+    }
+
+    /// Re-derive [`Self::order`] from the traversal and the queue's length.
+    ///
+    /// Called from exactly the two places either input can move — a queue
+    /// command, and [`Self::set_traversal`] — so that "the plan matches the
+    /// queue" is a thing the code establishes rather than a thing every reader
+    /// has to check.
+    fn replan(&mut self) {
+        self.order = self.traversal.play_order(self.queue.len());
+    }
+
+    /// The queue position the traversal starts at: the first entry of the plan.
+    ///
+    /// This is what "from the top" means once the walk is not the list. `Stop`,
+    /// a run that ended and a fresh queue all park here, and for
+    /// [`Traversal::InOrder`] it is 0 — which is what it always was.
+    fn top(&self) -> usize {
+        self.order.first().copied().unwrap_or(0)
+    }
+
+    /// Where `position` sits in the plan, or `None` for a position the queue
+    /// does not hold.
+    ///
+    /// A scan rather than an inverse table: it is asked once per transport
+    /// command and once per session start, never per sample and never per pump
+    /// block, and a second vector to keep in step with the first would be a
+    /// second thing that can be wrong.
+    fn slot_of(&self, position: usize) -> Option<usize> {
+        self.order.iter().position(|&at| at == position)
+    }
+
+    /// **What plays after `position`** — the traversal's whole job, and the one
+    /// question the engine must be able to answer *before* the current track
+    /// ends.
+    ///
+    /// Past the end of the plan it answers `self.queue.len()`, which every
+    /// caller already treats as "the run is over" ([`Self::start_session`] ends
+    /// it there). A `position` the queue no longer holds gets the same answer:
+    /// there is no honest successor to a track that is gone.
+    fn successor(&self, position: usize) -> usize {
+        self.slot_of(position)
+            .and_then(|slot| self.order.get(slot + 1).copied())
+            .unwrap_or(self.queue.len())
+    }
+
+    /// **What played before `position`**, or `position` itself when it leads the
+    /// plan — [`Command::Previous`]'s "there is nothing before the first track,
+    /// so restart it" rule, expressed over the walk instead of over the list.
+    fn predecessor(&self, position: usize) -> usize {
+        self.slot_of(position)
+            .and_then(|slot| slot.checked_sub(1))
+            .and_then(|slot| self.order.get(slot).copied())
+            .unwrap_or(position)
+    }
+
+    /// [`Command::SetTraversal`]: change the order the queue is walked in
+    /// without touching the queue ([`crate::traversal`]).
+    ///
+    /// **Nothing stops.** The three states this can arrive in, and what each
+    /// does, are the three [`Self::update_queue`] already distinguishes — for
+    /// the identical reason, which is that the question "may I re-plan the rest
+    /// of the run?" is the same question whether the list changed or the walk
+    /// did:
+    ///
+    /// - **Delivering** — the sounding track is delivered to its end and the
+    ///   run continues on the new plan after it. That boundary is a fresh decode
+    ///   rather than a sample-accurate splice, because the plan the producer was
+    ///   decoding ahead against is no longer the plan. One press, one boundary;
+    ///   every later boundary in the new pass is gapless again.
+    /// - **Holding a queue but sounding nothing** — there is no audio to
+    ///   protect, so the session is rebuilt on the new plan where it stands, and
+    ///   a paused run stays paused.
+    /// - **Stopped** — nothing to do but remember the mode, and the next `Play`
+    ///   starts at the new plan's top.
+    fn set_traversal(&mut self, traversal: Traversal) {
+        if traversal == self.traversal {
+            return; // the engine already walks this way: nothing to say
+        }
+        self.traversal = traversal;
+        self.replan();
+        let delivering = self.session.as_ref().is_some_and(Session::started);
+        match self.playing_index() {
+            Some(index) if delivering => {
+                self.edited_index = Some(index);
+                if let Some(session) = self.session.as_mut() {
+                    session.cut_after_current();
+                }
+            }
+            Some(index) => {
+                let (seek_ms, track_ms) = self
+                    .session
+                    .as_ref()
+                    .map_or((0, None), |session| (session.seek_ms, session.track_ms));
+                self.move_without_resuming(index, seek_ms, track_ms);
+            }
+            None => self.position = self.top(),
+        }
+        let _ = self.events.send(Event::TraversalChanged { traversal });
     }
 
     /// Resolve ReplayGain for the track now being delivered, put the result
@@ -1893,7 +2017,7 @@ impl<S: Sink> Control<S> {
     /// snapshot's (see [`Control::edited_index`]).
     fn playing_index(&self) -> Option<usize> {
         let session = self.session.as_ref()?;
-        Some(self.edited_index.unwrap_or(session.current))
+        Some(self.edited_index.unwrap_or_else(|| session.at()))
     }
 
     /// The playing position *and* the file at it — the pair an edit needs,
@@ -1905,7 +2029,7 @@ impl<S: Sink> Control<S> {
     fn playing_track(&self) -> Option<(usize, PathBuf)> {
         let session = self.session.as_ref()?;
         let path = session.queue.get(session.current)?.clone();
-        Some((self.edited_index.unwrap_or(session.current), path))
+        Some((self.edited_index.unwrap_or_else(|| session.at()), path))
     }
 
     /// Say that the queue changed, if it did — the rule every command in this
@@ -1941,6 +2065,10 @@ impl<S: Sink> Control<S> {
         // session that has started nothing has also been heard by nobody.
         let delivering = self.session.as_ref().is_some_and(Session::started);
         self.queue = paths;
+        // The plan is a permutation of the queue's positions, so a queue that
+        // changed length has no plan until this runs. Before every use of
+        // `successor`, `top` or `slot_of` below.
+        self.replan();
         if let Some((index, path)) = playing {
             let target = derive_position(&self.queue, index, &path);
             if !delivering {
@@ -2031,7 +2159,9 @@ impl<S: Sink> Control<S> {
     /// to hear. That is also why this is not [`Self::jump_to`] — the two look
     /// alike and differ on exactly the question of whose audio is still owed.
     fn hand_over_after_edit(&mut self) {
-        let next = self.playing_index().map_or(0, |current| current + 1);
+        let next = self
+            .playing_index()
+            .map_or_else(|| self.top(), |current| self.successor(current));
         // The track this session was told to finish has been delivered in
         // full — count it before the session goes away (ADR-0018).
         self.bank_listening();
@@ -2060,12 +2190,13 @@ impl<S: Sink> Control<S> {
             return; // stopped: there is no current track to go back from
         };
         let elapsed = self.session.as_ref().map_or(0, Session::elapsed_ms);
-        // Past the threshold, or already at the head of the queue with nothing
-        // before it: this track again. Otherwise the one before it.
-        let target = if elapsed >= PREVIOUS_RESTART_MS || current == 0 {
+        // Past the threshold: this track again. Otherwise the one the traversal
+        // came from — which at the head of the *plan* is this track again, for
+        // the reason it always was: there is nothing before the first thing.
+        let target = if elapsed >= PREVIOUS_RESTART_MS {
             current
         } else {
-            current - 1
+            self.predecessor(current)
         };
         self.jump_to(target);
     }
@@ -2085,9 +2216,11 @@ impl<S: Sink> Control<S> {
         // "seek feels late" bug: see `Sink::discard_buffered`.
         self.abandon_for_move();
         if track_ms.is_some_and(|total| position_ms >= total) {
-            // At or past the end is Next, per Command::Seek's contract.
+            // At or past the end is Next, per Command::Seek's contract — and
+            // Next is the traversal's successor, not the row below.
             self.paused = false;
-            self.start_session(current + 1, 0, None);
+            let next = self.successor(current);
+            self.start_session(next, 0, None);
             return;
         }
         // Seeking inside a track is one listening act, not two: the play in
@@ -2216,6 +2349,24 @@ impl<S: Sink> Control<S> {
     /// length of it (`None` until the producer reports one). Past the end of
     /// the queue (or on an empty queue) the run is already over:
     /// [`Event::QueueEnded`].
+    ///
+    /// # The session is handed an itinerary, not the queue
+    ///
+    /// This is where the traversal becomes audible, and it is deliberately the
+    /// **only** place. A session is given the entries it will play *in the order
+    /// it will play them* — `order[slot_of(start)..]`, resolved to paths —
+    /// together with the plan that maps each of its own slots back to a queue
+    /// position ([`Session::plan`]).
+    ///
+    /// So the producer ([`ProducerTask::produce`]) walks its list front to back
+    /// and decodes one ahead exactly as it always has: **not one line of the
+    /// gapless path knows that shuffle exists.** That is the property this shape
+    /// was chosen for. The alternative — teaching the producer to consult a
+    /// plan — would have put a traversal decision inside the one loop in baz
+    /// whose timing is the product's headline promise, to no benefit.
+    ///
+    /// A `start` the plan does not hold (past the end, or an empty queue) ends
+    /// the run, which is what `Next` past the last track already did.
     fn start_session(&mut self, start: usize, seek_ms: u64, track_ms: Option<u64>) {
         self.paused = false;
         // A new session numbers its tracks against the queue as it is now, so
@@ -2236,18 +2387,20 @@ impl<S: Sink> Control<S> {
         // current setting instead — which is also what makes "set the volume,
         // then press play" exact from the first sample.
         self.fader.jump(self.volume.gain());
-        if start >= self.queue.len() {
-            self.position = 0;
+        let Some(slot) = self.slot_of(start) else {
+            self.position = self.top();
             // Nothing will start, so a seek's continuation has nowhere to land:
             // the play in progress ends here rather than waiting for a track
             // that is never coming (ADR-0018).
             self.close_play();
             let _ = self.events.send(Event::QueueEnded);
             return;
-        }
+        };
+        let plan: Arc<[usize]> = self.order[slot..].into();
+        let itinerary: Arc<[PathBuf]> = plan.iter().map(|&at| self.queue[at].clone()).collect();
         self.session = Some(Session::start(
-            self.queue.clone().into(),
-            start,
+            itinerary,
+            plan,
             seek_ms,
             track_ms,
             Arc::clone(&self.instruments),
@@ -2374,7 +2527,24 @@ struct Session {
     fails: rtrb::Consumer<(usize, String)>,
     shared: Arc<SessionShared>,
     producer: Option<JoinHandle<()>>,
+    /// **This session's itinerary**: the tracks it will play, in the order it
+    /// will play them, starting with the one it was started at.
+    ///
+    /// Named `queue` because that is what it is *to the producer* — a list of
+    /// paths walked front to back — and it is exactly the queue whenever the
+    /// engine walks in order. Under any other traversal it is the queue seen
+    /// through [`Self::plan`], which is the whole of how shuffle reaches the
+    /// audio path (see [`Control::start_session`]).
     queue: Arc<[PathBuf]>,
+    /// **Slot → queue position**: where each entry of the itinerary above sits
+    /// in the engine's queue.
+    ///
+    /// Every index inside a session is a slot in its own itinerary; every index
+    /// the *protocol* carries is a queue position. This is the translation, and
+    /// [`Self::at`] is the only place it is spent for the current track. The
+    /// identity permutation for an in-order run, so nothing about it is visible
+    /// until somebody turns shuffle on.
+    plan: Arc<[usize]>,
     /// Interleaved samples delivered to the sink so far this session.
     pulled: usize,
     /// Start sample of each queue index's audio, once known.
@@ -2414,10 +2584,10 @@ struct Session {
     /// Reporting cursor: per-track events are emitted strictly in queue
     /// order, so a decode-ahead discovery never outruns the track before it.
     next_report: usize,
-    /// Last queue index reported as started — what [`Command::Next`] skips
-    /// from and what [`Command::Seek`] seeks within. **In this session's own
-    /// index space**, which an edit can renumber; [`Control::playing_index`] is
-    /// the translation.
+    /// Last slot reported as started — what [`Command::Next`] steps from and
+    /// what [`Command::Seek`] seeks within. **In this session's own index
+    /// space** ([`Self::plan`]), which an edit can renumber on top of;
+    /// [`Control::playing_index`] is the translation.
     current: usize,
     /// Delivery slot of the track [`Self::current`] names — `None` until an
     /// [`Event::TrackStarted`] has been emitted at all, i.e. while `current` is
@@ -2470,9 +2640,17 @@ struct Session {
 }
 
 impl Session {
+    /// Open a session over `queue` — this session's itinerary, whose first
+    /// entry is the track to start at — with `plan` mapping its slots back to
+    /// queue positions.
+    ///
+    /// There is no `start` parameter any more, and its absence is the point: a
+    /// session always begins at slot 0 of the list it was handed, because
+    /// [`Control::start_session`] hands it a list that begins where the run
+    /// begins.
     fn start(
         queue: Arc<[PathBuf]>,
-        start: usize,
+        plan: Arc<[usize]>,
         seek_ms: u64,
         track_ms: Option<u64>,
         instruments: Arc<Instruments>,
@@ -2480,13 +2658,12 @@ impl Session {
         exclusive: bool,
     ) -> Self {
         let (ring_tx, ring_rx) = RingBuffer::new(cfg.ring_frames * CHANNELS);
-        let remaining = (queue.len() - start).max(1);
+        let remaining = queue.len().max(1);
         let (bounds_tx, bounds_rx) = RingBuffer::new(remaining);
         let (fails_tx, fails_rx) = RingBuffer::new(remaining);
         let shared = Arc::new(SessionShared::default());
         let task = ProducerTask {
             queue: Arc::clone(&queue),
-            start,
             seek_ms,
             boundary: cfg.boundary,
             instruments,
@@ -2504,6 +2681,7 @@ impl Session {
             shared,
             producer: Some(producer),
             queue,
+            plan,
             pulled: 0,
             boundaries: vec![None; len],
             durations: vec![None; len],
@@ -2511,14 +2689,14 @@ impl Session {
             // One entry per track this session can still reach; the producer
             // pushes at most that many bounds, so this never grows past its
             // reservation while audio is flowing.
-            replay_gains: Vec::with_capacity(len.saturating_sub(start).max(1)),
+            replay_gains: Vec::with_capacity(len.max(1)),
             active_slot: None,
             last_signal: None,
             boundary: cfg.boundary,
             exclusive,
             failures: vec![None; len],
-            next_report: start,
-            current: start,
+            next_report: 0,
+            current: 0,
             reported_slot: None,
             cut_after_slot: None,
             // The session's first track always begins at delivered sample 0,
@@ -2526,7 +2704,7 @@ impl Session {
             track_origin: 0,
             track_ms,
             seek_ms,
-            seek_index: start,
+            seek_index: 0,
             // Nothing to report until a track actually starts (or a seek or
             // resume asks for a reading), so the cadence starts disarmed.
             next_progress: usize::MAX,
@@ -2535,11 +2713,31 @@ impl Session {
         }
     }
 
-    /// The queue index this session stopped short at because the sample rate
-    /// changed there, if it did (see [`SessionShared::rate_change_at`]).
+    /// **The queue position of the track this session is delivering** — the
+    /// one place a slot becomes a protocol index.
+    ///
+    /// [`Self::current`] is a slot in this session's itinerary; every caller
+    /// outside the session speaks queue positions. The plan is a permutation of
+    /// a slice of the queue's positions, so the lookup cannot miss for a slot
+    /// this session actually reached; the fallback exists so that the function
+    /// is total rather than because a caller should ever see it.
+    fn at(&self) -> usize {
+        self.plan.get(self.current).copied().unwrap_or(self.current)
+    }
+
+    /// The **queue index** this session stopped short at because the sample
+    /// rate changed there, if it did (see [`SessionShared::rate_change_at`]).
+    ///
+    /// The producer publishes a slot in its own itinerary; the engine restarts
+    /// at a queue position, and under a shuffled traversal those are different
+    /// numbers. Translated here rather than at the one call site so that the
+    /// producer's index space never leaves the session (ADR-0009's reopen
+    /// handover).
     fn rate_change_at(&self) -> Option<usize> {
         let at = self.shared.rate_change_at.load(Ordering::Acquire);
-        (at != NO_RATE_CHANGE).then_some(at)
+        (at != NO_RATE_CHANGE)
+            .then(|| self.plan.get(at).copied())
+            .flatten()
     }
 
     /// The signal-path statement for the track at `index`, or `None` when
@@ -2922,7 +3120,10 @@ impl Session {
                 if self.pulled > start_sample || flush {
                     let _ = events.send(Event::TrackStarted {
                         path: self.queue[i].clone(),
-                        position: i,
+                        // The queue position, never the slot: a front end
+                        // reconciles this against the list it drew, and under a
+                        // shuffled pass slot 1 is not queue position 1.
+                        position: self.plan.get(i).copied().unwrap_or(i),
                     });
                     self.current = i;
                     self.reported_slot = self.active_slot;
@@ -3000,8 +3201,11 @@ impl Drop for Session {
 // ---------------------------------------------------------------------------
 
 struct ProducerTask {
+    /// The session's itinerary, walked front to back — see [`Session::queue`].
+    /// The producer is the one part of the engine that never learned what a
+    /// traversal is, and that is deliberate: the gapless loop below is
+    /// unchanged by shuffle, to the line.
     queue: Arc<[PathBuf]>,
-    start: usize,
     /// Milliseconds into the session's first playable track to begin at
     /// ([`Command::Seek`]'s target); 0 for an ordinary start.
     seek_ms: u64,
@@ -3142,7 +3346,7 @@ impl ProducerTask {
     /// Returns the queue index and the positioned source, or `None` if the
     /// queue ran out (or the session is stopping).
     fn find_anchor(&mut self, stop: &AtomicBool) -> Option<(usize, AudioSource)> {
-        let mut idx = self.start;
+        let mut idx = 0;
         let mut seek_ms = self.seek_ms;
         while idx < self.queue.len() && !stop.load(Ordering::Acquire) {
             let opened = AudioSource::open(&self.queue[idx]).and_then(|mut src| {

@@ -489,15 +489,15 @@ mod tests {
         assert!(keys > 200.0 && keys < 420.0, "the key row is {keys:.1} px");
     }
 
-    /// **The arrangement row, measured**: the five group keys and the wall's
-    /// sixth word, each tracked, upper-cased and boxed the way
-    /// `views::top_bar` boxes them, with the row's own gaps between.
+    /// **The arrangement row, measured**: the five group keys, each tracked,
+    /// upper-cased and boxed the way `views::top_bar` boxes them, with the
+    /// row's own gaps between.
     ///
     /// One function because two tests measure it and they must measure the
     /// same row — the shipped-window fit above, and the declaration check
-    /// below. It walks `GroupKey::ALL` and `WallSubject::Artists` rather than
-    /// spelling six words out, so a key added, removed or relabelled in
-    /// `baz-core` moves the measurement without an edit here.
+    /// below. It walks `GroupKey::ALL` rather than spelling the words out, so
+    /// a key added, removed or relabelled in `baz-core` moves the measurement
+    /// without an edit here.
     fn arrangement_row(medium: &Face<'_>) -> f32 {
         use baz_core::index::GroupKey;
 
@@ -505,10 +505,7 @@ mod tests {
             medium.width(&theme::tracked(&word.to_uppercase()), theme::SIZE_META)
                 + 2.0 * theme::GAP_XS
         };
-        let words = GroupKey::ALL
-            .iter()
-            .map(|key| key.label())
-            .chain(std::iter::once(crate::vm::WallSubject::Artists.label()));
+        let words = GroupKey::ALL.iter().map(|key| key.label());
         // The gap is counted *between* the words rather than from a length —
         // one `GAP_MD` for every word after the first, which is the row iced
         // actually lays out.
@@ -637,24 +634,17 @@ mod tests {
             "the key row measures {keys:.2} px against a declared {}",
             crate::views::top_bar::KEYS_W
         );
-        // **The declaration is the next lattice step above the measurement**,
-        // and both halves are named: `ARTISTS` in its box plus the `GAP_MD`
-        // beside it costs 77.49 px, and the first key's rename from `ARTIST`
-        // to `A–Z` gave 23.98 back. The six words come to 366.50 against a
-        // declared 368 — 1.50 px of margin, which is the tightest reservation
-        // in the strip and the number a seventh word would have to beat.
+        // **The declaration is the next lattice step above the measurement.**
+        // The five words come to 312.99 against a declared 314 — 1.01 px of
+        // margin, which is the tightest reservation in the strip and the
+        // number a sixth word would have to beat. It was measured: the row
+        // carried `ARTISTS` for one release, and that word in its box plus the
+        // `GAP_MD` beside it cost 77.49 px (ADR-0035).
         let slack = crate::views::top_bar::KEYS_W - keys;
         assert!(
             (1.0..8.0).contains(&slack),
             "the key row's reservation now carries {slack:.2} px of slack: it \
              is either overflowing or reserving room for a word that left"
-        );
-        // The en dash is the face's own, not a fallback: `A–Z` set in a face
-        // with no U+2013 would draw a tofu box in the strip's first word.
-        assert_ne!(
-            medium.glyph('\u{2013}'),
-            0,
-            "the bundled face has no en dash, so the A–Z key cannot be set in it"
         );
 
         // The act: the triangle, its word, and their `GAP_SM` padding.

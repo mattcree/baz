@@ -64,7 +64,7 @@ pub(crate) fn view<'a>(
     lamp: f32,
     collecting: Collecting,
 ) -> Element<'a, Message> {
-    if shelf.wall_visible().is_empty() {
+    if shelf.visible.is_empty() {
         return empty_state(shelf);
     }
     let hang = shelf.grid();
@@ -143,20 +143,15 @@ pub(crate) fn view<'a>(
     // against the same width and the rail stays the sibling of the whole
     // body; absent (not empty) whenever there are no song answers, in which
     // case the composition is exactly what it always was.
-    // **Only over a wall of records** (ADR-0035). The section ends in an
-    // `Albums` rule naming the wall beneath it, and its rows are tracks — two
-    // subjects stacked over a third would be the wall answering one query
-    // three ways. Under `ARTISTS` the artists *are* the answer.
-    let body: Element<'a, Message> =
-        if shelf.songs.is_empty() || shelf.subject != vm::WallSubject::Records {
-            wall.into()
-        } else {
-            column![
-                songs_section(shelf, player, collecting, hang.block_width()),
-                wall
-            ]
-            .into()
-        };
+    let body: Element<'a, Message> = if shelf.songs.is_empty() {
+        wall.into()
+    } else {
+        column![
+            songs_section(shelf, player, collecting, hang.block_width()),
+            wall
+        ]
+        .into()
+    };
     row![body, index_rail(shelf, &shelves)].into()
 }
 
@@ -397,24 +392,11 @@ fn shelf_row<'a>(
         if offset >= run.len {
             break;
         }
-        let Some(&index) = shelf.wall_visible().get(run.first + offset) else {
+        let Some(&index) = shelf.visible.get(run.first + offset) else {
             break;
         };
-        // **The row is the wall's, the tile is the subject's.** Everything
-        // above this line — the runs, the virtualized range, the block width,
-        // the pitch — is one piece of arithmetic for both walls (ADR-0035);
-        // what a cell *is* is the only thing that forks.
-        match shelf.subject {
-            vm::WallSubject::Records => {
-                if let Some(album) = shelf.albums.get(index) {
-                    cells = cells.push(tile(shelf, player, hang, album, lamp, collecting));
-                }
-            }
-            vm::WallSubject::Artists => {
-                if let Some(artist) = shelf.artists.get(index) {
-                    cells = cells.push(artist_tile(shelf, hang, artist));
-                }
-            }
+        if let Some(album) = shelf.albums.get(index) {
+            cells = cells.push(tile(shelf, player, hang, album, lamp, collecting));
         }
     }
     container(cells)
@@ -512,24 +494,54 @@ fn pinned_header(shelf: &Shelf, hang: Grid, run: Option<Run>, block: f32) -> Ele
 /// air below is `hang − HEADING_LINE_H` — the same ratio at every density
 /// step, since both numbers are the step's. See [`theme::SHELF_HEADER_H`] for
 /// why it is that way round.
+///
+/// # Under ARTIST the header is a **door** (ADR-0035)
+///
+/// The key shelves one artist per shelf, so the header names a person the
+/// product has a *place* for — and that place is now reached by pressing their
+/// name on the wall, which is the door the artist tiles used to be (ADR-0035).
+/// The breadcrumb on a record's page still opens the same place with the same
+/// [`crate::vm::artist_id`], so the two doors cannot land on different pages.
+///
+/// **The type does not change when it is a door**: same face, same size, same
+/// tracking, same [`theme::Palette::paper_faint`] ink at rest, same line box,
+/// same height. What it gains is [`theme::word_button`]'s ground under the
+/// pointer — the paint the record page's `Artist ›` breadcrumb already wears,
+/// because the two doors lead to one place and should not be two kinds of
+/// control. The hit box is **the word's own box, not the shelf's width**
+/// (`padding(0)`, shrink width): a band-wide ground would light the whole wall
+/// on a mouse-over, and a padded one would inset the header's ink off the
+/// block's left edge, which is law L1's line.
+///
+/// The pinned copy is the same call, so the press is available wherever the
+/// name is, and the two remain pixel-identical at rest — which is what makes
+/// pinning a position rather than a state (see [`pinned_header`]).
+///
+/// Every other key's header is inert text, because a decade is not a place.
 fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
     let room = theme::active();
-    let label = shelf
-        .wall_groups()
-        .get(run.group)
-        .map_or_else(String::new, |group| group.header.label());
-    container(
-        text(theme::tracked(&label.to_uppercase()))
-            .size(theme::SIZE_HEADING)
-            .line_height(theme::LEADING_HEADING)
-            .font(theme::MEDIUM)
-            .color(room.paper_faint)
-            .wrapping(text::Wrapping::None),
-    )
-    .width(Length::Fixed(block))
-    .height(Length::Fixed(theme::HEADING_LINE_H))
-    .clip(true)
-    .into()
+    let header = shelf.groups.get(run.group).map(|group| &group.header);
+    let label = header.map_or_else(String::new, vm::GroupHeaderVm::label);
+    let word = text(theme::tracked(&label.to_uppercase()))
+        .size(theme::SIZE_HEADING)
+        .line_height(theme::LEADING_HEADING)
+        .font(theme::MEDIUM)
+        .color(room.paper_faint)
+        .wrapping(text::Wrapping::None);
+    let line: Element<'_, Message> = match header {
+        Some(vm::GroupHeaderVm::Artist(artist)) => button(word)
+            .height(Length::Fixed(theme::HEADING_LINE_H))
+            .padding(0)
+            .style(move |_theme, status| theme::word_button(room, room.wall, status))
+            .on_press(Message::OpenArtist(vm::artist_id(artist)))
+            .into(),
+        _ => word.into(),
+    };
+    container(line)
+        .width(Length::Fixed(block))
+        .height(Length::Fixed(theme::HEADING_LINE_H))
+        .clip(true)
+        .into()
 }
 
 /// **The index rail**: a pure projection of the active group key, holding no
@@ -603,20 +615,10 @@ fn index_rail<'a>(shelf: &'a Shelf, shelves: &Shelves) -> Element<'a, Message> {
     let runs = shelves.runs();
     let headers: Vec<vm::GroupHeaderVm> = runs
         .iter()
-        .filter_map(|run| shelf.wall_groups().get(run.group))
+        .filter_map(|run| shelf.groups.get(run.group))
         .map(|group| group.header.clone())
         .collect();
-    // **The artists wall costs the rail nothing** (ADR-0035). `rail::entries`
-    // is a pure function of the headers, and an artists wall's headers are
-    // `Initial`s — so it is indexed by `rail::artist` verbatim, the alphabet
-    // with the collection's own initials merged in, with no new branch and no
-    // new vocabulary. The key named here is the *shape of the headers*, which
-    // for that wall is the first key's whatever the active one is.
-    let key = match shelf.subject {
-        vm::WallSubject::Records => shelf.group_key,
-        vm::WallSubject::Artists => baz_core::index::GroupKey::Artist,
-    };
-    let entries = rail::entries(key, &headers);
+    let entries = rail::entries(shelf.group_key, &headers);
     // Where the wall is: the shelf at the top of the viewport, mapped onto the
     // rail's own list. This is the *only* thing the rail reads about scroll
     // position, and it reads it rather than remembering it.
@@ -1041,120 +1043,6 @@ pub(crate) fn tile<'a>(
     )
 }
 
-/// **One artist tile**: their collage, their name, and how many records of
-/// theirs the collection holds (ADR-0035).
-///
-/// # It is the album tile's anatomy, to the pixel
-///
-/// The same [`Grid::art`] edge inside the same [`theme::SLEEVE_MAT`], the same
-/// two reserved caption lanes in the same [`theme::CAPTION_H`] block, the same
-/// [`RULE_LANE_H`] under it, the same hit box. The two subjects share a wall
-/// and share its arithmetic, so a tile that agreed with the grid only
-/// approximately would show up as a ragged row the moment the density moved.
-///
-/// # The sleeve is the collage, and it is *the* collage
-///
-/// [`crate::views::playlist_sleeve`] — the same 2 × 2-of-the-first-four,
-/// full-bleed-single, designed-rest-tile rule a playlist's sleeve follows, out
-/// of the same thumbnail cache with the same gradient while a decode is in
-/// flight. A second collage would be two renderings of one idea that could
-/// drift apart, which is the argument that made the playlist's own sleeve one
-/// function in two places.
-///
-/// # What it does not have
-///
-/// **No hover options.** The three that overlay a record's sleeve — play,
-/// queue, add — are answers about a *record*, and an artist has no equivalent
-/// verb yet; drawing them would need an "everything by this artist" run that
-/// nothing else in the product offers.
-///
-/// **No right-press menu**, for the same reason: `menu::Target` names records
-/// and lists, and a menu of one item that repeats the press is a menu that
-/// exists to look complete.
-///
-/// **No 2 px opened rule.** [`crate::app::Shelf::opened`] is *the record the
-/// wall was last left for* and it is one value; spending it on an artist would
-/// take the mark off the record it was built for, and the breadcrumb from an
-/// album page opens artists too. The lane is reserved all the same, so the two
-/// subjects' rows are the same height.
-fn artist_tile<'a>(shelf: &'a Shelf, hang: Grid, artist: &'a vm::ArtistVm) -> Element<'a, Message> {
-    let room = theme::active();
-    let edge = hang.art;
-    let work = (edge - 2.0 * theme::SLEEVE_MAT).max(0.0);
-    let sleeve = container(
-        container(crate::views::playlist_sleeve(
-            shelf,
-            &artist.records,
-            &artist.name,
-            work,
-        ))
-        .width(Length::Fixed(work))
-        .height(Length::Fixed(work))
-        .style(move |_theme| theme::sleeve(room, 0.0)),
-    )
-    .width(Length::Fixed(edge))
-    .height(Length::Fixed(edge))
-    .padding(theme::SLEEVE_MAT)
-    .style(move |_theme| theme::sleeve_mat(room));
-    let hovered = shelf.tile_hover.strength(artist.id);
-    let caption_ink = theme::caption_ink(room, hovered);
-    let caption_lane = |content: Element<'a, Message>| {
-        container(content)
-            .width(Length::Fixed(edge))
-            .height(Length::Fixed(theme::CAPTION_LINE_H))
-            .align_y(alignment::Vertical::Top)
-            .clip(true)
-    };
-    // The second line is the record count, where an album tile carries the
-    // artist and the year: the one fact about an artist the collection can
-    // state without going to a network (`views::artist`'s own refusals), and
-    // the same word the artist's page counts in.
-    let records = if artist.records.len() == 1 {
-        "1 record".to_owned()
-    } else {
-        format!("{} records", artist.records.len())
-    };
-    let caption_block = column![
-        caption_lane(
-            text(&artist.name)
-                .size(theme::SIZE_BODY)
-                .line_height(theme::LEADING_BODY)
-                .font(theme::MEDIUM)
-                .color(room.paper)
-                .wrapping(text::Wrapping::None)
-                .into(),
-        ),
-        caption_lane(
-            text(records)
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(caption_ink)
-                .wrapping(text::Wrapping::None)
-                .into(),
-        ),
-    ]
-    .width(Length::Fixed(edge))
-    .height(Length::Fixed(theme::CAPTION_H));
-    let label_block = column![caption_block, state_rule(hovered, false, edge)]
-        .spacing(theme::GAP_XS)
-        .width(Length::Fixed(edge));
-    mouse_area(
-        button(
-            column![sleeve, label_block]
-                .spacing(theme::GAP_LG)
-                .width(Length::Fixed(edge)),
-        )
-        .width(Length::Fixed(edge))
-        .height(Length::Fixed(hang.row_h - hang.hang + RULE_LANE_H))
-        .padding(0)
-        .style(move |_theme, status| theme::tile(room, status, false))
-        .on_press(Message::OpenArtist(artist.id)),
-    )
-    .on_enter(Message::TileEntered(artist.id))
-    .on_exit(Message::TileLeft(artist.id))
-    .into()
-}
-
 /// What the state rule costs the tile vertically: the gap under the label plus
 /// the lane the rule is drawn in (logical px).
 ///
@@ -1171,7 +1059,7 @@ const RULE_LANE_H: f32 = theme::GAP_XS + theme::SELECTION_EDGE;
 /// The lane is reserved rather than sized to the mark, which is the same
 /// fixed-slot rule the bottom bar's timestamps follow and the reason the mark
 /// can be 0, 1 or 2 px without a row of covers shifting under the pointer.
-fn state_rule(hovered: f32, selected: bool, edge: f32) -> Element<'static, Message> {
+pub(crate) fn state_rule(hovered: f32, selected: bool, edge: f32) -> Element<'static, Message> {
     let room = theme::active();
     let thickness = theme::tile_rule_h(hovered, selected);
     container(
@@ -1240,47 +1128,86 @@ fn hover_options<'a>(
     engine: bool,
     collecting: Collecting,
 ) -> Element<'a, Message> {
+    let listed: [Option<VeilOption>; theme::VEIL_OPTIONS] = [
+        engine.then(|| VeilOption::accented(icon::Glyph::Play, "Play", Message::PlayAlbum(album))),
+        engine.then(|| VeilOption::new(icon::Glyph::Queue, "Queue", Message::QueueAlbum(album))),
+        collecting.available.then(|| {
+            VeilOption::new(
+                icon::Glyph::Plus,
+                "Add to…",
+                Message::AddAlbumToPlaylist(album),
+            )
+        }),
+        Some(VeilOption::new(
+            icon::Glyph::Open,
+            "Open",
+            Message::AlbumClicked(album),
+        )),
+    ];
+    veil(work, listed.into_iter().flatten())
+}
+
+/// One row of a hover veil: its mark, its word, what it sends, and whether it
+/// is the one that wears the accent.
+///
+/// A named type rather than a tuple because [`veil`] is now called from two
+/// surfaces — the wall's tiles and Home's **All songs** tile — and a
+/// four-element tuple read at a distance is exactly the kind of thing whose
+/// third field nobody remembers.
+pub(crate) struct VeilOption {
+    glyph: icon::Glyph,
+    label: &'static str,
+    press: Message,
+    accent: bool,
+}
+
+impl VeilOption {
+    /// An ordinary option, in the room's own glyph ink.
+    pub(crate) const fn new(glyph: icon::Glyph, label: &'static str, press: Message) -> Self {
+        Self {
+            glyph,
+            label,
+            press,
+            accent: false,
+        }
+    }
+
+    /// The one option that wears the accent — `Play`, and only `Play`
+    /// ([`theme::veil_option_ink`] holds the discipline).
+    pub(crate) const fn accented(glyph: icon::Glyph, label: &'static str, press: Message) -> Self {
+        Self {
+            glyph,
+            label,
+            press,
+            accent: true,
+        }
+    }
+}
+
+/// **The veil and its options, over a `work`-px square.**
+///
+/// The geometry and the argument are [`hover_options`]'s; this is that function
+/// with its *list* taken as a parameter, so that a surface which is not a record
+/// — Home's **All songs** tile — can wear the wall's own layer rather than a
+/// second one that looks like it. Options the caller has already filtered out
+/// are simply absent, and the rows left divide the sleeve between them.
+pub(crate) fn veil<'a>(
+    work: f32,
+    listed: impl IntoIterator<Item = VeilOption>,
+) -> Element<'a, Message> {
     let room = theme::active();
     let band = work * theme::VEIL_BAND_X;
     let ink_lane = (work * theme::VEIL_INK_X - theme::VEIL_LEAD).max(0.0);
-    let listed: [(icon::Glyph, &'static str, Option<Message>, bool); theme::VEIL_OPTIONS] = [
-        (
-            icon::Glyph::Play,
-            "Play",
-            engine.then_some(Message::PlayAlbum(album)),
-            true,
-        ),
-        (
-            icon::Glyph::Queue,
-            "Queue",
-            engine.then_some(Message::QueueAlbum(album)),
-            false,
-        ),
-        (
-            icon::Glyph::Plus,
-            "Add to…",
-            collecting
-                .available
-                .then_some(Message::AddAlbumToPlaylist(album)),
-            false,
-        ),
-        (
-            icon::Glyph::Open,
-            "Open",
-            Some(Message::AlbumClicked(album)),
-            false,
-        ),
-    ];
     let mut options = column![]
         .width(Length::Fixed(band))
         .height(Length::Fixed(work));
-    for (glyph, label, press, accent) in listed {
-        // Absent, not disabled: an option with no engine or no playlists
-        // folder behind it is not offered, and the rows left divide the
-        // sleeve between them.
-        let Some(press) = press else {
-            continue;
-        };
+    for VeilOption {
+        glyph,
+        label,
+        press,
+        accent,
+    } in listed
+    {
         // One decision about which option wears the accent, made in the
         // theme and read here — see [`theme::veil_option_ink`], which also
         // records the one place this departs from the approved mockup.
@@ -1599,7 +1526,8 @@ mod hover_option_tests {
     /// | `Open` | `AlbumClicked` | the tile's own press, and the menu's `Open` |
     #[test]
     fn every_option_is_a_press_some_visible_control_already_makes() {
-        let options = function(&source(), "hover_options<'a>");
+        let source = source();
+        let options = function(&source, "hover_options<'a>");
         for (label, press) in [
             ("Play", "Message::PlayAlbum(album)"),
             ("Queue", "Message::QueueAlbum(album)"),
@@ -1616,12 +1544,17 @@ mod hover_option_tests {
             );
         }
         // Four options and four presses: no fifth verb slipped onto a sleeve.
+        assert_eq!(theme::VEIL_OPTIONS, 4);
+        // **One press arm for every veil in the product.** The layer is drawn
+        // by [`veil`] now — Home's `All songs` tile wears the wall's own rather
+        // than a second one that looks like it — so the arm is asserted where
+        // it lives, and the list above is asserted where the *record's* options
+        // are decided.
         assert_eq!(
-            options.matches(".on_press(").count(),
+            function(&source, "veil<'a>").matches(".on_press(").count(),
             1,
             "the options are pressed through one arm, once"
         );
-        assert_eq!(theme::VEIL_OPTIONS, 4);
     }
 
     /// **An option's press never also opens the page.**
@@ -1673,7 +1606,7 @@ mod hover_option_tests {
     /// permitted thing's name.
     #[test]
     fn the_veil_is_a_gradient_over_one_sleeve_and_never_a_flat_panel() {
-        let options = function(&source(), "hover_options<'a>");
+        let options = function(&source(), "veil<'a>");
         assert!(
             options.contains("Background::Gradient(theme::hover_veil(room)"),
             "the veil stopped being the design's gradient"

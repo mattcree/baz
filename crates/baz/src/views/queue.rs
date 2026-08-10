@@ -391,8 +391,8 @@ fn save_field(saving: Option<&NameEntry>) -> Element<'_, Message> {
 ///
 /// **Albums are listed as albums, never flattened** — the product's standing rules by way
 /// of the critique's stack. baz's queue is one list with a cursor and today it
-/// usually holds one album, so there is usually one of these; a shuffle's run
-/// already draws several, and a second album is a second header in this same
+/// usually holds one album, so there is usually one of these; `Play all`
+/// already stacks several, and a second album is a second header in this same
 /// column with **no other part of this surface changing**.
 fn album_group(album: Option<&str>, artist: &str, air: f32) -> Element<'static, Message> {
     let room = theme::active();
@@ -449,10 +449,13 @@ pub(crate) fn empty_state() -> Element<'static, Message> {
             // advance, at the exact moment the refusal is felt. ("Plays the
             // Library", not "the wall": room vocabulary stays internal,
             // P4's rule, applied to P6's own sentence.)
-            text("When a queue ends, baz stops. Shuffle draws again; Play all plays the Library.")
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_muted),
+            text(
+                "When a queue ends, baz stops. All songs is a tile on Home; \
+                 Play all plays the wall.",
+            )
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_muted),
         ]
         .spacing(theme::GAP_SM)
         .align_x(iced::Alignment::Start),
@@ -534,16 +537,25 @@ fn queue_row(
     let playing = row_state.state == QueueRowState::Playing;
     let ink = match row_state.state {
         QueueRowState::Played => room.paper_faint,
-        QueueRowState::Playing | QueueRowState::Upcoming => room.paper,
+        QueueRowState::Playing | QueueRowState::Next | QueueRowState::Upcoming => room.paper,
     };
-    let marker: Element<'static, Message> = if playing {
-        lamp_dot()
-    } else {
-        text(row_state.position.to_string())
+    // **Filled means sounding; open means about to.** The two marks share the
+    // number lane, the dot's size and its lattice, so the run column says what
+    // is playing and what is next in one vocabulary and one column of pixels.
+    //
+    // It earns its place hardest under shuffle, where the next track is *not*
+    // the row below and nothing else on screen could tell you which one it is
+    // — but it is drawn in both modes, because the fact is true in both and an
+    // interface that only marks what is next when it is surprising is one that
+    // has decided when you are allowed to know.
+    let marker: Element<'static, Message> = match row_state.state {
+        QueueRowState::Playing => lamp_dot(),
+        QueueRowState::Next => next_ring(),
+        _ => text(row_state.position.to_string())
             .size(theme::SIZE_META)
             .line_height(theme::LEADING_META)
             .color(room.paper_faint)
-            .into()
+            .into(),
     };
     // The playing row's title gains the medium weight the now-playing bar gives
     // the same string; everything else keeps the list's regular face, so the
@@ -799,6 +811,34 @@ fn remove_slot(index: usize, offered: bool) -> Element<'static, Message> {
 
 /// The playing row's lamp dot — the same amber circle the shelf puts beside
 /// the playing album, and the same token behind it.
+/// **The next row's mark**: the lamp dot's ring, unlit.
+///
+/// The same [`theme::DOT`] box in the same lane, drawn as a hairline circle in
+/// [`theme::Palette::paper_dim`] instead of a filled disc in the lamp colour.
+/// Deliberately **not** the accent: the accent is playback truth — it means
+/// *this is sounding now* everywhere in the product (`theme`'s
+/// accent-discipline note) — and a track that has not started is not sounding.
+/// So the shape carries the relationship (this is the dot's sibling) and the
+/// ink carries the difference (it is not lit yet).
+fn next_ring() -> Element<'static, Message> {
+    let room = theme::active();
+    container(Space::new(
+        Length::Fixed(theme::DOT),
+        Length::Fixed(theme::DOT),
+    ))
+    .style(move |_theme| iced::widget::container::Style {
+        border: iced::Border {
+            color: room.paper_dim,
+            // The product's hairline, the literal `theme` itself uses for
+            // every 1 px border it draws.
+            width: 1.0,
+            radius: (theme::DOT / 2.0).into(),
+        },
+        ..iced::widget::container::Style::default()
+    })
+    .into()
+}
+
 fn lamp_dot() -> Element<'static, Message> {
     let room = theme::active();
     container(Space::new(

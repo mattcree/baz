@@ -42,6 +42,7 @@ use baz_core::history::{History, HistoryLedger};
 use baz_core::index::{GroupKey, Library};
 use baz_core::protocol::{self as protocol, Command, Event, SignalChain};
 use baz_core::replaygain::ReplayGainSettings;
+use baz_core::traversal::Traversal;
 use iced::keyboard;
 use iced::widget::scrollable::{AbsoluteOffset, Viewport};
 use iced::widget::{column, image as iced_image, row, scrollable, text_input};
@@ -55,8 +56,7 @@ use crate::playback::{Playback, PlayerEvent};
 use crate::player::{Availability, PlayerState};
 use crate::scan::ScanUpdate;
 use crate::{
-    art, config, font, keys, menu, motion, mpris, player, queue_edit, scan, shelf, shuffle, theme,
-    views, vm,
+    art, config, font, keys, menu, motion, mpris, player, queue_edit, scan, shelf, theme, views, vm,
 };
 
 // The top bar's height — used for the pre-first-scroll estimate of the grid
@@ -317,15 +317,16 @@ pub(crate) enum Message {
     /// single-display listener. Remembered across launches
     /// ([`config::Config::run_column`]).
     ToggleRun,
-    /// **The bar's now-playing block**: go to the page of the record that is
-    /// sounding.
+    /// **The bar's now-playing block**: go to `Now playing`.
     ///
     /// The prior-art study's R3 — *get back to what is playing* — which every
-    /// product it surveyed spends an affordance on and baz had none for. With
-    /// no persistent inspector there is nothing else on screen that knows which
-    /// record is under the lamp, so the text that names it is the control that
-    /// takes you to it.
-    ShowPlayingAlbum,
+    /// product it surveyed spends an affordance on and baz had none for. It
+    /// used to open the *record's page*, and that was right while the record's
+    /// page was the only surface that knew what was sounding. `Now playing`
+    /// exists now and is that surface, so the block leads there: the text
+    /// naming what is playing takes you to the place about what is playing.
+    /// The record is one step further on, which is the right way round.
+    ShowNowPlaying,
     /// A row of the **Queue** place was clicked: play the queue from that
     /// zero-based position ([`Command::JumpTo`], ADR-0014).
     ///
@@ -553,13 +554,6 @@ pub(crate) enum Message {
     /// It also puts the wall back on the **records** (ADR-0035): the five keys
     /// are how records are arranged, so pressing one is asking for records.
     GroupKeySelected(baz_core::index::GroupKey),
-    /// The strip's sixth word, or `6`: show the wall's other subject
-    /// (ADR-0035). Persisted, on [`Self::GroupKeySelected`]'s terms.
-    ///
-    /// It carries the subject rather than toggling, so the word and the digit
-    /// are *selections* like the five beside them and pressing `ARTISTS` twice
-    /// is not a way to end up somewhere else.
-    WallSubjectSelected(crate::vm::WallSubject),
     /// An entry in the index rail was clicked: put that shelf at the top of
     /// the wall. Carries the run's index, not a pixel — the rail knows which
     /// shelf it points at and nothing about where the shelf is.
@@ -626,6 +620,25 @@ pub(crate) enum Message {
     /// in is the player's shuffle property's answer, the same as every other
     /// play gesture's ([`App::send_run`]).
     PlayAll,
+    /// **Home's `All songs` tile was pressed**: play everything you own.
+    ///
+    /// The strip's [`Self::PlayAll`] with a different scope, and the difference
+    /// is the whole reason there are two: `Play all` sits beside the query and
+    /// the arrangement that decide the wall, and plays exactly what the wall
+    /// shows. **Home shows no wall**, so its tile plays the collection whole
+    /// rather than silently applying a filter set on another page
+    /// (`crate::implicit::ImplicitList::everything`). The tile states its own
+    /// scope in its counts line, so what it will play is on screen beside it.
+    PlayEverything,
+    /// The pointer entered (`true`) or left (`false`) Home's `All songs` tile.
+    ///
+    /// The wall's [`Self::TileEntered`] mechanism for the one tile that is not
+    /// a record, and a `bool` rather than an id because there is only ever one
+    /// of it. iced 0.13 tells a widget its own hover status and its siblings
+    /// nothing, so the tile reports its crossings and the shelf holds the
+    /// answer — the pattern [`Self::TileEntered`] and [`Self::QueueRowEntered`]
+    /// already use, for the same toolkit reason.
+    AllSongsHovered(bool),
     /// **The playlist panel's `All songs` row**: go to the list.
     ///
     /// The list is the wall (`crate::all_songs`), so this is the Library —
@@ -636,10 +649,11 @@ pub(crate) enum Message {
     /// bar's crossed arrows.
     ///
     /// A *mode*, not an act. It says what order things play in from here, and
-    /// it re-arranges the run in progress to match — forward of the needle
-    /// only, through [`Command::UpdateQueue`], so nothing stops. Turning it off
-    /// puts the run back into the order the gesture that started it built
-    /// ([`shuffle::restored`]). See [`App::toggle_shuffle`].
+    /// it changes **the walk, never the list** — the run keeps the order the
+    /// gesture that started it built, in both positions of the control, so
+    /// turning it off is a `SetTraversal` and nothing else. Nothing stops: the
+    /// sounding track plays to its end and what follows is re-planned
+    /// (`baz_core::traversal`). See [`App::toggle_shuffle`].
     ToggleShuffle,
     /// The record's page: a different format of this album was picked.
     EditionSelected(u64, vm::EditionKey),
@@ -986,9 +1000,6 @@ struct App {
     /// a shelf to hold it — so the first-run path can hand it to the shelf the
     /// setup screen eventually opens.
     group_key: GroupKey,
-    /// The subject the wall opens on (ADR-0035), held here for `group_key`'s
-    /// reason and handed to the shelf the same way.
-    subject: vm::WallSubject,
     /// Whether the returns lane opens open, read from the config for
     /// `group_key`'s reason and handed to the shelf the same way.
     lane_open: bool,
@@ -1078,8 +1089,9 @@ impl App {
         reason = "a launch is one composition of independent restores — the \
                   engine, the library, the config's standing decisions, the \
                   run's snapshot — and each is three lines that only mean \
-                  anything beside the others. Splitting it would name four \
-                  functions after the order they happen to run in"
+                  anything beside the others. It has crossed and re-crossed \
+                  the limit as those decisions came and went; splitting it \
+                  would name four functions after the order they happen to run"
     )]
     fn new(started: Instant, cli_dir: Option<PathBuf>) -> (Self, Task<Message>) {
         // Engine first: open failure must not kill the app — it becomes
@@ -1146,9 +1158,6 @@ impl App {
         let group_key = stored
             .as_ref()
             .map_or(GroupKey::Artist, |config| config.group_key);
-        let subject = stored
-            .as_ref()
-            .map_or(vm::WallSubject::default(), |config| config.wall_subject);
         let density = stored
             .as_ref()
             .map_or(shelf::Density::Balanced, |config| config.density);
@@ -1159,7 +1168,24 @@ impl App {
         // (`config::Config::shuffle`), seeded rather than assumed for
         // `seed_volume`'s reason: the control must be lit on the first frame,
         // not on the first press.
-        player.seed_shuffle(stored.as_ref().is_some_and(|config| config.shuffle));
+        //
+        // The *mode* is what is persisted; the seed belongs to a run, so a
+        // fresh one is rolled here rather than remembered. Two launches with
+        // shuffle on are two different passes, which is what a listener means
+        // by shuffle and what remembering a seed would quietly break.
+        //
+        // **Sent, not assumed**, on exactly the terms the ReplayGain settings
+        // above are: the traversal is engine state now, so the config's
+        // standing decision reaches it as a command and this process keeps a
+        // mirror. `InOrder` is the engine's own default and is not sent, which
+        // is the ordinary case and costs nothing.
+        let standing = traversal(stored.as_ref().is_some_and(|config| config.shuffle));
+        if standing != Traversal::InOrder {
+            playback.send(Command::SetTraversal {
+                traversal: standing,
+            });
+        }
+        player.seed_traversal(standing);
         let resume = read_snapshot();
         // The folders baz holds this run (ADR-0022): what the config remembers,
         // with a `baz DIR` argument **added to the front** rather than replacing
@@ -1174,7 +1200,7 @@ impl App {
         let (screen, task) = if dirs.is_empty() {
             (Screen::Setup(Setup::fresh(None)), Task::none())
         } else {
-            match Shelf::open(dirs, group_key, subject, density, lane_open) {
+            match Shelf::open(dirs, group_key, density, lane_open) {
                 Ok((shelf, task)) => (Screen::Shelf(Box::new(shelf)), task),
                 Err(error) => (Screen::Setup(Setup::fresh(Some(error))), Task::none()),
             }
@@ -1182,7 +1208,6 @@ impl App {
         let mut app = Self {
             _history_ledger: history_ledger,
             group_key,
-            subject,
             settings_section: 0,
             density,
             lane_open,
@@ -1334,13 +1359,11 @@ impl App {
             // the toggle, so pressing the artist you are already reading puts
             // the page down, exactly as a tile pressed twice does.
             Message::OpenArtist(id) => self.go(|place| place.artist(id)),
-            Message::ShowPlayingAlbum => match self.player.playing_album() {
-                // Nothing is sounding, so there is no record to be taken to.
-                // The control is not offered in that state (see
-                // `views::bottom_bar`), so this is the guard and not the case.
-                None => Task::none(),
-                Some(id) => self.open_album(id),
-            },
+            // The density it lands in is whatever was last chosen; only
+            // `Ctrl+U` asks for the run specifically.
+            Message::ShowNowPlaying => {
+                self.go(|place| place.go(crate::lane::Destination::NowPlaying))
+            }
             // The Settings place's spine. Session state and deliberately not
             // persisted: which section you were last reading is not a standing
             // decision.
@@ -1384,6 +1407,16 @@ impl App {
             }
             Message::PlayAll => {
                 self.play_all();
+                Task::none()
+            }
+            Message::PlayEverything => {
+                self.play_everything();
+                Task::none()
+            }
+            Message::AllSongsHovered(over) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.hovered_all_songs = over;
+                }
                 Task::none()
             }
             Message::SeekBy(delta_ms) => {
@@ -1474,13 +1507,7 @@ impl App {
         let Screen::Setup(setup) = &mut self.screen else {
             return Task::none();
         };
-        match Shelf::open(
-            vec![dir],
-            self.group_key,
-            self.subject,
-            self.density,
-            self.lane_open,
-        ) {
+        match Shelf::open(vec![dir], self.group_key, self.density, self.lane_open) {
             Ok((state, task)) => {
                 self.screen = Screen::Shelf(Box::new(state));
                 task
@@ -2729,6 +2756,10 @@ impl App {
             // record's hover options unbidden, on the record you had happened
             // to touch on the way out.
             state.hovered_album = None;
+            // Home's `All songs` tile is the same case exactly: its own press
+            // navigates out from under the pointer, so without this the veil
+            // would be waiting on it when you came back.
+            state.hovered_all_songs = false;
             let from = self.place;
             self.place = door(self.place);
             self.note_place_left(from);
@@ -3321,123 +3352,98 @@ impl App {
         self.publish_mpris(false);
     }
 
-    /// **Arrange a run for the player's shuffle property, and send it.**
+    /// **Send a run, and say how it is to be walked.**
     ///
     /// The one place a `SetQueue` that *starts* something goes out, which is
     /// what makes "`Play` on a record, `Play all`, a playlist's `Play` and a
     /// track click all agree" a structural fact rather than four functions
     /// keeping a convention. Each caller builds the queue its own gesture
-    /// means, in the order that gesture means, and hands it here; what happens
-    /// to that order is decided once.
+    /// means, in the order that gesture means, and hands it here.
     ///
-    /// - **Shuffle off**: the queue goes out exactly as built. Nothing is
-    ///   retained, because there is nothing to come back from.
-    /// - **Shuffle on**: the source order is retained
-    ///   ([`shuffle::source_order`]), the run is permuted
-    ///   ([`shuffle::arranged`]), and the two are recorded **together**
-    ///   ([`PlayerState::note_shuffled_run`]) — so "a shuffled run the toggle
-    ///   cannot turn off" is not a state this shell can reach.
+    /// **What happens to that order is: nothing.** This function used to
+    /// permute the run when the mode was on and keep a copy of what it had
+    /// permuted; the owner's reading of shuffle — *"going to an unknown next
+    /// track rather than actually mutating the track list"* — took both away.
+    /// The run goes out as built, in every mode, and the mode goes out beside
+    /// it as a traversal the engine walks by (`baz_core::traversal`).
     ///
-    /// `lead` is a row the gesture named — a track click — which plays first
-    /// and is not shuffled into the body ([`shuffle::leading`]). `None` is a
-    /// plain `Play`, where the whole run is still *next*.
+    /// A **fresh seed per run**, because the same seed over a re-played record
+    /// would be the same shuffle twice.
     ///
-    /// Answers **the position playback should start at**: the named row with
-    /// shuffle off, `0` with it on — the front of the run for a plain `Play`,
-    /// and the hoisted track for a click. `None` when the engine would not take
-    /// the queue, which is the caller's cue to stop rather than to send a
+    /// `lead` is a row the gesture named — a track click. It needs no special
+    /// handling any more: starting at a row and continuing by the plan is what
+    /// the engine does with `JumpTo`, so *this one, then whatever* is one
+    /// command rather than a hoist and a permutation.
+    ///
+    /// Answers **the position playback should start at**: the named row, or the
+    /// head of the pass for a plain `Play`. `None` when the engine would not
+    /// take the queue, which is the caller's cue to stop rather than to send a
     /// transport command into a run that does not exist.
     fn send_run(&mut self, queue: vm::QueueVm, lead: Option<usize>) -> Option<usize> {
-        if !self.player.shuffle() {
-            let paths = queue.paths();
-            if !self.playback.send(Command::SetQueue { paths }) {
+        // **A fresh pass per run**, and only when the mode is on. The same seed
+        // over a re-played record would be the same shuffle twice, which is the
+        // one thing about a shuffle a listener notices immediately.
+        if self.player.shuffle() {
+            let traversal = Traversal::Shuffled { seed: draw_seed() };
+            if !self.playback.send(Command::SetTraversal { traversal }) {
                 self.player.engine_closed();
                 return None;
             }
-            self.player.note_queue_sent(queue);
-            return Some(lead.unwrap_or(0));
+            self.player.note_traversal(traversal);
         }
-        let source = shuffle::source_order(&queue);
-        let arranged = match lead {
-            // The clicked track leads and the rest follows by chance — the one
-            // reading that honours both halves of "play this one" and "shuffle
-            // is on".
-            Some(row) => shuffle::arranged(&shuffle::leading(&queue, row), draw_seed(), 1),
-            None => shuffle::arranged(&queue, draw_seed(), 0),
-        };
-        let paths = arranged.paths();
+        // **The queue goes out exactly as the gesture built it, in every mode.**
+        // There is no branch here any more and that is the reduction: what
+        // shuffle changes is the walk, which the engine was told about above.
+        let paths = queue.paths();
         if !self.playback.send(Command::SetQueue { paths }) {
             self.player.engine_closed();
             return None;
         }
-        self.player.note_shuffled_run(arranged, source);
-        Some(0)
+        self.player.note_queue_sent(queue);
+        // The row the gesture named is the row to start on — under either mode.
+        // It used to be hoisted to the front of a permuted list so that a click
+        // could mean *this one* and *then whatever*; a traversal means both by
+        // construction, because starting at a row and continuing by the plan is
+        // exactly what the engine does with `JumpTo`.
+        Some(lead.unwrap_or_else(|| self.player.first_of_the_pass()))
     }
 
     /// **Turn shuffle on or off** — the now-playing bar's crossed arrows
     /// (the owner, 2026-08-10: *"can you make shuffle a property of the player
-    /// i.e. toggle on/off"*).
+    /// i.e. toggle on/off"*, and *"shuffle as a concept is more about going to
+    /// an unknown next track rather than actually mutating the track list"*).
     ///
-    /// Three things, in this order: the property moves, the standing decision
-    /// is written to `config.toml`, and the run in progress is re-arranged to
-    /// match what the control now says.
+    /// Three things, in this order: the engine is told how to walk, the standing
+    /// decision is written to `config.toml`, and this process records the same
+    /// traversal so that what it draws and what the engine plays are one answer.
     ///
-    /// **Nothing stops.** The re-arrangement goes out as
-    /// [`Command::UpdateQueue`], which ADR-0014 guarantees disturbs no
-    /// delivered sample when the playing track stays where it is — and it
-    /// always does, because both directions keep the needle put:
+    /// **The queue is not touched, in either direction.** That is the whole
+    /// shape of the second decision: shuffle was a permutation this function
+    /// applied to the run and undid from a retained copy, and it is now a
+    /// property of the walk — so *on* sends a fresh pass and *off* sends
+    /// `InOrder`, and the run is in its own order again because it never left
+    /// it. Everything the old version needed to be careful about — a retained
+    /// order that a delete could stale, an append that had to survive the
+    /// restore, a run with no order to go back to — is gone rather than handled.
     ///
-    /// - **On**: what is behind the needle is history and does not re-order;
-    ///   what is in front of it is permuted ([`shuffle::arranged`], with
-    ///   `keep` = the playing row + 1). The order the run had is retained as
-    ///   the order to come back to.
-    /// - **Off**: the run goes back into its retained order
-    ///   ([`shuffle::restored`]), and the retained order is spent. A run with
-    ///   none — restored from a snapshot, or re-ordered by hand since — is
-    ///   left exactly as it stands and says so on stdout, which is the honest
-    ///   answer rather than an invented one.
+    /// **Nothing stops.** `SetTraversal` lets the sounding track play to its end
+    /// and continues on the new plan after it (`baz_core::traversal`), which is
+    /// the bargain `UpdateQueue` already made and the same one boundary's cost.
     ///
     /// A press with nothing playing moves the property and writes it, and that
     /// is the whole of what there is to do: the mode is about what plays
     /// **next**.
     fn toggle_shuffle(&mut self) {
-        let on = self.player.set_shuffle(!self.player.shuffle());
-        persist_shuffle(on);
-        let Some(queue) = self.player.queue().cloned() else {
-            println!("[shuffle] {}", if on { "on" } else { "off" });
-            return;
-        };
-        // `playing_queue_row` is the engine's answer reconciled against this
-        // record; `None` — queued but not started — means all of it is still
-        // to come.
-        let keep = self.player.playing_queue_row().map_or(0, |row| row + 1);
-        // **On** retains the order it is about to destroy; **off** spends the
-        // one it retained. A run with none to spend — restored from a snapshot,
-        // or re-ordered by hand since — is left exactly as it stands.
-        let arranged = if on {
-            Some(shuffle::arranged(&queue, draw_seed(), keep))
-        } else {
-            self.player
-                .source_order()
-                .map(|order| shuffle::restored(&queue, order))
-        };
-        let Some(arranged) = arranged else {
-            println!("[shuffle] off \u{2014} this run has no earlier order to return to");
-            return;
-        };
-        let source = on.then(|| shuffle::source_order(&queue));
-        let paths = arranged.paths();
-        if !self.playback.send(Command::UpdateQueue { paths }) {
+        let on = !self.player.shuffle();
+        let traversal = traversal(on);
+        if !self.playback.send(Command::SetTraversal { traversal }) {
             self.player.engine_closed();
             return;
         }
-        self.player.note_queue_edited(arranged);
-        match source {
-            Some(order) => self.player.retain_source_order(order),
-            None => self.player.forget_source_order(),
-        }
+        self.player.note_traversal(traversal);
+        persist_shuffle(on);
         println!(
-            "[shuffle] {} \u{2014} the run re-arranged from row {keep}",
+            "[shuffle] {} \u{2014} the run keeps its own order; the walk changed",
             if on { "on" } else { "off" }
         );
         self.publish_mpris(false);
@@ -3483,8 +3489,44 @@ impl App {
             return;
         }
         println!("[all-songs] play — {}", list.counts());
-        let queue = list.queue;
-        if self.send_run(queue, None).is_some() && self.playback.send(Command::Play) {
+        self.start(list);
+    }
+
+    /// **Play everything you own** — Home's `All songs` tile (the owner,
+    /// 2026-08-10: *"again I wanted the Play all, to be more like a tile on the
+    /// home screen, a special 'playlist'"*).
+    ///
+    /// [`Self::play_all`] with the collection as its scope rather than the
+    /// wall's. The two share the list type, the origin, the queue shape and the
+    /// arranger, and differ in exactly one argument — which is the shape
+    /// `crate::implicit` was built for and the reason this is four lines rather
+    /// than a second gesture.
+    ///
+    /// **Why Home's tile does not read the wall's query.** `Play all` lives in
+    /// the strip beside the query and the arrangement that decide the wall, and
+    /// its contract is *exactly what you can see*. Home shows no wall. A tile
+    /// there that applied a filter set on another page would be acting on state
+    /// the listener cannot see or clear from where they are standing — the same
+    /// rule, on a surface where "what you can see" is a different set. What this
+    /// tile will play is stated on the tile, in its counts line.
+    fn play_everything(&mut self) {
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        let list = state.everything();
+        if list.is_empty() {
+            // An empty library. Nothing to play, so nothing happens and nothing
+            // is claimed — the rule every play gesture in baz keeps.
+            return;
+        }
+        println!("[all-songs] play everything — {}", list.counts());
+        self.start(list);
+    }
+
+    /// Send an implicit list's run and start it — the tail both `All songs`
+    /// gestures share, so their one difference stays their scope.
+    fn start(&mut self, list: crate::implicit::ImplicitList) {
+        if self.send_run(list.queue, None).is_some() && self.playback.send(Command::Play) {
             self.player.note_transport_sent();
         } else {
             self.player.engine_closed();
@@ -3589,11 +3631,12 @@ impl App {
         let paths = edited.paths();
         if self.playback.send(Command::UpdateQueue { paths }) {
             self.player.note_queue_edited(edited);
-            // **A hand reorder restates the order**, so the order shuffle would
-            // return to is dropped with it (ADR-0023's amendment): the hand
-            // beats the machine's memory, and turning shuffle off after a
-            // stepper press leaves the run exactly as the press left it.
-            self.player.forget_source_order();
+            // **A hand reorder needs nothing undone.** It used to drop the
+            // order shuffle would return to, because shuffle owned an order of
+            // its own that the hand had just contradicted. Shuffle owns no
+            // order now — the run's order is the run's — so a stepper press is
+            // an ordinary edit and turning shuffle off after one leaves the run
+            // exactly as the press left it, by construction rather than by rule.
             // [`Self::remove_queued`]'s history rule, for the reorder.
             self.queue_undo.push(before);
         } else {
@@ -3732,8 +3775,6 @@ impl App {
         let paths = edited.paths();
         if self.playback.send(Command::UpdateQueue { paths }) {
             self.player.note_queue_edited(edited);
-            // [`Self::shift_queued`]'s rule, for the drag.
-            self.player.forget_source_order();
         } else {
             self.player.engine_closed();
         }
@@ -4277,14 +4318,6 @@ pub(crate) struct Shelf {
     /// How the wall is arranged (ADR-0019). Persisted in `config.toml`; the
     /// top bar's row of words and `1`–`5` are the two ways to change it.
     pub(crate) group_key: GroupKey,
-    /// **What the wall is a wall of** — records, or artists (ADR-0035).
-    ///
-    /// It sits *beside* `group_key` rather than inside it, so the arrangement
-    /// survives a trip through the artists and back; see
-    /// [`vm::WallSubject`] for why it is not a sixth key. Persisted on
-    /// `group_key`'s own terms; the strip's sixth word and `6` are the two
-    /// ways to change it.
-    pub(crate) subject: vm::WallSubject,
     /// How closely the wall hangs (ADR-0017 step 6). Persisted in
     /// `config.toml`; <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd>
     /// and <kbd>Ctrl</kbd>+scroll are the two ways to change it, and there is
@@ -4315,22 +4348,6 @@ pub(crate) struct Shelf {
     /// How many of each shelf's albums survived it, in `groups` order — what
     /// [`shelf::Shelves`] lays the wall out from.
     visible_counts: Vec<usize>,
-    /// **The artists wall, flattened**, exactly as `albums` is: every artist
-    /// the collection is filed under, in the artists wall's own shelf order
-    /// (ADR-0035). Rebuilt with the records, from the records.
-    pub(crate) artists: Vec<vm::ArtistVm>,
-    /// One entry per artists shelf: its `Initial` header and the slice of
-    /// `artists` under it. `groups`' twin, for the other subject.
-    artist_groups: Vec<GroupVm>,
-    /// Indices into `artists` that survive the current query.
-    ///
-    /// **One query projected twice**: this is `visible`'s own answer put
-    /// through [`vm::visible_artists`], never a second search. An artist
-    /// survives exactly when one of their records does.
-    pub(crate) artist_visible: Vec<usize>,
-    /// How many of each artists shelf's artists survived, in `artist_groups`
-    /// order — `visible_counts`' twin.
-    artist_visible_counts: Vec<usize>,
     /// The live search text.
     pub(crate) query: String,
     /// The **Songs** answers for the live query (doc 09 §5): the top
@@ -4445,6 +4462,17 @@ pub(crate) struct Shelf {
     /// The rule's lane is reserved whatever this says, so it changes what is
     /// drawn in it and never the geometry around it.
     pub(crate) hovered_album: Option<u64>,
+    /// Whether the pointer is on Home's **All songs** tile.
+    ///
+    /// [`Self::hovered_album`]'s mechanism for the one tile that is not a
+    /// record — a `bool` because there is exactly one of it, where the wall has
+    /// hundreds and needs an id. It carries no tween for the same reason: the
+    /// wall's keyed tween exists so that crossing a gutter *hands the mark over*
+    /// from one sleeve to the next, and a lone tile has nothing to hand it to.
+    /// The hover options themselves were always a boolean reveal rather than a
+    /// tween (`views::shelf`'s `hover_options`), so this tile's layer appears
+    /// exactly as the wall's does.
+    pub(crate) hovered_all_songs: bool,
     /// How far the hovered tile's mark has travelled (ADR-0020 §2.3).
     ///
     /// **One tween for the whole wall, keyed by the hovered id — never one per
@@ -4508,7 +4536,6 @@ impl Shelf {
     fn open(
         roots: Vec<PathBuf>,
         group_key: GroupKey,
-        subject: vm::WallSubject,
         density: shelf::Density,
         lane_open: bool,
     ) -> Result<(Self, Task<Message>), String> {
@@ -4544,17 +4571,12 @@ impl Shelf {
         let mut shelf = Self {
             library,
             group_key,
-            subject,
             density,
             history,
             albums: Vec::new(),
             groups: Vec::new(),
             visible: Vec::new(),
             visible_counts: Vec::new(),
-            artists: Vec::new(),
-            artist_groups: Vec::new(),
-            artist_visible: Vec::new(),
-            artist_visible_counts: Vec::new(),
             query: String::new(),
             songs: Vec::new(),
             hovered_song: None,
@@ -4588,6 +4610,7 @@ impl Shelf {
             ),
             last_scan_log: Instant::now(),
             hovered_album: None,
+            hovered_all_songs: false,
             tile_hover: Keyed::new(),
             window_w: WINDOW.width,
             lane_open,
@@ -4648,7 +4671,6 @@ impl Shelf {
             // shell's state, and the owner's move put the field in the lane.
             Message::EscapePressed => self.peel(),
             Message::GroupKeySelected(key) => self.arrange_by(key),
-            Message::WallSubjectSelected(subject) => self.show_subject(subject),
             Message::RailJumped(run) => self.jump_to_shelf(run),
             Message::Scrolled(viewport) => {
                 self.scroll_offset = viewport.absolute_offset().y;
@@ -4946,19 +4968,10 @@ impl Shelf {
     /// entirely, so holding the scroll offset would drop you into an unrelated
     /// part of the collection while claiming nothing had moved.
     fn arrange_by(&mut self, key: GroupKey) -> Task<Message> {
-        // **Pressing a key asks for records.** The five words are how *records*
-        // are arranged, so one of them is a statement about records even when
-        // the artists are what is on the wall — and a `YEAR` that left the
-        // artists standing would be a word that did nothing (ADR-0035).
-        let subject_moved = self.subject != vm::WallSubject::Records;
-        if self.group_key == key && !subject_moved {
+        if self.group_key == key {
             return Task::none();
         }
         self.group_key = key;
-        if subject_moved {
-            self.subject = vm::WallSubject::Records;
-            persist_wall_subject(self.subject);
-        }
         self.rebuild_shelves();
         self.scroll_offset = 0.0;
         persist_group_key(key);
@@ -4966,94 +4979,6 @@ impl Shelf {
             scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
             self.request_visible_thumbs(),
         ])
-    }
-
-    /// **Show the wall's other subject** — the strip's sixth word and `6` both
-    /// land here (ADR-0035).
-    ///
-    /// [`Self::arrange_by`]'s twin, and deliberately its twin: the wall goes
-    /// back to the top for the same reason (what you were looking at is not
-    /// where it was), the query is untouched for the same reason (the subject
-    /// is a projection of the same match set, never a filter), and the press is
-    /// remembered for the same reason.
-    ///
-    /// **The arrangement is not touched at all.** `group_key` is records' state
-    /// and it stays exactly where the listener left it, so a trip through the
-    /// artists and back is a round trip rather than a reset — which is the
-    /// whole argument for holding the subject beside the key instead of inside
-    /// it.
-    fn show_subject(&mut self, subject: vm::WallSubject) -> Task<Message> {
-        if self.subject == subject {
-            return Task::none();
-        }
-        self.subject = subject;
-        // Nothing is re-derived from the library: both walls were built by the
-        // last `rebuild_shelves` and both filters by the last `refilter`. What
-        // changes is which of them is drawn — and the *range guard*, whose
-        // positions now name a different set of tiles.
-        self.forget_requested();
-        self.scroll_offset = 0.0;
-        persist_wall_subject(subject);
-        Task::batch([
-            scrollable::scroll_to(scroll_id(), AbsoluteOffset { x: 0.0, y: 0.0 }),
-            self.request_visible_thumbs(),
-        ])
-    }
-
-    /// **The headers of the wall that is actually drawn** — the records' or the
-    /// artists', by the active subject (ADR-0035).
-    ///
-    /// The three accessors here are what let one virtualizer, one sticky
-    /// header, one index rail and one set of grid arithmetic serve both
-    /// subjects: the view asks *the wall* for its headers, its survivors and
-    /// its per-shelf counts, and never reaches for a named field. A second
-    /// copy of the wall's layout is the one thing this feature could not
-    /// afford.
-    pub(crate) fn wall_groups(&self) -> &[GroupVm] {
-        match self.subject {
-            vm::WallSubject::Records => &self.groups,
-            vm::WallSubject::Artists => &self.artist_groups,
-        }
-    }
-
-    /// The indices the query left standing, into whichever list the active
-    /// subject draws tiles from ([`Self::wall_groups`]).
-    pub(crate) fn wall_visible(&self) -> &[usize] {
-        match self.subject {
-            vm::WallSubject::Records => &self.visible,
-            vm::WallSubject::Artists => &self.artist_visible,
-        }
-    }
-
-    /// How many tiles survived on each shelf of the drawn wall, in
-    /// [`Self::wall_groups`] order — what [`shelf::Shelves`] lays out from.
-    fn wall_visible_counts(&self) -> &[usize] {
-        match self.subject {
-            vm::WallSubject::Records => &self.visible_counts,
-            vm::WallSubject::Artists => &self.artist_visible_counts,
-        }
-    }
-
-    /// **The figures the wall's readouts state**, following the subject
-    /// (ADR-0035): how many tiles the query left, and how many there are.
-    ///
-    /// The wells say `7 / 1284`, and under an artists wall a figure counting
-    /// *albums* beside tiles that are people would be visibly wrong — the
-    /// readout's subject has to be the wall's. Resolved here rather than at
-    /// each well, so the strip's form and the lane's form cannot disagree.
-    pub(crate) fn wall_counts(&self) -> (usize, usize) {
-        match self.subject {
-            vm::WallSubject::Records => (self.visible.len(), self.albums.len()),
-            vm::WallSubject::Artists => (self.artist_visible.len(), self.artists.len()),
-        }
-    }
-
-    /// The noun those figures are figures **of** — `albums` or `artists`.
-    pub(crate) fn wall_noun(&self) -> &'static str {
-        match self.subject {
-            vm::WallSubject::Records => "albums",
-            vm::WallSubject::Artists => "artists",
-        }
     }
 
     /// **The All songs list, resolved from this wall** (`crate::implicit`).
@@ -5065,6 +4990,20 @@ impl Shelf {
     /// something is about to be played or drawn.
     pub(crate) fn all_songs(&self) -> crate::implicit::ImplicitList {
         crate::implicit::ImplicitList::all_songs(&self.albums, &self.visible, |id| {
+            self.edition_choice.get(&id).copied()
+        })
+    }
+
+    /// **All songs over the whole library**, whatever the wall is filtered to —
+    /// what Home's tile draws and plays (`crate::implicit`).
+    ///
+    /// [`Self::all_songs`]'s sibling and not its variant: same origin, same
+    /// name, same sleeve, different scope. `ImplicitList::everything` carries
+    /// the argument for why Home's scope is the collection rather than the
+    /// wall's, and it is short — Home shows no wall and no query, so a filter
+    /// set on another page has nothing on screen to be read from.
+    pub(crate) fn everything(&self) -> crate::implicit::ImplicitList {
+        crate::implicit::ImplicitList::everything(&self.albums, |id| {
             self.edition_choice.get(&id).copied()
         })
     }
@@ -5190,7 +5129,7 @@ impl Shelf {
     /// inspector and the double-click hold), and a cache of it would be a
     /// fourth thing that could disagree with the other three.
     pub(crate) fn shelves(&self) -> shelf::Shelves {
-        shelf::Shelves::new(self.grid(), self.wall_visible_counts())
+        shelf::Shelves::new(self.grid(), &self.visible_counts)
     }
 
     /// Re-ask the library for the wall under the active key, and re-derive
@@ -5219,20 +5158,6 @@ impl Shelf {
         // but re-counting is cheaper than reasoning about which caller changed
         // what.
         self.collection = vm::Collection::count(&self.albums, self.library.len());
-        // **The artists wall is built from the records wall, not beside it**
-        // (ADR-0035): an artist exists exactly when a record filed under them
-        // reached `albums`, so the two cannot describe different collections.
-        // Shelved by `Initial` whatever the active key is — the initial is the
-        // one break that is a property of the artist rather than of the record.
-        self.artists.clear();
-        self.artist_groups.clear();
-        for shelf in vm::build_artists(&self.albums) {
-            self.artists.extend(shelf.artists);
-            self.artist_groups.push(GroupVm {
-                header: shelf.header,
-                end: self.artists.len(),
-            });
-        }
         self.refilter();
         // The album ids survive a re-arrangement (see above), so the fold does
         // too — but a *rescan* can add and remove records, and the lane must
@@ -5327,17 +5252,6 @@ impl Shelf {
     /// and its contents cannot disagree about which albums survived.
     fn refilter(&mut self) {
         self.visible = vm::visible_indices(&self.albums, &self.library, &self.query);
-        // **One query, projected twice** (ADR-0035). The search has been spent
-        // once, above; the artists wall is that same answer put through
-        // `vm::visible_artists`, so an artist survives exactly when one of
-        // their records does and a keystroke costs one search rather than two.
-        let surviving: HashSet<u64> = self
-            .visible
-            .iter()
-            .filter_map(|&index| self.albums.get(index))
-            .map(|album| album.id)
-            .collect();
-        self.artist_visible = vm::visible_artists(&self.artists, &surviving);
         // The range guard names *positions*, and every album behind them has
         // just moved. Rows 0..24 of a filtered wall are not the rows 0..24 of
         // the wall before it.
@@ -5354,7 +5268,6 @@ impl Shelf {
         // two lists together rather than a second filter that could disagree
         // with the first.
         self.visible_counts = surviving_per_shelf(&self.visible, &self.groups);
-        self.artist_visible_counts = surviving_per_shelf(&self.artist_visible, &self.artist_groups);
     }
 
     /// Answer a message that only the folders baz holds care about, reporting
@@ -5923,7 +5836,7 @@ impl Shelf {
         let (start, end) = self
             .shelves()
             .visible_albums(self.scroll_offset, self.grid_size.height);
-        let tiles = self.wall_visible().len();
+        let tiles = self.visible.len();
         let (start, end) = (start.min(tiles), end.min(tiles));
         // **Nothing new is on screen, so there is nothing to ask for.**
         //
@@ -5943,29 +5856,6 @@ impl Shelf {
             return Task::none();
         }
         self.last_requested = Some((start, end));
-        // **The artists wall has its own quotations, and this is where they
-        // are asked for** (ADR-0035). An artist's tile is a collage of records
-        // that are *not* on the wall, and the wall's visible range is the
-        // whole of the thumbnail guard — so without this an artist's collage
-        // drew the deterministic gradient until one of the records it quotes
-        // happened to scroll past on the *records* wall. That is real artwork
-        // by luck, and it is verbatim the defect the playlist collages had and
-        // then the artist page had; this is the third time the same guard has
-        // needed extending and the last surface that needed it.
-        //
-        // It is asked for **here** rather than in `App::request_offscreen_art`
-        // — which is where the artist *page*'s records are named — because
-        // this is the only guard that re-fires on a scroll. That one is keyed
-        // on the lane's stamps and the place, neither of which moves when the
-        // wall slides under the pointer.
-        if self.subject == vm::WallSubject::Artists {
-            let quoted: Vec<u64> = self.artist_visible[start..end]
-                .iter()
-                .filter_map(|&index| self.artists.get(index))
-                .flat_map(|artist| artist.records.iter().take(views::SLEEVE_CELLS).copied())
-                .collect();
-            return self.request_thumbs(&quoted);
-        }
         let mut tasks = Vec::new();
         for &album_index in &self.visible[start..end] {
             let Some(album) = self.albums.get(album_index) else {
@@ -6226,10 +6116,7 @@ fn persist_group_key(key: GroupKey) {
 ///
 /// The shelves are contiguous slices of the flat list and `surviving` is in
 /// the same order, so this is one walk of the two lists together rather than
-/// a second filter that could disagree with the first. One function for both
-/// subjects, because the shape is the same shape and two copies of it would
-/// be two chances for the artists wall to lay out differently from the
-/// records wall.
+/// a second filter that could disagree with the first.
 fn surviving_per_shelf(surviving: &[usize], groups: &[GroupVm]) -> Vec<usize> {
     let mut seen = surviving.iter().peekable();
     groups
@@ -6242,12 +6129,6 @@ fn surviving_per_shelf(surviving: &[usize], groups: &[GroupVm]) -> Vec<usize> {
             count
         })
         .collect()
-}
-
-/// Remember what the wall is a wall of — `persist_group_key`'s exact terms
-/// (ADR-0035, ADR-0017 §1.3).
-fn persist_wall_subject(subject: vm::WallSubject) {
-    persist(|config| config.wall_subject = subject);
 }
 
 /// Remember how closely it hangs — the same terms exactly (ADR-0017 §1.3).
@@ -6383,15 +6264,30 @@ fn read_snapshot() -> crate::session::Snapshot {
 /// **The one place a draw gets its randomness**: the wall clock, in
 /// nanoseconds.
 ///
-/// `crate::shuffle` takes a seed rather than reading a clock or reaching for a
-/// global generator, so that every arrangement it can produce is reproducible
-/// in a test — the nondeterminism has to enter *somewhere*, and this is that
-/// somewhere, in the shell, where nothing is asserted about it.
+/// `baz_core::traversal` takes a seed rather than reading a clock or reaching
+/// for a global generator, so that every pass it can produce is reproducible in
+/// a test and identical on both sides of the protocol — the nondeterminism has
+/// to enter *somewhere*, and this is that somewhere, in the shell, where
+/// nothing is asserted about it.
 ///
 /// A clock that refuses to answer (it has been set before the epoch) gives a
-/// fixed seed rather than a panic. The consequence is that two shuffles in that
-/// state draw the same eight records, which is a strange machine's problem and
-/// not worth a branch anywhere else.
+/// fixed seed rather than a panic. The consequence is that two runs on that
+/// machine shuffle the same way, which is a strange machine's problem and not
+/// worth a branch anywhere else.
+/// **The traversal the shuffle control's two positions mean.**
+///
+/// One function so the start-up seed and the toggle cannot disagree about what
+/// "on" is, and so the seed enters in exactly one place. Off is
+/// [`Traversal::InOrder`] and carries nothing: there is no order to remember,
+/// because the run never left its own.
+fn traversal(on: bool) -> Traversal {
+    if on {
+        Traversal::Shuffled { seed: draw_seed() }
+    } else {
+        Traversal::InOrder
+    }
+}
+
 fn draw_seed() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -6595,74 +6491,6 @@ mod tests {
         }
     }
 
-    /// **The wall's subject and the wall's arrangement are independent state,
-    /// and a trip through the artists is a round trip** (ADR-0035).
-    ///
-    /// This is the whole argument for holding the subject beside `group_key`
-    /// rather than as a sixth key, and it is a claim about what a function
-    /// does *not* touch — so it is asserted where the fact lives, over the
-    /// source of the two functions that answer it, exactly as
-    /// [`Self::a_place_costs_the_wall_no_width_at_all`] is.
-    ///
-    /// - `show_subject` never reads or writes `group_key`. Press `ARTISTS`
-    ///   from a `YEAR` wall, press `YEAR` again, and the decades are where
-    ///   they were left — because nothing on the way out could have moved
-    ///   them.
-    /// - `arrange_by` *does* set the subject, and only in one direction: the
-    ///   five words are how records are arranged, so pressing one is asking
-    ///   for records. A `YEAR` that left the artists standing would be a word
-    ///   that did nothing.
-    /// - Neither goes back to the library. Both walls were built by the last
-    ///   `rebuild_shelves` and both filters by the last `refilter`, so the
-    ///   press costs a redraw rather than a rebuild.
-    #[test]
-    fn the_walls_subject_and_its_arrangement_are_independent_state() {
-        let source = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app.rs"),
-        )
-        .expect("this module's own source");
-        let body = |signature: &str| {
-            let rest = source
-                .split_once(signature)
-                .unwrap_or_else(|| panic!("`{signature}` exists"))
-                .1;
-            rest[..rest.find("\n    }\n").expect("a function ends")].to_owned()
-        };
-
-        let show = body("fn show_subject(&mut self, subject: vm::WallSubject) -> Task<Message> {");
-        assert!(
-            !show.contains("group_key"),
-            "showing the other subject touches the arrangement, so a trip \
-             through the artists is not a round trip"
-        );
-        assert!(
-            !show.contains("self.rebuild_shelves()") && !show.contains("self.refilter()"),
-            "showing the other subject goes back to the library for a wall \
-             that was already built"
-        );
-        assert!(
-            show.contains("self.forget_requested()"),
-            "the range guard survives a change of subject, so the artists' \
-             collages ask for no artwork until something else clears it"
-        );
-        assert!(
-            show.contains("persist_wall_subject(subject)"),
-            "the subject is not remembered"
-        );
-
-        let arrange = body("fn arrange_by(&mut self, key: GroupKey) -> Task<Message> {");
-        assert!(
-            arrange.contains("vm::WallSubject::Records"),
-            "pressing a group key leaves the artists on the wall, so five of \
-             the row's six words do nothing while the sixth is current"
-        );
-        assert!(
-            !arrange.contains("WallSubject::Artists"),
-            "an arrangement can send the wall *to* the artists, which is a \
-             word meaning something it does not say"
-        );
-    }
-
     /// **Navigating between places costs the Library nothing.**
     ///
     /// Four members, one on screen, and the transitions between them are pure:
@@ -6727,7 +6555,7 @@ mod tests {
 
         /// Message tag → the on-screen control that sends the same message,
         /// or the reason there is none.
-        const CONTROLS: [(&str, &str); 22] = [
+        const CONTROLS: [(&str, &str); 21] = [
             (
                 "ToggleLane",
                 "the `Collapse` control at the returns lane's foot (ADR-0030 §3) — \
@@ -6794,14 +6622,9 @@ mod tests {
             ),
             (
                 "GroupKeySelected",
-                "the top bar's row of words — the first five of the six \
-                 (ADR-0019)",
-            ),
-            (
-                "WallSubjectSelected",
-                "the sixth word in that same row, `ARTISTS` (ADR-0035) — one \
-                 of a closed set of six states, drawn in the same voice and \
-                 the same box as the five keys beside it",
+                "the top bar's row of five words (ADR-0019); the first of \
+                 them, ARTIST, shelves the wall one artist at a time \
+                 (ADR-0035)",
             ),
             (
                 "SetVolume",
@@ -6957,13 +6780,18 @@ mod tests {
         for gesture in [
             "play_album",
             "play_all",
+            "play_everything",
             "play_playlist",
             "play_track",
             "play_playlist_track",
         ] {
             let body = body(gesture);
             assert!(
-                body.contains("self.send_run("),
+                // The two `All songs` gestures reach it through `start`, the
+                // four-line tail they share so that their one difference stays
+                // their *scope* — which is itself the claim, so it is spelled
+                // rather than papered over.
+                body.contains("self.send_run(") || body.contains("self.start(list)"),
                 "`{gesture}` starts a run without going through the arranger — \
                  shuffle would apply to some gestures and not others"
             );
@@ -6972,56 +6800,63 @@ mod tests {
                 "`{gesture}` sends its own SetQueue past `send_run`"
             );
         }
+        assert!(
+            body("start").contains("self.send_run("),
+            "the shared tail stopped going through the arranger"
+        );
 
-        // And the arranger does the two things the mode is made of: it retains
-        // the order it is about to destroy, and it records the pair together.
+        // **The arranger sends the run as it was built, and says how to walk
+        // it.** The two halves of the owner's second decision: the queue is
+        // never permuted here, and the traversal is what carries shuffle.
         let arranger = body("send_run");
         assert!(
-            arranger.contains("shuffle::source_order"),
-            "the order is kept"
+            arranger.contains("Command::SetTraversal"),
+            "the walk is what shuffle changes, and the engine has to be told"
         );
         assert!(
-            arranger.contains("shuffle::arranged"),
-            "and the run permuted"
-        );
-        assert!(
-            arranger.contains("note_shuffled_run"),
-            "the run and its source order are recorded together, so a shuffled \
-             run the toggle cannot turn off is unreachable"
+            arranger.contains("queue.paths()") && arranger.contains("note_queue_sent"),
+            "the run goes out as the gesture built it"
         );
 
-        // **Turning it off never stops the music.** ADR-0014's bargain: an
-        // edit that leaves the playing track alone disturbs no delivered
-        // sample, so the toggle is an `UpdateQueue` and never a `SetQueue`.
+        // **Nothing in this shell permutes a run any more.** Swept over the
+        // whole file rather than over one function, because the value of the
+        // decision is that there is nowhere left for a permutation to live.
+        // Spelled in halves so these needles are not their own counter-examples.
+        for (head, tail) in [
+            ("shuffle", "::arranged"),
+            ("shuffle", "::restored"),
+            ("source", "_order"),
+            ("note_shuffled", "_run"),
+        ] {
+            let gone = format!("{head}{tail}");
+            assert!(
+                !source.contains(&gone),
+                "`{gone}` came back: shuffle is a property of the walk, and a \
+                 run that gets re-ordered has a list being mutated again"
+            );
+        }
+
+        // **Turning it off never stops the music, and never touches the run.**
+        // `SetTraversal` lets the sounding track play out and re-plans what
+        // follows; a queue command here would be the old design returning.
         let toggle = body("toggle_shuffle");
-        assert!(toggle.contains("Command::UpdateQueue"));
+        assert!(toggle.contains("Command::SetTraversal"));
         assert!(
-            !toggle.contains("Command::SetQueue") && !toggle.contains("Command::Play"),
-            "the toggle restarted the music instead of re-ordering it"
-        );
-        assert!(
-            toggle.contains("shuffle::restored"),
-            "turning it off puts the run back into its retained order"
+            !toggle.contains("Command::SetQueue")
+                && !toggle.contains("Command::UpdateQueue")
+                && !toggle.contains("Command::Play"),
+            "the toggle touched the queue instead of the walk"
         );
         assert!(
             toggle.contains("persist_shuffle"),
             "a standing decision that is not written down is a session setting"
         );
 
-        // **A hand reorder drops the retained order** — the hand beats the
-        // machine's memory (ADR-0023's amendment).
-        for reorder in ["shift_queued", "move_queued"] {
-            assert!(
-                body(reorder).contains("forget_source_order"),
-                "`{reorder}` re-stated the order by hand and kept the old one"
-            );
-        }
-
-        // **The pull and the wall's draw are gone, and nothing kept a stub of
-        // either.** Named here so that a re-introduction is a deliberate act
-        // with a test to move rather than a quiet reappearance. Spelled in two
-        // pieces so these assertions are not their own counter-examples.
-        for gone in ["draw_pull", "start_shuffle"] {
+        // **The pull, the wall's draw and the retained-order machinery are
+        // gone, and nothing kept a stub of any of them.** Named here so that a
+        // re-introduction is a deliberate act with a test to move rather than a
+        // quiet reappearance. Spelled in two pieces for the reason above.
+        for gone in ["draw_pull", "start_shuffle", "forget_source"] {
             let (head, tail) = gone.split_once('_').expect("a two-word name");
             assert!(
                 !source.contains(&format!("fn {head}_{tail}")),
@@ -7072,16 +6907,42 @@ mod tests {
             "`Play all` is the All songs list's own Play — one concept, not two"
         );
         assert!(
-            play_all.contains("list.queue"),
+            play_all.contains("self.start(list)"),
             "and it plays that list, rather than building a second one beside it"
-        );
-        assert!(
-            play_all.contains("self.send_run(") && play_all.contains("Command::Play"),
-            "one press, and the first track sounds"
         );
         assert!(
             play_all.contains("if list.is_empty()"),
             "an empty wall: nothing happens and nothing is claimed"
+        );
+
+        // **Home's tile is the same list at a different scope**, which is the
+        // owner's *"more like a tile on the home screen, a special 'playlist'"*
+        // built as one concept rather than two. Same tail, same emptiness rule,
+        // and the only difference is which wall the list is a view of.
+        let start = source
+            .find("fn play_everything(&mut self")
+            .expect("play_everything exists");
+        let rest = &source[start..];
+        let everything = &rest[..rest.find("\n    }\n").expect("a function ends")];
+        assert!(
+            everything.contains("state.everything()"),
+            "Home's tile plays the collection, not whatever the wall is filtered to"
+        );
+        assert!(
+            !everything.contains("state.all_songs()"),
+            "Home's tile read a query it has nowhere to show"
+        );
+        assert!(everything.contains("self.start(list)"));
+        assert!(everything.contains("if list.is_empty()"));
+
+        // One press, and the first track sounds — asserted on the tail both
+        // gestures spend, so neither can grow a confirmation of its own.
+        let start = source.find("fn start(&mut self").expect("start exists");
+        let rest = &source[start..];
+        let tail = &rest[..rest.find("\n    }\n").expect("a function ends")];
+        assert!(
+            tail.contains("self.send_run(") && tail.contains("Command::Play"),
+            "one press, and the first track sounds"
         );
     }
 
@@ -7952,10 +7813,11 @@ mod tests {
             "self.menu = None;",
             "self.drag = None;",
             "hovered_album = None;",
+            "hovered_all_songs = false;",
         ] {
             assert!(
                 body.contains(cleared),
-                "a place change must not outlive `{cleared}` — the three are \
+                "a place change must not outlive `{cleared}` — the four are \
                  one rule: what was about the place you left does not follow you"
             );
         }

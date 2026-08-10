@@ -499,14 +499,10 @@ fn collapsed_well(filtering: bool) -> Element<'static, Message> {
 /// (`views::top_bar`'s `match_count`), so the two regimes answer one query one
 /// way.
 ///
-/// **It counts whatever the wall is a wall of** (ADR-0035). Records, normally;
-/// artists while the strip's sixth word is current, because a figure counting
-/// albums beside a wall of people would be a readout describing a surface that
-/// is not on screen. The `Songs` section states its own count in its own
-/// heading, as it always did.
+/// The `Songs` section states its own count in its own heading, as it always
+/// did.
 fn match_count(shelf: &Shelf) -> String {
-    let (narrowed, total) = shelf.wall_counts();
-    format!("{narrowed} / {total}")
+    format!("{} / {}", shelf.visible.len(), shelf.albums.len())
 }
 
 /// The lamp dot on `Now playing`: [`theme::DOT`], the accent, and nothing
@@ -912,19 +908,9 @@ mod tests {
         );
         let count = body(&source, "fn match_count(shelf: &Shelf)");
         assert!(
-            count.contains("{narrowed} / {total}") && count.contains("shelf.wall_counts()"),
+            count.contains("shelf.visible.len()") && count.contains("shelf.albums.len()"),
             "the match count is no longer the query's answer over the \
              collection's size"
-        );
-        // **And the figures are the *wall's*, not the albums'** (ADR-0035).
-        // Reaching for `shelf.albums` here would put a count of records under
-        // a wall of artists — the readout describing a surface that is not on
-        // screen — which is exactly the defect `wall_counts` exists to make
-        // unspellable.
-        assert!(
-            !count.contains("shelf.albums.len()") && !count.contains("shelf.visible.len()"),
-            "the lane's match count counts albums rather than whatever the \
-             wall is a wall of"
         );
     }
 

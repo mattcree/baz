@@ -10,10 +10,15 @@
 //! ADR-0030 §6 inventoried what a home surface could truthfully hold and
 //! found exactly two facts worth the room. That survives the change from band
 //! to place unchanged, because it was an argument about *facts*, not about
-//! geometry — and the owner has since added a third:
+//! geometry — and the owner has since added two more:
 //!
 //! - **`CONTINUE`** — the run to carry on with (ADR-0023 §6's snapshot, built
 //!   for this; see [`crate::session`]).
+//! - **`All songs`** — one tile, the whole collection, in the wall's own tile
+//!   anatomy with a list's own sleeve. The owner: *"again I wanted the Play
+//!   all, to be more like a tile on the home screen, a special 'playlist'"*.
+//!   See [`all_songs_tile`] for why it wears the collage, why it sits second,
+//!   and why the strip's `Play all` stays where it is.
 //! - **`RECENTLY ADDED`** — a row of records by first-seen, in the wall's own
 //!   tile, carrying the wall's own hover options.
 //! - **`COLLECTION`** — four figures about the library, at the **foot** of the
@@ -70,10 +75,11 @@
 //!
 //! **A section is absent, not empty.** `CONTINUE` is absent while something is
 //! sounding, with no run to carry on with, and when the library no longer holds
-//! the file the run is on; `RECENTLY ADDED` is absent when the library holds
-//! fewer than a row of records; `COLLECTION` is absent when there is no
-//! collection. A page with none of the three says so in one line rather than
-//! drawing three empty headings.
+//! the file the run is on; `All songs` is absent when there is nothing to play;
+//! `RECENTLY ADDED` is absent when the library holds fewer than a row of
+//! records; `COLLECTION` is absent when there is no collection. A page with
+//! none of the four says so in one line rather than drawing four empty
+//! headings.
 //!
 //! # The signature of the whole design
 //!
@@ -84,7 +90,9 @@
 //! in the mockup the owner approved that is not a rearrangement of something
 //! already shipped, and it is what [`needle`] is.
 
-use iced::widget::{Space, button, column, container, image as iced_image, row, scrollable, text};
+use iced::widget::{
+    Space, button, column, container, image as iced_image, mouse_area, row, scrollable, stack, text,
+};
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
@@ -154,10 +162,18 @@ pub(crate) fn view<'a>(
     let mut body = column![].spacing(theme::HANG);
 
     let continuing = continue_band(shelf, player, resume, width);
+    let everything = all_songs_tile(shelf, player, width);
     let added = recently_added(shelf, player, width, collecting);
     let counted = collection(shelf);
-    let nothing = continuing.is_none() && added.is_none() && counted.is_none();
+    let nothing =
+        continuing.is_none() && everything.is_none() && added.is_none() && counted.is_none();
     if let Some(band) = continuing {
+        body = body.push(band);
+    }
+    // **Second, under `CONTINUE` and above `RECENTLY ADDED`** — see
+    // [`all_songs_tile`] for the argument, which is about what each of the
+    // three offers is *for* rather than about how big they are.
+    if let Some(band) = everything {
         body = body.push(band);
     }
     if let Some(band) = added {
@@ -478,6 +494,191 @@ fn resume_line<'a>(
     .spacing(theme::GAP_SM)
     .align_y(iced::Alignment::Center)
     .into()
+}
+
+/// **`ALL SONGS`, as a tile** — the owner, 2026-08-10: *"again I wanted the
+/// Play all, to be more like a tile on the home screen, a special
+/// 'playlist'"*, and the *again* is the point: it had been asked for before and
+/// not built.
+///
+/// # It wears a list's sleeve, not a designed one
+///
+/// The collage ([`crate::views::playlist_sleeve`]) — four quotations from the
+/// records the list holds, in the list's own order. The alternative was a
+/// designed face of its own, on the argument that four arbitrary covers claim to
+/// characterise a list whose whole definition is *no selection at all*, and that
+/// they re-shuffle whenever the wall is re-arranged.
+///
+/// **It is refused because this list already has a face.** The playlist panel's
+/// `All songs` row draws exactly this collage (shipped 2026-08-10), and a second
+/// face for one list is a worse fault than a restless one: a listener would have
+/// to learn twice that these are the same thing. `crate::implicit`'s own words
+/// settle it — *an implicit list is a list and gets a list's sleeve*. What the
+/// collage is arbitrary about, the caption states exactly.
+///
+/// A typographic face was the other candidate and it fails on a second count:
+/// the figures it would carry — records, songs, running time — are the
+/// `COLLECTION` footer's own, three sections down the same page, which is doc 07
+/// L8.6's one fact drawn twice.
+///
+/// # Where it sits, and why
+///
+/// **Second: under `CONTINUE`, above `RECENTLY ADDED`.** The page is ordered by
+/// how *particular* its offers are, not by how large:
+///
+/// - `CONTINUE` is your own interrupted run — the most specific answer to *what
+///   now*, and absent most of the time, which is why it leads when it is there
+///   rather than taking the room when it is not.
+/// - **`All songs` is the broadest way in and it is always there.** With
+///   `CONTINUE` absent — the ordinary state of this page — it is the first thing
+///   on it, which is right for a door. With `CONTINUE` standing, your own run
+///   leads and the whole collection follows it.
+/// - `RECENTLY ADDED` is a narrower, more particular offer than *all of it*, and
+///   it is the section that changes.
+/// - `COLLECTION` stays last: it is the one section you read rather than press.
+///
+/// **No section rule over it.** A rule names a *set* of things; this is one
+/// thing and it names itself in its own caption, where `All songs` under a rule
+/// reading `ALL SONGS` would be the word twice. It stands on the same grid as
+/// the row below — one column of the wall's own tile — so it rhymes with
+/// `RECENTLY ADDED` without pretending to be a section.
+///
+/// # And the strip keeps its `Play all`
+///
+/// Both stay, and they are not the same control at a different size. `Play all`
+/// lives in the Library strip **beside the query and the arrangement that decide
+/// the wall**, and its contract is *exactly what you can see, in the order you
+/// can see it* — it is the only way to play seven search results. This tile is
+/// on a page that shows no wall and no query, so it plays the collection whole
+/// (`crate::implicit::ImplicitList::everything`) rather than applying a filter
+/// the listener cannot see or clear from where they are standing.
+///
+/// So: one list, one origin, one sleeve, one `Play`, two scopes — and each
+/// states its own scope where it stands. `ACTS_W` is untouched, because nothing
+/// left the strip.
+///
+/// **Absent, not empty**, like every other band here: no records, no tile. A
+/// door into nothing is worse than no door.
+fn all_songs_tile<'a>(
+    shelf: &'a Shelf,
+    player: &'a PlayerState,
+    width: f32,
+) -> Option<Element<'a, Message>> {
+    let room = theme::active();
+    let list = shelf.everything();
+    if list.is_empty() {
+        return None;
+    }
+    // The wall's own grid, at the same density the row below uses, so the tile
+    // is one column of the lattice `RECENTLY ADDED` stands on rather than a
+    // second measure.
+    let hang = Grid::new(
+        (width - 2.0 * theme::HANG).max(0.0),
+        crate::shelf::Density::Balanced,
+    );
+    let edge = hang.art;
+    let work = (edge - 2.0 * theme::SLEEVE_MAT).max(0.0);
+    let hovered = shelf.hovered_all_songs;
+    let art = crate::views::playlist_sleeve(shelf, &list.art, list.name(), work);
+    // **The wall's own hover layer**, built by the wall's own function
+    // (`views::shelf::veil`) rather than by a second one that looks like it.
+    // Two options where a record has four, and the two it does not have are the
+    // two an implicit list cannot answer: `Add to…` is refused by construction
+    // (`Origin::file` is `None`, so there is no file to append to), and `Queue`
+    // would append a whole library to a run — a verb with no reading a listener
+    // would want. `Open` goes to the wall, which is where this list is looked
+    // at (`crate::implicit`'s "where you look at one").
+    let art: Element<'_, Message> = if hovered {
+        let engine = player.engine_ready();
+        stack![
+            art,
+            crate::views::shelf::veil(
+                work,
+                [
+                    engine.then(|| crate::views::shelf::VeilOption::accented(
+                        icon::Glyph::Play,
+                        "Play",
+                        Message::PlayEverything,
+                    )),
+                    Some(crate::views::shelf::VeilOption::new(
+                        icon::Glyph::Open,
+                        "Open",
+                        Message::ShowAllSongs,
+                    )),
+                ]
+                .into_iter()
+                .flatten(),
+            )
+        ]
+        .into()
+    } else {
+        art
+    };
+    let sleeve = container(
+        container(art)
+            .width(Length::Fixed(work))
+            .height(Length::Fixed(work))
+            .style(move |_theme| theme::sleeve(room, 0.0)),
+    )
+    .width(Length::Fixed(edge))
+    .height(Length::Fixed(edge))
+    .padding(theme::SLEEVE_MAT)
+    .style(move |_theme| theme::sleeve_mat(room));
+    // The wall tile's caption block, to the pixel: two one-line lanes in a
+    // reserved box, so this tile and the row below sit on one baseline.
+    let caption_lane = |content: Element<'a, Message>| {
+        container(content)
+            .width(Length::Fixed(edge))
+            .height(Length::Fixed(theme::CAPTION_LINE_H))
+            .align_y(alignment::Vertical::Top)
+            .clip(true)
+    };
+    let hover = if hovered { 1.0 } else { 0.0 };
+    let caption_block = column![
+        caption_lane(
+            text(list.name())
+                .size(theme::SIZE_BODY)
+                .line_height(theme::LEADING_BODY)
+                .font(theme::MEDIUM)
+                .color(room.paper)
+                .wrapping(text::Wrapping::None)
+                .into(),
+        ),
+        // **The tile states its own scope.** The collage is arbitrary about
+        // which four records it quotes; this line is not arbitrary about
+        // anything — it is what pressing the tile will play.
+        caption_lane(
+            text(list.counts())
+                .size(theme::SIZE_META)
+                .line_height(theme::LEADING_META)
+                .color(theme::caption_ink(room, hover))
+                .wrapping(text::Wrapping::None)
+                .into(),
+        ),
+    ]
+    .width(Length::Fixed(edge))
+    .height(Length::Fixed(theme::CAPTION_H));
+    let tile = column![
+        sleeve,
+        caption_block,
+        crate::views::shelf::state_rule(hover, false, edge)
+    ]
+    .spacing(theme::GAP_XS)
+    .width(Length::Fixed(edge));
+    // The tile's own press plays it, exactly as a record's tile press opens the
+    // record: the primary act, from anywhere on the tile that is not an option.
+    // An option's press is captured before this sees it (iced hands a button's
+    // event to its content first), which is the mechanism the wall relies on.
+    let pressable = button(tile)
+        .padding(0)
+        .style(move |_theme, status| theme::tile(room, status, false))
+        .on_press(Message::PlayEverything);
+    Some(
+        mouse_area(pressable)
+            .on_enter(Message::AllSongsHovered(true))
+            .on_exit(Message::AllSongsHovered(false))
+            .into(),
+    )
 }
 
 /// **`RECENTLY ADDED`** — one row of records by `first_seen_ns`, newest first,
@@ -936,6 +1137,103 @@ mod tests {
         let (filled, rest) = needle_runs(100_000, 100_000, width);
         assert!((filled - (width - theme::NEEDLE_TICK_W)).abs() < 0.001);
         assert!((rest - 0.0).abs() < 0.001);
+    }
+
+    /// **`All songs` is a tile on Home, and it is the wall's own tile** — the
+    /// owner, 2026-08-10: *"again I wanted the Play all, to be more like a tile
+    /// on the home screen, a special 'playlist'"*.
+    ///
+    /// Pinned over this file's source, the way the footer below is and for the
+    /// same reason: there is no `Shelf` to construct without a database and a
+    /// scan thread, and every claim here is about what this function builds.
+    /// Each is named by the literal a reviewer would have to move.
+    #[test]
+    fn all_songs_is_a_tile_in_the_walls_own_anatomy() {
+        let source = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/views/home.rs"),
+        )
+        .expect("this file")
+        .replace("\r\n", "\n");
+        let shipped = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("a source has a head");
+        let tile = shipped
+            .split_once("fn all_songs_tile<'a>(")
+            .expect("the tile")
+            .1;
+        let tile = &tile[..tile.find("\n}\n").expect("a function ends")];
+
+        // **It plays everything you own**, not whatever the wall is filtered
+        // to: Home shows no wall and no query, so a filter set on another page
+        // has nothing on screen to be read from.
+        assert!(
+            tile.contains("shelf.everything()"),
+            "the tile reads a scope it has nowhere to show"
+        );
+        assert!(
+            tile.contains("Message::PlayEverything"),
+            "the tile's press no longer plays the list"
+        );
+        // **A list's sleeve, because an implicit list is a list.** The panel's
+        // `All songs` row draws this same collage, and one list has one face.
+        assert!(
+            tile.contains("crate::views::playlist_sleeve("),
+            "the tile grew a second face for a list that already has one"
+        );
+        // **The wall's own tile anatomy**, to the token: the grid's art edge,
+        // the sleeve inside its mat, the two-lane caption box, the state rule.
+        for token in [
+            "hang.art",
+            "theme::SLEEVE_MAT",
+            "theme::sleeve_mat(room)",
+            "theme::CAPTION_LINE_H",
+            "theme::CAPTION_H",
+            "crate::views::shelf::state_rule(",
+        ] {
+            assert!(
+                tile.contains(token),
+                "the tile stopped standing in the wall's anatomy: `{token}`"
+            );
+        }
+        // **The wall's own hover layer**, built by the wall's own function —
+        // and two options rather than four, because the two it does not have
+        // are the two an implicit list cannot answer.
+        assert!(
+            tile.contains("crate::views::shelf::veil(") && tile.contains("stack!["),
+            "the tile draws a hover layer of its own instead of the wall's"
+        );
+        assert!(
+            tile.contains("\"Play\"") && tile.contains("\"Open\""),
+            "the tile lost one of its two options"
+        );
+        assert!(
+            !tile.contains("\"Add to…\""),
+            "the veil offers to add to a list with no file behind it"
+        );
+        // **Absent, not empty** — the rule every band on this page keeps.
+        assert!(
+            tile.contains("if list.is_empty() {\n        return None;"),
+            "an empty library still draws a door into nothing"
+        );
+
+        // **Second on the page**: under CONTINUE, above RECENTLY ADDED. Ordered
+        // by how particular each offer is, not by how large.
+        let view = shipped
+            .split_once("pub(crate) fn view<'a>(")
+            .expect("the page")
+            .1;
+        let drawn = |guard: &str| view.find(guard).unwrap_or_else(|| panic!("{guard}"));
+        assert!(
+            drawn("if let Some(band) = continuing {") < drawn("if let Some(band) = everything {")
+                && drawn("if let Some(band) = everything {") < drawn("if let Some(band) = added {"),
+            "the tile is not between CONTINUE and RECENTLY ADDED"
+        );
+        // …and it counts towards the page having something to say.
+        assert!(
+            view.contains("everything.is_none()"),
+            "a library with only this tile could draw the empty-page line"
+        );
     }
 
     /// **The collection's counts are the Home place's footer now** — the far
