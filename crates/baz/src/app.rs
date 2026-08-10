@@ -1261,6 +1261,11 @@ impl App {
         if let Screen::Shelf(state) = &app.screen {
             app.playlists.refresh(Some(&state.library));
         }
+        // **And the lists that were played in an earlier session** — the half
+        // of the owner's defect that could not be fixed until the ledger
+        // remembered which list a run came from. After the refresh, because it
+        // credits rows the refresh has just listed.
+        app.credit_the_lists_that_were_played();
         // One publish before the first frame, so a desktop widget that asks
         // straight away gets the seeded volume and the real `Can*` flags
         // rather than the server's own defaults. The MPRIS thread may not
@@ -2419,10 +2424,8 @@ impl App {
             return;
         }
         let paths = queue.paths();
-        if self.playback.send(Command::SetQueue {
-            paths,
-            origin: None,
-        }) {
+        let origin = run_origin(&queue);
+        if self.playback.send(Command::SetQueue { paths, origin }) {
             self.player.note_queue_sent(queue);
         }
     }
@@ -2605,6 +2608,58 @@ impl App {
             Screen::Setup(_) => Vec::new(),
         };
         self.lane = crate::lane::resolve(lists, records);
+    }
+
+    /// **The lists the ledger says were played**, credited at launch — the
+    /// cross-quit half of the owner's attribution defect (ADR-0034).
+    ///
+    /// The owner: *"when I play a song from a playlist it should only bump the
+    /// recency of that playlist, not the underlying albums"*. The live half
+    /// has worked since `lane::played_list`: a run reified from a list touches
+    /// the **list** and not the records it quotes. It could not reach across a
+    /// quit, because `Playlists::played` is not persisted and the only thing
+    /// baz writes about what was played is the play ledger — which was per
+    /// *path*, and never told a run's provenance.
+    ///
+    /// It is now. Each `# baz run` marker names the list its plays came from,
+    /// so this is the same attribution, folded out of the file instead of held
+    /// in memory. Runs arrive in the order they happened, so the last one to
+    /// name a list is the one whose moment stands.
+    ///
+    /// Once, at launch, over a snapshot already in memory — the same budget
+    /// `fold_history_onto_records` pays, and for the same reason: what the
+    /// lane's contract forbids is paying it *per frame*.
+    fn credit_the_lists_that_were_played(&mut self) {
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        let Some(history) = state.history.as_ref() else {
+            return;
+        };
+        // Collected before anything is credited, because the ledger is
+        // borrowed out of the screen and the lists are not.
+        let played: Vec<(u64, u64)> = history
+            .runs()
+            .iter()
+            .filter_map(|run| {
+                let at = run.last_played_unix_s?;
+                let origin = crate::origin::Origin::decode(run.origin.as_deref()?)?;
+                match crate::lane::subject_of(&origin)? {
+                    crate::lane::Subject::Playlist(id) => Some((id, at)),
+                    // A record's run is already the lane's records half, folded
+                    // out of the play lines themselves. Crediting it here would
+                    // be the same fact counted twice.
+                    crate::lane::Subject::Record(_) => None,
+                }
+            })
+            .collect();
+        let runs = played.len();
+        for (id, at) in played {
+            self.playlists.note_played(id, at);
+        }
+        if runs > 0 {
+            println!("[history] {runs} list runs credited from the ledger");
+        }
     }
 
     /// **Collapse the lane, or open it** — the one press whose subject is the
@@ -3398,10 +3453,8 @@ impl App {
         // There is no branch here any more and that is the reduction: what
         // shuffle changes is the walk, which the engine was told about above.
         let paths = queue.paths();
-        if !self.playback.send(Command::SetQueue {
-            paths,
-            origin: None,
-        }) {
+        let origin = run_origin(&queue);
+        if !self.playback.send(Command::SetQueue { paths, origin }) {
             self.player.engine_closed();
             return None;
         }
@@ -5194,7 +5247,16 @@ impl Shelf {
                         .flat_map(|edition| edition.tracks.iter())
                         .map(move |track| (album.id, track.path.as_path()))
                 }),
-                |path| history.track(path).last_played_unix_s,
+                // **The plays that were a *record* being put on**, which is
+                // not every play of its tracks (ADR-0034). A run reified from
+                // a list touched the list; re-deriving the records from those
+                // play lines is exactly the attribution the live fix removes,
+                // and doing it here is what made a list played last week come
+                // back as its albums. `last_played_unlisted` is
+                // `last_played_unix_s` minus those plays — and for a ledger
+                // with no markers, which is every ledger written before this
+                // shipped, it *is* `last_played_unix_s`.
+                |path| history.last_played_unlisted(path),
             ),
             None => HashMap::new(),
         };
@@ -6303,6 +6365,33 @@ fn draw_seed() -> u64 {
         .map_or(0, |since| {
             u64::try_from(since.as_nanos() & u128::from(u64::MAX)).unwrap_or(0)
         })
+}
+
+/// **What the engine is told a run came from** — the encoded
+/// [`Origin`](crate::origin::Origin) that rides on `SetQueue` and ends up as
+/// the run's marker in the play ledger (ADR-0034 §2).
+///
+/// One function, so that both `SetQueue` sends in this file — `send_run`'s and
+/// the snapshot's `restore_the_run` — say the same thing, and a third could not
+/// quietly say something else.
+///
+/// It reads `QueueVm::provenance`, which is *"the name of the playlist file
+/// this run was reified from"* and is `None` for every other origin: a record's
+/// own `Play`, `Play all`, a shuffle draw, a track click, a run appended to.
+/// So today exactly one kind is ever written, and that is the whole of the
+/// owner's ask: **a playlist's run stops crediting its albums, and an album's
+/// run keeps crediting the album.** A run with no origin writes a marker that
+/// names no list, and its plays fold onto their records exactly as they always
+/// did.
+///
+/// When ADR-0034 §1 lands and `QueueVm` carries an `Origin` of its own, this
+/// becomes `queue.origin.as_ref().map(Origin::encode)` and nothing else in the
+/// file changes.
+fn run_origin(queue: &vm::QueueVm) -> Option<String> {
+    queue
+        .provenance
+        .as_deref()
+        .map(|name| crate::origin::Origin::playlist(name).encode())
 }
 
 fn read_history() -> Option<History> {

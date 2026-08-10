@@ -84,72 +84,21 @@
 
 use crate::vm::{AlbumVm, EditionKey, QueueVm, format_duration, stacked_queue};
 
-/// **Which implicit list this is**, and the identity that kind of list has.
+/// **Which list this is**, and the identity that kind of list has —
+/// [`crate::origin::Origin`], which is this module's own one-variant enum
+/// grown the kinds that have a file (ADR-0034 §1.4).
 ///
-/// The general half of this module (module docs): a run is a list and a
-/// cursor, and what distinguishes one list from another is *what identity it
-/// carries*. A named playlist carries a **file**; the kinds below carry less
-/// than that, and each carries something different, which is why this is an
-/// enum rather than a name-plus-flags.
+/// It is re-exported rather than kept and shadowed. Two enums both called
+/// `Origin` — one naming the fileless lists, one naming runs' lists — would be
+/// the worst possible outcome of two people answering the same sentence of the
+/// owner's, and there is one sentence.
 ///
-/// # The origins that are not built yet
-///
-/// Only [`Self::AllSongs`] exists, because only it was asked for. The two the
-/// owner's model names next are recorded here rather than guessed at, so that
-/// adding either is a variant and a constructor and touches nothing else:
-///
-/// - **An album's own track list.** Its identity is the **album id** — it is a
-///   list that already has a name (the record's), an order (the edition's) and
-///   a page (the record's own), so its constructor would take an `AlbumVm` and
-///   its `narrowed_from` would be `None`: an album's tracks are its tracks, and
-///   no filter narrows them.
-/// - **A draw.** Its identity is **nothing durable** — that is the finding, not
-///   a gap. A draw is a list that existed once, and the run it produced is
-///   already the queue.
-///
-/// Neither is built here, and the state-tracking half of the owner's model —
-/// what "recent plays" means when the ledger records one line per *track path*
-/// and the engine is never told a run's origin — is separate design work that
-/// reopens ADR-0018. This type is a door for it, not an answer to it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Origin {
-    /// **All songs** — the whole library, as the wall arranges it.
-    ///
-    /// The owner: *"the 'all songs' should be an implicit playlist."* Its
-    /// identity is its **name and nothing else**: there is no file, no id, and
-    /// nothing to look it up by, because there is only ever one of it.
-    AllSongs,
-}
-
-impl Origin {
-    /// The list's name, in the listener's language.
-    ///
-    /// The owner's own words, kept. Sentence case like every other name in the
-    /// product, and not *Everything* — which the earlier mapping used as a
-    /// placeholder and which reads as a claim about the library rather than as
-    /// a name for a list.
-    pub(crate) const fn name(self) -> &'static str {
-        match self {
-            Self::AllSongs => "All songs",
-        }
-    }
-
-    /// **The playlist file this list is stored in** — always `None`, for every
-    /// origin, by construction.
-    ///
-    /// The one method that makes the module's load-bearing property a fact
-    /// about the type rather than a convention: an implicit list has no file,
-    /// so there is nothing for the picker to append to and nothing for playing
-    /// provenance to name. It is written as a method returning `None` rather
-    /// than left unwritten because a *later* origin must have somewhere to say
-    /// so, and because the sweep in `crate::menu` is more legible against an
-    /// API that answers the question than against one that lacks it.
-    pub(crate) const fn file(self) -> Option<&'static str> {
-        match self {
-            Self::AllSongs => None,
-        }
-    }
-}
+/// **What this module still owns is the *meaning* of implicit**, and the
+/// promotion did not widen it: an implicit list is one with no file behind it,
+/// which is `origin.file().is_none()` — exactly what this module's docs
+/// already said it was. [`ImplicitList`] carries no state of its own, and the
+/// run's origin lives on the run.
+pub(crate) use crate::origin::Origin;
 
 /// How many records a list's sleeve quotes, and the reason is
 /// [`crate::playlists::PanelRow::art`]'s: four for the 2 × 2 collage.
@@ -257,7 +206,12 @@ impl ImplicitList {
     }
 
     /// The list's name — its origin's.
-    pub(crate) const fn name(&self) -> &'static str {
+    ///
+    /// A borrow rather than a `&'static str`, and not `const`, because
+    /// [`Origin`] now holds kinds whose name differs per instance (ADR-0034
+    /// §1.4). `All songs` is still one `'static` word; the signature is what
+    /// changed, not the string.
+    pub(crate) fn name(&self) -> &str {
         self.origin.name()
     }
 

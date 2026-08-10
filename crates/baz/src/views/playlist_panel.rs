@@ -230,7 +230,7 @@ fn all_songs_row(shelf: &Shelf, picking: bool) -> Element<'_, Message> {
     let list = shelf.all_songs();
     let sleeve = playlist_sleeve(shelf, &list.art, list.name(), theme::PANEL_SLEEVE);
     let name_block = column![
-        text(list.name())
+        text(list.name().to_owned())
             .size(theme::SIZE_BODY)
             .line_height(theme::LEADING_BODY)
             .font(theme::MEDIUM)
@@ -252,7 +252,7 @@ fn all_songs_row(shelf: &Shelf, picking: bool) -> Element<'_, Message> {
     // stops this view from being the place the rule has to be re-stated — and
     // what makes an origin added later inherit the refusal instead of needing
     // to be remembered here.
-    if picking && list.origin.file().is_none() {
+    if picking && !list.origin.is_destination() {
         // A readout, and deliberately not a target: no press, no `Add`.
         return container(body)
             .width(Length::Fill)
