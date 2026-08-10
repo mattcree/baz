@@ -26,6 +26,26 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Added
 
+- **A library baz will not open now says so, instead of asking where your music
+  is** (ADR-0041). Running an older baz against a library a newer one wrote
+  used to draw the first-run screen — *"Where's your music?"* — at a listener
+  whose collection had not moved, and every door on that screen led back into
+  the same refusal. It is a distinct state now, and it makes a statement rather
+  than asking a question: what happened, **that your music and your playlists
+  are untouched**, which version the library wants against which one this build
+  reads, where the file is, and that running the newer baz again opens it
+  exactly as it was.
+  - The same surface answers an index that cannot be read at all — a permission,
+    a corrupt page, a full disk — and a machine with nowhere to keep one. All
+    three say the same sentence about your files, because in all three it is
+    true. `Try again` appears only where trying again could give a different
+    answer, which a schema version never can.
+  - **`Set this library aside…`** is the way out for anyone who cannot get the
+    newer baz back. It **renames** `library.db` to `library.db.set-aside-1` —
+    with its write-ahead log — and starts an empty index over the same folders.
+    Nothing is deleted and renaming it back restores it exactly. It is never
+    the default, and the first press only shows what a new index costs: every
+    record files under ADDED = today.
 - **An app bar across the top of every place** — baz's own window chrome
   (ADR-0040). It carries the window's name, the display options, the Settings
   gear and the three window buttons (minimise, maximise, close, on the right),
@@ -44,7 +64,7 @@ Every release is built from a tag by CI, gated on the full test suite — see
   a reproducer that lives only in a corpus is not a gate at all (ADR-0040 §3).
 - `an_mp3s_replay_gain_comes_off_its_id3v2_block` — the first test to drive an
   MP3's ID3v2 tags through the decoder, which nothing covered before and which
-  the probe change below made load-bearing.
+  the probe change above made load-bearing.
 - **Every skipped file says its own name in the log.** A scan prints one
   `[scan] skipped <path>: <reason>` line per failure, beside the count it
   already reported. The count is a statistic and cannot tell a listener *which*
@@ -68,13 +88,6 @@ Every release is built from a tag by CI, gated on the full test suite — see
   message, same tooltip.
 - The Library strip is the arrangement row alone. Its split breakpoint falls
   from 824 px to 680 with the two departures.
-- **The `Dense` step is tighter** — art 160 … 200 where it was 176 … 240, on
-  the owner's *"I think the dense should be a bit smaller"*. At 1280 the wall
-  hangs 6 × 162.7 px where it hung 5 × 200.8; at 1920, 9 × 170.2 where it hung
-  8 × 195. `Compact` is re-derived from it and is still exactly the
-  `Balanced`-to-`Dense` rung halved. The floor is `art::THUMB_PX` halved — the
-  wall never discards more than three quarters of the thumbnail it decoded —
-  and stands one hang above the smallest sleeve baz identifies a record by.
 - **The scheduled fuzz job measures residency rather than reservation, and one
   red target no longer hides the rest.** `-rss_limit_mb` stays at 2048;
   `-malloc_limit_mb` goes to 6144, above the largest buffer a 32-bit length
@@ -89,12 +102,13 @@ Every release is built from a tag by CI, gated on the full test suite — see
 - **`symphonia-metadata` is now a direct dependency** — **zero net-new
   crates**, since it was already in the graph as Symphonia's own. baz needs to
   name it to register the ID3v2 reader on the probe it now builds itself.
-
-### Removed
-
-- **`Play all`**, at the owner's request — the control and the action together.
-  Home's `All songs` tile is unaffected; it plays the collection rather than
-  the wall as arranged, and always did.
+- **The `Dense` step is tighter** — art 160 … 200 where it was 176 … 240, on
+  the owner's *"I think the dense should be a bit smaller"*. At 1280 the wall
+  hangs 6 × 162.7 px where it hung 5 × 200.8; at 1920, 9 × 170.2 where it hung
+  8 × 195. `Compact` is re-derived from it and is still exactly the
+  `Balanced`-to-`Dense` rung halved. The floor is `art::THUMB_PX` halved — the
+  wall never discards more than three quarters of the thumbnail it decoded —
+  and stands one hang above the smallest sleeve baz identifies a record by.
 
 ### Fixed
 
@@ -113,30 +127,26 @@ Every release is built from a tag by CI, gated on the full test suite — see
   3 721 tracks and 14 skipped becomes **3 735 tracks and 0 skipped**, and the
   only field lost is the year the frame never legibly held. Ordering is
   deliberate: the strict read runs first and wins whenever it succeeds, so no
-  file that reads today reads any differently. `a_malformed_year_frame_costs_-
-  the_year_and_nothing_else` builds the byte sequence from the ID3v2.3
-  specification and fails without the fix.
+  file that reads today reads any differently.
+  `a_malformed_year_frame_costs_the_year_and_nothing_else` builds the byte
+  sequence from the ID3v2.3 specification and fails without the fix.
   - **Not a regression from the format-registry change** (ADR-0040 §2.5),
     which was the first suspect: the scanner reads tags with lofty and never
     touches Symphonia's probe. Both commits were built and run over the same
     folder, and both skip the same fourteen files with the same sentence.
-- **A tighter density step could draw *larger* covers than a looser one.** Each
-  step carries its own hang, and the wall's art rises as the hang falls, so
-  wherever two steps landed on the same column count the tighter one drew the
-  bigger work: at the shipped 1280 px window `Balanced` hung 4 × 243 px and
-  `Compact` hung 4 × 253. Swept every whole pixel from 300 to 2560, the ladder
-  inverted at 30 of the 96 widths on a 20 px grid — and at 11 of them before
-  the fourth step existed, so this was true from the day the wall gained a
-  zoom. The step table's own test asserted **column count**, which was correct
-  throughout, so nothing ever checked the size a listener sees.
-
-  A step's largest work is now **derived**: it is the next-looser step's
-  smallest, so the four art ranges abut and cannot overlap, and a tighter step
-  can meet a looser one but never cross it. Monotonic at every width, swept to
-  quarter-pixel resolution. **This moves the default wall**: `Balanced` caps at
-  288 px rather than 320, so at the tops of each column band the covers are
-  smaller and the gutters wider — 744 of 2261 widths, none of them below
-  `Balanced`'s own 240 px floor. ADR-0028's second amendment.
+- **The `[Unreleased]` section carried unresolved merge-conflict markers.**
+  `Merge branch 'feat/app-bar'` committed `<<<<<<<`, `=======` and `>>>>>>>`
+  into this file. Both sides are kept, merged into one set of headings, and one
+  item the earlier merge had misfiled under *Added* (the density-step
+  inversion) is under *Fixed* where it belongs.
+- **A library database from a newer baz is now refused before a pragma is
+  set.** `Library::open` set `journal_mode` — which is persistent, and on a
+  database in some other mode rewrites the file header — and only then read
+  `user_version`. Nothing was ever lost by it, because a baz-written database
+  is already in WAL, but a build that has decided not to touch a newer install's
+  library should not have changed it on the way to saying so. The refusal is
+  now the first thing that happens on the connection, and a test opens a stamped
+  database three times and compares its bytes after each.
 - **A corrupt file in a scanned folder can no longer stop the music.** Three
   panics in Symphonia's AAC reader were reachable from `AudioSource::open` —
   `assertion failed: step != 0` and `attempt to subtract with overflow` while
@@ -174,6 +184,29 @@ Every release is built from a tag by CI, gated on the full test suite — see
   - an `#EXTINF` title ending in a vertical tab or a non-breaking space was
     shortened by the writer but not by the reader, so the first save silently
     changed it.
+- **A tighter density step could draw *larger* covers than a looser one.** Each
+  step carries its own hang, and the wall's art rises as the hang falls, so
+  wherever two steps landed on the same column count the tighter one drew the
+  bigger work: at the shipped 1280 px window `Balanced` hung 4 × 243 px and
+  `Compact` hung 4 × 253. Swept every whole pixel from 300 to 2560, the ladder
+  inverted at 30 of the 96 widths on a 20 px grid — and at 11 of them before
+  the fourth step existed, so this was true from the day the wall gained a
+  zoom. The step table's own test asserted **column count**, which was correct
+  throughout, so nothing ever checked the size a listener sees.
+
+  A step's largest work is now **derived**: it is the next-looser step's
+  smallest, so the four art ranges abut and cannot overlap, and a tighter step
+  can meet a looser one but never cross it. Monotonic at every width, swept to
+  quarter-pixel resolution. **This moves the default wall**: `Balanced` caps at
+  288 px rather than 320, so at the tops of each column band the covers are
+  smaller and the gutters wider — 744 of 2261 widths, none of them below
+  `Balanced`'s own 240 px floor. ADR-0028's second amendment.
+
+### Removed
+
+- **`Play all`**, at the owner's request — the control and the action together.
+  Home's `All songs` tile is unaffected; it plays the collection rather than
+  the wall as arranged, and always did.
 
 ## [0.1.0] - 2026-08-10
 
