@@ -1966,6 +1966,41 @@ pub const TOP_BAR_PAD_V: f32 = GAP_SM;
 /// three pixels was three pixels of shelf mis-virtualized on the first frame.
 pub const TOP_BAR_H: f32 = 2.0 * TOP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
 
+/// **The shortest window baz will let you make** (logical px).
+///
+/// The owner, 2026-08-10: *"we need some sort of min height as well"*. There
+/// was none — `app.rs` passed `min_size` a height of literally `0.0`, so the
+/// window could be dragged shut to a strip of furniture with no collection
+/// under it at all, while the *width* had been floored since the strip's audit.
+/// One of the two was thought about and the other was not.
+///
+/// **Derived, never chosen**, for the reason [`TOP_BAR_FLOOR`] states about its
+/// own number: a floor that is a taste is a promise nobody can check later. It
+/// is the fixed furniture plus one row of the tightest wall —
+///
+/// - the two-line Library strip, which is the **tallest** the top can be, so
+///   the floor holds at every width rather than only above the strip's split;
+/// - the bottom bar, its hairline and the needle;
+/// - one row at [`crate::shelf::Density::Dense`]: its smallest work, the
+///   caption's lead and line, and the row's trailing hang.
+///
+/// **One row is the whole of the claim.** Below it the window is furniture with
+/// nothing between it — two bars agreeing about a collection you cannot see —
+/// and that is the state this floor exists to make unreachable. It is not a
+/// claim that one row is comfortable.
+///
+/// It does **not** track the density: the floor is a property of the window and
+/// the listener may be at any step when they drag, so it takes the tightest,
+/// which is the only step that cannot be squeezed further.
+pub const WINDOW_FLOOR_H: f32 = TOP_BAR_2LINE_H
+    + BAR_CONTENT_H
+    + 1.0
+    + NEEDLE_H
+    + crate::shelf::Density::Dense.art_min()
+    + GAP_LG
+    + LABEL_H
+    + crate::shelf::Density::Dense.hang();
+
 /// **Strip width** below which the Library strip splits into its two lines
 /// (logical px) — **824**, an exact sum rather than a rounded one.
 ///
@@ -7483,5 +7518,35 @@ mod tests {
             }
         }
         found
+    }
+}
+
+#[cfg(test)]
+mod window_floor_tests {
+    /// **The window has a floor in both directions**, which it did not until
+    /// the owner said *"we need some sort of min height as well"* — `min_size`
+    /// carried a literal `0.0` for height while the width had been floored
+    /// since the strip's audit.
+    ///
+    /// Asserted as a *derivation* rather than a number, so the floor follows
+    /// the furniture: if the strip grows a line or `Dense` tightens again, this
+    /// keeps meaning "one row of the tightest wall under the tallest chrome"
+    /// rather than becoming a stale constant that used to mean that.
+    #[test]
+    fn the_window_floor_is_the_furniture_plus_one_row() {
+        use super::{BAR_CONTENT_H, GAP_LG, LABEL_H, NEEDLE_H, TOP_BAR_2LINE_H, WINDOW_FLOOR_H};
+        let dense = crate::shelf::Density::Dense;
+        let furniture = TOP_BAR_2LINE_H + BAR_CONTENT_H + 1.0 + NEEDLE_H;
+        let row = dense.art_min() + GAP_LG + LABEL_H + dense.hang();
+        assert!(
+            (WINDOW_FLOOR_H - (furniture + row)).abs() < f32::EPSILON,
+            "the floor has stopped being the furniture plus one row"
+        );
+        // A floor below the furniture would admit a window with no collection
+        // in it at all, which is the state this exists to make unreachable.
+        assert!(
+            WINDOW_FLOOR_H > furniture,
+            "the floor does not clear the furniture, so the wall can vanish"
+        );
     }
 }

@@ -174,7 +174,10 @@ fn window_settings() -> window::Settings {
         // `Shelf::body_width`, so the *window* has to be that much wider for
         // the same strip to fit: 600 + 96 = **696**. Height is left
         // unbounded; the study declares no floor for it.
-        min_size: Some(Size::new(theme::TOP_BAR_FLOOR + theme::SIDEBAR_RAIL_W, 0.0)),
+        min_size: Some(Size::new(
+            theme::TOP_BAR_FLOOR + theme::SIDEBAR_RAIL_W,
+            theme::WINDOW_FLOOR_H,
+        )),
         ..window::Settings::default()
     };
     #[cfg(target_os = "linux")]
