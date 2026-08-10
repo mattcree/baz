@@ -240,6 +240,21 @@ pub(crate) struct OpenPlaylist {
     /// with every re-read, so an edit that changes the first records changes
     /// the sleeve with the rows.
     pub(crate) art: Vec<u64>,
+    /// **How many distinct records this list is drawn from**, uncapped — what
+    /// the page's byline states (`Playlist · 4 records`, ADR-0024 §A4.3).
+    ///
+    /// It is *not* `art.len()`. [`art`](Self::art) stops at four because four
+    /// is all the 2 × 2 collage can quote, so a fourteen-record list has an
+    /// `art` of 4 — and a byline reading `Playlist · 4 records` over it would
+    /// be a false statement about the object, which is the one thing this
+    /// whole change is for. Design 14 §5.4 costed the byline as free from the
+    /// sleeve's list; the sleeve's list cannot pay for it, and this counts
+    /// the walk out to its end.
+    ///
+    /// Entries the library cannot resolve contribute nothing — an unindexed
+    /// path names no record — so a list of nothing but missing entries states
+    /// `Playlist` and no count, which is all it can prove.
+    pub(crate) records: usize,
     /// The rename field, while renaming.
     pub(crate) renaming: Option<NameEntry>,
 }
@@ -1230,8 +1245,13 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
     // The sleeve's quotations: the first four distinct records, in order
     // (ADR-0024 §A1) — the same identity the wall's thumbnail cache is keyed
     // by, so the page's hero and the panel's tile read the cache the tiles
-    // already fill.
+    // already fill. Beside it the *whole* distinct set, which the byline
+    // states and which `art` deliberately cannot answer (see
+    // `OpenPlaylist::records`): the walk is the same walk, and one `insert`
+    // per resolved entry over a list of tens is not a cost worth a second
+    // pass to avoid.
     let mut art: Vec<u64> = Vec::new();
+    let mut records: std::collections::HashSet<u64> = std::collections::HashSet::new();
     for (position, entry) in playlist.entries().enumerate() {
         let stem = || {
             entry.path.file_stem().map_or_else(
@@ -1240,13 +1260,12 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
             )
         };
         let meta = indexed.get(entry.path.as_path());
-        if art.len() < 4
-            && let Some(meta) = meta
-        {
+        if let Some(meta) = meta {
             let record = vm::album_id(AlbumArtist::of(meta), meta.album.as_deref());
-            if !art.contains(&record) {
+            if art.len() < 4 && !art.contains(&record) {
                 art.push(record);
             }
+            records.insert(record);
         }
         // The verdict (module docs): indexed, or on disk. The one `stat` per
         // unindexed entry happens here, at load.
@@ -1363,6 +1382,7 @@ fn resolve(id: u64, playlist: Playlist, library: &Library) -> OpenPlaylist {
         queue,
         missing,
         art,
+        records: records.len(),
         renaming: None,
     }
 }

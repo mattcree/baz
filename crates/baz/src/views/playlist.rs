@@ -236,9 +236,21 @@ fn aside<'a>(shelf: &'a Shelf, open: &'a OpenPlaylist, live: bool) -> Element<'a
 ///
 /// **Not *"Made by you"***: ADR-0024 §4 admits `.m3u8` files dropped into the
 /// playlists folder, which this product did not author and whose author no
-/// file records. `Playlist` claims only what the file can prove. Stating the
-/// composition with it — `Playlist · 4 records`, which would also explain the
-/// collage beside it — is design 14 tier 2 and is not shipped here.
+/// file records. The byline claims only what the file can prove — the kind,
+/// and the composition beside it ([`byline`], `Playlist · 4 records`), which
+/// also explains the collage it stands next to.
+///
+/// # The hero stays in the sans, and that is the axis rather than an omission
+///
+/// `views::album`'s hero takes `theme::WORK_TITLE` — serif italic, the museum
+/// placard's convention for a work's own title. This one, at the same
+/// `SIZE_HERO` 28 in the same ink in the same slot, **does not**, and the
+/// asymmetry is the statement (ADR-0024 §A4.4; design 14 §5.2): a record's
+/// title is a work somebody published, and a playlist's name is a label the
+/// owner typed — like the search query, the rename field two lines below this
+/// one, and the folder path in `DETAILS`, every one of which is already sans.
+/// Flattening the two heroes back into one face would delete the distinction
+/// tier 1 spent three strings stating.
 fn identity_block(open: &OpenPlaylist, can_undo: bool) -> Element<'_, Message> {
     let room = theme::active();
     let mut summary = row![
@@ -266,7 +278,7 @@ fn identity_block(open: &OpenPlaylist, can_undo: bool) -> Element<'_, Message> {
         // The byline, in the album page's artist slot at the album page's
         // artist size — the one widget this change adds, and the whole of
         // the 52 → 80 px correction.
-        text(KIND)
+        text(byline(open.records))
             .size(theme::SIZE_TITLE)
             .line_height(theme::LEADING_TITLE)
             .color(room.paper_dim)
@@ -282,6 +294,38 @@ fn identity_block(open: &OpenPlaylist, can_undo: bool) -> Element<'_, Message> {
 /// the same first token [`crate::playlists::PanelRow::counts`] gives the lane
 /// and the panel).
 pub(crate) const KIND: &str = "Playlist";
+
+/// The byline: [`KIND`], then **what the list is made of** —
+/// `Playlist · 4 records` (ADR-0024 §A4.3, design 14 §5.4 / tier 2 #7).
+///
+/// The record's byline names a person. This one cannot — §4 admits `.m3u8`
+/// files dropped into the playlists folder, whose author no file records — so
+/// it names the composition instead, which is a fact the file can prove. It
+/// also **explains the collage beside it**: the picture is quotations from the
+/// things below, and this says how many things there are to quote from.
+///
+/// # It is the distinct-record count, not the collage's
+///
+/// Design 14 §5.4 costed this as free, *"from the distinct-record list
+/// `playlists.rs` already computes for the sleeve"*. **That list cannot pay
+/// for it**: it stops at four, because four is all a 2 × 2 can hold. A
+/// fourteen-record list would have read `Playlist · 4 records` over a page
+/// listing fourteen records — a byline that is false about its own object, in
+/// the slot this whole change exists to make honest. The count is walked to
+/// its end instead ([`crate::playlists::OpenPlaylist::records`]).
+///
+/// Below one, the word stands alone. A list whose entries the library cannot
+/// resolve is still a playlist and still says so; what it may not do is claim
+/// a composition it cannot show. Zero geometry either way — one `SIZE_TITLE`
+/// line in the same slot, and `wrapping(None)` holds it to one line at every
+/// width the aside takes.
+fn byline(records: usize) -> String {
+    match records {
+        0 => KIND.to_owned(),
+        1 => format!("{KIND} · 1 record"),
+        n => format!("{KIND} · {n} records"),
+    }
+}
 
 /// **Undo** — the file as it stood before the last recorded edit, one press
 /// away (doc 11 §5 P2): the queue place's word and rule, worn by the page.
@@ -804,10 +848,11 @@ mod tests {
         }
 
         // …and the middle line is the one place the two differ. A record
-        // names its artist there; a made list names what it is, because there
-        // is no author a `.m3u8` file records (ADR-0024 §A4.3).
+        // names its artist there; a made list names what it is and what it is
+        // made of, because there is no author a `.m3u8` file records
+        // (ADR-0024 §A4.3).
         assert!(
-            made.contains("text(KIND)") && KIND == "Playlist",
+            made.contains("text(byline(open.records))") && KIND == "Playlist",
             "the playlist's byline slot holds the kind"
         );
         assert!(
@@ -818,8 +863,40 @@ mod tests {
         // press, no message, nothing to learn. A door in this slot would be
         // the badge §A3.3 refuses, wearing a word instead of a glyph.
         assert!(
-            !made.contains("text(KIND)\n            .on_press"),
+            !made.contains("text(byline(open.records))\n            .on_press"),
             "the byline states; it does not act"
         );
+    }
+
+    /// **The byline states a composition it can prove**, and the first token
+    /// is the kind in every form it takes (ADR-0024 §A4.3).
+    ///
+    /// The regression this exists for is arithmetic rather than wording:
+    /// design 14 costed the count as free from the sleeve's quotation list,
+    /// which stops at four. A byline reading `Playlist · 4 records` over a
+    /// fourteen-record page would be a false statement in the slot the whole
+    /// change exists to make honest, so the count is the *whole* distinct set
+    /// and the plural is real.
+    #[test]
+    fn the_byline_names_the_kind_first_and_counts_what_it_can_prove() {
+        assert_eq!(
+            super::byline(0),
+            "Playlist",
+            "nothing resolved, nothing claimed"
+        );
+        assert_eq!(super::byline(1), "Playlist · 1 record");
+        assert_eq!(super::byline(4), "Playlist · 4 records");
+        assert_eq!(
+            super::byline(14),
+            "Playlist · 14 records",
+            "the count is the distinct set, not the collage's four"
+        );
+        for records in [0usize, 1, 2, 4, 14, 206] {
+            let line = super::byline(records);
+            assert!(
+                line.starts_with(KIND),
+                "the kind is the first token in every form: {line:?}"
+            );
+        }
     }
 }
