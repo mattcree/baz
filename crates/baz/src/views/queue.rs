@@ -449,10 +449,13 @@ pub(crate) fn empty_state() -> Element<'static, Message> {
             // advance, at the exact moment the refusal is felt. ("Plays the
             // Library", not "the wall": room vocabulary stays internal,
             // P4's rule, applied to P6's own sentence.)
-            text("When a queue ends, baz stops. Play all plays the Library.")
-                .size(theme::SIZE_META)
-                .line_height(theme::LEADING_META)
-                .color(room.paper_muted),
+            text(
+                "When a queue ends, baz stops. All songs is a tile on Home; \
+                 Play all plays the wall.",
+            )
+            .size(theme::SIZE_META)
+            .line_height(theme::LEADING_META)
+            .color(room.paper_muted),
         ]
         .spacing(theme::GAP_SM)
         .align_x(iced::Alignment::Start),

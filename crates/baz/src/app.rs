@@ -626,6 +626,25 @@ pub(crate) enum Message {
     /// in is the player's shuffle property's answer, the same as every other
     /// play gesture's ([`App::send_run`]).
     PlayAll,
+    /// **Home's `All songs` tile was pressed**: play everything you own.
+    ///
+    /// The strip's [`Self::PlayAll`] with a different scope, and the difference
+    /// is the whole reason there are two: `Play all` sits beside the query and
+    /// the arrangement that decide the wall, and plays exactly what the wall
+    /// shows. **Home shows no wall**, so its tile plays the collection whole
+    /// rather than silently applying a filter set on another page
+    /// (`crate::implicit::ImplicitList::everything`). The tile states its own
+    /// scope in its counts line, so what it will play is on screen beside it.
+    PlayEverything,
+    /// The pointer entered (`true`) or left (`false`) Home's `All songs` tile.
+    ///
+    /// The wall's [`Self::TileEntered`] mechanism for the one tile that is not
+    /// a record, and a `bool` rather than an id because there is only ever one
+    /// of it. iced 0.13 tells a widget its own hover status and its siblings
+    /// nothing, so the tile reports its crossings and the shelf holds the
+    /// answer — the pattern [`Self::TileEntered`] and [`Self::QueueRowEntered`]
+    /// already use, for the same toolkit reason.
+    AllSongsHovered(bool),
     /// **The playlist panel's `All songs` row**: go to the list.
     ///
     /// The list is the wall (`crate::all_songs`), so this is the Library —
@@ -1393,6 +1412,16 @@ impl App {
             }
             Message::PlayAll => {
                 self.play_all();
+                Task::none()
+            }
+            Message::PlayEverything => {
+                self.play_everything();
+                Task::none()
+            }
+            Message::AllSongsHovered(over) => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.hovered_all_songs = over;
+                }
                 Task::none()
             }
             Message::SeekBy(delta_ms) => {
@@ -3442,8 +3471,44 @@ impl App {
             return;
         }
         println!("[all-songs] play — {}", list.counts());
-        let queue = list.queue;
-        if self.send_run(queue, None).is_some() && self.playback.send(Command::Play) {
+        self.start(list);
+    }
+
+    /// **Play everything you own** — Home's `All songs` tile (the owner,
+    /// 2026-08-10: *"again I wanted the Play all, to be more like a tile on the
+    /// home screen, a special 'playlist'"*).
+    ///
+    /// [`Self::play_all`] with the collection as its scope rather than the
+    /// wall's. The two share the list type, the origin, the queue shape and the
+    /// arranger, and differ in exactly one argument — which is the shape
+    /// `crate::implicit` was built for and the reason this is four lines rather
+    /// than a second gesture.
+    ///
+    /// **Why Home's tile does not read the wall's query.** `Play all` lives in
+    /// the strip beside the query and the arrangement that decide the wall, and
+    /// its contract is *exactly what you can see*. Home shows no wall. A tile
+    /// there that applied a filter set on another page would be acting on state
+    /// the listener cannot see or clear from where they are standing — the same
+    /// rule, on a surface where "what you can see" is a different set. What this
+    /// tile will play is stated on the tile, in its counts line.
+    fn play_everything(&mut self) {
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        let list = state.everything();
+        if list.is_empty() {
+            // An empty library. Nothing to play, so nothing happens and nothing
+            // is claimed — the rule every play gesture in baz keeps.
+            return;
+        }
+        println!("[all-songs] play everything — {}", list.counts());
+        self.start(list);
+    }
+
+    /// Send an implicit list's run and start it — the tail both `All songs`
+    /// gestures share, so their one difference stays their scope.
+    fn start(&mut self, list: crate::implicit::ImplicitList) {
+        if self.send_run(list.queue, None).is_some() && self.playback.send(Command::Play) {
             self.player.note_transport_sent();
         } else {
             self.player.engine_closed();
@@ -4339,6 +4404,17 @@ pub(crate) struct Shelf {
     /// The rule's lane is reserved whatever this says, so it changes what is
     /// drawn in it and never the geometry around it.
     pub(crate) hovered_album: Option<u64>,
+    /// Whether the pointer is on Home's **All songs** tile.
+    ///
+    /// [`Self::hovered_album`]'s mechanism for the one tile that is not a
+    /// record — a `bool` because there is exactly one of it, where the wall has
+    /// hundreds and needs an id. It carries no tween for the same reason: the
+    /// wall's keyed tween exists so that crossing a gutter *hands the mark over*
+    /// from one sleeve to the next, and a lone tile has nothing to hand it to.
+    /// The hover options themselves were always a boolean reveal rather than a
+    /// tween (`views::shelf`'s `hover_options`), so this tile's layer appears
+    /// exactly as the wall's does.
+    pub(crate) hovered_all_songs: bool,
     /// How far the hovered tile's mark has travelled (ADR-0020 §2.3).
     ///
     /// **One tween for the whole wall, keyed by the hovered id — never one per
@@ -4477,6 +4553,7 @@ impl Shelf {
             ),
             last_scan_log: Instant::now(),
             hovered_album: None,
+            hovered_all_songs: false,
             tile_hover: Keyed::new(),
             window_w: WINDOW.width,
             lane_open,
@@ -4935,6 +5012,20 @@ impl Shelf {
     /// something is about to be played or drawn.
     pub(crate) fn all_songs(&self) -> crate::implicit::ImplicitList {
         crate::implicit::ImplicitList::all_songs(&self.albums, &self.visible, |id| {
+            self.edition_choice.get(&id).copied()
+        })
+    }
+
+    /// **All songs over the whole library**, whatever the wall is filtered to —
+    /// what Home's tile draws and plays (`crate::implicit`).
+    ///
+    /// [`Self::all_songs`]'s sibling and not its variant: same origin, same
+    /// name, same sleeve, different scope. `ImplicitList::everything` carries
+    /// the argument for why Home's scope is the collection rather than the
+    /// wall's, and it is short — Home shows no wall and no query, so a filter
+    /// set on another page has nothing on screen to be read from.
+    pub(crate) fn everything(&self) -> crate::implicit::ImplicitList {
+        crate::implicit::ImplicitList::everything(&self.albums, |id| {
             self.edition_choice.get(&id).copied()
         })
     }
@@ -6771,13 +6862,18 @@ mod tests {
         for gesture in [
             "play_album",
             "play_all",
+            "play_everything",
             "play_playlist",
             "play_track",
             "play_playlist_track",
         ] {
             let body = body(gesture);
             assert!(
-                body.contains("self.send_run("),
+                // The two `All songs` gestures reach it through `start`, the
+                // four-line tail they share so that their one difference stays
+                // their *scope* — which is itself the claim, so it is spelled
+                // rather than papered over.
+                body.contains("self.send_run(") || body.contains("self.start(list)"),
                 "`{gesture}` starts a run without going through the arranger — \
                  shuffle would apply to some gestures and not others"
             );
@@ -6786,6 +6882,10 @@ mod tests {
                 "`{gesture}` sends its own SetQueue past `send_run`"
             );
         }
+        assert!(
+            body("start").contains("self.send_run("),
+            "the shared tail stopped going through the arranger"
+        );
 
         // **The arranger sends the run as it was built, and says how to walk
         // it.** The two halves of the owner's second decision: the queue is
@@ -6889,16 +6989,42 @@ mod tests {
             "`Play all` is the All songs list's own Play — one concept, not two"
         );
         assert!(
-            play_all.contains("list.queue"),
+            play_all.contains("self.start(list)"),
             "and it plays that list, rather than building a second one beside it"
-        );
-        assert!(
-            play_all.contains("self.send_run(") && play_all.contains("Command::Play"),
-            "one press, and the first track sounds"
         );
         assert!(
             play_all.contains("if list.is_empty()"),
             "an empty wall: nothing happens and nothing is claimed"
+        );
+
+        // **Home's tile is the same list at a different scope**, which is the
+        // owner's *"more like a tile on the home screen, a special 'playlist'"*
+        // built as one concept rather than two. Same tail, same emptiness rule,
+        // and the only difference is which wall the list is a view of.
+        let start = source
+            .find("fn play_everything(&mut self")
+            .expect("play_everything exists");
+        let rest = &source[start..];
+        let everything = &rest[..rest.find("\n    }\n").expect("a function ends")];
+        assert!(
+            everything.contains("state.everything()"),
+            "Home's tile plays the collection, not whatever the wall is filtered to"
+        );
+        assert!(
+            !everything.contains("state.all_songs()"),
+            "Home's tile read a query it has nowhere to show"
+        );
+        assert!(everything.contains("self.start(list)"));
+        assert!(everything.contains("if list.is_empty()"));
+
+        // One press, and the first track sounds — asserted on the tail both
+        // gestures spend, so neither can grow a confirmation of its own.
+        let start = source.find("fn start(&mut self").expect("start exists");
+        let rest = &source[start..];
+        let tail = &rest[..rest.find("\n    }\n").expect("a function ends")];
+        assert!(
+            tail.contains("self.send_run(") && tail.contains("Command::Play"),
+            "one press, and the first track sounds"
         );
     }
 

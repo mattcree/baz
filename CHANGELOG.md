@@ -1093,6 +1093,50 @@ next commit.
   ADR-0024 §1's definition of a playlist (*"made by a person, stored in a file
   that person owns"*) is amended to say why All songs is deliberately **not**
   one, and why the definition is not widened to swallow it.
+- **`All songs` has a face: a tile on Home.** The owner: *"again I wanted the
+  Play all, to be more like a tile on the home screen, a special 'playlist'"* —
+  and the *again* is the point, because it had been asked for before and not
+  built.
+
+  It is the wall's own tile, to the token: the grid's art edge, the sleeve
+  inside its mat, the two-lane caption box, the state rule, and the wall's own
+  hover veil — built by the wall's own function rather than by a second one that
+  looks like it. Two options where a record has four, and the two it does not
+  have are the two an implicit list cannot answer: `Add to…` is refused by
+  construction (there is no file), and `Queue` would append a library to a run.
+
+  **It wears a list's collage sleeve** rather than a designed face. The
+  objection to the collage is real — four arbitrary covers claim to characterise
+  a list whose definition is *no selection at all* — and it loses to a larger
+  one: the playlist panel's `All songs` row already draws exactly this collage,
+  and a second face for one list is worse than a restless one. A typographic
+  face fails twice over, because the figures it would carry are the `COLLECTION`
+  footer's own, three sections down the same page.
+
+  **Second on the page**: under `CONTINUE`, above `RECENTLY ADDED`, ordered by
+  how *particular* each offer is. `CONTINUE` is your own interrupted run and is
+  absent most of the time; with it absent — the page's ordinary state — the tile
+  is the first thing on Home, which is right for a door. No section rule over
+  it: a rule names a set, and this is one thing that names itself in its own
+  caption.
+
+  **It plays the collection whole**, not whatever the wall is filtered to, and
+  it says which in its counts line. Home shows no wall and no query, so a tile
+  there that applied a filter set on another page would be acting on state the
+  listener cannot see or clear from where they are standing.
+
+  **The strip's `Play all` stays**, and the two are not one control at two
+  sizes: `Play all` lives beside the query and the arrangement that decide the
+  wall and plays exactly what the wall shows — the only way to play seven search
+  results — where the tile is the way into all of it. One list, one origin, one
+  sleeve, one `Play`, two scopes, each stating its own. `ACTS_W` is untouched:
+  nothing left the strip, so the acts lane's budget does not move a third time
+  in one day.
+
+  `Origin::file()` still answers `None`, so the picker still refuses the list as
+  a destination by construction. Recorded in ADR-0030's fifth amendment, which
+  tests the addition against §6's own inventory rule and confirms the five
+  refusals are untouched.
 
 ### Changed
 

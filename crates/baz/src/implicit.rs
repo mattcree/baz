@@ -228,6 +228,34 @@ impl ImplicitList {
         }
     }
 
+    /// **All songs, whole** — the same list over the *unfiltered* library,
+    /// which is what Home's tile plays.
+    ///
+    /// The one place two resolutions of one origin exist, and the difference is
+    /// **scope, not identity**: same [`Origin`], same name, same sleeve rule,
+    /// same `Play`. What differs is which wall it is a view of.
+    ///
+    /// Why Home's is not the filtered one. The strip's `Play all` sits beside
+    /// the query and the arrangement that decide the wall's scope, and its whole
+    /// contract is *exactly what you can see*. **Home shows no wall and no
+    /// query.** A tile there that quietly applied a filter set five minutes ago
+    /// on another page would be the interface acting on state the listener
+    /// cannot see from where they are standing — which is the same rule, applied
+    /// to a surface where "what you can see" is a different set.
+    ///
+    /// It needs no new machinery, and that is the point of
+    /// [`Self::all_songs`]'s shape: a different `visible` arriving is all a
+    /// different scope ever is. The whole library's index list is one such
+    /// `visible`, so [`Self::filtered`] correctly answers `false` and
+    /// [`Self::counts`] prints the plain form.
+    pub(crate) fn everything(
+        albums: &[AlbumVm],
+        chosen: impl Fn(u64) -> Option<EditionKey>,
+    ) -> Self {
+        let visible: Vec<usize> = (0..albums.len()).collect();
+        Self::all_songs(albums, &visible, chosen)
+    }
+
     /// The list's name — its origin's.
     pub(crate) const fn name(&self) -> &'static str {
         self.origin.name()
@@ -498,6 +526,35 @@ mod tests {
             assert!(!origin.name().is_empty(), "{origin:?} has no name");
         }
         assert_eq!(Origin::AllSongs.name(), "All songs");
+    }
+
+    /// **Home's tile plays everything you own, whatever the wall is filtered
+    /// to** — the one place two resolutions of one origin exist, differing in
+    /// scope and in nothing else.
+    #[test]
+    fn everything_is_the_whole_library_however_the_wall_is_narrowed() {
+        let albums = wall();
+        let whole = ImplicitList::everything(&albums, |_| None);
+        assert_eq!(whole.records, 6);
+        assert_eq!(whole.queue.len(), 12);
+        assert!(!whole.filtered(), "nothing narrows everything you own");
+        assert_eq!(whole.counts(), "6 records \u{b7} 12 songs \u{b7} 20:00");
+
+        // It is the same list the wall resolves when no query is standing …
+        assert_eq!(whole, all(&albums));
+        // … and it is *not* the narrowed one, which is the whole reason it
+        // exists as its own call.
+        assert_ne!(whole, of(&albums, &[0, 1]));
+
+        // Same origin, same name, same absence of a file: a second scope is not
+        // a second kind of list.
+        assert_eq!(whole.origin, Origin::AllSongs);
+        assert_eq!(whole.name(), "All songs");
+        assert_eq!(whole.origin.file(), None);
+        assert_eq!(whole.queue.provenance, None);
+
+        // An empty library is an empty list, not a panic.
+        assert!(ImplicitList::everything(&[], |_| None).is_empty());
     }
 
     /// **`narrowed_from` is what makes the counts general.** A list that is a

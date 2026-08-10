@@ -677,24 +677,43 @@ size *settles*, not on every configure — costs nothing and removes the burst.
 > - **2. `Shuffle` as a toggle** — done, and the three questions "only the
 >   owner can answer" were answered by him: it is a property of the *player*,
 >   not of a playlist. So question 2 dissolves — the toggle is not keyed to
->   provenance and provenance stays a statement about origin. Question 1's
->   answer is ADR-0023's amendment: an inert `Vec<PathBuf>` retained beside
->   the run, invalidated by a new run and by a hand reorder. Question 3's
->   answer is that there is no pool to keep visible — the mode re-orders the
->   run, which is a list you can open and read.
-> - **3. `Play all` → an implicit playlist** — done as `crate::all_songs`.
+>   provenance and provenance stays a statement about origin. Question 3's
+>   answer is that there is no pool to keep visible — what shuffle can play is
+>   the run, which is a list you can open and read.
+>
+>   **Question 1 — "what does *off* restore?" — was answered twice**, and the
+>   second answer deleted the first. It shipped as an inert `Vec<PathBuf>`
+>   retained beside the run and invalidated by a new run or a hand reorder;
+>   the owner then said *"shuffle as a concept is more about going to an
+>   unknown next track rather than actually mutating the track list"*, and the
+>   question dissolved with the permutation. **Off restores nothing, because
+>   nothing was changed.** Shuffle is a traversal the engine walks
+>   (`baz_core::traversal`, ADR-0023's amendment rewritten as one decision) and
+>   the retained order, its two invalidation rules, the restore walk and the
+>   whole of `crates/baz/src/shuffle.rs` are gone.
+> - **3. `Play all` → an implicit playlist** — done as `crate::implicit`.
 >   Both traps were live and both are closed: the picker never offers
 >   `Add to "All songs"` (asserted over every target, and at its source by the
 >   list carrying no provenance), and the order question is answered by
 >   *following the wall and saying so* rather than by snapshotting.
+>
+>   **And it has a face**: the owner's *"again I wanted the Play all, to be
+>   more like a tile on the home screen, a special 'playlist'"* shipped the
+>   same day as a tile on Home, second on the page, in the wall's tile anatomy
+>   with a list's collage sleeve (ADR-0030's fifth amendment).
 > - **4. The `Queue` door leaving the bar** — **not done**, and the collisions
 >   this section names are why. Still open.
 >
 > **Cross-cutting, resolved:** `ACTS_W` went 182 → 88 rather than to zero,
-> because `Play all` stayed (redefined). The strip's split seam moved 872 →
+> because `Play all` stayed (redefined). It stays at 88: Home's tile is a
+> second **scope** of the same list rather than the strip's word relocated —
+> `Play all` plays exactly what the wall shows, which is the only way to play a
+> handful of search results, and Home shows no wall to filter. So the acts
+> lane's budget does not move a third time. The strip's split seam moved 872 →
 > 778; `TOP_BAR_FLOOR` did **not** follow, because it is also the window's
 > sensible minimum. The `impl/shuffle-and-pull/` harness now documents a
-> surface that does not exist; `impl/shuffle-and-all-songs/` replaces it.
+> surface that does not exist; `impl/shuffle-and-all-songs-tile/` replaces it
+> and `impl/shuffle-and-all-songs/` in turn.
 
 
 
