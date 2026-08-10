@@ -1064,6 +1064,14 @@ pub(crate) struct Setup {
 }
 
 impl App {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "a launch is one composition of independent restores — the \
+                  engine, the library, the config's standing decisions, the \
+                  run's snapshot — and each is three lines that only mean \
+                  anything beside the others. Splitting it would name four \
+                  functions after the order they happen to run in"
+    )]
     fn new(started: Instant, cli_dir: Option<PathBuf>) -> (Self, Task<Message>) {
         // Engine first: open failure must not kill the app — it becomes
         // Availability::NoDevice state that the bottom bar reports.
