@@ -634,8 +634,21 @@ fn header_line(shelf: &Shelf, run: Run, block: f32) -> Element<'_, Message> {
 /// # Where its edges are
 ///
 /// Entries are right-aligned to the lane, so the rail's right edge is
-/// [`theme::HANG`] from the window's — the one window gutter (law L1), which
-/// is the alignment edge the `Settings` word above already established. An
+/// [`theme::HANG`] from the window's — the one window gutter (law L1).
+///
+/// **This used to say the edge was one *"the `Settings` word above already
+/// established"*, and that sentence outlived its subject twice.** ADR-0026
+/// replaced the word with a 32 px gear, whose ink stands 8 px inside its box,
+/// and ADR-0040 moved the gear into the app bar, where a phantom row seam put
+/// it 16 px further in again — so the thing this lane was said to agree with
+/// had been 25 px off it, unmeasured, since the morning of 2026-08-10. The
+/// owner found it by looking. The rail was never the surface at fault: what it
+/// draws its letters on is the same `W − HANG` the bottom bar's volume groove
+/// and the last column of covers stand on, which is what made it the reference
+/// once somebody measured all three
+/// (`docs/design/impl/app-bar-gutter/`, ADR-0040's amendment §1).
+///
+/// An
 /// entry wider than [`theme::INDEX_W`] grows *leftwards* to that cap and then
 /// clips, which is why the lane keeps [`theme::INDEX_CLEARANCE`] between
 /// itself and the last column of covers. The full value is never lost: it is

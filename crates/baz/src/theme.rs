@@ -2085,6 +2085,69 @@ pub const APP_BAR_PAD_V: f32 = GAP_XS;
 /// answers that refusal head-on rather than around it.
 pub const APP_BAR_H: f32 = 2.0 * APP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
 
+/// **How far a glyph's ink stands inside its control box** —
+/// `(TRANSPORT_HIT − ICON_PX) / 2`, **8**.
+///
+/// Every control on the sheet is an [`ICON_PX`] 16 sprite centred in a
+/// [`TRANSPORT_HIT`] 32 box, because 32 is law L7's pointer floor and 16 is
+/// the size the glyph is drawn at. The box is a **hit target**; the sprite is
+/// the **drawing**. They are concentric and they are not the same rectangle,
+/// and this token is the difference — named once, here, because a surface that
+/// hangs its controls by their boxes hangs its *ink* 8 px inside wherever it
+/// thinks it put it.
+///
+/// That is not a defect on a strip whose neighbours are also boxes. It is a
+/// defect the moment a glyph control has to line up with **type**, because a
+/// text box's ink starts at its own edge: `views::app_bar`'s gear against
+/// `views::shelf`'s index rail is exactly that case, and
+/// [`APP_BAR_HANG_R`] is what it buys.
+pub const CONTROL_INK_INSET: f32 = (TRANSPORT_HIT - ICON_PX) / 2.0;
+
+/// **The app bar's trailing gutter** (logical px) — `HANG − CONTROL_INK_INSET`,
+/// **32**.
+///
+/// Law L1 says every surface that touches a window edge hangs from `x = HANG`
+/// and `x = W − HANG`, and the law is about **ink**: the index rail's letters
+/// end on that line ([`crate::spine`] draws them at `bounds.width − HANG`), the
+/// bottom bar's volume groove ends on it, the last column of covers ends on it.
+/// The app bar's trailing tenant is not type but a *glyph in a control box*, so
+/// hanging the container from `HANG` puts the box on the line and the drawing
+/// [`CONTROL_INK_INSET`] 8 px inside it.
+///
+/// **Measured, at 1280 × 860, before this token existed**: the rail's letters
+/// ran to x 1239 and the bottom bar's groove to x 1239 — one edge, twice — and
+/// the gear's ink stopped at x 1214. The owner, 2026-08-10: *"the settings cog
+/// is padded in quite a bit and does not align with the rail"*. Sixteen of
+/// those twenty-five pixels were a phantom gap (see [`crate::views::app_bar`]);
+/// the last eight are this.
+///
+/// So the bar's **right** padding is this and its **left** padding is [`HANG`],
+/// and the asymmetry is the whole point rather than a slip: zone 1 holds a mark
+/// whose ink fills its own box, zones 3–5 hold marks whose boxes are twice
+/// their ink. Both edges put **ink** on `HANG`.
+///
+/// It is stated as a subtraction from `HANG` rather than as `32` so that the
+/// day `HANG` or [`TRANSPORT_HIT`] moves, this moves with them; a literal here
+/// would be a second grid.
+pub const APP_BAR_HANG_R: f32 = HANG - CONTROL_INK_INSET;
+
+/// The app bar's padding: [`APP_BAR_PAD_V`] above and below, [`HANG`] on the
+/// left and [`APP_BAR_HANG_R`] on the right.
+///
+/// A named function rather than a [`pad`] call at the call site, because this
+/// is the one surface in the product whose two horizontal gutters differ and
+/// the reason lives with the numbers rather than in a view file's comment.
+/// `one_gutter_touches_every_window_edge` reads this name.
+#[must_use]
+pub fn app_bar_pad() -> Padding {
+    Padding {
+        top: APP_BAR_PAD_V,
+        right: APP_BAR_HANG_R,
+        bottom: APP_BAR_PAD_V,
+        left: HANG,
+    }
+}
+
 /// The app bar's reserved slot for the **display options** (logical px) —
 /// four [`STEPPER_HIT`] detent marks, **96**.
 ///
@@ -2098,22 +2161,27 @@ pub const APP_BAR_H: f32 = 2.0 * APP_BAR_PAD_V + TRANSPORT_HIT + 1.0;
 /// which is the one thing the frame may not do.
 pub const APP_BAR_MARKS_W: f32 = 4.0 * STEPPER_HIT;
 
-/// The app bar's reserved slot for the **window's name** (logical px) — **32**.
+/// The app bar's reserved slot for the **application's mark** (logical px) —
+/// [`ICON_PX`] 16 + [`GAP_SM`] 8 = **24**.
 ///
-/// `baz` at the metadata size in the Medium face measures **19.54 px**
-/// (`font.rs`), and this is the second 4 px lattice step above it rather than
-/// the first. Every other reservation in the product takes the first — the
-/// arrangement row's 360 sits 2.09 px over its measurement — and this one does
-/// not, for a reason worth writing down: 20 would leave 0.46 px, which is
-/// inside the range a hinting or rasterizer change could move a three-letter
-/// word, and the neighbour here is a **fill**. A word that overran would push
-/// the drag region rather than clip, so the bar would stop being the geometry
-/// the budget adds up without anything looking wrong.
+/// The mark hangs from [`HANG`] at the slot's leading edge, so its ink stands
+/// on law L1's gutter exactly as the word it replaced did; the `GAP_SM` is the
+/// separation between it and the drag gap, which is a **fill** and would
+/// otherwise be touching.
+///
+/// **It was the word `baz`**, at the metadata size in the Medium face,
+/// measuring 19.54 px (`font.rs`) against this same 24 — and the number is
+/// unchanged by the swap, which is why the app bar's budget is unchanged too.
+/// The owner, 2026-08-10: *"we probably want an icon for our app to show in
+/// the bar"*. What zone 1 is for is unmoved (ADR-0040 §2): it is a
+/// **statement** of what this window is, and it is still the one zone that is
+/// not a control. See [`crate::icon::app_mark`] for why the thing drawn there
+/// is not on the glyph sheet.
 ///
 /// It is declared at all — rather than left to shrink to its content — because
 /// L9 wants every tenant of a strip to declare, and a fill next to an
-/// undeclared word is a region whose width nobody has written down.
-pub const APP_BAR_NAME_W: f32 = 24.0;
+/// undeclared tenant is a region whose width nobody has written down.
+pub const APP_BAR_NAME_W: f32 = ICON_PX + GAP_SM;
 
 /// The app bar's reserved slot for the **window controls** (logical px) —
 /// three [`TRANSPORT_HIT`] boxes on a [`GAP_XS`] rhythm, **104**.
@@ -6806,11 +6874,33 @@ mod tests {
         // **The app bar**, which since ADR-0040 is the fifth window-edge
         // surface and the only one that touches *three* of the window's edges
         // — top, left and right. Its lead is its own (`APP_BAR_PAD_V`, half
-        // the strip's) and its gutter is the same `HANG` as everything else's,
-        // which is the whole of what this law asks.
+        // the strip's).
+        //
+        // **Its two horizontal gutters differ, and that is this law being
+        // obeyed rather than excused.** L1 is about where the **ink** stands,
+        // and the bar's trailing tenant is a glyph centred in a box twice its
+        // size: hanging that container from `HANG` puts the *box* on the line
+        // and the *drawing* `CONTROL_INK_INSET` 8 px inside it, which is the
+        // 2026-08-10 defect (`the_bars_trailing_ink_lands_on_the_windows_gutter`
+        // carries the measurement). So the right padding is `APP_BAR_HANG_R`
+        // and the left is `HANG`, and ink lands on `HANG` at both edges. The
+        // arithmetic lives in `theme::app_bar_pad`, which is what this asserts
+        // — a view file that rebuilt the padding inline would be a second
+        // answer to the one question this law asks.
+        //
+        // Read off the **code**, not the whole file: that module's own tests
+        // name the symmetric form in order to forbid it, and a census that
+        // counted them would be counting the guard as the breach.
+        let app_bar = read("app_bar.rs");
+        let app_bar = app_bar.split("#[cfg(test)]").next().expect("a head");
         assert!(
-            read("app_bar.rs").contains("theme::pad(theme::APP_BAR_PAD_V, theme::HANG)"),
-            "the app bar no longer hangs from HANG"
+            app_bar.contains("theme::app_bar_pad()"),
+            "the app bar no longer hangs from the one gutter"
+        );
+        assert!(
+            !app_bar.contains("theme::pad(theme::APP_BAR_PAD_V"),
+            "the app bar has gone back to a symmetric gutter, which puts its \
+             trailing glyph 8 px inside the line the index rail draws on"
         );
         // The now-playing bar. Its vertical padding is zero because the band is
         // `BAR_CONTENT_H` and the lane that centres the transport is inside it.
@@ -7502,18 +7592,27 @@ mod tests {
     fn the_app_bar_holds_its_tenants_at_the_windows_own_floor() {
         /// The window's declared minimum width (`app.rs`'s `min_size`).
         const FLOOR: f32 = TOP_BAR_FLOOR + SIDEBAR_RAIL_W;
-        /// How far the gear's box stands from the window's right edge — a
-        /// constant with no term in it that can be zero, which is the
-        /// arithmetic form of "both reserved slots are held in every place".
-        const GEAR_FROM_RIGHT: f32 = HANG + APP_BAR_BUTTONS_W + GAP_LG;
+        /// How far the gear's box stands from the window's right edge **when
+        /// baz owns the chrome and the buttons are drawn**. Not a constant of
+        /// the bar: with the buttons absent the gear *is* the trailing control
+        /// and stands at [`APP_BAR_HANG_R`] (see
+        /// `the_bars_trailing_ink_lands_on_the_windows_gutter`).
+        const GEAR_FROM_RIGHT: f32 = APP_BAR_HANG_R + APP_BAR_BUTTONS_W + GAP_LG;
         /// The same, for the display options' slot.
         const MARKS_FROM_RIGHT: f32 = GEAR_FROM_RIGHT + TRANSPORT_HIT + GAP_LG;
-        /// The bar's one line: the gutter, the window's name, the drag gap's
-        /// two `GAP_LG` flanks, the display options' reserved slot, the seam,
-        /// the gear, the seam, the window controls' reserved slot, the gutter.
+        /// The bar's one line: the leading gutter, the application's mark, the
+        /// drag gap's two `GAP_LG` flanks, the display options' reserved slot,
+        /// the seam, the gear, the seam, the window controls' reserved slot,
+        /// the trailing gutter.
         ///
         /// The drag gap contributes **zero** of its own — it is the fill, and
         /// what the law has to hold is the line with the fill at nothing.
+        ///
+        /// This is the line **at its widest**, which is the state where baz
+        /// owns the chrome. With the buttons absent their slot and its seam are
+        /// not spent at all — that is the fix of 2026-08-10, and it is asserted
+        /// below rather than left to a reader to notice that the constant has
+        /// two values.
         const LINE: f32 = HANG
             + APP_BAR_NAME_W
             + 2.0 * GAP_LG
@@ -7522,23 +7621,41 @@ mod tests {
             + TRANSPORT_HIT
             + GAP_LG
             + APP_BAR_BUTTONS_W
-            + HANG;
+            + APP_BAR_HANG_R;
 
         const { assert!(APP_BAR_MARKS_W == 96.0) }
         const { assert!(APP_BAR_BUTTONS_W == 104.0) }
-        const { assert!(LINE == 400.0) }
+        const { assert!(LINE == 392.0) }
         const { assert!(LINE <= FLOOR) }
         // The slack is stated rather than left implicit, because it is the
         // figure any future tenant of this bar is argued against — the same
         // service `TOP_BAR_FLOOR`'s 160 does for the strip below.
-        const { assert!(FLOOR - LINE == 296.0) }
+        //
+        // **It is the figure the search well is argued against**, which is the
+        // owner's open question of 2026-08-10 (*"maybe we could put the search
+        // in the top bar?"*, `docs/BACKLOG.md`): the lane's well is
+        // `SIDEBAR_MEASURE` 232 and its seam `GAP_LG` 16, so it fits here with
+        // 56 px left over — and its always-drawn counts line does not fit at
+        // all, because this band is one `TRANSPORT_HIT` tall. The arithmetic is
+        // stated so the answer is a decision rather than a discovery.
+        const { assert!(FLOOR - LINE == 304.0) }
+        const { assert!(SIDEBAR_MEASURE + GAP_LG < FLOOR - LINE) }
+        const { assert!(APP_BAR_H - 1.0 - 2.0 * APP_BAR_PAD_V == SIDEBAR_WELL_H) }
 
-        // **Both reserved slots are held in every place**, which is what makes
-        // one bar the same bar everywhere (ADR-0040 §5). Stated as arithmetic:
-        // the distance from the window's right edge to the gear is a constant,
-        // and it does not contain a term that could be zero.
-        const { assert!(GEAR_FROM_RIGHT == 160.0) }
-        const { assert!(MARKS_FROM_RIGHT == 208.0) }
+        // **The display options' slot is held in every place**, which is what
+        // makes one bar the same bar everywhere (ADR-0040 §5): the distance
+        // from the gear to the marks contains no term that can be zero, so the
+        // right cluster does not slide 96 px as you navigate.
+        //
+        // The window buttons' slot is **not** held, and the two are different
+        // on purpose. The marks come and go *within a run* as you move between
+        // places, so a collapsing slot would be the frame moving under you; the
+        // buttons are decided once per process by `app::owns_chrome`, so there
+        // is no frame in which they appear and nothing can be seen to move.
+        // Holding their 120 px open would be 120 px of dead gutter in every
+        // build that ships.
+        const { assert!(GEAR_FROM_RIGHT == 152.0) }
+        const { assert!(MARKS_FROM_RIGHT == 200.0) }
 
         // **The band's height is a control row plus a named lead each side**
         // (law L4), and it is smaller than the place strip's on purpose: this
@@ -7554,6 +7671,90 @@ mod tests {
         // is still drawn above it. ADR-0040 §6 takes that debt deliberately
         // and names what clears it.
         const { assert!(APP_BAR_H + TOP_BAR_H == 90.0) }
+    }
+
+    /// **The app bar's trailing ink lands on the window's gutter, in both
+    /// chrome states** — the alignment rule, as arithmetic.
+    ///
+    /// The owner, 2026-08-10, looking at the shipped bar: *"the settings cog is
+    /// padded in quite a bit and does not align with the rail"*. He is right,
+    /// and the measurement is in `docs/design/impl/app-bar-gutter/`: at
+    /// 1280 × 860 the index rail's letters ran to x 1239 and the bottom bar's
+    /// volume groove ran to x 1239 — the same edge, found twice, which is what
+    /// makes it *the* edge — while the gear's ink stopped at x 1214.
+    ///
+    /// **Twenty-five pixels, from two independent causes:**
+    ///
+    /// 1. **16** — the row spent a [`GAP_LG`] seam on the zero-width `Space`
+    ///    that stood in for the absent window buttons. Fixed in
+    ///    [`crate::views::app_bar`] by pushing no child at all.
+    /// 2. **8** — [`CONTROL_INK_INSET`], a glyph's ink inside its
+    ///    [`TRANSPORT_HIT`] box. Fixed by [`APP_BAR_HANG_R`].
+    ///
+    /// Re-measured after the fix, at both widths: the gear lands **1 px**
+    /// inside the rail's letters and the close button **2 px**. That residual
+    /// is each mark's own inner air — the gear's outline reaches 0.92 of its
+    /// unit square and the close cross rather less ([`crate::icon`]), against a
+    /// letterform's right side bearing — and it is deliberately *not* chased.
+    /// Chasing it would mean hanging each glyph by its own drawn extent, which
+    /// is a different x per glyph and would make the bar's trailing edge move
+    /// when a control's drawing changed. The alignment unit is the **sprite
+    /// box**, which is the one rectangle every mark on the sheet shares.
+    ///
+    /// **The rule, which is what this test exists to hold:** *the bar's
+    /// trailing control puts its **sprite box** — not its hit box — on
+    /// `W − HANG`, whichever control that is.* Stated over the control rather
+    /// than over the gear, because the gear is only the trailing control while
+    /// `app::owns_chrome` is false; the day it is true, the close button is,
+    /// and the rule has to give the same answer without a second clause. That
+    /// is the property asserted here in both states.
+    #[test]
+    fn the_bars_trailing_ink_lands_on_the_windows_gutter() {
+        /// Where the trailing control's *sprite box* ends, measured inward
+        /// from the window's right edge. The container's padding puts the
+        /// control **box** here, and the sprite sits `CONTROL_INK_INSET`
+        /// inside it on each side.
+        const fn trailing_ink_from_right(pad_r: f32) -> f32 {
+            pad_r + CONTROL_INK_INSET
+        }
+        // **In both chrome states the trailing control's sprite box lands on
+        // `W − HANG`**, and it lands there by the *same* arithmetic — which is
+        // the property, rather than the number. What differs between the two
+        // states is only *which* control is trailing: the gear while
+        // `app::owns_chrome` is false, the close button when it is true. Both
+        // are a `TRANSPORT_HIT` box holding an `ICON_PX` sprite, both sit at
+        // the row's trailing edge, so both read this one line.
+        const { assert!(trailing_ink_from_right(APP_BAR_HANG_R) == HANG) }
+        // …and that edge is the one the rail draws its letters on
+        // (`crate::spine`: `bounds.x + bounds.width - theme::HANG`) and the one
+        // the last column of covers hangs from. One line, three surfaces.
+        const { assert!(INDEX_LANE_W - INDEX_CLEARANCE - INDEX_W == HANG) }
+
+        // **The leading gutter is `HANG` and stays `HANG`**, because zone 1
+        // holds a mark whose ink fills its own box rather than a glyph centred
+        // in a box twice its size. The asymmetry is the rule being obeyed on
+        // both edges, not broken on one — so it is read off the padding the
+        // bar actually spends rather than off the tokens beside it.
+        let pad = app_bar_pad();
+        assert!(
+            (pad.left - HANG).abs() < f32::EPSILON,
+            "the app bar's leading gutter is no longer the window's"
+        );
+        assert!(
+            (pad.right - APP_BAR_HANG_R).abs() < f32::EPSILON,
+            "the app bar's trailing gutter is no longer the ink gutter"
+        );
+        assert!(
+            (pad.top - pad.bottom).abs() < f32::EPSILON,
+            "the band's lead is no longer the same above and below"
+        );
+        const { assert!(APP_BAR_HANG_R < HANG) }
+        const { assert!(HANG - APP_BAR_HANG_R == CONTROL_INK_INSET) }
+        const { assert!(CONTROL_INK_INSET == 8.0) }
+        const { assert!(APP_BAR_HANG_R == 32.0) }
+        // The mark's slot leaves it hanging from the leading gutter with one
+        // `GAP_SM` before the drag gap, so zone 1's ink starts on `HANG` too.
+        const { assert!(APP_BAR_NAME_W - ICON_PX == GAP_SM) }
     }
 
     /// **Every icon-only control carries a tooltip** — the form rule's

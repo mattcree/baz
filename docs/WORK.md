@@ -221,6 +221,29 @@ call.
     cannot play in the one place everything is playable.
 
   *Needs: Settings readout, or is the log line enough for the beta?*
+- **Does the search well move into the app bar?** His question, 2026-08-10:
+  *"maybe we could put the search in the top bar?"* — a *maybe*, so it is
+  priced rather than built. The full case each way is in `BACKLOG.md`'s *What
+  the owner asked for*; the short of it is that the bar's own admission rule
+  (his) **admits** search more cleanly than it admits the display options, and
+  the composition **refuses** it: the field fits the 304 px of slack, and the
+  always-drawn counts line under it does not fit a band one `TRANSPORT_HIT`
+  tall. Moving it back up would also revive the thing ADR-0030's second
+  amendment cured on his own instruction — the frame's identity in two places
+  at once. **Recommendation: no**, and it is close; the cheapest honest yes is
+  the *collapsed* well (the magnifier alone, opening the lane onto the caret),
+  which costs 32 px and keeps one home for the field and one place for the
+  counts. *Needs: yes, no, or the magnifier.* Nothing is queued behind this —
+  if the answer is no, the line closes and the well stays where he put it.
+- **Does baz's chrome spend an accent that is not playback truth?** The app
+  bar now draws the application's own icon in zone 1 (his *"we probably want an
+  icon for our app to show in the bar"*), and the mark carries the lamp dot —
+  about one pixel at 16 px, and permanently on screen in a place that says
+  nothing about playback. It ships as a **stated exception** with a boundary
+  (*the application's mark is the application's, not the room's ink*) rather
+  than as an oversight. *Needs: keep it, or take the reversal* — a monochrome
+  `Glyph::Baz` on the sheet, inked like every other mark in the bar, which
+  costs a second drawing of the mark and keeps the accent discipline whole.
 - **Should baz play Opus?** Promoted here rather than into `## Next`, because
   it is the largest *functional* gap in the product and the only one whose fix
   is a decision rather than work. `.opus` is out of `AUDIO_EXTENSIONS`
@@ -330,6 +353,30 @@ call.
 
 Newest first. Fuller detail in `CHANGELOG.md`.
 
+- **The app bar hangs by its ink, and zone 1 is baz's own mark.** The owner's
+  two corrections to the bar that shipped the same morning (ADR-0040's
+  amendment; frames and the measurement in
+  `docs/design/impl/app-bar-gutter/`).
+  - **The gear stood 25 px inside the window's gutter** — *"the settings cog is
+    padded in quite a bit and does not align with the rail"*. Measured, not
+    eyeballed, and the same at both widths: the index rail's letters and the
+    bottom bar's volume groove both end 41 px from the window's right edge, and
+    the gear's ink stopped at 66. **16 px was a phantom seam** on the
+    zero-width `Space` standing in for the absent window buttons — a row's
+    spacing falls between *children*, and a shrink-width `Space` is one.
+    **8 px was the hit box not being the drawing**: a 16 px sprite centred in a
+    32 px box, hung by the box.
+  - **The finding worth carrying forward is the false claim, not the pixels.**
+    `views/app_bar.rs` said its right edge was `W − HANG` and that was true of
+    the container and false of everything drawn in it; `views/shelf.rs` still
+    cited *"the alignment edge the `Settings` word above already established"*,
+    which had stopped being a word two ADRs earlier. Nothing in the product
+    measured either, which is why a 25 px error survived a study with its own
+    capture harness. The rule is now `const`-asserted and written over *the
+    trailing control* rather than over the gear, so it holds when baz owns the
+    chrome and the close button is trailing instead.
+  - **Two things for the owner** are on *Waiting* above: the accent the
+    application's mark carries, and his search question.
 - **Removing a music folder no longer destroys `first_seen_ns` — and the two
   blockers that looked like opposites turned out to be one question.**
   ADR-0042. *"A deleted folder's records never leave"* forgets too little and

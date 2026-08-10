@@ -1239,6 +1239,80 @@ pub fn inked(glyph: Glyph, ink: Color) -> image::Handle {
     }
 }
 
+/// The **application's own mark** — the icon a launcher shows — decoded once
+/// from the PNG the desktop entry and the Flatpak already install.
+///
+/// # It is not on the sheet, and that is the whole point
+///
+/// Everything above this line is a *glyph*: an outline in a unit square,
+/// rasterized to coverage and **inked by the room** at draw time
+/// ([`SHEET`], [`ACCENT_SHEET`]). A glyph has no colour of its own; the room
+/// gives it one, which is how baz keeps two inks and one accent.
+///
+/// baz's application icon is a different kind of asset and `packaging/README.md`
+/// already says so in as many words — *"`crates/baz/src/icon.rs` is unrelated —
+/// that is the in-UI transport glyph sheet, drawn in code"*. It is
+/// **full-colour**: a wall gradient, a sleeve in the placeholder gamut, a
+/// letterform, and the picture light. Flattening it to coverage would throw
+/// away the thing that makes it recognisable at a glance in a launcher, and
+/// re-drawing it as an outline would be a **second master** — two files that
+/// have to be kept in agreement, when `packaging/icons/README.md` is explicit
+/// that the SVG is *the* master and the PNG ladder is rendered from it.
+///
+/// So: one master, one ladder, and the bar reads the ladder.
+///
+/// # Which rung, and why that one
+///
+/// The **32 px** rung, drawn at [`theme::ICON_PX`] 16 logical px — exactly
+/// [`SUPERSCALE`] 2, which is the same `@2x` contract every sprite on the sheet
+/// is drawn under, and exact on 1× and 2× displays for the same reason. The
+/// rung is rendered from `io.github.mattcree.baz-small.svg`, the size-specific
+/// artwork the freedesktop icon theme spec exists to allow: the master's wall
+/// label loses its second line below ~48 px because two 1 px lanes composite
+/// into one grey smudge. Taking the 256 px master and minifying 16:1 here would
+/// have thrown that work away and drawn the smudge.
+///
+/// # The one thing it spends
+///
+/// The mark carries the room's accent — the lamp dot on the label's first line
+/// — and in the bar that accent is **not playback truth**, which is the
+/// standing rule it would otherwise break (doc 02 §5.3). It is admitted as an
+/// exception with a stated boundary: **the application's mark is the
+/// application's, not the room's ink**, and nothing else in the chrome may
+/// reach for colour on this precedent. At 16 px the dot is roughly one pixel.
+/// ADR-0040's amendment records it and states the reversal — a monochrome
+/// `Glyph::Baz` on the sheet, inked like every other mark in the bar, which is
+/// a real option and not a hypothetical one.
+///
+/// # Failure
+///
+/// The bytes are `include_bytes!` from the repository, so a decode failure is a
+/// corrupt commit rather than anything a machine in the field can cause, and
+/// CI's `packaging` job renders the ladder from the master and compares. It is
+/// therefore an `expect` rather than a fallback: a silent blank in the window's
+/// own chrome would be worse than a build that cannot start.
+static APP_MARK: LazyLock<image::Handle> = LazyLock::new(|| {
+    /// The 32 px rung of the hicolor ladder — the same file the desktop entry,
+    /// the release tarball and the Flatpak install.
+    const BYTES: &[u8] =
+        include_bytes!("../../../packaging/icons/hicolor/32x32/apps/io.github.mattcree.baz.png");
+    // `::image` is the decoder crate; the bare `image` in this module is
+    // `iced::widget::image`, whose `Handle` the last line mints.
+    let mark = ::image::load_from_memory(BYTES)
+        .expect("baz's own application icon, compiled in from packaging/icons")
+        .to_rgba8();
+    let (w, h) = mark.dimensions();
+    image::Handle::from_rgba(w, h, mark.into_raw())
+});
+
+/// The application's mark, for the app bar's zone 1. Cheap: an `Arc` bump over
+/// the one decoded copy, whose id lives as long as the process for [`SHEET`]'s
+/// reason.
+#[must_use]
+pub fn app_mark() -> image::Handle {
+    APP_MARK.clone()
+}
+
 /// A theme color as the sRGB bytes the image pipeline stores. iced's
 /// `Color` components are already sRGB-encoded and the renderer uploads
 /// sprites as `Rgba8UnormSrgb`, so this is a straight scaling.

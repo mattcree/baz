@@ -894,19 +894,24 @@ mod tests {
         // where a *width* claim belongs.
     }
 
-    /// **The app bar's name fits its declared slot** — L9's declaration/
-    /// measurement pairing, applied to the one word in the window's own chrome
-    /// (ADR-0040 §2).
+    /// **The app bar's zone 1 still holds the word it was sized for**, if the
+    /// mark ever has to come back out — L9's declaration/measurement pairing,
+    /// kept alive across a swap.
     ///
-    /// `baz` is drawn at the metadata size in the Medium face, in a
-    /// [`theme::APP_BAR_NAME_W`] box. The declaration is only worth asserting
-    /// if the face is measured against it, which is the same discipline the
-    /// arrangement row keeps — and it matters more here than it looks, because
-    /// the slot's neighbour is a **fill**: a word that overran would push the
-    /// drag region rather than clip, and the bar would silently stop being the
-    /// geometry the budget adds up.
+    /// Zone 1 drew the word `baz` at the metadata size in the Medium face until
+    /// 2026-08-10, when the owner asked for the application's icon there
+    /// (ADR-0040's amendment; [`crate::views::app_bar`]'s `mark`). The slot did
+    /// not move — it was `ICON_PX + GAP_SM` all along, by coincidence and now
+    /// by derivation — and that is precisely the fact worth holding, because
+    /// the stated reversal for the icon is *put the word back*. A reversal that
+    /// silently overran its slot would push the drag region rather than clip,
+    /// and the bar would stop being the geometry the budget adds up without
+    /// anything looking wrong.
+    ///
+    /// So this is no longer a measurement of what is drawn; it is a measurement
+    /// of what the slot can still take, and it says so.
     #[test]
-    fn the_app_bars_name_fits_its_declared_slot() {
+    fn the_app_bars_zone_one_still_fits_the_word_it_was_sized_for() {
         let medium = Face::parse(SANS_MEDIUM);
         let name = medium.width("baz", theme::SIZE_META);
         assert!(
@@ -921,6 +926,13 @@ mod tests {
             (1.0..8.0).contains(&slack),
             "the name's reservation carries {slack:.2} px of slack: it is \
              either overflowing or reserving room for a word that is not there"
+        );
+        // …and the mark actually drawn there hangs from the leading gutter
+        // with the slot's remainder falling on the drag gap's side.
+        assert!(
+            (theme::APP_BAR_NAME_W - theme::ICON_PX - theme::GAP_SM).abs() < f32::EPSILON,
+            "zone 1's slot is no longer the mark's lane plus its separation \
+             from the fill beside it"
         );
     }
 

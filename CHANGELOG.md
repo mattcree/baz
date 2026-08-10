@@ -82,11 +82,16 @@ Every release is built from a tag by CI, gated on the full test suite — see
     the default, and the first press only shows what a new index costs: every
     record files under ADDED = today.
 - **An app bar across the top of every place** — baz's own window chrome
-  (ADR-0040). It carries the window's name, the display options, the Settings
-  gear and the three window buttons (minimise, maximise, close, on the right),
-  and it is identical in all seven places. Dragging any part of it that is not
-  a control moves the window; pressing it twice maximises or restores it;
+  (ADR-0040). It carries the application's mark, the display options, the
+  Settings gear and the three window buttons (minimise, maximise, close, on the
+  right), and it is identical in all seven places. Dragging any part of it that
+  is not a control moves the window; pressing it twice maximises or restores it;
   right-pressing it asks the desktop for its window menu.
+- **baz's own icon stands in the app bar**, on the owner's *"we probably want an
+  icon for our app to show in the bar"* — the same mark the launcher shows,
+  decoded from `packaging/icons/`'s 32 px rung and drawn at 16 logical px. It
+  replaces the word `baz` rather than joining it, in a slot whose width does not
+  change (ADR-0040's amendment §2).
 - Three glyphs on the icon sheet: minimise, maximise and restore, on the set's
   own stroke band.
 - `BAZ_BORDERLESS=1` turns the platform's title bar off, so the app bar is the
@@ -96,10 +101,11 @@ Every release is built from a tag by CI, gated on the full test suite — see
 - `crates/baz-core/tests/hostile_media.rs` — every hostile input the fuzzer has
   found, run on `push` through both `open_bytes` and a real file on disk under
   every scanned extension. The fuzz job is not a gate a tag passes through, so
-  a reproducer that lives only in a corpus is not a gate at all (ADR-0040 §3).
+  a reproducer that lives only in a corpus is not a gate at all
+  (ADR-0040 *a hostile file* §3).
 - `an_mp3s_replay_gain_comes_off_its_id3v2_block` — the first test to drive an
   MP3's ID3v2 tags through the decoder, which nothing covered before and which
-  the probe change above made load-bearing.
+  the probe change below made load-bearing.
 - **Every skipped file says its own name in the log.** A scan prints one
   `[scan] skipped <path>: <reason>` line per failure, beside the count it
   already reported. The count is a statistic and cannot tell a listener *which*
@@ -128,7 +134,7 @@ Every release is built from a tag by CI, gated on the full test suite — see
   `-malloc_limit_mb` goes to 6144, above the largest buffer a 32-bit length
   field can name, because Symphonia allocates metadata buffers from unchecked
   32-bit lengths in at least four places across two containers and that bound
-  is upstream's (ADR-0040 §1, `docs/BACKLOG.md`). The loop now runs **every**
+  is upstream's (ADR-0040 *a hostile file* §1, `docs/BACKLOG.md`). The loop now runs **every**
   target and fails at the end with the list — a `run:` block is `bash -e`, so
   the first failure used to abort the step, which matters because
   `playback_decode` stays red on a Symphonia panic that no fix inside baz can
@@ -147,6 +153,22 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Fixed
 
+- **The app bar's gear stood 25 px inside the window's own gutter**, on the
+  owner's *"the settings cog is padded in quite a bit and does not align with
+  the rail"*. Measured at 1280 × 860 and 1920 × 1080
+  (`docs/design/impl/app-bar-gutter/`): the index rail's letters and the bottom
+  bar's volume groove both end 41 px from the window's right edge — two
+  independent surfaces already agreeing on law L1's line — while the gear's ink
+  stopped at 66. Two causes. **16 px was a phantom seam**: the window buttons
+  are absent unless baz owns the chrome, and the row put a zero-width `Space`
+  where they would go, which still collects a `GAP_LG` because a row's spacing
+  falls between *children*. **8 px was box versus ink**: every control is a
+  16 px sprite centred in a 32 px hit box, so hanging the container from `HANG`
+  puts the box on the line and the drawing inside it. The bar's trailing gutter
+  is now `HANG` less that inset, and the rule is written over *the trailing
+  control* rather than over the gear, so it gives the same answer when baz owns
+  the chrome and the close button is trailing instead. Both states are measured;
+  the residual is 1–2 px of each mark's own inner air.
 - **One junk byte in a year tag no longer costs a whole album.** Fourteen
   MP3s — every track of Frank Zappa's *Unmitigated Audacity*, ripped by
   dBpoweramp — were missing from a 3 735-file library, and the only evidence

@@ -2,6 +2,160 @@
 
 **Status**: accepted (2026-08-10), **with one field not yet flipped** (§6) · **amends [ADR-0022](0022-places-and-nothing-else.md)'s foundational sentence for the third time**, after [ADR-0030](0030-the-returns-lane-and-the-home-band.md)'s lane · **reverses [ADR-0028](0028-density-detents.md)'s amendment §3** on where the density marks stand, and keeps its §2 · **empties the strip charter in [ADR-0026](0026-iconography-and-the-strip-budget.md) §3** of two tenants and re-derives its budget · frames in `docs/design/impl/app-bar/`
 
+> ## Amendment (2026-08-10) — the bar hangs by its ink, and zone 1 is the mark
+>
+> The owner, with the bar in front of him, in three more messages. Two are
+> corrections and one is a question; the question is not answered here, because
+> it is his (see below and `docs/BACKLOG.md`).
+>
+> Frames, the measurement and the harness:
+> [`docs/design/impl/app-bar-gutter/`](../design/impl/app-bar-gutter/README.md).
+>
+> ### 1. The trailing gutter is the **ink** gutter — and §2's claim was false
+>
+> > *"the settings cog is padded in quite a bit and does not align with the
+> > rail"*
+>
+> He is right, and the number is **25 px** at 1280 × 860 and again at
+> 1920 × 1080. The index rail's letters end 41 px from the window's right edge
+> and the bottom bar's volume groove ends 41 px from it — two independent
+> surfaces, drawn by different code, already agreeing on law L1's line, which is
+> what makes `W − HANG` *the* edge rather than one surface's opinion. The gear's
+> ink stopped at 66.
+>
+> **Two causes, and the first is a plain defect:**
+>
+> 1. **16 px — a phantom seam.** The window buttons are absent unless baz owns
+>    the chrome, and `views/app_bar.rs` put a zero-width `Space` where they would
+>    go. `Row::spacing` falls between every pair of **children**, and a
+>    shrink-width `Space` is a child, so the bar spent a `GAP_LG` on a
+>    placeholder for a control that was not there. The two chrome states
+>    therefore disagreed with each other — 25 px out with the buttons hidden,
+>    10 px out with them drawn — which is how the cause was isolated.
+>    `Row::push_maybe` pushes nothing for a `None`.
+> 2. **8 px — the box is not the drawing.** Every control on the sheet is an
+>    `ICON_PX` 16 sprite centred in a `TRANSPORT_HIT` 32 box: 32 is law L7's
+>    pointer floor and 16 is the size the glyph is drawn at, and they are
+>    concentric but not the same rectangle. Hanging the container from `HANG`
+>    puts the **box** on the line and the **drawing** 8 px inside it. Invisible
+>    on a strip whose neighbours are also boxes; visible the moment a glyph has
+>    to line up with type, which is exactly the rail's case.
+>
+> **This means §2's `theme::pad(APP_BAR_PAD_V, HANG)` was carrying a false
+> claim** — `views/app_bar.rs` said *"its right edge is the window's `W − HANG`"*
+> and that was true of the container and false of everything drawn in it. The
+> false claim is the actual bug; the pixels are its symptom. This ADR's own §2
+> repeated it, and so did `views/shelf.rs`'s index-rail note, which still cited
+> *"the alignment edge the `Settings` word above already established"* — a
+> **word**, whose ink does start at its box edge. ADR-0026 replaced that word
+> with a 32 px square and the visual edge moved 8 px inboard with nobody
+> noticing, because nothing in the product measured it.
+>
+> **The rule, which is stated over the trailing control and not over the gear:**
+>
+> > **The app bar's trailing control puts its *sprite box* — not its hit box —
+> > on `W − HANG`, whichever control that is.**
+>
+> The gear is only the trailing control while `app::owns_chrome` is false. The
+> day it is true, the close button is, and the rule must give the same answer
+> without a second clause — so the correction is on the **band's padding**
+> (`theme::APP_BAR_HANG_R` = `HANG − CONTROL_INK_INSET` = 32) rather than a
+> nudge on the gear, which would have been a state-dependent rule and would have
+> moved the gear by a further 8 px relative to the marks the day the buttons
+> arrived. Both states are measured after the fix: 42 and 43 from the right
+> against the rail's 41, the residual being each mark's own inner air.
+>
+> The leading gutter stays `HANG`. The asymmetry is this law being **obeyed** on
+> both edges rather than excused on one: zone 1 holds a mark whose ink fills its
+> own box, so `HANG` puts its ink on the line already.
+>
+> **Two lines that were candidates and are not the answer**, recorded because
+> one of them is a trap:
+>
+> - **the rail's lane centre**, `W − 70`. `crate::spine` sets its entries flush
+>   *right*, so the rail has a visible vertical edge and no visible middle;
+>   aligning to the centre is aligning to nothing drawn. The trap is that the
+>   gear's ink centre before the fix was `W − 72.5` — within 2.5 px of it. It
+>   looked like a rule and it was a coincidence, and a future reader who
+>   "restores" it will undo this.
+> - **the wall's scrollbar**, `W − 4 … W`. It is deliberately drawn *outside*
+>   the gutter, in the 4 px of it that never held ink (ADR-0022, `views/shelf`);
+>   it is the one thing L1 exempts, and hanging app furniture from it would put
+>   the gear 36 px outboard of the whole window.
+>
+> **The budget moves**, and §2's figure was wrong twice over: the line was 400
+> against a floor of 696 and this ADR reported the slack as 288 when the test
+> asserted 296. With the trailing gutter at 32 the line is **392** and the slack
+> **304**, and both are `const`-asserted rather than written in prose.
+>
+> ### 2. Zone 1 is the application's mark
+>
+> > *"we probably want an icon for our app to show in the bar"*
+>
+> **The icon already existed** and was not redrawn: `packaging/icons/`'s hicolor
+> ladder, which the desktop entry, the release tarball and the Flatpak already
+> install. The bar decodes the **32 px** rung once and draws it at `ICON_PX` 16
+> — exactly the `@2x` contract every sprite on the sheet is drawn under. That
+> rung comes from the *small-sizes* master, the size-specific artwork the
+> freedesktop icon theme spec exists to allow; minifying the 256 px master 16:1
+> here would have drawn the grey smudge that master deliberately avoids below
+> ~48 px.
+>
+> **It is not on the glyph sheet, and the two are different kinds of asset.**
+> `icon.rs` holds outlines in a unit square, rasterized to coverage and **inked
+> by the room** — a glyph has no colour of its own. The application icon is
+> full-colour by construction, and `packaging/README.md` already said so in as
+> many words (*"`crates/baz/src/icon.rs` is unrelated"*). Putting the mark on the
+> sheet would flatten away what makes it recognisable and would create a
+> **second master**, which `packaging/icons/README.md` forbids.
+>
+> **Instead of the word, not beside it**, and the slot does not move.
+> `APP_BAR_NAME_W` was 24 for a 19.54 px word and is now `ICON_PX 16 + GAP_SM 8`
+> — the same 24, re-derived — so the bar's budget, its drag gap and every
+> coordinate in `docs/design/impl/app-bar/` are untouched. Icon *and* word would
+> have widened zone 1 to 48 and been the only one of the three asks that cost the
+> composition anything, to say the same thing twice: on a single-window product
+> this zone never varies, so it carries identity and nothing else, and a mark
+> carries identity better than a three-letter lowercase word at the faintest ink
+> in the room. The reference the owner named carries the mark, not the word.
+> §2's zone 1 keeps its meaning exactly — a **statement**, not a control (L8.5) —
+> and because it is not a control, the icon-only law (doc 10 §3.1) does not reach
+> it, by the same reasoning §3 used to admit the three window buttons.
+>
+> **What it spends, and this is the one thing on his desk.** The mark carries the
+> lamp dot, and in the bar that accent is **not playback truth** — the standing
+> rule is that the accent appears only where it is. It is admitted as an
+> exception with a stated boundary: *the application's mark is the
+> application's, not the room's ink*, and nothing else in the chrome may reach
+> for colour on this precedent. At 16 px the dot is about one pixel. **The
+> reversal**: a monochrome `Glyph::Baz` on the sheet, inked like every other mark
+> in the bar — it costs a second drawing of the mark and keeps the accent
+> discipline whole.
+>
+> ### 3. Search in the bar is **his question**, not this record's answer
+>
+> > *"maybe we could put the search in the top bar?"*
+>
+> Not built, and deliberately not decided here. It is genuinely arguable — §1's
+> admission rule is the owner's own and search passes it more cleanly than the
+> display options do, while ADR-0036 gave the well one meaning and one home and
+> ADR-0030's second amendment records what moving it into the lane *cured*. The
+> case each way, the costs and the recommendation are in `docs/BACKLOG.md`'s
+> *What the owner asked for*, which is where an ask lives until he answers it.
+>
+> What this record adds is the arithmetic, so the answer is a decision rather
+> than a discovery. It is `const`-asserted beside the bar's budget: the lane's
+> well is `SIDEBAR_MEASURE` 232 and its seam `GAP_LG` 16, which **fits** in the
+> 304 px of slack with 56 px to spare — and the band is one `TRANSPORT_HIT`
+> tall, which is exactly the well's own height and leaves **nothing** for the
+> always-drawn counts line under it that ADR-0030's second amendment §3 put
+> there. The field fits. Its readout does not.
+>
+> ### What this amendment does not touch
+>
+> §3's gestures, §4's right-always, §5's marks and §6's open `decorations`
+> question are all unchanged.
+
 ## Context
 
 The owner, 2026-08-10, in three messages and then three clarifications.
@@ -140,7 +294,7 @@ between them.
 
 **Its budget is L9's, asserted as const arithmetic** in
 `theme::the_app_bar_holds_its_tenants_at_the_windows_own_floor`: the line comes
-to 400 against the window's declared minimum of 696, so there is 288 px of
+to 392 against the window's declared minimum of 696, so there is 304 px of
 slack and **the bar has no split regime**. Giving it one for symmetry with the
 strip below would be inventing a breakpoint nothing can reach.
 
