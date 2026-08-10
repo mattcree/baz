@@ -88,12 +88,6 @@
 >    [`impl/queue-in-now-playing/`](impl/queue-in-now-playing/README.md).
 >    §3.4 is the argument, §5.5a is the drawing, §6.4 is what the bar does
 >    afterwards.
-> **Every `file:line` in §3.4, §3.5, §5.5a, §6.4 and §12.0 is read against
-> `c768035`**, and three other branches are editing `app.rs`, `views/lane.rs`,
-> `views/home.rs`, `views/top_bar.rs` and `theme.rs` concurrently. Check
-> `git log` before quoting a line number from those five; the *claims* are about
-> named functions and constants and survive the drift, the numbers may not.
->
 > 8. **What is playing is *which list, and which track in it*.**
 >    (2026-08-10, the same conversation: *"probably the basic model is that
 >    every album has a playlist implicitly… it should be basically which
@@ -102,6 +96,13 @@
 >    [ADR-0034](../adr/0034-the-run-and-its-list.md), because it reaches the
 >    protocol and the play ledger and this study does not. §3.5 is what it buys
 >    here.
+>
+> **Citation baseline for the 2026-08-10 revision.** Every `file:line` in §3.4,
+> §3.5, §5.5a, §6.4 and §12.0 is read against **`c768035`**, and three other
+> branches are editing `app.rs`, `views/lane.rs`, `views/home.rs`,
+> `views/top_bar.rs` and `theme.rs` concurrently. Check `git log` before quoting
+> a line number from those five: the *claims* are about named functions and
+> constants and survive the drift; the numbers may not.
 
 ---
 
