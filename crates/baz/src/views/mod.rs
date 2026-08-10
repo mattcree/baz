@@ -7,6 +7,11 @@
 //!   (ADR-0040). The display options, the gear, the window controls, and the
 //!   window's name.
 //! - [`setup`] — the first-run "Where's your music?" screen.
+//! - [`blocked`] — its sibling and its opposite (ADR-0041): the library is
+//!   there and baz will not open it. A **statement** where [`setup`] asks a
+//!   question — a database from a newer baz, one that cannot be read, or a
+//!   machine with nowhere to keep one. Neither wears the app bar, for the
+//!   reason [`blocked`]'s own docs give.
 //! - [`top_bar`] — the search well, the group-key row, and the quiet counts.
 //! - [`shelf`] — the wall: the shelved, virtualized album grid, its pinned
 //!   group headers, the index rail, its tiles and its empty states.
@@ -73,6 +78,7 @@
 pub(crate) mod album;
 pub(crate) mod app_bar;
 pub(crate) mod artist;
+pub(crate) mod blocked;
 pub(crate) mod bottom_bar;
 pub(crate) mod context_menu;
 pub(crate) mod drag_ghost;
