@@ -103,8 +103,8 @@ pub(crate) fn run_scroll_id() -> scrollable::Id {
 /// head block where there is one.
 ///
 /// Published rather than inlined because **two surfaces have to agree about
-/// it**: this module builds the column from it, and the shell computes a
-/// follow offset from it ([`crate::views::now_playing::follow`]). A private
+/// it**: this module builds the column from it, and the shell computes the
+/// playing-row follow offset from the same geometry. A private
 /// copy on each side is a pair of numbers that drift, and the symptom would be
 /// a follow that lands a header or a strip's height off the row it was aiming
 /// at.

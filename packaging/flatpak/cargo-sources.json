@@ -2992,14 +2992,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/lru/lru-0.16.4.crate",
-        "sha256": "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39",
-        "dest": "cargo/vendor/lru-0.16.4"
+        "url": "https://static.crates.io/crates/lru/lru-0.18.2.crate",
+        "sha256": "5d2f2f9b4ba7e6b24d95e7e899329d35be83bcded72c8540cdd5368932d1d90a",
+        "dest": "cargo/vendor/lru-0.18.2"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39\", \"files\": {}}",
-        "dest": "cargo/vendor/lru-0.16.4",
+        "contents": "{\"package\": \"5d2f2f9b4ba7e6b24d95e7e899329d35be83bcded72c8540cdd5368932d1d90a\", \"files\": {}}",
+        "dest": "cargo/vendor/lru-0.18.2",
         "dest-filename": ".cargo-checksum.json"
     },
     {

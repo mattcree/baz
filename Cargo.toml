@@ -27,9 +27,10 @@ ab_glyph = "0.2.32" # rasterise cached generated jewel-case inserts (MIT OR Apac
 # ships in practice (see crates/baz/src/art.rs). (MIT OR Apache-2.0)
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 lofty = "0.22"      # tag reading (MIT OR Apache-2.0)
-# Bounded album-art thumbnail cache (MIT). >= 0.16.3 for the RUSTSEC-2026-0002
-# IterMut soundness fix; iced_glyphon still pins a 0.12 copy (see deny.toml).
-lru = "0.16.3"
+# Bounded album-art thumbnail cache (MIT). >= 0.18.2 for the
+# RUSTSEC-2026-0253 panic-safety fix; iced_glyphon still pins a 0.12 copy
+# (see deny.toml).
+lru = "0.18.2"
 # WGPU's own shader parser, named directly only in tests so an invalid jewel-
 # case WGSL module fails before the Now Playing view constructs it. Already in
 # the release graph through wgpu; this adds no crate or shipped code. (MIT OR Apache-2.0)

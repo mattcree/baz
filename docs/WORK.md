@@ -273,6 +273,10 @@ only.
 
 ## Recently done
 
+- **The release dependency gate is green again.** A newly published
+  RUSTSEC-2026-0253 advisory made the existing `lru 0.16.4` fail `cargo deny`;
+  baz now requires the fixed 0.18.2 release. The API is unchanged, and the
+  complete dependency, lint and workspace-test gates pass with the new lock.
 - **The artist's page is worth visiting, entirely offline** — doc 15 tiers 1
   and 2. Its one-line facts band now states playing time, release years,
   formats, up to three case-folded genres and the earliest added year, omitting

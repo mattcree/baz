@@ -518,7 +518,7 @@ const UNKNOWN_TOTAL: &str = "--:--";
 ///
 /// Unity is the one position on this control that carries a guarantee — the
 /// engine performs no arithmetic on the samples at all (ADR-0011 §5) — and on
-/// a [`theme::VOLUME_W`]-wide groove a single pixel is
+/// a [`crate::theme::VOLUME_W`]-wide groove a single pixel is
 /// ~10 control positions, so "very nearly at the top" is an easy place to land
 /// and an invisible one to be in. Four pixels is the same figure
 /// [`DRAG_THRESHOLD_PX`] uses and for the same reason: it is the scale of the

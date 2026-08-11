@@ -26,6 +26,9 @@ Every release is built from a tag by CI, gated on the full test suite — see
 
 ### Fixed
 
+- **The bounded artwork cache no longer carries the panic-safety flaw reported
+  as RUSTSEC-2026-0253.** `lru` is updated to the fixed 0.18.2 release; cache
+  behaviour and budgets are unchanged.
 - **Opening music is no longer secretly a toggle.** Repeated presses on the
   same album, artist, or playlist are idempotent, so the second event of a
   double-click cannot open a page and immediately throw the listener back to
