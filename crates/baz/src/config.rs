@@ -93,7 +93,7 @@ use baz_core::protocol::ReplayGainMode;
 use baz_core::replaygain::ReplayGainSettings;
 use baz_core::volume::{MAX_POSITION, Volume};
 
-use crate::shelf::Density;
+use crate::{place::Place, shelf::Density};
 
 /// The `[replaygain]` table's name in the document.
 const REPLAY_GAIN_TABLE: &str = "replaygain";
@@ -119,6 +119,9 @@ const SHUFFLE: &str = "shuffle";
 
 /// The key the volume fader's control position is written under.
 const VOLUME: &str = "volume";
+
+/// The key the last visible place is written under.
+const LAST_PLACE: &str = "last_place";
 
 /// Application configuration. See the [module docs](self) for scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,6 +219,12 @@ pub struct Config {
     /// launches with shuffle on should be two different shuffles; remembering
     /// one would make every morning's first record play in last night's order.
     pub shuffle: bool,
+    /// The place restored on the next launch after a clean close.
+    ///
+    /// This is view state, not a Settings row. Subject places keep their
+    /// stable id; the shell validates it against the newly opened library and
+    /// falls back when the album, artist or playlist no longer exists.
+    pub last_place: Place,
 }
 
 impl Default for Config {
@@ -231,6 +240,7 @@ impl Default for Config {
             sidebar_open: true,
             volume: Volume::UNITY,
             shuffle: false,
+            last_place: Place::Library,
         }
     }
 }
@@ -307,6 +317,11 @@ impl Config {
              now-playing bar\n{SHUFFLE} = {}",
             self.shuffle,
         );
+        let _ = writeln!(
+            out,
+            "# the screen to restore after a clean close\n{LAST_PLACE} = {}",
+            toml_string(&self.last_place.code()),
+        );
         let _ = write!(
             out,
             "\n[{REPLAY_GAIN_TABLE}]\n\
@@ -377,6 +392,14 @@ impl Config {
             .get(SHUFFLE)
             .and_then(toml::Value::as_bool)
             .unwrap_or(false);
+        // A place this build cannot name is Library, and only Library: never
+        // guess which screen a newer spelling meant. Subject existence is
+        // checked later, once the library and playlists are available.
+        let last_place = table
+            .get(LAST_PLACE)
+            .and_then(toml::Value::as_str)
+            .and_then(Place::from_code)
+            .unwrap_or_default();
         Self {
             music_dirs,
             replay_gain,
@@ -385,6 +408,7 @@ impl Config {
             sidebar_open,
             volume,
             shuffle,
+            last_place,
         }
     }
 }
@@ -590,6 +614,46 @@ mod tests {
         }
     }
 
+    #[test]
+    fn round_trips_every_shape_of_last_place() {
+        for place in [
+            Place::Library,
+            Place::Playlists,
+            Place::Home,
+            Place::NowPlaying,
+            Place::Queue,
+            Place::Artist(7),
+            Place::Album(8),
+            Place::Playlist(9),
+            Place::Settings,
+        ] {
+            let config = Config {
+                last_place: place,
+                ..Config::default()
+            };
+            let text = config.to_toml();
+            assert!(
+                text.contains(&format!("last_place = {:?}", place.code())),
+                "{place:?} was not written legibly:\n{text}"
+            );
+            assert_eq!(Config::from_toml(&text), config, "{place:?}");
+        }
+    }
+
+    /// One unreadable destination costs only this view preference. A hand
+    /// edit cannot erase the saved volume or rearrange the library.
+    #[test]
+    fn an_invalid_last_place_degrades_to_library_per_key() {
+        for value in ["\"album:missing\"", "\"future-screen\"", "7", "true"] {
+            let config = Config::from_toml(&format!(
+                "last_place = {value}\nvolume = 618\ngroup_key = \"year\"\n"
+            ));
+            assert_eq!(config.last_place, Place::Library, "{value}");
+            assert_eq!(config.volume, Volume::new(618), "{value}");
+            assert_eq!(config.group_key, GroupKey::Year, "{value}");
+        }
+    }
+
     /// The persisted setting, every mode and both signs of both pre-amps,
     /// through the document and back unchanged.
     #[test]
@@ -609,6 +673,7 @@ mod tests {
                 sidebar_open: true,
                 volume: Volume::new(618),
                 shuffle: false,
+                last_place: Place::Library,
             };
             let back = Config::from_toml(&config.to_toml());
             assert_eq!(back, config, "round-trip failed for {replay_gain:?}");
@@ -938,6 +1003,7 @@ mod tests {
             sidebar_open: true,
             volume: Volume::new(500),
             shuffle: false,
+            last_place: Place::Library,
         };
         let text = config.to_toml();
         assert!(!text.contains(MUSIC_DIRS), "{text}");
@@ -958,6 +1024,7 @@ mod tests {
             sidebar_open: true,
             volume: Volume::new(750),
             shuffle: false,
+            last_place: Place::Playlist(42),
         };
         store(&path, &config).expect("store creates parents and writes");
         assert_eq!(load(&path), config);
@@ -1111,6 +1178,7 @@ mod tests {
             sidebar_open: true,
             volume: Volume::new(250),
             shuffle: false,
+            last_place: Place::NowPlaying,
         };
         let table: toml::Table = config.to_toml().parse().expect("baz writes valid TOML");
         assert!(table.contains_key(MUSIC_DIRS));

@@ -1635,11 +1635,10 @@ place's own bottom padding. **The same three glyphs, from the same function,
 driven by the same `PlayerState`, twice on one screen.**
 
 **Is the bar present in this place? Yes, and unconditionally.** The composition
-at `app.rs:3744–3752` appends `bottom_bar::view` under *every* place, gated on
-exactly one thing — `Availability::NotBuilt`, a build with no audio output at
-all, where hiding playback UI entirely is the honest answer. There is no
-per-place branch. `Place::NowPlaying` is not special-cased and does not need to
-be.
+appends `bottom_bar::view` under *every* place. The GUI always includes device
+output, and an unavailable device is represented as state in that same bar;
+there is no alternate silent composition and no per-place branch.
+`Place::NowPlaying` is not special-cased and does not need to be.
 
 **This is the same reasoning that just removed `‹ Library` from the place
 headers** (`9a7e9a5`, *"The place headers lose their way back, because the lane

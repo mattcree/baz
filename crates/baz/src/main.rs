@@ -3,10 +3,8 @@
 //! v0.1 scope: pick (or remember) a music folder, scan it live onto a
 //! virtualized album shelf with lazy artwork, search-as-you-type, a dismissible
 //! album inspector beside it, an **Queue** popover anchored to the
-//! now-playing bar, a Settings place beside the Library, and — with the
-//! `device-output` feature — album playback
-//! through `baz-core`'s engine (see `playback.rs` and `player.rs`; without
-//! the feature the app builds everywhere with playback UI hidden).
+//! now-playing bar, a Settings place beside the Library, and album playback
+//! through `baz-core`'s engine (see `playback.rs` and `player.rs`).
 //!
 //! The interface's shape is ADR-0016's: **one place at a time, one inspector
 //! attached to that place, one popover attached to the transport, and the
@@ -41,6 +39,7 @@ mod drag;
 mod field;
 mod font;
 mod groove;
+mod health;
 mod icon;
 mod implicit;
 mod jewel_case;
@@ -70,6 +69,7 @@ mod spine;
 mod theme;
 mod undo;
 mod views;
+mod visualizer;
 mod vm;
 
 /// **The window presents without waiting for the vertical blank, unless the

@@ -161,6 +161,14 @@ pub enum Glyph {
     DensityCompact,
     /// The wall at its tightest hang — sixteen works. The fourth detent.
     DensityDense,
+    /// Plain square artwork, used by Now playing's visual-mode detents.
+    VisualCover,
+    /// A landscape jewel case with its narrow tray hinge.
+    VisualCase,
+    /// Uneven frequency bars across the visual field.
+    VisualSpectrum,
+    /// The paired vertical level meters traditionally labelled VU.
+    VisualLevels,
     /// Queue: three stacked bars, the last one short — a list with more to
     /// come. The wall's hover option (doc 13 §11 as the owner overruled it).
     Queue,
@@ -1048,6 +1056,41 @@ const SHUFFLE: &[Outline] = &[
     &[(0.55, 0.90), (0.84, 0.76), (0.55, 0.62)],
 ];
 
+/// Plain cover: one square frame, open in the middle.
+const VISUAL_COVER: &[Outline] = &[
+    &[(0.16, 0.16), (0.84, 0.16), (0.84, 0.24), (0.16, 0.24)],
+    &[(0.16, 0.76), (0.84, 0.76), (0.84, 0.84), (0.16, 0.84)],
+    &[(0.16, 0.24), (0.24, 0.24), (0.24, 0.76), (0.16, 0.76)],
+    &[(0.76, 0.24), (0.84, 0.24), (0.84, 0.76), (0.76, 0.76)],
+];
+
+/// Jewel case: a wider frame with the tray hinge visible at the left.
+const VISUAL_CASE: &[Outline] = &[
+    &[(0.08, 0.20), (0.92, 0.20), (0.92, 0.27), (0.08, 0.27)],
+    &[(0.08, 0.73), (0.92, 0.73), (0.92, 0.80), (0.08, 0.80)],
+    &[(0.08, 0.27), (0.15, 0.27), (0.15, 0.73), (0.08, 0.73)],
+    &[(0.85, 0.27), (0.92, 0.27), (0.92, 0.73), (0.85, 0.73)],
+    &[(0.22, 0.27), (0.31, 0.27), (0.31, 0.73), (0.22, 0.73)],
+];
+
+/// Spectrum: frequency bins with a deliberately irregular envelope.
+const VISUAL_SPECTRUM: &[Outline] = &[
+    &[(0.10, 0.60), (0.20, 0.60), (0.20, 0.84), (0.10, 0.84)],
+    &[(0.24, 0.39), (0.34, 0.39), (0.34, 0.84), (0.24, 0.84)],
+    &[(0.38, 0.18), (0.48, 0.18), (0.48, 0.84), (0.38, 0.84)],
+    &[(0.52, 0.31), (0.62, 0.31), (0.62, 0.84), (0.52, 0.84)],
+    &[(0.66, 0.50), (0.76, 0.50), (0.76, 0.84), (0.66, 0.84)],
+    &[(0.80, 0.67), (0.90, 0.67), (0.90, 0.84), (0.80, 0.84)],
+];
+
+/// VU: two broad level columns and their peak marks.
+const VISUAL_LEVELS: &[Outline] = &[
+    &[(0.17, 0.34), (0.42, 0.34), (0.42, 0.84), (0.17, 0.84)],
+    &[(0.58, 0.20), (0.83, 0.20), (0.83, 0.84), (0.58, 0.84)],
+    &[(0.17, 0.25), (0.42, 0.25), (0.42, 0.29), (0.17, 0.29)],
+    &[(0.58, 0.11), (0.83, 0.11), (0.83, 0.15), (0.58, 0.15)],
+];
+
 impl Glyph {
     /// Every glyph, in sprite-sheet order.
     const ALL: [Self; Self::COUNT] = [
@@ -1079,10 +1122,14 @@ impl Glyph {
         Self::WindowMinimise,
         Self::WindowMaximise,
         Self::WindowRestore,
+        Self::VisualCover,
+        Self::VisualCase,
+        Self::VisualSpectrum,
+        Self::VisualLevels,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 28;
+    const COUNT: usize = 32;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -1116,6 +1163,10 @@ impl Glyph {
             Self::LaneExpanded => LANE_EXPANDED,
             Self::LaneCollapsed => LANE_COLLAPSED,
             Self::Shuffle => SHUFFLE,
+            Self::VisualCover => VISUAL_COVER,
+            Self::VisualCase => VISUAL_CASE,
+            Self::VisualSpectrum => VISUAL_SPECTRUM,
+            Self::VisualLevels => VISUAL_LEVELS,
         }
     }
 
@@ -1150,6 +1201,10 @@ impl Glyph {
             Self::WindowMinimise => 25,
             Self::WindowMaximise => 26,
             Self::WindowRestore => 27,
+            Self::VisualCover => 28,
+            Self::VisualCase => 29,
+            Self::VisualSpectrum => 30,
+            Self::VisualLevels => 31,
         }
     }
 

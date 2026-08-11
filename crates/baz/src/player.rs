@@ -245,8 +245,7 @@
 //! a send fails.
 //!
 //! Everything here is pure and iced-free, so the whole machine is unit
-//! tested on the host without a window, an audio device, or the
-//! `device-output` feature.
+//! tested without a window or an audio device.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -262,20 +261,9 @@ use crate::vm::{self, AlbumVm, QueueItemVm, QueueVm};
 /// Whether a playback engine exists to talk to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Availability {
-    /// Compiled without the `device-output` feature: playback UI is hidden
-    /// entirely (see `src/playback.rs`).
-    NotBuilt,
     /// The engine could not open an output device at startup; the shelf
     /// works, playback controls show this state. The string is the
     /// user-presentable reason.
-    #[cfg_attr(
-        all(not(feature = "device-output"), not(test)),
-        expect(
-            dead_code,
-            reason = "only the device build (and the tests) construct this; the \
-                      no-audio build still matches on it so the machine stays whole"
-        )
-    )]
     NoDevice(String),
     /// The engine is running and accepting commands.
     Ready,
@@ -2010,6 +1998,7 @@ impl PlayerState {
     }
 
     /// Current engine availability.
+    #[cfg(test)]
     #[must_use]
     pub fn availability(&self) -> &Availability {
         &self.availability
@@ -2165,7 +2154,7 @@ impl PlayerState {
     #[must_use]
     pub fn availability_note(&self) -> Option<String> {
         match &self.availability {
-            Availability::NotBuilt | Availability::Ready => None,
+            Availability::Ready => None,
             Availability::NoDevice(reason) => Some(format!("no audio device — {reason}")),
             Availability::Closed => Some("audio engine stopped".to_owned()),
         }

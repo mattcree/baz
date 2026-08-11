@@ -49,16 +49,14 @@ macOS ships as one universal binary rather than two downloads because an
 ordinary person should not have to know which Mac they own; the arm64 runner
 cross-builds the Intel slice with the same Xcode toolchain and no extra linker.
 
-**The shipped feature set is `--features device-output`, and that is the whole
-of it** — `baz` has exactly one feature. It is non-default only because
-building `cpal` needs platform audio headers, which the primary development
-host lacks; a released music player obviously needs audio output. The Linux
-runner installs `libasound2-dev`, the same package and the same reason as CI's
-test job.
+Device output is part of every GUI build. Building `cpal` needs platform audio
+headers, which the primary development host lacks outside its toolbox. The
+Linux runner installs `libasound2-dev`, the same package and the same reason as
+CI's test job.
 
 **A consequence worth stating before you try it**: the release build command
 does not run on the maintainer's own machine. Fedora Silverblue has no
-`alsa-lib-devel`, so `cargo build … --features device-output` fails on the host
+`alsa-lib-devel`, so `cargo build -p baz` fails on the host
 and every local rehearsal below runs inside the `baz-dev` toolbox
 (`scripts/toolbox-setup.sh`, `docs/DEVELOPMENT.md`). The Linux release artifact
 has therefore never been produced outside a container, which is fine — CI's
@@ -126,7 +124,7 @@ python3 packaging/flatpak/check-cargo-sources.py
 toolbox run -c baz-dev env CARGO_INCREMENTAL=0 \
   RUSTFLAGS="--remap-path-prefix=$PWD=/build/baz" \
   cargo build --release --locked --target x86_64-unknown-linux-gnu \
-              -p baz --features device-output
+              -p baz
 ```
 
 That last one takes about eight minutes from cold and produces a 33 MB binary

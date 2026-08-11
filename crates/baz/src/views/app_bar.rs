@@ -176,13 +176,14 @@ use crate::{icon, theme};
 pub(crate) fn view(
     window_w: f32,
     density: Option<crate::shelf::Density>,
+    visualization: Option<crate::visualizer::Mode>,
     maximized: bool,
     owns_chrome: bool,
     ink: Ink,
 ) -> Element<'static, Message> {
     let room = theme::active();
     let name = mark();
-    let furniture = row![marks(density), gear(ink),]
+    let furniture = row![marks(density, visualization), gear(ink),]
         .spacing(theme::GAP_LG)
         .align_y(iced::Alignment::Center);
     // Absent rather than disabled, and absent rather than a held slot: see the
@@ -326,10 +327,17 @@ fn mark() -> Element<'static, Message> {
 /// **Right-aligned in the slot**, so that the run's own right edge is fixed and
 /// the gear beside it never moves; on the four places with nothing to draw, the
 /// slot is [`Space`] of exactly the same width.
-fn marks(density: Option<crate::shelf::Density>) -> Element<'static, Message> {
-    let inner: Element<'static, Message> = match density {
-        Some(current) => crate::views::density_marks(current),
-        None => Space::new(Length::Fixed(theme::APP_BAR_MARKS_W), Length::Shrink).into(),
+fn marks(
+    density: Option<crate::shelf::Density>,
+    visualization: Option<crate::visualizer::Mode>,
+) -> Element<'static, Message> {
+    let inner: Element<'static, Message> = match (density, visualization) {
+        (Some(current), None) => crate::views::density_marks(current),
+        (None, Some(current)) => crate::visualizer::marks(current),
+        (None, None) => Space::new(Length::Fixed(theme::APP_BAR_MARKS_W), Length::Shrink).into(),
+        (Some(_), Some(_)) => {
+            unreachable!("a place cannot have density and visualization controls")
+        }
     };
     container(inner)
         .width(Length::Fixed(theme::APP_BAR_MARKS_W))
@@ -789,7 +797,7 @@ mod tests {
             .expect("the view/application cluster")
             .1;
         assert!(
-            furniture.starts_with("marks(density), gear(ink)"),
+            furniture.starts_with("marks(density, visualization), gear(ink)"),
             "the display options no longer stand inside the gear: scope \
              widens rightward, and this pair is the rule's smallest instance"
         );

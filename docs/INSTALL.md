@@ -137,19 +137,17 @@ on Linux, and nothing at all on macOS or Windows.
 ```sh
 git clone https://github.com/mattcree/baz
 cd baz
-cargo build --release --locked -p baz --features device-output
+cargo build --release --locked -p baz
 ./target/release/baz [MUSIC_DIR]
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`, so `rustup` installs the
 right compiler for you; the minimum supported version is in `Cargo.toml`.
 
-**`--features device-output` is what makes sound come out.** It is off by
-default because building it needs the platform's audio headers, which the
-project's primary development host does not have. Without it baz still builds
-and runs everywhere, shows your whole library, and hides the playback controls
-— useful for working on the interface, useless as a music player. Released
-binaries and the Flatpak are always built with it.
+Audio output is an unconditional part of the GUI binary. Building it needs
+the platform's audio headers, which the project's primary development host
+does not have outside the `baz-dev` toolbox. There is no library-only GUI
+variant with its playback controls removed.
 
 The audio headers, if your Linux distribution has not already installed them:
 

@@ -17,8 +17,7 @@
 //!   derived in `art.rs`. Tiles without art render a deterministic gradient
 //!   placeholder.
 //! - **Playback** ([`crate::playback`], [`crate::player`]): the device
-//!   engine is spawned once at app start (feature `device-output`; without
-//!   it playback UI is hidden). Commands go straight to the
+//!   engine is spawned once at app start. Commands go straight to the
 //!   [`baz_core::engine`] handle; events come back through a bridge
 //!   subscription and are the *only* source of playback UI state — see
 //!   `player.rs` for the honesty rule. The persistent bottom bar and the
@@ -55,7 +54,7 @@ use crate::motion::{Control, Ink, Keyed, Tween};
 use crate::mpris::Mpris;
 use crate::place::Place;
 use crate::playback::{Playback, PlayerEvent};
-use crate::player::{Availability, PlayerState};
+use crate::player::PlayerState;
 use crate::scan::ScanUpdate;
 use crate::{
     art, config, font, keys, menu, motion, mpris, player, queue_edit, scan, shelf, theme, views, vm,
@@ -408,6 +407,10 @@ pub(crate) enum Message {
     /// destination never closes itself ([`crate::place::Place::go`]) — and
     /// <kbd>Esc</kbd> is the way out.
     ShowNowPlaying,
+    /// Open or close the bottom-right application status and event history.
+    ToggleStatus,
+    /// Dismiss the application status layer without changing any place.
+    CloseStatus,
     /// Pressing the current-song block in the bottom bar: open its source and,
     /// for a saved playlist, bring the sounding entry into view.
     OpenPlayingSource,
@@ -838,6 +841,8 @@ pub(crate) enum Message {
     CaseDragged(Point),
     /// The pointer released the jewel case.
     CaseReleased,
+    /// Choose the visual subject above the current track identity.
+    VisualizationMode(crate::visualizer::Mode),
     /// The needle: the pointer went down on it, this far along the window.
     /// Nothing is requested and nothing moves yet — the gesture is a click
     /// until it travels [`player::DRAG_THRESHOLD_PX`].
@@ -1099,6 +1104,8 @@ struct App {
     /// assignment. The items are captured at open, so a press sends exactly
     /// what was offered on screen ([`crate::menu::Menu`]).
     menu: Option<menu::Menu>,
+    /// Whether the bottom-right application health/event card is visible.
+    status_open: bool,
     /// The playlist surfaces: the panel, the open page, and the shelf of
     /// files behind both ([`crate::playlists`], ADR-0024 §4–§6).
     ///
@@ -1135,6 +1142,8 @@ struct App {
     last_bar_press: Option<Instant>,
     /// The Now Playing jewel case's yaw, pitch and drag gesture.
     case_rotation: crate::jewel_case::Rotation,
+    /// Which truthful Now Playing visual is in the record's subject slot.
+    visualization_mode: crate::visualizer::Mode,
     /// The engine connection (or its documented absence) — spawned once at
     /// app start, before the first screen.
     playback: Playback,
@@ -1511,6 +1520,9 @@ impl App {
             .as_ref()
             .map_or(shelf::Density::Balanced, |config| config.density);
         let lane_open = stored.as_ref().is_none_or(|config| config.sidebar_open);
+        let saved_place = stored
+            .as_ref()
+            .map_or_else(Place::default, |config| config.last_place);
         // **The shuffle property, restored.** A standing decision
         // (`config::Config::shuffle`), seeded rather than assumed for
         // `seed_volume`'s reason: the control must be lit on the first frame,
@@ -1587,12 +1599,14 @@ impl App {
             drag: None,
             queue_undo: crate::undo::History::new(),
             menu: None,
+            status_open: false,
             playlists: crate::playlists::Playlists::start(),
             window: WINDOW,
             window_maximized: false,
             window_focused: true,
             last_bar_press: None,
             case_rotation: crate::jewel_case::Rotation::new(Instant::now()),
+            visualization_mode: crate::visualizer::Mode::JewelCase,
             playback,
             player,
             mpris,
@@ -1623,6 +1637,7 @@ impl App {
         if let Screen::Shelf(state) = &app.screen {
             app.playlists.refresh(Some(&state.library));
         }
+        app.restore_place(saved_place);
         // **And the lists that were played in an earlier session** — the half
         // of the owner's defect that could not be fixed until the ledger
         // remembered which list a run came from. After the refresh, because it
@@ -1659,6 +1674,7 @@ impl App {
             self.last_interaction = now;
         }
         let task = self.route(message);
+        self.sync_visualization_tap();
         self.sync_lists_with_the_library();
         self.sync_snapshot();
         // **The lane, re-merged when — and only when — one of its two halves
@@ -1771,6 +1787,23 @@ impl App {
             Message::OpenArtist(id) => self.go(|place| place.artist(id)),
             Message::ShowNowPlaying => {
                 self.go(|place| place.go(crate::lane::Destination::NowPlaying))
+            }
+            Message::ToggleStatus => {
+                if self.status_open
+                    && let Screen::Shelf(state) = &mut self.screen
+                {
+                    state.health.acknowledge();
+                }
+                self.status_open = !self.status_open;
+                self.menu = None;
+                Task::none()
+            }
+            Message::CloseStatus => {
+                if let Screen::Shelf(state) = &mut self.screen {
+                    state.health.acknowledge();
+                }
+                self.status_open = false;
+                Task::none()
             }
             Message::OpenPlayingSource => self.open_playing_source(),
             Message::ShowQueue => self.go(|_| Place::Queue),
@@ -2277,23 +2310,52 @@ impl App {
                 }
             }
             Message::CaseTick(now) => {
-                if self.window_focused && self.place == Place::NowPlaying {
+                if self.window_focused
+                    && self.place == Place::NowPlaying
+                    && self.visualization_mode == crate::visualizer::Mode::JewelCase
+                {
                     self.case_rotation.tick(now);
                 }
             }
-            Message::CasePressed(at) if self.place == Place::NowPlaying => {
+            Message::CasePressed(at)
+                if self.place == Place::NowPlaying
+                    && self.visualization_mode == crate::visualizer::Mode::JewelCase =>
+            {
                 self.case_rotation.press(at);
             }
-            Message::CaseDragged(at) if self.place == Place::NowPlaying => {
+            Message::CaseDragged(at)
+                if self.place == Place::NowPlaying
+                    && self.visualization_mode == crate::visualizer::Mode::JewelCase =>
+            {
                 self.case_rotation.drag(at);
             }
-            Message::CaseReleased if self.place == Place::NowPlaying => {
+            Message::CaseReleased
+                if self.place == Place::NowPlaying
+                    && self.visualization_mode == crate::visualizer::Mode::JewelCase =>
+            {
                 self.case_rotation.release();
             }
-            Message::CasePressed(_) | Message::CaseDragged(_) | Message::CaseReleased => {}
+            Message::VisualizationMode(mode) if self.place == Place::NowPlaying => {
+                self.visualization_mode = mode;
+                self.case_rotation.release();
+            }
+            Message::CasePressed(_)
+            | Message::CaseDragged(_)
+            | Message::CaseReleased
+            | Message::VisualizationMode(_) => {}
             _ => return None,
         }
         Some(Task::none())
+    }
+
+    /// Pay the sample-copy cost only while an audio visualization is visible.
+    fn sync_visualization_tap(&self) {
+        self.playback.set_visualization_enabled(
+            self.window_focused
+                && self.place == Place::NowPlaying
+                && self.player.now_playing().is_some()
+                && self.visualization_mode.needs_audio(),
+        );
     }
 
     /// Log startup-to-interactive, once, on the first frame the window
@@ -3140,7 +3202,40 @@ impl App {
     /// is one exit path and it cannot drift.
     fn leave_for_good(&mut self) -> Task<Message> {
         self.remember_the_run(self.player.elapsed_ms());
+        // Setup and Blocked are launch conditions rather than places. Keep the
+        // last usable preference when the library did not open, instead of
+        // replacing it with the latent `Library` value behind either screen.
+        if matches!(self.screen, Screen::Shelf(_)) {
+            let place = self.place;
+            persist(|config| config.last_place = place);
+        }
         iced::exit()
+    }
+
+    /// Restore the last screen once both the library and saved playlists can
+    /// validate any subject it names.
+    ///
+    /// A vanished album or artist returns to the collection. A vanished
+    /// playlist returns to the playlists root, which is the nearest surviving
+    /// place and makes the disappearance understandable rather than looking
+    /// like arbitrary navigation.
+    fn restore_place(&mut self, saved: Place) {
+        let Screen::Shelf(state) = &self.screen else {
+            return;
+        };
+        self.place = match saved {
+            Place::Album(id) if state.album(id).is_some() => saved,
+            Place::Artist(id) if views::artist::label(state, id).is_some() => saved,
+            Place::Playlist(id) => {
+                if self.playlists.open_page(id, &state.library) {
+                    saved
+                } else {
+                    Place::Playlists
+                }
+            }
+            Place::Album(_) | Place::Artist(_) => Place::Library,
+            place => place,
+        };
     }
 
     /// **`Resume`**: the run put back on where the band said it was — and the
@@ -3639,6 +3734,7 @@ impl App {
             // the same rule discards it — a keyboard door mid-hold must not
             // leave a ghost over a place with no rows to land on.
             self.menu = None;
+            self.status_open = false;
             self.drag = None;
             // **And the hovered tile, for the same reason.** `TileLeft` is
             // published by a `mouse_area` the pointer actually leaves, so
@@ -3688,6 +3784,7 @@ impl App {
         // The place changes, so an open menu and any drag go with it
         // (`go`'s rule).
         self.menu = None;
+        self.status_open = false;
         self.drag = None;
         let from = self.place;
         self.place = self.place.album(id);
@@ -3704,6 +3801,7 @@ impl App {
         // The place changes, so an open menu and any drag go with it
         // (`go`'s rule).
         self.menu = None;
+        self.status_open = false;
         self.drag = None;
         let from = self.place;
         // `back()` can reach `Now playing` from a record's page opened out of
@@ -3778,6 +3876,13 @@ impl App {
         // floats over the panel itself — so it peels before everything, one
         // layer per press (doc 09 §5.2).
         if self.menu.take().is_some() {
+            return Task::none();
+        }
+        if self.status_open {
+            self.status_open = false;
+            if let Screen::Shelf(state) = &mut self.screen {
+                state.health.acknowledge();
+            }
             return Task::none();
         }
         // The playlist panel floats *over* every place it exists in, so its
@@ -3874,6 +3979,13 @@ impl App {
                     }
                     Event::TrackFailed { path, reason } => {
                         println!("[playback] track skipped: {} ({reason})", path.display());
+                        if let Screen::Shelf(state) = &mut self.screen {
+                            state.health.record(
+                                crate::health::Level::Warning,
+                                "Track could not be played",
+                                format!("{}\n{reason}", path.display()),
+                            );
+                        }
                     }
                     Event::QueueEnded => {
                         println!("[playback] queue ended");
@@ -4792,6 +4904,21 @@ impl App {
         ))
     }
 
+    fn health_summary(&self) -> crate::health::Summary {
+        match &self.screen {
+            Screen::Shelf(state) => crate::health::Summary::resolve(
+                state.scanning,
+                state.unavailable.len(),
+                state.files_skipped,
+                state.problem.is_some(),
+                state.health.attention(),
+            ),
+            Screen::Setup(_) | Screen::Blocked(_) => {
+                crate::health::Summary::resolve(false, 0, 0, false, None)
+            }
+        }
+    }
+
     /// The whole window: the current place, and the persistent bottom bar
     /// under it. Composition only — every surface is drawn by
     /// [`crate::views`].
@@ -4922,14 +5049,21 @@ impl App {
                 state.grid(),
                 collecting,
             ),
-            (Screen::Shelf(state), Place::NowPlaying) => views::now_playing::view(
-                state,
-                &self.player,
-                self.body_width(),
-                self.body_height(),
-                self.now_playing_source(),
-                self.case_rotation,
-            ),
+            (Screen::Shelf(state), Place::NowPlaying) => {
+                let audio = self.playback.visualization();
+                views::now_playing::view(
+                    state,
+                    &self.player,
+                    self.body_width(),
+                    self.body_height(),
+                    self.now_playing_source(),
+                    views::now_playing::Visual {
+                        rotation: self.case_rotation,
+                        mode: self.visualization_mode,
+                        audio: &audio,
+                    },
+                )
+            }
             (Screen::Shelf(state), Place::Settings) => {
                 // Built here rather than inside the view: the folders come from
                 // the shell's own list and their contents from the index, and a
@@ -5037,10 +5171,16 @@ impl App {
             // amendment §2). No marks — **absent, not disabled**.
             _ => None,
         };
+        let visualization = matches!(
+            (&self.screen, self.place),
+            (Screen::Shelf(_), Place::NowPlaying)
+        )
+        .then_some(self.visualization_mode);
         let screen: Element<'_, Message> = column![
             views::app_bar::view(
                 self.window.width,
                 hangs_works,
+                visualization,
                 self.window_maximized,
                 owns_chrome(),
                 ink,
@@ -5048,23 +5188,32 @@ impl App {
             screen
         ]
         .into();
-        // The persistent bottom bar lives under every place — unless this build
-        // has no audio output at all, in which case playback UI is hidden
-        // entirely.
-        let whole: Element<'_, Message> = if *self.player.availability() == Availability::NotBuilt {
-            screen
+        // The GUI is always an audio build, so the persistent bottom bar lives
+        // under every place. A missing device is represented in the bar rather
+        // than by changing the application's composition.
+        let whole: Element<'_, Message> = column![
+            screen,
+            views::bottom_bar::view(
+                &self.player,
+                ink,
+                self.bar_cover(),
+                self.now_playing_source()
+                    .map(|_| Message::OpenPlayingSource),
+                self.health_summary(),
+            ),
+        ]
+        .into();
+        let whole: Element<'_, Message> = if self.status_open {
+            match &self.screen {
+                Screen::Shelf(state) => iced::widget::stack![
+                    whole,
+                    views::status::layer(&state.health, self.health_summary(), self.window),
+                ]
+                .into(),
+                Screen::Setup(_) | Screen::Blocked(_) => whole,
+            }
         } else {
-            column![
-                screen,
-                views::bottom_bar::view(
-                    &self.player,
-                    ink,
-                    self.bar_cover(),
-                    self.now_playing_source()
-                        .map(|_| Message::OpenPlayingSource),
-                ),
-            ]
-            .into()
+            whole
         };
         // **The context menu** (doc 09 §5.2), floated at the pointer by the
         // same ADR-0016 mechanics as the panel — but stacked over the *whole
@@ -5133,9 +5282,6 @@ impl App {
     /// route in and out of it — but since ADR-0040 it wears the **app bar**,
     /// like every other place, and that does come off the top.
     fn body_height(&self) -> f32 {
-        if *self.player.availability() == Availability::NotBuilt {
-            return (self.window.height - theme::APP_BAR_H).max(0.0);
-        }
         (self.window.height - theme::APP_BAR_H - theme::BAR_CONTENT_H - 1.0).max(0.0)
     }
 
@@ -5228,9 +5374,9 @@ impl App {
         if self.moving() {
             subs.push(iced::time::every(motion::TICK).map(|_| Message::MotionTick(Instant::now())));
         }
-        // The jewel case is the one intentionally continuous motion in Baz.
-        // It exists only while its surface is foregrounded and has a record
-        // to draw; every other place and every background window has no timer.
+        // The Now Playing subject is the one intentionally continuous visual
+        // in Baz: either the turning case or a delivered-audio reading. It
+        // exists only while foregrounded and holding a record.
         if self.window_focused
             && self.place == Place::NowPlaying
             && self.player.now_playing().is_some()
@@ -5599,6 +5745,8 @@ pub(crate) struct Shelf {
     /// start of each pass, so it always describes the latest attempt rather
     /// than accumulating every share that was ever offline.
     unavailable: HashSet<PathBuf>,
+    /// Bounded session history shown by the bottom-right status control.
+    pub(crate) health: crate::health::Log,
     /// The periodic-refresh clock (ADR-0022 §3).
     refresh: scan::Refresh,
     /// What has been typed into the Settings place's add-a-folder field.
@@ -5810,6 +5958,7 @@ impl Shelf {
             scan_rx: Some(scan_rx),
             roots,
             unavailable: HashSet::new(),
+            health: crate::health::Log::default(),
             refresh: scan::Refresh::new(scan::REFRESH_INTERVAL, Instant::now()),
             folder_input: String::new(),
             folder_error: None,
@@ -5836,6 +5985,11 @@ impl Shelf {
             lane_stamp: 0,
             collection: vm::Collection::default(),
         };
+        shelf.health.record(
+            crate::health::Level::Working,
+            "Library scan started",
+            format!("Checking {} configured folders", shelf.roots.len()),
+        );
         // `rebuild_shelves` folds the ledger onto the records it has just
         // built (ADR-0030 §4): once, here, and never again from the file.
         shelf.rebuild_shelves();
@@ -6835,6 +6989,13 @@ impl Shelf {
     /// it again in ten seconds.
     fn start_scan(&mut self, mode: scan::ScanMode) {
         self.unavailable.clear();
+        if self
+            .problem
+            .as_deref()
+            .is_some_and(|problem| problem.contains("not reachable"))
+        {
+            self.problem = None;
+        }
         self.files_skipped = 0;
         self.refresh.restarted(Instant::now());
         if self.roots.is_empty() {
@@ -6842,6 +7003,11 @@ impl Shelf {
             self.scanning = false;
             return;
         }
+        self.health.record(
+            crate::health::Level::Working,
+            "Library scan started",
+            format!("Checking {} configured folders", self.roots.len()),
+        );
         self.scan_rx = Some(scan::spawn(
             self.roots.clone(),
             self.library.known_files(),
@@ -6901,11 +7067,7 @@ impl Shelf {
                     unchanged,
                     failed,
                 }) => {
-                    println!(
-                        "[scan] {}: {added} added, {updated} updated, {unchanged} unchanged, \
-                         {failed} skipped",
-                        root.display()
-                    );
+                    record_root_scan(&mut self.health, &root, [added, updated, unchanged, failed]);
                     scanned.push((root, at_ns));
                 }
                 Ok(ScanUpdate::RootUnavailable { root, reason }) => missing.push((root, reason)),
@@ -6930,17 +7092,37 @@ impl Shelf {
                          {removed} removed, {failed} files skipped, \
                          {unavailable} folders unavailable, {secs:.1} s ({rate:.0} tracks/s)"
                     );
+                    self.health.record(
+                        if failed > 0 || unavailable > 0 {
+                            crate::health::Level::Warning
+                        } else {
+                            crate::health::Level::Ready
+                        },
+                        "Library scan complete",
+                        format!(
+                            "{added} added · {updated} updated · {removed} removed · \
+                             {failed} files skipped · {unavailable} folders unavailable"
+                        ),
+                    );
                     finished = true;
                     break;
                 }
                 Ok(ScanUpdate::Error(error)) => {
                     println!("[scan] failed to start: {error}");
                     self.problem = Some(format!("scan failed: {error}"));
+                    self.health
+                        .record(crate::health::Level::Error, "Library scan failed", error);
                     finished = true;
                     break;
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
+                    self.health.record(
+                        crate::health::Level::Error,
+                        "Library scan stopped",
+                        "The scan worker disconnected before reporting completion",
+                    );
+                    self.problem = Some("scan stopped unexpectedly".to_owned());
                     finished = true;
                     break;
                 }
@@ -6979,6 +7161,14 @@ impl Shelf {
         let absent = missing.len();
         for (root, reason) in missing {
             println!("[scan] {} is unavailable: {reason}", root.display());
+            self.health.record(
+                crate::health::Level::Warning,
+                "Folder unavailable",
+                format!(
+                    "{}\n{reason}\nThe existing library entries were kept.",
+                    root.display()
+                ),
+            );
             self.unavailable.insert(root);
         }
         if absent == 1 {
@@ -6994,6 +7184,11 @@ impl Shelf {
                     "[index] could not record the scan of {}: {error}",
                     root.display()
                 );
+                self.health.record(
+                    crate::health::Level::Error,
+                    "Could not record scan time",
+                    format!("{}\n{error}", root.display()),
+                );
             }
         }
 
@@ -7003,6 +7198,11 @@ impl Shelf {
                 if let Err(error) = self.library.add_tracks_under(Some(&root), tracks) {
                     println!("[index] write failed: {error}");
                     self.problem = Some(format!("library write failed: {error}"));
+                    self.health.record(
+                        crate::health::Level::Error,
+                        "Library write failed",
+                        error.to_string(),
+                    );
                 }
             }
             if !vanished.is_empty() {
@@ -7011,6 +7211,11 @@ impl Shelf {
                     Err(error) => {
                         println!("[index] removal failed: {error}");
                         self.problem = Some(format!("library removal failed: {error}"));
+                        self.health.record(
+                            crate::health::Level::Error,
+                            "Library removal failed",
+                            error.to_string(),
+                        );
                     }
                 }
             }
@@ -7343,6 +7548,26 @@ impl Shelf {
     pub(crate) fn album(&self, id: u64) -> Option<&vm::AlbumVm> {
         self.albums.iter().find(|album| album.id == id)
     }
+}
+
+fn record_root_scan(health: &mut crate::health::Log, root: &std::path::Path, counts: [usize; 4]) {
+    let [added, updated, unchanged, failed] = counts;
+    println!(
+        "[scan] {}: {added} added, {updated} updated, {unchanged} unchanged, {failed} skipped",
+        root.display()
+    );
+    health.record(
+        if failed > 0 {
+            crate::health::Level::Warning
+        } else {
+            crate::health::Level::Ready
+        },
+        "Folder scanned",
+        format!(
+            "{}\n{added} added · {updated} updated · {unchanged} unchanged · {failed} skipped",
+            root.display()
+        ),
+    );
 }
 
 /// One tick's worth of scan updates, taken off the channel and not yet applied
@@ -7803,6 +8028,7 @@ fn expand_tilde(input: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::player::Availability;
 
     #[test]
     fn visible_art_replaces_stale_work() {

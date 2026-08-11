@@ -1,19 +1,12 @@
 //! Engine lifecycle for the GUI: spawn at app start, bridge events into
 //! iced, send commands.
 //!
-//! Both feature configurations expose the same [`Playback`] API so `app.rs`
-//! carries no `cfg` at all:
-//!
-//! - **With `device-output`** (the passthrough feature on this crate):
-//!   [`Playback::start`] spawns the device engine once at app start. Open
-//!   failure (headless machine, no output device) is *not* fatal — the shelf
-//!   works and the state machine is seeded
-//!   [`Availability::NoDevice`](crate::player::Availability::NoDevice),
-//!   which the bottom bar shows plainly.
-//! - **Without it** (the default host build): no engine, no cpal, no ALSA
-//!   headers needed. [`Playback::start`] prints a one-line stdout note and
-//!   seeds [`Availability::NotBuilt`](crate::player::Availability::NotBuilt),
-//!   which hides all playback UI.
+//! [`Playback::start`] spawns the device engine once at app start. Device
+//! output is an unconditional property of the GUI binary: there is no silent
+//! GUI build. Open failure (headless machine, no output device) is *not*
+//! fatal — the shelf works and the state machine is seeded
+//! [`Availability::NoDevice`](crate::player::Availability::NoDevice), which
+//! the bottom bar shows plainly.
 //!
 //! # Spawn defaults
 //!
@@ -76,14 +69,6 @@ use baz_core::protocol::Event;
 
 /// What the event bridge delivers to the UI.
 #[derive(Debug, Clone)]
-#[cfg_attr(
-    not(feature = "device-output"),
-    expect(
-        dead_code,
-        reason = "only the device build's bridge constructs events; the no-audio \
-                  build still matches on them so app.rs stays cfg-free"
-    )
-)]
 pub enum PlayerEvent {
     /// An engine event, verbatim.
     Engine(Event),
@@ -91,12 +76,12 @@ pub enum PlayerEvent {
     Closed,
 }
 
-#[cfg(feature = "device-output")]
 mod imp {
     use std::sync::{Arc, Mutex};
     use std::thread;
 
     use baz_core::engine::EngineHandle;
+    use baz_core::engine::VisualizationFrame;
     use baz_core::playback::EngineConfig;
     use baz_core::protocol::Command;
     use baz_core::replaygain::ReplayGainState;
@@ -114,7 +99,7 @@ mod imp {
     /// Device ring capacity in frames (~0.19 s at 44.1 kHz; module docs).
     const DEVICE_RING_FRAMES: usize = 8192;
 
-    /// The GUI's connection to the playback engine (`device-output` build).
+    /// The GUI's connection to the playback engine.
     pub struct Playback {
         handle: Option<EngineHandle>,
         /// Take-once slot the subscription stream drains (module docs).
@@ -203,6 +188,21 @@ mod imp {
             self.handle.as_ref().map(EngineHandle::replay_gain)
         }
 
+        /// Turn the engine's lock-free visualization sample tap on or off.
+        pub fn set_visualization_enabled(&self, enabled: bool) {
+            if let Some(handle) = &self.handle {
+                handle.set_visualization_enabled(enabled);
+            }
+        }
+
+        /// The most recent delivered-audio snapshot, or silence without an
+        /// engine. Reading it never locks the playback thread.
+        pub fn visualization(&self) -> VisualizationFrame {
+            self.handle
+                .as_ref()
+                .map_or_else(VisualizationFrame::default, EngineHandle::visualization)
+        }
+
         /// Send a command; `false` means the engine is gone (the caller
         /// should downgrade the state machine, never assume success).
         pub fn send(&self, command: Command) -> bool {
@@ -246,68 +246,6 @@ mod imp {
             })
             .flatten();
             Subscription::run_with_id("baz-playback-events", events)
-        }
-    }
-}
-
-#[cfg(not(feature = "device-output"))]
-mod imp {
-    use baz_core::protocol::Command;
-    use baz_core::replaygain::ReplayGainState;
-    use baz_core::volume::VolumeState;
-    use iced::Subscription;
-
-    use super::PlayerEvent;
-    use crate::player::Availability;
-
-    /// The no-audio stand-in (default host build): same API, no engine.
-    pub struct Playback;
-
-    #[expect(
-        clippy::unused_self,
-        reason = "method-for-method API parity with the device-output Playback"
-    )]
-    impl Playback {
-        /// Print the one-line build note; there is nothing to spawn.
-        pub fn start() -> Self {
-            println!("built without audio output — see docs/DEVELOPMENT.md");
-            Self
-        }
-
-        /// Always [`Availability::NotBuilt`] — playback UI stays hidden.
-        pub fn availability(&self) -> Availability {
-            Availability::NotBuilt
-        }
-
-        /// No engine, no volume to read.
-        pub fn volume(&self) -> Option<VolumeState> {
-            None
-        }
-
-        /// No engine, no ReplayGain to read.
-        pub fn replay_gain(&self) -> Option<ReplayGainState> {
-            None
-        }
-
-        /// No engine: every send is refused. (Unreachable in practice —
-        /// the UI that would send is hidden.)
-        pub fn send(&self, _command: Command) -> bool {
-            false
-        }
-
-        /// No engine, so nothing can produce a play to record. The ledger is
-        /// still opened by the shell (and still read, for the PLAYED key) —
-        /// this build simply has nothing to append to it.
-        pub fn set_history(
-            &self,
-            _ledger: Option<std::sync::Arc<baz_core::history::HistoryLedger>>,
-        ) -> bool {
-            false
-        }
-
-        /// No engine, no events.
-        pub fn subscription(&self) -> Subscription<PlayerEvent> {
-            Subscription::none()
         }
     }
 }

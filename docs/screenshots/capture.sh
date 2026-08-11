@@ -16,7 +16,7 @@
 # than from arithmetic, which is the only way this file has ever been correct.
 #
 #   toolbox run -c baz-dev env CARGO_TARGET_DIR=target/tb \
-#     cargo build --release -p baz --features device-output
+#     cargo build --release -p baz
 #   toolbox run -c baz-dev docs/screenshots/capture.sh
 #
 # # Headless, and isolated six ways
@@ -28,9 +28,8 @@
 # the scratch `HOME` routes ALSA's default PCM to `null`, and every sample in
 # the fixture is a zero. `BAZ_DEVICE_TESTS` stays unset.
 #
-# The binary is built with `device-output` because that is what ships, and
-# because the transport at the bottom of the window only exists in that build
-# — a screenshot without it would be a screenshot of a player that cannot play.
+# Every GUI binary includes device output and the transport at the bottom of
+# the window. There is no silent screenshot-only build.
 #
 # # Why the fixture, and what is done to it
 #

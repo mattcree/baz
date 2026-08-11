@@ -26,12 +26,13 @@
 //! surface that was being built anyway, and it costs the strip nothing; it
 //! costs the head its own second subject, which is the concession, recorded.
 //!
-//! **[`Place::Library`] is still the launch frame and still what
-//! [`Place::back`] returns to.** The collection is what baz opens onto
-//! (`VISION.md`'s first pillar) and <kbd>Esc</kbd> means *put this down*, not
-//! *go to the home page*; nothing the owner decided touches either, so neither
-//! moved. [`Place::is_library`] is the reading, renamed from `is_home` the
-//! moment a place was actually called Home.
+//! **[`Place::Library`] is still the fresh-install frame and still what
+//! [`Place::back`] returns to.** A returning listener is put back in the last
+//! valid place they closed; the collection is the safe answer when that place
+//! named a record, artist or playlist that no longer exists. <kbd>Esc</kbd>
+//! still means *put this down*, not *go to the home page*.
+//! [`Place::is_library`] is the reading, renamed from `is_home` the moment a
+//! place was actually called Home.
 //!
 //! # What this replaces
 //!
@@ -150,6 +151,51 @@ pub enum Place {
 }
 
 impl Place {
+    /// Stable, human-readable spelling used by `config.toml`.
+    ///
+    /// Subject places carry their existing stable id after a colon. This is
+    /// deliberately not an enum ordinal or `Debug` output: adding or moving a
+    /// variant must not silently turn somebody's saved destination into a
+    /// different screen.
+    #[must_use]
+    pub(crate) fn code(self) -> String {
+        match self {
+            Self::Library => "library".to_owned(),
+            Self::Playlists => "playlists".to_owned(),
+            Self::Home => "home".to_owned(),
+            Self::NowPlaying => "now-playing".to_owned(),
+            Self::Queue => "queue".to_owned(),
+            Self::Artist(id) => format!("artist:{id}"),
+            Self::Album(id) => format!("album:{id}"),
+            Self::Playlist(id) => format!("playlist:{id}"),
+            Self::Settings => "settings".to_owned(),
+        }
+    }
+
+    /// Read [`Self::code`]'s spelling. Unknown and malformed values are
+    /// absent, allowing configuration to degrade this key alone to Library.
+    #[must_use]
+    pub(crate) fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "library" => Some(Self::Library),
+            "playlists" => Some(Self::Playlists),
+            "home" => Some(Self::Home),
+            "now-playing" => Some(Self::NowPlaying),
+            "queue" => Some(Self::Queue),
+            "settings" => Some(Self::Settings),
+            _ => {
+                let (kind, id) = code.split_once(':')?;
+                let id = id.parse::<u64>().ok()?;
+                match kind {
+                    "artist" => Some(Self::Artist(id)),
+                    "album" => Some(Self::Album(id)),
+                    "playlist" => Some(Self::Playlist(id)),
+                    _ => None,
+                }
+            }
+        }
+    }
+
     /// <kbd>Ctrl</kbd>+<kbd>,</kbd>, and the top bar's `Settings` control: go
     /// to the settings, or come back from them.
     ///
@@ -325,11 +371,45 @@ mod tests {
         assert_eq!(Place::default(), Place::Library);
         assert!(Place::default().is_library());
         assert_eq!(Place::default().showing_album(), None);
-        // **The launch frame is still the collection**, with a place now
-        // literally called Home beside it. `VISION.md`'s first pillar is the
-        // reason and the owner did not touch it; a fresh baz opens onto the
-        // records it holds.
+        // **A fresh install still starts at the collection**, with a place now
+        // literally called Home beside it. Returning installs may restore a
+        // different saved place before their first frame.
         assert_ne!(Place::default(), Place::Home);
+    }
+
+    #[test]
+    fn every_place_round_trips_through_its_preference_code() {
+        for place in [
+            Place::Library,
+            Place::Playlists,
+            Place::Home,
+            Place::NowPlaying,
+            Place::Queue,
+            Place::Artist(0),
+            Place::Artist(u64::MAX),
+            Place::Album(42),
+            Place::Playlist(987_654_321),
+            Place::Settings,
+        ] {
+            assert_eq!(Place::from_code(&place.code()), Some(place), "{place:?}");
+        }
+    }
+
+    #[test]
+    fn malformed_preference_codes_are_not_guessed() {
+        for code in [
+            "",
+            "Library",
+            "now_playing",
+            "album",
+            "album:",
+            "album:-1",
+            "album:7:8",
+            "record:7",
+            "playlist:three",
+        ] {
+            assert_eq!(Place::from_code(code), None, "{code:?}");
+        }
     }
 
     /// **The head's three are destinations, not doors**: pressing the one you

@@ -67,7 +67,7 @@ use iced::widget::{
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
-use crate::player::{Availability, PlayerState};
+use crate::player::PlayerState;
 use crate::playlists::{Collecting, OpenPlaylist, PageRow};
 use crate::views::page::{self, Identity, NameEdit, Page};
 use crate::views::{place_name, playlist_sleeve};
@@ -129,11 +129,11 @@ pub(crate) fn view<'a>(
             // The collage of quotations (§A1), at the record page's own sleeve
             // edge.
             sleeve: playlist_sleeve(shelf, &open.art, open.name(), theme::ALBUM_SLEEVE),
-            // Drawn only where there is an engine in the build to send it to —
-            // the record page's rule, which this page did not have: a `Play`
-            // that could never act in any state of any run is not a control.
-            commitment: (*player.availability() != Availability::NotBuilt)
-                .then(|| page::commitment("Play", live && playable, Message::PlaylistPlay)),
+            commitment: Some(page::commitment(
+                "Play",
+                live && playable,
+                Message::PlaylistPlay,
+            )),
             acts,
             aside_tail: Vec::new(),
             identity: identity(open, can_undo),

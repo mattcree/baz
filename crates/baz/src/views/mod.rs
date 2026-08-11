@@ -94,6 +94,7 @@ pub(crate) mod queue;
 pub(crate) mod settings;
 pub(crate) mod setup;
 pub(crate) mod shelf;
+pub(crate) mod status;
 pub(crate) mod top_bar;
 
 use iced::widget::{

@@ -4155,6 +4155,19 @@ pub fn menu(p: &Palette) -> container::Style {
     }
 }
 
+/// A health/event severity dot. Its hue is supplied by the status vocabulary.
+#[must_use]
+pub fn status_dot(tone: Color) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(tone)),
+        border: Border {
+            radius: 999.0.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// The bar's drawn height including its hairline — **57**. Stated here
@@ -6609,7 +6622,12 @@ mod tests {
         /// says the lamp means — drawn at the sleeve's measure on the
         /// placard rather than on the artwork. It is one line, on one band,
         /// about one run, and there is at most one interrupted run.
-        const PERMITTED: [&str; 3] = ["views/bottom_bar.rs", "icon.rs", "views/home.rs"];
+        const PERMITTED: [&str; 4] = [
+            "views/bottom_bar.rs",
+            "icon.rs",
+            "views/home.rs",
+            "visualizer.rs",
+        ];
 
         // Spelled in halves so this test's own source does not match it.
         let needle = concat!(".", "lamp");

@@ -278,13 +278,20 @@ fn art_edge_with_below(width: f32, height: f32, run_w: f32, source: f32, below: 
 }
 
 /// Draw the current song at the size the viewport and its source permit.
+#[derive(Clone, Copy)]
+pub(crate) struct Visual<'a> {
+    pub(crate) rotation: crate::jewel_case::Rotation,
+    pub(crate) mode: crate::visualizer::Mode,
+    pub(crate) audio: &'a baz_core::engine::VisualizationFrame,
+}
+
 pub(crate) fn view<'a>(
     shelf: &'a Shelf,
     player: &'a PlayerState,
     width: f32,
     height: f32,
     source: Option<Source>,
-    rotation: crate::jewel_case::Rotation,
+    visual: Visual<'_>,
 ) -> Element<'a, Message> {
     let Some(now) = player.now_playing() else {
         // **A start in flight is not silence.** `Resume` on the Home place
@@ -342,7 +349,7 @@ pub(crate) fn view<'a>(
     );
     let insert = rear_insert(shelf, now);
     let song = container(record_column(
-        &work, t, now, edge, show_album, rotation, insert,
+        &work, t, now, edge, show_album, &insert, visual,
     ))
     .center(Length::Fill);
     let body: Element<'a, Message> = match source {
@@ -532,7 +539,7 @@ fn sleeve(
     t: f32,
     edge: f32,
     rotation: crate::jewel_case::Rotation,
-    insert: crate::jewel_case::Insert,
+    insert: &crate::jewel_case::Insert,
 ) -> Element<'static, Message> {
     crate::jewel_case::view(
         edge,
@@ -542,10 +549,25 @@ fn sleeve(
             from: work.from.as_ref().map(|(handle, _, _)| handle.clone()),
             front_opacity: t,
             back: work.back.clone(),
-            field: work.field,
         },
         insert,
     )
+}
+
+/// The same work without physical packaging, for the plain-cover visual mode.
+fn plain_cover(work: &Work, t: f32, edge: f32, album_id: u64) -> Element<'static, Message> {
+    let image = |handle: iced_image::Handle| {
+        iced_image(handle)
+            .width(Length::Fixed(edge))
+            .height(Length::Fixed(edge))
+    };
+    match (&work.handle, &work.from) {
+        (Some(handle), Some((from, _, _))) if t < 1.0 => {
+            stack![image(from.clone()), image(handle.clone()).opacity(t)].into()
+        }
+        (Some(handle), _) => image(handle.clone()).into(),
+        (None, _) => crate::views::gradient_block(album_id, edge, 1.0),
+    }
 }
 
 /// **The field, laid under everything** — the place's z1, and the reason a
@@ -625,11 +647,13 @@ fn record_column<'a>(
     now: &'a crate::player::NowPlaying,
     edge: f32,
     show_album: bool,
-    rotation: crate::jewel_case::Rotation,
-    insert: crate::jewel_case::Insert,
+    insert: &crate::jewel_case::Insert,
+    visual: Visual<'_>,
 ) -> Element<'a, Message> {
     let room = theme::active();
-    let sleeve = sleeve(work, t, edge, rotation, insert);
+    let cover = plain_cover(work, t, edge, insert.album_id);
+    let jewel_case = sleeve(work, t, edge, visual.rotation, insert);
+    let sleeve = crate::visualizer::view(visual.mode, edge, visual.audio, cover, jewel_case);
 
     let mut placard = column![
         // The artist in letterspaced caps, over the work's title — the wall

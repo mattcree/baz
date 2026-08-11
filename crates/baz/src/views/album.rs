@@ -73,7 +73,7 @@ use iced::widget::{button, column, container, image as iced_image, mouse_area, r
 use iced::{Element, Length, alignment};
 
 use crate::app::{Message, Shelf};
-use crate::player::{Availability, PlayerState};
+use crate::player::PlayerState;
 use crate::playlists::Collecting;
 use crate::views::page::{self, Identity, Page};
 use crate::views::{gradient_block, place_name, section_rule};
@@ -103,14 +103,11 @@ pub(crate) fn view<'a>(
         Page {
             lead: breadcrumb(album),
             sleeve: sleeve(shelf, album, player, lamp),
-            // Drawn only where there is an engine in the build to send it to.
-            commitment: (*player.availability() != Availability::NotBuilt).then(|| {
-                page::commitment(
-                    "Play album",
-                    player.engine_ready(),
-                    Message::PlayAlbum(album.id),
-                )
-            }),
+            commitment: Some(page::commitment(
+                "Play album",
+                player.engine_ready(),
+                Message::PlayAlbum(album.id),
+            )),
             // The transfer gesture (09 §8.1): the record, whole, toward a
             // destination of the user's choosing. It reads the selected album —
             // L8.1 puts it with the album — and stands under the page's one

@@ -33,19 +33,18 @@ Rust itself is **not** installed in the container — it comes from your rustup 
 - **Dev container**: `.devcontainer/` carries the same environment as a Containerfile for VS Code / Claude Code / cloud agents. Keep its package list in sync with `scripts/toolbox-setup.sh` (single source of truth: the script).
 - **Debian/Ubuntu contributors**: the equivalent of the build-critical one is `libasound2-dev` (what CI installs on its Ubuntu runners); add `libxkbcommon-x11-0 xvfb imagemagick` for the render harness.
 
-## Running baz with audio output
+## Running baz
 
-Device playback is behind the non-default `device-output` feature (building
-cpal needs `alsa-lib-devel`, which the toolbox provides):
+The GUI always includes device playback. Building cpal needs
+`alsa-lib-devel`, which the toolbox provides:
 
 ```sh
-toolbox run -c baz-dev cargo run --release -p baz --features device-output [-- MUSIC_DIR]
+toolbox run -c baz-dev cargo run --release -p baz [-- MUSIC_DIR]
 ```
 
-A plain host `cargo run -p baz` builds everywhere and runs the full shelf,
-but prints `built without audio output — see docs/DEVELOPMENT.md` and hides
-the playback UI. With the feature but no usable output device, the app still
-runs and the bottom bar reports "no audio device".
+On a host without the Linux audio development package, build and run through
+the toolbox as above. If the binary builds but no usable output device is
+available, the app still runs and the bottom bar reports "no audio device".
 
 ### Audible tests are opt-in: `BAZ_DEVICE_TESTS=1`
 
@@ -80,7 +79,7 @@ no system mixer between the decoder and the converter — build with the
 
 ```sh
 toolbox run -c baz-dev env BAZ_OUTPUT=exclusive BAZ_OUTPUT_DEVICE=hw:3,0 \
-  cargo run --release -p baz --features device-output,baz-core/exclusive-output
+  cargo run --release -p baz --features baz-core/exclusive-output
 ```
 
 `BAZ_OUTPUT` is `shared` (the default) or `exclusive`; anything else is an

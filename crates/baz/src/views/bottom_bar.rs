@@ -112,6 +112,7 @@ pub(crate) fn view(
     ink: Ink,
     cover: Option<Cover>,
     source: Option<Message>,
+    health: crate::health::Summary,
 ) -> Element<'_, Message> {
     let room = theme::active();
     let mut status = row![]
@@ -125,7 +126,10 @@ pub(crate) fn view(
                 .color(room.paper_faint),
         );
     }
-    status = status.push(signal_path(player)).push(volume(player, ink));
+    status = status
+        .push(signal_path(player))
+        .push(volume(player, ink))
+        .push(crate::views::status::indicator(health));
     let bar = row![
         container(now_playing_block(player, cover, source))
             .width(Length::Fill)

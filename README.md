@@ -112,15 +112,14 @@ system package:
 ```sh
 git clone https://github.com/mattcree/baz
 cd baz
-cargo build --release --locked -p baz --features device-output
+cargo build --release --locked -p baz
 ./target/release/baz [MUSIC_DIR]
 ```
 
-`device-output` is what makes sound come out. It is off by default because
-building it needs the platform's audio headers — `libasound2-dev` on
-Debian/Ubuntu, `alsa-lib-devel` on Fedora, `alsa-lib` on Arch; nothing at all
-on macOS or Windows. Without it baz builds and runs everywhere, shows your
-whole library, and hides the playback controls.
+Audio output is part of every baz GUI build. On Linux, building it needs the
+platform's audio headers — `libasound2-dev` on Debian/Ubuntu,
+`alsa-lib-devel` on Fedora, or `alsa-lib` on Arch; macOS and Windows need no
+extra package.
 
 baz keeps its index, its playlists and its play history under
 `~/.local/share/baz/` (and the platform equivalents), and its settings under

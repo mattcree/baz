@@ -561,6 +561,9 @@ const NO_RATE_CHANGE: usize = usize::MAX;
 /// pump runs ahead, never slower when it is starved) and keeps the check on
 /// the engine loop down to one integer comparison.
 const PROGRESS_HZ: u32 = 4;
+/// Number of recent mono sample points retained for an optional front-end
+/// visualization. Fixed so the pump-side tap is allocation-free.
+pub const VISUAL_SAMPLE_COUNT: usize = 256;
 
 /// How far into a track [`Command::Previous`] stops meaning "the track before
 /// this one" and starts meaning "this one again", in milliseconds.
@@ -608,6 +611,151 @@ pub struct EngineHandle {
     replay_gain: Arc<SharedReplayGain>,
     computed_gains: Arc<Mutex<Option<Arc<dyn ComputedGains>>>>,
     history: Arc<Mutex<Option<Arc<HistoryLedger>>>>,
+    visualization: Arc<VisualizationTap>,
+}
+
+/// A lock-free snapshot of the most recently delivered audio block.
+///
+/// The engine only updates it while a front end has explicitly enabled the
+/// visualization tap. Samples are mono folds of the delivered stereo stream;
+/// level figures retain the two channels independently.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VisualizationFrame {
+    /// Uniformly sampled points from the latest delivered block.
+    pub samples: [f32; VISUAL_SAMPLE_COUNT],
+    /// Output sample rate applying to [`Self::samples`].
+    pub sample_rate: u32,
+    /// Root-mean-square level of the left channel, in linear full scale.
+    pub left_rms: f32,
+    /// Root-mean-square level of the right channel, in linear full scale.
+    pub right_rms: f32,
+    /// Peak absolute level of the left channel, in linear full scale.
+    pub left_peak: f32,
+    /// Peak absolute level of the right channel, in linear full scale.
+    pub right_peak: f32,
+}
+
+impl Default for VisualizationFrame {
+    fn default() -> Self {
+        Self {
+            samples: [0.0; VISUAL_SAMPLE_COUNT],
+            sample_rate: 0,
+            left_rms: 0.0,
+            right_rms: 0.0,
+            left_peak: 0.0,
+            right_peak: 0.0,
+        }
+    }
+}
+
+/// Seqlock-style sample handoff: one engine writer, one or more readers, no
+/// lock or allocation on the pump path. Float values travel as their bits.
+#[derive(Debug)]
+struct VisualizationTap {
+    enabled: AtomicBool,
+    sequence: AtomicU64,
+    sample_rate: AtomicU32,
+    left_rms: AtomicU32,
+    right_rms: AtomicU32,
+    left_peak: AtomicU32,
+    right_peak: AtomicU32,
+    samples: [AtomicU32; VISUAL_SAMPLE_COUNT],
+}
+
+impl Default for VisualizationTap {
+    fn default() -> Self {
+        Self {
+            enabled: AtomicBool::new(false),
+            sequence: AtomicU64::new(0),
+            sample_rate: AtomicU32::new(0),
+            left_rms: AtomicU32::new(0),
+            right_rms: AtomicU32::new(0),
+            left_peak: AtomicU32::new(0),
+            right_peak: AtomicU32::new(0),
+            samples: std::array::from_fn(|_| AtomicU32::new(0)),
+        }
+    }
+}
+
+impl VisualizationTap {
+    fn enabled(&self) -> bool {
+        self.enabled.load(Ordering::Relaxed)
+    }
+
+    fn set_enabled(&self, enabled: bool) {
+        self.enabled.store(enabled, Ordering::Release);
+    }
+
+    fn capture(&self, interleaved: &[f32], sample_rate: u32) {
+        if !self.enabled() {
+            return;
+        }
+        let frames = interleaved.len() / CHANNELS;
+        if frames == 0 {
+            return;
+        }
+        let count = frames.min(VISUAL_SAMPLE_COUNT);
+        let step = (frames / count).max(1);
+        let start = frames.saturating_sub(count * step);
+        let mut left_square = 0.0_f32;
+        let mut right_square = 0.0_f32;
+        let mut left_peak = 0.0_f32;
+        let mut right_peak = 0.0_f32;
+
+        // Odd means a writer is active; the release of the following even
+        // value publishes every relaxed payload store as one snapshot.
+        self.sequence.fetch_add(1, Ordering::AcqRel);
+        for (index, slot) in self.samples.iter().enumerate() {
+            let mono = if index < count {
+                let frame = start + index * step;
+                let left = interleaved[frame * CHANNELS];
+                let right = interleaved[frame * CHANNELS + 1];
+                left_square += left * left;
+                right_square += right * right;
+                left_peak = left_peak.max(left.abs());
+                right_peak = right_peak.max(right.abs());
+                (left + right) * 0.5
+            } else {
+                0.0
+            };
+            slot.store(mono.to_bits(), Ordering::Relaxed);
+        }
+        let divisor = f32::from(u16::try_from(count).unwrap_or(1));
+        self.sample_rate.store(sample_rate, Ordering::Relaxed);
+        self.left_rms
+            .store((left_square / divisor).sqrt().to_bits(), Ordering::Relaxed);
+        self.right_rms
+            .store((right_square / divisor).sqrt().to_bits(), Ordering::Relaxed);
+        self.left_peak.store(left_peak.to_bits(), Ordering::Relaxed);
+        self.right_peak
+            .store(right_peak.to_bits(), Ordering::Relaxed);
+        self.sequence.fetch_add(1, Ordering::Release);
+    }
+
+    fn snapshot(&self) -> VisualizationFrame {
+        for _ in 0..3 {
+            let before = self.sequence.load(Ordering::Acquire);
+            if !before.is_multiple_of(2) {
+                std::hint::spin_loop();
+                continue;
+            }
+            let mut frame = VisualizationFrame {
+                sample_rate: self.sample_rate.load(Ordering::Relaxed),
+                left_rms: f32::from_bits(self.left_rms.load(Ordering::Relaxed)),
+                right_rms: f32::from_bits(self.right_rms.load(Ordering::Relaxed)),
+                left_peak: f32::from_bits(self.left_peak.load(Ordering::Relaxed)),
+                right_peak: f32::from_bits(self.right_peak.load(Ordering::Relaxed)),
+                ..VisualizationFrame::default()
+            };
+            for (sample, slot) in frame.samples.iter_mut().zip(&self.samples) {
+                *sample = f32::from_bits(slot.load(Ordering::Relaxed));
+            }
+            if self.sequence.load(Ordering::Acquire) == before {
+                return frame;
+            }
+        }
+        VisualizationFrame::default()
+    }
 }
 
 /// A running count of the conversions the engine has performed, readable from
@@ -721,6 +869,21 @@ impl EngineHandle {
     #[must_use]
     pub fn replay_gain(&self) -> ReplayGainState {
         self.replay_gain.snapshot()
+    }
+
+    /// Enable or disable the delivered-sample visualization tap.
+    ///
+    /// Disabled is the default and makes the pump perform no sample copy or
+    /// level arithmetic. A front end should enable it only while a live audio
+    /// visualization is actually visible.
+    pub fn set_visualization_enabled(&self, enabled: bool) {
+        self.visualization.set_enabled(enabled);
+    }
+
+    /// Read the latest visualization snapshot without locking the engine.
+    #[must_use]
+    pub fn visualization(&self) -> VisualizationFrame {
+        self.visualization.snapshot()
     }
 
     /// Tell the engine where to find the ReplayGain figures baz measured
@@ -874,6 +1037,8 @@ pub fn spawn_offline(
     let measured = Arc::clone(&computed_gains);
     let history: Arc<Mutex<Option<Arc<HistoryLedger>>>> = Arc::new(Mutex::new(None));
     let ledger = Arc::clone(&history);
+    let visualization = Arc::new(VisualizationTap::default());
+    let visual = Arc::clone(&visualization);
     let thread = thread::Builder::new()
         .name("baz-engine".into())
         .spawn(move || {
@@ -889,6 +1054,7 @@ pub fn spawn_offline(
                     replay_gain: loudness,
                     computed_gains: measured,
                     history: ledger,
+                    visualization: visual,
                 },
                 OfflineSink::with_capacity(capacity_samples),
             );
@@ -905,6 +1071,7 @@ pub fn spawn_offline(
             replay_gain,
             computed_gains,
             history,
+            visualization,
         },
         event_rx,
         OfflineOutput { output: out_rx },
@@ -1103,6 +1270,8 @@ pub fn spawn_device_with(
     let measured = Arc::clone(&computed_gains);
     let history: Arc<Mutex<Option<Arc<HistoryLedger>>>> = Arc::new(Mutex::new(None));
     let ledger = Arc::clone(&history);
+    let visualization = Arc::new(VisualizationTap::default());
+    let visual = Arc::clone(&visualization);
     let thread = thread::Builder::new()
         .name("baz-engine".into())
         .spawn(move || {
@@ -1129,6 +1298,7 @@ pub fn spawn_device_with(
                             replay_gain: loudness,
                             computed_gains: measured,
                             history: ledger,
+                            visualization: visual,
                         },
                         sink,
                     );
@@ -1148,6 +1318,7 @@ pub fn spawn_device_with(
         replay_gain,
         computed_gains,
         history,
+        visualization,
     };
     match ack_rx.recv() {
         Ok(Ok(())) => Ok((handle, event_rx)),
@@ -1257,6 +1428,8 @@ struct Control<S: Sink> {
     /// write — this thread hands the record to the ledger's own thread and
     /// returns, so no file I/O ever happens on the thread that runs the pump.
     history: Arc<Mutex<Option<Arc<HistoryLedger>>>>,
+    /// Optional sample handoff for a visible front-end visualization.
+    visualization: Arc<VisualizationTap>,
     /// The play being accumulated: the track whose audio is reaching the sink,
     /// when it started, and how much of it has been heard so far.
     play: Option<PlayInProgress>,
@@ -1316,6 +1489,7 @@ struct Observable {
     replay_gain: Arc<SharedReplayGain>,
     computed_gains: Arc<Mutex<Option<Arc<dyn ComputedGains>>>>,
     history: Arc<Mutex<Option<Arc<HistoryLedger>>>>,
+    visualization: Arc<VisualizationTap>,
 }
 
 impl<S: Sink> Control<S> {
@@ -1334,6 +1508,7 @@ impl<S: Sink> Control<S> {
             replay_gain,
             computed_gains,
             history,
+            visualization,
         } = observable;
         let rg_settings = ReplayGainSettings::default();
         // `SharedReplayGain::default` already holds exactly this, so a handle
@@ -1369,6 +1544,7 @@ impl<S: Sink> Control<S> {
             scratch: vec![0.0; cfg.consumer_chunk_frames * CHANNELS].into_boxed_slice(),
             sink,
             history,
+            visualization,
             play: None,
             banked_ms: 0,
             last_start: 0,
@@ -1599,6 +1775,7 @@ impl<S: Sink> Control<S> {
             &self.delivered,
             &mut self.fader,
             &mut self.scratch,
+            &self.visualization,
         );
         self.report_session(false);
         if self.session.as_ref().is_some_and(Session::complete) {
@@ -2963,6 +3140,7 @@ impl Session {
         delivered: &AtomicUsize,
         fader: &mut Fader,
         scratch: &mut [f32],
+        visualization: &VisualizationTap,
     ) -> bool {
         let available = self.audio.slots();
         if available == 0 {
@@ -2987,6 +3165,13 @@ impl Session {
         };
         let (a, b) = chunk.as_slices();
         if transparent {
+            if visualization.enabled() {
+                let split = a.len();
+                scratch[..split].copy_from_slice(a);
+                scratch[split..n].copy_from_slice(b);
+                let rate = self.shared.stream_rate.load(Ordering::Acquire);
+                visualization.capture(&scratch[..n], rate);
+            }
             sink.write(a);
             if !b.is_empty() {
                 sink.write(b);
@@ -2999,6 +3184,7 @@ impl Session {
             scratch[split..n].copy_from_slice(b);
             let block = &mut scratch[..n];
             fader.apply(block, rate);
+            visualization.capture(block, rate);
             sink.write(block);
         }
         chunk.commit_all();
@@ -3607,7 +3793,8 @@ mod tests {
 
     use super::{
         Arc, BoundaryPolicy, Command, Control, Conversions, Duration, EngineConfig, Event,
-        Instruments, Observable, Path, PathBuf, Sink, mpsc, thread,
+        Instruments, Observable, Path, PathBuf, Sink, VisualizationFrame, VisualizationTap, mpsc,
+        thread,
     };
     use crate::protocol::{ConversionReason, SignalChain};
 
@@ -3617,6 +3804,26 @@ mod tests {
     const HI_RATE: u32 = 48_000;
     /// Long enough that every command below lands mid-track.
     const TRACK_SECS: usize = 5;
+
+    #[test]
+    fn the_visualization_tap_costs_no_sample_work_until_enabled() {
+        let tap = VisualizationTap::default();
+        let mut samples = [0.0_f32; 512];
+        for frame in samples.chunks_exact_mut(2) {
+            frame[0] = 0.5;
+            frame[1] = -0.25;
+        }
+        tap.capture(&samples, RATE);
+        assert_eq!(tap.snapshot(), VisualizationFrame::default());
+
+        tap.set_enabled(true);
+        tap.capture(&samples, RATE);
+        let frame = tap.snapshot();
+        assert_eq!(frame.sample_rate, RATE);
+        assert!((frame.left_rms - 0.5).abs() < f32::EPSILON);
+        assert!((frame.right_rms - 0.25).abs() < f32::EPSILON);
+        assert!((frame.samples[0] - 0.125).abs() < f32::EPSILON);
+    }
     const TIMEOUT: Duration = Duration::from_secs(20);
 
     /// What a sink was asked to do, in order.
