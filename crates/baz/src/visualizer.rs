@@ -1,43 +1,31 @@
-//! Now Playing's switchable, audio-truthful visual field.
+//! Now Playing's foreground choice and optional audio-truthful background.
 
 use std::f32::consts::TAU;
 
 use baz_core::engine::{VISUAL_SAMPLE_COUNT, VisualizationFrame};
-use iced::widget::{
-    Space, button, column, container, image as iced_image, row, stack, text, tooltip,
-};
+use iced::widget::{Space, button, column, container, image as iced_image, row, text, tooltip};
 use iced::{Element, Length, alignment};
 
 use crate::app::Message;
 use crate::theme;
 
 const BANDS: usize = 24;
-const VISUAL_PAD: f32 = 24.0;
 const BAR_GAP: f32 = 4.0;
 
-/// The subject shown above the current track's identity.
+/// The record object shown above the current track's identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Mode {
+pub(crate) enum Foreground {
     Cover,
     JewelCase,
-    Spectrum,
-    Levels,
 }
 
-impl Mode {
-    pub(crate) const ALL: [Self; 4] = [Self::Cover, Self::JewelCase, Self::Spectrum, Self::Levels];
-
-    #[must_use]
-    pub(crate) fn needs_audio(self) -> bool {
-        matches!(self, Self::Spectrum | Self::Levels)
-    }
+impl Foreground {
+    const ALL: [Self; 2] = [Self::Cover, Self::JewelCase];
 
     fn label(self) -> &'static str {
         match self {
             Self::Cover => "Cover art",
             Self::JewelCase => "Jewel case",
-            Self::Spectrum => "Spectrum",
-            Self::Levels => "VU meters",
         }
     }
 
@@ -45,29 +33,40 @@ impl Mode {
         match self {
             Self::Cover => crate::icon::Glyph::VisualCover,
             Self::JewelCase => crate::icon::Glyph::VisualCase,
-            Self::Spectrum => crate::icon::Glyph::VisualSpectrum,
-            Self::Levels => crate::icon::Glyph::VisualLevels,
         }
     }
 }
 
-/// Draw only the selected subject; its controls live in the app bar.
-pub(crate) fn view(
-    mode: Mode,
+/// The two independent decisions represented by the app-bar controls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct State {
+    pub(crate) foreground: Foreground,
+    pub(crate) spectrum: bool,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            foreground: Foreground::JewelCase,
+            spectrum: false,
+        }
+    }
+}
+
+/// Draw the selected record object in the square foreground stage.
+pub(crate) fn foreground(
+    choice: Foreground,
     width: f32,
-    audio: &VisualizationFrame,
     cover: Element<'static, Message>,
     jewel_case: Element<'static, Message>,
 ) -> Element<'static, Message> {
-    let subject = match mode {
-        Mode::Cover => cover,
-        Mode::JewelCase => jewel_case,
-        Mode::Spectrum => spectrum(audio, width, width),
-        Mode::Levels => levels(audio, width, width),
+    let subject = match choice {
+        Foreground::Cover => cover,
+        Foreground::JewelCase => jewel_case,
     };
-    // Every mode occupies the same square stage. The physical jewel case is
-    // wider than it is tall, so it is centred inside that stage; switching
-    // modes must not move the placard or redefine the artwork area.
+    // Both choices occupy the same square stage. The physical jewel case is
+    // wider than it is tall, so it is centred inside that stage; switching the
+    // foreground must not move the placard or redefine the artwork area.
     container(subject)
         .width(Length::Fixed(width))
         .height(Length::Fixed(width))
@@ -76,12 +75,16 @@ pub(crate) fn view(
         .into()
 }
 
-/// Four icon detents for the app bar's view-options slot.
-pub(crate) fn marks(current: Mode) -> Element<'static, Message> {
-    row(Mode::ALL.map(|mode| mode_button(mode, current))).into()
+/// Two radio-like foreground marks followed by one independent spectrum
+/// toggle, all in the app bar's existing display-options slot.
+pub(crate) fn marks(state: State) -> Element<'static, Message> {
+    row(Foreground::ALL.map(|choice| foreground_button(choice, state.foreground)))
+        .push(Space::with_width(Length::Fixed(theme::GAP_SM)))
+        .push(spectrum_button(state.spectrum))
+        .into()
 }
 
-fn mode_button(choice: Mode, selected: Mode) -> Element<'static, Message> {
+fn foreground_button(choice: Foreground, selected: Foreground) -> Element<'static, Message> {
     let room = theme::active();
     let active = choice == selected;
     let mark = container(
@@ -109,7 +112,7 @@ fn mode_button(choice: Mode, selected: Mode) -> Element<'static, Message> {
             .height(Length::Fixed(theme::STEPPER_HIT))
             .padding(0)
             .style(move |_theme, status| theme::transport(room, room.recess, status))
-            .on_press(Message::VisualizationMode(choice))
+            .on_press(Message::VisualizationForeground(choice))
             .into()
     };
     tooltip(
@@ -125,17 +128,66 @@ fn mode_button(choice: Mode, selected: Mode) -> Element<'static, Message> {
     .into()
 }
 
-fn spectrum(audio: &VisualizationFrame, width: f32, height: f32) -> Element<'static, Message> {
+fn spectrum_button(on: bool) -> Element<'static, Message> {
+    let room = theme::active();
+    let mark = container(
+        iced_image(crate::icon::inked(
+            crate::icon::Glyph::VisualSpectrum,
+            if on { room.lamp } else { room.glyph() },
+        ))
+        .width(Length::Fixed(theme::ICON_PX))
+        .height(Length::Fixed(theme::ICON_PX))
+        .opacity(if on { 1.0 } else { theme::GLYPH_OPACITY }),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(alignment::Horizontal::Center)
+    .align_y(alignment::Vertical::Center);
+    let control = button(mark)
+        .width(Length::Fixed(theme::STEPPER_HIT))
+        .height(Length::Fixed(theme::STEPPER_HIT))
+        .padding(0)
+        .style(move |_theme, status| theme::transport(room, room.recess, status))
+        .on_press(Message::ToggleSpectrum);
+    tooltip(
+        control,
+        text(if on {
+            "Spectrum is on — hide the audio background"
+        } else {
+            "Spectrum is off — show it behind the artwork"
+        })
+        .size(theme::SIZE_CAPTION)
+        .line_height(theme::LEADING_CAPTION),
+        tooltip::Position::Bottom,
+    )
+    .gap(theme::GAP_XS)
+    .padding(theme::GAP_XS)
+    .style(move |_theme| theme::tooltip(room))
+    .into()
+}
+
+/// Draw the spectrum across the whole Now Playing body. It has no ground of
+/// its own: the artwork-derived field remains visible through and around the
+/// bars, while the cover or jewel case is composed independently above it.
+pub(crate) fn background(
+    audio: &VisualizationFrame,
+    width: f32,
+    height: f32,
+) -> Element<'static, Message> {
     let room = theme::active();
     let bands = frequency_bands(audio);
-    let usable_h = (height - 2.0 * VISUAL_PAD).max(1.0);
+    let usable_h = height.max(1.0);
     let mut bars = row![].spacing(BAR_GAP).align_y(iced::Alignment::End);
     for level in bands {
         let bar_h = (usable_h * level).max(2.0);
+        let ink = iced::Color {
+            a: 0.18,
+            ..room.lamp
+        };
         let bar = container(Space::new(Length::Fill, Length::Fixed(bar_h)))
             .width(Length::FillPortion(1))
             .style(move |_theme| container::Style {
-                background: Some(iced::Background::Color(room.lamp)),
+                background: Some(iced::Background::Color(ink)),
                 border: iced::Border {
                     radius: 1.0.into(),
                     ..iced::Border::default()
@@ -151,96 +203,7 @@ fn spectrum(audio: &VisualizationFrame, width: f32, height: f32) -> Element<'sta
     container(bars)
         .width(Length::Fixed(width))
         .height(Length::Fixed(height))
-        .padding(VISUAL_PAD)
-        .style(move |_theme| visual_ground(room))
         .into()
-}
-
-fn levels(audio: &VisualizationFrame, width: f32, height: f32) -> Element<'static, Message> {
-    let room = theme::active();
-    let meter_h = (height - 2.0 * VISUAL_PAD - theme::LINE_CAPTION).max(1.0);
-    let left = level_meter("L", audio.left_rms, audio.left_peak, meter_h);
-    let right = level_meter("R", audio.right_rms, audio.right_peak, meter_h);
-    container(row![left, right].width(Length::Fill).spacing(theme::GAP_XL))
-        .width(Length::Fixed(width))
-        .height(Length::Fixed(height))
-        .padding(VISUAL_PAD)
-        .style(move |_theme| visual_ground(room))
-        .into()
-}
-
-fn level_meter(label: &'static str, rms: f32, peak: f32, height: f32) -> Element<'static, Message> {
-    let room = theme::active();
-    let fill_h = height * amplitude_height(rms);
-    let peak_h = height * amplitude_height(peak);
-    let meter = stack![
-        container(Space::new(Length::Fill, Length::Fixed(height))).style(move |_theme| {
-            container::Style {
-                background: Some(iced::Background::Color(room.plinth)),
-                border: iced::Border {
-                    color: room.hairline(room.plinth),
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                ..container::Style::default()
-            }
-        }),
-        container(
-            column![
-                Space::with_height(Length::Fixed((height - peak_h - 1.0).max(0.0))),
-                container(Space::new(Length::Fill, Length::Fixed(1.0))).style(move |_theme| {
-                    container::Style {
-                        background: Some(iced::Background::Color(room.paper)),
-                        ..container::Style::default()
-                    }
-                }),
-                Space::with_height(Length::Fill),
-            ]
-            .height(Length::Fixed(height)),
-        )
-        .width(Length::Fill),
-        container(
-            column![
-                Space::with_height(Length::Fill),
-                container(Space::new(Length::Fill, Length::Fixed(fill_h.max(2.0)))).style(
-                    move |_theme| container::Style {
-                        background: Some(iced::Background::Color(room.lamp)),
-                        border: iced::Border {
-                            radius: 2.0.into(),
-                            ..iced::Border::default()
-                        },
-                        ..container::Style::default()
-                    }
-                ),
-            ]
-            .height(Length::Fixed(height)),
-        )
-        .width(Length::Fill),
-    ];
-    column![
-        meter,
-        text(label)
-            .size(theme::SIZE_CAPTION)
-            .line_height(theme::LEADING_CAPTION)
-            .font(theme::MEDIUM)
-            .color(room.paper_faint),
-    ]
-    .spacing(theme::GAP_XS)
-    .align_x(iced::Alignment::Center)
-    .width(Length::FillPortion(1))
-    .into()
-}
-
-fn visual_ground(room: &theme::Palette) -> container::Style {
-    container::Style {
-        background: Some(iced::Background::Color(room.recess)),
-        border: iced::Border {
-            color: room.hairline(room.recess),
-            width: 1.0,
-            radius: theme::RADIUS_CTRL.into(),
-        },
-        ..container::Style::default()
-    }
 }
 
 fn amplitude_height(amplitude: f32) -> f32 {
@@ -296,7 +259,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn silence_has_no_spectrum_or_level() {
+    fn the_foreground_choice_and_spectrum_toggle_are_independent() {
+        let mut state = State::default();
+        assert_eq!(state.foreground, Foreground::JewelCase);
+        assert!(!state.spectrum);
+
+        state.spectrum = true;
+        assert_eq!(state.foreground, Foreground::JewelCase);
+        state.foreground = Foreground::Cover;
+        assert!(state.spectrum);
+    }
+
+    #[test]
+    fn silence_has_no_spectrum() {
         assert!(
             frequency_bands(&VisualizationFrame::default())
                 .into_iter()
@@ -310,7 +285,7 @@ mod tests {
         clippy::cast_precision_loss,
         reason = "the fixed 256-sample test window's indices are exactly representable in f32"
     )]
-    fn a_tone_lifts_a_band_without_leaving_the_meter() {
+    fn a_tone_lifts_a_band_without_leaving_the_unit_range() {
         let mut frame = VisualizationFrame {
             sample_rate: 44_100,
             ..VisualizationFrame::default()

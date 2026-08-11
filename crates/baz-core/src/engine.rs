@@ -617,22 +617,13 @@ pub struct EngineHandle {
 /// A lock-free snapshot of the most recently delivered audio block.
 ///
 /// The engine only updates it while a front end has explicitly enabled the
-/// visualization tap. Samples are mono folds of the delivered stereo stream;
-/// level figures retain the two channels independently.
+/// visualization tap. Samples are mono folds of the delivered stereo stream.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VisualizationFrame {
     /// Uniformly sampled points from the latest delivered block.
     pub samples: [f32; VISUAL_SAMPLE_COUNT],
     /// Output sample rate applying to [`Self::samples`].
     pub sample_rate: u32,
-    /// Root-mean-square level of the left channel, in linear full scale.
-    pub left_rms: f32,
-    /// Root-mean-square level of the right channel, in linear full scale.
-    pub right_rms: f32,
-    /// Peak absolute level of the left channel, in linear full scale.
-    pub left_peak: f32,
-    /// Peak absolute level of the right channel, in linear full scale.
-    pub right_peak: f32,
 }
 
 impl Default for VisualizationFrame {
@@ -640,10 +631,6 @@ impl Default for VisualizationFrame {
         Self {
             samples: [0.0; VISUAL_SAMPLE_COUNT],
             sample_rate: 0,
-            left_rms: 0.0,
-            right_rms: 0.0,
-            left_peak: 0.0,
-            right_peak: 0.0,
         }
     }
 }
@@ -655,10 +642,6 @@ struct VisualizationTap {
     enabled: AtomicBool,
     sequence: AtomicU64,
     sample_rate: AtomicU32,
-    left_rms: AtomicU32,
-    right_rms: AtomicU32,
-    left_peak: AtomicU32,
-    right_peak: AtomicU32,
     samples: [AtomicU32; VISUAL_SAMPLE_COUNT],
 }
 
@@ -668,10 +651,6 @@ impl Default for VisualizationTap {
             enabled: AtomicBool::new(false),
             sequence: AtomicU64::new(0),
             sample_rate: AtomicU32::new(0),
-            left_rms: AtomicU32::new(0),
-            right_rms: AtomicU32::new(0),
-            left_peak: AtomicU32::new(0),
-            right_peak: AtomicU32::new(0),
             samples: std::array::from_fn(|_| AtomicU32::new(0)),
         }
     }
@@ -697,10 +676,6 @@ impl VisualizationTap {
         let count = frames.min(VISUAL_SAMPLE_COUNT);
         let step = (frames / count).max(1);
         let start = frames.saturating_sub(count * step);
-        let mut left_square = 0.0_f32;
-        let mut right_square = 0.0_f32;
-        let mut left_peak = 0.0_f32;
-        let mut right_peak = 0.0_f32;
 
         // Odd means a writer is active; the release of the following even
         // value publishes every relaxed payload store as one snapshot.
@@ -710,25 +685,13 @@ impl VisualizationTap {
                 let frame = start + index * step;
                 let left = interleaved[frame * CHANNELS];
                 let right = interleaved[frame * CHANNELS + 1];
-                left_square += left * left;
-                right_square += right * right;
-                left_peak = left_peak.max(left.abs());
-                right_peak = right_peak.max(right.abs());
                 (left + right) * 0.5
             } else {
                 0.0
             };
             slot.store(mono.to_bits(), Ordering::Relaxed);
         }
-        let divisor = f32::from(u16::try_from(count).unwrap_or(1));
         self.sample_rate.store(sample_rate, Ordering::Relaxed);
-        self.left_rms
-            .store((left_square / divisor).sqrt().to_bits(), Ordering::Relaxed);
-        self.right_rms
-            .store((right_square / divisor).sqrt().to_bits(), Ordering::Relaxed);
-        self.left_peak.store(left_peak.to_bits(), Ordering::Relaxed);
-        self.right_peak
-            .store(right_peak.to_bits(), Ordering::Relaxed);
         self.sequence.fetch_add(1, Ordering::Release);
     }
 
@@ -741,10 +704,6 @@ impl VisualizationTap {
             }
             let mut frame = VisualizationFrame {
                 sample_rate: self.sample_rate.load(Ordering::Relaxed),
-                left_rms: f32::from_bits(self.left_rms.load(Ordering::Relaxed)),
-                right_rms: f32::from_bits(self.right_rms.load(Ordering::Relaxed)),
-                left_peak: f32::from_bits(self.left_peak.load(Ordering::Relaxed)),
-                right_peak: f32::from_bits(self.right_peak.load(Ordering::Relaxed)),
                 ..VisualizationFrame::default()
             };
             for (sample, slot) in frame.samples.iter_mut().zip(&self.samples) {
@@ -3820,8 +3779,6 @@ mod tests {
         tap.capture(&samples, RATE);
         let frame = tap.snapshot();
         assert_eq!(frame.sample_rate, RATE);
-        assert!((frame.left_rms - 0.5).abs() < f32::EPSILON);
-        assert!((frame.right_rms - 0.25).abs() < f32::EPSILON);
         assert!((frame.samples[0] - 0.125).abs() < f32::EPSILON);
     }
     const TIMEOUT: Duration = Duration::from_secs(20);

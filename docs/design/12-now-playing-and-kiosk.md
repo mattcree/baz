@@ -1,5 +1,18 @@
 # 12 — The now-playing screen: a surface for the far field
 
+> **Implementation amendment (2026-08-11).** The owner removed the VU view
+> after seeing it and separated the remaining visual choices into two axes:
+> *"make the spectrum take up the background… a toggle like shuffle… and the
+> other one is a 'radio' button essentially, allowing the art or the cd as two
+> alternatives in the foreground"*. The shipped control is therefore two
+> mutually exclusive foreground choices (**Cover / Jewel Case**) and one
+> independent **Spectrum** toggle. The spectrum fills the Now Playing body
+> behind either foreground; it no longer replaces the record object. The audio
+> tap, sample snapshot and redraw clock are all absent while that toggle is off
+> (except the jewel case's own rotation clock), and the VU mode and glyph are
+> removed rather than retained as a hidden option. This owner decision
+> supersedes the meter-specific recommendations below wherever they conflict.
+
 > The owner, verbatim, on what this surface is to become:
 >
 > *"now playing does not need the play pause controls. it would be nice if the

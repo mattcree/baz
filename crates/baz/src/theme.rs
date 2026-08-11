@@ -2118,8 +2118,10 @@ pub fn app_bar_pad() -> Padding {
     }
 }
 
-/// The app bar's reserved slot for the **display options** (logical px) —
-/// four [`STEPPER_HIT`] detent marks, **96**.
+/// The app bar's reserved slot for the **display options** (logical px) — the
+/// widest tenant is the wall's four [`STEPPER_HIT`] density detents, **96**.
+/// Now Playing right-aligns its two foreground choices and spectrum toggle in
+/// the same slot.
 ///
 /// Reserved at every width and in **every place**, including the five that
 /// hang no works and draw no marks (ADR-0040 §5). That is the whole mechanism

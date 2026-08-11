@@ -176,7 +176,7 @@ use crate::{icon, theme};
 pub(crate) fn view(
     window_w: f32,
     density: Option<crate::shelf::Density>,
-    visualization: Option<crate::visualizer::Mode>,
+    visualization: Option<crate::visualizer::State>,
     maximized: bool,
     owns_chrome: bool,
     ink: Ink,
@@ -329,7 +329,7 @@ fn mark() -> Element<'static, Message> {
 /// slot is [`Space`] of exactly the same width.
 fn marks(
     density: Option<crate::shelf::Density>,
-    visualization: Option<crate::visualizer::Mode>,
+    visualization: Option<crate::visualizer::State>,
 ) -> Element<'static, Message> {
     let inner: Element<'static, Message> = match (density, visualization) {
         (Some(current), None) => crate::views::density_marks(current),

@@ -33,7 +33,8 @@ chapter's reasoning lives:
 | One press to sound from the wall: the hover options | shipped | the owner's design, 2026-08-09 |
 | The returns lane, `Home`, `Now playing`, search in the lane | shipped | ADR-0030, design 13 |
 | The `CONTINUE` band — the question asked in the silence | shipped | ADR-0030's third amendment |
-| The ambient Now playing: field, meter, spectrum, feed, toggles | **designed, unbuilt** | ADR-0029, design 12 |
+| The ambient Now playing: field, spectrum, foreground controls | shipped | owner visual pass 2026-08-11; design 12 implementation amendment |
+| The ambient Now playing: local facts feed and kiosk affordances | designed, unbuilt | ADR-0029, design 12; VU mode removed by owner |
 
 ## Next, in order
 
@@ -84,16 +85,15 @@ building it.
 - **Shortcut discovery** — the bindings live in the README and nowhere a
   running baz can show them.
 
-### 3. Build the ambient Now playing
+### 3. Finish the ambient Now playing
 
-Designed in full and not started: the cover-derived field, the R128 momentary
-meter, the **spectrum analyser** (whose FFT costs no new crate — `rubato`
-already pulls `realfft` into every build), the local facts feed, and the four
-toggles. ADR-0029 and `docs/design/12-now-playing-and-kiosk.md` carry the plan:
-nine steps, or **1 → 2 → 6 → 8** to reach the bars in four. The owner's rule
-governs it — *"ambient motion is fine as long as the performance remains top
-tier"* — so §7.4's harness and its four thresholds are the gate, and the
-measurements have never been taken because the feature does not exist yet.
+The cover-derived field, rotating jewel case and spectrum analyser now ship.
+Cover / Jewel Case are the two foreground alternatives; Spectrum is a separate
+full-body background toggle, and its sample tap and redraw cost disappear when
+off. The four-way visual selector was tried and simplified by the owner on
+2026-08-11, removing the VU mode entirely. What remains from ADR-0029 is the
+local facts feed and kiosk affordances; design 12's implementation amendment
+records the new boundary.
 
 ### 4. Three decisions waiting on the owner
 

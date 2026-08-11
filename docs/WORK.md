@@ -69,9 +69,11 @@
 > be re-argued each time somebody reads the backlog and finds something
 > appealing:
 >
-> - **The ambient `Now playing`** — the spectrum, the meter, the facts feed
->   (ADR-0029, design 12 steps A2–A9). The largest unbuilt thing in the
->   product and the most tempting; it is a 1.0 surface.
+> - **The remainder of ambient `Now playing`** — the local facts feed and kiosk
+>   affordances. The cover-derived field, rotating jewel case and independently
+>   toggled full-body spectrum shipped during the owner's visual pass on
+>   2026-08-11; the VU mode was tried and explicitly removed. The remaining
+>   pieces are 1.0 work, not beta blockers.
 > - **Kiosk mode**, for the same reason and because iced cannot enumerate
 >   monitors.
 > - **Vibe- or prompt-generated playlists** — designed, unmerged, and a whole

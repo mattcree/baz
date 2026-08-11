@@ -281,8 +281,9 @@ fn art_edge_with_below(width: f32, height: f32, run_w: f32, source: f32, below: 
 #[derive(Clone, Copy)]
 pub(crate) struct Visual<'a> {
     pub(crate) rotation: crate::jewel_case::Rotation,
-    pub(crate) mode: crate::visualizer::Mode,
-    pub(crate) audio: &'a baz_core::engine::VisualizationFrame,
+    pub(crate) foreground: crate::visualizer::Foreground,
+    /// Present only while the independently toggled spectrum is visible.
+    pub(crate) audio: Option<&'a baz_core::engine::VisualizationFrame>,
 }
 
 pub(crate) fn view<'a>(
@@ -358,9 +359,16 @@ pub(crate) fn view<'a>(
             .into(),
         None => song.into(),
     };
-    // The artwork-derived field sits under the one centred current-song
-    // composition. Nothing else competes for this place's body.
-    stack![field, body].into()
+    // The spectrum is a background property, independent of which record
+    // object stands in front of it. With it off this is a zero-cost empty
+    // layer; with it on the bars fill the whole place beneath the centred
+    // composition instead of replacing the artwork.
+    let spectrum: Element<'static, Message> = if let Some(audio) = visual.audio {
+        crate::visualizer::background(audio, width, height)
+    } else {
+        Space::new(Length::Fill, Length::Fill).into()
+    };
+    stack![field, spectrum, body].into()
 }
 
 fn rear_insert(shelf: &Shelf, now: &crate::player::NowPlaying) -> crate::jewel_case::Insert {
@@ -653,7 +661,7 @@ fn record_column<'a>(
     let room = theme::active();
     let cover = plain_cover(work, t, edge, insert.album_id);
     let jewel_case = sleeve(work, t, edge, visual.rotation, insert);
-    let sleeve = crate::visualizer::view(visual.mode, edge, visual.audio, cover, jewel_case);
+    let sleeve = crate::visualizer::foreground(visual.foreground, edge, cover, jewel_case);
 
     let mut placard = column![
         // The artist in letterspaced caps, over the work's title — the wall

@@ -841,8 +841,10 @@ pub(crate) enum Message {
     CaseDragged(Point),
     /// The pointer released the jewel case.
     CaseReleased,
-    /// Choose the visual subject above the current track identity.
-    VisualizationMode(crate::visualizer::Mode),
+    /// Choose which record object stands in the Now Playing foreground.
+    VisualizationForeground(crate::visualizer::Foreground),
+    /// Show or hide the spectrum behind the Now Playing composition.
+    ToggleSpectrum,
     /// The needle: the pointer went down on it, this far along the window.
     /// Nothing is requested and nothing moves yet — the gesture is a click
     /// until it travels [`player::DRAG_THRESHOLD_PX`].
@@ -1142,8 +1144,8 @@ struct App {
     last_bar_press: Option<Instant>,
     /// The Now Playing jewel case's yaw, pitch and drag gesture.
     case_rotation: crate::jewel_case::Rotation,
-    /// Which truthful Now Playing visual is in the record's subject slot.
-    visualization_mode: crate::visualizer::Mode,
+    /// The foreground object and independent audio background in Now Playing.
+    visualization: crate::visualizer::State,
     /// The engine connection (or its documented absence) — spawned once at
     /// app start, before the first screen.
     playback: Playback,
@@ -1606,7 +1608,7 @@ impl App {
             window_focused: true,
             last_bar_press: None,
             case_rotation: crate::jewel_case::Rotation::new(Instant::now()),
-            visualization_mode: crate::visualizer::Mode::JewelCase,
+            visualization: crate::visualizer::State::default(),
             playback,
             player,
             mpris,
@@ -2312,37 +2314,44 @@ impl App {
             Message::CaseTick(now) => {
                 if self.window_focused
                     && self.place == Place::NowPlaying
-                    && self.visualization_mode == crate::visualizer::Mode::JewelCase
+                    && self.visualization.foreground == crate::visualizer::Foreground::JewelCase
                 {
                     self.case_rotation.tick(now);
                 }
             }
             Message::CasePressed(at)
                 if self.place == Place::NowPlaying
-                    && self.visualization_mode == crate::visualizer::Mode::JewelCase =>
+                    && self.visualization.foreground
+                        == crate::visualizer::Foreground::JewelCase =>
             {
                 self.case_rotation.press(at);
             }
             Message::CaseDragged(at)
                 if self.place == Place::NowPlaying
-                    && self.visualization_mode == crate::visualizer::Mode::JewelCase =>
+                    && self.visualization.foreground
+                        == crate::visualizer::Foreground::JewelCase =>
             {
                 self.case_rotation.drag(at);
             }
             Message::CaseReleased
                 if self.place == Place::NowPlaying
-                    && self.visualization_mode == crate::visualizer::Mode::JewelCase =>
+                    && self.visualization.foreground
+                        == crate::visualizer::Foreground::JewelCase =>
             {
                 self.case_rotation.release();
             }
-            Message::VisualizationMode(mode) if self.place == Place::NowPlaying => {
-                self.visualization_mode = mode;
+            Message::VisualizationForeground(foreground) if self.place == Place::NowPlaying => {
+                self.visualization.foreground = foreground;
                 self.case_rotation.release();
+            }
+            Message::ToggleSpectrum if self.place == Place::NowPlaying => {
+                self.visualization.spectrum = !self.visualization.spectrum;
             }
             Message::CasePressed(_)
             | Message::CaseDragged(_)
             | Message::CaseReleased
-            | Message::VisualizationMode(_) => {}
+            | Message::VisualizationForeground(_)
+            | Message::ToggleSpectrum => {}
             _ => return None,
         }
         Some(Task::none())
@@ -2354,7 +2363,7 @@ impl App {
             self.window_focused
                 && self.place == Place::NowPlaying
                 && self.player.now_playing().is_some()
-                && self.visualization_mode.needs_audio(),
+                && self.visualization.spectrum,
         );
     }
 
@@ -5050,7 +5059,12 @@ impl App {
                 collecting,
             ),
             (Screen::Shelf(state), Place::NowPlaying) => {
-                let audio = self.playback.visualization();
+                // Snapshot the lock-free tap only when its layer is visible.
+                // Cover-only and jewel-case-only frames do no sample reads.
+                let audio = self
+                    .visualization
+                    .spectrum
+                    .then(|| self.playback.visualization());
                 views::now_playing::view(
                     state,
                     &self.player,
@@ -5059,8 +5073,8 @@ impl App {
                     self.now_playing_source(),
                     views::now_playing::Visual {
                         rotation: self.case_rotation,
-                        mode: self.visualization_mode,
-                        audio: &audio,
+                        foreground: self.visualization.foreground,
+                        audio: audio.as_ref(),
                     },
                 )
             }
@@ -5175,7 +5189,7 @@ impl App {
             (&self.screen, self.place),
             (Screen::Shelf(_), Place::NowPlaying)
         )
-        .then_some(self.visualization_mode);
+        .then_some(self.visualization);
         let screen: Element<'_, Message> = column![
             views::app_bar::view(
                 self.window.width,
@@ -5374,12 +5388,15 @@ impl App {
         if self.moving() {
             subs.push(iced::time::every(motion::TICK).map(|_| Message::MotionTick(Instant::now())));
         }
-        // The Now Playing subject is the one intentionally continuous visual
-        // in Baz: either the turning case or a delivered-audio reading. It
-        // exists only while foregrounded and holding a record.
+        // Now Playing owns the only intentionally continuous visuals in Baz:
+        // the turning case and the optional delivered-audio background. The
+        // timer is absent for plain cover art with the spectrum off, and is
+        // always absent while unfocused or without a sounding record.
         if self.window_focused
             && self.place == Place::NowPlaying
             && self.player.now_playing().is_some()
+            && (self.visualization.spectrum
+                || self.visualization.foreground == crate::visualizer::Foreground::JewelCase)
         {
             subs.push(
                 iced::time::every(crate::jewel_case::TICK)

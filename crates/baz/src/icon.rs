@@ -167,8 +167,6 @@ pub enum Glyph {
     VisualCase,
     /// Uneven frequency bars across the visual field.
     VisualSpectrum,
-    /// The paired vertical level meters traditionally labelled VU.
-    VisualLevels,
     /// Queue: three stacked bars, the last one short — a list with more to
     /// come. The wall's hover option (doc 13 §11 as the owner overruled it).
     Queue,
@@ -1083,14 +1081,6 @@ const VISUAL_SPECTRUM: &[Outline] = &[
     &[(0.80, 0.67), (0.90, 0.67), (0.90, 0.84), (0.80, 0.84)],
 ];
 
-/// VU: two broad level columns and their peak marks.
-const VISUAL_LEVELS: &[Outline] = &[
-    &[(0.17, 0.34), (0.42, 0.34), (0.42, 0.84), (0.17, 0.84)],
-    &[(0.58, 0.20), (0.83, 0.20), (0.83, 0.84), (0.58, 0.84)],
-    &[(0.17, 0.25), (0.42, 0.25), (0.42, 0.29), (0.17, 0.29)],
-    &[(0.58, 0.11), (0.83, 0.11), (0.83, 0.15), (0.58, 0.15)],
-];
-
 impl Glyph {
     /// Every glyph, in sprite-sheet order.
     const ALL: [Self; Self::COUNT] = [
@@ -1125,11 +1115,10 @@ impl Glyph {
         Self::VisualCover,
         Self::VisualCase,
         Self::VisualSpectrum,
-        Self::VisualLevels,
     ];
 
     /// How many glyphs the sheet holds.
-    const COUNT: usize = 32;
+    const COUNT: usize = 31;
 
     /// The glyph's outlines in the unit square.
     #[must_use]
@@ -1166,7 +1155,6 @@ impl Glyph {
             Self::VisualCover => VISUAL_COVER,
             Self::VisualCase => VISUAL_CASE,
             Self::VisualSpectrum => VISUAL_SPECTRUM,
-            Self::VisualLevels => VISUAL_LEVELS,
         }
     }
 
@@ -1204,7 +1192,6 @@ impl Glyph {
             Self::VisualCover => 28,
             Self::VisualCase => 29,
             Self::VisualSpectrum => 30,
-            Self::VisualLevels => 31,
         }
     }
 
